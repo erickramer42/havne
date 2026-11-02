@@ -387,42 +387,71 @@ TEST(SocketCanTest, OnlyAControllerThatCanStopAtOnceMaySend)
               socketcan_verdict::not_listen_only);
 }
 
-/* The first request proves the rate (ADR-0040 section 3): an echo
- * proves it; before that, an error halts at once and three requests
- * unseen halt too; once proven, nothing here changes */
-TEST(SocketCanTest, TheFirstEchoProvesTheRateAndAnErrorBeforeItHalts)
+/* The first request proves the rate (ADR-0040 section 3): its echo, then
+ * a reply or N_As with no error frame, proves it (the desk bus's
+ * adapter echoed before reporting the missing ACK); before that, an
+ * error halts at once and three requests unseen halt too; once proven,
+ * nothing here changes */
+TEST(SocketCanTest, AnEchoThenAReplyOrQuietProvesTheRateAndAnErrorHalts)
 {
+    constexpr int64_t quiet = SOCKETCAN_PROOF_QUIET_US;
     LinkSpec c = sender();
     socketcan_proof p = socketcan_proof_for(parsed(c));
     EXPECT_FALSE(p.proven);
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed, 0),
               socketcan_proof_step::send_again);
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed),
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed, 1000),
+              socketcan_proof_step::confirming);
+    EXPECT_FALSE(p.proven) << "an echo alone proves nothing yet";
+    EXPECT_EQ(socketcan_proof_settle(p, 1000 + quiet, false),
+              socketcan_proof_step::carry_on)
+        << "still within the quiet time";
+    EXPECT_EQ(socketcan_proof_settle(p, 1000 + quiet + 1, false),
               socketcan_proof_step::proven);
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error),
+    EXPECT_TRUE(p.proven);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error, 2000000),
               socketcan_proof_step::carry_on)
         << "a proven rate: the link health's";
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed, 2000000),
               socketcan_proof_step::carry_on)
         << "a proven rate: a failed write";
     EXPECT_FALSE(p.halted);
 
+    /* a reply proves it at once */
     p = socketcan_proof_for(parsed(c));
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error),
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed, 0),
+              socketcan_proof_step::confirming);
+    EXPECT_EQ(socketcan_proof_settle(p, 10, true),
+              socketcan_proof_step::proven);
+
+    /* the desk bus's adapter: the echo, then the missing ACK 1.5 ms on */
+    p = socketcan_proof_for(parsed(c));
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed, 0),
+              socketcan_proof_step::confirming);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error, 1500),
               socketcan_proof_step::halt);
     EXPECT_TRUE(p.halted);
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed),
+    EXPECT_EQ(socketcan_proof_settle(p, 1000000, true),
+              socketcan_proof_step::carry_on)
+        << "halted for the session";
+    EXPECT_FALSE(p.proven);
+
+    p = socketcan_proof_for(parsed(c));
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error, 0),
+              socketcan_proof_step::halt);
+    EXPECT_TRUE(p.halted);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed, 10),
               socketcan_proof_step::carry_on)
         << "halted for the session";
     EXPECT_FALSE(p.proven);
 
     p = socketcan_proof_for(parsed(c));
     for (uint8_t i = 1; i < SOCKETCAN_PROOF_TRIES; ++i) {
-        EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+        EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed, i),
                   socketcan_proof_step::send_again)
             << int(i);
     }
-    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed, 9),
               socketcan_proof_step::halt);
 
     LinkSpec v;

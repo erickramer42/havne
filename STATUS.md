@@ -14,8 +14,8 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.4.0, in progress.** v0.3.6 is out: the car runs the
-adapters on hand can make (several PIDs per request through the VX,
+**Current phase: v0.4.0, in progress.** v0.3.6 is out: every car run
+the adapters on hand allow (several PIDs per request through the VX,
 two ECUs, DID scans, the first clears); trouble-code titles, VIN
 decode and inspection readiness; clearing with the engine running;
 the simulated ECU as `havne-cli sim`; the phone as a relay; and
@@ -204,7 +204,9 @@ bus ([roadmap](#roadmap)).
       request keys of the other two transports. A real controller must
       be in normal mode at the rate `?baud=` states, never restart
       itself, be in one-shot mode and be error-active; until its first
-      request comes back from the bus, a CAN error ends the sending.
+      request is echoed and then answered, or 25 ms pass after the echo
+      with no error frame, a CAN error ends the sending (an adapter may
+      echo a frame before any node acknowledged it).
     - Verified on `vcan0` (on CI too): listening, and requests against
       the fakes' ECU answering through the kernel's ISO-TP, core's
       ISO-TP held to the kernel's as well. A real controller, an
@@ -405,25 +407,12 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
-- **#40. A SocketCAN echo is taken as proof of the rate, and one
-    adapter echoes before any acknowledgement.** A requesting session's
-    first echoed request proves the rate (ADR-0040 section 3,
-    `socketcan_proof_on` in `core/src/socketcan_wire.h`), and from then
-    on an error frame is the link health's, not a halt. On the desk
-    bus the Innomaker USB2CAN echoed a frame no node could acknowledge
-    1.5 ms before its first `no-acknowledgement-on-tx` error frame
-    ([2026-11-02-socketcan-desk](docs/bench-sessions/2026-11-02-socketcan-desk.md)),
-    so on an adapter that echoes this way, a request at a wrong rate
-    would prove the rate it failed at. That adapter can't send through
-    Havne (it has no one-shot mode); one that can may echo the same way.
-    The fix: an echo proves the rate only once the request's N_As has
-    passed with no error frame, or its reply has come.
 
 ## Roadmap
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Released |
+| v0.3.6 | Proven and finished: every car run the adapters on hand allow (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Released |
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | In progress |
 | v0.5.0-v0.9.0 | v0.5.0, your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier. v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
@@ -472,9 +461,6 @@ had the Innomaker USB2CAN listen (BENCH prep #26) and kept
 [ADR-0040](docs/adr/0040-socketcan-requests-isotp.md) section 2's
 one-shot rule: without it, a frame nobody acknowledges is sent again
 forever. The USB2CAN offers no one-shot mode, so it listens only.
-- **Known Issue #40 fixed:** a session's first echo proves the rate
-  only once no error frame follows within its N_As, or its reply has
-  come, since the USB2CAN echoes before any acknowledgement.
 - The refusal names only modes the controller offers, and
   `havne-cli devices` shows each CAN interface's bit rate, controller
   state and supported modes, so a refusal is explained before a run.
@@ -496,8 +482,7 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
 **Done when:** two recordings of the mock's pulls, recorded by
 `havne-cli`, overlay aligned on the pull's start in the app and in
 `havne-cli view`; an hour-long recording opens and scrubs within a
-stated memory bound; Known Issue #40 is fixed and the SocketCAN car
-run is filed.
+stated memory bound; the SocketCAN car run is filed.
 
 ### Waiting on a tester: an iPhone download
 

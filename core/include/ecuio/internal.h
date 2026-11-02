@@ -162,6 +162,14 @@ void ecuio_elm327_set_port_opener(ecuio_elm327_port_open_t open);
  * tests' open that never answers ends in a fraction of it. */
 void ecuio_elm327_set_stream_open_ms(uint32_t ms);
 
+/* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
+ * vcan created after this call start with the rate unproven, as on a
+ * real controller, and an error frame within quiet_us of the first echo
+ * halts their sending (ADR-0040 section 3 and its appendix of
+ * 2026-11-02); 0 restores vcan's proven start. HARNESS use: vcan has no
+ * rate, so the proof is otherwise reached only through a controller. */
+void ecuio_socketcan_set_vcan_unproven(int64_t quiet_us);
+
 /* TEST-ONLY: the directory (UTF-8) the wire logs of ELM327 sessions
  * created after this call go to; NULL restores the temporary directory.
  * The session tests keep their logs, and their pruning, out of the

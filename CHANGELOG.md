@@ -11,6 +11,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- A SocketCAN session that sends requests counts the bus rate as proven only once its first request is answered, or 25 ms pass after the controller echoed it with no error frame. An adapter can echo a frame no node acknowledged and report the missing acknowledgement after, so a wrong rate could pass for the right one.
+
 ### Changed
 
 - A J2534 adapter that refuses to open without saying why gets an error that asks whether the adapter is attached and not open in another program, the two usual causes, instead of naming the status alone.
