@@ -39,6 +39,7 @@
 #include "uri_query.h"
 #include "error_detail.h"
 #include "host_clock.h"
+#include "isotp.h"
 #include "ecuio/profile.h"
 
 #include <atomic>
@@ -666,7 +667,12 @@ ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
         uint8_t fc[J2534_FILTER_MSG_LEN];
         pack_be32(mask, 0xFFFFFFFFu);   /* exact-ID match, all 4 bytes */
         pack_be32(pattern, t->chans[i].rx_id);
-        pack_be32(fc, t->chans[i].tx_id);
+        /* A functional request's reply takes its Flow Control on the
+         * physical request ID (isotp_flow_control_id); the request itself
+         * is one frame, which J2534-1 (DEC2004) Appendix A.3 sends with no
+         * filter naming its ID */
+        pack_be32(fc,
+                  isotp_flow_control_id(t->chans[i].rx_id, t->chans[i].tx_id));
         ecuio_status_t st = ecuio_j2534_start_msg_filter(
             t->handle, t->channel,
             ECUIO_PT_FLOW_CONTROL_FILTER,

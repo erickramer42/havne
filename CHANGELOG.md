@@ -39,6 +39,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
 - On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
 - On a phone, tapping Disconnect while an adapter's replies were still arriving over Bluetooth could crash the app (once in eight disconnects on a car). The closed link's socket now stays until Android has stopped reading it (20 disconnects on a car, none crashed).
+- A request sent to every ECU at once (`?txid=0x7DF`) now gets a reply longer than one CAN frame, such as the VIN, through a J2534 adapter or SocketCAN: the reply's flow control went to the functional ID, where an ECU doesn't listen for it, and goes to that ECU's own request ID.
+- `havne-cli` ends a connect that hasn't finished within 60 s, with an `error` line and exit code 3, instead of waiting on it; an antivirus holding a newly built driver process at its first run held one.
 - A DID scan through a J2534 adapter could stop one DID short and never finish, so `havne-cli stream --until-scanned` ran until `--seconds`: a long reply that came after its request's wait was dropped. A scanned DID's late reply now counts it found.
 
 ## [0.3.5] - 2026-11-01

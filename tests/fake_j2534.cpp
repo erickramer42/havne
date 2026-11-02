@@ -1107,7 +1107,8 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
     fake_j2534::g_last_filter = rec;
     if (fake_control::Page* page = fake_control::attach()) {
         fake_control::record_filter(page, rec.filter_id, rec.filter_type,
-                                    rec.mask, rec.pattern, rec.mask_len);
+                                    rec.mask, rec.pattern, rec.mask_len,
+                                    rec.flow_control);
     }
 
     *pFilterID = rec.filter_id;

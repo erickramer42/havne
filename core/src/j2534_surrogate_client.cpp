@@ -870,6 +870,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
+    /* The spawn's last step before the handshake's wait: a log ending
+     * here waited on the handshake, one ending above never got this far */
+    SUR_LOG(h, "open: child resumed, waiting up to %lu ms for its pipe\n",
+            handshake_timeout_ms());
 
     OVERLAPPED ov = {};
     ov.hEvent = h->io_event;

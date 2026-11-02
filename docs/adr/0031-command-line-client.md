@@ -421,3 +421,20 @@ rescan), so a script caps the wait with `--seconds`. The found DIDs'
 replies are the stream's frames. `cli/scan_line.h`, `CliScanTest`,
 `CliGoldenTest.NothingToScanEndsAtOnce`; end to end on `vcan0` against
 `havne-cli sim` by hand.
+
+## Appendix: 2026-11-01, a deadline on the connect
+
+On the laptop that goes to the car, an antivirus held a newly built
+surrogate at its first run, and `havne-cli` never ended: the session
+log stopped at the child's spawn, though every wait core makes on the
+way is bounded (the handshake and `OP_OPEN` 8 s each) and logs when it
+runs out ([2026-11-01-vehicle](../bench-sessions/2026-11-01-vehicle.md)).
+So the CLI keeps a deadline of its own: `ecuio_session_create` runs on
+a thread of its own, and if it hasn't returned within 60 s, the CLI
+writes the `error` line ("the connect didn't finish within 60 s",
+`ECUIO_ERR_TRANSPORT_HARD_FAILURE`) and exits 3 at once; the process's
+end takes the surrogate with it (its job object). The surrogate's log
+adds a line once the child is resumed, so a stall's place shows next
+time. `CliConnectTest.AConnectPastItsDeadlineEnds` (Windows: the fake
+DLL holds `PassThruOpen` past a deadline `HAVNE_CLI_CONNECT_MS` makes
+short).

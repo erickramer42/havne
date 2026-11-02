@@ -198,7 +198,7 @@ latest release. Next:
 |---|---|
 | v0.3.6 | Car runs with every adapter on hand; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim` |
 | v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
-| Later | SocketCAN through a real controller, when the hardware is on hand; discovery and capture formats; a plugin framework; older buses |
+| Later | SocketCAN through a real controller, when the hardware is on hand; an iPhone download, once a tester's device run works; discovery and capture formats; a plugin framework; older buses |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
 issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each
