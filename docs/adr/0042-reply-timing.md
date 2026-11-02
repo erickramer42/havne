@@ -217,3 +217,13 @@ outstanding, rather than 16, would end a read when its reply lands
 instead of at the slice; that changes how the adapter is read, so it
 waits for the VX on the bench. What a real VX's replies read comes
 from the car run's `latency.csv`.
+
+*Amended 2026-11-01 (the car):* on the test car through the VX
+([2026-11-01-vehicle](../bench-sessions/2026-11-01-vehicle.md)),
+`?pack=0` for 45 s four times, alternating a surrogate built without
+the `timeBeginPeriod` call and the build's own: 1,185 and 1,251
+replies without the 1 ms timer, 1,519 and 1,601 with it (28 % more);
+the median request's P50 18.4 ms against 15.4, the slowest's 30.7 to
+32.8 ms against 20.5, RPM every 721 ms against 590. The bench's
+11.3 ms doesn't carry: the car's ECU answers slower than the fake's
+4 ms, and its time is in each figure.

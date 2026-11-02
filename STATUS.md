@@ -269,10 +269,10 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 844 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 846 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (87/87); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
@@ -371,6 +371,23 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+- **#38. A functional request whose reply is segmented never completes
+    through J2534.** The session's `FLOW_CONTROL` filter names the
+    channel's `tx_id` as its flow-control ID, so with `?txid=0x7DF` the
+    adapter sends its Flow Control on the functional ID, and ISO
+    15765-4 has the ECU wait for it on its physical ID. On the test car
+    through the VX, F190 asked through 0x7DF timed out ten of ten while
+    the physical request answered
+    ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md));
+    single-frame replies, such as the bitmaps, answer functionally.
+    The cause is read from the code, not a capture of the bus.
+- **#39. `havne-cli` didn't end when a surrogate never answered its
+    handshake.** On the laptop, the antivirus held a newly built x86
+    surrogate at its first run; the session log stopped at the spawn
+    line, and the CLI didn't end on its own, where the handshake's 8 s
+    window should fail the connect
+    ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
+    Not reproduced off that laptop.
 
 ## Roadmap
 
@@ -407,17 +424,22 @@ reach into car-verified claims and finishes the diagnostics.
   latency beside it (ADR-0042); and on the same run, the data more
   than one ECU answering needs (a functional `0x7DF` bitmap request,
   physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
-  v0.4.0's design. Through the MX+, done
-  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md)):
-  two ECUs answer Service 01, both to a functional request; the VX's
-  capture is left.
+  v0.4.0's design. Done through both adapters
+  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md),
+  [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)):
+  through the VX, 2.7 times as many replies a minute packed and RPM
+  2.8 times as often; two ECUs answer Service 01, both to a functional
+  request (a functional request's segmented reply through J2534 is
+  Known Issue #38).
 - **Windows timer resolution:** the surrogate holds a 1 ms timer, so
   through the fake as the VX a 4 ms reply reads 11.3 ms (one read
   slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
   0.246; ELM327 never waited on the timer (ADR-0042's appendix of
-  2026-11-01). Left: the VX on the car confirms it, and asking the VX
-  for as many messages as replies are outstanding would end a read at
-  its reply (the bench first).
+  2026-11-01). On the test car through the VX, an A/B of four runs:
+  28 % more replies with it, the median reply 3 ms sooner
+  ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
+  Left: asking the VX for as many messages as replies are outstanding
+  would end a read at its reply (the bench first).
 - **Trouble-code titles** (built, ADR-0044: the generic powertrain
   and network codes; no urgency, which no source rates); **VIN decode**
   (built, ADR-0043: the year and the make, offline; the model isn't in a
