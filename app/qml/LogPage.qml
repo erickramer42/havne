@@ -391,7 +391,7 @@ Pane {
                         // The page's narrowTable, read through the view
                         readonly property bool narrow: ListView.view !== null
                                                        && ListView.view.width < 480
-                        width: frameList.width
+                        width: ListView.view !== null ? ListView.view.width : 0
                         // Narrow, a long payload wraps onto more lines
                         height: narrow ? Math.max(26, payloadLabel.implicitHeight + 8) : 26
                         spacing: 8
@@ -406,29 +406,29 @@ Pane {
                         // throw per delegate.
                         Label {
                             // Session-relative us, shown as s.mmm
-                            text: (model.timestampUs / 1e6).toFixed(3)
+                            text: (frameRow.model.timestampUs / 1e6).toFixed(3)
                             color: Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.preferredWidth: frameRow.narrow ? 64 : 96
                             elide: Text.ElideRight
                         }
                         Label {
-                            text: model.dlc
+                            text: frameRow.model.dlc
                             visible: !frameRow.narrow
                             color: Theme.text
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.preferredWidth: 36
                         }
                         Label {
-                            text: model.extended ? "E" : "-"
-                            color: model.extended ? Theme.success : Theme.textDim
+                            text: frameRow.model.extended ? "E" : "-"
+                            color: frameRow.model.extended ? Theme.success : Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.preferredWidth: frameRow.narrow ? 20 : 36
                         }
                         Label {
                             // Role name is "arbId" (a quint32): hex-format
                             // it for display.
-                            text: "0x" + model.arbId.toString(16).toUpperCase()
+                            text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
                             color: Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.preferredWidth: frameRow.narrow ? 80 : 96
@@ -436,7 +436,7 @@ Pane {
                         }
                         Label {
                             id: payloadLabel
-                            text: model.payloadHex   // spaced uppercase bytes, from the bridge
+                            text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
                             color: Theme.text
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.fillWidth: true

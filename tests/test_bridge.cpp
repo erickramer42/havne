@@ -757,6 +757,11 @@ TEST(BridgeTest, RelayRefusesWhatItCantRelay)
         EXPECT_FALSE(f.relay.start(uri, 0).isEmpty()) << uri;
         EXPECT_FALSE(f.relay.running()) << uri;
     }
+    EXPECT_EQ(f.relay.start("elm327://bt:00:11:22:33:44:55", -1),
+              QStringLiteral("The port must be 0 to 65535 (0: the system picks)"));
+    EXPECT_EQ(f.relay.start("elm327://bt:00:11:22:33:44:55", 65536),
+              QStringLiteral("The port must be 0 to 65535 (0: the system picks)"));
+    EXPECT_FALSE(f.relay.running());
     EXPECT_EQ(f.s->opens, 0);
     ASSERT_EQ(f.start(), QString());
     EXPECT_FALSE(f.start().isEmpty()) << "one relay at a time";
