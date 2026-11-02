@@ -1,6 +1,7 @@
 // File/layer: tests/test_qml.cpp | Qt Quick Test, QML tier
 // Testing: runs tests/qml/tst_*.qml against the app's App module
-//          and a real bridge, the one its Bridge singleton serves.
+//          and a real bridge, the one its Bridge singleton serves,
+//          and a relay whose adapter opens at once (Relay).
 //          ctest runs each file in its own process (QmlTest.<name>).
 
 #include <QCoreApplication>
@@ -19,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "adapterrelay.h"
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "sessionbridge.h"
@@ -113,6 +115,16 @@ private:
     QStringList m_armed;
 };
 
+// The relay's adapter as main() makes it on the phone, opening at once:
+// with it the relay is available, and Settings shows its box
+class OpenAdapter : public RelayAdapter
+{
+public:
+    void open() override { opened(); }
+    void write(const QByteArray&) override {}
+    void close() override {}
+};
+
 class Setup : public QObject
 {
     Q_OBJECT
@@ -147,6 +159,11 @@ public slots:
         m_bluetooth = std::make_unique<BluetoothDevices>();
         BluetoothDevices::instance = m_bluetooth.get();
         m_bluetooth->attachTo(m_bridge.get());
+        m_relay = std::make_unique<AdapterRelay>();
+        m_relay->setFactory([](const QString&) {
+            return std::unique_ptr<RelayAdapter>(new OpenAdapter);
+        });
+        AdapterRelay::instance = m_relay.get();
         qmlRegisterSingletonInstance("AppTest", 1, 0, "Harness", &m_harness);
     }
 
@@ -157,6 +174,8 @@ public slots:
         BridgeSingleton::instance = nullptr;
         m_bluetooth.reset(); // after the bridge: its sessions are closed
         BluetoothDevices::instance = nullptr;
+        m_relay.reset();
+        AdapterRelay::instance = nullptr;
     }
 
 private:
@@ -165,6 +184,7 @@ private:
     Harness m_harness;
     std::unique_ptr<BluetoothDevices> m_bluetooth;
     std::unique_ptr<SessionBridge> m_bridge;
+    std::unique_ptr<AdapterRelay> m_relay;
 };
 
 }  // namespace
