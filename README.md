@@ -8,11 +8,11 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 Havne is an OBD-II scan tool and data logger: live gauges, a strip
 chart, the trouble codes and readiness monitors, and a log of
 every frame, recorded and replayed on request. It runs on Windows,
-Linux, macOS and Android (iOS builds and runs on the Simulator), and
-reaches the car through J2534 Pass-Thru adapters on Windows,
-ELM327-compatible adapters over USB, Bluetooth or WiFi everywhere, and
-SocketCAN on Linux. A simulated vehicle runs every page with no
-hardware.
+Linux and Android, builds and passes its tests on macOS, and runs on
+the iOS Simulator. It reaches the car through J2534 Pass-Thru adapters
+on Windows and ELM327-compatible adapters over USB, Bluetooth or WiFi
+everywhere; SocketCAN on Linux has run on a virtual bus so far. A
+simulated vehicle runs every page with no hardware.
 
 Underneath is a Qt-free C++17 core that does all the vehicle I/O and
 decoding behind a stable C ABI. The Qt 6 / QML app is one front end
@@ -41,6 +41,13 @@ a quarter mile off launch control on a warm loop.*
   70 times a full classic CAN bus, and CI re-runs that load test on
   every push ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
   [docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Measured on a real car.** Through both adapters on hand, a J2534
+  Pass-Thru on a laptop and an ELM327 on a phone over Bluetooth, the
+  test car's two ECUs answered; asking up to six PIDs per request
+  brought 2.7 times as many replies a minute, and holding Windows'
+  1 ms timer 28 % more. Each session is written up with its scrubbed
+  logs ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
+  [2026-11-02](docs/bench-sessions/2026-11-02-vehicle.md)).
 - **Requests follow the replies.** One request per ECU at a time; the
   supported-PID probe drops only what the ECU says it lacks, never on
   silence. A clear asks first, saves the report, and asks once more
@@ -76,13 +83,14 @@ a quarter mile off launch control on a warm loop.*
 
 ## What it does
 
-- **Four pages:** a Dashboard of gauges with shift lights and peak
+- **The pages:** a Dashboard of gauges with shift lights and peak
   hold; Live, the values and a strip chart; Diagnostics; and a Log of
   every connect and link change, with the raw frames in developer mode.
 - **Three kinds of adapter:** J2534 on Windows; ELM327 over a serial
   port, Bluetooth or WiFi, on the desktop and on Android, where
   sessions keep running in the background; SocketCAN on Linux,
-  listening or asking the car ([docs/j2534.md](docs/j2534.md),
+  listening or making requests, so far on a virtual bus
+  ([docs/j2534.md](docs/j2534.md),
   [docs/elm327.md](docs/elm327.md), [docs/linux.md](docs/linux.md)).
 - **Trouble codes:** each ECU's check-engine light, its stored, pending
   and permanent codes, readiness monitors and freeze frame, read at
@@ -164,6 +172,7 @@ it, a frame's path from transport to screen included.
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
 | [`cli/main.cpp`](cli/main.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |
 | [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h) | The simulated vehicle and its physics |
+| [`core/src/sim_ecu.h`](core/src/sim_ecu.h) | The simulated ECU behind `havne-cli sim`: what it answers, as the simulated car or a recording of the test car, with faults on request; pure, so every answer is a unit test |
 
 ## Try it
 
