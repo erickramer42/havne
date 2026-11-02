@@ -697,7 +697,10 @@ and merged into `dev`, whose push run is the gate. A manual run
 leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f smoke_only=true` runs it with `core-and-tests` alone, which the
-smoke depends on. Every job that uses Qt
+smoke depends on. `-f macos_repeat='<ctest regex>'` (and
+`-f macos_repeat_count=<n>`, 200 by default) has `macos-build` run the
+matching tests again until one fails, for a failure seen once on macOS
+(its timeout is then 60 minutes). Every job that uses Qt
 uses 6.12.0, and every job has a `timeout-minutes` of roughly 3-5x
 its usual duration:
 

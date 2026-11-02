@@ -12,9 +12,21 @@ on:
   # asked: ios_smoke adds it to the whole run, smoke_only runs it with
   # core-and-tests alone. [ios-smoke] in a pushed commit's message also
   # asks for it; re-running a push run replays the push and skips the
-  # smoke again.
+  # smoke again. macos_repeat (-f macos_repeat='^BridgeTest\.Replay'
+  # [-f macos_repeat_count=200]) runs the matching tests again on macOS
+  # until one fails, for a failure seen once there (no Mac on hand).
   workflow_dispatch:
     inputs:
+      macos_repeat:
+        description: >-
+          A ctest regex macos-build runs again until it fails (empty: no
+          repeat)
+        type: string
+        default: ''
+      macos_repeat_count:
+        description: How many times macos_repeat runs at most
+        type: number
+        default: 200
       ios_smoke:
         description: Also run the iOS simulator smoke (about 20 minutes)
         type: boolean
@@ -370,7 +382,8 @@ jobs:
     if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
     needs: core-and-tests
-    timeout-minutes: 15
+    # The repeat runs a test hundreds of times: 60 minutes then
+    timeout-minutes: ${{ inputs.macos_repeat != '' && 60 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -388,6 +401,16 @@ jobs:
           cmake --build build
       - name: Run tests
         run: ctest --test-dir build --output-on-failure --no-tests=error
+
+      # A manual run's regex reaches the shell only through env.
+      - name: Repeat until a failure (manual runs)
+        if: ${{ inputs.macos_repeat != '' }}
+        env:
+          REPEAT_REGEX: ${{ inputs.macos_repeat }}
+          REPEAT_COUNT: ${{ inputs.macos_repeat_count }}
+        run: |
+          ctest --test-dir build --output-on-failure --no-tests=error \
+            -R "$REPEAT_REGEX" --repeat "until-fail:$REPEAT_COUNT"
 
   linux-build:
     if: ${{ !inputs.smoke_only }}
