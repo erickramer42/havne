@@ -3022,16 +3022,6 @@ QString SessionBridge::describeDtc(const QString& typed) const
                : QStringLiteral("%1: %2").arg(text, title);
 }
 
-QString SessionBridge::dtcTitleSource() const
-{
-    return QString::fromLatin1(ecuio_dtc_title_source());
-}
-
-QString SessionBridge::dtcTitleNotice() const
-{
-    return QString::fromLatin1(ecuio_dtc_title_notice());
-}
-
 QString SessionBridge::newSalt() const
 {
     QByteArray bytes(16, '\0');
