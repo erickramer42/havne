@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-01, **Version:** v0.3.5,
+**Updated:** 2026-11-02, **Version:** v0.3.5,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -22,12 +22,12 @@ then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
-bench bus and in two sessions on one car
-([2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md),
-[2026-10-25](docs/bench-sessions/2026-10-25-vehicle.md)): the engine
-ECU answered, the values decoded and tracked the cluster, and the
-second session ran the request engine, the probe, identification and
-`uds-generic` there. The [ELM327 transport](docs/elm327.md)
+bench bus and in five sessions on one car, from
+[2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md) to
+[2026-11-02](docs/bench-sessions/2026-11-02-vehicle.md): the values
+decoded and tracked the cluster, and the request engine, the probe,
+identification, `uds-generic`, the trouble codes, several PIDs per
+request, more than one ECU and a DID scan ran there. The [ELM327 transport](docs/elm327.md)
 ([ADR-0026](docs/adr/0026-elm327-transport.md)) is built and has read
 the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
@@ -35,7 +35,8 @@ mode over USB
 the Android app reaches the car through the phone's Bluetooth, in the
 background too. Next comes v0.3.6, the car runs the adapters on hand
 can make and the diagnostics finished; SocketCAN's runs wait for their
-hardware ([roadmap](#roadmap)).
+hardware ([roadmap](#roadmap)). v0.3.6's car runs are filed, through
+both adapters, and its features are in; what remains is its release.
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -213,7 +214,11 @@ hardware ([roadmap](#roadmap)).
     activity log's summary at the disconnect; `bench_timing` measures
     what the stack adds through each transport against the fakes
     ([docs/testing.md](docs/testing.md#reply-timing-against-the-fakes)).
-    Left: a car's figures, from v0.3.6's runs.
+    On the test car through the VX, a single PID's reply at P50
+    15.4 ms (the median across the rotation) and a pack of several at
+    73.7 ms ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md));
+    through the MX+ relayed by the test phone, `01 00` at P50 18 ms and
+    P99 114 ms ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md)).
   - **Every release** carries the Windows zip and a zip of its PDBs,
     the signed APK, the Linux files, one SPDX SBOM over them, and
     checksums and one signed provenance over every download
@@ -234,8 +239,10 @@ hardware ([roadmap](#roadmap)).
     database (a table committed from it); the activity log's `VIN:`
     line and Settings' lookup in the app, `havne-cli vin` and
     `stream`'s `identity` line. Verified at UNIT (the regulation's
-    sample VIN, each year rule) and in the bridge, QML and CLI tests;
-    the test car's own VIN not yet.
+    sample VIN, each year rule) and in the bridge, QML and CLI tests,
+    and on the test car through the VX: its VIN decoded, the year and
+    the make found and the check digit matching
+    ([2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
   - **Trouble-code titles** ([ADR-0044](docs/adr/0044-trouble-code-titles.md)):
     SAE J2012's names for the generic powertrain and network codes, from
     Wal33D's MIT list (a table committed from it, its notice in every
@@ -248,8 +255,10 @@ hardware ([roadmap](#roadmap)).
     federal OBD inspection rule (40 CFR 85.2222: two incomplete for
     1996-2000, one from 2001, a commanded light fails) for the VIN's
     model year; Diagnostics' card and `stream`'s `inspection` line.
-    Verified at UNIT and in the bridge, QML and CLI tests; not yet on the
-    test car.
+    Verified at UNIT and in the bridge, QML and CLI tests, and on the
+    test car through the VX: "ready", one monitor incomplete where its
+    model year allows one
+    ([2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -270,7 +279,7 @@ hardware ([roadmap](#roadmap)).
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
 - **Tests:** 849 ctest cases on Windows (both trees rebuilt,
-  2026-11-01), all passing but two env-gated skips (the cross-arch
+  2026-11-02), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (87/87); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
@@ -384,7 +393,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Released |
 | v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Released |
-| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened | Planned |
+| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Planned |
 | v0.3.7 | A log viewer: recordings opened offline, two runs overlaid on a common zero | Planned |
 | v0.3.8 | CSV import and export, scrubbed for sharing; a health report; the Log page's frame filter; Python bindings | Planned |
 | v0.3.9 | Conditions: triggered logging, alerts and markers; computed signals | Planned |
