@@ -1019,6 +1019,31 @@ TEST_F(J2534HealthTest, UnansweredRequestWaitsOutItsWait)
     EXPECT_EQ(le, ECUIO_OK);
 }
 
+/* A scanned DID whose long reply comes after its wait (the test car's
+ * 263-byte DA9E through the VX came 215 ms after the reply before it)
+ * is still found: the
+ * late reply answers it, it's polled, and the scan completes. F19E and
+ * F19F are refused at once; F1A0's 200 bytes come 200 ms late */
+TEST_F(J2534HealthTest, AScannedDidsLateLongReplyIsFound)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_LONG_REPLY_DELAY_MS", "200"));
+    ASSERT_NO_FATAL_FAILURE(start_session(
+        "?profile=uds-generic&did=F19E-F1A0&identify=0&diagnose=0"));
+    ecuio_channel_support_t s{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline &&
+           !(ecuio_session_get_channel_support(session, 0, &s) == ECUIO_OK &&
+             (s.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_SCAN_COMPLETE)
+        << "the scan didn't end (done " << s.scan_done << ")";
+    EXPECT_EQ(s.scan_found, 1u);
+    EXPECT_EQ(s.scan_refused, 2u);
+    EXPECT_EQ(s.scan_polled, 1u);
+}
+
 /* The fake's ECU answers each request "response pending" (7F 01 78) at
  * once and the reply 300 ms later. Pending extends the request's wait,
  * so the next request follows the reply, about one every 300 ms, and
