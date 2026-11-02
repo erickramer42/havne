@@ -144,6 +144,14 @@ void page_last_filter(unsigned long* id, unsigned long* type,
     *len = f.len;
 }
 
+/* The last FLOW_CONTROL filter's flow-control message, its 4-byte ID */
+uint32_t page_last_flow_id()
+{
+    const fake_control::Filter f = fake_control::last_filter(fake_page());
+    return (uint32_t(f.flow[0]) << 24) | (uint32_t(f.flow[1]) << 16) |
+           (uint32_t(f.flow[2]) << 8) | f.flow[3];
+}
+
 void page_last_stop(unsigned long* id)
 {
     *id = fake_control::last_stopped(fake_page());
@@ -1300,6 +1308,46 @@ TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
+}
+
+/* A functional request (?txid=0x7DF) still goes out on 0x7DF, one
+ * frame, but the reply's Flow Control goes on the physical request ID
+ * paired with the channel's rx (ISO 15765-4 section 6.3.2.1): the filter's
+ * flow-control message names it, so a segmented reply completes. A
+ * physical request's is its own ID */
+TEST_F(J2534AdoptionTest, AFunctionalRequestsFlowControlGoesToThePhysicalId)
+{
+    struct Case {
+        const char* query;
+        uint32_t flow;
+        uint8_t tx_low;
+    };
+    for (const Case& k :
+         {Case{"?txid=0x7DF", 0x7E0, 0xDF},
+          Case{"?profile=raw&filter=0x7E9&poll=0x00&txid=0x7DF", 0x7E1, 0xDF},
+          Case{"", 0x7E0, 0xE0}}) {
+        SCOPED_TRACE(k.query);
+        fake_control::reset(fake_page());
+        char uri[700];
+        snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH,
+                 k.query);
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+        ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+        unsigned long fid = 0, ftype = 0, len = 0;
+        unsigned char mask[12] = {}, pattern[12] = {};
+        get_last_filter(&fid, &ftype, mask, pattern, &len);
+        EXPECT_EQ(ftype,
+                  static_cast<unsigned long>(ECUIO_PT_FLOW_CONTROL_FILTER));
+        EXPECT_EQ(page_last_flow_id(), k.flow);
+        wait_for_writes(get_write_count, 1, 200);
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(0, wbuf, &wlen, &wflags);
+        EXPECT_EQ(wbuf[3], k.tx_low) << "the request's own ID";
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+    }
 }
 
 /* ROUTING: each request goes to the channel of the def it was derived

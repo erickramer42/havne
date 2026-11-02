@@ -387,12 +387,13 @@ From a terminal on the laptop, `havne-cli` beside the app's build
       `health` line; the last line's `answered` and `timeouts` noted
 - [ ] pack-off: `packed` stays 0
 - [ ] RPM's refresh (`interval_p50_us` on `01 0C`'s row) packed
-      against unpacked, and the latency P50 and P99 of each: the
-      surrogate's 1 ms timer should put a reply at about 11 ms, not 16
-      (ADR-0042's appendix of 2026-11-01)
+      against unpacked, and the latency P50 and P99 of each: about
+      15 ms unpacked on the test car, where the bench's fake reads 11
+      (the ECU's own time is in it; ADR-0042's appendix of 2026-11-01)
 - [ ] If the ECU refuses packs (`7F 01 12`, or replies that don't
       split): after three failures the channel goes unpacked and stays
-      so, and nothing is dropped. That's the fallback BENCH prep #31's
+      so while the ECU answers its other requests, and nothing is
+      dropped. That's the fallback BENCH prep #31's
       other half asks for: record it, it isn't a fault
 
 ## Phase 3c: more than one ECU, engine idling
@@ -452,6 +453,9 @@ ignition-on.
       100 ms to a 5 s cap, so the next can be up to 5 s away. Record
       the time from the restart to the first value; longer than about
       10 s is a finding
+- [ ] Packing resumes: the bare URI packs, the requests unanswered
+      while the engine is off end it, and once the link recovers the
+      `timing` lines' `packed` counts climb again
 - [ ] Optional, the probe on a cold connect: Disconnect, key off,
       connect the bare URI, then start the engine at once. The ECU
       line reads "no answer to the supported-PID query" and "none
@@ -463,7 +467,9 @@ ignition-on.
 
 | Symptom | Suspect |
 |---|---|
-| Connect fails at once, before any write | The Settings error line names the cause: "surrogate process failed" (no surrogate next to `havne.exe`, or a stale `build-win32`: rebuild both trees), "couldn't load what the URI names" (the DLL not loading), or "the adapter's driver refused: PassThruOpen returned status 34" (the adapter isn't attached; the VT and VX both answer 34). Check the URI names the VX |
+| Connect fails at once, before any write | The Settings error line names the cause: "surrogate process failed" (no surrogate next to `havne.exe`, or a stale `build-win32`: rebuild both trees), "couldn't load what the URI names" (the DLL not loading), or "the adapter's driver refused: PassThruOpen returned status 34" (the adapter isn't attached, or another program has it open: close that program, or unplug the VX from the car and plug it back; the VT and VX both answer 34). Check the URI names the VX |
+| `PassThruOpen` refused (status 7 or 34) with the VX attached, after another J2534 program used it | The vendor's state: unplug the VX from the car and plug it back in, then connect again |
+| A functional request (`?txid=0x7DF`) answers single-frame requests but never a segmented reply | The Flow Control's ID: the filter's flow-control message must be the physical request ID (0x7E0 for 0x7E8), which core sends for a functional `txid`. Ask that item physically meanwhile |
 | Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 3's one PID with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but Live shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |

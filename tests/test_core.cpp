@@ -3151,6 +3151,11 @@ TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
          "frames.csv line 2: data isn't"},
         {std::string(kFramesHeader) + "1,1,0x123456789,0x0,41\n",
          "frames.csv line 2: id isn't"},
+        /* 0xEF and two more bytes that aren't a byte-order mark's */
+        {std::string("\xEF" "XY") + kFramesHeader + ok_row,
+         "not a Havne frames.csv, or a newer format"},
+        {std::string("\xEF\n") + ok_row,
+         "not a Havne frames.csv, or a newer format"},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.text);
@@ -3162,6 +3167,15 @@ TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
         EXPECT_EQ(std::string(ecuio_last_error_detail()).rfind(c.detail, 0),
                   size_t{0})
             << ecuio_last_error_detail();
+    }
+
+    {
+        /* A byte-order mark ahead of the header, as an editor may add */
+        TempRecording rec(std::string("\xEF\xBB\xBF") + kFramesHeader + ok_row);
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri().c_str(), &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_session_destroy(session);
     }
 
     std::string long_data, too_long;

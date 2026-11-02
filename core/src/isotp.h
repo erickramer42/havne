@@ -76,7 +76,7 @@ inline isotp_pci isotp_kind(const isotp_can& f)
 
 /* The receiver's Flow Control frame (ISO 15765-4's Table 7): ClearToSend,
  * block size 0 and STmin 0, so the ECU sends the rest at once; never a
- * wait frame. Sent to the request ID, once per First Frame. */
+ * wait frame. Sent once per First Frame, on isotp_flow_control_id's ID. */
 inline isotp_can isotp_flow_control(uint32_t to_id)
 {
     isotp_can f;
@@ -87,6 +87,27 @@ inline isotp_can isotp_flow_control(uint32_t to_id)
     f.data[1] = 0x00;
     f.data[2] = 0x00;
     return f;
+}
+
+/* The ID a Flow Control frame goes out on for a reply from rx to a
+ * request on tx: tx, unless tx is the functional request ID (0x7DF,
+ * 0x18DB33F1), when it's the physical request ID paired with rx (8 below
+ * an 11-bit one, the swapped pair of an 18DA one). ISO 15765-4:2005
+ * section 6.3.2.1: the physical request ID "shall only be used for
+ * physically addressed FlowControl frames", and an ECU answering a
+ * functional request waits for its Flow Control there (6.3.1). */
+inline uint32_t isotp_flow_control_id(uint32_t rx, uint32_t tx)
+{
+    if (tx != 0x7DFu && tx != 0x18DB33F1u) {
+        return tx;
+    }
+    if (rx >= 9 && rx <= 0x7FFu) {
+        return rx - 8;
+    }
+    if ((rx >> 16) == 0x18DAu) {
+        return 0x18DA0000u | ((rx & 0xFFu) << 8) | ((rx >> 8) & 0xFFu);
+    }
+    return tx;
 }
 
 /* STmin's byte as microseconds: 0x00 to 0x7F milliseconds, 0xF1 to 0xF9

@@ -52,7 +52,7 @@ QString AdapterRelay::start(const QString& uri, int port)
                   "elm327://bt:<address>: select one in the list");
     }
     if (port < 0 || port > 65535) {
-        return tr("The port must be 1 to 65535");
+        return tr("The port must be 0 to 65535 (0: the system picks)");
     }
     std::unique_ptr<RelayAdapter> adapter = m_factory(rest.mid(3));
     if (adapter == nullptr) {

@@ -136,6 +136,7 @@ public:
     char recorded[kRecordDepth][24] = {};
     uint32_t commands = 0;
     uint32_t requests = 0;
+    uint32_t packs = 0;    /* Service 01 requests of two or more PIDs */
     uint32_t resets = 0;   /* AT Z */
     uint32_t bare_crs = 0; /* a CR alone, which repeats a command */
     uint32_t stops = 0;    /* bytes that stopped a monitor */
@@ -148,7 +149,7 @@ public:
         protocol_ = '0';
         head_ = tail_ = 0;
         in_len_ = 0;
-        commands = requests = resets = bare_crs = stops = 0;
+        commands = requests = packs = resets = bare_crs = stops = 0;
         last_stop = 0;
         held_ = late_reset_ = false;
         k = knobs{};
@@ -715,6 +716,9 @@ private:
          * count */
         const size_t digits = (n % 2 == 1) ? n - 1 : n;
         const int count_digit = (n % 2 == 1) ? hex(cmd[n - 1]) : 0;
+        if (digits >= 6 && cmd[0] == '0' && cmd[1] == '1') {
+            ++packs;
+        }
         if (count_digit < 0) {
             reply("?", now);
             return;

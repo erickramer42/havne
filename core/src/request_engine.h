@@ -108,7 +108,11 @@
  * record's PID is one of the pack's answers it; a PID it leaves out has
  * no value that pass and isn't dropped. A pack answered with silence, a
  * negative reply or one record ECUIO_ENGINE_PACK_FAILURES times in a row
- * puts the channel back to one PID per request for the session. */
+ * puts the channel back to one PID per request until the link recovers
+ * (ecuio_engine_rescan): an ECU that went quiet (the ignition off) left
+ * its packs unanswered along with everything else, so packing is judged
+ * again once it answers. An ECU that refuses packs answers the rest, so
+ * its link never recovers and its channel stays unpacked. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -316,7 +320,7 @@ struct ecuio_engine_channel {
     uint32_t pack_count = 0;
     uint32_t pack_failures = 0; /* failed packs in a row */
     bool packed = false;        /* a pack was answered with several records */
-    bool unpacked = false;      /* packing ended for the session */
+    bool unpacked = false;      /* packing ended until a rescan */
 };
 
 struct ecuio_request_engine {
@@ -725,6 +729,17 @@ inline int32_t ecuio_engine_scan_next(ecuio_request_engine* e, uint32_t c)
 
 /* Settles the scan entry channel c has out: found (and in the rotation
  * while the table has room), refused with its code, or unanswered. */
+/* A found DID joins channel c's rotation, room permitting */
+inline void ecuio_engine_scan_poll(ecuio_request_engine* e, uint32_t c,
+                                   ecuio_scan_entry& s)
+{
+    const uint8_t req[3] = {0x22, static_cast<uint8_t>(s.did >> 8),
+                            static_cast<uint8_t>(s.did)};
+    const ecuio_engine_add_result r = ecuio_engine_add(e, c, req, 3);
+    s.polled = (r == ecuio_engine_add_result::added ||
+                r == ecuio_engine_add_result::duplicate) ? 1 : 0;
+}
+
 inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
                                      uint8_t outcome, uint8_t nrc)
 {
@@ -734,16 +749,37 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
     s.outcome = outcome;
     s.nrc = nrc;
     if (outcome == ECUIO_SCAN_FOUND) {
-        const uint8_t req[3] = {0x22, static_cast<uint8_t>(s.did >> 8),
-                                static_cast<uint8_t>(s.did)};
-        const ecuio_engine_add_result r = ecuio_engine_add(e, c, req, 3);
-        s.polled = (r == ecuio_engine_add_result::added ||
-                    r == ecuio_engine_add_result::duplicate) ? 1 : 0;
+        ecuio_engine_scan_poll(e, c, s);
     }
     if (ch.scan_pending > 0) {
         --ch.scan_pending;
     }
     ++ch.generation;
+}
+
+/* A positive reply on channel c naming a scanned DID whose wait ended
+ * answers it, however late: a long reply can take longer than the wait
+ * (the test car's 263-byte DA9E through the VX), and the
+ * adapter hands it over only whole. The DID is found and polled, so the
+ * scan completes. Called only for a reply that answers nothing else. */
+inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
+                                   const uint8_t* data, uint16_t len)
+{
+    if (len < 3 || data[0] != 0x62) {
+        return false;
+    }
+    const uint16_t did = static_cast<uint16_t>((data[1] << 8) | data[2]);
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        ecuio_scan_entry& s = e->scan[i];
+        if (s.channel == c && s.did == did &&
+            s.outcome == ECUIO_SCAN_UNANSWERED) {
+            s.outcome = ECUIO_SCAN_FOUND;
+            ecuio_engine_scan_poll(e, c, s);
+            ++e->chans[c].generation;
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Asks every unanswered scan entry, identification item and diagnostics
@@ -761,6 +797,11 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
     }
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
+        if (ch.unpacked) {
+            ch.unpacked = false;
+            ch.pack_failures = 0;
+            ++ch.generation;
+        }
         for (uint32_t i = 0; i < ch.ident_count; ++i) {
             if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
                 ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
@@ -1541,7 +1582,7 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
 
 /* A pack on channel c that failed: silence, a negative reply or one
  * record. The ECUIO_ENGINE_PACK_FAILURES-th in a row ends packing on
- * the channel for the session. */
+ * the channel until ecuio_engine_rescan. */
 inline void ecuio_engine_pack_failed(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
@@ -1740,10 +1781,14 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.outstanding == ECUIO_ENGINE_NONE || len == 0) {
+        (void)ecuio_engine_scan_late(e, c, data, len);
         return ecuio_reply::none;
     }
     const int32_t out = ch.outstanding;
     if (out == ECUIO_ENGINE_PACK) {
+        if (ecuio_engine_scan_late(e, c, data, len)) {
+            return ecuio_reply::none;
+        }
         const ecuio_reply reply =
             ecuio_engine_pack_reply(e, c, data, len, now_us, out_nrc);
         ecuio_engine_time_pack(e, c, reply, data, len, now_us);
@@ -1790,6 +1835,9 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         !ch.diagnosing && !ch.scanning && !ch.clearing && len >= 2 &&
         data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
         ch.walk_stray = true; /* another PID's answer, not the bitmap's */
+    }
+    if (ecuio_engine_scan_late(e, c, data, len)) {
+        return ecuio_reply::none;
     }
     if (len < 3 || data[0] != ECUIO_NEGATIVE_RESPONSE ||
         data[1] != r.bytes[0]) {

@@ -1,0 +1,4 @@
+[sur 09:52:34.590] open: child pid 17112, surrogate 'C:\projects\qttune\build-win32\surrogate\Release\ecuio-j2534-surrogate.exe' (ECUIO_SURROGATE_EXE), dll 'C:\Program Files (x86)\OBDX Pro\J2534\OBDX Pro VX\OBDXVX_J2534.dll'
+[sur 09:52:34.590] open: log '%TEMP%\ecuio-surrogate-324-1.log'
+[sur 09:52:34.591] open: child resumed, waiting up to 8000 ms for its pipe
+[sur 09:52:34.593] transact: ov_read failed (req_id=1 op=1 OS-ERROR got=0/328 err=109)

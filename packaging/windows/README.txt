@@ -56,10 +56,10 @@ Using an adapter
 - Each vendor driver runs in a helper process of its own: 32-bit
   drivers in ecuio-j2534-surrogate.exe, 64-bit ones in
   ecuio-j2534-surrogate-x64.exe. Both must stay next to havne.exe.
-- Havne only reads: it sends standard diagnostic read requests (live
-  data and identification) and never changes anything in the vehicle.
-  It has been tested read-only on one vehicle with one adapter; other
-  vehicles and adapters are untested.
+- Havne reads live data, identification and trouble codes, and can
+  clear trouble codes after asking first. It has been tested on one
+  vehicle with two adapters; other vehicles and adapters are untested.
+  Read DISCLAIMER.md before connecting it to a vehicle.
 
 
 The command line

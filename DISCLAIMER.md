@@ -27,8 +27,8 @@ Service 0x22 ("read data by identifier")
 ([ADR-0015](docs/adr/0015-request-engine.md),
 [ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 
-It sends one request that changes the car: OBD-II Service 04 ("clear
-diagnostic information"), only from the Diagnostics page's **Clear
+It can clear trouble codes with OBD-II Service 04 ("clear diagnostic
+information"), only from the Diagnostics page's **Clear
 codes**, after a confirmation
 ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)). Before it,
 Havne saves the report to a file of its own in the recordings folder
@@ -41,11 +41,12 @@ other values the manufacturer chose. It clears each ECU by its own
 address, never every module at once. On an ECU that obeys, a clear
 erases the stored and pending codes and the freeze frame, turns the
 check-engine light off and sets the readiness monitors back to
-incomplete; permanent codes stay. **Clearing has run only against
-Havne's fakes and its simulated vehicle, never on a car.**
+incomplete; permanent codes stay. **Clearing has run on one car, with
+no trouble codes stored, through an OBDLink MX+, with the engine
+stopped and with it running; erasing a stored code has run only
+against Havne's fakes and its simulated vehicle.**
 
-It refuses every other service, and has **no** capability to write or
-flash any ECU. It reaches a vehicle through:
+It reaches a vehicle through:
 
 - a **J2534 Pass-Thru** adapter, on Windows only;
 - an **ELM327-compatible** adapter over USB, Bluetooth or WiFi, on
@@ -53,8 +54,8 @@ flash any ECU. It reaches a vehicle through:
 - an **Android phone** (Android 12 or later) and a Bluetooth adapter.
 
 It has been tested against its simulated vehicle and fake adapters, on
-the bench with real adapters and no vehicle, and in read-only sessions
-on **one** vehicle with **two** adapters (the OBDX Pro VX, as a J2534
+the bench with real adapters and no vehicle, and in sessions on
+**one** vehicle with **two** adapters (the OBDX Pro VX, as a J2534
 adapter and in its ELM327 mode, and the OBDLink MX+ over Bluetooth),
 from a laptop and from an Android phone. It has **not** been validated
 beyond that: other vehicles, other adapters, Bluetooth LE adapters,

@@ -1495,6 +1495,43 @@ TEST(RequestEngineTest, ScanAloneRunsEveryTurnAndRescanAsksTheUnansweredAgain) {
     EXPECT_EQ(s.scan_done, 2u);
 }
 
+/* A long reply can come after its wait: a positive reply naming a
+ * scanned DID left unanswered answers it, whether another request is
+ * out or none, so it's found and polled and the scan completes. The
+ * request out when it lands keeps waiting for its own. */
+TEST(RequestEngineTest, ALateReplyStillAnswersItsScannedDid) {
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E20));
+    ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E21));
+
+    int64_t now = 0;
+    ASSERT_NO_FATAL_FAILURE(send_scan_request(&e, 0, 0x1E20, now));
+    now += ECUIO_ENGINE_WAIT_US;
+    EXPECT_TRUE(ecuio_engine_expire(&e, 0, now));
+    EXPECT_EQ(e.scan[0].outcome, ECUIO_SCAN_UNANSWERED);
+    ASSERT_NO_FATAL_FAILURE(send_scan_request(&e, 0, 0x1E21, now));
+    EXPECT_EQ(answer_did(&e, 0, 0x1E20, now + 4 * kMs), ecuio_reply::none)
+        << "1E21's request still waits";
+    EXPECT_EQ(e.scan[0].outcome, ECUIO_SCAN_FOUND);
+    EXPECT_EQ(e.scan[0].polled, 1u);
+    EXPECT_EQ(e.chans[0].outstanding, ECUIO_ENGINE_ONCE);
+
+    now += ECUIO_ENGINE_WAIT_US;
+    EXPECT_TRUE(ecuio_engine_expire(&e, 0, now));
+    EXPECT_EQ(e.scan[1].outcome, ECUIO_SCAN_UNANSWERED);
+    EXPECT_EQ(e.chans[0].outstanding, ECUIO_ENGINE_NONE);
+    EXPECT_EQ(answer_did(&e, 0, 0x1E21, now + 4 * kMs), ecuio_reply::none);
+    EXPECT_EQ(e.scan[1].outcome, ECUIO_SCAN_FOUND);
+
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_SCAN_COMPLETE);
+    EXPECT_EQ(s.scan_found, 2u);
+    EXPECT_EQ(s.scan_polled, 2u);
+    EXPECT_EQ(e.count, 2u);
+}
+
 /* A found DID is counted even when the table is full; it just isn't
  * polled, which the report says. */
 TEST(RequestEngineTest, ScanFoundWithAFullTableIsCountedButNotPolled) {
@@ -4039,6 +4076,45 @@ TEST(RequestEngineTest, APackedReplyMatchesByAnyOfItsPids)
 /* Silence, a negative reply or one record, three packs in a row, puts
  * the channel back to one PID per request; one answered in between
  * starts the count again; a pending reply only extends the wait */
+/* An ECU that goes quiet (the ignition off) leaves its packs unanswered
+ * along with everything else, so the channel unpacks; once the link
+ * recovers (the driver's rescan) packing is judged again and resumes */
+TEST(RequestEngineTest, PackingResumesOnceTheLinkRecovers)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    int turn = 0;
+    int packs_before = 0;
+    int packs_after = 0;
+    uint32_t quiet_flags = 0;
+    (void)packing_turns(&e, 600, [&](const Bytes& req) {
+        ++turn;
+        if (turn <= 200) {
+            packs_before += req.size() > 2 ? 1 : 0;
+            return packed_fake_reply(req);
+        }
+        if (turn <= 300) {
+            return Bytes{};
+        }
+        if (turn == 301) {
+            ecuio_channel_support_t s{};
+            ecuio_engine_support(&e, 0, &s);
+            quiet_flags = s.flags;
+            ecuio_engine_rescan(&e);
+        }
+        packs_after += req.size() > 2 ? 1 : 0;
+        return packed_fake_reply(req);
+    });
+    EXPECT_GT(packs_before, 0);
+    EXPECT_TRUE(quiet_flags & ECUIO_SUPPORT_UNPACKED)
+        << "the quiet ECU unpacked it";
+    EXPECT_GT(packs_after, 50);
+    ecuio_channel_support_t s{};
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_FALSE(s.flags & ECUIO_SUPPORT_UNPACKED);
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_PACKED);
+}
+
 TEST(RequestEngineTest, ThreeFailedPacksEndPackingOnTheChannel)
 {
     for (const char* how : {"silence", "negative", "first PID only"}) {

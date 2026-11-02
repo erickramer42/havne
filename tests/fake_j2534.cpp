@@ -40,6 +40,8 @@
 //    answers every write STATUS_NOERROR with a count of 0, the same
 //    way. ECUIO_FAKE_REPLY_DELAY_MS
 //    holds each response back that long after the write (default 0);
+//    ECUIO_FAKE_LONG_REPLY_DELAY_MS adds its delay to a response longer
+//    than one Single Frame (over 7 bytes), as a long reply takes;
 //    ECUIO_FAKE_PENDING=1 answers each request with "response pending"
 //    (7F <service> 78) at once, ahead of that reply.
 //    ECUIO_FAKE_UNSUPPORTED_NRC sets the code of the negative reply to
@@ -792,6 +794,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     const bool no_ack = vx && fake_j2534::knob_on("ECUIO_FAKE_NO_ACK");
     const unsigned long reply_delay_ms = fake_j2534::knob_ms(
         "ECUIO_FAKE_REPLY_DELAY_MS", vx ? fake_j2534::kVxReplyDelayMs : 0);
+    const unsigned long long_delay_ms =
+        fake_j2534::knob_ms("ECUIO_FAKE_LONG_REPLY_DELAY_MS", 0);
     const bool pending_first = fake_j2534::knob_on("ECUIO_FAKE_PENDING");
     long unsupported_nrc = -1;
     {
@@ -926,8 +930,10 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             echo_len = n;
         }
 
+        const unsigned long delay_ms =
+            reply_delay_ms + (echo_len > 4 + 7 ? long_delay_ms : 0);
         const long long arrives_us =
-            written_us + 1000LL * static_cast<long long>(reply_delay_ms);
+            written_us + 1000LL * static_cast<long long>(delay_ms);
         static unsigned long resp_ts = 0x1000;
         resp_ts += 1;
         fake_j2534::enqueue_rx_locked(
@@ -1101,7 +1107,8 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
     fake_j2534::g_last_filter = rec;
     if (fake_control::Page* page = fake_control::attach()) {
         fake_control::record_filter(page, rec.filter_id, rec.filter_type,
-                                    rec.mask, rec.pattern, rec.mask_len);
+                                    rec.mask, rec.pattern, rec.mask_len,
+                                    rec.flow_control);
     }
 
     *pFilterID = rec.filter_id;

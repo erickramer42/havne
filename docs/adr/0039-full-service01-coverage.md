@@ -2,10 +2,12 @@
 
 - **Status:** Accepted. Sections 1-7 built on 2026-10-31 (the set, the rate
   classes, Live hiding what a car lacks, the fakes, imperial units),
-  verified on the fakes; not yet on a car (BENCH prep #30). Appendix A
+  verified on the fakes and on the test car through the MX+ (BENCH prep
+  #30; the values beside a second scan tool still to see). Appendix A
   built on 2026-10-31 (the decode's split and the engine's packing),
-  verified on the fakes and on the test car through the MX+; through
-  the VX to come (BENCH prep #31).
+  verified on the fakes and on the test car through the MX+ and the VX
+  (BENCH prep #31; the fallback on a car that refuses packs still to
+  see).
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI), [ADR-0015](0015-request-engine.md) section 1 (the rotation),
@@ -415,6 +417,23 @@ support report says so (a new `ECUIO_SUPPORT_*` flag, append-only).
 The fakes' ECU answers packed requests, and a fake knob makes it
 answer only the first PID, so the fallback is tested through J2534
 and ELM327.
+
+> **Amended 2026-11-01 (an ignition cycle):** on the test car through
+> the VX, a key cycle while packing left the session unpacked for good:
+> with the ECU off, every request went unanswered, packs among them,
+> and three of those ended packing. The fallback now lasts until the
+> link recovers: `ecuio_engine_rescan`, which each worker calls then,
+> judges packing again. An ECU that refuses packs answers its other
+> requests, so its link never recovers and its channel stays unpacked;
+> one that went quiet packs again once it answers.
+> `RequestEngineTest.PackingResumesOnceTheLinkRecovers`,
+> `Elm327SessionTest.PackingResumesAfterTheEcuWentQuiet`.
+
+> **Amended 2026-11-02 (on the car):** the same key cycle through the
+> VX, with the change: `01 0C` had 142 replies packed at the key-off
+> and 501 at the end, 9,648 of the run's 9,692 replies packed
+> ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
+> Through an ELM327 it has met only the fake.
 
 **The adapters.** J2534 adapters do the ISO-TP framing of a longer
 reply; ELM327's response-count digit (`elm327_response_count`) counts

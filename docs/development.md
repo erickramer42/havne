@@ -291,6 +291,7 @@ machine, 2026-10-26; the times vary with the machine's load):
 ```sh
 scripts/verify.sh                         # both trees, full suite, cross-arch
 scripts/verify.sh --tests-only -R '^BridgeTest\.'   # a subset, no build
+scripts/verify.sh --build-only            # both trees, no tests
 ```
 
 ```

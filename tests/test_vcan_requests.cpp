@@ -765,6 +765,31 @@ TEST_F(SimBusTest, AnObd2SessionReadsTheSimulatedCar)
     EXPECT_EQ(e, ECUIO_OK);
 }
 
+/* A functional session (?txid=0x7DF): the VIN, a segmented reply from
+ * 0x7E8, completes because core sends its Flow Control on 0x7E0, the
+ * physical request ID, where the simulated ECU waits for it (ISO 15765-4
+ * section 6.3.2.1); on 0x7DF the ECU would never send the rest */
+TEST_F(SimBusTest, AFunctionalRequestsSegmentedReplyCompletes)
+{
+    Sim sim("mock://sim");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Session s("?profile=obd2&txid=0x7DF&probe=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    ecuio_channel_identity_t id{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_identity(s.get(), 0, &id) ==
+                       ECUIO_OK &&
+                   id.items > 0 && id.list[0].outcome != ECUIO_IDENTITY_UNASKED;
+        },
+        10000ms));
+    EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_ANSWERED);
+    char vin[ECUIO_VIN_TEXT_LEN];
+    ASSERT_EQ(ecuio_identity_vin(&id, vin, sizeof vin), ECUIO_OK);
+    EXPECT_STREQ(vin, "ZZZFAKE11M0000001");
+    EXPECT_EQ(sim.stats().unflowed, 0u) << "a reply waited for Flow Control";
+}
+
 /* values=canned: the fakes' ECU, so the probe walks the same bitmaps and
  * drops nothing from obd2 */
 TEST_F(SimBusTest, CannedValuesWalkTheFakesBitmaps)

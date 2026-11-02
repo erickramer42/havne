@@ -281,6 +281,17 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    # A connect held past the CLI's deadline ends it (ADR-0031's appendix
+    # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
+    # deadline
+    if(WIN32)
+        add_test(NAME CliConnectTest.AConnectPastItsDeadlineEnds
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli>
+                    -DDLL=$<TARGET_FILE:fake_j2534>
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_connect_deadline.cmake)
+        set_tests_properties(CliConnectTest.AConnectPastItsDeadlineEnds
+            PROPERTIES TIMEOUT 30)
+    endif()
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console

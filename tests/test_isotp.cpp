@@ -326,6 +326,23 @@ TEST(IsoTpTest, AFlowControlFrameIsTheSendersNotTheReceivers)
     EXPECT_EQ(r.malformed, 0u);
 }
 
+/* A functional request's Flow Control goes on the physical request ID
+ * paired with the replying ECU's (ISO 15765-4 section 6.3.2.1); any other
+ * request's on the request ID itself */
+TEST(IsoTpTest, AFunctionalRequestsFlowControlGoesToThePhysicalId)
+{
+    EXPECT_EQ(isotp_flow_control_id(0x7E8, 0x7DF), 0x7E0u);
+    EXPECT_EQ(isotp_flow_control_id(0x7E9, 0x7DF), 0x7E1u);
+    EXPECT_EQ(isotp_flow_control_id(0x7EF, 0x7DF), 0x7E7u);
+    EXPECT_EQ(isotp_flow_control_id(0x18DAF110u, 0x18DB33F1u), 0x18DA10F1u);
+    EXPECT_EQ(isotp_flow_control_id(0x7E8, 0x7E0), 0x7E0u);
+    EXPECT_EQ(isotp_flow_control_id(0x7E9, 0x7E1), 0x7E1u);
+    EXPECT_EQ(isotp_flow_control_id(0x641, 0x241), 0x241u) << "not OBD's IDs";
+    EXPECT_EQ(isotp_flow_control_id(0x18DAF110u, 0x18DA10F1u), 0x18DA10F1u);
+    EXPECT_EQ(isotp_flow_control_id(0x5, 0x7DF), 0x7DFu)
+        << "no physical request ID below 9";
+}
+
 TEST(IsoTpTest, TheReceiversFlowControlFrameIsClearToSendAtOnce)
 {
     const isotp_can f = isotp_flow_control(0x7E0);

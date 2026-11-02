@@ -220,7 +220,7 @@ The full reference is [j2534.md](j2534.md).
   `?poll=` PID (which outranks them), or passive listening. The
   request engine ([ADR-0015](adr/0015-request-engine.md)) derives the
   requests from the defs (`41 <PID>` asks for `01 <PID>`, `62 <DID>`
-  for `22 <DID>`), sends only reads, keeps one request out per
+  for `22 <DID>`), keeps one request out per
   channel and sends the next when the reply is in, after a 100 ms wait
   at most and no sooner than 20 ms after the last. Before a channel's
   rotation, its probe reads the ECU's supported-PID bitmaps, and a
@@ -296,8 +296,8 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   the port's failures and reopens. With `ECUIO_SUR_LOG_FRAMES=1`, which
   a recording sets, every request and reply line too, each prompt with
   its time after the request.
-- **Read-only** as every session is: the adapter's memory is never
-  written, and no serial number is asked for.
+- **The adapter's memory is never written,** and no serial number is
+  asked for.
 - **Passive listening:** a session with nothing to ask monitors with
   `AT MA` (ADR-0026's appendix "passive listening"), which keeps the
   receive filter, so it hears its channels' IDs and never acknowledges.
@@ -446,7 +446,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |
 | Manual smoke | The real app, page by page |
-| BENCH / Vehicle | A real adapter with no vehicle; then a real car, read-only |
+| BENCH / Vehicle | A real adapter with no vehicle; then a real car |
 
 The fake emits only what a test injected or what it echoes, so J2534
 tests assert exact counts. Tests against the timed mock assert ranges.
