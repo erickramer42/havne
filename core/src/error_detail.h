@@ -25,7 +25,9 @@ void ecuio_detail_set(const char* fmt, ...)
  * in hex, as vendors list their own codes, then named when J2534-1
  * v04.04 defines it and called vendor-specific otherwise; the
  * vendor's own description (PassThruGetLastError) follows when it gave
- * one. */
+ * one. A PassThruOpen refused with a vendor-specific status and no text
+ * asks instead whether the adapter is attached and not open in another
+ * program. */
 void ecuio_detail_set_vendor(const char* call, long status,
                              const char* vendor_text);
 

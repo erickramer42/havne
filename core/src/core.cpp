@@ -405,12 +405,23 @@ void ecuio_detail_set_vendor(const char* call, long status,
         ecuio_text_one_line(text);
     }
     const char* name = ecuio_pt_status_name(status);
+    /* An open refused with a status of the vendor's own and no text says
+     * nothing a user can act on; the two usual causes, for any vendor,
+     * are no adapter and another program holding it (the VX answers 34
+     * to both: docs/bench-sessions/2026-11-02-vehicle.md). The vendor's
+     * text, when it gave one, goes first below. */
+    const bool open_hint = name == nullptr && strcmp(call, "PassThruOpen") == 0;
     if (name == nullptr) {
         name = "vendor-specific";
     }
     if (text[0] != '\0') {
         ecuio_detail_set("%s returned status %ld (0x%lX, %s): %s", call, status,
                          static_cast<unsigned long>(status), name, text);
+    } else if (open_hint) {
+        ecuio_detail_set("%s returned status %ld (0x%lX, %s): is the adapter "
+                         "attached, and not open in another program?",
+                         call, status, static_cast<unsigned long>(status),
+                         name);
     } else {
         ecuio_detail_set("%s returned status %ld (0x%lX, %s)", call, status,
                          static_cast<unsigned long>(status), name);
