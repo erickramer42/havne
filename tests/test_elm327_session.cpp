@@ -623,6 +623,35 @@ TEST_F(Elm327SessionTest, AnEcuAnsweringOnePidEndsPacking)
     EXPECT_EQ(s.state(nullptr), ECUIO_OK) << "a fallback, not a fault";
 }
 
+/* An ECU that goes quiet while packing (the ignition off: NO DATA to
+ * every request) unpacks the channel; once it answers again the link
+ * recovers and packs go out again */
+TEST_F(Elm327SessionTest, PackingResumesAfterTheEcuWentQuiet)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(support_flags_when(s.s, ECUIO_SUPPORT_PACKED, 10000) &
+                ECUIO_SUPPORT_PACKED);
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    ASSERT_TRUE(support_flags_when(s.s, ECUIO_SUPPORT_UNPACKED, 10000) &
+                ECUIO_SUPPORT_UNPACKED);
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    const auto packs = [] {
+        return on_fake<uint32_t>(
+            [](fake_elm327::adapter& a) { return a.packs; });
+    };
+    const uint32_t before = packs();
+    EXPECT_TRUE(wait_for([&] { return packs() >= before + 5; }, 10000))
+        << "packs go out again";
+    ecuio_channel_support_t sup{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.s, 0, &sup), ECUIO_OK);
+    EXPECT_FALSE(sup.flags & ECUIO_SUPPORT_UNPACKED);
+}
+
 /* The probe walks the supported-PID chain (01 00, 20, 40), and the
  * support report says what it learned */
 TEST_F(Elm327SessionTest, TheProbeWalksTheChainAndReportsIt)
