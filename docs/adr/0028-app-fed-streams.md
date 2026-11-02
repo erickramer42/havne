@@ -373,5 +373,11 @@ unconnected, or after 5 s for a reader that never stops
 mid-connect) goes at once, as before. A link going away takes no
 socket with it. `BridgeTest.BtRetire*` pins the rule against a stand-in
 socket, at the desk; Phase 7c2 of the phone run sheet (20 disconnects
-while replies arrive) is the car's check, still to run.
+while replies arrive) is the car's check.
+
+*Amended 2026-11-01:* 7c2 ran on the test car through the MX+
+([2026-11-01-android](../bench-sessions/2026-11-01-android.md)): 20
+disconnects while Service 01 replies arrived, no crash, the app's
+process the same throughout, and every recording ending
+`end disconnected`.
 
