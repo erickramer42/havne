@@ -51,7 +51,7 @@ The threat model, the trust boundaries and the defenses at each are in
 | Memory safety | A frame, a recording, a vendor reply, an adapter's reply (over serial, WiFi or Bluetooth) or a URI that makes Havne read or write out of bounds, hang, or crash |
 | Host integrity | A way for another process or user to reach the surrogate's pipe, for a DLL to load from somewhere it shouldn't, or for another app on a phone to drive Havne's session or its background service |
 | Reach | Havne talking to anything but the adapter the user chose: a host-name lookup, a listening port, a connection the URI didn't name |
-| Requests | A path that sends the vehicle anything but the read-only services (0x01, 0x09, 0x22), whatever an adapter or ECU replies |
+| Requests | A path that sends the vehicle anything but the reads (services 0x01, 0x02, 0x03, 0x07, 0x09, 0x0A and 0x22), whatever an adapter or ECU replies, or a clear (0x04) that bypasses its one gated path |
 | Privacy | Vehicle identity or local paths written anywhere the user didn't choose to record them, or sent off the device by Havne |
 | Supply chain | An unpinned action or dependency, or a release whose provenance doesn't verify |
 
@@ -67,9 +67,10 @@ Out of scope:
   the fix on the user's side is to unplug an adapter that isn't in
   use.
 - **Vehicle-side security** (security access, gateways, emissions
-  controls). Havne sends read-only diagnostic requests and has no
-  write path; reports about bypassing a manufacturer's protections
-  aren't handled as Havne vulnerabilities. See
+  controls). Havne sends diagnostic reads and one clear, and has no
+  path that writes or flashes; reports about bypassing a
+  manufacturer's protections aren't handled as Havne vulnerabilities.
+  See
   [DISCLAIMER.md](DISCLAIMER.md).
 
 ## Security practices

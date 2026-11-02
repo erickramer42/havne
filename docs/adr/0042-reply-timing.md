@@ -2,7 +2,9 @@
 
 - **Status:** Accepted. Built on 2026-10-31 and verified through each
   transport against the fakes (J2534 through the surrogate, ELM327,
-  SocketCAN on `vcan0`); a car's figures come with v0.3.6's runs.
+  SocketCAN on `vcan0`), and on the test car through the VX and the
+  MX+ ([2026-11-01-vehicle](../bench-sessions/2026-11-01-vehicle.md),
+  [2026-11-01-android](../bench-sessions/2026-11-01-android.md)).
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request engine:
   one request outstanding per channel, its wait);

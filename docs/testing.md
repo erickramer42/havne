@@ -17,7 +17,7 @@ where the gaps are. For build and run commands, see
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on request: a manual run with `ios_smoke` ticked (`smoke_only` instead skips the other platform jobs), or `[ios-smoke]` in the commit message (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, Dashboard gauges, LiveView, strip chart, Settings picker against the live registry and the machine's serial ports | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)), and again on the laptop that goes to the car, 2026-10-25 ([sheet](bench-sessions/2026-10-25-bench.md)); the VX as an ELM327 over USB, no bus, 2026-10-27: refused at `AT Z` ([sheet](bench-sessions/2026-10-27-elm327-bench.md)), then every phase passed, a cable pull included ([sheet](bench-sessions/2026-10-27-elm327-bench-2.md)) |
-| **Vehicle** | A live vehicle session | Sessions on one car, its engine ECU on `0x7E8`: 2026-10-22, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); 2026-10-25, the same plus the request engine, the probe, identification, `uds-generic` and an ignition cycle ([session sheet](bench-sessions/2026-10-25-vehicle.md)); 2026-10-27, through the ELM327 transport: the OBDLink MX+ over Bluetooth through a cold start and idle, the values as in the J2534 sessions, and the VX in ELM mode through a start and idle ([session sheet](bench-sessions/2026-10-27-elm327-vehicle.md)). Run sheets [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) and [elm327-vehicle-runsheet.md](bench-sessions/elm327-vehicle-runsheet.md) |
+| **Vehicle** | A live vehicle session | Sessions on one car, its engine ECU on `0x7E8`: 2026-10-22, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); 2026-10-25, the same plus the request engine, the probe, identification, `uds-generic` and an ignition cycle ([session sheet](bench-sessions/2026-10-25-vehicle.md)); 2026-10-27, through the ELM327 transport: the OBDLink MX+ over Bluetooth through a cold start and idle, the values as in the J2534 sessions, and the VX in ELM mode through a start and idle ([session sheet](bench-sessions/2026-10-27-elm327-vehicle.md)); 2026-10-31, the full `obd2` set and the trouble codes through both adapters ([VX](bench-sessions/2026-10-31-vehicle.md), [MX+](bench-sessions/2026-10-31-elm327-vehicle.md)); 2026-11-01, several PIDs per request, more than one ECU, DID scans, the timer A/B and the first clears, through the VX ([session sheet](bench-sessions/2026-11-01-vehicle.md)) and the MX+ relayed by the test phone ([session sheet](bench-sessions/2026-11-01-android.md)); 2026-11-02, the VX re-runs of that day's fixes ([session sheet](bench-sessions/2026-11-02-vehicle.md)). Run sheets [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) and [elm327-vehicle-runsheet.md](bench-sessions/elm327-vehicle-runsheet.md) |
 
 The smoke tiers earn their place: they have caught bugs no C++ test
 could see. A strip-chart indexing bug lived in QML paint code, and the
@@ -658,14 +658,16 @@ requests and quiet states
   code has run only through the x86 surrogate. The x64 one, which every
   x64 vendor DLL would load in, has met only the x64 fake (in CI on
   every push).
-- **Real-hardware coverage is one adapter and one vehicle.** The
+- **Real-hardware coverage is two adapters and one vehicle.** The
   quiet-bus BENCH sessions (2026-10-16, 2026-10-20, 2026-10-22,
-  2026-10-25) and both vehicle sessions on one car (2026-10-22,
-  2026-10-25: [session sheet](bench-sessions/2026-10-25-vehicle.md))
-  all ran the OBDX Pro VX through the surrogate, and the car's engine
-  ECU answered on 11-bit `0x7E8`. Still unverified against real
-  hardware: 29-bit addressing, more than one ECU answering, and any
-  other vendor's statuses (the VX never returned `ERR_TIMEOUT`).
+  2026-10-25) and the J2534 vehicle sessions on one car ran the OBDX
+  Pro VX through the surrogate; the ELM327 sessions ran the OBDLink MX+
+  and the VX in ELM mode. The car's engine ECU answers on 11-bit
+  `0x7E8`, and a second ECU on `0x7E9`
+  ([2026-11-01-vehicle](bench-sessions/2026-11-01-vehicle.md)). Still
+  unverified against real hardware: 29-bit addressing, a second car,
+  and any other vendor's J2534 statuses (the VX never returned
+  `ERR_TIMEOUT`).
 - **The request engine has met one ECU.** On the car (2026-10-25) it
   paced Service 01 at about 26 requests a second with every reply but
   one in 7,196 in before the next request, and Service 0x22 at about
@@ -677,11 +679,14 @@ requests and quiet states
   a cold connect dropped nothing. A car that refuses the bitmap
   request itself, or answers it with a negative reply, hasn't been
   seen.
-- **`uds-generic` has met one ECU's default session.** The scan of
-  `F180-F1FF` and three text DIDs ran on the car; every refusal was
-  `7F 22 31`. Other refusal codes (`11`, `33`), an `<ecu>:` prefix on
-  a second ECU, and DIDs outside the identification range are tested
-  against the fake only.
+- **`uds-generic` has met one car's default sessions.** The scan of
+  `F180-F1FF`, three text DIDs, two 1,024-DID blocks through the VX
+  ([2026-11-02-vehicle](bench-sessions/2026-11-02-vehicle.md)) and a
+  sweep of the engine ECU's 64,509 remaining DIDs through the MX+
+  ([2026-11-01-android](bench-sessions/2026-11-01-android.md)) ran on
+  the car; every refusal was `7F 22 31`, and the second ECU refused
+  F190 the same way. Other refusal codes (`11`, `33`) and an `<ecu>:`
+  prefix on a second ECU's values are tested against the fake only.
 - **Identification has met one ECU.** On the car every item settled
   (four Service 09 items and two DIDs answered, seven DIDs refused),
   and its replies of up to 27 bytes arrived whole. An ECU with several
@@ -694,10 +699,15 @@ requests and quiet states
   a stored code, a multi-frame list and the freeze frame's values are
   tested against the fakes' ECU and the simulated car only, and a
   second scan tool's reading beside Havne's is BENCH prep #28.
-- **Clearing has met no ECU.** The fakes and the simulated car answer
-  `01 0C` and `04` as the code reads SAE J1979; a car's clear, with its
-  engine stopped and running, beside a second scan tool, is BENCH prep
-  #29.
+- **Clearing has met one ECU, with no codes stored.** Through the MX+,
+  the test car's engine ECU answered `04` with `44` with the engine off
+  and running, and the read after showed its readiness monitors
+  incomplete
+  ([2026-11-01-android](bench-sessions/2026-11-01-android.md)). A
+  stored code erased, a permanent one kept, a clear through the VX and
+  a second scan tool's reading are BENCH prep #29's rest; the fakes and
+  the simulated car answer `01 0C` and `04` as the code reads SAE
+  J1979.
 - **Link health is covered against the fake.** The tests above drive
   `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`,
   `ECUIO_FAKE_WRITE_STATUS` and `ECUIO_FAKE_WRITE_ZERO_COUNT` through
