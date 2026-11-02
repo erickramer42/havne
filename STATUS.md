@@ -425,8 +425,6 @@ reach into car-verified claims and finishes the diagnostics.
   2026-11-01). On the test car through the VX, an A/B of four runs:
   28 % more replies with it, the median reply 3 ms sooner
   ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
-  Left: asking the VX for as many messages as replies are outstanding
-  would end a read at its reply (the bench first).
 - **Trouble-code titles** (built, ADR-0044: the generic powertrain
   and network codes; no urgency, which no source rates); **VIN decode**
   (built, ADR-0043: the year and the make, offline; the model isn't in a
@@ -449,8 +447,7 @@ reach into car-verified claims and finishes the diagnostics.
   took 32.9 s, and a DID whose reply spans frames was asked again
   without the digit, as built; one whose reply runs past a few frames
   waits until the ECU has sent the rest, which the sweep showed it
-  needs and the car confirms. Left: a reply held pending, on an
-  adapter.
+  needs and the car confirms.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
   (built, ADR-0046: `mock://`, the drive cycle or the fakes' canned
   values, the mock's diagnostics, a VIN, periodic faults; `replay://`,
@@ -604,6 +601,13 @@ week or more or a design that needs an ADR first.
   still gets final display values, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
 
+- **A scanned DID answered "response pending" on a real adapter (S,
+  needs an ECU that sends it).** Over an ELM327, a scanned DID whose
+  `7F 22 78` reaches the prompt is asked again without the count digit
+  ([ADR-0026](docs/adr/0026-elm327-transport.md)'s appendix of 2026-11-01),
+  tested against the fake only: the test car never answers pending.
+  BENCH prep #17 covers response pending in general.
+
 ### Performance
 
 - **Full signal sets at full rate (L).** The goal is a per-PID refresh
@@ -620,6 +624,14 @@ week or more or a design that needs an ADR first.
   doesn't grow with the profile either. Left: the bridge's 4 KB copy
   per frame, the worker's largest per-frame cost (`bench_bridge`,
   [docs/testing.md](docs/testing.md#performance)).
+- **A J2534 read that ends at its reply (S, the VX on the bench
+  first).** The worker asks the surrogate for 16 messages a read, and
+  the VX holds a read until its batch fills or its timeout ends, so a
+  reply waits out the rest of its 10 ms slice. Asking for as many
+  messages as replies are outstanding would end the read when the
+  reply lands. It changes how the adapter is read, so the VX on the
+  bench first ([ADR-0042](docs/adr/0042-reply-timing.md)'s appendix of
+  2026-11-01).
 - **A frame-rate readout in developer mode (S).** The window's drawn
   frames per second (`QQuickWindow::frameSwapped`, counted each
   second), shown only in developer mode, so the strip chart's and the
