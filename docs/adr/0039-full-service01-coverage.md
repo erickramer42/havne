@@ -429,6 +429,12 @@ and ELM327.
 > `RequestEngineTest.PackingResumesOnceTheLinkRecovers`,
 > `Elm327SessionTest.PackingResumesAfterTheEcuWentQuiet`.
 
+> **Amended 2026-11-02 (on the car):** the same key cycle through the
+> VX, with the change: `01 0C` had 142 replies packed at the key-off
+> and 501 at the end, 9,648 of the run's 9,692 replies packed
+> ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
+> Through an ELM327 it has met only the fake.
+
 **The adapters.** J2534 adapters do the ISO-TP framing of a longer
 reply; ELM327's response-count digit (`elm327_response_count`) counts
 frames, so the engine passes the expected reply length (from the

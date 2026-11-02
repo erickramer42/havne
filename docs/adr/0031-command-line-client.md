@@ -438,3 +438,10 @@ adds a line once the child is resumed, so a stall's place shows next
 time. `CliConnectTest.AConnectPastItsDeadlineEnds` (Windows: the fake
 DLL holds `PassThruOpen` past a deadline `HAVNE_CLI_CONNECT_MS` makes
 short).
+
+*Amended 2026-11-02:* the next build's first run on the laptop took
+another path: nothing for 26 s before the surrogate's spawn, then its
+pipe broke 2 ms after the child resumed, and `havne-cli` wrote the
+error line and exited 3, 27 s in
+([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)). The
+deadline wasn't reached; a stall after the spawn has met only the fake.

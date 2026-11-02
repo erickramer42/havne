@@ -163,6 +163,13 @@ converter (the VX answers 34, 0x22, when no adapter is attached). The
 example in section 2 shows the earlier form. Pinned by
 `CoreTest.VendorDetailIsOneLine` and `J2534ConnectTest`.
 
+*Amended 2026-11-02:* the VX also answers 34 while another program has
+it open: three refusals on the laptop each fell while another J2534
+program could have held it, and with nothing else using it eleven
+opens in a row worked
+([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)). The
+DLL gives no text with it, so the error line names the status only.
+
 ## Appendix: `LOAD_FAILED`'s words (2026-10-26)
 
 `ecuio_status_string(ECUIO_ERR_LOAD_FAILED)` reads "couldn't load what
