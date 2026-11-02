@@ -254,3 +254,10 @@ fake ECU's `clear_nrc`.
 **Not run on a car.** The first clear on the test car is with the
 engine off (BENCH prep #29); a clear with the engine running is a run of
 its own, on a car whose codes are meant to be cleared.
+
+*Amended 2026-11-01:* both ran on the test car through the MX+, a car
+with no codes stored
+([2026-11-01-android](../bench-sessions/2026-11-01-android.md)): with
+the engine running, `cleared (747 rpm, 0 mph)`, and with it off,
+`cleared (0 rpm, 0 mph)`; each read after showed the readiness monitors
+incomplete. A stored code erased is still to see.
