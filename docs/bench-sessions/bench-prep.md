@@ -125,8 +125,8 @@ which has no bench session):
 - **#28, trouble codes on a car:** a stored code and its freeze frame,
   beside a second scan tool's reading written down.
 - **#30, the new values beside a second scan tool.**
-- **#31, several PIDs per request:** the VX's path on the test car, and
-  the fallback on a car that won't answer packs.
+- **#31, several PIDs per request:** the fallback on a car that won't
+  answer packs.
 - **#29, clearing codes on a car:** a stored code erased and a
   permanent one kept, once the test car has one, beside a second scan
   tool.

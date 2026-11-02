@@ -33,6 +33,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- Through a J2534 adapter on Windows, the driver process's log of a session that ran while another held the usual log's name was never deleted, so the temporary folder grew on a computer that ran two sessions at once; those logs are kept to the newest 50, as the others are.
 - Through a J2534 adapter on Windows, values refresh about a third more often: a reply was seen up to 15.6 ms after it arrived, Windows' default timer step, and is now seen within the 10 ms the read waits. On the test car through the VX, 28 % more replies arrived in the same time.
 - After an ignition cycle with the app connected, values refreshed at about a third of their rate for the rest of the session: the requests that went unanswered while the engine was off ended asking several PIDs per request. Asking several resumes once the car answers again.
 - Over an ELM327 adapter, the first reading of a PID whose reply spans two CAN frames (such as PID 68, intake air temperature) was lost and counted as a timeout: the request asked the adapter for one frame. It now asks for the whole reply from the start.

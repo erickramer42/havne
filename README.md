@@ -20,7 +20,7 @@ over it; `havne-cli`, which streams any session as JSON lines, is a
 second, written against the public headers alone.
 
 > [!WARNING]
-> **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first, but has cleared them only on its fakes and simulated vehicle, never on a car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
+> **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first; it has cleared one car with none stored, with the engine stopped and running, and has erased a stored code only on its fakes and simulated vehicle. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
 ![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 deg F, where the fan cuts in, and the oil from 225 to 239 deg F, before the driver lifts](docs/images/dashboard.gif)
 
@@ -86,18 +86,27 @@ a quarter mile off launch control on a warm loop.*
   [docs/elm327.md](docs/elm327.md), [docs/linux.md](docs/linux.md)).
 - **Trouble codes:** each ECU's check-engine light, its stored, pending
   and permanent codes, readiness monitors and freeze frame, read at
-  connect; clearing asks first and saves the report
-  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
+  connect, each generic code named offline, and whether the car meets
+  the federal inspection's readiness rule; clearing asks first and
+  saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md),
+  [ADR-0044](docs/adr/0044-trouble-code-titles.md),
+  [ADR-0045](docs/adr/0045-inspection-readiness.md)).
 - **Profiles chosen by the URI:** `obd2` polls every standard
   Service 01 reading the car has, the fast-changing ones more often;
   `uds-generic` polls or scans the UDS identifiers the URI names; `raw`
-  logs frames. The VIN and calibration IDs are read at connect, and
-  each request's reply time is measured
+  logs frames. The VIN and calibration IDs are read at connect, the
+  VIN's model year and make decoded on the device, and each request's
+  reply time is measured
   ([ADR-0039](docs/adr/0039-full-service01-coverage.md),
-  [ADR-0042](docs/adr/0042-reply-timing.md)).
+  [ADR-0042](docs/adr/0042-reply-timing.md),
+  [ADR-0043](docs/adr/0043-vin-decode.md)).
 - **`havne-cli`:** any session's frames, values and link health as JSON
-  lines; on Linux, the simulated car or a recording played onto a
-  virtual CAN bus ([ADR-0031](docs/adr/0031-command-line-client.md)).
+  lines; on Linux, the simulated car or a recording answering requests
+  on a virtual CAN bus as the car's engine ECU
+  ([ADR-0031](docs/adr/0031-command-line-client.md),
+  [ADR-0046](docs/adr/0046-simulated-ecu.md)). An Android phone can
+  relay its paired Bluetooth adapter to a computer's `havne-cli` over
+  USB ([ADR-0047](docs/adr/0047-adapter-relay.md)).
 - **Recording and replay:** every frame, value and event of a connect;
   `replay://` plays it back at its own pace or faster, through the same
   decoding, with faults injected on request

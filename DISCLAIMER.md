@@ -41,8 +41,10 @@ other values the manufacturer chose. It clears each ECU by its own
 address, never every module at once. On an ECU that obeys, a clear
 erases the stored and pending codes and the freeze frame, turns the
 check-engine light off and sets the readiness monitors back to
-incomplete; permanent codes stay. **Clearing has run only against
-Havne's fakes and its simulated vehicle, never on a car.**
+incomplete; permanent codes stay. **Clearing has run on one car, with
+no trouble codes stored, through an OBDLink MX+, with the engine
+stopped and with it running; erasing a stored code has run only
+against Havne's fakes and its simulated vehicle.**
 
 It refuses every other service, and has **no** capability to write or
 flash any ECU. It reaches a vehicle through:
