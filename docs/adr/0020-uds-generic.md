@@ -194,3 +194,19 @@ phone ([2026-11-01-android](../bench-sessions/2026-11-01-android.md)),
 second) and ended `scanned`, 36 s from connect to end with the
 adapter's setup; a whole range per ECU, 64 blocks, is about 38 minutes
 at that pace.
+
+*Amended 2026-11-01 (late replies):* on the test car through the VX
+(J2534), `did=D800-DBFF&scan=first` and `DC00-DFFF` each asked every
+DID but one in about 30 s and then never completed: each block's
+longest reply (DA9E's 263 bytes, DE00's 131) came whole, 215 and
+125 ms after the reply before it, past the engine's 100 ms wait from
+its request (sent after the 20 ms floor), so the DID
+was left unanswered and its reply then matched nothing. A J2534
+adapter hands a segmented reply over only whole. A positive reply that
+names a scanned DID left unanswered now answers it, whenever it comes
+(`ecuio_engine_scan_late`): the DID is found and polled, and the scan
+completes. A polled DID whose reply is always that late still decodes
+on each reply; its request times out each lap.
+`RequestEngineTest.ALateReplyStillAnswersItsScannedDid`,
+`J2534HealthTest.AScannedDidsLateLongReplyIsFound`
+(`ECUIO_FAKE_LONG_REPLY_DELAY_MS`).
