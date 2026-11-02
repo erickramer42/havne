@@ -387,9 +387,9 @@ From a terminal on the laptop, `havne-cli` beside the app's build
       `health` line; the last line's `answered` and `timeouts` noted
 - [ ] pack-off: `packed` stays 0
 - [ ] RPM's refresh (`interval_p50_us` on `01 0C`'s row) packed
-      against unpacked, and the latency P50 and P99 of each: the
-      surrogate's 1 ms timer should put a reply at about 11 ms, not 16
-      (ADR-0042's appendix of 2026-11-01)
+      against unpacked, and the latency P50 and P99 of each: about
+      15 ms unpacked on the test car, where the bench's fake reads 11
+      (the ECU's own time is in it; ADR-0042's appendix of 2026-11-01)
 - [ ] If the ECU refuses packs (`7F 01 12`, or replies that don't
       split): after three failures the channel goes unpacked and stays
       so while the ECU answers its other requests, and nothing is
@@ -468,6 +468,8 @@ ignition-on.
 | Symptom | Suspect |
 |---|---|
 | Connect fails at once, before any write | The Settings error line names the cause: "surrogate process failed" (no surrogate next to `havne.exe`, or a stale `build-win32`: rebuild both trees), "couldn't load what the URI names" (the DLL not loading), or "the adapter's driver refused: PassThruOpen returned status 34" (the adapter isn't attached; the VT and VX both answer 34). Check the URI names the VX |
+| `PassThruOpen` refused (status 7 or 34) with the VX attached, after another J2534 program used it | The vendor's state: unplug the VX from the car and plug it back in, then connect again |
+| A functional request (`?txid=0x7DF`) answers single-frame requests but never a segmented reply | Known Issue #38: the Flow Control goes on 0x7DF. Ask that item physically |
 | Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 3's one PID with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but Live shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |

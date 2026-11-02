@@ -33,7 +33,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
-- Through a J2534 adapter on Windows, values refresh about a third more often: a reply was seen up to 15.6 ms after it arrived, Windows' default timer step, and is now seen within the 10 ms the read waits (measured against the test adapter's stand-in, not yet on a car).
+- Through a J2534 adapter on Windows, values refresh about a third more often: a reply was seen up to 15.6 ms after it arrived, Windows' default timer step, and is now seen within the 10 ms the read waits. On the test car through the VX, 28 % more replies arrived in the same time.
 - After an ignition cycle with the app connected, values refreshed at about a third of their rate for the rest of the session: the requests that went unanswered while the engine was off ended asking several PIDs per request. Asking several resumes once the car answers again.
 - Over an ELM327 adapter, the first reading of a PID whose reply spans two CAN frames (such as PID 68, intake air temperature) was lost and counted as a timeout: the request asked the adapter for one frame. It now asks for the whole reply from the start.
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
