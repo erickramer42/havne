@@ -123,8 +123,10 @@ hardware ([roadmap](#roadmap)).
     moves (ADR-0038's appendix of 2026-11-01), then reads the report
     again; each outcome on the page and in the activity log. Verified
     against the fakes through J2534 and ELM327 (running, standing,
-    moving, refused) and on the simulated car; not on a car (BENCH prep
-    #29).
+    moving, refused), on the simulated car, and on the test car through
+    the MX+ with the engine off and running, a car with no codes
+    ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md),
+    BENCH prep #29).
   - **Profiles** chosen by the URI
     ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
     `obd2` and `uds-generic`. Each signal def states its kind and byte
