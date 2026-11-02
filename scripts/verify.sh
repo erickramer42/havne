@@ -3,8 +3,8 @@
 # per step. Full output goes to Testing/verify/<step>.log; on a failure
 # the relevant lines are printed and the script stops.
 #
-# Usage: scripts/verify.sh [--tests-only] [--no-cross] [--no-devices]
-#                          [-R <ctest regex>]
+# Usage: scripts/verify.sh [--tests-only | --build-only] [--no-cross]
+#                          [--no-devices] [-R <ctest regex>]
 #
 #   win32       build-win32's surrogate and fake DLLs (Windows, when
 #               build-win32 exists). First, because the app build copies
@@ -21,6 +21,9 @@
 #               env-gated routing case skips, since that means the paths
 #               were wrong.
 #
+# --build-only runs win32 and build and stops: fresh binaries without the
+# suite, for a machine that only runs them (the laptop at the car).
+#
 # The trees must already be configured (docs/development.md).
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -28,20 +31,26 @@ LOGDIR=Testing/verify
 mkdir -p "$LOGDIR"
 
 tests_only=0
+build_only=0
 cross=1
 devices=1
 regex=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
+        --build-only) build_only=1 ;;
         --no-cross) cross=0 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
-        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
 done
+if [ "$build_only" = 1 ] && { [ "$tests_only" = 1 ] || [ -n "$regex" ]; }; then
+    echo "--build-only runs no tests: it takes neither --tests-only nor -R" >&2
+    exit 2
+fi
 
 windows=0
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) windows=1 ;; esac
@@ -98,6 +107,7 @@ if [ "$tests_only" = 0 ]; then
     [ "$rc" = 0 ] || build_failed build
     line build ok "$dur" "$(warnings build) warnings"
 fi
+[ "$build_only" = 1 ] && exit 0
 
 if [ "$windows" = 1 ] && [ "$devices" = 1 ]; then
     export ECUIO_EXPECT_J2534_DEVICES=1
