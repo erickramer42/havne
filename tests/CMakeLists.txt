@@ -671,8 +671,13 @@ if(WIN32)
     app_deploy_surrogate(test_j2534_surrogate)
 
     app_enable_warnings(test_j2534_surrogate)
+    # RUN_SERIAL: EarlierSessionLogIsKept needs the surrogate's fixed log
+    # name, which any other test's surrogate takes first under ctest -j
+    # (it then skips, and verify.sh's cross-arch step fails on a skip).
+    # The suite is about 14 s; CMake 3.22's TEST_FILTER could serialize
+    # that one case alone.
     gtest_discover_tests(test_j2534_surrogate
-        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS} RUN_SERIAL TRUE
     )
 endif()
 
