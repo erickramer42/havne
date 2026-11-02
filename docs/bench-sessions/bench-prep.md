@@ -38,6 +38,7 @@ which has no bench session):
 | [2026-10-31-elm327-vehicle-2](2026-10-31-elm327-vehicle-2.md) | Vehicle: several PIDs per request through the MX+ on the test phone, packed and with `?pack=0` |
 | [2026-11-01-vehicle](2026-11-01-vehicle.md) | Vehicle: several PIDs per request, more than one ECU, the 1 ms timer A/B, an ignition cycle while packing and a DID scan, through the VX |
 | [2026-11-02-vehicle](2026-11-02-vehicle.md) | Vehicle: the VX re-runs of four fixes (a functional request's segmented reply, a scanned DID's late reply, packing after an ignition cycle, the CLI's connect deadline) and eleven reopens |
+| [2026-11-02-socketcan-desk](2026-11-02-socketcan-desk.md) | Desk bus, no car: a real CAN controller under SocketCAN (the Innomaker USB2CAN) beside the VX, listening and sending |
 
 ## The list
 
@@ -83,9 +84,9 @@ which has no bench session):
 
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
-| 26 | **A real CAN controller, listening:** a `gs_usb` adapter (candleLight firmware) reports its link kind `can`, its bit rate and `CAN_CTRLMODE_LISTENONLY` through rtnetlink as the canned messages in `SocketCanTest` have them; in listen-only mode it never ACKs or sends an error frame; on a car's bus at the right rate its frames arrive with the kernel's times, and at a wrong rate it reports errors but disturbs nothing; unplugged, the session fails hard and recovers when it's back | STILL UNKNOWN: not yet run; the adapter on hand (#32's Innomaker USB2CAN) waits for the desk bus's terminator | The netlink parsing and the listen-only rule are UNIT-tested over canned messages, and the transport is HARNESS-tested on `vcan0` (`SocketCanBusTest`), which has no controller. WSL's kernel (6.18) has `gs_usb`, `slcan`, `peak_usb`, `kvaser_usb` and the USB/IP client, so an adapter reaches it through `usbipd-win` (2026-10-29) |
+| 26 | **A real CAN controller, listening:** a `gs_usb` adapter (candleLight firmware) reports its link kind `can`, its bit rate and `CAN_CTRLMODE_LISTENONLY` through rtnetlink as the canned messages in `SocketCanTest` have them; in listen-only mode it never ACKs or sends an error frame; on a car's bus at the right rate its frames arrive with the kernel's times, and at a wrong rate it reports errors but disturbs nothing; unplugged, the session fails hard and recovers when it's back | CONFIRMED on a desk bus for the Innomaker USB2CAN; a car's bus is still to come | On the desk bus beside the VX ([2026-11-02-socketcan-desk](2026-11-02-socketcan-desk.md)): rtnetlink gave kind `can`, the rate and listen-only; at 500 kbit/s the session took 38,497 frames, the kernel's RX count exactly, none dropped, while `can0` sent nothing (TX 0, no ACK: the VX's requests went unacknowledged); at 250 kbit/s 11 error frames and no data, TX 0; detached, a hard failure, and a recovery once `can0` was up again. The netlink parsing and the listen-only rule are UNIT-tested over canned messages, and the transport is HARNESS-tested on `vcan0` (`SocketCanBusTest`), which has no controller. WSL's kernel (6.18) has `gs_usb`, `slcan`, `peak_usb`, `kvaser_usb` and the USB/IP client, so an adapter reaches it through `usbipd-win` (2026-10-29) |
 
-| 32 | **A real CAN controller, sending** ([ADR-0040](../adr/0040-socketcan-requests-isotp.md)): a `gs_usb` adapter echoes a frame (`MSG_CONFIRM` on the sending socket) only once a node has acknowledged it; with no other node on its bus, a frame yields no echo and an error frame, and nothing more goes out; on a bus of two at the right rate (the adapter and the VX through the Y-splitter, one terminator) requests echo and the VX hears them; at a wrong rate, the controller's own resends without one-shot mode stop at bus-off after a bounded count (`restart-ms 0`), which decides whether section 2 requires one-shot mode | STILL UNKNOWN: an Innomaker USB2CAN (firmware V3.4.3) is on hand; its driver offers loopback, listen-only and `CC-LEN8-DLC`, not one-shot or bus-error reporting, and sets `IFF_ECHO`; the desk bus's hardware, the terminator included, is on hand | The rules over canned netlink messages (`SocketCanTest.OnlyAControllerThatCanStopAtOnceMaySend`, `.TheFirstEchoProvesTheRateAndAnErrorBeforeItHalts`), and requests on `vcan0`, which echoes every frame (`SocketCanRequestTest`) |
+| 32 | **A real CAN controller, sending** ([ADR-0040](../adr/0040-socketcan-requests-isotp.md)): a `gs_usb` adapter echoes a frame (`MSG_CONFIRM` on the sending socket) only once a node has acknowledged it; with no other node on its bus, a frame yields no echo and an error frame, and nothing more goes out; on a bus of two at the right rate (the adapter and the VX through the Y-splitter, one terminator) requests echo and the VX hears them; at a wrong rate, the controller's own resends without one-shot mode stop at bus-off after a bounded count (`restart-ms 0`), which decides whether section 2 requires one-shot mode | REFUTED in part, for the Innomaker USB2CAN (firmware V3.4.3; loopback, listen-only and `CC-LEN8-DLC`, not one-shot or bus-error reporting; `IFF_ECHO`): its echo comes before any acknowledgement (Known Issue #40), and without one-shot mode its resends stop at error-passive, never bus-off, so section 2 keeps one-shot mode required. CONFIRMED on the bus of two at the right rate: frames echo and the VX hears them | Through `cansend`, Havne refusing the controller ([2026-11-02-socketcan-desk](2026-11-02-socketcan-desk.md)): with the VX's session open, five frames echoed, TX 5, error-active, and the VX received each; with no other node, the frame echoed (TX counted) 1.5 ms before the first `no-acknowledgement-on-tx`, then the transmit counter sat at 128, error-passive, for 15 s with no bus-off; at 250 kbit/s against the VX at 500 the same. The rules over canned netlink messages (`SocketCanTest.OnlyAControllerThatCanStopAtOnceMaySend`, `.TheFirstEchoProvesTheRateAndAnErrorBeforeItHalts`), and requests on `vcan0`, which echoes every frame (`SocketCanRequestTest`) |
 
 ### The session clock ([ADR-0033](../adr/0033-session-time-counts-sleep.md))
 
@@ -117,10 +118,11 @@ which has no bench session):
 - **#17, response pending:** needs an ECU that answers `7F xx 78`.
 - **#19, listening to another tester:** a car and an OBD Y-splitter.
 - **#25, a BLE adapter's service:** needs a BLE adapter.
-- **#26, a real CAN controller:** a `gs_usb` adapter on the bench, then
-  a car through an OBD cable (CAN-H pin 6, CAN-L pin 14), listen-only.
-- **#32, a real CAN controller sending:** the desk bus of the USB2CAN
-  and the VX (the terminator is on hand), then the car.
+- **#26, a real CAN controller:** a car through an OBD cable (CAN-H pin
+  6, CAN-L pin 14), listen-only; the desk bus is done.
+- **#32, a real CAN controller sending:** an adapter whose driver
+  offers one-shot mode, on the desk bus first (does its echo wait for
+  an acknowledgement?), then the car.
 - **#27, a sleep in session time, on Linux:** a Linux machine suspended
   mid-session, if one is at hand (Android is confirmed).
 - **#28, trouble codes on a car:** a stored code and its freeze frame,

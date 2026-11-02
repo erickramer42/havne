@@ -207,11 +207,16 @@ through a real controller have their desk hardware on hand
       request comes back from the bus, a CAN error ends the sending.
     - Verified on `vcan0` (on CI too): listening, and requests against
       the fakes' ECU answering through the kernel's ISO-TP, core's
-      ISO-TP held to the kernel's as well. No real controller has run
-      yet (BENCH prep #26, #32): the one on hand, an Innomaker USB2CAN,
-      offers no one-shot mode, and whether to require it is the desk
-      run's to settle (ADR-0040 section 2), once the desk bus has its
-      terminator.
+      ISO-TP held to the kernel's as well. A real controller, an
+      Innomaker USB2CAN, has listened on a desk bus beside the VX
+      (BENCH prep #26: every frame the kernel counted, nothing sent, a
+      wrong rate's errors, an unplug and its recovery); it offers no
+      one-shot mode, so it can't ask, and on that bus `cansend` showed
+      why one-shot stays required: a frame nobody acknowledges is sent
+      again forever, error-passive, never bus-off (BENCH prep #32,
+      [2026-11-02-socketcan-desk](docs/bench-sessions/2026-11-02-socketcan-desk.md)).
+      No real controller has sent through Havne, and none has met a
+      car.
   - **Linux** ([docs/linux.md](docs/linux.md)): the app as an
     AppImage, and core alone as a deb and a tarball (`havne-cli`, the
     static library, its C headers, a CMake package and a pkg-config
@@ -354,8 +359,9 @@ hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
 the VX clock's zero (#5), the VX's serial port on a machine without
 OBDX's software (#11), response pending (#17), listening to another
 tester (#19), the VX's WiFi while its USB port is held (#20, in
-part), a BLE adapter (#25), a real CAN controller (#26) and a sleep
-on a Linux machine (#27). Any other adapter starts the list again.
+part), a BLE adapter (#25), a real CAN controller on a car (#26) and
+one that sends with one-shot mode (#32), and a sleep on a Linux
+machine (#27). Any other adapter starts the list again.
 
 ## Known issues and technical debt
 
@@ -399,6 +405,19 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+- **#40. A SocketCAN echo is taken as proof of the rate, and one
+    adapter echoes before any acknowledgement.** A requesting session's
+    first echoed request proves the rate (ADR-0040 section 3,
+    `socketcan_proof_on` in `core/src/socketcan_wire.h`), and from then
+    on an error frame is the link health's, not a halt. On the desk
+    bus the Innomaker USB2CAN echoed a frame no node could acknowledge
+    1.5 ms before its first `no-acknowledgement-on-tx` error frame
+    ([2026-11-02-socketcan-desk](docs/bench-sessions/2026-11-02-socketcan-desk.md)),
+    so on an adapter that echoes this way, a request at a wrong rate
+    would prove the rate it failed at. That adapter can't send through
+    Havne (it has no one-shot mode); one that can may echo the same way.
+    The fix: an echo proves the rate only once the request's N_As has
+    passed with no error frame, or its reply has come.
 
 ## Roadmap
 
