@@ -147,6 +147,9 @@ typedef enum {
     ECUIO_ERR_RECORDING_FAILED = 18,  /* a recording's folder or files
                                          couldn't be made, or a write to
                                          them failed (ADR-0049, recording.h) */
+    ECUIO_ERR_CANCELED = 19,          /* the caller's progress callback
+                                         stopped a long call (a recording's
+                                         open, ADR-0049) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;

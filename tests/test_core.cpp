@@ -539,6 +539,9 @@ TEST(CoreTest, StatusStringValidValues) {
                  "the diagnostics report changed since it was saved");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT),
                  "vehicle not responding (timeout)");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_RECORDING_FAILED),
+                 "the recording couldn't be made or written");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_CANCELED), "canceled");
 
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(ecuio_status_string(static_cast<ecuio_status_t>(999)), nullptr);
