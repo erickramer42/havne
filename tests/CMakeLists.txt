@@ -43,6 +43,17 @@ target_compile_definitions(test_core PRIVATE
 app_enable_warnings(test_core)
 gtest_discover_tests(test_core)
 
+# --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
+# ctest. Qt-free, so an NDK tree builds it alone for the test phone
+# (docs/testing.md "Performance") ---
+add_executable(bench_recording bench_recording.cpp)
+target_include_directories(bench_recording PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(bench_recording PRIVATE ecuio-core)
+target_compile_definitions(bench_recording PRIVATE
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+)
+app_enable_warnings(bench_recording)
+
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp)
 
