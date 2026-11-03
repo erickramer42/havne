@@ -330,6 +330,11 @@ TEST(RecordingRowsTest, FieldsAreQuotedAsTheWriterQuotesThem)
     EXPECT_FALSE(
         rows::parse_marker_row(nul_label.data(), nul_label.size(), &at, label,
                                &why));
+    /* An empty row with no buffer behind it (an empty vector's data()):
+     * refused, with nothing handed to memchr, which the sanitizer job's
+     * UBSan would report */
+    EXPECT_FALSE(rows::parse_signal_row(nullptr, 0, r, &why));
+    EXPECT_FALSE(rows::parse_marker_row(nullptr, 0, &at, label, &why));
     const std::string long_unit = "1,RPM,1," + std::string(16, 'u');
     EXPECT_FALSE(
         rows::parse_signal_row(long_unit.data(), long_unit.size(), r, &why));
