@@ -7,7 +7,7 @@
 //          list giving up rows so the
 //          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
-//          ChartLayout; every item inside 320 px alone and inside the
+//          ChartLayout, drawn by StripChart.qml; every item inside 320 px alone and inside the
 //          app's window at the test phone's size (tests/qml/tst_phone.qml);
 //          the drawing itself, sharp under zoom, is verified manually
 //          (docs/testing.md).
@@ -56,17 +56,9 @@ Page {
 
     // Trace styles, keyed by model row (chartData's `row`), so a row's
     // swatch matches its trace and styles hold when another signal is
-    // unsubscribed. Colors come from Theme.seriesColors; rows past the
-    // palette reuse its colors with a dashed trace, so the chart still
-    // tells them apart (the row swatch shows the color only).
-    readonly property var traceDashes: [[], [8, 4], [2, 3]]
-    // A crowded trace's band fill, faint so the traces under it show
-    readonly property real bandAlpha: 0.3
-    function seriesColor(row) { return Theme.seriesColors[row % Theme.seriesColors.length] }
-    function seriesDash(row) {
-        const tier = Math.floor(row / Theme.seriesColors.length)
-        return root.traceDashes[tier % root.traceDashes.length]
-    }
+    // unsubscribed (Theme.seriesColor and Theme.seriesDash)
+    function seriesColor(row) { return Theme.seriesColor(row) }
+    function seriesDash(row) { return Theme.seriesDash(row) }
 
     // Value plus unit at the signal's decimal places (core's
     // decimal_places), formatted the way the Dashboard's gauges are
@@ -333,7 +325,7 @@ Page {
         // ---- Strip chart: per-signal rolling history, one repaint per
         // coalesced batch. Each trace takes its list row's color
         // (root.seriesColor), so the list is the legend. ChartLayout
-        // works out where everything goes; the Canvas strokes it.
+        // works out where everything goes; StripChart strokes it.
         Rectangle {
             objectName: "chartFrame"
             Layout.fillWidth: true
@@ -344,21 +336,22 @@ Page {
             border.color: Theme.textDim
             border.width: 1
 
-            // A Canvas paints an image at its own size, which Main.qml's
-            // zoom would stretch: this one is Theme.zoom times the size it
-            // shows at, scaled back by as much, so its pixels meet the
-            // screen's one to one, and onPaint draws in the shown size
-            Canvas {
+            StripChart {
                 id: chart
-                readonly property real zoom: Theme.zoom
-                readonly property real shownW: parent.width - 8
-                readonly property real shownH: parent.height - 8
+                objectName: "chart"
                 x: 4
                 y: 4
-                width: shownW * zoom
-                height: shownH * zoom
-                scale: 1 / zoom
-                transformOrigin: Item.TopLeft
+                shownW: parent.width - 8
+                shownH: parent.height - 8
+                emptyText: root.chartEmptyText()
+                fetch: function(widthPx) {
+                    return Bridge.signalModel.chartData(root.chartWindowS * 1000, widthPx)
+                }
+                layoutOpts: ({
+                    gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
+                    format: root.valueText,
+                    windowMs: root.chartWindowS * 1000,
+                    caption: s => s === 0 ? qsTr("now") : qsTr("−%1 s").arg(s) })
 
                 Connections {
                     target: Bridge.signalModel
@@ -369,116 +362,6 @@ Page {
                     target: Bridge
                     function onConnectedChanged() { chart.requestPaint() }
                 }
-
-                // The layout is ChartLayout's (tested); this only strokes
-                // what it returns
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.reset()
-                    ctx.scale(zoom, zoom)
-                    ctx.fillStyle = Theme.surface
-                    ctx.fillRect(0, 0, shownW, shownH)
-
-                    const series = Bridge.signalModel.chartData(root.chartWindowS * 1000,
-                                                                Math.ceil(shownW))
-                    if (!series || series.length === 0) {
-                        ctx.fillStyle = Theme.textDim
-                        ctx.font = "12px sans-serif"
-                        ctx.textAlign = "center"
-                        ctx.fillText(root.chartEmptyText(), shownW / 2, shownH / 2)
-                        return
-                    }
-
-                    ctx.font = ChartLayout.labelPx + "px " + Theme.monoFamily   // measured and drawn in
-                    const l = ChartLayout.layout(series, shownW, shownH, {
-                        gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
-                        measure: text => ctx.measureText(text).width,
-                        format: root.valueText,
-                        windowMs: root.chartWindowS * 1000,
-                        caption: s => s === 0 ? qsTr("now") : qsTr("−%1 s").arg(s) })
-                    if (!l) return
-
-                    // Grid: quarter lines, and one vertical per time tick
-                    ctx.strokeStyle = Theme.bg
-                    ctx.lineWidth = 1
-                    ctx.beginPath()
-                    for (const gy of l.hGrid) {
-                        ctx.moveTo(0, gy)
-                        ctx.lineTo(l.plotW, gy)
-                    }
-                    for (const tick of l.ticks) {
-                        ctx.moveTo(tick.x, l.top)
-                        ctx.lineTo(tick.x, l.top + l.plotH)
-                    }
-                    ctx.stroke()
-
-                    // Captions: seconds before the newest sample
-                    ctx.fillStyle = Theme.textDim
-                    ctx.textBaseline = "top"
-                    for (const tick of l.ticks) {
-                        if (!tick.captioned) continue
-                        ctx.textAlign = tick.seconds === 0 ? "right" : "center"
-                        ctx.fillText(tick.caption, tick.x, l.top + l.plotH + 3)
-                    }
-
-                    // Traces, each piece its own stroke (a gap is a break);
-                    // a band filled faintly, then its two edges
-                    const polyline = pts => {
-                        ctx.moveTo(pts[0].x, pts[0].y)
-                        for (let i = 1; i < pts.length; ++i)
-                            ctx.lineTo(pts[i].x, pts[i].y)
-                    }
-                    for (const tr of l.traces) {
-                        const color = root.seriesColor(tr.row)
-                        ctx.strokeStyle = color
-                        ctx.fillStyle = color
-                        ctx.setLineDash(root.seriesDash(tr.row))
-                        for (const piece of tr.pieces) {
-                            if (!piece.band) {
-                                ctx.lineWidth = ChartLayout.lineW
-                                ctx.beginPath()
-                                polyline(piece.points)
-                                ctx.stroke()
-                                continue
-                            }
-                            ctx.globalAlpha = root.bandAlpha
-                            ctx.beginPath()
-                            polyline(piece.top.concat(piece.bottom.slice().reverse()))
-                            ctx.closePath()
-                            ctx.fill()
-                            ctx.globalAlpha = 1
-                            ctx.lineWidth = ChartLayout.bandEdgeW
-                            ctx.beginPath()
-                            polyline(piece.top)
-                            polyline(piece.bottom)
-                            ctx.stroke()
-                        }
-                    }
-
-                    // Value labels, each starting with a sample of its
-                    // trace's stroke, so dashed rows read apart from solid;
-                    // the layout leaves some out when the plot is short
-                    ctx.lineWidth = 1
-                    ctx.textAlign = "left"
-                    ctx.textBaseline = "middle"
-                    for (const tr of l.traces) {
-                        if (!tr.labeled) continue   // no room: its row shows the value
-                        const c = root.seriesColor(tr.row)
-                        ctx.strokeStyle = c
-                        ctx.setLineDash(root.seriesDash(tr.row))
-                        ctx.beginPath()
-                        ctx.moveTo(l.labelX, tr.labelY)
-                        ctx.lineTo(l.labelX + ChartLayout.swatchW, tr.labelY)
-                        ctx.stroke()
-                        ctx.fillStyle = c
-                        ctx.fillText(tr.label, l.labelX + ChartLayout.swatchW + 4, tr.labelY)
-                    }
-                    ctx.setLineDash([])
-                }
-
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                Component.onCompleted: requestPaint()
             }
         }
     }

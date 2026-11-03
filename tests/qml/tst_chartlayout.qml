@@ -3,7 +3,10 @@
 //          synthetic series: nothing to draw, the plot's width against the
 //          widest label, per-trace scaling with the minimum span, flat
 //          lanes, segments broken at a gap, the time ticks and the value
-//          labels nudged apart inside the plot, a crowded trace's band.
+//          labels nudged apart inside the plot, a crowded trace's band;
+//          a recording's columns over a fixed span (a line through calm
+//          columns, a band where one swings past its neighbors' lean, a
+//          steep ramp a line, a gap past gapMs a break) and absolute ticks.
 //          No bridge, no session.
 
 import QtQuick
@@ -33,6 +36,12 @@ TestCase {
 
     function layout(seriesList, over) {
         return ChartLayout.layout(seriesList, chartW, chartH, opts(over))
+    }
+
+    // A recording's columns, as RecordingView.columns gives them: NaN in
+    // both lists for a column with no sample
+    function columns(row, lows, highs, decimals) {
+        return { row: row, columns: { lows: lows, highs: highs }, decimals: decimals || 0, unit: "" }
     }
 
     function near(actual, expected, tolerance, what) {
@@ -306,6 +315,8 @@ TestCase {
         verify(l.ticks[0].captioned)
         verify(!l.ticks[5].captioned, "no room left of x = 0 for a centered caption")
         verify(l.ticks[4].captioned, "the second tick's x is " + l.ticks[4].x)
+        compare(l.ticks[0].align, "right", "now sits against the edge")
+        compare(l.ticks[1].align, "center")
         compare(l.hGrid.length, 3)
         near(l.hGrid[1], l.top + l.plotH / 2, 0.01, "quarter lines")
     }
@@ -380,5 +391,95 @@ TestCase {
                 Math.floor(thin.plotH / ChartLayout.labelPx), "as many as fit at labelPx")
         verify(thin.traces[0].labeled && thin.traces[many - 1].labeled,
                "the stack's ends keep their labels")
+    }
+
+    // A recording's calm columns over a fixed span draw as one line through
+    // each column's middle, from the span's left edge to its right
+    function test_calmColumnsAreALineAcrossTheSpan() {
+        const lows = [], highs = []
+        for (let c = 0; c < 10; ++c) {
+            lows.push(40 + c)
+            highs.push(41 + c)
+        }
+        const l = layout([columns(0, lows, highs)], { span: { t0: 0, t1: 1000 } })
+        verify(l, "a span and columns lay out")
+        const tr = l.traces[0]
+        compare(bandsOf(tr).length, 0, "nothing swings")
+        compare(linesOf(tr).length, 1)
+        const pts = linesOf(tr)[0].points
+        compare(pts[0].x, 0, "from the span's start")
+        near(pts[pts.length - 1].x, l.plotW - 1, 0.01, "to its end")
+        verify(pts[0].y > pts[pts.length - 1].y, "rising")
+        compare(tr.label, "50", "the last column's highest")
+    }
+
+    // Without a span a column series has no axis: nothing to draw
+    function test_columnsNeedASpan() {
+        compare(layout([columns(0, [1, 2], [1, 2])]), null)
+    }
+
+    // One column that swings past its neighbors draws as a band joined to
+    // the line on both sides
+    function test_aSwingingColumnIsABand() {
+        const lows = [], highs = []
+        for (let c = 0; c < 20; ++c) {
+            lows.push(c === 10 ? 0 : 50)
+            highs.push(c === 10 ? 100 : 50)
+        }
+        const tr = layout([columns(0, lows, highs)], { span: { t0: 0, t1: 2000 } }).traces[0]
+        compare(tr.pieces.map(p => p.band ? "band" : "line").join(","), "line,band,line")
+        const before = tr.pieces[0].points, band = tr.pieces[1], after = tr.pieces[2].points
+        compare(before[before.length - 1].x, band.top[0].x, "the line runs into the band")
+        compare(band.top[band.top.length - 1].x, after[0].x, "and on out of it")
+        verify(band.bottom[1].y - band.top[1].y > 100, "the band spans the swing")
+    }
+
+    // A steep ramp's columns are each tall, but their neighbors lean as
+    // much: a line, ends included
+    function test_aSteepRampOfColumnsStaysALine() {
+        const tr = layout([columns(0, [0, 25, 50, 75], [25, 50, 75, 100])],
+                          { span: { t0: 0, t1: 4000 } }).traces[0]
+        compare(bandsOf(tr).length, 0)
+        compare(linesOf(tr).length, 1)
+    }
+
+    // Empty columns between samples are bridged while they last no longer
+    // than gapMs; past it the trace breaks
+    function test_emptyColumnsBreakTheTraceOnlyPastTheGap() {
+        const lows = [], highs = []
+        for (let c = 0; c < 100; ++c) {
+            const sampled = c % 10 === 0 || c >= 60
+            lows.push(sampled && (c < 20 || c >= 60) ? 50 : NaN)
+            highs.push(sampled && (c < 20 || c >= 60) ? 50 + (c % 2) : NaN)
+        }
+        // 100 ms a column: 0 and 10 a second apart, then nothing to 60
+        const l = layout([columns(0, lows, highs)], { span: { t0: 0, t1: 10000 }, gapMs: 3000 })
+        const lines = linesOf(l.traces[0])
+        compare(lines.length, 2, "broken once, between 10 and 60")
+        verify(lines[0].points[lines[0].points.length - 1].x < lines[1].points[0].x)
+    }
+
+    // The label shows labelValue when a series gives one
+    function test_aSeriesLabelValueIsItsLabel() {
+        const l = layout([columns(0, [10, 20], [10, 20], 1)],
+                         { span: { t0: 0, t1: 1000 } })
+        compare(l.traces[0].label, "20.0")
+        const s = columns(0, [10, 20], [10, 20], 1)
+        s.labelValue = 12.34
+        compare(layout([s], { span: { t0: 0, t1: 1000 } }).traces[0].label, "12.3")
+    }
+
+    // Absolute ticks fall on whole steps of the time itself, in time order,
+    // each caption centered and kept inside the plot
+    function test_absoluteTicksFallOnWholeSteps() {
+        const l = layout([columns(0, [1, 2, 3], [1, 2, 3])],
+                         { span: { t0: 12000, t1: 42000 }, absolute: true })
+        compare(l.ticks.map(t => t.seconds).join(","), "15,20,25,30,35,40")
+        near(l.ticks[0].x, (15000 - 12000) / 30000 * (l.plotW - 1), 0.01, "15 s")
+        for (const tick of l.ticks) {
+            compare(tick.align, "center")
+            compare(tick.caption, String(tick.seconds))
+        }
+        verify(l.ticks[0].captioned)
     }
 }

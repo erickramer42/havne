@@ -60,6 +60,7 @@ qt_add_qml_module(app_ui
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
+        qml/StripChart.qml
         qml/VehicleBook.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml

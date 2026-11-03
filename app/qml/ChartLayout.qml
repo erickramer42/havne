@@ -7,17 +7,20 @@
 //          inside the plot, closed up and then thinned when they don't fit;
 //          a crowded trace's wide swings as a band (each column its whole
 //          range, a swing on a column edge too), a ramp, a small wiggle and
-//          a spike's peak as its line. LiveViewPage.qml draws
-//          what it returns; the drawing itself is manual smoke
-//          (docs/testing.md).
+//          a spike's peak as its line; a recording's columns over a
+//          fixed span (calm ones a line, a swing past the neighbors' lean
+//          a band, a steep ramp a line, a break past gapMs), a label's
+//          given value, absolute ticks. StripChart.qml draws what it
+//          returns; the drawing itself is manual smoke (docs/testing.md).
 
 pragma Singleton
 import QtQml
 
-// The strip chart's layout, as arithmetic on the model's series: no
-// Canvas, no Theme, no text. LiveView passes the series from
-// Bridge.signalModel.chartData(), the chart's size and two callbacks
-// (how wide a label is, how a value is written) and strokes the result.
+// The strip chart's layout, as arithmetic on the series: no Canvas, no
+// Theme, no text. StripChart passes the series a page gives it (Live's
+// from Bridge.signalModel.chartData(), the Recordings page's from
+// RecordingView.columns()), the chart's size and two callbacks (how wide
+// a label is, how a value is written) and strokes the result.
 QtObject {
     // Geometry shared with the page, in logical pixels
     readonly property int labelPx: 11    // the value labels' font size
@@ -187,6 +190,66 @@ QtObject {
         return pieces
     }
 
+    // A recording's columns as pieces (RecordingView.columns: each its
+    // lowest and highest, the reader's per-second summaries when zoomed
+    // out). cols are the columns with samples, in order: { c, x0, x1, top,
+    // bottom } in px. Two more than gapCols columns apart break the trace,
+    // as a gap does a live one. A column swings when its height beyond
+    // what its neighbors' lean explains (a ramp's column is as tall as its
+    // slope) is over swing px; swinging runs draw as a band, the rest as a
+    // line through each column's middle, joined end to end.
+    function columnPieces(cols, gapCols, swing) {
+        let pieces = []
+        let start = 0
+        for (let i = 1; i <= cols.length; ++i) {
+            if (i === cols.length || cols[i].c - cols[i - 1].c - 1 > gapCols) {
+                pieces = pieces.concat(columnRunPieces(cols.slice(start, i), swing))
+                start = i
+            }
+        }
+        return pieces
+    }
+
+    function columnRunPieces(seg, swing) {
+        const n = seg.length
+        const mid = k => (seg[k].top + seg[k].bottom) / 2
+        // The lean: the line's slope a column across the neighbors it has
+        const swings = seg.map((col, k) => {
+            const a = Math.max(0, k - 1), b = Math.min(n - 1, k + 1)
+            const lean = b > a ? Math.abs(mid(b) - mid(a)) / (b - a) : 0
+            return col.bottom - col.top - lean > swing
+        })
+        const pieces = []
+        let i = 0
+        while (i < n) {
+            let j = i
+            while (j + 1 < n && swings[j + 1] === swings[i])
+                ++j
+            if (swings[i]) {
+                const top = [{ x: seg[i].x0, y: mid(i) }]
+                const bottom = [{ x: seg[i].x0, y: mid(i) }]
+                for (let k = i; k <= j; ++k) {
+                    const x = (seg[k].x0 + seg[k].x1) / 2
+                    top.push({ x: x, y: seg[k].top })
+                    bottom.push({ x: x, y: seg[k].bottom })
+                }
+                top.push({ x: seg[j].x1, y: mid(j) })
+                bottom.push({ x: seg[j].x1, y: mid(j) })
+                pieces.push({ band: true, top: top, bottom: bottom })
+            } else {
+                const points = i > 0 ? [{ x: seg[i - 1].x1, y: mid(i - 1) }]
+                                     : [{ x: seg[i].x0, y: mid(i) }]
+                for (let k = i; k <= j; ++k)
+                    points.push({ x: (seg[k].x0 + seg[k].x1) / 2, y: mid(k) })
+                points.push(j < n - 1 ? { x: seg[j + 1].x0, y: mid(j + 1) }
+                                      : { x: seg[j].x1, y: mid(j) })
+                pieces.push({ band: false, points: points })
+            }
+            i = j + 1
+        }
+        return pieces
+    }
+
     // Label rows pushed apart where traces end close together, and kept
     // inside the plot's height. traces have endY; each gets labeled, and
     // a labeled one labelY. Rows are lineH apart while they fit, closer
@@ -219,16 +282,25 @@ QtObject {
         return byY
     }
 
-    // series: [{ samples: [t0, v0, t1, v1, ...] in ms, row, decimals, unit }]
+    // series: [{ samples: [t0, v0, t1, v1, ...] in ms, row, decimals, unit }],
+    //         or a recording's { columns: { lows: [...], highs: [...] }, row,
+    //         decimals, unit } over opts.span, a column with no sample NaN;
+    //         either may carry labelValue, the label's value (else the
+    //         newest sample's, or the last column's highest)
     // opts: { gapMs, minSpanUnits, measure(text) -> width,
     //         format(value, decimals, unit) -> text,
     //         caption(seconds) -> text (a time tick's, 0 for now; optional),
     //         windowMs (optional: the time axis spans that much before the
-    //         newest sample, however little history there is) }
+    //         newest sample, however little history there is),
+    //         span (optional: { t0, t1 } in ms, the axis exactly; columns
+    //         need it), absolute (optional: ticks at whole steps of the
+    //         time itself, captioned caption(seconds), instead of back
+    //         from the newest sample) }
     // Returns null when there is nothing to draw (no series with a
     // sample, or no time span), else:
     // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds, captioned,
-    //   caption }] newest first,
+    //   caption, align ("right" for now, else "center") }] newest first,
+    //   or in time order when absolute,
     //   traces: [{ row, segments: [[{x, y}]], pieces (what's drawn,
     //              each a segment's line or, crowded, bandPieces'),
     //              endY, label, labeled, labelY }]
@@ -241,7 +313,7 @@ QtObject {
         let tMin = Infinity, tMax = -Infinity
         for (const s of series) {
             const sp = s.samples
-            if (sp.length >= 2) {
+            if (sp && sp.length >= 2) {
                 if (sp[0] < tMin) tMin = sp[0]
                 // flattened pairs end with a VALUE; the last timestamp is
                 // at length - 2
@@ -250,23 +322,48 @@ QtObject {
         }
         if (opts.windowMs > 0 && isFinite(tMax))
             tMin = tMax - opts.windowMs
+        if (opts.span) {
+            tMin = opts.span.t0
+            tMax = opts.span.t1
+        }
         if (!isFinite(tMin) || tMax <= tMin)
             return null
 
         // Per-series VALUE scaling, kept independent, so the numbers come
-        // from the labels: one per trace, at its newest sample's height
+        // from the labels: one per trace, at its newest sample's height.
+        // A recording's columns scale on their lowest and highest, as
+        // samples (valueRange reads every other entry).
         const traces = []
         let labelW = 0
         for (const s of series) {
-            const sp = s.samples
-            if (sp.length < 2)
+            let sp = s.samples
+            let cols = null
+            let last = NaN
+            if (s.columns) {
+                if (!opts.span)
+                    continue
+                cols = s.columns
+                sp = []
+                for (let c = 0; c < cols.lows.length; ++c) {
+                    if (!isFinite(cols.lows[c]))
+                        continue
+                    sp.push(0, cols.lows[c], 0, cols.highs[c])
+                    last = cols.highs[c]
+                }
+            } else if (sp && sp.length >= 2) {
+                last = sp[sp.length - 1]
+            }
+            if (!sp || sp.length < 2)
                 continue
             const range = valueRange(sp, s.decimals, opts.minSpanUnits)
-            const label = opts.format(sp[sp.length - 1], s.decimals, s.unit)
+            const value = isFinite(s.labelValue) ? s.labelValue : last
+            const label = opts.format(value, s.decimals, s.unit)
             labelW = Math.max(labelW, opts.measure(label))
-            traces.push({ sp: sp, row: s.row, vMin: range.vMin, vMax: range.vMax,
-                          flat: range.flat, label: label })
+            traces.push({ sp: sp, cols: cols, row: s.row, vMin: range.vMin, vMax: range.vMax,
+                          flat: range.flat, label: label, value: value })
         }
+        if (traces.length === 0)
+            return null
 
         const plotH = Math.max(1, height - axisH - top - bottomPad)
         const plotW = Math.max(1, width - Math.min(Math.ceil(labelW) + swatchW + labelGap,
@@ -290,24 +387,54 @@ QtObject {
 
         // Time ticks: seconds before the newest sample, newest first. A
         // step fits a centered caption beside its neighbor's, and beside
-        // "now", which is right-aligned at the edge
+        // "now", which is right-aligned at the edge. Absolute: at whole
+        // steps of the time itself, in time order, every caption centered
+        // and kept inside the plot
         const spanS = (tMax - tMin) / 1000
         const caption = opts.caption || (s => String(s))
-        const widest = opts.measure(caption(Math.ceil(spanS)))
-        const nowW = opts.measure(caption(0))
-        const roomPx = widest / 2 + Math.max(widest / 2, nowW) + captionGap
-        const stepS = tickStep(spanS, (plotW - 1) / spanS, roomPx)
         const ticks = []
-        for (let k = 0; k * stepS <= spanS; ++k) {
-            const x = xOf(tMax - k * stepS * 1000)
-            ticks.push({ x: x, seconds: k * stepS, captioned: k === 0 || x >= minTickX,
-                         caption: caption(k * stepS) })
+        if (opts.absolute) {
+            const widest = opts.measure(caption(Math.ceil(tMax / 1000)))
+            const stepS = tickStep(spanS, (plotW - 1) / spanS, widest + captionGap)
+            for (let k = Math.ceil(tMin / 1000 / stepS); k * stepS * 1000 <= tMax; ++k) {
+                const x = xOf(k * stepS * 1000)
+                ticks.push({ x: x, seconds: k * stepS, caption: caption(k * stepS), align: "center",
+                             captioned: x >= widest / 2 && x <= plotW - widest / 2 })
+            }
+        } else {
+            const widest = opts.measure(caption(Math.ceil(spanS)))
+            const nowW = opts.measure(caption(0))
+            const roomPx = widest / 2 + Math.max(widest / 2, nowW) + captionGap
+            const stepS = tickStep(spanS, (plotW - 1) / spanS, roomPx)
+            for (let k = 0; k * stepS <= spanS; ++k) {
+                const x = xOf(tMax - k * stepS * 1000)
+                ticks.push({ x: x, seconds: k * stepS, captioned: k === 0 || x >= minTickX,
+                             caption: caption(k * stepS), align: k === 0 ? "right" : "center" })
+            }
         }
 
         const out = []
         for (const tr of traces) {
             const traceY = tr.flat ? () => yOf(tr.lane)
                                    : v => yOf((v - tr.vMin) / (tr.vMax - tr.vMin))
+            if (tr.cols) {
+                const n = tr.cols.lows.length
+                const colMs = (tMax - tMin) / n
+                const sampled = []
+                for (let c = 0; c < n; ++c) {
+                    if (!isFinite(tr.cols.lows[c]))
+                        continue
+                    sampled.push({ c: c, x0: xOf(tMin + c * colMs), x1: xOf(tMin + (c + 1) * colMs),
+                                   top: traceY(tr.cols.highs[c]),
+                                   bottom: traceY(tr.cols.lows[c]) })
+                }
+                out.push({ row: tr.row,
+                           segments: [],
+                           pieces: columnPieces(sampled, Math.floor(opts.gapMs / colMs), swing),
+                           endY: traceY(tr.value),
+                           label: tr.label })
+                continue
+            }
             // Its points' mean spacing across the time they cover
             const points = tr.sp.length / 2
             const spread = xOf(tr.sp[tr.sp.length - 2]) - xOf(tr.sp[0])
