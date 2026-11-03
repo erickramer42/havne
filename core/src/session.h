@@ -116,6 +116,9 @@ struct ecuio_session {
     std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     /* The URI create was given, for a recording's header */
     std::string uri;
+    /* A replay's: its source's frame flags line (ADR-0049 section 2),
+     * set by attach, read by a recording's attach */
+    std::string source_frame_flags;
     /* The recorder's link (ADR-0049, recorder.h), set by
      * ecuio_session_record before start and kept until the session is
      * freed, so the worker reads it without a lock */

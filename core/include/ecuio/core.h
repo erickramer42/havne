@@ -30,6 +30,12 @@ typedef struct ecuio_session ecuio_session_t;
                                                          overflowed before this
                                                          frame: frames were lost
                                                          (J2534's BUFFER_OVERFLOW) */
+#define ECUIO_FRAME_FLAG_REASSEMBLED      0x00000100u /* an ISO-TP message's
+                                                         payload, reassembled
+                                                         (core's or the
+                                                         adapter's), not a
+                                                         frame as it crossed
+                                                         the bus (ADR-0049) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled

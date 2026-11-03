@@ -1352,11 +1352,14 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         header += std::string("core  ") + ecuio_version_string() + "\n";
         header += "uri  " + one_line(session->uri.c_str()) + "\n";
         header += std::string("profile  ") + session->info.profile + "\n";
-        /* A replay's frames carry its source's flags, which a recording
-         * from before ADR-0049 never marked reassembled */
-        header += session->info.backend == ECUIO_BACKEND_REPLAY
-                      ? "frame flags  from an older recording\n"
-                      : "frame flags  complete\n";
+        /* A replay's frames carry its source's flags, so it writes its
+         * source's line, which a recording from before ADR-0049 lacks */
+        header += "frame flags  ";
+        header += session->info.backend != ECUIO_BACKEND_REPLAY ? "complete"
+                  : session->source_frame_flags.empty()
+                      ? "from an older recording"
+                      : session->source_frame_flags.c_str();
+        header += "\n";
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];

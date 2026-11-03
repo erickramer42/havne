@@ -250,9 +250,10 @@ nothing but its activity lines.
 A `frame flags` header line says whether `frames.csv`'s flags are
 complete, `ECUIO_FRAME_FLAG_REASSEMBLED` (0x00000100, appended past
 `OVERFLOW`) among them: a transport sets
-it on a payload reassembled from ISO-TP (every requesting session, and
-J2534's ISO 15765 channels), and leaves it off a frame as it crossed
-the bus (a raw SocketCAN socket, an ELM327's `AT MA`). It is per frame,
+it on a payload reassembled from ISO-TP (every requesting session, an
+ELM327's `AT MA` monitor, whose lines core reassembles as it does a
+reply's, and J2534's ISO 15765 channels), and leaves it off a frame as
+it crossed the bus (a raw SocketCAN socket). It is per frame,
 so a session that both requests and listens is described exactly, and
 a replay passes it through. No transport mixes the two yet (a
 requesting SocketCAN session's kernel filter passes only its reply

@@ -907,6 +907,84 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
     EXPECT_EQ(got[1].rfind("3.000,0x7E8,01 0C,3,", 0), 0u) << got[1];
 }
 
+/* A replay's recording writes its source's frame flags line, so a
+ * recording core made stays complete through any number of replays;
+ * anything else is an older recording's (ADR-0049 section 2) */
+TEST(RecorderTest, AReplayPassesOnItsSourcesFrameFlagsLine)
+{
+    register_profile();
+    Root root;
+    std::string source;
+    {
+        Recording rec(root, "mock://source?profile=rec-test");
+        ASSERT_NE(rec.recorder, nullptr);
+        dispatch(rec.session, kNumberId, std::string("\x02", 1),
+                 ECUIO_FRAME_FLAG_REASSEMBLED);
+        dispatch(rec.session, kNumberId, std::string("\x04", 1));
+        source = rec.folder;
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+    }
+    const auto replayed = [&](const std::string& path) {
+        const std::string uri = "replay://" + path + "?speed=max";
+        Recording rec(root, uri.c_str());
+        EXPECT_NE(rec.recorder, nullptr);
+        if (rec.recorder == nullptr)
+            return std::string();
+        ecuio_session_start(rec.session);
+        ecuio_recorder_state_t st{};
+        EXPECT_TRUE(eventually(
+            [&] {
+                ecuio_recorder_get_state(rec.recorder, &st);
+                return st.frame_rows == 2;
+            },
+            3000));
+        const std::string folder = rec.folder;
+        EXPECT_EQ(rec.finish(), ECUIO_OK);
+        return folder;
+    };
+    const auto flags_line = [](const std::string& folder) {
+        for (const std::string& line :
+             lines_of(read_text(fs::u8path(folder) / "events.log"))) {
+            if (line.rfind("frame flags  ", 0) == 0)
+                return line;
+        }
+        return std::string();
+    };
+
+    const std::string first = replayed(source);
+    EXPECT_EQ(flags_line(first), "frame flags  complete");
+    const std::vector<std::string> rows =
+        lines_of(read_text(fs::u8path(first) / "frames.csv"));
+    ASSERT_EQ(rows.size(), 3u);
+    EXPECT_NE(rows[1].find(",0x100,0x100,02"), std::string::npos) << rows[1];
+    EXPECT_NE(rows[2].find(",0x100,0x0,04"), std::string::npos) << rows[2];
+    EXPECT_EQ(flags_line(replayed(first + "/frames.csv")),
+              "frame flags  complete")
+        << "passed on again";
+
+    /* A word core doesn't write, an older header, a .csv of another name */
+    const fs::path odd = root.path / "odd";
+    fs::create_directories(odd);
+    fs::copy_file(fs::u8path(source) / "frames.csv", odd / "frames.csv");
+    std::ofstream(odd / "events.log", std::ios::binary)
+        << "ecuio session recording, format 2 (ADR-0049)\n"
+           "frame flags  everything\n\n";
+    EXPECT_EQ(flags_line(replayed(odd.generic_u8string())),
+              "frame flags  from an older recording");
+    std::ofstream(odd / "events.log", std::ios::binary)
+        << "Havne session recording\nframe flags  complete\n\n";
+    EXPECT_EQ(flags_line(replayed(odd.generic_u8string())),
+              "frame flags  from an older recording");
+    fs::copy_file(fs::u8path(source) / "frames.csv", odd / "other.csv");
+    fs::copy_file(fs::u8path(source) / "events.log", odd / "events.log",
+                  fs::copy_options::overwrite_existing);
+    EXPECT_EQ(flags_line(replayed((odd / "other.csv").generic_u8string())),
+              "frame flags  from an older recording");
+    EXPECT_EQ(flags_line(replayed(odd.generic_u8string())),
+              "frame flags  complete")
+        << "the same events.log beside its own frames.csv";
+}
+
 /* The writer writes nothing before a session attaches, however long the
  * caller takes: an attach past its wakes still puts the header first,
  * and a recorder closed unattached leaves its files empty */

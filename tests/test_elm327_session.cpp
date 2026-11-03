@@ -528,7 +528,8 @@ TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("41 0C", &f));
     EXPECT_EQ(f.id, 0x7E8u);
-    EXPECT_EQ(f.flags, 0u);
+    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_REASSEMBLED})
+        << "a message's payload, not a frame as it crossed the bus";
     EXPECT_EQ(hex_of(f.data.data(), f.data.size()), "41 0C 1F 40")
         << "the PCI byte and the padding are gone";
     EXPECT_GE(s.cap.count("41 05"), 1u);
@@ -1148,7 +1149,8 @@ TEST_F(Elm327SessionTest, TwentyNineBitChannelsUseTheirOwnProtocol)
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("41 0C", &f));
     EXPECT_EQ(f.id, 0x18DAF110u);
-    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_EXTENDED});
+    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_EXTENDED |
+                                ECUIO_FRAME_FLAG_REASSEMBLED});
 }
 
 /* ?baud=250000 picks protocol 8, and the session info says so */
@@ -1739,8 +1741,9 @@ void listen_on(Session& s, const std::string& u = uri("?profile=raw"))
 } // namespace
 
 /* A session that asks nothing runs the setup, then AT MA and nothing
- * else; the channel's messages arrive whole, multi-frame too, and a line
- * the monitor marks or another ID's frame is no frame of ours */
+ * else; the channel's messages arrive whole, multi-frame too, flagged
+ * reassembled, and a line the monitor marks or another ID's frame is no
+ * frame of ours */
 TEST_F(Elm327SessionTest, ListeningDeliversTheChannelsMessages)
 {
     Session s;
@@ -1762,6 +1765,8 @@ TEST_F(Elm327SessionTest, ListeningDeliversTheChannelsMessages)
     EXPECT_EQ(vin.data, kVinReply);
     EXPECT_EQ(vin.id, 0x7E8u);
     EXPECT_EQ(vin.flags & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_NE(vin.flags & ECUIO_FRAME_FLAG_REASSEMBLED, 0u)
+        << "core put the monitor's lines together as it does a reply's";
     EXPECT_EQ(s.cap.count("41 0D"), 0u);
     std::vector<std::string> commands = fake_commands();
     ASSERT_GE(commands.size(), 2u);
