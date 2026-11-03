@@ -164,7 +164,8 @@ bus ([roadmap](#roadmap)).
     Live's table and strip chart, the Log page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
     findings, two runs overlaid and aligned, and a Mark while
-    recording), and Settings composing the URI; developer mode (off until switched on:
+    recording), one signal filter on Live and the viewer (words, plotted
+    only, the part of the car), and Settings composing the URI; developer mode (off until switched on:
     the `mock://` preset and the Log page's raw frame table with its
     bridge counters), zoom, metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
@@ -483,9 +484,15 @@ section 10 orders the work).
 - **A stretch replayed:** `replay://<recording>?from=<s>&to=<s>`, on
   Live or through `havne-cli sim` on a virtual bus.
 
-**Finding a signal among many.** A group per signal def in core;
-Live's list and the viewer's picker share one filter: text over names
-and units, a "plotted only" switch, group chips.
+**Finding a signal among many**, built
+([ADR-0050](docs/adr/0050-finding-a-signal.md)). Each signal def
+carries a group, the part of the car it reads (Engine, Air, Fuel,
+Oxygen sensors, Emissions, Vehicle, Electrical, Diagnostics, else
+Other), which recordings and `havne-cli`'s lines carry too. Live's list
+and the Recordings page's rows share one filter, a row high: words
+over the name and the unit as shown, and a popup with Plotted only and
+a box per group the list holds. On Live it sits in the title's row, so
+a short page loses no height to it.
 
 **SocketCAN through a real controller.** The desk run
 ([2026-11-02-socketcan-desk](docs/bench-sessions/2026-11-02-socketcan-desk.md))
