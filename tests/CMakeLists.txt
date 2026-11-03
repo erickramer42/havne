@@ -159,6 +159,10 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME GoldenTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
+    # recording_compare.py, golden.py's like for recording folders
+    # (ADR-0049 section 9): what a run changes left out
+    add_test(NAME RecordingCompareTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/recording_compare.py selftest)
     add_test(NAME AbiReportTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
@@ -258,6 +262,34 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
+        # stream --record (ADR-0049): the engine start recorded to its last
+        # frame, its folder against tests/golden/recording/ and its frames
+        # against the fixture's (rewrite both with the command plus
+        # --update); lines typed are markers; a folder that can't be made
+        # fails the stream
+        set(_cli_record ${CMAKE_CURRENT_SOURCE_DIR}/cli_record.py)
+        add_test(NAME CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} replay $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
+                    ${_cli_golden}/replay-record.jsonl
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        add_test(NAME CliRecordTest.TypedLinesAreMarkers
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} marks $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliRecordTest.AFolderThatCantBeMadeFails
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} fails $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
+            CliRecordTest.TypedLinesAreMarkers CliRecordTest.AFolderThatCantBeMadeFails
+            PROPERTIES TIMEOUT 60)
+        # Ctrl+Break while the fake DLL's disconnect hangs: the recording
+        # ends whole without waiting for it (skipped where there's no
+        # console, as CliSignalTest is)
+        if(WIN32)
+            add_test(NAME CliRecordTest.AnInterruptedCloseThatHangsStillEndsTheRecording
+                COMMAND ${Python3_EXECUTABLE} ${_cli_record} hang $<TARGET_FILE:havne-cli>
+                        $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliRecordTest.AnInterruptedCloseThatHangsStillEndsTheRecording
+                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+        endif()
     endif()
     function(app_cli_usage name args)
         add_test(NAME CliUsageTest.${name}
@@ -271,6 +303,8 @@ if(TARGET havne-cli)
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
+    app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
+    app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
     app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
