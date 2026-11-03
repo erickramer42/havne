@@ -975,35 +975,40 @@ a test.
 `bench_bridge --record` runs step 1's measurement on core's own
 session: the engine-start fixture replayed under `obd2`, looping at
 full speed, to a frame callback that counts and a values callback that
-does nothing, as the bridge's are. Three kinds of run alternate, five
-of 3 s each. On the dev machine (8 cores, 16 threads, Release):
+does nothing, as the bridge's are. Recorded and unrecorded runs
+alternate, five of 3 s each, with the process held to one logical
+processor on each of two physical cores. Without that, where the OS
+puts the threads decides the figures: on the dev machine (8 cores, 16
+threads) a thread that never rests slowed the worker by 43% when it
+shared the worker's core and by 4% on a core of its own. One run
+(Release):
 
 | Run | Worker frames a second, median (lowest to highest) |
 |---|---|
-| Not recorded | 5,317,779 (4,984,134 to 5,409,957) |
-| Not recorded, a thread formatting numbers beside it | 3,477,131 (3,390,293 to 3,558,270) |
-| Recorded | 3,357,944 (3,293,312 to 3,399,326) |
+| Not recorded | 5,082,631 (4,850,466 to 5,113,153) |
+| Recorded | 4,179,817 (4,080,536 to 4,281,321) |
 
-At 5 million frames a second the writer can't keep up: it wrote about
-830,000 frame rows a second, and three records in four were dropped.
-So it never rests, and a second thread that never rests slows the
-worker by about a third whatever it does: the thread formatting
-numbers, with no recording at all, costs as much. Section 9's 10% is
-read as the worker's own cost, so the check compares the recorded runs
-with that busy one: 0.97 of its rate. Against the bare rate they ran
-at 0.63, which the bench prints beside it. Two further runs bound
-the parts: with a 4 KB ring, which drops nearly every record and
-leaves the writer idle, the recorded runs held 0.89 of the bare rate
-(the drop path: the clock read, the pin, the size); 200 turns of a busy
-loop added to every recorded frame (about 40 ns) brought the check to
-0.75, failing it. The same work added only where a record is written
-read 0.90, because at full speed one frame in four is.
+Recording costs this worker 31 to 47 ns a frame (0.81 to 0.86 of its
+rate in four runs), against a frame that costs it about 0.2 us with
+nothing else to do: a replay's row parsed, the decode and two callbacks
+that return at once. Under WSL on the same machine it cost 41 and
+42 ns, but there the unrecorded worker ran about 8 million frames a
+second, so the same cost was 0.75 of its rate: the share follows the
+rest of the worker's speed, the nanoseconds don't. About 20 ns of it is the path every frame takes
+(the clock read, the pin, the size): with a 4 KB ring, which drops
+nearly every record and leaves the writer idle, the recorded runs held
+0.89 of the unrecorded rate. The rest is the record's write into a ring
+the writer's core reads. At this rate the writer, on a core of its own,
+wrote about a million frame rows a second and three records in four
+were dropped; both recorded passes, at full speed and at 100x, put all
+7,074 frames and 7,061 values in the files with no record dropped.
 
-These rates are a stress figure. At the bridge's rate (about 400,000
-frames a second, over ten times the worker's cost per frame here), the
-same 20 ns or so is under 1%; at a saturated classic bus's 4,000
-frames a second it is under 0.01% of a core. Both recorded passes, at
-full speed and at 100x, put all 7,074 frames and 7,061 values in the
-files with no record dropped. Step 2's bridge run and its CI gate
-compare recorded with unrecorded as section 9 says, at the bridge's
-rate, where the writer may keep up.
+Section 9's 10% isn't met on this run, and this isn't the run it is
+judged on: the bridge's worker spends about 2.5 us on a frame (its 4 KB
+copy and queued call, ADR-0024's staging), so the same cost there is
+about 2%, and at a saturated classic bus's 4,000 frames a second it is
+under 0.02% of a core. Step 2 judges the 10% on the bridge's looping
+run, recorded against unrecorded, as section 9 says, with its CI gate.
+Here the bench checks a bound against regressions instead: recording
+adds at most 75 ns a frame. A busy loop of 200 turns on every recorded
+frame fails it (107 and 142 ns in two runs).

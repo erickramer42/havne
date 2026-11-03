@@ -438,10 +438,10 @@ section 10 orders the work).
   and a failed write or a full disk is an error the recording
   reports. Step 1 is built: core's recorder (`ecuio/recording.h`)
   and `havne-cli stream --record <dir>`, which writes the folder the
-  app does; on the worker it costs 0.97 of the rate beside a busy
-  thread (`bench_bridge --record`, the ADR's appendix of
-  2026-11-02). Step 2 moves the app onto it, with the bridge's
-  looping run and its CI gate.
+  app does; it costs core's worker 30 to 50 ns a frame
+  (`bench_bridge --record`, the ADR's appendix of 2026-11-02).
+  Step 2 moves the app onto it and judges the worker's 10% budget
+  on the bridge's looping run, with its CI gate.
 - **The reader** opens a recording offline. One pass on open builds a
   sparse index (`host_us` only increases) and each signal's lowest and
   highest per stretch, so memory follows the index, not the recording.

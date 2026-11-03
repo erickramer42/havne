@@ -237,35 +237,39 @@ running (ranges across the runs; milliseconds as median / p99):
 `bench_bridge --record` replays the engine-start fixture under `obd2`
 on core's own session, looping at full speed, to a frame callback that
 counts and a values callback that does nothing, as the bridge's are.
-Three kinds of run alternate, five of 3 s each: not recorded; not
-recorded with a thread formatting numbers beside it; recorded, with the
-default ring. Then two recorded passes, at full speed and at 100x, must
-put every frame and value in the files with none dropped. Exit status 1
-on a failed check; not run in CI.
+Recorded and unrecorded runs alternate, five of 3 s each, with the
+process held to one logical processor on each of two physical cores
+(Windows and Linux; elsewhere the bench says it isn't, and where the
+threads land moves the figures by tens of percent). Then two recorded
+passes, at full speed and at 100x, must put every frame and value in
+the files with none dropped. Exit status 1 on a failed check; not run
+in CI.
 
 On the dev machine, 2026-11-02 (Release; frames a second through the
 worker, median and range):
 
 | Run | Worker frames/s |
 |---|---|
-| Not recorded | 5.32 million (4.98 to 5.41) |
-| Not recorded, a busy thread beside it | 3.48 million (3.39 to 3.56) |
-| Recorded | 3.36 million (3.29 to 3.40) |
+| Not recorded | 5.08 million (4.85 to 5.11) |
+| Recorded | 4.18 million (4.08 to 4.28) |
 
-- **The worker's own cost is a few percent:** recorded runs hold 0.97
-  of the busy runs' rate, against the 0.9 the check asks
-  ([ADR-0049](adr/0049-recordings-in-core.md)'s appendix "the worker's
-  cost, measured"). Against the bare rate they hold 0.63: at 5 million
-  frames a second the writer never catches up, and any thread that
-  never rests slows the worker by a third on this machine.
-- **The writer** wrote about 830,000 frame rows a second, and dropped
-  three records in four at that rate.
+- **Recording costs this worker 31 to 47 ns a frame** (0.81 to 0.86 of
+  its rate in four runs; 41 and 42 ns under WSL, where the unrecorded
+  worker runs about 8 million frames a second, so 0.75 of its rate),
+  about 20 ns of it on every frame and the rest on each record
+  written. A frame costs this worker only about 0.2 us, so the share
+  is large; the bridge's worker spends about 2.5 us on one, and
+  [ADR-0049](adr/0049-recordings-in-core.md)'s 10% is judged on its
+  run (the ADR's appendix "the worker's cost, measured"). The check
+  here bounds the nanoseconds against regressions: at most 75 a
+  frame, which a busy loop on every recorded frame fails (107 and
+  142 ns).
+- **The writer** wrote about a million frame rows a second on a core of
+  its own, and dropped three records in four at this rate.
 - **Both recorded passes were whole:** all 7,074 frames and 7,061
   values, none dropped; the full-speed pass's files were complete
-  0.12 s after it started, the 100x pass's within 20 ms of its last
-  frame.
-- **The check catches a slower worker:** about 40 ns more on each
-  recorded frame failed it at 0.75 (2026-11-02).
+  about 0.12 s after it started, the 100x pass's within 70 ms of its
+  last frame.
 
 ### Reply timing against the fakes
 
