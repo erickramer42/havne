@@ -6,7 +6,9 @@
 //          does the unit system (2026-10-24) and developer mode
 //          (2026-10-27); Home's Connect... opens Settings with Adapter
 //          unfolded (2026-10-28); the Recordings page's Replay putting its
-//          URI in Settings' field, and seven tabs inside 384 px (2026-11-03).
+//          URI in Settings' field, and seven tabs inside 384 px (2026-11-03);
+//          the header's Mark while recording, inside a phone's width:
+//          tests/qml/tst_phone.qml.
 //          The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
 //          and the "Display:" line a phone logs in developer mode:

@@ -57,7 +57,7 @@ Page {
     // reader's per-second summaries. Past this many rows in view, columns
     // stay a second wide: a 50-signal 10 Hz hour panned at two pixels a
     // column read about 180,000 rows a frame and drew at 30 frames/s on the
-    // laptop (the frame test, 2026-11-03)
+    // laptop (ADR-0049's appendix "the viewer")
     readonly property int rawRowsPerFrame: 20000
     // The recording's rows a second, every signal's together
     property real rowsPerSecond: 0

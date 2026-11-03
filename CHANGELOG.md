@@ -13,6 +13,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- The Recordings page: the recordings sessions saved, newest first, each opening in a viewer. It shows the recording's signals and a chart of the part in view: drag it, zoom with the wheel or a pinch, and tap for the values at that moment. Its markers and what a check of its frames found are on the chart's time axis, and each finding listed shows its place. Replay still puts a recording's `replay://` URI in Settings' field.
+- Two recordings overlaid on the Recordings page: another recording's signals drawn dashed beside the first's, on the same scales, lined up on their starts, their wall-clock starts, a marker, or a signal rising or falling through a level typed in the units on screen.
+- **Mark** in the header, while a session records, puts a marker in the recording ("Mark 1", "Mark 2", and so on), as a line typed into `havne-cli stream --record` does.
 - `havne-cli stream --record <folder>` records the session into a folder of its own under `<folder>`, named for when it started, with the files the app writes (`frames.csv`, `signals.csv` and `events.log`; `markers.csv` and `latency.csv` once they have a row). `--label <name>` adds a name to the folder's. Each line typed while it runs is a marker. The recording is written on a thread of its own, so a slow disk never holds the session up; a write that fails says why in a `recording` line, and the stream exits 1.
 - `ecuio/recording.h` in core's C API: a recorder opened on a folder, attached to a session before it starts, with notes, markers and its state.
 - `havne-cli view <recording>...` reads recordings offline: what each holds, then each signal's lowest, highest and count over time in columns (`--columns`, `--from`, `--to`), and with `--at` the values at a moment. `--align-on` puts several on one axis, at a signal rising or falling through a level, a marker, or their wall-clock starts.
@@ -22,6 +25,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Changed
 
+- The recent recordings moved from Settings to the Recordings page, whose tab reads Recs on a phone.
 - The app's recordings are written by core, on a thread of their own, as `havne-cli`'s are: a recording holds every frame the session read, also the ones the Log page skips under load, and its last note says how many it skipped. A write that fails, a full disk among them, stops the recording with `Recording stopped: <reason>` while the session runs on.
 - A recording's `events.log` has a new layout: a format line, the app's details under `caller` lines, a kind word on every line (`note`, `link`, `asleep`, `drop`, `end`), and a summary of anything the recording dropped.
 - A frame carrying a whole ISO-TP message, as a requesting session's replies and an ELM327 adapter's monitor deliver them, is flagged `0x100` (`ECUIO_FRAME_FLAG_REASSEMBLED`), and the Log page's and `havne-cli`'s `frame` lines show it.

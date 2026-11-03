@@ -38,8 +38,8 @@ Canvas {
     property real paintMaxMs: 0
     // Set while a page moves the view: drawn without antialiasing, most of
     // a crowded chart's cost on the CPU (a dense hour's pan on the test
-    // phone, 21 charts a second with it, 62 without), then once more with
-    // it when the view rests
+    // phone, 21 charts a second with it, 62 without; ADR-0049's appendix
+    // "the viewer"), then once more with it when the view rests
     property bool moving: false
     antialiasing: !moving
     onMovingChanged: if (!moving) requestPaint()
