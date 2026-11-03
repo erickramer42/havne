@@ -5,7 +5,9 @@
 //          (BridgeTest's round trip), the seams in internal.h for drops,
 //          failed writes, a held writer and syncs, the statuses; link
 //          transitions and reply timing with the test as the worker, and
-//          through the fake ELM327 (Elm327SessionTest.ARecordingHolds*)
+//          through the fake ELM327 (Elm327SessionTest.ARecordingHolds*);
+//          a sleep's line and the writer's wakes through the seams;
+//          nothing written before an attach, however late
 //
 // The worker copies each frame and its values, its link transitions and
 // its reply timing into a byte ring (single producer, single consumer);
@@ -61,6 +63,7 @@ constexpr auto kFlushEvery = std::chrono::milliseconds(100);
 constexpr auto kSyncEvery = std::chrono::seconds(2);
 
 constexpr uint64_t kTimingEveryUs = 10000000;
+constexpr uint64_t kSleepLineUs = 1000000;
 constexpr auto kFinalTimingWait = std::chrono::seconds(1);
 constexpr auto kFinalTimingRetry = std::chrono::milliseconds(10);
 
@@ -554,6 +557,14 @@ struct ecuio_recorder {
     std::atomic<bool> hold{false};
     std::atomic<bool> fail_next{false};
     std::atomic<uint64_t> syncs{0};
+    std::atomic<uint64_t> wakes{0};
+    std::atomic<uint64_t> slept_added{0};
+
+    /* The machine's slept count at attach, written before attached; the
+     * writer's own after that */
+    uint64_t slept_at_attach = 0;
+    bool sleep_armed = false;
+    uint64_t slept_seen = 0;
 
     /* The writer's own */
     std::vector<uint8_t> scratch;
@@ -917,6 +928,36 @@ struct ecuio_recorder {
         syncs.fetch_add(1, std::memory_order_relaxed);
     }
 
+    /* An asleep line when the machine's slept count rose a second or more
+     * since the last wake (ADR-0049 section 2): stamped as the writer
+     * woke, its N s the N s before. Smaller rises are taken in without a
+     * line, as the app's tick takes them. */
+    void check_sleep()
+    {
+        if (!attached.load(std::memory_order_acquire))
+            return;
+        const uint64_t now = ecuio_clock_slept_us() +
+                             slept_added.load(std::memory_order_relaxed);
+        if (!sleep_armed) {
+            sleep_armed = true;
+            slept_seen = slept_at_attach;
+        }
+        const uint64_t rise = now > slept_seen ? now - slept_seen : 0;
+        slept_seen = (std::max)(now, slept_seen);
+        if (rise < kSleepLineUs)
+            return;
+        const uint64_t tenths = (rise + 50000) / 100000;
+        event_line(host_us_of(ecuio_clock_us()), "asleep",
+                   "Asleep for " + std::to_string(tenths / 10) + "." +
+                       std::to_string(tenths % 10) +
+                       " s: nothing was read meanwhile");
+    }
+
+    uint64_t host_us_of(uint64_t clock_us) const
+    {
+        return clock_us > link->zero_us ? clock_us - link->zero_us : 0;
+    }
+
     void run()
     {
         auto last_flush = std::chrono::steady_clock::now();
@@ -930,11 +971,21 @@ struct ecuio_recorder {
                                  [this] { return stop; });
                 stopping = stop;
             }
+            wakes.fetch_add(1, std::memory_order_relaxed);
             if (hold.load(std::memory_order_acquire) && !stopping) {
+                continue;
+            }
+            /* Nothing until a session attaches: the attach completes the
+             * header item open queued, and a recorder closed unattached
+             * leaves its files empty */
+            if (!attached.load(std::memory_order_acquire)) {
+                if (stopping)
+                    return;
                 continue;
             }
             /* The items first: the header comes ahead of any row */
             const bool notes = drain_items();
+            check_sleep();
             const bool frames_taken = drain_ring();
             busy = notes || frames_taken;
             const auto now = std::chrono::steady_clock::now();
@@ -1273,6 +1324,8 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
 
         /* The zero and the wall clock read back to back */
         link->zero_us = ecuio_clock_us();
+        recorder->slept_at_attach =
+            ecuio_clock_slept_us() + recorder->slept_added.load();
         recorder->start_wall = std::chrono::system_clock::now();
 
         const std::time_t t =
@@ -1506,6 +1559,19 @@ void ecuio_recorder_test_fail_writes(ecuio_recorder_t* recorder)
     if (recorder != nullptr) {
         recorder->fail_next.store(true, std::memory_order_release);
     }
+}
+
+void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us)
+{
+    if (recorder != nullptr) {
+        recorder->slept_added.fetch_add(us, std::memory_order_relaxed);
+    }
+}
+
+uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder)
+{
+    return recorder != nullptr ? recorder->wakes.load(std::memory_order_relaxed)
+                               : 0;
 }
 
 uint64_t ecuio_recorder_test_syncs(const ecuio_recorder_t* recorder)

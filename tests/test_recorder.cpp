@@ -4,7 +4,8 @@
 //          ecuio_session_dispatch_callbacks (never started, so every
 //          frame is the test's) and against the mock and the replay
 //          fixture; the seams in internal.h for a held writer, a failed
-//          write and the syncs
+//          write, the syncs, a sleep and the writer's wakes; the link
+//          and timing records with the test as the worker
 //
 // Each case records into a folder of its own under TEMP/TMPDIR, removed
 // at the end.
@@ -904,6 +905,132 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
     const std::vector<std::string> got = lines_of(rec.file("latency.csv"));
     ASSERT_EQ(got.size(), 2u);
     EXPECT_EQ(got[1].rfind("3.000,0x7E8,01 0C,3,", 0), 0u) << got[1];
+}
+
+/* The writer writes nothing before a session attaches, however long the
+ * caller takes: an attach past its wakes still puts the header first,
+ * and a recorder closed unattached leaves its files empty */
+TEST(RecorderTest, NothingIsWrittenBeforeASessionAttaches)
+{
+    register_profile();
+    Root root;
+    const std::string r = root.utf8();
+    ecuio_record_options_t o{};
+    o.root_utf8 = r.c_str();
+    const char* caller[] = {"app  Havne test"};
+    o.header_lines = caller;
+    o.header_line_count = 1;
+    for (const bool attach : {false, true}) {
+        SCOPED_TRACE(attach ? "attached late" : "never attached");
+        ecuio_recorder_t* rec = nullptr;
+        ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+        char buf[1024];
+        uint32_t len = 0;
+        ecuio_recorder_get_folder(rec, buf, sizeof buf, &len);
+        const fs::path folder = fs::u8path(buf);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        ecuio_session_t* s = nullptr;
+        if (attach) {
+            ASSERT_EQ(ecuio_session_create("mock://late?profile=rec-test", &s),
+                      ECUIO_OK);
+            ASSERT_EQ(ecuio_session_record(s, rec), ECUIO_OK);
+            dispatch(s, kNumberId, std::string("\x02", 1));
+            ecuio_session_destroy(s);
+        }
+        EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+        const std::string events = read_text(folder / "events.log");
+        if (!attach) {
+            for (const char* f : {"frames.csv", "signals.csv", "events.log"}) {
+                EXPECT_EQ(fs::file_size(folder / f), 0u) << f;
+            }
+            continue;
+        }
+        EXPECT_EQ(events.rfind("ecuio session recording, format 2", 0), 0u)
+            << events;
+        EXPECT_NE(events.find("\ncaller  app  Havne test\n"), std::string::npos)
+            << events;
+        const std::vector<std::string> frames =
+            lines_of(read_text(folder / "frames.csv"));
+        ASSERT_EQ(frames.size(), 2u);
+        EXPECT_EQ(frames[0], "host_us,timestamp_us,id,flags,data");
+    }
+}
+
+/* A sleep of the machine while recording is an asleep line, stamped as
+ * the writer woke, with its length; a rise under a second, or a sleep
+ * before the session attached, has none */
+TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
+{
+    Root root;
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://sleep", &s), ECUIO_OK);
+    const std::string r = root.utf8();
+    ecuio_record_options_t o{};
+    o.root_utf8 = r.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+    char buf[1024];
+    uint32_t len = 0;
+    ecuio_recorder_get_folder(rec, buf, sizeof buf, &len);
+    const fs::path folder = fs::u8path(buf);
+    ecuio_recorder_test_add_slept(rec, 5000000); /* before attach */
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ASSERT_EQ(ecuio_session_record(s, rec), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ecuio_recorder_test_add_slept(rec, 2340000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ecuio_recorder_test_add_slept(rec, 600000); /* under a second */
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+
+    const std::string events = read_text(folder / "events.log");
+    EXPECT_EQ(events.rfind("ecuio session recording, format 2", 0), 0u)
+        << "the header first, though attach came past the writer's wake";
+    const std::vector<EventLine> sleeps = events_of(events, "asleep");
+    ASSERT_EQ(sleeps.size(), 1u) << events;
+    EXPECT_EQ(sleeps[0].text, "Asleep for 2.3 s: nothing was read meanwhile");
+    /* Stamped at the wake that saw it: after the attach's 150 ms, within
+     * the next 250 */
+    EXPECT_GE(sleeps[0].ms, 140u) << events;
+    EXPECT_LE(sleeps[0].ms, 500u) << events;
+}
+
+/* The writer wakes every 100 ms while idle, so an idle recording costs a
+ * phone's background session ten wakes a second, and every 10 ms while
+ * the ring has records (ADR-0049 section 1) */
+TEST(RecorderTest, AnIdleWriterWakesTenTimesASecond)
+{
+    register_profile();
+    Root root;
+    Recording rec(root, "mock://wakes?profile=rec-test");
+    ASSERT_NE(rec.recorder, nullptr);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const uint64_t idle_from = ecuio_recorder_test_wakes(rec.recorder);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    const uint64_t idle = ecuio_recorder_test_wakes(rec.recorder) - idle_from;
+    ::testing::Test::RecordProperty("idle_wakes", std::to_string(idle));
+    EXPECT_GE(idle, 5u);
+    EXPECT_LE(idle, 20u) << "an idle writer wakes every 100 ms";
+
+    const uint64_t busy_from = ecuio_recorder_test_wakes(rec.recorder);
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    /* One frame waiting at every wake: the next goes in as soon as the
+     * writer has written the last, so no wake finds the ring empty and
+     * none spends its time on a full one */
+    uint64_t sent = 0;
+    while (std::chrono::steady_clock::now() < end) {
+        ecuio_recorder_state_t st{};
+        ecuio_recorder_get_state(rec.recorder, &st);
+        if (st.frame_rows == sent) {
+            dispatch(rec.session, kNumberId, std::string("\x02", 1));
+            ++sent;
+        }
+        std::this_thread::yield();
+    }
+    const uint64_t busy = ecuio_recorder_test_wakes(rec.recorder) - busy_from;
+    ::testing::Test::RecordProperty("busy_wakes", std::to_string(busy));
+    EXPECT_GE(busy, 30u) << "a busy writer wakes every 10 ms";
 }
 
 /* The writer syncs its files to the storage every 2 s, so a power cut
