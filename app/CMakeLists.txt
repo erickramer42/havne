@@ -31,6 +31,8 @@ qt_add_library(app_ui STATIC
     bridgesingleton.h
     carryover.cpp
     carryover.h
+    recordingview.cpp
+    recordingview.h
     sessionbridge.cpp
     sessionbridge.h
     latencystats.h
