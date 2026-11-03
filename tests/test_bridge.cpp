@@ -60,6 +60,7 @@
 #include <ecuio/signals.h>
 #include <ecuio/serial.h>
 #include <ecuio/signal_sets.h>
+#include "ecuio/internal.h" // core's recorder seams (a failed write)
 #include "pid_support.h" // core/src: core's judgment, fed to the model
 
 #ifdef _WIN32
@@ -837,9 +838,11 @@ TEST(BridgeTest, RecordingIsOffByDefault)
     EXPECT_TRUE(bridge.recordingFolder().isEmpty());
 }
 
-/* One folder per connect: every frame the bridge received, the log's
- * Pause notwithstanding, each decoded value, and the session's activity
- * lines from Connected through Disconnected. */
+/* One folder per connect, which core writes (ADR-0049): every frame
+ * the session dispatched, the log's Pause notwithstanding, each decoded
+ * value, core's header with the app's caller lines, and the session's
+ * activity lines from Connected through Disconnected as notes, then
+ * core's summary. */
 TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
 {
     QTemporaryDir root;
@@ -872,7 +875,9 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     const QList<QByteArray> frameRows = fileLines(dir + QStringLiteral("/frames.csv"));
     ASSERT_FALSE(frameRows.isEmpty());
     EXPECT_EQ(frameRows.first(), QByteArray("host_us,timestamp_us,id,flags,data"));
-    EXPECT_EQ(frameRows.size() - 1, frames) << "every frame, paused or not";
+    // The worker may dispatch a frame or two more after the bridge
+    // stops taking them, as the session closes
+    EXPECT_GE(frameRows.size() - 1, frames) << "every frame, paused or not";
     qint64 lastHost = -1;
     bool sawTelemetry = false;
     for (qsizetype i = 1; i < frameRows.size(); ++i) {
@@ -890,13 +895,72 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     EXPECT_TRUE(signalsCsv.startsWith("\xEF\xBB\xBFhost_us,signal,value,unit"));
     EXPECT_TRUE(signalsCsv.contains(",RPM,")) << "no RPM value recorded";
 
-    const QByteArray events = readFile(dir + QStringLiteral("/events.log"));
-    for (const char* expected : { "uri      mock://rec", "signals  ", "Connected: mock://rec",
-                                  "Disconnecting: mock://rec", "Delivery: ",
-                                  "Disconnected: mock://rec",
-                                  "end      disconnected: " }) {
+    // CRLF on Windows (ADR-0017 takes either)
+    const QByteArray events =
+        readFile(dir + QStringLiteral("/events.log")).replace("\r\n", "\n");
+    for (const char* expected :
+         {"ecuio session recording, format 2 (ADR-0049)\n",
+          "\nuri  mock://rec\n", "\nsignal  RPM,", "\ncaller  Havne ",
+          "\ncaller  surrogate frame logging  ",
+          "  note  Connected: mock://rec\n",
+          "  note  Disconnecting: mock://rec\n", "  note  Delivery: ",
+          "  note  Disconnected: mock://rec\n", "  end  disconnected: "}) {
         EXPECT_TRUE(events.contains(expected)) << expected << "\n" << events.toStdString();
     }
+}
+
+/* The app's Mark (ADR-0049 section 4): a marker in markers.csv at the
+ * time it's tapped, "Mark N" unless labeled, counted per recording, said
+ * in the activity log; nothing to mark without a recording. */
+TEST(BridgeTest, AMarkGoesIntoTheRecording)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    EXPECT_FALSE(bridge.mark()) << "no recording";
+    EXPECT_EQ(bridge.markCount(), 0);
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://marks").isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    EXPECT_TRUE(bridge.mark());
+    EXPECT_TRUE(bridge.mark(QStringLiteral("  launch, \"go\"  ")));
+    EXPECT_TRUE(bridge.mark(QStringLiteral(" ")));
+    EXPECT_EQ(bridge.markCount(), 3);
+    EXPECT_TRUE(log.contains(QStringLiteral("Marked: Mark 1")));
+    EXPECT_TRUE(log.contains(QStringLiteral("Marked: launch, \"go\"")));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_FALSE(bridge.mark()) << "the recording ended";
+    EXPECT_EQ(bridge.markCount(), 3) << "the last recording's";
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString dir = root.path() + QStringLiteral("/") + folders.first();
+    const QList<QByteArray> rows =
+        fileLines(dir + QStringLiteral("/markers.csv"));
+    ASSERT_EQ(rows.size(), 4);
+    EXPECT_EQ(rows[0], QByteArray("host_us,label"));
+    EXPECT_TRUE(rows[1].endsWith(",Mark 1")) << rows[1].toStdString();
+    EXPECT_TRUE(rows[2].endsWith(",\"launch, \"\"go\"\"\""))
+        << rows[2].toStdString();
+    EXPECT_TRUE(rows[3].endsWith(",Mark 3")) << rows[3].toStdString();
+    EXPECT_LE(rows[1].split(',')[0].toLongLong(),
+              rows[3].split(',')[0].toLongLong());
+    const QByteArray events = readFile(dir + QStringLiteral("/events.log"));
+    EXPECT_FALSE(events.contains("Marked:"))
+        << "markers.csv holds them, not notes";
+
+    // A new recording counts from one
+    ASSERT_TRUE(bridge.connectSession("mock://marks-again").isEmpty());
+    EXPECT_EQ(bridge.markCount(), 0);
+    EXPECT_TRUE(bridge.mark());
+    EXPECT_EQ(log.count(QStringLiteral("Marked: Mark 1")), 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 /* An app closed while connected: the bridge's destructor destroys the
@@ -920,7 +984,7 @@ TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
     const QByteArray events =
         readFile(root.path() + QStringLiteral("/") + folders.first() +
                  QStringLiteral("/events.log"));
-    EXPECT_TRUE(events.contains("end      the app closed: "))
+    EXPECT_TRUE(events.contains("  end  the app closed: "))
         << events.toStdString();
     EXPECT_FALSE(events.contains("Disconnecting:")) << events.toStdString();
 }
@@ -952,6 +1016,40 @@ TEST(BridgeTest, RecordingThatCantStartIsLoggedAndTheSessionRuns)
         << log.join('\n').toStdString();
     ASSERT_TRUE(
         spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A write that fails (a full disk) stops the recording, never the
+ * session: the activity log says why, once, with no path, the folder is
+ * no longer active, and frames keep coming. */
+TEST(BridgeTest, AFailedWriteStopsTheRecordingAndTheSessionRuns)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession("mock://failing").isEmpty());
+    ASSERT_TRUE(bridge.recordingActive());
+    ASSERT_NE(bridge.recorderForTesting(), nullptr);
+    ecuio_recorder_test_fail_writes(bridge.recorderForTesting());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return !bridge.recordingActive(); }, 5000));
+    const QStringList stopped =
+        log.filter(QStringLiteral("Recording stopped: "));
+    ASSERT_EQ(stopped.size(), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(stopped.first(),
+              QStringLiteral("Recording stopped: the disk is full"));
+    EXPECT_TRUE(bridge.connected());
+    const int before = bridge.frameCount();
+    ASSERT_TRUE(spinUntil(
+        [&bridge, before]() { return bridge.frameCount() > before + 2; }, 5000))
+        << "the session runs on";
+    EXPECT_EQ(log.filter(QStringLiteral("Recording stopped: ")).size(), 1)
+        << "once";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
@@ -3339,6 +3437,137 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
  * 44 data PIDs to 0x60, whose bit says a fourth exists), a chain
  * answered to its end, one unanswered, and requests dropped for each
  * reason, past the eight a report lists. */
+/* Finding a signal among many (ADR-0050): every word in the name or the
+ * unit, ignoring case; plotted rows only; the chosen groups, a code
+ * core doesn't name counted as Other; the choices in code order */
+TEST(BridgeTest, SignalFilterMatchesWordsPlottedRowsAndGroups)
+{
+    SignalFilter f;
+    int changes = 0;
+    QObject::connect(&f, &SignalFilter::changed, [&changes]() { ++changes; });
+    EXPECT_FALSE(f.active());
+    EXPECT_TRUE(
+        f.matches(QStringLiteral("RPM"), QStringLiteral("RPM"), 1, false));
+
+    f.setText(QStringLiteral("  COOL   temp "));
+    EXPECT_TRUE(f.active());
+    EXPECT_TRUE(f.matches(QStringLiteral("Coolant Temp"), QStringLiteral("°C"),
+                          1, false));
+    EXPECT_FALSE(f.matches(QStringLiteral("Engine Oil Temp"),
+                           QStringLiteral("°C"), 1, false))
+        << "every word";
+    f.setText(QStringLiteral("temp °c"));
+    EXPECT_TRUE(f.matches(QStringLiteral("Engine Oil Temp"),
+                          QStringLiteral("°C"), 1, false))
+        << "a word in the unit";
+    f.setText(QStringLiteral("psi"));
+    EXPECT_TRUE(f.matches(QStringLiteral("Fuel Pressure"),
+                          QStringLiteral("psi"), 3, false));
+    EXPECT_FALSE(f.matches(QStringLiteral("Fuel Pressure"),
+                           QStringLiteral("kPa"), 3, false));
+    f.setText(QString());
+    EXPECT_FALSE(f.active());
+
+    f.setPlottedOnly(true);
+    EXPECT_FALSE(
+        f.matches(QStringLiteral("RPM"), QStringLiteral("RPM"), 1, false));
+    EXPECT_TRUE(
+        f.matches(QStringLiteral("RPM"), QStringLiteral("RPM"), 1, true));
+    f.setPlottedOnly(false);
+
+    f.toggleGroup(ECUIO_SIGNAL_GROUP_ENGINE);
+    EXPECT_TRUE(f.chosen(ECUIO_SIGNAL_GROUP_ENGINE));
+    EXPECT_TRUE(f.matches(QStringLiteral("RPM"), QString(),
+                          ECUIO_SIGNAL_GROUP_ENGINE, false));
+    EXPECT_FALSE(f.matches(QStringLiteral("MAF"), QString(),
+                           ECUIO_SIGNAL_GROUP_AIR, false));
+    f.toggleGroup(ECUIO_SIGNAL_GROUP_AIR);
+    EXPECT_TRUE(f.matches(QStringLiteral("MAF"), QString(),
+                          ECUIO_SIGNAL_GROUP_AIR, false))
+        << "either chosen group";
+    f.toggleGroup(200);
+    EXPECT_TRUE(f.chosen(ECUIO_SIGNAL_GROUP_OTHER))
+        << "an unknown code is Other's";
+    EXPECT_TRUE(f.matches(QStringLiteral("DID 1E1C"), QString(), 0, false));
+    EXPECT_TRUE(
+        f.matches(QStringLiteral("Next year's"), QString(), 250, false));
+    EXPECT_EQ(f.groups(), (QVariantList{0, 1, 2}));
+    f.toggleGroup(ECUIO_SIGNAL_GROUP_ENGINE);
+    EXPECT_FALSE(f.chosen(ECUIO_SIGNAL_GROUP_ENGINE))
+        << "a second tap lets it go";
+
+    const QVariantList choices = f.groupChoices(QVariantList{3, 1, 1, 200, 0});
+    ASSERT_EQ(choices.size(), 3);
+    EXPECT_EQ(choices[0].toMap().value(QStringLiteral("code")).toInt(), 0);
+    EXPECT_EQ(choices[0].toMap().value(QStringLiteral("name")).toString(),
+              QStringLiteral("Other"));
+    EXPECT_EQ(choices[1].toMap().value(QStringLiteral("name")).toString(),
+              QStringLiteral("Engine"));
+    EXPECT_EQ(choices[2].toMap().value(QStringLiteral("name")).toString(),
+              QStringLiteral("Fuel"));
+
+    f.clear();
+    EXPECT_FALSE(f.active());
+    EXPECT_TRUE(f.groups().isEmpty());
+    EXPECT_EQ(changes, 11);
+}
+
+/* Live's list through its filter (ADR-0050): the mock's rows by word,
+ * group and plotted; a tick under "Plotted only" re-filters; the groups
+ * and the count before the filter leave out the rows core hides */
+TEST(BridgeTest, LiveListFollowsItsFilter)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_mock_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    ASSERT_EQ(live.rowCount(), rows);
+    EXPECT_EQ(live.shownCount(), rows);
+    EXPECT_EQ(live.groups(), (QVariantList{1, 2, 4, 6}))
+        << "Engine, Air, Oxygen sensors, Vehicle";
+    const auto names = [&live]() {
+        QStringList n;
+        for (int r = 0; r < live.rowCount(); ++r) {
+            n << live.data(live.index(r, 0), SignalListModel::NameRole)
+                     .toString();
+        }
+        return n;
+    };
+
+    live.filter()->setText(QStringLiteral("temp"));
+    EXPECT_EQ(names(), (QStringList{QStringLiteral("Coolant Temp"),
+                                    QStringLiteral("Intake Air Temp"),
+                                    QStringLiteral("Engine Oil Temp")}));
+    live.filter()->toggleGroup(ECUIO_SIGNAL_GROUP_AIR);
+    EXPECT_EQ(names(), QStringList{QStringLiteral("Intake Air Temp")});
+    live.filter()->clear();
+    EXPECT_EQ(live.rowCount(), rows);
+
+    live.filter()->setPlottedOnly(true);
+    EXPECT_EQ(live.rowCount(), rows) << "the mock plots every row";
+    model.toggleSubscribed(0); /* RPM */
+    EXPECT_EQ(live.rowCount(), rows - 1);
+    EXPECT_FALSE(names().contains(QStringLiteral("RPM")));
+    EXPECT_EQ(live.shownCount(), rows) << "the count before the filter";
+    live.filter()->clear();
+
+    /* obd2's Diagnostics rows hidden by core: no choice, not counted */
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> diag;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].group == ECUIO_SIGNAL_GROUP_DIAGNOSTICS) {
+            diag.push_back(set->defs[i].id);
+        }
+    }
+    ASSERT_FALSE(diag.empty());
+    EXPECT_TRUE(live.groups().contains(QVariant(8)));
+    model.applyAbsent(diag);
+    EXPECT_FALSE(live.groups().contains(QVariant(8)));
+    EXPECT_EQ(live.shownCount(),
+              model.rowCount() - static_cast<int>(diag.size()));
+}
+
 /* Live leaves out the rows core judges unsupported (ADR-0039 section 6;
  * the rule is PidSupportTest's): on the first vehicle's bitmaps (00, 20
  * and 40 answered), 0x5C among them; a PID past an answered range, and a
@@ -4739,9 +4968,11 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
 /* Settings' recordings list: a recording replays under the profile it
  * was recorded with, so a tap leaves nothing to type */
 /* A sleep while connected (ADR-0033 section 6) is one activity line saying how
- * long, in the recording's events.log too; a rise under a second, one
- * before the connect, or one after the disconnect says nothing. No runner
- * can sleep, so the seam adds to the count the tick reads */
+ * long; a rise under a second, one before the connect, or one after the
+ * disconnect says nothing. The line is never a note in the recording:
+ * core writes its own asleep line (ADR-0049 section 2,
+ * RecorderTest.ASleepIsAnAsleepLineWithItsLength). No runner can sleep,
+ * so the seam adds to the count the bridge's tick reads */
 TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
 {
     QTemporaryDir root;
@@ -4781,9 +5012,11 @@ TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
     const QList<QByteArray> events =
         fileLines(root.path() + QStringLiteral("/") + folders.first() +
                   QStringLiteral("/events.log"));
-    EXPECT_TRUE(std::any_of(
+    ASSERT_FALSE(events.isEmpty());
+    EXPECT_TRUE(std::none_of(
         events.cbegin(), events.cend(),
-        [&line](const QByteArray& e) { return e.endsWith(line.toUtf8()); }));
+        [](const QByteArray& e) { return e.contains("Asleep for"); }))
+        << "the activity line is no note";
 }
 
 /* A replay with faults injected (ADR-0041) still finishes, and says what
@@ -4917,6 +5150,8 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_EQ(field(0, "uri"),
               at + "20261028-143012-2 Daily driver?profile=raw");
     EXPECT_EQ(field(0, "source"), "") << "no events.log";
+    EXPECT_EQ(field(0, "folder"),
+              root.path().toStdString() + "/20261028-143012-2 Daily driver");
     EXPECT_EQ(field(1, "title"), "2026-10-28 14:30:12 \xC2\xB7 Daily driver");
     EXPECT_EQ(field(1, "source"),
               "elm327://192.168.4.1:23?profile=raw&poll=0x0C");
@@ -5119,7 +5354,7 @@ TEST(BridgeTest, RecentRecordingsReplayUnderTheirOwnProfile)
 namespace {
 
 /* What core's values callback delivers, as signals.csv rows: name and
- * value, formatted as SessionRecorder writes them */
+ * value, formatted as core's recorder writes them */
 struct CoreRows {
     QHash<uint16_t, QByteArray> names;
     std::vector<std::pair<QByteArray, QByteArray>> rows;
@@ -5301,11 +5536,11 @@ TEST(BridgeTest, TimingTextNamesTheRequestsAndTheClock)
 #ifdef _WIN32
 
 /* A recording of a requesting session holds latency.csv (ADR-0042
- * section 3): its header is ECUIO_TIMING_COLUMNS, then the snapshots,
- * each a block of the rows that changed under one t_s, the figures
- * cumulative, so each request's answers never fall from one row of it
- * to the next; the intervals on the fake's own clock; the activity log
- * names the timing at the disconnect */
+ * section 3), which core writes (ADR-0049): its header is
+ * ECUIO_TIMING_COLUMNS, then the worker's final snapshot at the
+ * teardown, a row per request on the engine's ECU, the intervals on the
+ * fake's own clock (core's 10 s snapshots, RecorderTest); the activity
+ * log names the timing at the disconnect */
 TEST(BridgeTest, ARecordingKeepsReplyTimingsSnapshots)
 {
     FakeHooks hooks;
@@ -5315,7 +5550,6 @@ TEST(BridgeTest, ARecordingKeepsReplyTimingsSnapshots)
     SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
-    bridge.setTimingEveryForTesting(1000 * 1000);
     QStringList log;
     QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
@@ -5343,12 +5577,9 @@ TEST(BridgeTest, ARecordingKeepsReplyTimingsSnapshots)
         snapshots.insert(cols[0]);
         EXPECT_EQ(cols[1], QByteArray("0x7E8"));
         EXPECT_EQ(cols.last(), QByteArray("adapter"));
-        const qint64 n = cols[3].toLongLong();
-        EXPECT_GE(n, answered.value(cols[2], 0))
-            << "cumulative: " << cols[2].toStdString();
-        answered[cols[2]] = n;
+        answered[cols[2]] = cols[3].toLongLong();
     }
-    EXPECT_GE(snapshots.size(), 3) << "every second, then the last";
+    EXPECT_EQ(snapshots.size(), 1) << "the last, at the teardown";
     EXPECT_GT(answered.size(), 10);
     bool named = false;
     for (const QString& line : log) {
@@ -5516,7 +5747,8 @@ std::vector<double> recordedRpm(const QString& root)
  * handles, so a frame dropped at the in-flight cap keeps its values
  * (ADR-0024 section 7): with the event loop held while a replay floods in,
  * thousands of frames drop, yet the recording holds every row's RPM in
- * order and the row shows the last one */
+ * order and the row shows the last one. Core's recording (ADR-0049)
+ * holds the dropped frames too, and its last note counts them */
 TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)
 {
     constexpr int kRows = 5000;
@@ -5550,62 +5782,33 @@ TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)
     EXPECT_EQ(model->data(model->index(rpmRow, 0), SignalListModel::ValueRole).toDouble(),
               1000.0 + kRows - 1)
         << "the last row's value, though its frame may have dropped";
+    const int dropped = bridge.droppedFrames();
     ASSERT_TRUE(disconnectAndWait(bridge));
     const std::vector<double> rpm = recordedRpm(root.path());
     ASSERT_EQ(rpm.size(), static_cast<size_t>(kRows)) << "every row's value recorded";
     for (int i = 0; i < kRows; ++i) {
         ASSERT_EQ(rpm[static_cast<size_t>(i)], 1000.0 + i) << "row " << i;
     }
-}
-
-/* A disconnect drains the window it ends: a value staged just before
- * it, with no tick between, reaches the recording */
-TEST(BridgeTest, ValuesStagedAtDisconnectAreRecorded)
-{
-    static ecuio_signal_def_t defs[1] = {};
-    defs[0] = {};
-    defs[0].id = 1;
-    defs[0].kind = ECUIO_VALUE_UINT;
-    defs[0].message_id = 0x123u;   /* not the mock's 0x0C0 */
-    defs[0].bit_length = 8;
-    defs[0].scale = 1.0;
-    strncpy(defs[0].name, "Last", sizeof(defs[0].name) - 1);
-    static ecuio_signal_set_t set = {};
-    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
-    set.count = 1;
-    set.defs = defs;
-    ASSERT_EQ(ecuio_profile_register("test-last-window", &set, nullptr), ECUIO_OK);
-
-    QTemporaryDir root;
-    ASSERT_TRUE(root.isValid());
-    SessionBridge bridge;
-    bridge.setRecordingsRootForTesting(root.path());
-    bridge.setRecording(true);
-    ASSERT_TRUE(bridge.connectSession("mock://last?profile=test-last-window").isEmpty());
-    spinLoop(150);
-    ecuio_value_t value = {};
-    value.signal_id = 1;
-    value.kind = ECUIO_VALUE_UINT;
-    value.value = 42.0;
-    ecuio_value_batch_t batch = {};
-    batch.arbitration_id = 0x123;
-    batch.count = 1;
-    batch.values = &value;
-    bridge.dispatchValuesForTesting(batch);
-    ASSERT_TRUE(disconnectAndWait(bridge));   // no tick since the value
-
+    // Core records the frames the bridge dropped too (ADR-0049), and the
+    // recording's last note says how many the Log page skipped
     const QStringList folders = recordingFolders(root.path());
     ASSERT_EQ(folders.size(), 1);
-    const QByteArray csv = readFile(root.path() + QStringLiteral("/") + folders.first() +
-                                    QStringLiteral("/signals.csv"));
-    EXPECT_TRUE(csv.contains(",Last,42,")) << csv.toStdString();
-    EXPECT_EQ(ecuio_profile_unregister("test-last-window"), ECUIO_OK);
+    const QString dir = root.path() + QStringLiteral("/") + folders.first();
+    EXPECT_EQ(fileLines(dir + QStringLiteral("/frames.csv")).size() - 1, kRows)
+        << "every frame, dropped by the bridge or not";
+    const QByteArray events = readFile(dir + QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains(
+        QStringLiteral(
+            "  note  the Log page skipped %1 frames; the recording has them")
+            .arg(dropped)
+            .toUtf8()))
+        << events.toStdString();
 }
 
 /* One window holds a bounded number of samples, so the worker never
- * allocates: past the limit, the recording misses them, the activity
- * log says so once and gives the count at disconnect, and the row still
- * shows the newest value */
+ * allocates: past the limit a value goes untimed and the Delivery line
+ * counts it, while the row still shows the newest value and the
+ * recording, which core writes (ADR-0049), holds every one */
 TEST(BridgeTest, ValuesPastTheWindowsLimitAreCountedAndLogged)
 {
     constexpr int kRows = 3000;
@@ -5641,22 +5844,18 @@ TEST(BridgeTest, ValuesPastTheWindowsLimitAreCountedAndLogged)
     }
     EXPECT_EQ(shown, 1000.0 + kRows - 1) << "the newest value, past the limit";
     ASSERT_TRUE(disconnectAndWait(bridge));
+    const SessionBridge::DeliveryStats s = bridge.deliveryStats();
     const std::vector<double> rpm = recordedRpm(root.path());
-    EXPECT_LT(rpm.size(), static_cast<size_t>(kRows));
-    EXPECT_GE(rpm.size(), static_cast<size_t>(kLimit));
-    int warned = 0;
-    QString total;
-    for (const QString& line : log) {
-        if (line.startsWith(QStringLiteral("Values are arriving faster than 100 in 100 ms")))
-            ++warned;
-        if (line.startsWith(QStringLiteral("Values the recording missed: ")))
-            total = line;
+    ASSERT_EQ(rpm.size(), static_cast<size_t>(kRows)) << "every value recorded";
+    for (int i = 0; i < kRows; ++i) {
+        ASSERT_EQ(rpm[static_cast<size_t>(i)], 1000.0 + i) << "row " << i;
     }
-    EXPECT_EQ(warned, 1);
-    const qint64 missed = static_cast<qint64>(kRows) - static_cast<qint64>(rpm.size());
-    EXPECT_EQ(total, QStringLiteral("Values the recording missed: %1, past 100 in one "
-                                    "100 ms window").arg(missed))
-        << total.toStdString();
+    EXPECT_GE(s.valuesMissed, static_cast<quint64>(kRows - 2 * kLimit));
+    const QStringList delivery = log.filter(QStringLiteral("Delivery: "));
+    ASSERT_EQ(delivery.size(), 1) << log.join('\n').toStdString();
+    EXPECT_TRUE(delivery.first().contains(
+        QStringLiteral("(%1 past the staging's limit").arg(s.valuesMissed)))
+        << delivery.first().toStdString();
 }
 
 namespace {
@@ -5833,6 +6032,11 @@ TEST(BridgeTest, SessionInfoTextDescribesAReplay)
     EXPECT_EQ(SessionBridge::sessionInfoText(info).toStdString(),
               "Session: replay of a recording, 7194 frames over 275.2 s at "
               "full speed; "
+              "profile obd2");
+    info.replay_rows_torn = 1;
+    EXPECT_EQ(SessionBridge::sessionInfoText(info).toStdString(),
+              "Session: replay of a recording, 7194 frames over 275.2 s at "
+              "full speed, its last row cut short and left out; "
               "profile obd2");
 }
 

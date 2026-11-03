@@ -29,6 +29,19 @@ typedef enum {
 #define ECUIO_BYTE_ORDER_LE 0u   /* Intel: LSB first, bit fields at any offset */
 #define ECUIO_BYTE_ORDER_BE 1u   /* Motorola: MSB first, whole bytes only */
 
+/* The part of the car a signal reads, for finding it among many
+ * (ADR-0050). Values are append-only; ecuio_signal_group_name names
+ * each. */
+#define ECUIO_SIGNAL_GROUP_OTHER        0u  /* not placed */
+#define ECUIO_SIGNAL_GROUP_ENGINE       1u
+#define ECUIO_SIGNAL_GROUP_AIR          2u  /* intake, throttle, pedal */
+#define ECUIO_SIGNAL_GROUP_FUEL         3u
+#define ECUIO_SIGNAL_GROUP_OXYGEN       4u  /* O2 sensors */
+#define ECUIO_SIGNAL_GROUP_EMISSIONS    5u  /* EGR, evap, catalyst */
+#define ECUIO_SIGNAL_GROUP_VEHICLE      6u  /* road speed, distance */
+#define ECUIO_SIGNAL_GROUP_ELECTRICAL   7u
+#define ECUIO_SIGNAL_GROUP_DIAGNOSTICS  8u  /* the MIL, counts since a clear */
+
 /* One signal, in three blocks: which frames carry it, how its bytes
  * become a value, and how the value is shown. Every byte is a named
  * field, so the compiler adds no padding. Reserved bytes and flags
@@ -69,7 +82,10 @@ typedef struct ecuio_signal_def {
                                      def's place, 1 first, among those a
                                      UI plots when a session starts
                                      (ADR-0039 section 8) */
-    uint8_t  display_reserved[2]; /* zero */
+    uint8_t  group;               /* ECUIO_SIGNAL_GROUP_*: the part of
+                                     the car it reads (ADR-0050); any
+                                     value, 0 Other */
+    uint8_t  display_reserved[1]; /* zero */
 
     uint32_t flags;               /* none defined; zero */
     uint32_t reserved[6];         /* zero; ADR-0016 earmarks this room */
@@ -86,6 +102,7 @@ static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length 
 static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, group) == 90, "def group offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -96,6 +113,7 @@ _Static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length
 _Static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, group) == 90, "def group offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #endif
@@ -327,6 +345,11 @@ _Static_assert(offsetof(ecuio_display_value_t, decimal_places) == 24, "display d
 int ecuio_display_convert(const char* unit, uint8_t decimal_places,
                           double value, uint32_t units,
                           ecuio_display_value_t* out);
+
+/* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
+ * static and never NULL: "" for a code this core doesn't know, which a
+ * UI shows as Other (ADR-0050). */
+const char* ecuio_signal_group_name(uint32_t group);
 
 #ifdef __cplusplus
 }

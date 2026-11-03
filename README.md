@@ -118,9 +118,11 @@ a quarter mile off launch control on a warm loop.*
   relay its paired Bluetooth adapter to a computer's `havne-cli` over
   USB ([ADR-0047](docs/adr/0047-adapter-relay.md)).
 - **Recording and replay:** every frame, value and event of a connect;
+  the Recordings page views one, two runs overlaid and aligned, and
   `replay://` plays it back at its own pace or faster, through the same
   decoding, with faults injected on request
-  ([ADR-0023](docs/adr/0023-replay-transport.md)).
+  ([ADR-0023](docs/adr/0023-replay-transport.md),
+  [ADR-0049](docs/adr/0049-recordings-in-core.md)).
 - **A simulated vehicle:** a modeled car (gearing, airflow, tire slip,
   coolant and oil heat) drives a cold start, pulls onto the limiter, a
   cruise and a quarter mile, its readings consistent with each other.

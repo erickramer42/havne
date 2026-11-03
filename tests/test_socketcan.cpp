@@ -605,6 +605,27 @@ TEST(SocketCanTest, AWallClockStepGivesWayToTheHostsTime)
     EXPECT_EQ(socketcan_clock_step(c, 0, 40000), 32000u);
 }
 
+/* A Flow Control frame's own echo and the Consecutive Frames it brought
+ * on, read after an error frame stamped later, across a 200 ms stall: a
+ * wall-clock step's host delta would put them 200 ms late, past ISO-TP's
+ * N_Cr (SocketCanRequestTest.AReplyOnTimeSurvivesAWorkerHeldUpMidMessage) */
+TEST(SocketCanTest, AFrameReadOutOfOrderTakesTheNewestTime)
+{
+    socketcan_clock c;
+    const uint64_t k0 = 1700000000000000000ull;
+    EXPECT_EQ(socketcan_clock_step(c, k0, 5000), 5000u);
+    EXPECT_EQ(socketcan_clock_step(c, k0 + 30000000, 36000), 35000u);
+    /* Stamped before the frame above, read after the stall */
+    EXPECT_EQ(socketcan_clock_step(c, k0 + 2000000, 236000), 35000u);
+    EXPECT_EQ(socketcan_clock_step(c, k0 + 12000000, 236010), 35000u);
+    /* The spacing runs from the newest stamp, not the one read last */
+    EXPECT_EQ(socketcan_clock_step(c, k0 + 40000000, 236020), 45000u);
+    EXPECT_EQ(c.host_steps, 0u);
+    /* Further back than any reordering: a step, the host's delta */
+    EXPECT_EQ(socketcan_clock_step(c, k0 - 200000000, 236030), 45010u);
+    EXPECT_EQ(c.host_steps, 1u);
+}
+
 TEST(SocketCanTest, TheClockNeverDecreases)
 {
     socketcan_clock c;

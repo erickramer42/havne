@@ -1012,3 +1012,234 @@ run, recorded against unrecorded, as section 9 says, with its CI gate.
 Here the bench checks a bound against regressions instead: recording
 adds at most 75 ns a frame. A busy loop of 200 turns on every recorded
 frame fails it (107 and 142 ns in two runs).
+
+## Appendix: the bridge's cost, measured (2026-11-03)
+
+Step 2 judges section 9's 10% on the bridge's looping run:
+`bench_bridge --record` replays the engine-start fixture under `obd2`
+through a `SessionBridge` at full speed, five runs of 3 s each way,
+recorded and unrecorded alternated, with the process held to one
+logical processor on each of three physical cores. One run (Release):
+
+| Run | Worker frames a second, median (lowest to highest) |
+|---|---|
+| Not recorded | 534,618 (515,656 to 542,733) |
+| Recorded | 514,763 (495,563 to 556,927) |
+
+The recorded runs went at 0.96 of the unrecorded rate, so the 10% is
+met, and `--record` fails below 0.9. At this rate, over a hundred times
+a saturated classic bus's, the writer sharing those three cores fell
+behind and 22,125 records were dropped and counted. The core-side runs
+of the appendix above follow in the same bench, with their bound of
+75 ns a frame.
+
+CI's gate is `--load`'s: its looping run again with a recorder
+attached, at least 0.8 of the unrecorded run in the same bench. It read
+0.96 on Windows (471,840 frames a second against 493,534) and 1.01
+under WSL, with no record dropped in either. The recorded pass at 100x
+writes all 7,074 frames and 7,061 values with none dropped, on both.
+
+**Note (2026-11-03): the gate is 0.7, the faster of two runs each.**
+The appendix "CI's recording gate" below has the runners' figures.
+
+## Appendix: the reader and `havne-cli view` (2026-11-03)
+
+Step 3 is built: the reader (section 5, `core/src/recording_reader.cpp`
+and `core/src/recording_rows.h`), its fuzz target (`fuzz_recording`,
+the rows and a whole folder), a torn last row dropped and counted in
+the reader and in `replay://` (section 7), and `havne-cli view`, whose
+lines are ADR-0031's appendix of 2026-11-03.
+
+**The open, measured.** `bench_recording` (`tests/bench_recording.cpp`,
+not in ctest) writes section 9's hour, the replay fixture's session
+under `obd2` laid down twelve times 300 s apart, and a dense hour of 50
+number signals at 10 Hz each, then opens each five times. It builds
+core-only for Android with the NDK, so the test phone (Android 16) runs
+it from a shell, its scratch folder first in `/data/local/tmp`, then on
+shared storage, where the app keeps its recordings. Medians:
+
+| Hour | Rows | `signals.csv` | Laptop (MSVC) | Laptop (GCC, WSL) | Test phone | Test phone, shared storage |
+|---|---|---|---|---|---|---|
+| The fixture's, 130 signals | 84,732 | 2.8 MB | 8.9 ms | 5.9 ms | 9.1 ms | 10.0 ms |
+| Dense, 50 signals at 10 Hz | 1,800,000 | 50.2 MB | 167 ms | 114 ms | 204 ms | 213 ms |
+
+Each reader's tables came to section 5's bound to the byte (1.04 MB
+and 5.82 MB), since every second of both hours has samples. Every open
+found the files in the system's cache, the bench having just written
+them; a cold open is unmeasured (the phone needs root to drop its
+cache). Section 9's 2 s and 10 s are met by two orders of magnitude, so
+the per-second index stays in memory, and the alternative of an index
+file isn't needed.
+
+**Alignment to the second at wide zoom.** A column of a second or more
+combines whole seconds' summaries, so two recordings aligned on events
+at different fractions of a second agree there to the second, not
+exactly; narrower columns read the raw rows and agree exactly. The
+viewer zoomed out draws columns wider than a second, where that
+difference is less than a column.
+
+**An axis that starts before a recording.** The reader's times start at
+the recording's own zero, so an aligned axis that starts earlier can't
+be one query. `havne-cli view` queries the column across the
+recording's start on its own: exactly to the split in raw columns, and
+to its last whole second in wide ones, the second across the split
+going to the next column by the reader's rule. No sample is lost or
+counted twice (`CliViewRunTest.ColumnsCountEverySampleOnce`, over
+alignments and zooms from one column to 9,999); the viewer has the same
+case to meet in step 5.
+
+## Appendix: the frames check and `havne-cli info` (2026-11-03)
+
+Step 4 is built: the check (section 6, `core/src/recording_check.h` and
+`core/src/recording_check.cpp`), `fuzz_recording`'s folders checked as
+well as opened, and `havne-cli info`, whose lines are ADR-0031's
+appendix of 2026-11-03, info. Four things differ from section 6 as
+written:
+
+- **Findings come as they settle, not in time order.** Each is passed
+  at the frame or `events.log` line that ends it, so a run (a rate
+  drop, overflows in a row, a first frame left open) comes after
+  anything that began within it; `at_us` still places it. Time order
+  would hold every finding until each ID's open run ended, and the
+  check's memory would then follow what's wrong with a recording, not
+  its IDs. The viewer places findings by `at_us`.
+- **Two more kinds.** `ECUIO_CHECK_LINK` (6) is each `link` line in
+  `events.log`, its state in `code` (the room section 6 calls
+  `reserved0`, an `ecuio_status_t`) and its episodes in `count`;
+  `ECUIO_CHECK_ASLEEP` (7) is each sleep, over the stretch its line
+  covers. A finding on a 29-bit ID carries
+  `ECUIO_CHECK_FINDING_EXTENDED`, and the summary says why ISO-TP
+  sequences went unchecked: `ECUIO_CHECK_ISOTP_FLAGS_UNKNOWN` (the
+  header has no `frame flags  complete` line) or
+  `ECUIO_CHECK_ISOTP_NO_WIRE` (no frame on those IDs came as it crossed
+  the bus).
+- **ISO-TP only on ISO 15765-4's IDs:** 0x7DF, 0x7E0 to 0x7EF, and the
+  29-bit 0x18DAxxxx and 0x18DB33F1. Another ID's first byte isn't a
+  protocol control byte, and a broadcast frame starting 0x2N would read
+  as a consecutive frame.
+- **The defaults are public:** `ECUIO_CHECK_DEFAULT_GAP_US`,
+  `ECUIO_CHECK_DEFAULT_RATE_DROP_X100` and
+  `ECUIO_CHECK_DEFAULT_SETTLE_US` in `ecuio/recording.h`, so a front end
+  can say what it checked against.
+
+**The defaults, measured.** `havne-cli info` ran over the car
+recordings on hand: 16 made through J2534 (28 minutes), 50 through an
+ELM327 adapter on the test phone (152 minutes), and the replay fixture
+(a copy of one of the J2534 ones with its identifying frames taken out,
+5 minutes). Every one is in the older format, which says nothing of its
+frame flags, so the ISO-TP kind was skipped in all of them; a car
+recording of wire frames is still to come. Rate drops by the multiple,
+with the recordings that had any:
+
+| Multiple | J2534 | ELM327 | The replay fixture |
+|---|---|---|---|
+| 4x | 45, in 3 of 16 | 1,360, in 36 of 50 | 36 |
+| 6x | 18, in 3 | 259, in 20 | 16 |
+| 8x | 7, in 1 | 174, in 10 | 7 |
+| 10x | 4, in 1 | 155, in 4 | 4 |
+| 20x | none | 4, in 3 | none |
+
+At 4x most of them are the request loop's own rhythm. A reply ID's
+interval follows the requests, and a one-shot request, a slow reply or
+a reconnect stretches it 100 to 400 ms past a median of 20 to 40 ms.
+What's left at 10x are stalls: 151 of the ELM327 drops come from one
+recording whose requests stalled for about 0.4 s again and again, the
+others are single stalls of 0.35 to 1 s, and the fixture's 4 are about
+0.56 s against its 39 ms median. **The rate drop's default is 10x.**
+
+Gaps over 1 s: 3 in the J2534 recordings (1.2 to 31 s) and 20 in the
+ELM327 ones (1.8 to 305 s), each a stretch with no frame at all; at
+2 s, 2 and 18. **The gap stays 1 s.** No recording has a late ID at any
+settle time from 2 s to 30 s, so nothing sets it, and **it stays 2 s**.
+
+## Appendix: CI's recording gate (2026-11-03)
+
+On GitHub's shared runners, one pair of looping runs (unrecorded, then
+recorded) read 0.80 to 0.82 on Linux in each of five dev runs where the
+writer kept up, and 0.89 in one where it fell behind and dropped
+records, which costs the worker less. One run read 0.76 and failed the
+gate of 0.8 with no change to the recorder. Windows read 0.87 to 0.93.
+So the gate has two changes. `--load` runs the looping pair twice,
+unrecorded and recorded alternated, and compares the faster of each,
+since a runner's noise only ever slows a run. And the floor is 0.7,
+which still fails a recorder that costs the worker twice what it does
+on Linux. The 10% bar is judged as before, on the dev machine by
+`--record`.
+
+## Appendix: the viewer (2026-11-03)
+
+Step 5 is built: the app's Recordings page (`app/qml/RecordingsPage.qml`)
+on the reader and the check, through `app/recordingview.h`, with Live's
+chart shared as `app/qml/StripChart.qml`.
+
+- **The page.** The recordings list moves there from Settings, each
+  row's Replay still filling Settings' field. Open reads the recording
+  off the GUI thread (the reader's open, then the frames check, with
+  progress and a cancel), then shows its signals, the ranked ones
+  plotted as Live plots them, and the chart over the part in view: drag
+  to pan, the wheel or a pinch to zoom, a tap for the values in force
+  then. The markers and the check's findings sit on the time axis, and
+  each listed finding centers the view on itself.
+- **Columns.** The chart asks for a column every two pixels. A column
+  narrower than a second reads raw rows, and a dense recording zoomed
+  out a little reads a great many: a 50-signal 10 Hz hour panned at a
+  tenth of its length is about 180,000 rows a frame, which held the
+  laptop to 30 frames a second. Past 20,000 rows in view
+  (`rawRowsPerFrame`), columns stay a second wide and come from the
+  summaries.
+- **The frame rate.** Section 10 asks for 60 frames a second panning
+  and pinching with four signals at the viewer's full width, on the
+  test phone and the laptop, and a GPU path if the Canvas can't. A
+  developer-mode frame test on the page moves the view every frame for
+  six seconds, panning for half and zooming in and out for half, with
+  four signals plotted, and counts the charts drawn and the frames the
+  window shows. Its recordings are `bench_recording --keep`'s two
+  hours. The Canvas meets the bar drawn on the GUI thread
+  (`Canvas.Immediate`), without antialiasing while the view moves and
+  once more with it when the view rests, 150 ms after its last change.
+  Charts drawn a second:
+
+  | Hour | Laptop, 1020 px, 144 Hz screen | Test phone, 344 px, 120 Hz screen |
+  |---|---|---|
+  | The fixture's | 141 | 61-62 |
+  | Dense, 50 signals at 10 Hz | 124 | 62 |
+
+  The page's frame callback ran about 62 times a second on the phone,
+  so 62 is the ceiling there; its window showed 92 to 117 frames a
+  second. Antialiasing was nearly all of a crowded chart's cost: on the
+  phone the dense hour drew 21 charts a second with it and 62 without,
+  and half the resolution instead reached 52. `Canvas.Threaded`, tried
+  first, counted 144 a second on the laptop but presented earlier
+  paints: once the view stopped, a chart it had left stayed up until
+  later frames, on both machines. Drawn on the GUI thread, each chart
+  is in the next frame, so the charts drawn are the charts seen. No GPU
+  path is needed.
+- **Two runs overlaid.** A second recording opens beside the first,
+  its signals of the same names drawn dashed in the first's colors on
+  the same value scale. They line up as `havne-cli view --align-on`
+  lines them up: on their starts, their UTC starts, a marker, or a
+  signal rising or falling through a level after the hysteresis, the
+  level typed in the units on screen and turned back into the recorded
+  ones (every display conversion is a rising line). The axis is the
+  first recording's time, over both, so it runs below zero when the
+  second starts earlier. A view from before a recording's start reads
+  its columns as `havne-cli view` does (the appendix "the reader and
+  `havne-cli view`"): the column across the start is a query of its
+  own, ended at its last whole second when columns are a second or
+  wider, so no sample is lost or counted twice
+  (`RecordingViewTest.AWindowFromBeforeTheStartCountsEverySampleOnce`).
+  The two pulls of `tests/fixtures/recording/` align at the times the
+  CLI's goldens give.
+- **Marks.** While a session records, the header's Mark writes
+  "Mark N" to `markers.csv` (section 4), N counting the recording's
+  marks, as a line typed into `havne-cli stream --record` does, so two
+  runs marked at the same moment line up on "Mark 1".
+
+## Appendix: the signal line's group (2026-11-03)
+
+> **Amended 2026-11-03 ([ADR-0050](0050-finding-a-signal.md)):**
+> section 4's `signal` line ends with the def's group, a sixth field
+> after the plot rank, and the reader fills `group` in
+> `ecuio_recording_signal_t` from it (the first of its two reserved
+> bytes, offset 54). A line of five fields, a recording from before
+> groups, opens with every signal under Other.

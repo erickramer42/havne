@@ -147,6 +147,9 @@ typedef enum {
     ECUIO_ERR_RECORDING_FAILED = 18,  /* a recording's folder or files
                                          couldn't be made, or a write to
                                          them failed (ADR-0049, recording.h) */
+    ECUIO_ERR_CANCELED = 19,          /* the caller's progress callback
+                                         stopped a long call (a recording's
+                                         open, ADR-0049) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;
@@ -361,19 +364,22 @@ typedef struct ecuio_session_info {
     uint32_t replay_frames;
     uint32_t replay_span_ms;
     uint32_t replay_speed_milli;
-    uint32_t reserved[13];    /* zero; ABI growth space */
+    /* 1 when the recording's last row had no newline and was left out (a
+     * write cut short, ADR-0049 section 7); 0 otherwise */
+    uint32_t replay_rows_torn;
+    uint32_t reserved[12];    /* zero; ABI growth space */
 } ecuio_session_info_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
-static_assert(offsetof(ecuio_session_info_t, reserved) == 380, "session info reserved offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, reserved) == 384, "session info reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
-_Static_assert(offsetof(ecuio_session_info_t, reserved) == 380, "session info reserved offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, reserved) == 384, "session info reserved offset is ABI");
 #endif
 
 /* Copies what the session runs on into *out_info. Filled once, while

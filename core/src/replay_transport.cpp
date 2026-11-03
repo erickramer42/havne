@@ -11,7 +11,7 @@
 //          source's frame flags line passed on
 //          (RecorderTest.AReplayPassesOnItsSourcesFrameFlagsLine);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
-//          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
+//          round trip through core's recorder), .ReplayThatStopsEarlySaysSo;
 //          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues;
 //          CoreTest.ReplayFaults* (?faults= and ?seed=: each kind's
 //          effect, its count and the same faults from the same seed),
@@ -20,7 +20,8 @@
 //
 // replay:// (ADR-0023): a recording's frames.csv (ADR-0017) played back
 // through the frame API. Attach reads the whole file once and refuses a
-// bad row with its line number; the worker reads it again a row at a time
+// bad row with its line number, but drops a last row with no newline and
+// counts it (a write cut short, ADR-0049 section 7); the worker reads it again a row at a time
 // and sends each frame when the recording's own session time, divided by
 // the speed, has passed. Passive: no requests and no link health, except
 // that a file changed since attach stops playback with
@@ -105,12 +106,13 @@ std::string source_frame_flags(const std::string& frames_csv)
     return found;
 }
 
-/* The whole file, checked: every row parses. Gives the row count and the
- * session time of the last row. Reads through the worker's own line buffer
- * and frame, which attach has made. */
+/* The whole file, checked: every row parses, a torn last one aside (left
+ * out and counted in *torn). Gives the row count and the session time of
+ * the last row. Reads through the worker's own line buffer and frame,
+ * which attach has made. */
 ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
                           ecuio_frame_t* frame, uint64_t* rows,
-                          uint64_t* span_us)
+                          uint64_t* span_us, uint32_t* torn)
 {
     FILE* f = path.open();
     if (f == nullptr) {
@@ -124,8 +126,13 @@ ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
     row prev, cur;
     uint64_t n = 0, span = 0, line_no = 1;
     bool too_long = false;
-    while (read_line(f, buf, &too_long)) {
+    bool cut = false;
+    while (read_line(f, buf, &too_long, &cut)) {
         ++line_no;
+        if (cut) {
+            *torn = 1;
+            break;
+        }
         const char* why = nullptr;
         if (too_long) {
             why = "the line is longer than any frame's row";
@@ -254,14 +261,15 @@ void replay_worker(ecuio_replay_transport* t)
         }
         row prev, cur;
         uint64_t pass_us = 0, n = 0;
-        bool first = true, too_long = false;
+        bool first = true, too_long = false, cut = false;
         /* Attach's rows and no more: rows added since (a recording
-         * still being written) wait for another session */
-        while (n < t->rows && read_line(f, buf, &too_long)) {
+         * still being written) wait for another session. A row attach
+         * read whole that has lost its newline since is a changed file. */
+        while (n < t->rows && read_line(f, buf, &too_long, &cut)) {
             ++n;
             const char* why = nullptr;
             *frame = ecuio_frame_t{};
-            if (too_long || !parse_row(buf.data(), &cur, frame, &why)) {
+            if (too_long || cut || !parse_row(buf.data(), &cur, frame, &why)) {
                 std::fclose(f);
                 stop_early(t);
                 return;
@@ -433,6 +441,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
     /* Every allocation from here is inside the try: a bad_alloc becomes
      * OUT_OF_MEMORY, never an exception out of ecuio_session_create */
     uint64_t rows = 0, span_us = 0;
+    uint32_t torn = 0;
     try {
         std::string path(body, body_len);
         if (!is_absolute(path)) {
@@ -456,7 +465,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         impl->line.resize(kLineMax + 2);
         impl->frame.reset(new ecuio_frame_t());
         const ecuio_status_t checked = check_file(
-            impl->path, impl->line, impl->frame.get(), &rows, &span_us);
+            impl->path, impl->line, impl->frame.get(), &rows, &span_us, &torn);
         if (checked != ECUIO_OK) {
             return checked;
         }
@@ -486,6 +495,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
     session->info.replay_span_ms =
         span_ms > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(span_ms);
     session->info.replay_speed_milli = speed;
+    session->info.replay_rows_torn = torn;
     if (loop) {
         session->info.flags |= ECUIO_SESSION_INFO_REPLAY_LOOP;
     }

@@ -11,6 +11,8 @@
 //          the VIN core reads, CoreTest.TheVinIsService09sThenF190s;
 //          BridgeTest.UnplottedNames*, ...), the default
 //          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
+//          a mark in a recording (ADR-0049 section 4,
+//          BridgeTest.AMarkGoesIntoTheRecording);
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
 //          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
 //          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
@@ -26,11 +28,14 @@
 #include <QSortFilterProxyModel>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
 #include <QUrl>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -40,8 +45,22 @@
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
+#include "ecuio/recording.h"
 #include "latencystats.h"
-#include "sessionrecorder.h"
+
+// ecuio_clock_us as a chrono clock: the bridge stamps a frame's and a
+// value's arrival with it, for the delivery figures
+struct HostClock {
+    using duration = std::chrono::microseconds;
+    using rep = duration::rep;
+    using period = duration::period;
+    using time_point = std::chrono::time_point<HostClock>;
+    static constexpr bool is_steady = true;
+    static time_point now() noexcept
+    {
+        return time_point(duration(static_cast<rep>(ecuio_clock_us())));
+    }
+};
 
 // The Log page's frames, newest first by default. The last MaxFrames
 // in a fixed ring of plain rows: each frame overwrites the oldest once
@@ -192,12 +211,15 @@ public:
                          * a window's newest value still counts.
                          * Notified with ValueRole. */
         WindowLowRole,
-        RowRole,        /* the row in this model, which toggleSubscribed
+        RowRole,    /* the row in this model, which toggleSubscribed
                          * takes and chartData's `row` names, whatever
                          * row a filtered view shows it at */
-        HiddenRole      /* core reports it unsupported or absent
+        HiddenRole, /* core reports it unsupported or absent
                          * (applyUnsupported, applyAbsent): Live
                          * leaves the row out */
+        GroupRole   /* the def's group (ECUIO_SIGNAL_GROUP_*,
+                         * ADR-0050), for Live's filter. Fixed per
+                         * signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -307,6 +329,7 @@ private:
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
+        uint8_t group = 0;        // the def's group (ADR-0050)
         // The user's tick or untick; Default follows plotDefault
         PlotChoice choice = PlotChoice::Default;
         bool plotDefault = false; // judgePlotted's default for the row
@@ -353,15 +376,38 @@ private:
 // Live's list: SignalListModel without its hidden rows (ADR-0039 section 6).
 // The Dashboard reads the whole model, so a gauge keeps its row either
 // way; a row keeps its model row (RowRole) for its plot box and color.
+// Its filter (ADR-0050) narrows the rows further, a row shown or not
+// by SignalFilter's rule; its group choices come from the rows
+// core leaves in.
 class LiveSignalModel : public QSortFilterProxyModel
 {
     Q_OBJECT
+    Q_PROPERTY(SignalFilter* filter READ filter CONSTANT)
+    // The groups' codes among the rows core leaves in, for the choices
+    Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
+    // The rows core leaves in, before the filter: what "of N" counts
+    Q_PROPERTY(int shownCount READ shownCount NOTIFY groupsChanged)
 
 public:
     explicit LiveSignalModel(SignalListModel* source, QObject* parent = nullptr);
 
+    SignalFilter* filter() const { return m_filter; }
+    QVariantList groups() const { return m_groups; }
+    int shownCount() const { return m_shownCount; }
+
+signals:
+    void groupsChanged();
+
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
+
+private:
+    void refilter();
+    void judgeGroups();
+
+    SignalFilter* m_filter;
+    QVariantList m_groups;
+    int m_shownCount = 0;
 };
 
 class SessionBridge : public QObject
@@ -402,13 +448,16 @@ class SessionBridge : public QObject
     // Session recording (ADR-0017), off by default: the Settings switch.
     // It takes effect at the next connect and can't change while a
     // session is up or in flight, so a recording always covers a whole
-    // session.
+    // session. Core writes it (ADR-0049): the bridge opens the recorder,
+    // attaches it before the session starts and notes its activity lines.
     Q_PROPERTY(bool recording READ recording WRITE setRecording NOTIFY recordingChanged)
     // The current or last recording, for display: relative to Documents
     // when it's there, so no account name shows. Empty before the first.
     Q_PROPERTY(QString recordingFolder READ recordingFolder NOTIFY recordingStateChanged)
     Q_PROPERTY(QUrl recordingFolderUrl READ recordingFolderUrl NOTIFY recordingStateChanged)
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
+    // The marks put in the recording under way, or the last one
+    Q_PROPERTY(int markCount READ markCount NOTIFY markCountChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
@@ -530,11 +579,11 @@ public:
     // bitrate }, kind "can" or "vcan", bitrate in bit/s (0 for vcan). A
     // netlink read; nothing is opened. Empty elsewhere.
     Q_INVOKABLE QVariantList discoverCanInterfaces() const;
-    // The newest recordings first, at most limit, for Settings to replay
-    // by a tap: one map per folder holding a frames.csv, { title, uri,
-    // source, profile } as QStrings. title is the folder's date and
-    // label ("2026-10-28 14:30:12 · Daily driver"), uri its replay://
-    // URI (replayUriFor), source the recorded URI as the pill shows it
+    // The newest recordings first, at most limit, for the Recordings page
+    // to open or replay by a tap: one map per folder holding a frames.csv,
+    // { title, uri, folder, source, profile } as QStrings. title is the
+    // folder's date and label ("2026-10-28 14:30:12 · Daily driver"), uri
+    // its replay:// URI (replayUriFor), folder its path, source the recorded URI as the pill shows it
     // (uriLabelFor), "" when events.log doesn't name one. Reads the
     // earlier product name's folder too, when it's another (ADR-0001's
     // appendix of 2026-10-28), newest first across both. A directory
@@ -555,7 +604,13 @@ public:
     void setRecording(bool on);
     QString recordingFolder() const;
     QUrl recordingFolderUrl() const;
-    bool recordingActive() const { return m_recorder.active(); }
+    bool recordingActive() const { return m_recorder != nullptr; }
+    int markCount() const { return m_markCount; }
+    // A marker in the recording under way (ADR-0049 section 4: the app's
+    // Mark, as a line typed into havne-cli stream --record): label, or
+    // "Mark N" for an empty one, N counting this recording's marks. False
+    // with no recording, or one core refused it (a write failed).
+    Q_INVOKABLE bool mark(const QString& label = QString());
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
     // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
@@ -673,12 +728,12 @@ public:
     // Test seam: record a replay too, to compare it with its source. The
     // app never records one: it would copy the recording it plays
     void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
+    // Test seam: the session's recorder, for core's internal.h seams
+    // (a failed write); nullptr with none
+    ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
-    // Test seam: reply timing's snapshots this often in session time, not
-    // every 10 s
-    void setTimingEveryForTesting(uint64_t us) { m_timingEveryUs = us; }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -719,20 +774,23 @@ signals:
     void logPausedChanged();
     void recordingChanged();
     void recordingStateChanged();
+    void markCountChanged();
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
-    void handleFrameInternal(const ecuio_frame_t* frame, SessionRecorder::Clock::time_point arrived);
+    void handleFrameInternal(const ecuio_frame_t* frame,
+                             HostClock::time_point arrived);
     // Core's values callback (ADR-0024): WORKER thread, stages a frame's
     // values under m_valuesMutex
     static void onValues(const ecuio_value_batch_t* batch, void* user_data);
     // GUI thread, before the session starts: sizes the staging for set
     void prepareValueStaging(const ecuio_signal_set_t* set);
-    // GUI thread: swaps the staging out and drains it, every sample to
-    // the recorder and each signal's newest into the model's batch
+    // GUI thread: swaps the staging out and drains it, each sample's wait
+    // into the delivery figures and each signal's window into the model's
+    // batch
     void drainValues();
     // GUI thread: drainValues, then the batch into the model (the tick,
     // and once more at disconnect)
@@ -745,9 +803,16 @@ private:
     // test root, else Documents/<earlierProductName()>/recordings; "" when
     // that's recordingsRoot() itself or there's no Documents folder
     QString earlierRecordingsRoot() const;
-    void startRecording(const QString& uri, const ecuio_signal_set_t* set);
+    // Before the session starts: the recorder opened on recordingsRoot()
+    // and attached, when the switch is on and the URI isn't a replay's
+    void startRecording(ecuio_session_t* session, const QString& uri);
+    // Its last notes, then closed with why; "" with nothing open
     void stopRecording(const QString& why);
-    QString recordingSummary(const QString& why) const;
+    // The tick: a write that failed stops the recording, once
+    void pollRecording();
+    // An activity line core's recording writes in its own form (a link
+    // transition, a sleep): shown, never noted
+    void logUnnoted(const QString& line);
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
@@ -797,11 +862,11 @@ private:
 
     // One coalesce window of decoded values, written by onValues on the
     // worker. Sized at connect and never grown there: a sample past the
-    // limit is counted, and only the recording misses it (a numeric
-    // signal's newest value is kept regardless).
+    // limit is counted and goes untimed (a numeric signal's newest,
+    // lowest and highest are kept regardless; the recording is core's).
     struct ValueStaging {
         struct Sample {
-            SessionRecorder::Clock::time_point arrived;
+            HostClock::time_point arrived;
             uint32_t def = 0;          // index into the session's set
             uint32_t textAt = 0;       // a text sample's bytes in text
             uint32_t textLen = 0;
@@ -825,7 +890,7 @@ private:
         uint32_t dropped = 0;          // samples past a limit this window
 
         void prepare(size_t defs, size_t samplesMax, size_t textMax);
-        void stage(uint32_t def, SessionRecorder::Clock::time_point arrived,
+        void stage(uint32_t def, HostClock::time_point arrived,
                    uint64_t frameUs, const ecuio_value_t& v);
         void reset();
     };
@@ -853,7 +918,7 @@ private:
     // thread (in the async entry and the queued completion), so a plain
     // bool suffices despite the worker's existence.
     QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
-    QString startSession(ecuio_session_t* session);
+    QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
     bool m_connecting = false;
@@ -888,11 +953,6 @@ private:
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
-    // The tick: reply timing's snapshot into latency.csv every 10 s of
-    // session time (ADR-0042 section 3); the last comes at the teardown
-    void pollTiming();
-    uint64_t m_timingEveryUs = 10u * 1000 * 1000;
-    uint64_t m_timingNextUs = 0;
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // What each channel's ECU reported of its diagnostics (ADR-0037),
     // logged once per completed read
@@ -922,7 +982,11 @@ private:
     quint64 m_valuesStaged = 0;
 
     bool m_recording = false;
-    SessionRecorder m_recorder;
+    ecuio_recorder_t* m_recorder =
+        nullptr;                       // the session's, until stopRecording
+    QString m_recordingFolder;         // the current or last one, absolute
+    bool m_noting = true;              // logUnnoted clears it for its line
+    int m_markCount = 0;               // the recording's marks, from 0
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only

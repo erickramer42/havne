@@ -368,6 +368,14 @@ uint64_t ecuio_recorder_test_syncs(const ecuio_recorder_t* recorder);
 void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us);
 uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
 
+/* Test-only (ADR-0049 section 5's memory bound): the bytes a reader's
+ * per-second tables hold (the summaries and the offset index, by
+ * capacity), and its raw rows' cache now; set_cache_limit lowers the
+ * cache's 8 MiB, so a test sees it evict. */
+uint64_t ecuio_recording_test_table_bytes(const ecuio_recording_t* r);
+uint64_t ecuio_recording_test_cache_bytes(const ecuio_recording_t* r);
+void ecuio_recording_test_set_cache_limit(ecuio_recording_t* r, uint64_t bytes);
+
 #ifdef __cplusplus
 }
 #endif

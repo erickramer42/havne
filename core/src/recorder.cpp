@@ -447,8 +447,43 @@ std::string absolute(const std::string& path)
     char out[4096 * 3];
     return ecuio_wide_to_utf8(buf, out, sizeof out) ? std::string(out) : path;
 #else
-    char buf[PATH_MAX];
-    return realpath(path.c_str(), buf) != nullptr ? std::string(buf) : path;
+    /* As the caller spelled it, its links kept, as GetFullPathNameW keeps
+     * them: realpath would turn macOS's temporary directory (/var, a link
+     * to /private/var) or an iOS container's into another spelling of
+     * the folder than the one the caller named and shows relative to. A
+     * relative path joins the working directory; ".", ".." and repeated
+     * separators go */
+    std::string full = path;
+    if (full.empty() || full[0] != '/') {
+        char cwd[PATH_MAX];
+        if (getcwd(cwd, sizeof cwd) == nullptr) {
+            return path;
+        }
+        full = std::string(cwd) + "/" + full;
+    }
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (start <= full.size()) {
+        size_t end = full.find('/', start);
+        if (end == std::string::npos) {
+            end = full.size();
+        }
+        const std::string part = full.substr(start, end - start);
+        if (part == "..") {
+            if (!parts.empty()) {
+                parts.pop_back();
+            }
+        } else if (!part.empty() && part != ".") {
+            parts.push_back(part);
+        }
+        start = end + 1;
+    }
+    std::string out;
+    for (const std::string& part : parts) {
+        out += '/';
+        out += part;
+    }
+    return out.empty() ? std::string("/") : out;
 #endif
 }
 
@@ -1426,7 +1461,8 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       (is_text_kind(d.kind) ? ",text," : ",number,") +
                       csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)) + "," +
                       std::to_string(d.decimal_places) + "," +
-                      std::to_string(d.plot_rank) + "\n";
+                      std::to_string(d.plot_rank) + "," +
+                      std::to_string(d.group) + "\n";
         }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;

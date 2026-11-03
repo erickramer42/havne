@@ -148,6 +148,66 @@ TEST(Obd2SetTest, RanksTheSignalsAUiPlotsFirst)
     }
 }
 
+/* ADR-0050: every def placed, a PID's fields together but for 4F's
+ * intake pressure, a def of each group where it belongs; the mock's
+ * defs where obd2's of the same name are */
+TEST(Obd2SetTest, GroupsEachSignalByThePartOfTheCarItReads)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < obd2->count; ++i) {
+        const ecuio_signal_def_t& d = obd2->defs[i];
+        EXPECT_NE(d.group, ECUIO_SIGNAL_GROUP_OTHER) << d.name;
+        EXPECT_STRNE(ecuio_signal_group_name(d.group), "") << d.name;
+        const ecuio_signal_def_t* first = find_def(
+            obd2,
+            static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(d.mux_key & 0xFFu, 0)));
+        if (first != nullptr && d.id != ECUIO_OBD2_PID_SIG_ID(0x4F, 3)) {
+            EXPECT_EQ(d.group, first->group)
+                << d.name << " and " << first->name;
+        }
+    }
+    const struct {
+        uint16_t id;
+        uint8_t group;
+    } placed[] = {
+        {ECUIO_OBD2_SIG_RPM_ID, ECUIO_SIGNAL_GROUP_ENGINE},
+        {ECUIO_OBD2_SIG_OIL_TEMP_ID, ECUIO_SIGNAL_GROUP_ENGINE},
+        {ECUIO_OBD2_PID_SIG_ID(0x64, 2), ECUIO_SIGNAL_GROUP_ENGINE},
+        {ECUIO_OBD2_SIG_IAT_ID, ECUIO_SIGNAL_GROUP_AIR},
+        {ECUIO_OBD2_PID_SIG_ID(0x49, 0), ECUIO_SIGNAL_GROUP_AIR},
+        {ECUIO_OBD2_PID_SIG_ID(0x4F, 3), ECUIO_SIGNAL_GROUP_AIR},
+        {ECUIO_OBD2_PID_SIG_ID(0x06, 0), ECUIO_SIGNAL_GROUP_FUEL},
+        {ECUIO_OBD2_SIG_FUEL_LEVEL_ID, ECUIO_SIGNAL_GROUP_FUEL},
+        {ECUIO_OBD2_PID_SIG_ID(0x14, 1), ECUIO_SIGNAL_GROUP_OXYGEN},
+        {ECUIO_OBD2_PID_SIG_ID(0x4F, 0), ECUIO_SIGNAL_GROUP_OXYGEN},
+        {ECUIO_OBD2_PID_SIG_ID(0x2C, 0), ECUIO_SIGNAL_GROUP_EMISSIONS},
+        {ECUIO_OBD2_PID_SIG_ID(0x3C, 0), ECUIO_SIGNAL_GROUP_EMISSIONS},
+        {ECUIO_OBD2_SIG_SPEED_ID, ECUIO_SIGNAL_GROUP_VEHICLE},
+        {ECUIO_OBD2_PID_SIG_ID(0xA6, 0), ECUIO_SIGNAL_GROUP_VEHICLE},
+        {ECUIO_OBD2_SIG_BATTERY_V_ID, ECUIO_SIGNAL_GROUP_ELECTRICAL},
+        {ECUIO_OBD2_PID_SIG_ID(0x21, 0), ECUIO_SIGNAL_GROUP_DIAGNOSTICS},
+        {ECUIO_OBD2_PID_SIG_ID(0x4E, 0), ECUIO_SIGNAL_GROUP_DIAGNOSTICS},
+    };
+    for (const auto& p : placed) {
+        const ecuio_signal_def_t* d = find_def(obd2, p.id);
+        ASSERT_NE(d, nullptr) << p.id;
+        EXPECT_EQ(d->group, p.group) << d->name;
+    }
+
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    for (uint32_t i = 0; i < mock->count; ++i) {
+        const ecuio_signal_def_t& m = mock->defs[i];
+        uint8_t expected =
+            ECUIO_SIGNAL_GROUP_OXYGEN; /* Lambda: obd2 has none */
+        for (uint32_t k = 0; k < obd2->count; ++k) {
+            if (std::strcmp(obd2->defs[k].name, m.name) == 0) {
+                expected = obd2->defs[k].group;
+            }
+        }
+        EXPECT_EQ(m.group, expected) << m.name;
+    }
+}
+
 TEST(Obd2SetTest, DeclaresSingleCanChannel) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     ASSERT_NE(set, nullptr);
@@ -5386,6 +5446,19 @@ TEST(SimRecordingTest, TheLoaderReadsTheFixture)
 }
 
 // What the loader refuses, by the line, never naming the path
+// A last row with no newline is a write cut short (ADR-0049 section 7):
+// left out, whether or not it would parse
+TEST(SimRecordingTest, ATornLastRowIsLeftOut)
+{
+    ScratchCsv csv("sim-torn", "host_us,timestamp_us,id,flags,data\n"
+                               "1,1,0x7E8,0x0,41 0C 1A F8\n"
+                               "2,2,0x7E8,0x0,41 0D 20");
+    ecuio_sim_recording r;
+    ASSERT_EQ(ecuio_sim_load_recording(csv.path, &r), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(r.replies.size(), 1u) << "only 41 0C's reply";
+}
+
 TEST(SimRecordingTest, TheLoadersRefusals)
 {
     const std::string header = "host_us,timestamp_us,id,flags,data\n";

@@ -696,19 +696,24 @@ gets no run of its own: it is checked locally (`scripts/verify.sh`)
 and merged into `dev`, whose push run is the gate. A manual run
 leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
-`-f smoke_only=true` runs it with `core-and-tests` alone, which the
-smoke depends on. `-f macos_repeat='<ctest regex>'` (and
+`-f smoke_only=true` runs it with `core-and-tests` alone.
+`-f macos_repeat='<ctest regex>'` (and
 `-f macos_repeat_count=<n>`, 200 by default) has `macos-build` run the
 matching tests again until one fails, for a failure seen once on macOS
-(its timeout is then 60 minutes). Every job that uses Qt
-uses 6.12.0, and every job has a `timeout-minutes` of roughly 3-5x
-its usual duration:
+(its timeout is then 60 minutes). No job waits for another, so a run
+takes as long as its longest job. Every build and every ctest run
+(`coverage.sh`'s too) runs four jobs at once, the hosted runners' core
+count (`CMAKE_BUILD_PARALLEL_LEVEL` and `CTEST_PARALLEL_LEVEL` in the
+workflow's `env`); the cases that share a fixed resource are
+`RUN_SERIAL`. Every job that uses Qt uses 6.12.0; the jobs that
+install it through `install-qt-action` keep it in the Actions cache.
+Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
+| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
-| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s, and uploads any crashing input ([fuzz/README.md](../fuzz/README.md)) |
+| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s, as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
 | `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app. Any warning fails it. Only the app's moc output is built. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |

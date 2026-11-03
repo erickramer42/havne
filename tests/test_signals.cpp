@@ -546,8 +546,8 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
      *   mux_reserved=10, mux_key=12, kind=16, byte_order=17,
      *   start_byte=18, bit_offset=20, bit_length=21,
      *   byte_length=22, scale=24, offset=32, name=40, unit=72,
-     *   decimal_places=88, plot_rank=89, display_reserved=90, flags=92,
-     *   reserved=96  =>  sizeof == 120.
+     *   decimal_places=88, plot_rank=89, group=90, display_reserved=91,
+     *   flags=92, reserved=96  =>  sizeof == 120.
      * If this fires, a field moved: bump ECUIO_SIGNAL_SET_LAYOUT. */
     EXPECT_EQ(sizeof(ecuio_signal_def_t), 120u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved0), 2u);
@@ -565,7 +565,8 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(offsetof(ecuio_signal_def_t, unit), 72u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, decimal_places), 88u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, plot_rank), 89u);
-    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 90u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, group), 90u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 91u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, flags), 92u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 96u);
 
@@ -851,15 +852,46 @@ TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
             ++checked;
         }
     }
-    /* Every byte that isn't a named value: 2 + 2 + 2 + 4 + 24. */
-    EXPECT_EQ(checked, 34u);
+    /* Every byte that isn't a named value: 2 + 2 + 1 + 4 + 24. */
+    EXPECT_EQ(checked, 33u);
 
-    /* plot_rank took a reserved byte's room: any value is a rank */
+    /* plot_rank and group took reserved bytes' room: any value is a
+     * rank, and any a group (one this core doesn't know shows as
+     * Other) */
     ecuio_signal_def_t ranked = good;
     for (unsigned rank : {1u, 10u, 255u}) {
         ranked.plot_rank = static_cast<uint8_t>(rank);
         EXPECT_EQ(ecuio_validate_signal(&ranked), ECUIO_VALIDATE_OK) << rank;
+        ranked.group = static_cast<uint8_t>(rank);
+        EXPECT_EQ(ecuio_validate_signal(&ranked), ECUIO_VALIDATE_OK) << rank;
     }
+}
+
+/* ADR-0050: each code its name, in the list's order; "" past it */
+TEST(SignalsTest, EachGroupHasAName)
+{
+    const struct {
+        uint32_t code;
+        const char* name;
+    } groups[] = {
+        {ECUIO_SIGNAL_GROUP_OTHER, "Other"},
+        {ECUIO_SIGNAL_GROUP_ENGINE, "Engine"},
+        {ECUIO_SIGNAL_GROUP_AIR, "Air"},
+        {ECUIO_SIGNAL_GROUP_FUEL, "Fuel"},
+        {ECUIO_SIGNAL_GROUP_OXYGEN, "Oxygen sensors"},
+        {ECUIO_SIGNAL_GROUP_EMISSIONS, "Emissions"},
+        {ECUIO_SIGNAL_GROUP_VEHICLE, "Vehicle"},
+        {ECUIO_SIGNAL_GROUP_ELECTRICAL, "Electrical"},
+        {ECUIO_SIGNAL_GROUP_DIAGNOSTICS, "Diagnostics"},
+    };
+    uint32_t next = 0;
+    for (const auto& g : groups) {
+        EXPECT_EQ(g.code, next++) << g.name << ": the codes run unbroken";
+        EXPECT_STREQ(ecuio_signal_group_name(g.code), g.name);
+    }
+    EXPECT_STREQ(ecuio_signal_group_name(next), "");
+    EXPECT_STREQ(ecuio_signal_group_name(255), "");
+    EXPECT_STREQ(ecuio_signal_group_name(UINT32_MAX), "");
 }
 
 TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)

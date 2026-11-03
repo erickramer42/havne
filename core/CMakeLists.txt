@@ -5,6 +5,8 @@ add_library(ecuio-core STATIC
     src/host_clock.cpp
     src/profile_registry.cpp
     src/recorder.cpp
+    src/recording_check.cpp
+    src/recording_reader.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp

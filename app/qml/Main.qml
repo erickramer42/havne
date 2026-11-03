@@ -5,7 +5,11 @@
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
 //          (2026-10-27); Home's Connect... opens Settings with Adapter
-//          unfolded (2026-10-28). The safe area's margins (Android's system
+//          unfolded (2026-10-28); the Recordings page's Replay putting its
+//          URI in Settings' field, and seven tabs inside 384 px (2026-11-03);
+//          the header's Mark while recording, inside a phone's width:
+//          tests/qml/tst_phone.qml.
+//          The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
 //          and the "Display:" line a phone logs in developer mode:
 //          BENCH, the phone run sheet.
@@ -69,12 +73,17 @@ ApplicationWindow {
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
-    readonly property int settingsPage: 5
+    readonly property int settingsPage: 6
 
     function gotoPage(index) { stack.currentIndex = index }
     // Connect... from any page: Settings, with what to connect to open
     function openConnect() {
         settingsView.showAdapters()
+        gotoPage(settingsPage)
+    }
+    // A recording's Replay: its URI in Settings' field, ready to connect
+    function replayRecording(uri) {
+        settingsView.pickRecording(uri)
         gotoPage(settingsPage)
     }
 
@@ -181,12 +190,16 @@ ApplicationWindow {
                     }
                 }
                 RowLayout {
+                    id: headerRow
                     anchors.fill: parent
                     anchors.leftMargin: 16
                     anchors.rightMargin: 16
                     spacing: 12
 
+                    // The name gives way to Mark on a phone's width
                     Label {
+                        objectName: "headerTitle"
+                        visible: !markButton.visible || headerRow.width >= 420
                         text: qsTr("Havne")
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
@@ -240,6 +253,19 @@ ApplicationWindow {
 
                     Item { Layout.fillWidth: true }  // Spacer
 
+                    // A marker in the recording under way, from any page
+                    // (ADR-0049 section 4): "Mark N" at the tap, which the
+                    // Recordings page aligns two runs on
+                    ThemedButton {
+                        id: markButton
+                        objectName: "markButton"
+                        visible: Bridge.recordingActive
+                        text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
+                                                   : qsTr("Mark")
+                        Accessible.name: qsTr("Mark the recording")
+                        onClicked: Bridge.mark()
+                    }
+
                     // Settings owns connecting: this button opens it, or ends the
                     // session from any page. On Settings itself, its Connect
                     // button is the one to use.
@@ -288,6 +314,7 @@ ApplicationWindow {
                                 { label: qsTr("Live"),   icon: "" },
                                 { label: qsTr("Diagnostics"), icon: "" },
                                 { label: qsTr("Log"),       icon: "" },
+                                { label: qsTr("Recordings"), icon: "" },
                                 { label: qsTr("Settings"),  icon: "" }
                             ]
                             delegate: NavButton {
@@ -322,6 +349,10 @@ ApplicationWindow {
                         onConnectRequested: root.openConnect()
                     }
                     LogPage { objectName: "logPage" }
+                    RecordingsPage {
+                        objectName: "recordingsPage"
+                        onReplayRequested: uri => root.replayRecording(uri)
+                    }
                     SettingsPage {
                         id: settingsView
                         objectName: "settingsPage"
@@ -373,6 +404,7 @@ ApplicationWindow {
                 ThemedTabButton { text: qsTr("Live") }
                 ThemedTabButton { text: qsTr("Codes") }
                 ThemedTabButton { text: qsTr("Log") }
+                ThemedTabButton { text: qsTr("Recs") }
                 ThemedTabButton { text: qsTr("Settings") }
             }
         }

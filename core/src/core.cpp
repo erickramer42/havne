@@ -851,6 +851,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_RECORDING_CHANGED:       return "the recording changed after it was opened";
         case ECUIO_ERR_REPORT_CHANGED:          return "the diagnostics report changed since it was saved";
         case ECUIO_ERR_RECORDING_FAILED:        return "the recording couldn't be made or written";
+        case ECUIO_ERR_CANCELED:                return "canceled";
         default:                                return "unknown status";
     }
 }

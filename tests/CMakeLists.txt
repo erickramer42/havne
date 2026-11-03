@@ -22,7 +22,8 @@ if(MSVC)
 endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_core test_core.cpp test_recorder.cpp)
+add_executable(test_core test_core.cpp test_recorder.cpp test_recording.cpp
+    test_recording_check.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -42,6 +43,17 @@ target_compile_definitions(test_core PRIVATE
 
 app_enable_warnings(test_core)
 gtest_discover_tests(test_core)
+
+# --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
+# ctest. Qt-free, so an NDK tree builds it alone for the test phone
+# (docs/testing.md "Performance") ---
+add_executable(bench_recording bench_recording.cpp)
+target_include_directories(bench_recording PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(bench_recording PRIVATE ecuio-core)
+target_compile_definitions(bench_recording PRIVATE
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+)
+app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp)
@@ -262,6 +274,11 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
+        # A last row cut short is left out and counted (ADR-0049 section 7)
+        add_test(NAME CliReplayTest.ATornLastRowIsLeftOut
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_torn.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliReplayTest.ATornLastRowIsLeftOut PROPERTIES TIMEOUT 30)
         # stream --record (ADR-0049): the engine start recorded to its last
         # frame, its folder against tests/golden/recording/ and its frames
         # against the fixture's (rewrite both with the command plus
@@ -280,6 +297,59 @@ if(TARGET havne-cli)
         set_tests_properties(CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
             CliRecordTest.TypedLinesAreMarkers CliRecordTest.AFolderThatCantBeMadeFails
             PROPERTIES TIMEOUT 60)
+        # view (ADR-0049 section 5) on two recordings of one pull, written
+        # by hand (tests/fixtures/recording/: pull-late's starts 10 s later
+        # into it, its UTC start 90 s later, a marker 0.5 s before each):
+        # what one holds, the two aligned on the pull's rise (with the
+        # values at a time), its marker and their UTC starts, a rise its
+        # hysteresis keeps from being found, and a folder with no
+        # recording; then every sample counted once at many zooms, and the
+        # aligned pulls' columns equal
+        set(_cli_pulls ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording)
+        app_cli_golden(ViewShowsWhatARecordingHolds view-one.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early --columns 12)
+        app_cli_golden(ViewAlignsTwoRecordingsOnARise view-rise.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
+               --from -2 --to 8 --columns 10 --at 2 --signal RPM --signal VIN)
+        app_cli_golden(ViewAlignsOnAMarker view-marker.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on marker:pull --columns 8
+               --signal Throttle)
+        app_cli_golden(ViewAlignsOnTheUtcStarts view-utc.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on utc --columns 4 --signal Coolant)
+        app_cli_golden(ViewLeavesOutARecordingItCantAlign view-unaligned.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               --align-on rise:RPM:2010 --hysteresis 30 --columns 2 --signal RPM)
+        app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
+        add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
+                    ${_cli_pulls}/pull-late)
+        add_test(NAME CliViewRunTest.AlignedPullsAgree
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py agree
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
+                    ${_cli_pulls}/pull-late)
+        set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
+            CliViewRunTest.AlignedPullsAgree PROPERTIES TIMEOUT 60)
+        # info (ADR-0049 section 6) on a recording with one of each finding
+        # (tests/fixtures/recording/findings, wire frames written by hand: a
+        # gap, a rate drop, a sleep, a late ID, an overflow, a cut First
+        # Frame and the link's two lines), the same with the thresholds
+        # raised, the replay fixture (frames.csv alone: the reader can't
+        # open it, the check still runs) and a folder with no frames.csv
+        app_cli_golden(InfoListsWhatsWrongWithARecording info-findings.jsonl
+            -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/findings)
+        app_cli_golden(InfoTakesTheThresholds info-thresholds.jsonl
+            -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/findings
+               --gap 3 --rate-drop 20 --settle 20)
+        app_cli_golden(InfoChecksFramesTheReaderCantOpen info-frames-only.jsonl
+            -- $<TARGET_FILE:havne-cli> info
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        app_cli_golden(InfoRefusesAFolderWithNoFrames info-no-frames.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/pull-early)
         # Ctrl+Break while the fake DLL's disconnect hangs: the recording
         # ends whole without waiting for it (skipped where there's no
         # console, as CliSignalTest is)
@@ -315,6 +385,34 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    # view's refusals come before any recording opens, but for a name no
+    # recording has, which comes after the opens and before any line
+    app_cli_usage(ViewWithoutARecordingIsUsage "view")
+    app_cli_usage(ViewColumnsOfZeroIsUsage "view|x|--columns|0")
+    app_cli_usage(ViewTooManyColumnsIsUsage "view|x|--columns|10001")
+    app_cli_usage(ViewAnUnknownAlignmentIsUsage "view|x|--align-on|sideways")
+    app_cli_usage(ViewARiseWithoutALevelIsUsage "view|x|--align-on|rise:RPM")
+    app_cli_usage(ViewHysteresisWithoutARiseIsUsage
+        "view|x|--align-on|marker:pull|--hysteresis|5")
+    app_cli_usage(ViewANegativeHysteresisIsUsage
+        "view|x|--align-on|rise:RPM:1|--hysteresis|-1")
+    app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
+    app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
+    app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
+    set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)
+    app_cli_usage(ViewASignalNoRecordingHasIsUsage
+        "view|${_cli_pull_early}|--signal|Boost")
+    app_cli_usage(ViewAlignedOnASignalNoRecordingHasIsUsage
+        "view|${_cli_pull_early}|--align-on|rise:Boost:1")
+    app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
+    app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
+        "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(InfoWithoutARecordingIsUsage "info")
+    app_cli_usage(InfoTwoRecordingsIsUsage "info|x|y")
+    app_cli_usage(InfoAGapOfZeroIsUsage "info|x|--gap|0")
+    app_cli_usage(InfoARateDropOfOneIsUsage "info|x|--rate-drop|1")
+    app_cli_usage(InfoSettleThatIsntSecondsIsUsage "info|x|--settle|soon")
+    app_cli_usage(InfoAnUnknownOptionIsUsage "info|x|--fast")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
     # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
     # deadline
@@ -390,8 +488,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     add_executable(test_bridge
         test_bridge.cpp
+        test_recording_view.cpp
+        ../app/recordingview.cpp
         ../app/sessionbridge.cpp
-        ../app/sessionrecorder.cpp
+        ../app/signalfilter.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
         ../app/carryover.cpp
@@ -410,9 +510,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ${CMAKE_SOURCE_DIR}/core/src
     )
 
-    # The engine-start fixture, which both decode paths read (ADR-0024)
+    # The engine-start fixture, which both decode paths read (ADR-0024),
+    # and the recordings RecordingViewTest opens (ADR-0049)
     target_compile_definitions(test_bridge PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -441,7 +543,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
-        ../app/sessionrecorder.cpp
+        ../app/signalfilter.cpp
         ../app/carryover.cpp
     )
     set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)
@@ -480,10 +582,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         Qt6::QuickTest
     )
     # Run with no -input, it runs every file in this directory. The
-    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023)
+    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023); the
+    # Recordings page opens the recording fixtures (ADR-0049)
     target_compile_definitions(test_qml PRIVATE
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

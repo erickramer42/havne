@@ -49,6 +49,7 @@ typedef char abi_def_byte_length_check[(offsetof(ecuio_signal_def_t, byte_length
 typedef char abi_def_scale_check[(offsetof(ecuio_signal_def_t, scale) == 24) ? 1 : -1];
 typedef char abi_def_name_check[(offsetof(ecuio_signal_def_t, name) == 40) ? 1 : -1];
 typedef char abi_def_plot_rank_check[(offsetof(ecuio_signal_def_t, plot_rank) == 89) ? 1 : -1];
+typedef char abi_def_group_check[(offsetof(ecuio_signal_def_t, group) == 90) ? 1 : -1];
 typedef char abi_def_flags_check[(offsetof(ecuio_signal_def_t, flags) == 92) ? 1 : -1];
 typedef char abi_def_reserved_check[(offsetof(ecuio_signal_def_t, reserved) == 96) ? 1 : -1];
 typedef char abi_set_layout_check[(offsetof(ecuio_signal_set_t, layout_version) == 0) ? 1 : -1];
@@ -60,7 +61,8 @@ typedef char abi_info_rx_check[(offsetof(ecuio_session_info_t, rx_ids) == 32) ? 
 typedef char abi_info_text_check[(offsetof(ecuio_session_info_t, firmware_version) == 64) ? 1 : -1];
 typedef char abi_info_profile_check[(offsetof(ecuio_session_info_t, profile) == 304) ? 1 : -1];
 typedef char abi_info_replay_check[(offsetof(ecuio_session_info_t, replay_frames) == 368) ? 1 : -1];
-typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 380) ? 1 : -1];
+typedef char abi_info_torn_check[(offsetof(ecuio_session_info_t, replay_rows_torn) == 380) ? 1 : -1];
+typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 384) ? 1 : -1];
 typedef char abi_dropped_size_check[(sizeof(ecuio_dropped_request_t) == 8) ? 1 : -1];
 typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1 : -1];
 typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
@@ -132,6 +134,17 @@ int main(void)
     ecuio_recorder_t* recorder = NULL;
     ecuio_recorder_state_t recorder_state;
     uint32_t folder_len = 0;
+    ecuio_recording_t* reading = NULL;
+    ecuio_recording_info_t reading_info;
+    ecuio_recording_signal_t reading_signal;
+    ecuio_recording_marker_t reading_marker;
+    ecuio_recording_column_t reading_column;
+    ecuio_recording_find_t reading_find;
+    uint64_t reading_at = 0;
+    uint32_t reading_pick = 0;
+    char reading_text[8];
+    ecuio_check_options_t check_options;
+    ecuio_check_summary_t check_summary;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     frame.arbitration_id = 0x7FF;
@@ -184,6 +197,10 @@ int main(void)
         return 1;
     }
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
+        return 1;
+    }
+    if (strcmp(ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_DIAGNOSTICS),
+               "Diagnostics") != 0) {
         return 1;
     }
     if (ecuio_display_convert("km/h", 0, 100.0, ECUIO_UNITS_IMPERIAL, &shown) !=
@@ -272,6 +289,53 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_close(NULL, NULL) != ECUIO_OK ||
         ecuio_recorder_test_syncs(NULL) != 0) {
+        return 1;
+    }
+    /* The reader (ADR-0049 section 5): its layout and its NULL refusals */
+    memset(&reading_find, 0, sizeof reading_find);
+    if (sizeof(ecuio_recording_info_t) != 96 ||
+        sizeof(ecuio_recording_signal_t) != 128 ||
+        offsetof(ecuio_recording_signal_t, samples) != 56 ||
+        offsetof(ecuio_recording_signal_t, group) != 54 ||
+        offsetof(ecuio_recording_marker_t, label_utf8) != 32 ||
+        sizeof(ecuio_recording_column_t) != 24 ||
+        offsetof(ecuio_recording_find_t, label_utf8) != 64 ||
+        ECUIO_ERR_CANCELED != 19 || ECUIO_RECORDING_NONE != UINT64_MAX ||
+        ecuio_recording_open(NULL, NULL, NULL, &reading) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        reading != NULL ||
+        ecuio_recording_get_info(NULL, &reading_info) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_get_signal(NULL, 0, &reading_signal) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_get_marker(NULL, 0, &reading_marker) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_query(NULL, &reading_pick, 1, 0, 1, &reading_column,
+                              1) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_text_at(NULL, 0, 0, reading_text, sizeof reading_text,
+                                &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_find(NULL, &reading_find, 0, &reading_at) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_test_table_bytes(NULL) != 0) {
+        return 1;
+    }
+    ecuio_recording_close(NULL);
+    /* The frames check (ADR-0049 section 6): its layout and refusals */
+    memset(&check_options, 0, sizeof check_options);
+    check_options.flags = 1;
+    if (sizeof(ecuio_check_options_t) != 56 ||
+        sizeof(ecuio_check_finding_t) != 56 ||
+        offsetof(ecuio_check_finding_t, code) != 36 ||
+        sizeof(ecuio_check_summary_t) != 128 ||
+        offsetof(ecuio_check_summary_t, counts) != 24 ||
+        offsetof(ecuio_check_summary_t, torn_rows) != 88 ||
+        ECUIO_CHECK_GAP != 1 || ECUIO_CHECK_ASLEEP != 7 ||
+        ecuio_recording_check(NULL, NULL, NULL, NULL, NULL, &check_summary) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_check(".", NULL, NULL, NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_check(".", &check_options, NULL, NULL, NULL,
+                              &check_summary) != ECUIO_ERR_INVALID_ARGUMENT) {
         return 1;
     }
     if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||

@@ -349,3 +349,26 @@ unranked, 1 first ([ADR-0039](0039-full-service01-coverage.md)
 section 8). Every value is valid, so the validator no longer checks
 that byte; the layout, its size and `ECUIO_SIGNAL_SET_LAYOUT` are
 unchanged, and a set that leaves it zero ranks nothing.
+
+## Appendix: a name or unit a formula would start (2026-11-03)
+
+Validator code 18, `ECUIO_VALIDATE_ERR_FORMULA`, is appended
+([ADR-0049](0049-recordings-in-core.md) section 8): a def whose name or
+unit starts with `=`, `+`, `-`, `@`, a tab or a carriage return, which
+a spreadsheet runs as a formula, is refused where defs enter, so no
+profile, `uds-generic`'s generated defs or an imported set can put one
+into a recording's `signals.csv`. No built-in def is refused: no
+Service 01 name or unit starts with one, and `uds-generic`'s names
+start `DID` or `0x`. `SignalsTest.ValidatorRefusesANameOrUnitAFormulaWouldStart`.
+
+## Appendix: the group (2026-11-03)
+
+`group` takes the second of the display block's reserved bytes
+(offset 90), leaving `display_reserved[1]` at 91: the part of the car
+the def reads, one of `ECUIO_SIGNAL_GROUP_*`, which
+`ecuio_signal_group_name` names
+([ADR-0050](0050-finding-a-signal.md)). Every value is valid, as the
+plot rank's is, so the validator no longer checks that byte (one
+reserved byte fewer in `SignalsTest.ValidatorRefusesEveryNonzeroReservedByte`);
+the layout, its size and `ECUIO_SIGNAL_SET_LAYOUT` are unchanged, and
+a set that leaves it zero groups every def under Other.

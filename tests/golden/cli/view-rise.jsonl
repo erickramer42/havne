@@ -1,0 +1,22 @@
+{"schema": 1, "type": "start"}
+{"duration_us": 30000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signals": 4, "summary": true, "type": "opened", "utc_start_us": 1793718000000000}
+{"decimals": 0, "first_us": 100000, "group": "Engine", "highest": 6806, "index": 0, "last_us": 29900000, "lowest": 1981, "name": "RPM", "rank": 2, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "rpm"}
+{"decimals": 1, "first_us": 101000, "group": "Air", "highest": 100, "index": 1, "last_us": 29901000, "lowest": 0, "name": "Throttle", "rank": 3, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "%"}
+{"decimals": 0, "first_us": 1002000, "group": "Engine", "highest": 90, "index": 2, "last_us": 29002000, "lowest": 88, "name": "Coolant", "rank": 1, "rate_hz": 1, "recording": 0, "samples": 29, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 500000, "group": "Other", "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "rate_hz": null, "recording": 0, "samples": 1, "text": true, "type": "signal", "unit": ""}
+{"host_us": 11500000, "index": 0, "label": "pull", "recording": 0, "type": "marker"}
+{"duration_us": 40000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 1, "records_dropped": 0, "rows_torn": 0, "signals": 4, "summary": true, "type": "opened", "utc_start_us": 1793718090000000}
+{"decimals": 0, "first_us": 100000, "group": "Other", "highest": 6806, "index": 0, "last_us": 39900000, "lowest": 1981, "name": "RPM", "rank": 2, "rate_hz": 10, "recording": 1, "samples": 399, "text": false, "type": "signal", "unit": "rpm"}
+{"decimals": 1, "first_us": 101000, "group": "Other", "highest": 100, "index": 1, "last_us": 39901000, "lowest": 0, "name": "Throttle", "rank": 3, "rate_hz": 10, "recording": 1, "samples": 399, "text": false, "type": "signal", "unit": "%"}
+{"decimals": 0, "first_us": 1002000, "group": "Other", "highest": 90, "index": 2, "last_us": 39002000, "lowest": 88, "name": "Coolant", "rank": 1, "rate_hz": 1, "recording": 1, "samples": 39, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 500000, "group": "Other", "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "rate_hz": null, "recording": 1, "samples": 1, "text": true, "type": "signal", "unit": ""}
+{"host_us": 21500000, "index": 0, "label": "pull", "recording": 1, "type": "marker"}
+{"found": true, "host_us": 14600000, "offset_us": -14600000, "on": "rise:RPM:4000", "recording": 0, "type": "align"}
+{"found": true, "host_us": 24600000, "offset_us": -24600000, "on": "rise:RPM:4000", "recording": 1, "type": "align"}
+{"column_us": 1000000, "columns": 10, "from_us": -2000000, "to_us": 8000000, "type": "axis"}
+{"highest": [3513, 4325, 5125, 5913, 6721, 6806, 5189, 3595, 2018, 1995], "lowest": [2000, 3591, 4405, 5205, 5996, 5354, 3756, 2179, 1991, 1988], "recording": 0, "samples": [20, 10, 10, 10, 10, 10, 10, 10, 10, 10], "signal": "RPM", "type": "columns"}
+{"recording": 0, "samples": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "signal": "VIN", "type": "columns"}
+{"highest": [3513, 4325, 5125, 5913, 6721, 6806, 5189, 3595, 2018, 1995], "lowest": [2000, 3591, 4405, 5205, 5996, 5354, 3756, 2179, 1991, 1988], "recording": 1, "samples": [20, 10, 10, 10, 10, 10, 10, 10, 10, 10], "signal": "RPM", "type": "columns"}
+{"recording": 1, "samples": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "signal": "VIN", "type": "columns"}
+{"recording": 0, "t_us": 2000000, "type": "at", "values": [{"host_us": 16600000, "signal": "RPM", "text": "5671"}, {"host_us": 500000, "signal": "VIN", "text": "ZZZFAKE11M0000001"}]}
+{"recording": 1, "t_us": 2000000, "type": "at", "values": [{"host_us": 26600000, "signal": "RPM", "text": "5671"}, {"host_us": 500000, "signal": "VIN", "text": "ZZZFAKE11M0000001"}]}

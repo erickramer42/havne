@@ -1,6 +1,7 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
 // Testing: test_qml (tests/qml/tst_theme.qml) pins linkColor and
-//          linkLabel for every state and the trace palette's rules;
+//          linkLabel for every state and the trace palette's rules
+//          (seriesColor and seriesDash through tst_liveview.qml's rows);
 //          developerMode's effect on the Log page and Settings:
 //          tests/qml/tst_log.qml; how the palette looks is manual smoke.
 pragma Singleton
@@ -87,6 +88,22 @@ QtObject {
         "#a3e635",   // lime
         "#e879f9",   // fuchsia
     ]
+    // A trace's style by its row (Live's model row, a recording's signal
+    // index): rows past the palette reuse its colors with a dashed trace,
+    // so a chart still tells them apart (a list's swatch shows the color
+    // only)
+    readonly property var traceDashes: [[], [8, 4], [2, 3]]
+    function seriesColor(row: int): color {
+        return seriesColors[row % seriesColors.length]
+    }
+    function seriesDash(row: int): var {
+        return traceDashes[Math.floor(row / seriesColors.length) % traceDashes.length]
+    }
+    // A second recording's trace of a row: the next pattern along from the
+    // row's own, so the two read apart however the row is drawn
+    function seriesCompareDash(row: int): var {
+        return traceDashes[(Math.floor(row / seriesColors.length) + 1) % traceDashes.length]
+    }
 
     // Link state -> color. Whitelists the healthy and the explained
     // states; fault, degraded and any future state fall to danger.

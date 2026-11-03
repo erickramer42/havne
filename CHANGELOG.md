@@ -13,17 +13,31 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- The Recordings page: the recordings sessions saved, newest first, each opening in a viewer. It shows the recording's signals and a chart of the part in view: drag it, zoom with the wheel or a pinch, and tap for the values at that moment. Its markers and what a check of its frames found are on the chart's time axis, and each finding listed shows its place. Replay still puts a recording's `replay://` URI in Settings' field.
+- Two recordings overlaid on the Recordings page: another recording's signals drawn dashed beside the first's, on the same scales, lined up on their starts, their wall-clock starts, a marker, or a signal rising or falling through a level typed in the units on screen.
+- Finding a signal among many: Live's list and the Recordings page's signals filter by words in the name or unit, by **Plotted only**, and by the part of the car each signal reads (Engine, Air, Fuel, Oxygen sensors, Emissions, Vehicle, Electrical, Diagnostics). The filter sits beside Live's title and above the viewer's signals.
+- Each signal says which part of the car it reads: a `group` in `ecuio_signal_def_t` with `ecuio_signal_group_name`, the last field of a recording's `signal` lines, and `group` in `havne-cli`'s `signals` and `signal` lines.
+- **Mark** in the header, while a session records, puts a marker in the recording ("Mark 1", "Mark 2", and so on), as a line typed into `havne-cli stream --record` does.
 - `havne-cli stream --record <folder>` records the session into a folder of its own under `<folder>`, named for when it started, with the files the app writes (`frames.csv`, `signals.csv` and `events.log`; `markers.csv` and `latency.csv` once they have a row). `--label <name>` adds a name to the folder's. Each line typed while it runs is a marker. The recording is written on a thread of its own, so a slow disk never holds the session up; a write that fails says why in a `recording` line, and the stream exits 1.
 - `ecuio/recording.h` in core's C API: a recorder opened on a folder, attached to a session before it starts, with notes, markers and its state.
+- `havne-cli view <recording>...` reads recordings offline: what each holds, then each signal's lowest, highest and count over time in columns (`--columns`, `--from`, `--to`), and with `--at` the values at a moment. `--align-on` puts several on one axis, at a signal rising or falling through a level, a marker, or their wall-clock starts.
+- `havne-cli info <recording>` checks a recording's frames offline: what it holds, then each stretch with no frame at all (over `--gap` seconds, 1), each ID whose frames slowed past `--rate-drop` times their usual interval (10), each ID first seen over `--settle` seconds in (2), each overflow, broken ISO-TP sequence, link change and sleep, then a summary. A folder holding only `frames.csv` is still checked. Its `signal` lines, and `view`'s, carry each signal's rate.
+- `ecuio_recording_check` in `ecuio/recording.h`: one pass over a recording's frames, each finding passed to a callback as it's settled, with a summary of the frames, the IDs and each kind's count.
+- A reader in `ecuio/recording.h`: `ecuio_recording_open` reads a recording's folder once, with a progress callback that can cancel it (`ECUIO_ERR_CANCELED`), then answers a time range's lowest and highest per column, the value in force at a time, and the first time a signal crosses a level or a marker was set. An hour of recording opens in a fraction of a second.
 
 ### Changed
 
+- The recent recordings moved from Settings to the Recordings page, whose tab reads Recs on a phone.
+- The app's recordings are written by core, on a thread of their own, as `havne-cli`'s are: a recording holds every frame the session read, also the ones the Log page skips under load, and its last note says how many it skipped. A write that fails, a full disk among them, stops the recording with `Recording stopped: <reason>` while the session runs on.
+- A recording's `events.log` has a new layout: a format line, the app's details under `caller` lines, a kind word on every line (`note`, `link`, `asleep`, `drop`, `end`), and a summary of anything the recording dropped.
 - A frame carrying a whole ISO-TP message, as a requesting session's replies and an ELM327 adapter's monitor deliver them, is flagged `0x100` (`ECUIO_FRAME_FLAG_REASSEMBLED`), and the Log page's and `havne-cli`'s `frame` lines show it.
 - A signal whose name or unit starts with `=`, `+`, `-`, `@`, a tab or a carriage return is refused when its profile is registered (validator code 18): a spreadsheet opening the recording would run it as a formula.
 - A J2534 adapter that refuses to open without saying why gets an error that asks whether the adapter is attached and not open in another program, the two usual causes, instead of naming the status alone.
+- A replay of a recording whose last row was cut short, as a crash or a power loss leaves it, plays the rest instead of refusing the recording, and says so: the Session line adds ", its last row cut short and left out", and `havne-cli`'s `session` line counts it in `rows_torn`. The simulated ECU loading such a recording leaves the row out too.
 
 ### Fixed
 
+- A SocketCAN session that sends requests no longer drops a long reply, a VIN among them, when the computer is busy: the kernel's times of the session's own frames, and of frames read slightly out of order, no longer put a stall into the reply's timing.
 - A SocketCAN session that sends requests counts the bus rate as proven only once its first request is answered, or 25 ms pass after the controller echoed it with no error frame. An adapter can echo a frame no node acknowledged and report the missing acknowledgement after, so a wrong rate could pass for the right one.
 
 ## [0.3.6] - 2026-11-02

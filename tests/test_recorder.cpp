@@ -118,6 +118,7 @@ void register_profile()
                                "C");
     kDefs[0].decimal_places = 1;
     kDefs[0].plot_rank = 2;
+    kDefs[0].group = ECUIO_SIGNAL_GROUP_FUEL;
     kDefs[1].id = 2;
     kDefs[1].message_id = kTextId;
     kDefs[1].kind = ECUIO_VALUE_TEXT;
@@ -233,6 +234,51 @@ TEST(RecorderTest, OpenMakesTheFolderAndItsFiles)
     EXPECT_EQ(std::strlen(small), 7u);
     EXPECT_EQ(len, std::strlen(buf));
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+}
+
+/* The folder is the root as the caller spelled it, made absolute: a
+ * relative root joins the working directory, "." and ".." go, and a
+ * link in it stays (macOS's temporary directory is one, /var to
+ * /private/var, and the app shows the folder relative to the root it
+ * named) */
+TEST(RecorderTest, TheFolderKeepsTheRootAsTheCallerSpelledIt)
+{
+    Root root;
+    std::error_code ec;
+    fs::create_directories(root.path / "real", ec);
+    ASSERT_FALSE(ec) << ec.message();
+    auto parent_of_folder = [](const std::string& r) {
+        ecuio_record_options_t o{};
+        o.root_utf8 = r.c_str();
+        ecuio_recorder_t* rec = nullptr;
+        EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+            << ecuio_last_error_detail();
+        char buf[2048] = "";
+        uint32_t len = 0;
+        if (rec != nullptr) {
+            EXPECT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len),
+                      ECUIO_OK);
+            EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+        }
+        return fs::u8path(buf).parent_path();
+    };
+    EXPECT_EQ(parent_of_folder(root.utf8() + "/real/./x/../y"),
+              root.path / "real" / "y");
+
+    const std::string relative =
+        std::string("ecuio-recorder-relative-") +
+        ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    const fs::path cwd = fs::current_path();
+    EXPECT_EQ(parent_of_folder(relative), cwd / relative);
+    fs::remove_all(cwd / relative, ec);
+
+#ifndef _WIN32
+    /* Making a link on Windows needs a privilege; GetFullPathNameW never
+     * follows one */
+    fs::create_directory_symlink(root.path / "real", root.path / "link", ec);
+    ASSERT_FALSE(ec) << ec.message();
+    EXPECT_EQ(parent_of_folder(root.utf8() + "/link"), root.path / "link");
+#endif
 }
 
 /* Two recorders opened in one second never share a folder */
@@ -374,9 +420,9 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     EXPECT_NE(events.find("\nprofile  rec-test\n"), std::string::npos);
     EXPECT_NE(events.find("\nframe flags  complete\n"), std::string::npos);
     EXPECT_NE(events.find("\nsignal  Half,number,\xC2\xB0"
-                          "C,1,2\n"),
+                          "C,1,2,3\n"),
               std::string::npos);
-    EXPECT_NE(events.find("\nsignal  Words,text,,0,0\n"), std::string::npos);
+    EXPECT_NE(events.find("\nsignal  Words,text,,0,0,0\n"), std::string::npos);
     EXPECT_NE(events.find("\ncaller  surrogate frame logging  off\n"),
               std::string::npos);
     EXPECT_NE(events.find("\ncaller  two lines\n"), std::string::npos);

@@ -178,3 +178,49 @@ snapshot's `t_s`, the figures cumulative from the connect, so the last
 row for a request is its total. The recorder creates it with the first
 snapshot that has a row, so a mock or replay recording has none.
 `BridgeTest.ARecordingKeepsReplyTimingsSnapshots`.
+
+## Appendix: the recorder is core's (2026-11-03)
+
+[ADR-0049](0049-recordings-in-core.md) moves the recorder into core
+(`ecuio/recording.h`), and the app records through it. That amends
+decision items 1, 3, 4 and 7 and two consequences; items 2, 5 and 6
+stand.
+
+- **Item 1, where it lives.** The worker puts each frame and its
+  values into a ring as dispatch takes the frame, and a writer thread
+  of core's writes the files. The bridge opens the recorder once
+  `ecuio_session_create` succeeds, attaches it before
+  `ecuio_session_start`, writes each activity line into `events.log`
+  as a note and closes it when the disconnect's teardown completes.
+  `SessionRecorder` is gone. A recording holds every frame the session
+  dispatched, those the bridge drops at its in-flight cap included,
+  and its last note says how many the Log page skipped.
+- **Item 3, the folder.** Core names it,
+  `<yyyyMMdd-HHmmss>[-n][ <label>]` (ADR-0049 section 2). The app
+  chooses the root, `Documents/Havne/recordings/`, and Settings still
+  shows the folder relative to Documents.
+- **Item 4, the files.** `frames.csv` and `signals.csv` keep their
+  columns. `host_us` counts on core's clock from the attach and is
+  stamped as dispatch takes the frame, before any callback.
+  `events.log` is format 2 (ADR-0049 section 2): the app's header
+  lines (its version, the frame-logging state, the vehicle's label)
+  sit under `caller`, every line carries a kind word, core adds its own
+  `link`, `asleep` and `drop` lines, and the summary is core's: why it
+  ended, then the frames, values, records and notes dropped.
+- **Item 7, failures.** A folder that can't be created logs
+  `Recording failed: <cause>`, and the session runs unrecorded. The
+  writer flushes every 100 ms and syncs to the storage every 2 s. A
+  write that fails marks the recording failed; at its next tick the
+  bridge logs `Recording stopped: <reason>` and closes it, and the
+  session runs on.
+- **"One format has two implementations"** gives way to one of each,
+  both in core, and `BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded`
+  has core on both sides.
+- **The spreadsheet.** `signals.csv` keeps its byte-order mark, but the
+  raw files are evidence, the files a session sheet rests on, and are
+  never escaped; opening one in a spreadsheet is opening a CSV from
+  elsewhere. The way into a spreadsheet is the export (ADR-0049
+  section 8, with sharing).
+- The appendices of 2026-10-29 and 2026-10-31 hold, with core writing
+  both: the sleep is an `asleep` line, and `latency.csv` keeps its
+  snapshots.

@@ -3,8 +3,9 @@
 //          connected to mock://demo with developer mode on: each page's
 //          items lie inside the window's width, the Log page in its
 //          Frames view too. The pages' own tests run them at 320 px
-//          alone; this one runs them as the window holds them, and the
-//          relay's line beside its button. How they
+//          alone; this one runs them as the window holds them, the
+//          relay's line beside its button, and the header's Mark while
+//          recording. How they
 //          look on a phone is the phone's run.
 
 import QtQuick
@@ -29,6 +30,7 @@ TestCase {
         Theme.developerMode = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.recording = false
     }
 
     function find(within, name) {
@@ -76,6 +78,7 @@ TestCase {
     function test_everyPageFitsAPhonesWidth_data() {
         return [{ tag: "homePage" }, { tag: "dashboardPage" }, { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
+                { tag: "recordingsPage" }, { tag: "recordingsViewer" }, { tag: "recordingsCompare" },
                 { tag: "settingsPage" }]
     }
 
@@ -88,12 +91,33 @@ TestCase {
         // Android's 14 sp text at the test phone's font scale, 1.15
         main.font.pixelSize = 16
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const name = data.tag === "logFrames" ? "logPage" : data.tag
+        const name = data.tag === "logFrames" ? "logPage"
+                   : data.tag === "recordingsViewer" || data.tag === "recordingsCompare"
+                   ? "recordingsPage" : data.tag
         const page = find(main.contentItem, name)
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         verify(page.visible, name + " is on screen")
         if (data.tag === "logFrames")
             find(page, "view_frames").clicked()
+        // A long title and source, and the findings fixture in the viewer
+        const row = { title: "2026-10-28 14:30:12 · A vehicle label forty characters long",
+                      uri: "replay://C:/rec/x?profile=raw",
+                      folder: Harness.recordingFixtures + "/findings",
+                      source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C", profile: "raw" }
+        if (name === "recordingsPage")
+            page.recordings = [row]
+        if (data.tag === "recordingsViewer" || data.tag === "recordingsCompare") {
+            page.open(row)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+            page.setCursor(5000)
+        }
+        // Compared with itself, aligned on a rise: every field shown
+        if (data.tag === "recordingsCompare") {
+            page.compareWith(row)
+            tryVerify(() => page.compareAligned, 10000, "the compared one opens")
+            page.setAlignOn("rise")
+            page.setCursor(5000)
+        }
         if (data.tag === "diagnosticsPage") {
             tryVerify(() => find(page, "clearCodes").enabled, 2000, "the report is read")
             find(page, "clearCodes").clicked()
@@ -104,6 +128,36 @@ TestCase {
         compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
+    }
+
+    // While a session records, the header's Mark marks it from any page,
+    // counting its marks, and the header still fits a phone
+    function test_theHeadersMarkMarksTheRecording() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const button = find(main.contentItem, "markButton")
+        const title = find(main.contentItem, "headerTitle")
+        verify(!button.visible, "nothing to mark yet")
+        verify(title.visible)
+        Bridge.recording = true
+        compare(Bridge.connectSession("mock://marked"), "", "mock://marked connects")
+        verify(Bridge.recordingActive)
+        verify(button.visible)
+        compare(button.text, "Mark")
+        button.clicked()
+        compare(Bridge.markCount, 1)
+        compare(button.text, "Mark (1)")
+        waitForRendering(main.contentItem)
+        verify(!title.visible, "the name gives way on a phone")
+        const out = pastTheEdge(button.parent, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        verify(!button.visible, "the recording ended")
+        verify(title.visible)
     }
 
     // The relay's line beside its button (ADR-0047): the traffic wraps in

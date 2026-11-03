@@ -31,6 +31,7 @@ TestCase {
     }
 
     function cleanup() {
+        Bridge.liveSignalModel.filter.clear()
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
@@ -57,6 +58,53 @@ TestCase {
     Component {
         id: sizedPageComponent
         LiveViewPage {}
+    }
+
+    // Finding a signal among many (ADR-0050): typed words narrow the
+    // list, a group's box and Plotted only narrow it further, Clear
+    // brings every row back, and the status line counts what's shown
+    function test_theFilterNarrowsTheList() {
+        // In the window: the filter's popup opens in its overlay
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        const all = list.count
+        const bar = findChild(page, "liveFilter")
+        verify(bar && bar.visible, "the filter shows while connected")
+        // Edited as typing edits it, keeping the field's binding
+        const field = findChild(bar, "filterText")
+        field.insert(0, "temp")
+        field.textEdited()
+        tryCompare(list, "count", 3)
+        verify(page.statusText().indexOf("Showing 3 of " + all + " signals") === 0,
+               page.statusText())
+
+        mouseClick(findChild(bar, "filterButton"))
+        tryVerify(() => bar.options.opened, 2000, "the filter's options open")
+        const boxes = bar.options.contentItem
+        for (const code of [1, 2, 4, 6])
+            verify(findChild(boxes, "group_" + code), "a box for group " + code)
+        verify(!findChild(boxes, "group_3"), "no box for a group the list lacks")
+        // A box's own handler, as a tap runs it
+        findChild(boxes, "group_2").toggled()
+        tryCompare(list, "count", 1)
+        tryVerify(() => list.itemAtIndex(0) !== null && list.itemAtIndex(0).name === "Intake Air Temp",
+                  2000, "the row left is the intake air's")
+        verify(findChild(bar, "filterButton").highlighted, "a group chosen lights the button")
+
+        findChild(boxes, "filterClear").clicked()
+        tryCompare(list, "count", all)
+        compare(field.text, "")
+        verify(!findChild(boxes, "group_2").checked, "Clear unticks the group")
+
+        const plottedOnly = findChild(boxes, "plottedOnly")
+        plottedOnly.toggle()
+        plottedOnly.toggled()
+        compare(list.count, all, "the mock plots every row")
+        Bridge.signalModel.toggleSubscribed(0)
+        tryCompare(list, "count", all - 1)
+        verify(page.statusText().indexOf("Showing " + (all - 1) + " of " + all) === 0,
+               page.statusText())
+        Bridge.signalModel.toggleSubscribed(0)
     }
 
     // On a short page (a small window, a large zoom) the list gives up

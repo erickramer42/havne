@@ -2,14 +2,16 @@
 //             ALL platforms
 // Testing: UNIT: CoreTest.Replay* (replay_transport.cpp's reader: the
 //          refusals with their line numbers, either line ending, a
-//          whole-message payload); SimRecordingTest (test_obd2: the
-//          simulated ECU's recording, sim_recording.h); FUZZ:
+//          whole-message payload, a torn last row dropped);
+//          SimRecordingTest (test_obd2: the simulated ECU's recording,
+//          sim_recording.h, a torn last row dropped); FUZZ:
 //          fuzz_replay_file
 //
 // Reading a recording's frames.csv (ADR-0017): its header row, one row at
 // a time into a frame, and the recording's path as fopen takes it. Shared
 // by replay:// (replay_transport.cpp) and the simulated ECU's recording
-// (sim_recording.h), so both read a file the same way.
+// (sim_recording.h), so both read a file the same way; the frames check
+// (recording_check.cpp) reads its rows too, and the reader its sizes.
 
 #ifndef ECUIO_FRAMES_CSV_H
 #define ECUIO_FRAMES_CSV_H
@@ -85,11 +87,46 @@ struct native_path {
     }
 };
 
+/* A byte offset, past 2 GiB too */
+inline bool seek_to(FILE* f, uint64_t offset)
+{
+#ifdef _WIN32
+    return _fseeki64(f, static_cast<__int64>(offset), SEEK_SET) == 0;
+#else
+    return fseeko(f, static_cast<off_t>(offset), SEEK_SET) == 0;
+#endif
+}
+
+/* The file's size; it is left at its start */
+inline uint64_t file_size(FILE* f)
+{
+#ifdef _WIN32
+    if (_fseeki64(f, 0, SEEK_END) != 0) {
+        return 0;
+    }
+    const __int64 n = _ftelli64(f);
+#else
+    if (fseeko(f, 0, SEEK_END) != 0) {
+        return 0;
+    }
+    const off_t n = ftello(f);
+#endif
+    (void)seek_to(f, 0);
+    return n > 0 ? static_cast<uint64_t>(n) : 0;
+}
+
 /* One line without its ending (LF or CRLF). False at the end of the file;
- * *too_long when the line doesn't fit kLineMax. */
-inline bool read_line(FILE* f, std::vector<char>& buf, bool* too_long)
+ * *too_long when the line doesn't fit kLineMax; *torn, when given, for the
+ * file's last bytes with no newline after them: a write cut short (a
+ * crash, a pulled cable, a power cut), which ADR-0049 section 7 drops and
+ * counts rather than refuses. */
+inline bool read_line(FILE* f, std::vector<char>& buf, bool* too_long,
+                      bool* torn = nullptr)
 {
     *too_long = false;
+    if (torn != nullptr) {
+        *torn = false;
+    }
     /* No lock is held here: the worker's wait block ends before the next
      * read. clang-tidy 22's analyzer loses the unique_lock's unlock. */
     // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection)
@@ -102,6 +139,8 @@ inline bool read_line(FILE* f, std::vector<char>& buf, bool* too_long)
     } else if (!std::feof(f)) {
         *too_long = true;
         return true;
+    } else if (torn != nullptr) {
+        *torn = true;
     }
     if (n > 0 && buf[n - 1] == '\r') {
         buf[--n] = '\0';

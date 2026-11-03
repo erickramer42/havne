@@ -347,9 +347,12 @@ void hold_on_error(const ecuio_frame_t* f, void* user_data)
  * (150 ms), and the VIN is still whole. The ECU answers 09 02 once, so
  * a request asked again can't stand in for the first; other requests
  * get the fakes' Single Frames, or nothing. The ECU's thread can itself
- * be late (ASan on a loaded runner): a run whose last Consecutive Frame
- * went over 100 ms after the First Frame was late on the bus too, so it
- * tests nothing and runs again, three runs at most. So does a run whose
+ * be late (ASan on a loaded runner), and so can the kernel's stamps: a
+ * run whose last Consecutive Frame went over 100 ms after the First
+ * Frame, by the ECU's clock or by the stamps a listener reads (which a
+ * starved CPU can put 200 ms late, ADR-0032's appendix "frames out of
+ * order"), was late on the bus too, so it tests nothing and runs again,
+ * three runs at most. So does a run whose
  * frames the bus carried out of order: vcan queues each frame on the
  * sending CPU's backlog, so a thread moving between CPUs under load can
  * have its frames delivered out of order, which a real bus never does.
@@ -376,6 +379,10 @@ HeldWorkerRun run_held_worker()
     std::atomic<bool> on_time{false};
     vcan_bus::Fd listener = vcan_bus::open_raw();
     EXPECT_TRUE(listener.ok());
+    const int stamps = 1;
+    EXPECT_EQ(setsockopt(listener.get(), SOL_SOCKET, SO_TIMESTAMPNS, &stamps,
+                         sizeof stamps),
+              0);
     std::thread ecu([&] {
         const int cpu = sched_getcpu();
         if (cpu >= 0) {
@@ -458,19 +465,46 @@ HeldWorkerRun run_held_worker()
     }
     stop = true;
     ecu.join();
-    /* The VIN's frames as the bus carried them: 10, 21, 22 */
+    /* The VIN's frames as the bus carried them, 10, 21, 22, and the
+     * kernel's stamps of the first and last */
     std::vector<uint8_t> pcis;
-    can_frame f;
-    while (listener.ok() &&
-           vcan_bus::read_for(listener.get(), &f, sizeof f, 0) ==
-               static_cast<long>(sizeof f)) {
+    int64_t first_ns = -1, last_ns = -1;
+    for (;;) {
+        can_frame f;
+        iovec iov{&f, sizeof f};
+        alignas(cmsghdr) char control[CMSG_SPACE(sizeof(timespec))];
+        msghdr msg{};
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof control;
+        if (!listener.ok() ||
+            recvmsg(listener.get(), &msg, MSG_DONTWAIT) !=
+                static_cast<ssize_t>(sizeof f)) {
+            break;
+        }
+        int64_t ns = -1;
+        for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr;
+             c = CMSG_NXTHDR(&msg, c)) {
+            if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_TIMESTAMPNS) {
+                timespec ts;
+                std::memcpy(&ts, CMSG_DATA(c), sizeof ts);
+                ns = static_cast<int64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec;
+            }
+        }
         if (f.can_id == vcan_bus::kReply && f.len == 8 &&
             (f.data[0] == 0x10 || f.data[0] == 0x21 || f.data[0] == 0x22)) {
             pcis.push_back(f.data[0]);
+            if (f.data[0] == 0x10) {
+                first_ns = ns;
+            } else if (f.data[0] == 0x22) {
+                last_ns = ns;
+            }
         }
     }
     r.in_order = pcis == std::vector<uint8_t>{0x10, 0x21, 0x22};
-    r.on_time = on_time.load();
+    r.on_time = on_time.load() && first_ns >= 0 && last_ns >= first_ns &&
+                last_ns - first_ns <= 100000000;
     r.held = held.load();
     r.segmented = segmented.load();
     return r;

@@ -30,12 +30,17 @@
 // itself: core's decode at 1000 defs against 9 (the def index keeps it
 // flat; checking every def made it over 20x), and the looping run's
 // worker rate under obd2 against the same run under raw, which decodes
-// nothing. Exit status 1 on any failed check.
+// nothing. The looping run and the 100x pass run again recorded through
+// core's recorder (ADR-0049): the looping pair twice, unrecorded and
+// recorded alternated, the faster recorded run at least 0.7 of the
+// faster unrecorded one; the 100x one writing every frame and value with
+// no record dropped. Exit status 1 on any failed check.
 //
-// --record measures core's recorder on the worker (ADR-0049 section 9):
-// the fixture replayed by core's own session on two physical cores,
-// recorded and unrecorded runs alternated, and recorded passes checked
-// whole (recordTest).
+// --record measures the recorder (ADR-0049 section 9): the bridge's
+// looping run, recorded and unrecorded alternated on three physical
+// cores, held to the ADR's 10%; then core's own session on two, its
+// cost a frame bounded; then recorded passes checked whole
+// (recordTest).
 //
 // The defs sit four to a CAN ID, 16 bits each, as a passive-bus profile
 // packs them; each frame carries one ID, so it decodes four values and
@@ -46,7 +51,7 @@
 //      build/tests/Release/bench_bridge.exe --load   (the load test alone,
 //      as CI runs it; a markdown table)
 //      build/tests/Release/bench_bridge.exe --record (the recording test
-//      alone, about a minute; a markdown table)
+//      alone, about 90 s; a markdown table)
 
 #include <QCoreApplication>
 #include <QFile>
@@ -292,6 +297,12 @@ constexpr double kMaxPacedFrameP99Ms = 500.0;    // dev: under 1
 // decode ratio is kDecodeFrames frames
 constexpr double kMaxDecodeRatio = 3.0;
 constexpr double kMinDecodingShare = 0.5;
+// The looping run recorded through core's recorder against the same run
+// not recorded, the faster of two each (a runner's noise only slows a
+// run): ADR-0049 section 9's CI gate, the 10% judged on the dev machine
+// by --record's alternated runs. Shared runners read about 0.8 on Linux
+// and 0.9 on Windows with one pair, 2026-11-03
+constexpr double kMinRecordedLoopShare = 0.7;
 constexpr int kDecodeFrames = 100000;
 
 struct LoadRun {
@@ -299,12 +310,15 @@ struct LoadRun {
     const char* query = "";
     const char* profile = "obd2";
     bool sustained = false;
+    bool recorded = false;       // core's recorder attached (ADR-0049)
     double seconds = 0.0;        // one pass: until every frame is handled or dropped
     double workerRate = 0.0;     // sustained: frames a second through the worker
     double handledRate = 0.0;    // sustained: frames a second the GUI thread handled
     int handled = 0;
     double peakRpm = 0.0;
     SessionBridge::DeliveryStats stats;
+    ecuio_recorder_state_t rec{}; // recorded: one pass once every frame is
+                                  // written, looping at the run's end
 };
 
 void spin(double seconds)
@@ -324,6 +338,12 @@ void replayFixture(LoadRun& run)
                  QString::fromLatin1(run.profile),
                  QString::fromLatin1(run.query));
     SessionBridge bridge;
+    QTemporaryDir recordings;
+    if (run.recorded) {
+        bridge.setRecordingsRootForTesting(recordings.path());
+        bridge.setRecording(true);
+        bridge.setRecordReplaysForTesting(true);
+    }
     SignalListModel* model = bridge.signalModel();
     QObject::connect(model, &SignalListModel::valuesUpdated, model, [&]() {
         for (const QVariant& s : model->chartData()) {
@@ -353,6 +373,8 @@ void replayFixture(LoadRun& run)
         run.workerRate = static_cast<double>(run.stats.frames - frames0) / dt;
         run.handledRate = static_cast<double>(bridge.frameCount() - handled0) / dt;
         run.seconds = dt;
+        if (bridge.recorderForTesting() != nullptr)
+            ecuio_recorder_get_state(bridge.recorderForTesting(), &run.rec);
     } else {
         while (static_cast<quint64>(bridge.frameCount() + bridge.droppedFrames()) <
                kFixtureFrames)
@@ -361,6 +383,16 @@ void replayFixture(LoadRun& run)
             std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         spin(0.25);   // two more ticks: the last window's values reach the model
         run.stats = bridge.deliveryStats();
+        // Every frame written, or the writer's 100 ms wakes have had ample time
+        const auto until =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (bridge.recorderForTesting() != nullptr &&
+               std::chrono::steady_clock::now() < until) {
+            ecuio_recorder_get_state(bridge.recorderForTesting(), &run.rec);
+            if (run.rec.frame_rows + run.rec.records_dropped >= kFixtureFrames)
+                break;
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        }
     }
     run.handled = bridge.frameCount();
     bridge.disconnectSession();
@@ -408,7 +440,7 @@ double decodeMicros(int n)
 // counts and a values callback that does nothing, as the bridge's.
 // Recorded runs (a recorder with its default ring attached before start)
 // alternate with unrecorded ones, kRecordRounds of each, the process held
-// to two physical cores (pinToTwoCores), and their medians are compared.
+// to two physical cores (pinToCores), and their medians are compared.
 // A frame costs this worker so little that the recorder's fixed cost per
 // frame is a large share of it here, and that share follows the rest of
 // the worker's speed; section 9's 10% is judged on the bridge's run,
@@ -417,6 +449,7 @@ double decodeMicros(int n)
 // regressions. Then one recorded pass at full speed and one at 100x must
 // put every frame and value in the files, none dropped
 constexpr int kRecordRounds = 5;
+constexpr double kMinBridgeRecordedShare = 0.9; // ADR-0049 section 9's 10%
 constexpr double kMaxRecordedNs = 75.0; // dev: 42 to 47, Windows and Linux,
                                         // 2026-11-02
 constexpr quint64 kFixtureValues = 7061;
@@ -462,13 +495,14 @@ int readSysInt(const char* format, int cpu)
 }
 #endif
 
-// The process held to one logical processor on each of two physical
-// cores, so the worker and the writer never share a core: otherwise where
-// the OS puts them decides the figures (a busy thread on the worker's own
-// core slowed it by about 40%, on another by about 4%, 2026-11-02). Its
-// processors in *which; false where it can't be done. Threads started
-// later inherit it, the sessions' among them
-bool pinToTwoCores(std::string* which)
+// The process held to one logical processor on each of n physical
+// cores, so its busy threads (the worker, the writer, the bridge's GUI
+// thread) never share a core: otherwise where the OS puts them decides
+// the figures (a busy thread on the worker's own core slowed it by about
+// 40%, on another by about 4%, 2026-11-02). Its processors in *which;
+// false where it can't be done. Threads started later inherit it, the
+// sessions' among them
+bool pinToCores(int n, std::string* which)
 {
 #if defined(_WIN32)
     DWORD bytes = 0;
@@ -483,10 +517,10 @@ bool pinToTwoCores(std::string* which)
         if (i.Relationship != RelationProcessorCore || i.ProcessorMask == 0)
             continue;
         mask |= i.ProcessorMask & (~i.ProcessorMask + 1); // its first
-        if (++cores == 2)
+        if (++cores == n)
             break;
     }
-    if (cores < 2 || !SetProcessAffinityMask(GetCurrentProcess(), mask))
+    if (cores < n || !SetProcessAffinityMask(GetCurrentProcess(), mask))
         return false;
     char text[64];
     std::snprintf(text, sizeof(text), "processor mask 0x%llx",
@@ -502,7 +536,7 @@ bool pinToTwoCores(std::string* which)
     cpu_set_t pick;
     CPU_ZERO(&pick);
     std::string names;
-    for (int c = 0; c < CPU_SETSIZE && seen.size() < 2; ++c) {
+    for (int c = 0; c < CPU_SETSIZE && static_cast<int>(seen.size()) < n; ++c) {
         if (!CPU_ISSET(c, &allowed))
             continue;
         const std::pair<int, int> id{
@@ -516,13 +550,15 @@ bool pinToTwoCores(std::string* which)
             continue;
         seen.push_back(id);
         CPU_SET(c, &pick);
-        names += (names.empty() ? "processors " : " and ") + std::to_string(c);
+        names += (names.empty() ? "processors " : ", ") + std::to_string(c);
     }
-    if (seen.size() < 2 || sched_setaffinity(0, sizeof(pick), &pick) != 0)
+    if (static_cast<int>(seen.size()) < n ||
+        sched_setaffinity(0, sizeof(pick), &pick) != 0)
         return false;
     *which = names;
     return true;
 #else
+    (void)n;
     (void)which;
     return false;
 #endif
@@ -603,10 +639,32 @@ bool recordTest()
         std::fprintf(stderr, "no temporary folder for the recordings\n");
         std::exit(1);
     }
-    std::string pinned;
-    const bool held = pinToTwoCores(&pinned);
-    const QByteArray root = dir.path().toUtf8();
     const char* loop = "speed=max&loop=1";
+    // The bridge's looping run first, recorded and not, alternated, on
+    // three cores (ADR-0049 section 9's 10%: the app's worker path)
+    std::string pinnedBridge;
+    const bool heldBridge = pinToCores(3, &pinnedBridge);
+    std::vector<double> bridgePlain, bridgeRecorded;
+    quint64 bridgeDropped = 0;
+    for (int i = 0; i < kRecordRounds; ++i) {
+        LoadRun run;
+        run.query = loop;
+        run.sustained = true;
+        replayFixture(run);
+        bridgePlain.push_back(run.workerRate);
+        LoadRun recordedRun;
+        recordedRun.query = loop;
+        recordedRun.sustained = true;
+        recordedRun.recorded = true;
+        replayFixture(recordedRun);
+        bridgeRecorded.push_back(recordedRun.workerRate);
+        bridgeDropped += recordedRun.rec.records_dropped;
+    }
+    const double bridgeShare = median(bridgeRecorded) / median(bridgePlain);
+
+    std::string pinned;
+    const bool held = pinToCores(2, &pinned);
+    const QByteArray root = dir.path().toUtf8();
     std::vector<double> plain, recorded;
     quint64 loopWritten = 0, loopDropped = 0;
     for (int i = 0; i < kRecordRounds; ++i) {
@@ -621,6 +679,27 @@ bool recordTest()
 
     const double share = median(recorded) / median(plain);
     const double costNs = 1e9 / median(recorded) - 1e9 / median(plain);
+    std::printf("\n### Recording: the engine-start fixture under obd2, the "
+                "bridge's worker\n\n"
+                "%d looping runs of %.0f s each way through a SessionBridge, "
+                "alternated, %s; frames a second through the worker, median "
+                "(lowest to highest).\n\n",
+                kRecordRounds, kSustainSeconds,
+                heldBridge ? ("held to " + pinnedBridge).c_str()
+                           : "NOT held to three cores, so where the OS put the "
+                             "threads moves the figures");
+    std::printf("| Run | Worker frames/s |\n|---|---|\n");
+    auto rate = [](const char* label, const std::vector<double>& v) {
+        std::printf("| %s | %.0f (%.0f to %.0f) |\n", label, median(v),
+                    *std::min_element(v.begin(), v.end()),
+                    *std::max_element(v.begin(), v.end()));
+    };
+    rate("not recorded", bridgePlain);
+    rate("recorded", bridgeRecorded);
+    std::printf("\nRecorded at %.2f of the unrecorded rate (%llu records "
+                "dropped).\n",
+                bridgeShare, static_cast<unsigned long long>(bridgeDropped));
+
     std::printf("\n### Recording: the engine-start fixture under obd2, core's "
                 "worker\n\n"
                 "%d looping runs of %.0f s each way, alternated, %s; frames a "
@@ -661,6 +740,12 @@ bool recordTest()
     std::vector<std::string> failed;
     char bound[160];
     std::snprintf(bound, sizeof(bound),
+                  "the bridge's run recorded at %.2f of its unrecorded rate, "
+                  "under %.2f",
+                  bridgeShare, kMinBridgeRecordedShare);
+    if (bridgeShare < kMinBridgeRecordedShare)
+        failed.push_back(bound);
+    std::snprintf(bound, sizeof(bound),
                   "recording added %.0f ns a frame, over %.0f", costNs,
                   kMaxRecordedNs);
     if (costNs > kMaxRecordedNs)
@@ -679,10 +764,11 @@ bool recordTest()
             failed.push_back(at + "the recording failed: " + r.rec.reason);
     }
     if (failed.empty()) {
-        std::printf("\nEvery check passed: recording added at most %.0f ns a "
-                    "frame; each recorded pass wrote every frame and value, "
-                    "none dropped.\n",
-                    kMaxRecordedNs);
+        std::printf("\nEvery check passed: the bridge's run recorded at least "
+                    "%.2f of its unrecorded rate; recording added at most %.0f "
+                    "ns a frame to core's worker; each recorded pass wrote "
+                    "every frame and value, none dropped.\n",
+                    kMinBridgeRecordedShare, kMaxRecordedNs);
         return true;
     }
     std::printf("\n");
@@ -715,6 +801,20 @@ bool loadTest(bool withSlowRun)
     raw.label = "full speed, looping 3 s, raw (no decode)";
     raw.profile = "raw";
     runs.push_back(raw);
+    LoadRun recordedLoop = runs[2];
+    recordedLoop.label = "full speed, looping 3 s, recorded";
+    recordedLoop.recorded = true;
+    runs.push_back(recordedLoop); // runs[4]
+    LoadRun recordedPaced = runs[1];
+    recordedPaced.label = "100x, one pass, recorded";
+    recordedPaced.recorded = true;
+    runs.push_back(recordedPaced); // runs[5]
+    LoadRun loopAgain = runs[2];
+    loopAgain.label = "full speed, looping 3 s, again";
+    runs.push_back(loopAgain); // runs[6]
+    LoadRun recordedAgain = recordedLoop;
+    recordedAgain.label = "full speed, looping 3 s, recorded, again";
+    runs.push_back(recordedAgain); // runs[7]
     if (withSlowRun) {
         LoadRun slow;
         slow.label = "10x, one pass";
@@ -772,6 +872,13 @@ bool loadTest(bool withSlowRun)
         check(r.stats.valueToModel.count() == r.stats.values, at + "a value not timed");
         check(std::abs(r.peakRpm - kFixturePeakRpm) < 0.01,
               at + "the chart lost the recording's peak");
+        if (r.recorded) {
+            check(r.rec.records_dropped == 0,
+                  at + "the recording dropped records");
+            check(r.rec.frame_rows == kFixtureFrames &&
+                      r.rec.value_rows == kFixtureValues,
+                  at + "the recording missed frames or values");
+        }
     }
     const double decode9 = decodeMicros(9);
     const double decode1000 = decodeMicros(1000);
@@ -791,6 +898,28 @@ bool loadTest(bool withSlowRun)
                   "looping under obd2 at %.2f of raw's rate, under %.2f",
                   decodingShare, kMinDecodingShare);
     check(decodingShare >= kMinDecodingShare, bound);
+    const double unrecordedRate =
+        std::max(runs[2].workerRate, runs[6].workerRate);
+    const double recordedRate =
+        std::max(runs[4].workerRate, runs[7].workerRate);
+    const double recordedShare = recordedRate / unrecordedRate;
+    std::printf(
+        "Looping, recorded against not, the faster of two each: %.0f against "
+        "%.0f frames/s (%.2f), %llu frames written, %llu records dropped. "
+        "100x recorded: %llu frames and %llu values written, %llu records "
+        "dropped.\n",
+        recordedRate, unrecordedRate, recordedShare,
+        static_cast<unsigned long long>(runs[4].rec.frame_rows +
+                                        runs[7].rec.frame_rows),
+        static_cast<unsigned long long>(runs[4].rec.records_dropped +
+                                        runs[7].rec.records_dropped),
+        static_cast<unsigned long long>(runs[5].rec.frame_rows),
+        static_cast<unsigned long long>(runs[5].rec.value_rows),
+        static_cast<unsigned long long>(runs[5].rec.records_dropped));
+    std::snprintf(bound, sizeof(bound),
+                  "looping recorded at %.2f of the unrecorded rate, under %.2f",
+                  recordedShare, kMinRecordedLoopShare);
+    check(recordedShare >= kMinRecordedLoopShare, bound);
 
     const LoadRun& paced = runs[1];
     check(ms(paced.stats.valueToModel.quantileUs(0.99)) <= kMaxPacedValueP99Ms,
@@ -804,9 +933,11 @@ bool loadTest(bool withSlowRun)
             "and kept the peak; at least %.0f frames/s through the worker; "
             "at 100x, p99 under %.0f ms to the model and %.0f ms to the GUI "
             "thread; decode at 1000 defs within %.1fx its cost at 9; looping "
-            "under obd2 at least %.2f of raw's rate.\n",
+            "under obd2 at least %.2f of raw's rate, and recorded at least "
+            "%.2f of its unrecorded rate; the recorded 100x pass wrote every "
+            "frame and value.\n",
             kMinWorkerFramesPerSecond, kMaxPacedValueP99Ms, kMaxPacedFrameP99Ms,
-            kMaxDecodeRatio, kMinDecodingShare);
+            kMaxDecodeRatio, kMinDecodingShare, kMinRecordedLoopShare);
         return true;
     }
     std::printf("\n");

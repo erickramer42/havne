@@ -206,6 +206,11 @@ judges nothing.
 > bridge hands Live those IDs. A range never answered still judges
 > nothing, and a rescan that finds a PID takes its defs off the list.
 
+> **Amended 2026-11-03 (recordings in core):** the decode also runs
+> while a session records ([ADR-0049](0049-recordings-in-core.md)
+> section 1), and the absent signals' judgment follows it: a recording
+> session judges them whether or not a values callback is registered.
+
 ### 7. The fakes
 
 The fakes' ECU (`tests/fake_ecu.h`) answers every linear PID with a

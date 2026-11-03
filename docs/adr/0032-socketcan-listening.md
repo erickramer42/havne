@@ -290,3 +290,23 @@ same way.
 > a requesting session needs a controller in normal mode, at the rate
 > `?baud=` states, with no restart after a bus-off, in one-shot mode and
 > error-active (ADR-0040 section 2).
+
+## Appendix: frames out of order (2026-11-03)
+
+> **Amended 2026-11-03:** section 5's clock leaves a session's own
+> frames out, and reads a small backward delta as a frame delivered
+> out of order, not as a wall-clock step. A requesting session reads
+> its own Flow Control frame back to settle its sending, and that
+> echo's kernel stamp is not the moment it went out: in an ASan build
+> under load, in WSL, one echo was read after the Consecutive Frames
+> it brought on but stamped before them, and another stamped 200 ms
+> after them, once a stalled worker read on. Either way the clock
+> carried the stall into the reply's times, past ISO-TP's N_Cr, and
+> the VIN was dropped
+> (`SocketCanRequestTest.AReplyOnTimeSurvivesAWorkerHeldUpMidMessage`,
+> about one run in 400 under load). An echo now leaves the clock alone:
+> nothing reads its time. And since each CPU queues the frames it
+> sends, a frame stamped up to 100 ms before the newest
+> (`SOCKETCAN_CLOCK_REORDER_US`) takes the newest frame's time, later
+> deltas running from the newest stamp; a step further back still
+> gives way to the host's delta.

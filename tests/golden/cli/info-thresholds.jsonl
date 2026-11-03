@@ -1,0 +1,11 @@
+{"schema": 1, "type": "start"}
+{"duration_us": 20000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signals": 1, "summary": true, "type": "opened", "utc_start_us": 1793721600000000}
+{"decimals": 0, "first_us": 100300, "group": "Other", "highest": 1610, "index": 0, "last_us": 19950300, "lowest": 804, "name": "RPM", "rank": 1, "rate_hz": 15.415617128463476, "recording": 0, "samples": 307, "text": false, "type": "signal", "unit": "rpm"}
+{"host_us": 2000000, "index": 0, "label": "lap", "recording": 0, "type": "marker"}
+{"at_us": 4950000, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 1550000, "type": "finding"}
+{"at_us": 10000000, "count": 0, "extended": false, "id": null, "kind": "asleep", "length_us": 3000000, "type": "finding"}
+{"at_us": 16000000, "count": 1, "extended": false, "id": null, "kind": "overflow", "length_us": 0, "type": "finding"}
+{"at_us": 17000000, "count": 1, "extended": false, "id": "0x7E8", "kind": "isotp", "length_us": 0, "type": "finding"}
+{"at_us": 18000000, "code": 8, "count": 1, "extended": false, "id": null, "kind": "link", "length_us": 0, "message": "vehicle not responding (timeout)", "type": "finding"}
+{"at_us": 18500000, "code": 0, "count": 1, "extended": false, "id": null, "kind": "link", "length_us": 0, "message": "success", "type": "finding"}
+{"duration_us": 19950000, "findings": {"asleep": 1, "gap": 0, "isotp": 1, "late-id": 0, "link": 2, "overflow": 1, "rate-drop": 1}, "frames": 509, "gap_us": 3000000, "ids": 3, "isotp": "checked", "rate_drop": 20, "settle_us": 20000000, "torn_rows": 0, "type": "summary"}
