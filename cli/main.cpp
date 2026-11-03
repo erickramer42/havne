@@ -69,6 +69,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#else
+#include <unistd.h> /* read: the marks typed into stream --record */
 #endif
 
 // play writes to a SocketCAN interface: Linux only, as socketcan:// is
