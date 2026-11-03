@@ -430,6 +430,7 @@ QVariantList RecordingView::signalList() const
             {QStringLiteral("decimals"), decimals},
             {QStringLiteral("isText"), text},
             {QStringLiteral("plotRank"), static_cast<int>(s.pub.plot_rank)},
+            {QStringLiteral("group"), static_cast<int>(s.pub.group)},
             {QStringLiteral("plotted"), s.plotted},
             {QStringLiteral("samples"), static_cast<double>(s.pub.samples)},
             {QStringLiteral("lowest"), lowest},

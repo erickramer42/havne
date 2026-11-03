@@ -298,28 +298,29 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case WindowLowRole: return shown(e, e.windowLow).value;
         case RowRole: return index.row();
         case HiddenRole: return e.hidden;
+        case GroupRole:
+            return static_cast<int>(e.group);
         default: return QVariant();
     }
 }
 
 QHash<int, QByteArray> SignalListModel::roleNames() const
 {
-    return {
-        {IdRole, "id"},
-        {NameRole, "name"},
-        {UnitRole, "unit"},
-        {ValueRole, "value"},
-        {SubscribedRole, "subscribed"},
-        {HasValueRole, "hasValue"},
-        {AgeMsRole, "ageMs"},
-        {DecimalsRole, "decimals"},
-        {TextRole, "text"},
-        {IsTextRole, "isText"},
-        {WindowHighRole, "windowHigh"},
-        {WindowLowRole, "windowLow"},
-        {RowRole, "row"},
-        {HiddenRole, "hidden"}
-    };
+    return {{IdRole, "id"},
+            {NameRole, "name"},
+            {UnitRole, "unit"},
+            {ValueRole, "value"},
+            {SubscribedRole, "subscribed"},
+            {HasValueRole, "hasValue"},
+            {AgeMsRole, "ageMs"},
+            {DecimalsRole, "decimals"},
+            {TextRole, "text"},
+            {IsTextRole, "isText"},
+            {WindowHighRole, "windowHigh"},
+            {WindowLowRole, "windowLow"},
+            {RowRole, "row"},
+            {HiddenRole, "hidden"},
+            {GroupRole, "group"}};
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
@@ -361,6 +362,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
         e.plotRank = set->defs[i].plot_rank;
+        e.group = set->defs[i].group;
         m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
         // judgePlotted's, below; a text row has nothing to plot
         e.subscribed = false;
@@ -754,17 +756,64 @@ void SignalListModel::rejudgeHidden()
 
 // ---------------- LiveSignalModel ----------------
 LiveSignalModel::LiveSignalModel(SignalListModel* source, QObject* parent)
-    : QSortFilterProxyModel(parent)
+    : QSortFilterProxyModel(parent), m_filter(new SignalFilter(this))
 {
     // A HiddenRole change re-filters its rows (dynamic filtering, the default)
     setFilterRole(SignalListModel::HiddenRole);
     setSourceModel(source);
+    // Dynamic filtering re-judges a row on any change to it, so a tick
+    // under Plotted only, or a unit changed under typed text, re-filters
+    // it; the filter's own changes re-judge every row
+    connect(m_filter, &SignalFilter::changed, this, &LiveSignalModel::refilter);
+    connect(source, &QAbstractItemModel::modelReset, this,
+            &LiveSignalModel::judgeGroups);
+    connect(source, &SignalListModel::hiddenCountChanged, this,
+            &LiveSignalModel::judgeGroups);
+    judgeGroups();
 }
 
 bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
 {
-    const QModelIndex i = sourceModel()->index(sourceRow, 0, sourceParent);
-    return !sourceModel()->data(i, SignalListModel::HiddenRole).toBool();
+    const QAbstractItemModel* m = sourceModel();
+    const QModelIndex i = m->index(sourceRow, 0, sourceParent);
+    if (m->data(i, SignalListModel::HiddenRole).toBool()) {
+        return false;
+    }
+    return m_filter->matches(
+        m->data(i, SignalListModel::NameRole).toString(),
+        m->data(i, SignalListModel::UnitRole).toString(),
+        m->data(i, SignalListModel::GroupRole).toInt(),
+        m->data(i, SignalListModel::SubscribedRole).toBool());
+}
+
+void LiveSignalModel::refilter()
+{
+    // The filter changed already: begin and end at once re-judge every row
+    beginFilterChange();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+}
+
+void LiveSignalModel::judgeGroups()
+{
+    const QAbstractItemModel* m = sourceModel();
+    QVariantList codes;
+    int shown = 0;
+    for (int r = 0; r < m->rowCount(); ++r) {
+        const QModelIndex i = m->index(r, 0);
+        if (!m->data(i, SignalListModel::HiddenRole).toBool()) {
+            codes.append(m->data(i, SignalListModel::GroupRole));
+            ++shown;
+        }
+    }
+    QVariantList groups;
+    for (const QVariant& choice : m_filter->groupChoices(codes)) {
+        groups.append(choice.toMap().value(QStringLiteral("code")));
+    }
+    if (groups != m_groups || shown != m_shownCount) {
+        m_groups = groups;
+        m_shownCount = shown;
+        emit groupsChanged();
+    }
 }
 
 // ---------------- SessionBridge ----------------

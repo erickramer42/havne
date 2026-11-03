@@ -69,6 +69,14 @@ struct RecordingViewForeign {
     QML_NAMED_ELEMENT(RecordingView)
 };
 
+// Finding a signal among many (ADR-0050): Live's list holds one, and the
+// Recordings page makes its own
+struct SignalFilterForeign {
+    Q_GADGET
+    QML_FOREIGN(SignalFilter)
+    QML_NAMED_ELEMENT(SignalFilter)
+};
+
 // The bridge's model properties, typed for qmllint. Not creatable or
 // nameable from QML.
 struct FrameListModelForeign
