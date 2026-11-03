@@ -1584,6 +1584,10 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
     (void)ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length);
     m_recorder = recorder;
     m_recordingFolder = QString::fromUtf8(folder);
+    if (m_markCount != 0) {
+        m_markCount = 0;
+        emit markCountChanged();
+    }
     emit recordingStateChanged();
     emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
 }
@@ -1608,6 +1612,25 @@ void SessionBridge::stopRecording(const QString& why)
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+}
+
+bool SessionBridge::mark(const QString& label)
+{
+    if (m_recorder == nullptr) {
+        return false;
+    }
+    const QString text = label.trimmed().isEmpty()
+                             ? QStringLiteral("Mark %1").arg(m_markCount + 1)
+                             : label.trimmed();
+    if (ecuio_recorder_mark(m_recorder, text.toUtf8().constData()) !=
+        ECUIO_OK) {
+        return false;
+    }
+    ++m_markCount;
+    emit markCountChanged();
+    // markers.csv holds it: the activity log only, not a note as well
+    logUnnoted(QStringLiteral("Marked: %1").arg(text));
+    return true;
 }
 
 void SessionBridge::pollRecording()

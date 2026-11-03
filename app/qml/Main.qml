@@ -188,12 +188,16 @@ ApplicationWindow {
                     }
                 }
                 RowLayout {
+                    id: headerRow
                     anchors.fill: parent
                     anchors.leftMargin: 16
                     anchors.rightMargin: 16
                     spacing: 12
 
+                    // The name gives way to Mark on a phone's width
                     Label {
+                        objectName: "headerTitle"
+                        visible: !markButton.visible || headerRow.width >= 420
                         text: qsTr("Havne")
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
@@ -246,6 +250,19 @@ ApplicationWindow {
                     }
 
                     Item { Layout.fillWidth: true }  // Spacer
+
+                    // A marker in the recording under way, from any page
+                    // (ADR-0049 section 4): "Mark N" at the tap, which the
+                    // Recordings page aligns two runs on
+                    ThemedButton {
+                        id: markButton
+                        objectName: "markButton"
+                        visible: Bridge.recordingActive
+                        text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
+                                                   : qsTr("Mark")
+                        Accessible.name: qsTr("Mark the recording")
+                        onClicked: Bridge.mark()
+                    }
 
                     // Settings owns connecting: this button opens it, or ends the
                     // session from any page. On Settings itself, its Connect

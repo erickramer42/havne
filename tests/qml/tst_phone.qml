@@ -3,8 +3,9 @@
 //          connected to mock://demo with developer mode on: each page's
 //          items lie inside the window's width, the Log page in its
 //          Frames view too. The pages' own tests run them at 320 px
-//          alone; this one runs them as the window holds them, and the
-//          relay's line beside its button. How they
+//          alone; this one runs them as the window holds them, the
+//          relay's line beside its button, and the header's Mark while
+//          recording. How they
 //          look on a phone is the phone's run.
 
 import QtQuick
@@ -29,6 +30,7 @@ TestCase {
         Theme.developerMode = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.recording = false
     }
 
     function find(within, name) {
@@ -126,6 +128,36 @@ TestCase {
         compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
+    }
+
+    // While a session records, the header's Mark marks it from any page,
+    // counting its marks, and the header still fits a phone
+    function test_theHeadersMarkMarksTheRecording() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const button = find(main.contentItem, "markButton")
+        const title = find(main.contentItem, "headerTitle")
+        verify(!button.visible, "nothing to mark yet")
+        verify(title.visible)
+        Bridge.recording = true
+        compare(Bridge.connectSession("mock://marked"), "", "mock://marked connects")
+        verify(Bridge.recordingActive)
+        verify(button.visible)
+        compare(button.text, "Mark")
+        button.clicked()
+        compare(Bridge.markCount, 1)
+        compare(button.text, "Mark (1)")
+        waitForRendering(main.contentItem)
+        verify(!title.visible, "the name gives way on a phone")
+        const out = pastTheEdge(button.parent, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        verify(!button.visible, "the recording ended")
+        verify(title.visible)
     }
 
     // The relay's line beside its button (ADR-0047): the traffic wraps in
