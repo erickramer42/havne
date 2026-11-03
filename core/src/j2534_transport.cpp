@@ -26,7 +26,13 @@
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there;
 //          Reply timing on the adapter's clock (ADR-0042):
-//          J2534HealthTest.VxTimingReportsEachRequestOnTheAdaptersClock
+//          J2534HealthTest.VxTimingReportsEachRequestOnTheAdaptersClock.
+//          A recording's link lines (ADR-0049) come through link_health.h,
+//          tested there (RecorderTest.ALinkTransition*) and through the
+//          fake ELM327; this worker's argument by code reading.
+//          ECUIO_FRAME_FLAG_REASSEMBLED on every message:
+//          J2534StreamTest.DirectLoadUriDeliversInjectedFramesExactly,
+//          J2534HealthTest.LongRepliesArriveWhole
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -204,7 +210,8 @@ void resolve_channels(ecuio_j2534_transport* t, const ecuio_signal_set_t* set,
 /* A received message as the frame the session delivers: skip bytes
  * dropped from the front (the CAN ID, once it matched a channel), the
  * rest cut at ECUIO_FRAME_DATA_MAX. EXTENDED comes from RxStatus, and
- * TRUNCATED says the frame holds less than the message. */
+ * TRUNCATED says the frame holds less than the message. Every channel
+ * is ISO 15765, so the adapter reassembled each message: REASSEMBLED. */
 void frame_from_msg(const ecuio_pt_rx_t& m, uint32_t skip,
                     uint32_t arbitration_id, uint64_t timestamp_us,
                     ecuio_frame_t* f)
@@ -217,8 +224,10 @@ void frame_from_msg(const ecuio_pt_rx_t& m, uint32_t skip,
                                                      : ECUIO_FRAME_DATA_MAX;
     memcpy(f->data, m.data + skip, n);
     f->data_length = static_cast<uint16_t>(n);
-    f->flags = (m.rx_status & ECUIO_PT_CAN_29BIT_ID)
-               ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
+    f->flags =
+        ((m.rx_status & ECUIO_PT_CAN_29BIT_ID) ? ECUIO_FRAME_FLAG_EXTENDED
+                                               : 0u) |
+        ECUIO_FRAME_FLAG_REASSEMBLED;
     if (n < have) {
         f->flags |= ECUIO_FRAME_FLAG_TRUNCATED;
     }
@@ -416,7 +425,8 @@ void j2534_worker(ecuio_j2534_transport* t)
 {
     ecuio_request_engine& e = t->engine;
     const bool requests = e.count > 0 || e.scan_count > 0;
-    link_health h(t->session->last_error, t->session->error_count);
+    link_health h(t->session->last_error, t->session->error_count,
+                  t->session->record_link.get());
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};

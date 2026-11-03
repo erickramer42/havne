@@ -538,10 +538,12 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     ASSERT_EQ(memcmp(cap.payloads[1], f1, 8), 0);
     ASSERT_EQ(memcmp(cap.payloads[2], f2, 8), 0);
 
-    /* Flag translation: fake's RxStatus bit -> frame flags word. */
-    EXPECT_EQ(cap.frame_flags[0], 0u);
-    EXPECT_EQ(cap.frame_flags[1], ECUIO_FRAME_FLAG_EXTENDED);
-    EXPECT_EQ(cap.frame_flags[2], 0u);
+    /* Flag translation: fake's RxStatus bit -> frame flags word; an ISO
+     * 15765 channel's message is the adapter's reassembly */
+    EXPECT_EQ(cap.frame_flags[0], ECUIO_FRAME_FLAG_REASSEMBLED);
+    EXPECT_EQ(cap.frame_flags[1],
+              ECUIO_FRAME_FLAG_EXTENDED | ECUIO_FRAME_FLAG_REASSEMBLED);
+    EXPECT_EQ(cap.frame_flags[2], ECUIO_FRAME_FLAG_REASSEMBLED);
 
     /* No channel on this session: frames dispatch VERBATIM with id 0,
      * pinned so the channel path can't silently change this one. */

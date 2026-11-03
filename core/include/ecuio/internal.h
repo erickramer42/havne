@@ -6,7 +6,7 @@
 //          loader helpers directly, the other J2534 suites reach them
 //          through the transport ops; test_elm327 puts its fake ELM327
 //          behind the port opener; UNIT: CoreTest through the mock
-//          transport
+//          transport; RecorderTest through the recorder's seams
 
 #ifndef ECUIO_INTERNAL_H
 #define ECUIO_INTERNAL_H
@@ -14,6 +14,7 @@
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
+#include "ecuio/recording.h"
 
 #include <stdbool.h>
 
@@ -354,6 +355,18 @@ ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              uint32_t len,
                                              uint32_t timestamp,
                                              uint32_t rx_flags);
+
+/* Test-only (ADR-0049 section 9), never in recording.h: hold keeps the
+ * recorder's writer from draining its ring until released, so a test
+ * fills it; fail_writes makes its next write fail as a full disk does;
+ * syncs counts its syncs to the storage; add_slept adds to the slept
+ * count its writer reads, as a sleep of the machine would; wakes counts
+ * its writer's wakes. */
+void ecuio_recorder_test_hold(ecuio_recorder_t* recorder, int hold);
+void ecuio_recorder_test_fail_writes(ecuio_recorder_t* recorder);
+uint64_t ecuio_recorder_test_syncs(const ecuio_recorder_t* recorder);
+void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us);
+uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
 
 #ifdef __cplusplus
 }

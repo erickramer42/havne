@@ -119,6 +119,7 @@ protected:
 struct Delivered {
     std::mutex mutex;
     std::vector<std::vector<uint8_t>> replies;
+    size_t unflagged = 0; /* replies without ECUIO_FRAME_FLAG_REASSEMBLED */
     size_t size()
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -135,12 +136,14 @@ void on_reply(const ecuio_frame_t* f, void* user_data)
     auto* d = static_cast<Delivered*>(user_data);
     std::lock_guard<std::mutex> lock(d->mutex);
     d->replies.emplace_back(f->data, f->data + f->data_length);
+    d->unflagged += (f->flags & ECUIO_FRAME_FLAG_REASSEMBLED) == 0;
 }
 
 /* What a session against the recording's ECU came to */
 struct FaultRun {
     std::vector<std::vector<uint8_t>> whole;     /* the ECU's, in order */
     std::vector<std::vector<uint8_t>> delivered; /* the session's */
+    size_t unflagged = 0; /* of them, not flagged reassembled */
     std::set<uint8_t> refused;
     std::set<uint8_t> answered;
     unsigned silent = 0, late = 0, bad_sequence = 0, stalled = 0;
@@ -210,6 +213,7 @@ protected:
         {
             std::lock_guard<std::mutex> lock(d.mutex);
             out->delivered = d.replies;
+            out->unflagged = d.unflagged;
         }
         out->refused = ecu.refused();
         out->answered = ecu.answered();
@@ -229,7 +233,8 @@ protected:
     }
 
     /* What holds under every fault: the session delivered each reply the
-     * bus carried whole, in order, and nothing else; the walk read the
+     * bus carried whole, in order, flagged reassembled, and nothing else;
+     * the walk read the
      * car's bitmaps; the rotation kept each PID the recording holds and
      * no other (the bitmaps' and the refusals' left), each was answered,
      * and packing held;
@@ -240,6 +245,7 @@ protected:
         EXPECT_TRUE(r.delivered == r.whole)
             << "a reply delivered that the bus didn't carry whole, or one "
                "it did left out";
+        EXPECT_EQ(r.unflagged, 0u) << "each is ISO-TP's reassembly";
         EXPECT_NE(r.support.flags & ECUIO_SUPPORT_COMPLETE, 0u);
         EXPECT_EQ(r.support.ranges, 0x3Fu) << "the car's bitmaps, 00 to A0";
         EXPECT_EQ(r.support.requests - r.support.dropped, recorded_.size())

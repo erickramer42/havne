@@ -7,7 +7,8 @@
 //          the session info, the requests, multi-frame replies,
 //          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
 //          the signals core lists unsupported (ADR-0039 section 6),
-//          link health and recovery, and that the worker allocates
+//          link health and recovery, a recording's link lines and
+//          latency.csv (ADR-0049), and that the worker allocates
 //          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
 //          against the fake on a pseudo-terminal; Elm327TcpTest (every
 //          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
@@ -20,6 +21,7 @@
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
+#include "ecuio/recording.h"
 #include "elm327_log.h" /* core/src */
 #include "elm327_protocol.h" /* core/src: elm327_pack_count */
 #include "elm327_port.h" /* core/src */
@@ -526,7 +528,8 @@ TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("41 0C", &f));
     EXPECT_EQ(f.id, 0x7E8u);
-    EXPECT_EQ(f.flags, 0u);
+    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_REASSEMBLED})
+        << "a message's payload, not a frame as it crossed the bus";
     EXPECT_EQ(hex_of(f.data.data(), f.data.size()), "41 0C 1F 40")
         << "the PCI byte and the padding are gone";
     EXPECT_GE(s.cap.count("41 05"), 1u);
@@ -811,6 +814,63 @@ TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
     EXPECT_GT(answered(), before) << "the last half second's answers";
 }
 
+/* A recorded ELM327 session (ADR-0049 section 1): the worker's link
+ * transitions are events.log's link lines, and its final reply timing,
+ * its last record, is latency.csv's rows under the channel's ECU */
+TEST_F(Elm327SessionTest, ARecordingHoldsTheLinksTransitionsAndReplyTiming)
+{
+    const fs::path root = fs::temp_directory_path() / "ecuio-elm327-recording";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    const std::string root8 = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len), ECUIO_OK);
+    const fs::path folder = fs::u8path(buf);
+    ASSERT_EQ(ecuio_session_record(s.s, rec), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 3000));
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 5; }, 3000));
+    ecuio_session_destroy(s.s);
+    s.s = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+
+    const auto read = [](const fs::path& p) {
+        std::ifstream f(p, std::ios::binary);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        std::string out;
+        for (char c : ss.str()) {
+            if (c != '\r')
+                out += c;
+        }
+        return out;
+    };
+    const std::string events = read(folder / "events.log");
+    const size_t quiet =
+        events.find("  link  vehicle not responding (state 8, 0 episodes)\n");
+    ASSERT_NE(quiet, std::string::npos) << events;
+    EXPECT_NE(events.find("  link  recovered (state 0, 0 episodes)\n", quiet),
+              std::string::npos)
+        << events;
+    const std::string latency = read(folder / "latency.csv");
+    EXPECT_EQ(latency.rfind(ECUIO_TIMING_COLUMNS "\n", 0), 0u) << latency;
+    EXPECT_NE(latency.find(",0x7E8,01 0C,"), std::string::npos) << latency;
+    EXPECT_NE(latency.find(",host\n"), std::string::npos) << latency;
+    fs::remove_all(root, ec);
+}
+
 /* Identification's replies span frames (the VIN's 20 bytes: a First
  * Frame and two Consecutive Frames), are reassembled and reach the
  * identity report; Service 09 carries no count digit, and a 0x22 item's,
@@ -1089,7 +1149,8 @@ TEST_F(Elm327SessionTest, TwentyNineBitChannelsUseTheirOwnProtocol)
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("41 0C", &f));
     EXPECT_EQ(f.id, 0x18DAF110u);
-    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_EXTENDED});
+    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_EXTENDED |
+                                ECUIO_FRAME_FLAG_REASSEMBLED});
 }
 
 /* ?baud=250000 picks protocol 8, and the session info says so */
@@ -1677,11 +1738,21 @@ void listen_on(Session& s, const std::string& u = uri("?profile=raw"))
     ASSERT_TRUE(wait_for(fake_monitoring, 3000));
 }
 
+/* When the fake took the last AT MA (steady_us): the transport's quiet
+ * windows and checks run from its write, which the test thread's poll in
+ * listen_on can trail by a loaded machine's scheduling */
+int64_t monitor_started()
+{
+    return on_fake<int64_t>(
+        [](fake_elm327::adapter& a) { return a.monitor_us; });
+}
+
 } // namespace
 
 /* A session that asks nothing runs the setup, then AT MA and nothing
- * else; the channel's messages arrive whole, multi-frame too, and a line
- * the monitor marks or another ID's frame is no frame of ours */
+ * else; the channel's messages arrive whole, multi-frame too, flagged
+ * reassembled, and a line the monitor marks or another ID's frame is no
+ * frame of ours */
 TEST_F(Elm327SessionTest, ListeningDeliversTheChannelsMessages)
 {
     Session s;
@@ -1703,6 +1774,8 @@ TEST_F(Elm327SessionTest, ListeningDeliversTheChannelsMessages)
     EXPECT_EQ(vin.data, kVinReply);
     EXPECT_EQ(vin.id, 0x7E8u);
     EXPECT_EQ(vin.flags & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_NE(vin.flags & ECUIO_FRAME_FLAG_REASSEMBLED, 0u)
+        << "core put the monitor's lines together as it does a reply's";
     EXPECT_EQ(s.cap.count("41 0D"), 0u);
     std::vector<std::string> commands = fake_commands();
     ASSERT_GE(commands.size(), 2u);
@@ -1733,13 +1806,10 @@ TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)
 {
     Session s;
     listen_on(s);
-    const auto from = std::chrono::steady_clock::now();
+    const int64_t from = monitor_started();
     ASSERT_TRUE(
         wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 3000));
-    EXPECT_GE(std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - from)
-                  .count(),
-              800)
+    EXPECT_GE(fake_elm327::steady_us() - from, 800000)
         << "ten windows of 100 ms";
     on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
     EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 2000));
@@ -1750,28 +1820,23 @@ TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)
 
 /* 5 s with no line: the monitor is stopped with a space, never a CR;
  * the adapter's STOPPED and prompt show it's there, and AT MA starts
- * again with no failure */
+ * again with no failure; both gaps on the fake's stamps */
 TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedEveryFiveSeconds)
 {
     Session s;
     listen_on(s);
-    const auto from = std::chrono::steady_clock::now();
+    const int64_t first_monitor = monitor_started();
     ASSERT_TRUE(wait_for(
         [] {
             return on_fake<uint32_t>(
                        [](fake_elm327::adapter& a) { return a.stops; }) >= 1;
         },
         8000));
-    const auto stopped = std::chrono::steady_clock::now();
-    EXPECT_GE(
-        std::chrono::duration_cast<std::chrono::milliseconds>(stopped - from)
-            .count(),
-        4900);
+    const int64_t stopped =
+        on_fake<int64_t>([](fake_elm327::adapter& a) { return a.stop_us; });
+    EXPECT_GE(stopped - first_monitor, 4900000);
     ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 2000));
-    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - stopped)
-                  .count(),
-              90)
+    EXPECT_LT(monitor_started() - stopped, 90000)
         << "AT MA again at once, not on the backoff";
     EXPECT_EQ(
         on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.stops; }), 1u);
@@ -1794,13 +1859,10 @@ TEST_F(Elm327SessionTest, AHungMonitorIsAHardFailureAndRecovers)
     Session s;
     listen_on(s);
     set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
-    const auto from = std::chrono::steady_clock::now();
+    const int64_t from = monitor_started();
     ASSERT_TRUE(wait_for(
         [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 12000));
-    EXPECT_GE(std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - from)
-                  .count(),
-              9800)
+    EXPECT_GE(fake_elm327::steady_us() - from, 9800000)
         << "5 s with no line, then 5 s with no prompt";
     set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
     ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));

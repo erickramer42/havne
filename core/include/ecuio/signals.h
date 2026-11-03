@@ -204,6 +204,11 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
 #define ECUIO_VALIDATE_ERR_BYTE_LENGTH       17  /* byte_length on a numeric
                                                     kind, or over
                                                     ECUIO_FRAME_DATA_MAX */
+#define ECUIO_VALIDATE_ERR_FORMULA           18  /* name or unit starts with
+                                                    '=', '+', '-', '@', a tab
+                                                    or a CR, which a
+                                                    spreadsheet runs as a
+                                                    formula (ADR-0049) */
 #define ECUIO_VALIDATE_ERR_CHANNELS_NULL    (-10)  /* channel_count > 0 with
                                                       NULL channels */
 #define ECUIO_VALIDATE_ERR_CHANNEL_COUNT    (-11)  /* over ECUIO_MAX_CHANNELS */

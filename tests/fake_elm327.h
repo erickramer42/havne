@@ -141,6 +141,8 @@ public:
     uint32_t bare_crs = 0; /* a CR alone, which repeats a command */
     uint32_t stops = 0;    /* bytes that stopped a monitor */
     uint8_t last_stop = 0; /* the last of them */
+    int64_t monitor_us = 0; /* when the last AT MA came, steady_us */
+    int64_t stop_us = 0;    /* when the last stop came */
 
     /* Back to power-on: settings, output and the record. */
     void clear()
@@ -151,6 +153,7 @@ public:
         in_len_ = 0;
         commands = requests = packs = resets = bare_crs = stops = 0;
         last_stop = 0;
+        monitor_us = stop_us = 0;
         held_ = late_reset_ = false;
         k = knobs{};
     }
@@ -255,6 +258,7 @@ public:
                 /* Any byte stops the monitor and is discarded */
                 ++stops;
                 last_stop = data[i];
+                stop_us = now_us;
                 if (!k.hung) {
                     monitoring_ = false;
                     reply("STOPPED", now_us);
@@ -528,6 +532,7 @@ private:
         }
         if (is("MA")) {
             monitoring_ = true; /* no answer until it's stopped */
+            monitor_us = now;
         } else if (is("I")) {
             reply(k.version, now);
         } else if (is("RV")) {

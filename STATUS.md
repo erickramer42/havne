@@ -176,7 +176,11 @@ bus ([roadmap](#roadmap)).
     fixture through `obd2` frame for frame, the mock's cycle and the
     refusals; a stop from outside ends it cleanly (SIGINT and SIGTERM
     tested on Linux and macOS, Ctrl+Break on Windows), and so does a
-    reader closing the pipe (`| head`).
+    reader closing the pipe (`| head`). `stream --record <folder>`
+    records the session through core's recorder
+    ([ADR-0049](docs/adr/0049-recordings-in-core.md)) into a folder
+    of the app's files, each line typed a marker; a golden folder
+    pins the replay fixture's.
   - **SocketCAN** ([ADR-0032](docs/adr/0032-socketcan-listening.md),
     [ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)), on Linux.
     Core reads the interface and never configures it, and each refusal
@@ -426,14 +430,18 @@ in here when its work starts.
 
 ### v0.4.0: recordings in core, the log viewer, SocketCAN on a real controller
 
-**Recordings in core, and the log viewer** (an ADR first).
+**Recordings in core, and the log viewer**
+([ADR-0049](docs/adr/0049-recordings-in-core.md), accepted; its
+section 10 orders the work).
 - **The writer** moves from the app's recorder into core, on a thread
-  the worker feeds ([ADR-0017](docs/adr/0017-session-recording.md)'s
-  "recorder in core" alternative): frames the app drops under load are
-  recorded too, and `havne-cli stream --record <dir>` writes the same
-  folder the app does, in the same formats. A failed write or a full
-  disk is an error the session reports, and the load test gates the
-  writer's throughput.
+  the worker feeds: frames the app drops under load are recorded too,
+  and a failed write or a full disk is an error the recording
+  reports. Step 1 is built: core's recorder (`ecuio/recording.h`)
+  and `havne-cli stream --record <dir>`, which writes the folder the
+  app does; it costs core's worker 30 to 50 ns a frame
+  (`bench_bridge --record`, the ADR's appendix of 2026-11-02).
+  Step 2 moves the app onto it and judges the worker's 10% budget
+  on the bridge's looping run, with its CI gate.
 - **The reader** opens a recording offline. One pass on open builds a
   sparse index (`host_us` only increases) and each signal's lowest and
   highest per stretch, so memory follows the index, not the recording.
