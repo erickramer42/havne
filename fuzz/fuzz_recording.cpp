@@ -6,18 +6,23 @@
 //          summary and the drop lines; a parsed name within 31 bytes, a
 //          unit within 15, decimals 0 to 3; two parses agree, NaN bits
 //          included), or a folder: the input cut at 0x1E bytes into
-//          events.log, signals.csv and markers.csv, written to a scratch
-//          folder in TEMP / TMPDIR and opened through
-//          ecuio_recording_open. The status is ECUIO_OK or
-//          ECUIO_ERR_LOAD_FAILED with a one-line detail that never holds
-//          the path; an open recording's counts agree with its queries
-//          (a whole-range column holds every sample), every signal's
-//          name and unit are terminated, and its text_at and find return
-//          ECUIO_OK; two opens agree.
+//          events.log, signals.csv, markers.csv and frames.csv, written to
+//          a scratch folder in TEMP / TMPDIR, opened through
+//          ecuio_recording_open and checked through ecuio_recording_check
+//          (section 6). Each status is ECUIO_OK or ECUIO_ERR_LOAD_FAILED
+//          with a one-line detail that never holds the path; an open
+//          recording's counts agree with its queries (a whole-range column
+//          holds every sample), every signal's name and unit are
+//          terminated, and its text_at and find return ECUIO_OK; each
+//          finding is of a known kind, within the summary's duration, a
+//          whole-bus one with no ID and an ISO-TP one on ISO 15765-4's IDs,
+//          and the summary counts what was passed; a check stopped at its
+//          first finding counts that one; two opens and two checks agree.
 
 #include <ecuio/core.h>
 #include <ecuio/recording.h>
 
+#include "recording_check.h" /* core/src: pure, iso15765_id */
 #include "recording_rows.h" /* core/src: pure */
 
 #include <stddef.h>
@@ -287,6 +292,76 @@ opened open_and_query()
     return o;
 }
 
+struct checked {
+    ecuio_status_t rc = ECUIO_OK;
+    std::string detail;
+    ecuio_check_summary_t summary{};
+    uint64_t passed[8] = {};
+    uint64_t seen = 0;
+    uint64_t last_end = 0;   /* the latest at_us + length_us passed */
+    uint64_t stop_after = 0; /* 0: never stop */
+};
+
+int on_finding(const ecuio_check_finding_t* f, void* user)
+{
+    auto* c = static_cast<checked*>(user);
+    if (f->kind < ECUIO_CHECK_GAP || f->kind > ECUIO_CHECK_ASLEEP ||
+        f->reserved[0] != 0 || f->reserved[1] != 0) {
+        abort();
+    }
+    const bool whole = (f->flags & ECUIO_CHECK_FINDING_WHOLE_BUS) != 0;
+    if ((whole && f->arbitration_id != 0) ||
+        (whole && (f->flags & ECUIO_CHECK_FINDING_EXTENDED) != 0) ||
+        (f->kind != ECUIO_CHECK_LINK && f->code != 0) ||
+        f->at_us + f->length_us < f->at_us) {
+        abort();
+    }
+    if (f->kind == ECUIO_CHECK_ISOTP &&
+        !ecuio_check::iso15765_id(f->arbitration_id,
+                                  (f->flags & ECUIO_CHECK_FINDING_EXTENDED) !=
+                                      0)) {
+        abort();
+    }
+    ++c->passed[f->kind];
+    ++c->seen;
+    if (f->at_us + f->length_us > c->last_end) {
+        c->last_end = f->at_us + f->length_us;
+    }
+    return c->stop_after != 0 && c->seen >= c->stop_after ? 1 : 0;
+}
+
+checked check_folder(uint64_t stop_after)
+{
+    checked c;
+    c.stop_after = stop_after;
+    c.rc = ecuio_recording_check(folder().c_str(), nullptr, nullptr, on_finding,
+                                 &c, &c.summary);
+    const char* detail = ecuio_last_error_detail();
+    if (detail == nullptr || strlen(detail) >= 512 ||
+        strchr(detail, '\n') != nullptr ||
+        strstr(detail, "ecuio-fuzz-recording") != nullptr) {
+        abort();
+    }
+    c.detail = detail;
+    if (c.rc == ECUIO_ERR_LOAD_FAILED) {
+        return c;
+    }
+    if (c.rc != ECUIO_OK && !(c.rc == ECUIO_ERR_CANCELED && stop_after != 0 &&
+                              c.seen == stop_after)) {
+        abort();
+    }
+    for (uint32_t k = 1; k < 8; ++k) {
+        if (c.summary.counts[k] != c.passed[k]) {
+            abort();
+        }
+    }
+    if (c.summary.counts[0] != 0 || c.summary.torn_rows > 1 ||
+        c.summary.ids > c.summary.frames) {
+        abort();
+    }
+    return c;
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -298,12 +373,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         each_line(data + 1, size - 1);
         return 0;
     }
-    /* events.log, signals.csv, markers.csv: absent past the cuts given */
-    const uint8_t* parts[3] = {};
-    size_t lens[3] = {};
+    /* events.log, signals.csv, markers.csv, frames.csv: absent past the
+     * cuts given */
+    const uint8_t* parts[4] = {};
+    size_t lens[4] = {};
     size_t count = 0;
     size_t start = 1;
-    for (size_t i = 1; i <= size && count < 3; ++i) {
+    for (size_t i = 1; i <= size && count < 4; ++i) {
         if (i == size || data[i] == 0x1E) {
             parts[count] = data + start;
             lens[count] = i - start;
@@ -314,11 +390,29 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     write_file("events.log", parts[0], lens[0], count > 0);
     write_file("signals.csv", parts[1], lens[1], count > 1);
     write_file("markers.csv", parts[2], lens[2], count > 2);
+    write_file("frames.csv", parts[3], lens[3], count > 3);
     const opened a = open_and_query();
     const opened b = open_and_query();
     if (a.rc != b.rc || a.detail != b.detail ||
         memcmp(&a.info, &b.info, sizeof a.info) != 0) {
         abort();
+    }
+    const checked x = check_folder(0);
+    const checked y = check_folder(0);
+    if (x.rc != y.rc || x.detail != y.detail ||
+        memcmp(&x.summary, &y.summary, sizeof x.summary) != 0) {
+        abort();
+    }
+    if (x.rc == ECUIO_OK) {
+        if (x.last_end > x.summary.duration_us) {
+            abort();
+        }
+        if (x.seen > 0) {
+            const checked z = check_folder(1);
+            if (z.rc != ECUIO_ERR_CANCELED || z.seen != 1) {
+                abort();
+            }
+        }
     }
     return 0;
 }

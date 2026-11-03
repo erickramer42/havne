@@ -22,7 +22,8 @@ if(MSVC)
 endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_core test_core.cpp test_recorder.cpp test_recording.cpp)
+add_executable(test_core test_core.cpp test_recorder.cpp test_recording.cpp
+    test_recording_check.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
