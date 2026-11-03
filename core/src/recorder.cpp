@@ -141,8 +141,9 @@ std::string csv_quoted(const char* text, size_t len)
     }
     std::string q = "\"";
     for (char c : f) {
-        if (c == '"')
+        if (c == '"') {
             q += '"';
+        }
         q += c;
     }
     q += '"';
@@ -171,8 +172,12 @@ void append_value(std::string& out, double v)
 {
     char buf[40];
     const int n = std::snprintf(buf, sizeof buf, "%.12g", v);
-    if (n <= 0)
+    if (n <= 0) {
         return;
+    }
+    /* The locale is set once at startup (Qt sets LC_NUMERIC), before any
+     * recorder runs; this only reads its decimal point */
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char* point = std::localeconv()->decimal_point;
     const char p = (point != nullptr && point[0] != '\0') ? point[0] : '.';
     for (int i = 0; i < n; ++i) {
@@ -226,8 +231,9 @@ std::string one_line(const char* text)
         s.resize(cut);
     }
     for (char& c : s) {
-        if (c == '\r' || c == '\n')
+        if (c == '\r' || c == '\n') {
             c = ' ';
+        }
     }
     return s;
 }
@@ -327,17 +333,20 @@ std::string os_reason(DWORD code)
     std::string out;
     if (n > 0 && text != nullptr) {
         char buf[512];
-        if (ecuio_wide_to_utf8(text, buf, sizeof buf))
+        if (ecuio_wide_to_utf8(text, buf, sizeof buf)) {
             out = buf;
+        }
     }
-    if (text != nullptr)
+    if (text != nullptr) {
         LocalFree(text);
+    }
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r' ||
                             out.back() == ' ' || out.back() == '.')) {
         out.pop_back();
     }
-    if (out.empty())
+    if (out.empty()) {
         out = "Windows error " + std::to_string(code);
+    }
     return out;
 }
 
@@ -359,11 +368,13 @@ FILE* open_file(const std::string& path)
 bool make_root(const std::string& root, std::string* why)
 {
     for (size_t i = 1; i <= root.size(); ++i) {
-        if (i < root.size() && root[i] != '/' && root[i] != '\\')
+        if (i < root.size() && root[i] != '/' && root[i] != '\\') {
             continue;
+        }
         const std::string prefix = root.substr(0, i);
-        if (prefix.empty() || prefix.back() == ':')
+        if (prefix.empty() || prefix.back() == ':') {
             continue;
+        }
 #ifdef _WIN32
         const std::wstring w = wide(prefix);
         if (w.empty()) {
@@ -398,8 +409,9 @@ bool make_leaf(const std::string& path, bool* taken, std::string* why)
         *why = "the folder's name isn't valid UTF-8";
         return false;
     }
-    if (CreateDirectoryW(w.c_str(), nullptr))
+    if (CreateDirectoryW(w.c_str(), nullptr)) {
         return true;
+    }
     const DWORD e = GetLastError();
     if (e == ERROR_ALREADY_EXISTS) {
         *taken = true;
@@ -424,11 +436,13 @@ std::string absolute(const std::string& path)
     const std::wstring w = wide(path);
     wchar_t buf[4096];
     const DWORD n = GetFullPathNameW(w.c_str(), 4096, buf, nullptr);
-    if (n == 0 || n >= 4096)
+    if (n == 0 || n >= 4096) {
         return path;
+    }
     for (DWORD i = 0; i < n; ++i) {
-        if (buf[i] == L'\\')
+        if (buf[i] == L'\\') {
             buf[i] = L'/';
+        }
     }
     char out[4096 * 3];
     return ecuio_wide_to_utf8(buf, out, sizeof out) ? std::string(out) : path;
@@ -486,16 +500,19 @@ const char* clock_name(uint32_t clock)
 /* A quantile, or nothing when it has too few samples */
 void append_quantile(std::string& out, uint32_t us, bool has)
 {
-    if (has)
+    if (has) {
         append_u64(out, us);
+    }
 }
 
 bool sync_file(FILE* f)
 {
-    if (f == nullptr)
+    if (f == nullptr) {
         return true;
-    if (std::fflush(f) != 0)
+    }
+    if (std::fflush(f) != 0) {
         return false;
+    }
 #ifdef _WIN32
     return _commit(_fileno(f)) == 0;
 #else
@@ -505,6 +522,9 @@ bool sync_file(FILE* f)
 
 } // namespace
 
+/* One per recording, its members grouped by who uses them: the padding
+ * the analyzer would save is some 40 bytes */
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct ecuio_recorder {
     std::string folder; /* UTF-8, absolute, '/' separated */
     FILE* frames = nullptr;
@@ -582,8 +602,9 @@ struct ecuio_recorder {
     {
         {
             std::lock_guard<std::mutex> g(reason_m);
-            if (failed())
+            if (failed()) {
                 return;
+            }
             reason = write_reason(err);
         }
         state.store(ECUIO_RECORDING_FAILED, std::memory_order_release);
@@ -672,8 +693,9 @@ struct ecuio_recorder {
 
     void take_link(const uint8_t* body, size_t size)
     {
-        if (size < sizeof(link_body))
+        if (size < sizeof(link_body)) {
             return;
+        }
         link_body lb;
         std::memcpy(&lb, body, sizeof lb);
         event_line(lb.host_us, "link", link_text(lb.state, lb.episodes));
@@ -683,8 +705,9 @@ struct ecuio_recorder {
      * (ADR-0017's appendix of 2026-10-31), the file made with the first */
     void take_timing(const uint8_t* body, size_t size)
     {
-        if (size < sizeof(timing_body))
+        if (size < sizeof(timing_body)) {
             return;
+        }
         timing_body tb;
         std::memcpy(&tb, body, sizeof tb);
         const ecuio_session_timing_t& t = tb.timing;
@@ -697,14 +720,16 @@ struct ecuio_recorder {
         for (uint32_t i = 0; i < tb.rows && i < ECUIO_PROFILE_MAX_REQUESTS;
              ++i) {
             const size_t off = sizeof tb + i * sizeof(ecuio_request_timing_t);
-            if (off + sizeof(ecuio_request_timing_t) > size)
+            if (off + sizeof(ecuio_request_timing_t) > size) {
                 break;
+            }
             ecuio_request_timing_t r;
             std::memcpy(&r, body + off, sizeof r);
             const uint64_t total =
                 uint64_t{r.answered} + r.refused + r.timeouts;
-            if (total == timing_totals[i])
+            if (total == timing_totals[i]) {
                 continue;
+            }
             timing_totals[i] = total;
             const bool latency_has = r.answered + r.refused > 0;
             const bool interval_has = r.intervals > 0;
@@ -714,8 +739,9 @@ struct ecuio_recorder {
                        r.channel < channels ? rx_ids[r.channel] : 0);
             latency_out += ',';
             for (uint8_t k = 0; k < r.length && k < 3; ++k) {
-                if (k > 0)
+                if (k > 0) {
                     latency_out += ' ';
+                }
                 latency_out += kHex[r.request[k] >> 4];
                 latency_out += kHex[r.request[k] & 0x0F];
             }
@@ -763,13 +789,15 @@ struct ecuio_recorder {
 
     void take_frame(const uint8_t* body, size_t size)
     {
-        if (size < sizeof(frame_body))
+        if (size < sizeof(frame_body)) {
             return;
+        }
         frame_body fb;
         std::memcpy(&fb, body, sizeof fb);
         size_t at = sizeof fb;
-        if (at + fb.length > size)
+        if (at + fb.length > size) {
             return;
+        }
         append_u64(frame_out, fb.host_us);
         frame_out += ',';
         append_u64(frame_out, fb.timestamp_us);
@@ -780,8 +808,9 @@ struct ecuio_recorder {
         frame_out += ',';
         static const char kHex[] = "0123456789ABCDEF";
         for (uint16_t i = 0; i < fb.length; ++i) {
-            if (i > 0)
+            if (i > 0) {
                 frame_out += ' ';
+            }
             const uint8_t b = body[at + i];
             frame_out += kHex[b >> 4];
             frame_out += kHex[b & 0x0F];
@@ -791,16 +820,18 @@ struct ecuio_recorder {
         frame_rows.fetch_add(1, std::memory_order_relaxed);
 
         for (uint16_t v = 0; v < fb.values; ++v) {
-            if (at + sizeof(value_head) > size)
+            if (at + sizeof(value_head) > size) {
                 return;
+            }
             value_head vh;
             std::memcpy(&vh, body + at, sizeof vh);
             at += sizeof vh;
             const def_entry* d = def(vh.signal_id);
             const bool text = is_text_kind(vh.kind);
             const size_t len = text ? vh.text_len : sizeof(double);
-            if (at + len > size)
+            if (at + len > size) {
                 return;
+            }
             if (d != nullptr) {
                 append_u64(value_out, fb.host_us);
                 value_out += ',';
@@ -832,11 +863,13 @@ struct ecuio_recorder {
         while (h - t >= sizeof(record_head)) {
             record_head rh;
             copy_out(t, &rh, sizeof rh);
-            if (rh.size < sizeof rh || rh.size > h - t)
+            if (rh.size < sizeof rh || rh.size > h - t) {
                 break;
+            }
             const size_t body = rh.size - sizeof rh;
-            if (scratch.size() < body)
+            if (scratch.size() < body) {
                 scratch.resize(body);
+            }
             copy_out(t + sizeof rh, scratch.data(), body);
             if (rh.dropped_before > 0 && body >= sizeof(uint64_t)) {
                 uint64_t host_us;
@@ -934,8 +967,9 @@ struct ecuio_recorder {
      * line, as the app's tick takes them. */
     void check_sleep()
     {
-        if (!attached.load(std::memory_order_acquire))
+        if (!attached.load(std::memory_order_acquire)) {
             return;
+        }
         const uint64_t now = ecuio_clock_slept_us() +
                              slept_added.load(std::memory_order_relaxed);
         if (!sleep_armed) {
@@ -944,8 +978,9 @@ struct ecuio_recorder {
         }
         const uint64_t rise = now > slept_seen ? now - slept_seen : 0;
         slept_seen = (std::max)(now, slept_seen);
-        if (rise < kSleepLineUs)
+        if (rise < kSleepLineUs) {
             return;
+        }
         const uint64_t tenths = (rise + 50000) / 100000;
         event_line(host_us_of(ecuio_clock_us()), "asleep",
                    "Asleep for " + std::to_string(tenths / 10) + "." +
@@ -979,8 +1014,9 @@ struct ecuio_recorder {
              * header item open queued, and a recorder closed unattached
              * leaves its files empty */
             if (!attached.load(std::memory_order_acquire)) {
-                if (stopping)
+                if (stopping) {
                     return;
+                }
                 continue;
             }
             /* The items first: the header comes ahead of any row */
@@ -997,8 +1033,9 @@ struct ecuio_recorder {
                 sync_all();
                 last_sync = now;
             }
-            if (stopping)
+            if (stopping) {
                 return;
+            }
         }
     }
 
@@ -1014,7 +1051,16 @@ struct ecuio_recorder {
         }
     }
 
-    ~ecuio_recorder() { close_files(); }
+    /* Files still open only when open failed part way, which reported
+     * its own failure: closed, nothing more recorded */
+    ~ecuio_recorder()
+    {
+        for (FILE* f : {frames, signals, events, markers, latency}) {
+            if (f != nullptr) {
+                (void)std::fclose(f);
+            }
+        }
+    }
 };
 
 void ecuio_record_detach(ecuio_record_link& link)
@@ -1045,11 +1091,13 @@ bool ring_has_room(const ecuio_recorder_t* r, uint64_t size)
  * count, so the drop line keeps the time of the record after the drops. */
 bool put_pending_link(ecuio_recorder_t* r)
 {
-    if (!r->link_pending)
+    if (!r->link_pending) {
         return true;
+    }
     const uint64_t size = sizeof(record_head) + sizeof(link_body);
-    if (!ring_has_room(r, size))
+    if (!ring_has_room(r, size)) {
         return false;
+    }
     const uint64_t h = r->head.load(std::memory_order_relaxed);
     const record_head rh{static_cast<uint32_t>(size), kRecordLink, 0};
     r->copy_in(h, &rh, sizeof rh);
@@ -1070,11 +1118,13 @@ uint64_t host_us_now(const ecuio_record_link& link)
 void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
                              uint32_t episodes)
 {
-    if (link == nullptr)
+    if (link == nullptr) {
         return;
+    }
     ecuio_recorder_t* r = ecuio_record_pin(*link);
-    if (r == nullptr)
+    if (r == nullptr) {
         return;
+    }
     /* A transition still carried gives way to this one: the latest state
      * and count are what a reader needs */
     r->pending_link = link_body{host_us_now(*link), state, episodes};
@@ -1088,16 +1138,18 @@ void ecuio_record_timing(ecuio_record_link* link,
                          const ecuio_request_timing_t* rows, uint32_t count,
                          bool final)
 {
-    if (link == nullptr)
+    if (link == nullptr) {
         return;
+    }
     const uint32_t n = (std::min)(count, uint32_t{ECUIO_PROFILE_MAX_REQUESTS});
     const uint64_t size = sizeof(record_head) + sizeof(timing_body) +
                           uint64_t{n} * sizeof(ecuio_request_timing_t);
     const auto give_up = std::chrono::steady_clock::now() + kFinalTimingWait;
     for (;;) {
         ecuio_recorder_t* r = ecuio_record_pin(*link);
-        if (r == nullptr)
+        if (r == nullptr) {
             return;
+        }
         if (!final && timing.snapshot_us < r->timing_next_us) {
             ecuio_record_unpin(*link);
             return;
@@ -1243,11 +1295,17 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
     const std::string tail = label.empty() ? "" : " " + label;
     std::string leaf;
     for (int n = 1;; ++n) {
-        const std::string name =
-            std::string(stamp) + (n > 1 ? "-" + std::to_string(n) : "") + tail;
+        std::string path = root;
+        path += '/';
+        path += stamp;
+        if (n > 1) {
+            path += '-';
+            path += std::to_string(n);
+        }
+        path += tail;
         bool taken = false;
-        if (make_leaf(root + "/" + name, &taken, &why)) {
-            leaf = root + "/" + name;
+        if (make_leaf(path, &taken, &why)) {
+            leaf = path;
             break;
         }
         if (!taken || n >= 1000) {
