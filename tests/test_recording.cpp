@@ -442,6 +442,15 @@ TEST(RecordingRowsTest, FieldsAreQuotedAsTheWriterQuotesThem)
         "1," + std::string(31, 'N') + ",1," + std::string(15, 'u');
     EXPECT_TRUE(
         rows::parse_signal_row(ok_name.data(), ok_name.size(), r, &why));
+    const std::string nul("1,RP\0M,1,rpm", 12);
+    EXPECT_FALSE(rows::parse_signal_row(nul.data(), nul.size(), r, &why));
+    EXPECT_STREQ(why, "the row holds a NUL byte");
+    uint64_t at = 0;
+    std::string label;
+    const std::string nul_label("1,la\0bel", 8);
+    EXPECT_FALSE(
+        rows::parse_marker_row(nul_label.data(), nul_label.size(), &at, label,
+                               &why));
     const std::string long_unit = "1,RPM,1," + std::string(16, 'u');
     EXPECT_FALSE(
         rows::parse_signal_row(long_unit.data(), long_unit.size(), r, &why));

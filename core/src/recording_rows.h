@@ -237,10 +237,24 @@ struct signal_row {
     std::string unit;
 };
 
+/* A NUL inside a row: a C caller would read the name or label short of
+ * what the reader holds, so no row may carry one */
+inline bool holds_nul(const char* p, size_t n, const char** why)
+{
+    if (std::memchr(p, '\0', n) != nullptr) {
+        *why = "the row holds a NUL byte";
+        return true;
+    }
+    return false;
+}
+
 /* host_us,signal,value,unit; *why on failure */
 inline bool parse_signal_row(const char* line, size_t n, signal_row& r,
                              const char** why)
 {
+    if (holds_nul(line, n, why)) {
+        return false;
+    }
     const char* p = line;
     const char* end = line + n;
     bool last = false;
@@ -277,6 +291,9 @@ inline bool parse_signal_row(const char* line, size_t n, signal_row& r,
 inline bool parse_marker_row(const char* line, size_t n, uint64_t* host_us,
                              std::string& label, const char** why)
 {
+    if (holds_nul(line, n, why)) {
+        return false;
+    }
     const char* p = line;
     const char* end = line + n;
     bool last = false;
@@ -304,6 +321,9 @@ struct header_signal {
 inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
                                 const char** why)
 {
+    if (holds_nul(text, n, why)) {
+        return false;
+    }
     const char* p = text;
     const char* end = text + n;
     bool last = false;
@@ -393,7 +413,8 @@ inline bool parse_utc(const char* p, size_t n, uint64_t* out)
 }
 
 /* An activity line, "HH:mm:ss.zzz  +S.sss  <rest>": its seconds since the
- * start in ms, and the rest (format 2: "<kind>  <text>") */
+ * start in ms (few enough that the microseconds fit), and the rest
+ * (format 2: "<kind>  <text>") */
 struct event_line {
     uint64_t ms = 0;
     const char* rest = nullptr;
@@ -416,7 +437,7 @@ inline bool parse_event_line(const char* p, size_t n, event_line* e)
     uint64_t ms = 0;
     if (i == whole || i + 4 > n || p[i] != '.' ||
         !parse_count(p + whole, i - whole, &s) ||
-        !parse_count(p + i + 1, 3, &ms) || s > UINT64_MAX / 1000 - 1) {
+        !parse_count(p + i + 1, 3, &ms) || s > UINT64_MAX / 1000000 - 1) {
         return false;
     }
     i += 4;
