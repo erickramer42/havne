@@ -91,6 +91,15 @@ static bool is_known_byte_order(uint8_t byte_order)
 }
 
 /* A big-endian field is whole bytes; the extractor can't read less. */
+/* A spreadsheet runs a cell starting with one of these as a formula,
+ * quoted or not */
+static bool starts_like_formula(const char* text)
+{
+    const char c = text[0];
+    return c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' ||
+           c == '\r';
+}
+
 static bool is_whole_bytes(const ecuio_signal_def_t* signal)
 {
     return signal->bit_offset == 0 && (signal->bit_length % 8) == 0;
@@ -386,6 +395,12 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     }
     if (signal->unit[sizeof(signal->unit) - 1] != '\0') {
         return ECUIO_VALIDATE_ERR_UNIT;
+    }
+    /* A recording writes both into signals.csv, where a spreadsheet runs
+     * a cell starting with one of these as a formula (ADR-0049 section 8) */
+    if (starts_like_formula(signal->name) ||
+        starts_like_formula(signal->unit)) {
+        return ECUIO_VALIDATE_ERR_FORMULA;
     }
 
     if (signal->decimal_places > 3) {

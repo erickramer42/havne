@@ -26,7 +26,12 @@
 //          reopen, the open's wait and its stop. BENCH: the Win32 port,
 //          the VX's WiFi.
 //          Reply timing (ADR-0042):
-//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock
+//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock;
+//          a recording's link lines and latency.csv (ADR-0049):
+//          Elm327SessionTest.ARecordingHoldsTheLinksTransitionsAndReplyTiming;
+//          ECUIO_FRAME_FLAG_REASSEMBLED on a reply and a monitored message:
+//          Elm327SessionTest.Obd2ValuesArriveFromTheEngineEcu,
+//          .ListeningDeliversTheChannelsMessages
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -703,7 +708,8 @@ void note_overflow(transport* t)
 }
 
 /* A frame line toward its message; a whole one from a channel's ECU is
- * dispatched, and handed to the engine when to_engine (a monitor's
+ * dispatched, flagged reassembled, and handed to the engine when
+ * to_engine (a monitor's
  * messages answer no request of ours). One from another ID got past the
  * receive filter's mask and is dropped, as J2534's are. */
 void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
@@ -721,7 +727,10 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
         const int64_t at = now_us(t);
         frame.timestamp_us = static_cast<uint64_t>(at);
         frame.arbitration_id = m.id;
-        frame.flags = t->ext29 ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
+        /* A reply's payload or a monitored message's, either way core's
+         * ISO-TP put it together from the adapter's lines */
+        frame.flags = (t->ext29 ? ECUIO_FRAME_FLAG_EXTENDED : 0u) |
+                      ECUIO_FRAME_FLAG_REASSEMBLED;
         if (t->overflow_pending) {
             frame.flags |= ECUIO_FRAME_FLAG_OVERFLOW;
             t->overflow_pending = false;
@@ -1160,7 +1169,8 @@ bool backoff_sleep(transport* t, uint32_t ms)
 void elm327_worker(transport* t)
 {
     ecuio_request_engine& e = t->engine;
-    link_health h(t->session->last_error, t->session->error_count);
+    link_health h(t->session->last_error, t->session->error_count,
+                  t->session->record_link.get());
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};

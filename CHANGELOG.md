@@ -2,13 +2,29 @@
 
 What changed in each release, for people using Havne. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
-versions follow [Semantic Versioning](https://semver.org/) (before
-1.0, a minor version may break the C ABI). A release's full notes,
+from v0.4.0 versions follow [Semantic Versioning](https://semver.org/)
+(before 1.0, a minor version may break the C ABI;
+[ADR-0048](docs/adr/0048-semantic-versioning.md)). A release's full notes,
 the text of its GitHub release, are in [docs/releases/](docs/releases/).
 How each change was built, with its commits and the lessons along the
 way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
+
+### Added
+
+- `havne-cli stream --record <folder>` records the session into a folder of its own under `<folder>`, named for when it started, with the files the app writes (`frames.csv`, `signals.csv` and `events.log`; `markers.csv` and `latency.csv` once they have a row). `--label <name>` adds a name to the folder's. Each line typed while it runs is a marker. The recording is written on a thread of its own, so a slow disk never holds the session up; a write that fails says why in a `recording` line, and the stream exits 1.
+- `ecuio/recording.h` in core's C API: a recorder opened on a folder, attached to a session before it starts, with notes, markers and its state.
+
+### Changed
+
+- A frame carrying a whole ISO-TP message, as a requesting session's replies and an ELM327 adapter's monitor deliver them, is flagged `0x100` (`ECUIO_FRAME_FLAG_REASSEMBLED`), and the Log page's and `havne-cli`'s `frame` lines show it.
+- A signal whose name or unit starts with `=`, `+`, `-`, `@`, a tab or a carriage return is refused when its profile is registered (validator code 18): a spreadsheet opening the recording would run it as a formula.
+- A J2534 adapter that refuses to open without saying why gets an error that asks whether the adapter is attached and not open in another program, the two usual causes, instead of naming the status alone.
+
+### Fixed
+
+- A SocketCAN session that sends requests counts the bus rate as proven only once its first request is answered, or 25 ms pass after the controller echoed it with no error frame. An adapter can echo a frame no node acknowledged and report the missing acknowledgement after, so a wrong rate could pass for the right one.
 
 ## [0.3.6] - 2026-11-02
 

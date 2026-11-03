@@ -15,6 +15,7 @@
  * j2534_ptypes.h comes in through j2534_surrogate.h.
  */
 
+#include "ecuio/recording.h"
 #include "ecuio/internal.h"
 #include "ecuio/surrogate_protocol.h"
 #include "ecuio/j2534_surrogate.h"
@@ -127,6 +128,10 @@ int main(void)
     ecuio_sim_t* sim = NULL;
     ecuio_sim_stats_t sim_stats;
     ecuio_inspection_t inspection;
+    ecuio_record_options_t record_options;
+    ecuio_recorder_t* recorder = NULL;
+    ecuio_recorder_state_t recorder_state;
+    uint32_t folder_len = 0;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     frame.arbitration_id = 0x7FF;
@@ -249,6 +254,26 @@ int main(void)
         return 1;
     }
     ecuio_sim_destroy(NULL);
+    /* The recorder (ADR-0049): its layout and its NULL refusals */
+    memset(&record_options, 0, sizeof record_options);
+    if (offsetof(ecuio_record_options_t, root_utf8) != 48 ||
+        sizeof(ecuio_recorder_state_t) != 200 ||
+        offsetof(ecuio_recorder_state_t, reason) != 40 ||
+        ECUIO_ERR_RECORDING_FAILED != 18 || ECUIO_VALIDATE_ERR_FORMULA != 18 ||
+        ecuio_recorder_open(&record_options, &recorder) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        recorder != NULL ||
+        ecuio_session_record(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recorder_note(NULL, "x") != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recorder_mark(NULL, "x") != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recorder_get_state(NULL, &recorder_state) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recorder_get_folder(NULL, NULL, 0, &folder_len) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recorder_close(NULL, NULL) != ECUIO_OK ||
+        ecuio_recorder_test_syncs(NULL) != 0) {
+        return 1;
+    }
     if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_vin_make(NULL)[0] != 0 || ecuio_vin_source()[0] == 0) {
         return 1;

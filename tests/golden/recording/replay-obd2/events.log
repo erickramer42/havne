@@ -1,0 +1,143 @@
+ecuio session recording, format 2 (ADR-0049)
+started  2026-11-02 22:10:27.237 (local time)
+utc  2026-11-03T04:10:27.237Z
+core  0.3.6
+uri  replay://<path>?profile=obd2&speed=max
+profile  obd2
+frame flags  from an older recording
+signal  Engine Load,number,%,1,7
+signal  Coolant Temp,number,°C,0,2
+signal  RPM,number,RPM,0,1
+signal  Vehicle Speed,number,km/h,0,6
+signal  Intake Air Temp,number,°C,0,3
+signal  Throttle Position,number,%,1,0
+signal  Fuel Level,number,%,1,0
+signal  Battery Voltage,number,V,2,12
+signal  MAF,number,g/s,1,4
+signal  Engine Oil Temp,number,°C,0,5
+signal  Short Term Fuel Trim B1,number,%,1,9
+signal  Long Term Fuel Trim B1,number,%,1,10
+signal  Short Term Fuel Trim B2,number,%,1,0
+signal  Long Term Fuel Trim B2,number,%,1,0
+signal  Fuel Pressure,number,kPa,0,0
+signal  Intake Manifold Pressure,number,kPa,0,11
+signal  Timing Advance,number,°,1,8
+signal  O2 S1 Voltage,number,V,3,0
+signal  O2 S1 Short Term Trim,number,%,1,0
+signal  O2 S2 Voltage,number,V,3,0
+signal  O2 S2 Short Term Trim,number,%,1,0
+signal  O2 S3 Voltage,number,V,3,0
+signal  O2 S3 Short Term Trim,number,%,1,0
+signal  O2 S4 Voltage,number,V,3,0
+signal  O2 S4 Short Term Trim,number,%,1,0
+signal  O2 S5 Voltage,number,V,3,0
+signal  O2 S5 Short Term Trim,number,%,1,0
+signal  O2 S6 Voltage,number,V,3,0
+signal  O2 S6 Short Term Trim,number,%,1,0
+signal  O2 S7 Voltage,number,V,3,0
+signal  O2 S7 Short Term Trim,number,%,1,0
+signal  O2 S8 Voltage,number,V,3,0
+signal  O2 S8 Short Term Trim,number,%,1,0
+signal  Run Time Since Start,number,s,0,0
+signal  Distance with MIL On,number,km,0,0
+signal  Fuel Rail Pressure (Rel),number,kPa,1,0
+signal  Fuel Rail Pressure (Gauge),number,kPa,0,0
+signal  O2 S1 Lambda (V),number,λ,3,0
+signal  O2 S1 Voltage (Wide),number,V,3,0
+signal  O2 S2 Lambda (V),number,λ,3,0
+signal  O2 S2 Voltage (Wide),number,V,3,0
+signal  O2 S3 Lambda (V),number,λ,3,0
+signal  O2 S3 Voltage (Wide),number,V,3,0
+signal  O2 S4 Lambda (V),number,λ,3,0
+signal  O2 S4 Voltage (Wide),number,V,3,0
+signal  O2 S5 Lambda (V),number,λ,3,0
+signal  O2 S5 Voltage (Wide),number,V,3,0
+signal  O2 S6 Lambda (V),number,λ,3,0
+signal  O2 S6 Voltage (Wide),number,V,3,0
+signal  O2 S7 Lambda (V),number,λ,3,0
+signal  O2 S7 Voltage (Wide),number,V,3,0
+signal  O2 S8 Lambda (V),number,λ,3,0
+signal  O2 S8 Voltage (Wide),number,V,3,0
+signal  Commanded EGR,number,%,1,0
+signal  EGR Error,number,%,1,0
+signal  Commanded Evap Purge,number,%,1,0
+signal  Warm-ups Since Clear,number,,0,0
+signal  Distance Since Clear,number,km,0,0
+signal  Evap Vapor Pressure,number,Pa,2,0
+signal  Barometric Pressure,number,kPa,0,0
+signal  O2 S1 Lambda (mA),number,λ,3,0
+signal  O2 S1 Current,number,mA,3,0
+signal  O2 S2 Lambda (mA),number,λ,3,0
+signal  O2 S2 Current,number,mA,3,0
+signal  O2 S3 Lambda (mA),number,λ,3,0
+signal  O2 S3 Current,number,mA,3,0
+signal  O2 S4 Lambda (mA),number,λ,3,0
+signal  O2 S4 Current,number,mA,3,0
+signal  O2 S5 Lambda (mA),number,λ,3,0
+signal  O2 S5 Current,number,mA,3,0
+signal  O2 S6 Lambda (mA),number,λ,3,0
+signal  O2 S6 Current,number,mA,3,0
+signal  O2 S7 Lambda (mA),number,λ,3,0
+signal  O2 S7 Current,number,mA,3,0
+signal  O2 S8 Lambda (mA),number,λ,3,0
+signal  O2 S8 Current,number,mA,3,0
+signal  Catalyst Temp B1 S1,number,°C,1,0
+signal  Catalyst Temp B2 S1,number,°C,1,0
+signal  Catalyst Temp B1 S2,number,°C,1,0
+signal  Catalyst Temp B2 S2,number,°C,1,0
+signal  Absolute Load,number,%,1,0
+signal  Commanded Lambda,number,λ,3,14
+signal  Relative Throttle Position,number,%,1,0
+signal  Ambient Air Temp,number,°C,0,0
+signal  Absolute Throttle B,number,%,1,0
+signal  Absolute Throttle C,number,%,1,0
+signal  Accelerator Pedal D,number,%,1,13
+signal  Accelerator Pedal E,number,%,1,0
+signal  Accelerator Pedal F,number,%,1,0
+signal  Commanded Throttle,number,%,1,0
+signal  Time Run with MIL On,number,min,0,0
+signal  Time Since Clear,number,min,0,0
+signal  Max Lambda,number,λ,0,0
+signal  Max O2 Voltage,number,V,0,0
+signal  Max O2 Current,number,mA,0,0
+signal  Max Intake Pressure,number,kPa,0,0
+signal  Max MAF,number,g/s,0,0
+signal  Ethanol Fuel,number,%,1,0
+signal  Evap Vapor Pressure (Abs),number,kPa,3,0
+signal  Evap Vapor Pressure (Wide),number,Pa,0,0
+signal  Rear O2 Short Trim B1,number,%,1,0
+signal  Rear O2 Short Trim B3,number,%,1,0
+signal  Rear O2 Long Trim B1,number,%,1,0
+signal  Rear O2 Long Trim B3,number,%,1,0
+signal  Rear O2 Short Trim B2,number,%,1,0
+signal  Rear O2 Short Trim B4,number,%,1,0
+signal  Rear O2 Long Trim B2,number,%,1,0
+signal  Rear O2 Long Trim B4,number,%,1,0
+signal  Fuel Rail Pressure (Abs),number,kPa,0,0
+signal  Relative Pedal Position,number,%,1,0
+signal  Hybrid Battery Life,number,%,1,0
+signal  Fuel Injection Timing,number,°,2,0
+signal  Engine Fuel Rate,number,L/h,2,0
+signal  Driver Demand Torque,number,%,0,0
+signal  Actual Engine Torque,number,%,0,0
+signal  Engine Reference Torque,number,N·m,0,0
+signal  Torque at Idle,number,%,0,0
+signal  Torque at Point 1,number,%,0,0
+signal  Torque at Point 2,number,%,0,0
+signal  Torque at Point 3,number,%,0,0
+signal  Torque at Point 4,number,%,0,0
+signal  MAF Sensor A,number,g/s,2,0
+signal  MAF Sensor B,number,g/s,2,0
+signal  Coolant Temp Sensor 1,number,°C,0,0
+signal  Coolant Temp Sensor 2,number,°C,0,0
+signal  Intake Air Temp Sensor 1,number,°C,0,0
+signal  Intake Air Temp Sensor 2,number,°C,0,0
+signal  Engine Friction Torque,number,%,0,0
+signal  Cylinder Fuel Rate,number,mg/stroke,2,0
+signal  Odometer,number,km,1,0
+caller  havne-cli 0.3.6
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
+
+22:10:27.241  +0.004  note  {"type":"end","reason":"replay-end","frames":7074,"dropped_frames":0,"dropped_values":0}
+
+22:10:27.245  +0.009  end  havne-cli: replay-end: 7074 frames, 7061 values, 0 records dropped, 0 notes dropped

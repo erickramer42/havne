@@ -14,7 +14,16 @@
 //          ISO-TP's N_Cr on the kernel's receive times:
 //          SocketCanRequestTest.AReplyOnTimeSurvivesAWorkerHeldUpMidMessage
 //          (a worker held inside its reads; one held between passes, which
-//          the expiry after the reads covers, by code reading only)
+//          the expiry after the reads covers, by code reading only);
+//          the rate's proof after the first echo (ADR-0040's appendix of
+//          2026-11-02), on
+//          vcan0 started unproven (ecuio_socketcan_set_vcan_unproven):
+//          SocketCanRequestTest.AnUnproven*. A recording's link lines
+//          (ADR-0049) come through link_health.h, tested there
+//          (RecorderTest.ALinkTransition*) and through the fake ELM327;
+//          these workers' argument by code reading.
+//          ECUIO_FRAME_FLAG_REASSEMBLED on a requesting session's replies:
+//          SocketCanFaultTest (expect_in_step)
 //
 // socketcan:// (ADR-0032, ADR-0040): a Linux CAN interface. Attach reads
 // the interface through rtnetlink and refuses one a session can't use
@@ -23,7 +32,8 @@
 // time, and nothing is sent. One whose profile requests sends each
 // request as ISO-TP (isotp.h) through the same socket, answers each First
 // Frame with Flow Control, and dispatches whole messages, as the J2534
-// and ELM327 transports do; until its first request is echoed it sends
+// and ELM327 transports do; until its first request is echoed and then
+// answered, or N_As passes after the echo with no error frame, it sends
 // one at a time, and a CAN error before then ends its sending.
 
 #include "ecuio/core.h"
@@ -76,6 +86,12 @@ namespace {
 constexpr int kReadBurst = 256;
 /* The worker's wait: one quiet window of link health */
 constexpr int kWaitMs = 100;
+
+static_assert(SOCKETCAN_PROOF_QUIET_US == ECUIO_ISOTP_N_AS_US,
+              "the rate's proof waits out N_As after the first echo");
+
+/* ecuio_socketcan_set_vcan_unproven's quiet time; 0: vcan starts proven */
+std::atomic<int64_t> g_vcan_unproven_us{0};
 
 /* The OS's words for an errno; may throw bad_alloc */
 std::string why(int err)
@@ -262,14 +278,16 @@ struct read_frame {
  * time. Link health
  * as J2534's: a reply OK, a request unanswered a timeout, an unechoed
  * request a failed write, a bus-off or the interface gone a hard
- * failure; the rate's proof (socketcan_proof_on) decides when sending
- * stops for the session. */
+ * failure; the rate's proof (socketcan_proof_on, socketcan_proof_settle)
+ * decides when the rotation starts and when sending stops for the
+ * session: after the first echo, nothing more is sent until a reply
+ * comes or N_As passes with no error frame. */
 void request_worker(ecuio_socketcan_transport* t)
 {
     ecuio_session_t* s = t->session;
     ecuio_request_engine& e = t->engine;
     isotp_rx& iso = *t->isotp;
-    link_health h(s->last_error, s->error_count);
+    link_health h(s->last_error, s->error_count, s->record_link.get());
     socketcan_clock clock;
     uint32_t drops = 0;
     bool overflow_pending = false;
@@ -291,7 +309,8 @@ void request_worker(ecuio_socketcan_transport* t)
 
     /* What became of the request awaiting its echo */
     const auto settle = [&](socketcan_sent what) {
-        const socketcan_proof_step step = socketcan_proof_on(t->proof, what);
+        const socketcan_proof_step step =
+            socketcan_proof_on(t->proof, what, now_us(t));
         if (what == socketcan_sent::echoed) {
             link_on_write(h, true);
         } else if (pending.active) {
@@ -333,8 +352,9 @@ void request_worker(ecuio_socketcan_transport* t)
         if (pending.active && now - pending.at_us > ECUIO_ISOTP_N_AS_US) {
             settle(socketcan_sent::unechoed);
         }
+        (void)socketcan_proof_settle(t->proof, now, false);
 
-        if (!pending.active && !t->proof.halted) {
+        if (!pending.active && !t->proof.halted && !t->proof.confirming) {
             uint32_t c = 0;
             int32_t r = ECUIO_ENGINE_NONE;
             for (uint32_t k = 0; k < e.chan_count && r == ECUIO_ENGINE_NONE;
@@ -371,6 +391,10 @@ void request_worker(ecuio_socketcan_transport* t)
         if (pending.active) {
             next_us =
                 std::min(next_us, pending.at_us + ECUIO_ISOTP_N_AS_US + 1);
+        }
+        if (t->proof.confirming) {
+            next_us =
+                std::min(next_us, t->proof.echoed_us + t->proof.quiet_us + 1);
         }
         int wait_ms = kWaitMs;
         if (next_us != INT64_MAX) {
@@ -501,7 +525,9 @@ void request_worker(ecuio_socketcan_transport* t)
                     ecuio_frame_t& reply = *t->reply;
                     reply.timestamp_us = stamp;
                     reply.arbitration_id = m.id;
-                    reply.flags = t->ext29[c] ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
+                    reply.flags =
+                        (t->ext29[c] ? ECUIO_FRAME_FLAG_EXTENDED : 0u) |
+                        ECUIO_FRAME_FLAG_REASSEMBLED;
                     if (overflow_pending) {
                         reply.flags |= ECUIO_FRAME_FLAG_OVERFLOW;
                         overflow_pending = false;
@@ -517,6 +543,8 @@ void request_worker(ecuio_socketcan_transport* t)
                     e.stamp_breaks = clock.host_steps;
                     (void)ecuio_engine_on_frame(
                         &e, c, reply.data, reply.data_length, now, nullptr);
+                    /* an ECU answered at this rate */
+                    (void)socketcan_proof_settle(t->proof, now, true);
                     matched = true;
                 }
                 break;
@@ -555,7 +583,7 @@ void socketcan_worker(ecuio_socketcan_transport* t)
         return;
     }
     ecuio_session_t* s = t->session;
-    link_health h(s->last_error, s->error_count);
+    link_health h(s->last_error, s->error_count, s->record_link.get());
     socketcan_clock clock;
     ecuio_frame_t* frame = t->frame.get();
     uint32_t drops = 0; /* SO_RXQ_OVFL's count on this socket */
@@ -954,6 +982,11 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             r.sender.reset(new isotp_tx());
             r.reply.reset(new ecuio_frame_t());
             r.proof = socketcan_proof_for(link);
+            const int64_t unproven_us = g_vcan_unproven_us.load();
+            if (unproven_us > 0 && link.is_vcan()) {
+                r.proof.proven = false; /* TEST-ONLY: the proof on vcan */
+                r.proof.quiet_us = unproven_us;
+            }
         }
         impl->fd = open_socket(impl.get(), link.index);
         if (impl->fd < 0) {
@@ -990,6 +1023,11 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
         ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
     }
     return ECUIO_OK;
+}
+
+extern "C" void ecuio_socketcan_set_vcan_unproven(int64_t quiet_us)
+{
+    g_vcan_unproven_us.store(quiet_us > 0 ? quiet_us : 0);
 }
 
 #endif /* ECUIO_HAVE_SOCKETCAN */

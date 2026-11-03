@@ -6,13 +6,15 @@
 //          the titles and the dtc line (CliDtcTest, ADR-0044) name through it;
 //          the inspection line (CliInspectionTest, ADR-0045) is core's verdict;
 //          the simulated ECU's lines (CliSimTest, ADR-0046); the DID
-//          scan's line and --until-scanned's end (CliScanTest, ADR-0020).
+//          scan's line and --until-scanned's end (CliScanTest, ADR-0020);
+//          the lines typed into stream --record (CliMarkLinesTest, ADR-0049).
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
 #include "diagnostics_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
+#include "mark_lines.h"
 #include "scan_line.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
@@ -411,6 +413,33 @@ TEST(CliRingTest, WakeEndsADrainsWait)
 
 // A sleep is a rise of a second or more in one poll (ADR-0033 section 6), told
 // once; smaller rises are taken in, so they never add up to a line
+/* Standard input's bytes in the pieces a read gives them: a line split
+ * across reads is one line, CRLF and LF both end one, an empty line is
+ * one (an unlabeled marker), the last without a newline counts at the
+ * end, and a line past kMax keeps its first kMax bytes */
+TEST(CliMarkLinesTest, TypedBytesBecomeLines)
+{
+    cli::MarkLines split;
+    std::vector<std::string> got;
+    const auto out = [&](const std::string& line) { got.push_back(line); };
+    const std::string typed = "lap 1\r\n\nsec";
+    split.feed(typed.data(), typed.size(), out);
+    EXPECT_EQ(got, (std::vector<std::string>{"lap 1", ""}));
+    const std::string rest = "ond lap\nlast";
+    split.feed(rest.data(), rest.size(), out);
+    split.finish(out);
+    EXPECT_EQ(got,
+              (std::vector<std::string>{"lap 1", "", "second lap", "last"}));
+
+    got.clear();
+    const std::string long_line(cli::MarkLines::kMax + 10, 'x');
+    split.feed(long_line.data(), long_line.size(), out);
+    split.feed("\n", 1, out);
+    split.finish(out);
+    ASSERT_EQ(got.size(), 1u);
+    EXPECT_EQ(got[0].size(), cli::MarkLines::kMax);
+}
+
 TEST(CliSleepTest, ARiseOfASecondInOnePollIsASleep)
 {
     cli::SleepWatch w(7000000);

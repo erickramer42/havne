@@ -65,6 +65,13 @@ if(MSVC)
     add_link_options("$<$<CONFIG:Release>:/DEBUG>"
                      "$<$<CONFIG:Release>:/OPT:REF>"
                      "$<$<CONFIG:Release>:/OPT:ICF>")
+    # The Visual Studio generator hands MSBuild one project at a time and
+    # cl one file at a time; /MP compiles a project's files in parallel
+    # (it implies /FS, so the shared PDB stays consistent). Ninja trees
+    # (clang-tidy's) already run one cl per file in parallel.
+    if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+        add_compile_options(/MP)
+    endif()
 endif()
 
 # Compiler warnings for every first-party target: core, the surrogate,

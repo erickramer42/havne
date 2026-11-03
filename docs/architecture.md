@@ -369,7 +369,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   ([ADR-0017](adr/0017-session-recording.md)): with it on, the
   bridge writes every frame it accepts, each decoded value and the
   activity lines to one folder per connect. It sits where those three
-  already meet, on the GUI thread, so core is unchanged.
+  already meet, on the GUI thread. Core has a recorder of its own
+  ([ADR-0049](adr/0049-recordings-in-core.md), `ecuio/recording.h`),
+  which `havne-cli stream --record` uses: the worker queues each frame
+  and its values into a ring, and the recorder's thread writes the
+  same folder, so a slow disk never holds the worker up.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial

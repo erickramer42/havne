@@ -30,6 +30,12 @@ typedef struct ecuio_session ecuio_session_t;
                                                          overflowed before this
                                                          frame: frames were lost
                                                          (J2534's BUFFER_OVERFLOW) */
+#define ECUIO_FRAME_FLAG_REASSEMBLED      0x00000100u /* an ISO-TP message's
+                                                         payload, reassembled
+                                                         (core's or the
+                                                         adapter's), not a
+                                                         frame as it crossed
+                                                         the bus (ADR-0049) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled
@@ -138,6 +144,9 @@ typedef enum {
                                          read to the end, a clear running,
                                          or another generation (ADR-0038);
                                          nothing was sent */
+    ECUIO_ERR_RECORDING_FAILED = 18,  /* a recording's folder or files
+                                         couldn't be made, or a write to
+                                         them failed (ADR-0049, recording.h) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;

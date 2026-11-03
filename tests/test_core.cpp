@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <initializer_list>
 #include <memory>
 #include <mutex>
@@ -153,6 +154,30 @@ TEST(CoreTest, VendorDetailIsOneLine)
     ecuio_detail_set_vendor("PassThruConnect", 34, nullptr);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "PassThruConnect returned status 34 (0x22, vendor-specific)");
+    ecuio_detail_clear();
+}
+
+/* An open refused with the vendor's own status and no text asks after
+ * the two usual causes; the vendor's text, a status J2534 names, or
+ * another call keeps the plain form. */
+TEST(CoreTest, AnOpenRefusedWithoutTextAsksAfterTheAdapter)
+{
+    ecuio_detail_set_vendor("PassThruOpen", 34, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
+                 "is the adapter attached, and not open in another program?");
+    ecuio_detail_set_vendor("PassThruOpen", 34, " \r\n");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
+                 "is the adapter attached, and not open in another program?");
+    ecuio_detail_set_vendor("PassThruOpen", 34, "in use");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
+                 "in use");
+    ecuio_detail_set_vendor("PassThruOpen", 8, nullptr);
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "PassThruOpen returned status 8 (0x8, ERR_DEVICE_NOT_CONNECTED)");
     ecuio_detail_clear();
 }
 
@@ -2791,6 +2816,64 @@ TEST(CoreTest, WorkersAllocateNothingPerFrame)
             << "operator new on the worker between frames " << WorkerNews::kFrom
             << " and " << c.to;
     }
+}
+
+/* Recording costs the worker no allocation either: the ring is made at
+ * open, and each frame and its values (decoded for the recording, with
+ * no values callback registered) are copied into it (ADR-0049 section 1) */
+TEST(CoreTest, WorkersAllocateNothingPerFrameWhileRecording)
+{
+    TempRecording rec(paced_rows(3));
+    const std::string replay = rec.uri("?speed=max&loop=1&profile=obd2");
+    const char* tmp = std::getenv("TEMP");
+    if (tmp == nullptr)
+        tmp = std::getenv("TMPDIR");
+    const std::filesystem::path root =
+        std::filesystem::path(tmp != nullptr ? tmp : "/tmp") /
+        "ecuio-core-recording-news";
+    const std::string root8 = root.generic_u8string();
+    struct Case {
+        const char* uri;
+        int to;
+    };
+    for (const Case& c : {Case{"mock://demo", 12}, Case{replay.c_str(), 200}}) {
+        SCOPED_TRACE(c.uri);
+        WorkerNews w;
+        w.to = c.to;
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(c.uri, &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_record_options_t o{};
+        o.root_utf8 = root8.c_str();
+        ecuio_recorder_t* recorder = nullptr;
+        ASSERT_EQ(ecuio_recorder_open(&o, &recorder), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_EQ(ecuio_session_record(session, recorder), ECUIO_OK);
+        EXPECT_EQ(ecuio_register_frame_callback(session, worker_news_cb, &w),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const bool reached =
+            wait_for([&] { return w.frames.load() >= c.to; }, 5000);
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+        /* The writer counts the rows it writes, within its next wakes */
+        ecuio_recorder_state_t st{};
+        wait_for(
+            [&] {
+                ecuio_recorder_get_state(recorder, &st);
+                return st.value_rows > 0;
+            },
+            2000);
+        EXPECT_EQ(ecuio_recorder_close(recorder, nullptr), ECUIO_OK);
+        ASSERT_TRUE(reached) << w.frames.load() << " frames";
+        EXPECT_GT(st.value_rows, 0u)
+            << "the values were decoded for the recording";
+        EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+            << "operator new on the worker between frames " << WorkerNews::kFrom
+            << " and " << c.to;
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
 }
 
 /* Each row goes out as recorded (ID, flags, bytes, an empty payload

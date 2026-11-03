@@ -1,0 +1,7062 @@
+﻿host_us,signal,value,unit
+266,Engine Load,0,%
+269,Coolant Temp,60,°C
+269,RPM,0,RPM
+270,Vehicle Speed,0,km/h
+270,Intake Air Temp,63,°C
+271,Throttle Position,21.9607843137,%
+272,Fuel Level,54.1176470588,%
+273,Battery Voltage,11.77,V
+273,MAF,0.31,g/s
+274,Engine Load,0,%
+275,Coolant Temp,60,°C
+276,RPM,0,RPM
+276,Vehicle Speed,0,km/h
+277,Intake Air Temp,63,°C
+278,Throttle Position,21.9607843137,%
+278,Fuel Level,54.1176470588,%
+278,Battery Voltage,11.77,V
+279,MAF,0.32,g/s
+279,Engine Load,0,%
+280,Coolant Temp,60,°C
+280,RPM,0,RPM
+281,Vehicle Speed,0,km/h
+281,Intake Air Temp,63,°C
+282,Throttle Position,21.9607843137,%
+283,Fuel Level,54.1176470588,%
+283,Battery Voltage,11.716,V
+284,MAF,0.31,g/s
+284,Engine Load,0,%
+284,Coolant Temp,60,°C
+285,RPM,0,RPM
+285,Vehicle Speed,0,km/h
+286,Intake Air Temp,63,°C
+286,Throttle Position,21.9607843137,%
+286,Fuel Level,54.1176470588,%
+287,Battery Voltage,11.717,V
+288,MAF,0.31,g/s
+289,Engine Load,0,%
+291,Coolant Temp,60,°C
+291,RPM,0,RPM
+292,Vehicle Speed,0,km/h
+292,Intake Air Temp,63,°C
+293,Throttle Position,21.9607843137,%
+293,Fuel Level,54.1176470588,%
+293,Battery Voltage,11.716,V
+294,MAF,0.31,g/s
+294,Engine Load,0,%
+295,Coolant Temp,60,°C
+295,RPM,0,RPM
+295,Vehicle Speed,0,km/h
+296,Intake Air Temp,63,°C
+298,Throttle Position,21.9607843137,%
+299,Fuel Level,54.1176470588,%
+299,Battery Voltage,11.713,V
+299,MAF,0.31,g/s
+300,Engine Load,0,%
+300,Coolant Temp,60,°C
+301,RPM,0,RPM
+301,Vehicle Speed,0,km/h
+301,Intake Air Temp,63,°C
+302,Throttle Position,21.9607843137,%
+302,Fuel Level,54.1176470588,%
+303,Battery Voltage,9.564,V
+303,MAF,2.56,g/s
+304,Engine Load,0,%
+304,Coolant Temp,60,°C
+304,RPM,0,RPM
+305,Vehicle Speed,0,km/h
+306,Intake Air Temp,63,°C
+306,Throttle Position,21.9607843137,%
+307,Fuel Level,54.1176470588,%
+307,Battery Voltage,9.707,V
+307,MAF,0,g/s
+308,Engine Load,100,%
+308,Coolant Temp,60,°C
+309,RPM,251.25,RPM
+309,Vehicle Speed,0,km/h
+310,Intake Air Temp,63,°C
+310,Throttle Position,21.9607843137,%
+310,Fuel Level,54.1176470588,%
+311,Battery Voltage,10.121,V
+311,MAF,1.98,g/s
+312,Engine Load,67.8431372549,%
+312,Coolant Temp,60,°C
+313,RPM,943.25,RPM
+313,Vehicle Speed,0,km/h
+314,Intake Air Temp,63,°C
+314,Throttle Position,10.1960784314,%
+314,Fuel Level,54.1176470588,%
+317,Battery Voltage,11.15,V
+317,MAF,1.71,g/s
+318,Engine Load,20.3921568627,%
+318,Coolant Temp,60,°C
+318,RPM,935.75,RPM
+319,Vehicle Speed,0,km/h
+319,Intake Air Temp,62,°C
+320,Throttle Position,14.1176470588,%
+323,Fuel Level,54.1176470588,%
+324,Battery Voltage,11.294,V
+324,MAF,2.86,g/s
+325,Engine Load,14.9019607843,%
+325,Coolant Temp,60,°C
+325,RPM,1023.5,RPM
+326,Vehicle Speed,0,km/h
+326,Intake Air Temp,62,°C
+327,Throttle Position,14.1176470588,%
+327,Fuel Level,54.1176470588,%
+328,Battery Voltage,11.325,V
+328,MAF,4.78,g/s
+329,Engine Load,11.3725490196,%
+330,Coolant Temp,60,°C
+330,RPM,1128.25,RPM
+332,Vehicle Speed,0,km/h
+333,Intake Air Temp,62,°C
+334,Throttle Position,13.7254901961,%
+334,Fuel Level,54.1176470588,%
+334,Battery Voltage,11.422,V
+335,MAF,4.29,g/s
+335,Engine Load,9.41176470588,%
+336,Coolant Temp,60,°C
+336,RPM,1231.5,RPM
+337,Vehicle Speed,0,km/h
+337,Intake Air Temp,62,°C
+337,Throttle Position,13.7254901961,%
+338,Fuel Level,54.1176470588,%
+338,Battery Voltage,11.42,V
+339,MAF,4.16,g/s
+339,Engine Load,8.23529411765,%
+340,Coolant Temp,61,°C
+340,RPM,1261.25,RPM
+340,Vehicle Speed,0,km/h
+341,Intake Air Temp,62,°C
+341,Throttle Position,13.7254901961,%
+342,Fuel Level,54.1176470588,%
+342,Battery Voltage,11.363,V
+343,MAF,4.14,g/s
+343,Engine Load,7.8431372549,%
+343,Coolant Temp,61,°C
+344,RPM,1240.25,RPM
+346,Vehicle Speed,0,km/h
+346,Intake Air Temp,62,°C
+347,Throttle Position,13.7254901961,%
+347,Fuel Level,54.1176470588,%
+347,Battery Voltage,11.494,V
+348,MAF,4.06,g/s
+348,Engine Load,8.23529411765,%
+349,Coolant Temp,61,°C
+349,RPM,1195,RPM
+349,Vehicle Speed,0,km/h
+350,Intake Air Temp,62,°C
+350,Throttle Position,13.7254901961,%
+351,Fuel Level,54.1176470588,%
+351,Battery Voltage,11.577,V
+351,MAF,3.93,g/s
+352,Engine Load,9.41176470588,%
+352,Coolant Temp,61,°C
+353,RPM,1136,RPM
+353,Vehicle Speed,0,km/h
+353,Intake Air Temp,62,°C
+354,Throttle Position,13.3333333333,%
+354,Fuel Level,54.1176470588,%
+355,Battery Voltage,11.575,V
+355,MAF,3.63,g/s
+355,Engine Load,10.9803921569,%
+356,Coolant Temp,61,°C
+356,RPM,1056.75,RPM
+357,Vehicle Speed,0,km/h
+357,Intake Air Temp,62,°C
+358,Throttle Position,13.3333333333,%
+358,Fuel Level,54.1176470588,%
+358,Battery Voltage,11.593,V
+359,MAF,3.44,g/s
+359,Engine Load,13.3333333333,%
+361,Coolant Temp,61,°C
+362,RPM,984.75,RPM
+362,Vehicle Speed,0,km/h
+362,Intake Air Temp,62,°C
+363,Throttle Position,12.9411764706,%
+363,Fuel Level,54.1176470588,%
+364,Battery Voltage,11.617,V
+364,MAF,2.92,g/s
+365,Engine Load,14.5098039216,%
+365,Coolant Temp,61,°C
+365,RPM,872.25,RPM
+366,Vehicle Speed,0,km/h
+366,Intake Air Temp,62,°C
+367,Throttle Position,13.3333333333,%
+367,Fuel Level,54.1176470588,%
+368,Battery Voltage,11.676,V
+368,MAF,3.55,g/s
+370,Engine Load,19.2156862745,%
+371,Coolant Temp,61,°C
+371,RPM,844.5,RPM
+372,Vehicle Speed,0,km/h
+372,Intake Air Temp,62,°C
+372,Throttle Position,13.7254901961,%
+373,Fuel Level,54.1176470588,%
+373,Battery Voltage,11.745,V
+373,MAF,3.74,g/s
+374,Engine Load,20,%
+374,Coolant Temp,61,°C
+375,RPM,859.5,RPM
+375,Vehicle Speed,0,km/h
+375,Intake Air Temp,61,°C
+376,Throttle Position,13.7254901961,%
+376,Fuel Level,54.1176470588,%
+377,Battery Voltage,11.761,V
+377,MAF,3.81,g/s
+380,Engine Load,21.1764705882,%
+380,Coolant Temp,61,°C
+381,RPM,854.75,RPM
+381,Vehicle Speed,0,km/h
+382,Intake Air Temp,61,°C
+382,Throttle Position,13.7254901961,%
+382,Fuel Level,54.1176470588,%
+383,Battery Voltage,11.805,V
+383,MAF,3.89,g/s
+384,Engine Load,21.1764705882,%
+384,Coolant Temp,61,°C
+384,RPM,867.25,RPM
+385,Vehicle Speed,0,km/h
+385,Intake Air Temp,61,°C
+386,Throttle Position,13.7254901961,%
+386,Fuel Level,54.1176470588,%
+386,Battery Voltage,11.855,V
+387,MAF,4.12,g/s
+387,Engine Load,21.9607843137,%
+388,Coolant Temp,61,°C
+388,RPM,877.75,RPM
+389,Vehicle Speed,0,km/h
+389,Intake Air Temp,61,°C
+389,Throttle Position,13.7254901961,%
+390,Fuel Level,54.1176470588,%
+390,Battery Voltage,11.863,V
+392,MAF,4.2,g/s
+393,Engine Load,22.3529411765,%
+393,Coolant Temp,61,°C
+393,RPM,858,RPM
+394,Vehicle Speed,0,km/h
+394,Intake Air Temp,61,°C
+396,Throttle Position,13.7254901961,%
+397,Fuel Level,54.1176470588,%
+397,Battery Voltage,11.898,V
+398,MAF,4.22,g/s
+398,Engine Load,22.7450980392,%
+399,Coolant Temp,61,°C
+399,RPM,869.5,RPM
+400,Vehicle Speed,0,km/h
+400,Intake Air Temp,61,°C
+400,Throttle Position,13.7254901961,%
+401,Fuel Level,54.1176470588,%
+401,Battery Voltage,11.919,V
+402,MAF,4.24,g/s
+402,Engine Load,22.3529411765,%
+403,Coolant Temp,61,°C
+403,RPM,883,RPM
+403,Vehicle Speed,0,km/h
+404,Intake Air Temp,61,°C
+404,Throttle Position,13.7254901961,%
+405,Fuel Level,54.1176470588,%
+405,Battery Voltage,11.932,V
+406,MAF,4.49,g/s
+406,Engine Load,23.5294117647,%
+406,Coolant Temp,61,°C
+407,RPM,870.5,RPM
+407,Vehicle Speed,0,km/h
+408,Intake Air Temp,61,°C
+408,Throttle Position,13.7254901961,%
+409,Fuel Level,54.1176470588,%
+409,Battery Voltage,11.966,V
+410,MAF,4.51,g/s
+410,Engine Load,23.137254902,%
+410,Coolant Temp,61,°C
+411,RPM,876.25,RPM
+411,Vehicle Speed,0,km/h
+412,Intake Air Temp,61,°C
+412,Throttle Position,13.7254901961,%
+412,Fuel Level,54.1176470588,%
+413,Battery Voltage,11.981,V
+413,MAF,4.43,g/s
+414,Engine Load,23.5294117647,%
+414,Coolant Temp,60,°C
+415,RPM,871,RPM
+415,Vehicle Speed,0,km/h
+415,Intake Air Temp,61,°C
+416,Throttle Position,14.1176470588,%
+416,Fuel Level,54.1176470588,%
+417,Battery Voltage,12.006,V
+417,MAF,4.53,g/s
+418,Engine Load,23.137254902,%
+420,Coolant Temp,60,°C
+420,RPM,880.25,RPM
+420,Vehicle Speed,0,km/h
+421,Intake Air Temp,61,°C
+421,Throttle Position,14.1176470588,%
+423,Fuel Level,54.1176470588,%
+424,Battery Voltage,12.026,V
+424,MAF,4.53,g/s
+425,Engine Load,23.5294117647,%
+425,Coolant Temp,60,°C
+425,RPM,880,RPM
+426,Vehicle Speed,0,km/h
+426,Intake Air Temp,61,°C
+427,Throttle Position,13.7254901961,%
+427,Fuel Level,54.1176470588,%
+427,Battery Voltage,12.039,V
+428,MAF,4.51,g/s
+428,Engine Load,23.5294117647,%
+429,Coolant Temp,60,°C
+429,RPM,890,RPM
+430,Vehicle Speed,0,km/h
+430,Intake Air Temp,61,°C
+430,Throttle Position,13.7254901961,%
+431,Fuel Level,54.1176470588,%
+431,Battery Voltage,12.038,V
+434,MAF,4.51,g/s
+434,Engine Load,23.137254902,%
+435,Coolant Temp,60,°C
+435,RPM,892.75,RPM
+436,Vehicle Speed,0,km/h
+436,Intake Air Temp,61,°C
+436,Throttle Position,14.1176470588,%
+437,Fuel Level,54.1176470588,%
+437,Battery Voltage,12.058,V
+438,MAF,4.49,g/s
+438,Engine Load,23.5294117647,%
+439,Coolant Temp,60,°C
+439,RPM,881,RPM
+439,Vehicle Speed,0,km/h
+440,Intake Air Temp,61,°C
+440,Throttle Position,14.1176470588,%
+441,Fuel Level,54.1176470588,%
+441,Battery Voltage,12.113,V
+441,MAF,4.51,g/s
+442,Engine Load,23.9215686275,%
+442,Coolant Temp,60,°C
+443,RPM,878.5,RPM
+443,Vehicle Speed,0,km/h
+443,Intake Air Temp,61,°C
+444,Throttle Position,14.1176470588,%
+446,Fuel Level,54.1176470588,%
+447,Battery Voltage,12.174,V
+447,MAF,4.53,g/s
+448,Engine Load,23.137254902,%
+448,Coolant Temp,60,°C
+448,RPM,900.25,RPM
+449,Vehicle Speed,0,km/h
+449,Intake Air Temp,61,°C
+450,Throttle Position,14.1176470588,%
+450,Fuel Level,54.1176470588,%
+450,Battery Voltage,12.21,V
+451,MAF,4.78,g/s
+451,Engine Load,23.9215686275,%
+452,Coolant Temp,60,°C
+452,RPM,884.25,RPM
+454,Vehicle Speed,0,km/h
+454,Intake Air Temp,60,°C
+455,Throttle Position,13.7254901961,%
+455,Fuel Level,54.1176470588,%
+455,Battery Voltage,12.272,V
+456,MAF,4.47,g/s
+456,Engine Load,23.137254902,%
+457,Coolant Temp,60,°C
+457,RPM,870.25,RPM
+457,Vehicle Speed,0,km/h
+458,Intake Air Temp,60,°C
+458,Throttle Position,14.1176470588,%
+459,Fuel Level,54.1176470588,%
+459,Battery Voltage,12.313,V
+460,MAF,4.63,g/s
+460,Engine Load,23.5294117647,%
+460,Coolant Temp,60,°C
+461,RPM,879.25,RPM
+461,Vehicle Speed,0,km/h
+462,Intake Air Temp,60,°C
+462,Throttle Position,14.1176470588,%
+463,Fuel Level,54.1176470588,%
+463,Battery Voltage,12.371,V
+463,MAF,4.61,g/s
+464,Engine Load,23.5294117647,%
+464,Coolant Temp,60,°C
+465,RPM,887.5,RPM
+465,Vehicle Speed,0,km/h
+465,Intake Air Temp,60,°C
+466,Throttle Position,14.1176470588,%
+466,Fuel Level,54.1176470588,%
+467,Battery Voltage,12.417,V
+467,MAF,4.51,g/s
+468,Engine Load,23.9215686275,%
+468,Coolant Temp,60,°C
+470,RPM,873.75,RPM
+470,Vehicle Speed,0,km/h
+471,Intake Air Temp,60,°C
+471,Throttle Position,13.7254901961,%
+472,Fuel Level,54.1176470588,%
+472,Battery Voltage,12.464,V
+472,MAF,4.45,g/s
+473,Engine Load,23.9215686275,%
+473,Coolant Temp,60,°C
+474,RPM,879.5,RPM
+474,Vehicle Speed,0,km/h
+474,Intake Air Temp,60,°C
+475,Throttle Position,14.1176470588,%
+475,Fuel Level,54.1176470588,%
+476,Battery Voltage,12.524,V
+476,MAF,4.59,g/s
+476,Engine Load,23.9215686275,%
+477,Coolant Temp,60,°C
+477,RPM,869.25,RPM
+478,Vehicle Speed,0,km/h
+478,Intake Air Temp,60,°C
+479,Throttle Position,14.1176470588,%
+479,Fuel Level,54.1176470588,%
+480,Battery Voltage,12.595,V
+480,MAF,4.57,g/s
+480,Engine Load,24.7058823529,%
+482,Coolant Temp,60,°C
+483,RPM,863.5,RPM
+483,Vehicle Speed,0,km/h
+484,Intake Air Temp,60,°C
+486,Throttle Position,14.1176470588,%
+487,Fuel Level,54.1176470588,%
+487,Battery Voltage,12.656,V
+488,MAF,4.67,g/s
+488,Engine Load,25.0980392157,%
+489,Coolant Temp,60,°C
+489,RPM,869.5,RPM
+490,Vehicle Speed,0,km/h
+490,Intake Air Temp,60,°C
+490,Throttle Position,14.1176470588,%
+491,Fuel Level,54.1176470588,%
+491,Battery Voltage,12.722,V
+492,MAF,4.78,g/s
+492,Engine Load,25.0980392157,%
+493,Coolant Temp,60,°C
+493,RPM,867.25,RPM
+494,Vehicle Speed,0,km/h
+494,Intake Air Temp,60,°C
+494,Throttle Position,14.1176470588,%
+495,Fuel Level,54.1176470588,%
+497,Battery Voltage,12.791,V
+497,MAF,4.78,g/s
+498,Engine Load,25.8823529412,%
+498,Coolant Temp,60,°C
+499,RPM,863.75,RPM
+499,Vehicle Speed,0,km/h
+500,Intake Air Temp,60,°C
+500,Throttle Position,14.1176470588,%
+500,Fuel Level,54.1176470588,%
+501,Battery Voltage,12.854,V
+501,MAF,4.86,g/s
+502,Engine Load,25.8823529412,%
+502,Coolant Temp,60,°C
+502,RPM,873.75,RPM
+503,Vehicle Speed,0,km/h
+503,Intake Air Temp,60,°C
+503,Throttle Position,14.1176470588,%
+504,Fuel Level,54.1176470588,%
+504,Battery Voltage,12.921,V
+505,MAF,4.97,g/s
+505,Engine Load,25.8823529412,%
+505,Coolant Temp,60,°C
+506,RPM,872.75,RPM
+506,Vehicle Speed,0,km/h
+507,Intake Air Temp,60,°C
+507,Throttle Position,14.1176470588,%
+507,Fuel Level,54.1176470588,%
+508,Battery Voltage,12.978,V
+508,MAF,4.86,g/s
+508,Engine Load,25.8823529412,%
+509,Coolant Temp,60,°C
+509,RPM,874,RPM
+510,Vehicle Speed,0,km/h
+510,Intake Air Temp,60,°C
+510,Throttle Position,14.1176470588,%
+511,Fuel Level,54.1176470588,%
+511,Battery Voltage,13.084,V
+513,MAF,5.11,g/s
+513,Engine Load,26.6666666667,%
+514,Coolant Temp,60,°C
+514,RPM,874.75,RPM
+515,Vehicle Speed,0,km/h
+515,Intake Air Temp,60,°C
+515,Throttle Position,14.1176470588,%
+516,Fuel Level,54.1176470588,%
+516,Battery Voltage,13.141,V
+517,MAF,5.16,g/s
+517,Engine Load,27.4509803922,%
+517,Coolant Temp,60,°C
+518,RPM,870.25,RPM
+520,Vehicle Speed,0,km/h
+520,Intake Air Temp,60,°C
+521,Throttle Position,14.1176470588,%
+521,Fuel Level,54.1176470588,%
+522,Battery Voltage,13.213,V
+522,MAF,5.16,g/s
+522,Engine Load,27.4509803922,%
+523,Coolant Temp,60,°C
+523,RPM,865.25,RPM
+524,Vehicle Speed,0,km/h
+524,Intake Air Temp,59,°C
+524,Throttle Position,14.1176470588,%
+525,Fuel Level,54.1176470588,%
+525,Battery Voltage,13.266,V
+526,MAF,5.22,g/s
+526,Engine Load,27.8431372549,%
+527,Coolant Temp,60,°C
+527,RPM,864.25,RPM
+527,Vehicle Speed,0,km/h
+528,Intake Air Temp,59,°C
+528,Throttle Position,14.5098039216,%
+529,Fuel Level,54.1176470588,%
+529,Battery Voltage,13.341,V
+529,MAF,5.33,g/s
+530,Engine Load,28.2352941176,%
+531,Coolant Temp,61,°C
+531,RPM,864.75,RPM
+532,Vehicle Speed,0,km/h
+532,Intake Air Temp,59,°C
+532,Throttle Position,14.5098039216,%
+533,Fuel Level,54.1176470588,%
+533,Battery Voltage,13.354,V
+534,MAF,5.31,g/s
+534,Engine Load,28.6274509804,%
+535,Coolant Temp,61,°C
+537,RPM,867,RPM
+538,Vehicle Speed,0,km/h
+538,Intake Air Temp,59,°C
+538,Throttle Position,14.1176470588,%
+539,Fuel Level,54.1176470588,%
+539,Battery Voltage,13.372,V
+540,MAF,5.26,g/s
+540,Engine Load,27.8431372549,%
+541,Coolant Temp,61,°C
+541,RPM,876.5,RPM
+541,Vehicle Speed,0,km/h
+542,Intake Air Temp,59,°C
+542,Throttle Position,14.1176470588,%
+544,Fuel Level,54.1176470588,%
+545,Battery Voltage,13.382,V
+547,MAF,5.26,g/s
+547,Engine Load,27.8431372549,%
+547,Coolant Temp,61,°C
+548,RPM,865.25,RPM
+548,Vehicle Speed,0,km/h
+549,Intake Air Temp,59,°C
+549,Throttle Position,14.5098039216,%
+549,Fuel Level,54.1176470588,%
+550,Battery Voltage,13.368,V
+550,MAF,5.31,g/s
+551,Engine Load,28.2352941176,%
+551,Coolant Temp,61,°C
+551,RPM,866.75,RPM
+552,Vehicle Speed,0,km/h
+552,Intake Air Temp,59,°C
+553,Throttle Position,14.5098039216,%
+553,Fuel Level,54.1176470588,%
+553,Battery Voltage,13.37,V
+554,MAF,5.28,g/s
+554,Engine Load,28.2352941176,%
+555,Coolant Temp,61,°C
+555,RPM,872.25,RPM
+556,Vehicle Speed,0,km/h
+556,Intake Air Temp,59,°C
+556,Throttle Position,14.5098039216,%
+557,Fuel Level,54.1176470588,%
+557,Battery Voltage,13.365,V
+558,MAF,5.26,g/s
+558,Engine Load,27.8431372549,%
+559,Coolant Temp,61,°C
+559,RPM,873.5,RPM
+559,Vehicle Speed,0,km/h
+560,Intake Air Temp,59,°C
+560,Throttle Position,14.1176470588,%
+561,Fuel Level,54.1176470588,%
+561,Battery Voltage,13.362,V
+561,MAF,5.22,g/s
+562,Engine Load,27.4509803922,%
+562,Coolant Temp,61,°C
+563,RPM,875.75,RPM
+563,Vehicle Speed,0,km/h
+563,Intake Air Temp,58,°C
+564,Throttle Position,14.5098039216,%
+564,Fuel Level,54.1176470588,%
+565,Battery Voltage,13.365,V
+565,MAF,5.24,g/s
+565,Engine Load,27.4509803922,%
+566,Coolant Temp,61,°C
+566,RPM,875.75,RPM
+567,Vehicle Speed,0,km/h
+569,Intake Air Temp,58,°C
+569,Throttle Position,14.1176470588,%
+569,Fuel Level,54.1176470588,%
+570,Battery Voltage,13.345,V
+570,MAF,5.22,g/s
+571,Engine Load,28.2352941176,%
+571,Coolant Temp,61,°C
+571,RPM,872.5,RPM
+572,Vehicle Speed,0,km/h
+574,Intake Air Temp,58,°C
+574,Throttle Position,14.5098039216,%
+575,Fuel Level,54.1176470588,%
+575,Battery Voltage,13.361,V
+575,MAF,5.28,g/s
+576,Engine Load,27.4509803922,%
+576,Coolant Temp,61,°C
+577,RPM,880,RPM
+577,Vehicle Speed,0,km/h
+577,Intake Air Temp,58,°C
+578,Throttle Position,14.1176470588,%
+578,Fuel Level,54.1176470588,%
+579,Battery Voltage,13.34,V
+579,MAF,5.24,g/s
+580,Engine Load,27.0588235294,%
+580,Coolant Temp,61,°C
+581,RPM,872,RPM
+581,Vehicle Speed,0,km/h
+582,Intake Air Temp,58,°C
+582,Throttle Position,14.1176470588,%
+582,Fuel Level,54.1176470588,%
+583,Battery Voltage,13.344,V
+583,MAF,5.11,g/s
+584,Engine Load,26.6666666667,%
+584,Coolant Temp,61,°C
+584,RPM,885,RPM
+585,Vehicle Speed,0,km/h
+585,Intake Air Temp,58,°C
+586,Throttle Position,14.1176470588,%
+586,Fuel Level,54.1176470588,%
+587,Battery Voltage,13.361,V
+589,MAF,5.22,g/s
+590,Engine Load,27.0588235294,%
+590,Coolant Temp,61,°C
+590,RPM,885.5,RPM
+591,Vehicle Speed,0,km/h
+591,Intake Air Temp,58,°C
+592,Throttle Position,14.1176470588,%
+592,Fuel Level,54.1176470588,%
+592,Battery Voltage,13.331,V
+593,MAF,5.18,g/s
+595,Engine Load,26.6666666667,%
+596,Coolant Temp,61,°C
+596,RPM,888.25,RPM
+597,Vehicle Speed,0,km/h
+597,Intake Air Temp,58,°C
+598,Throttle Position,14.1176470588,%
+598,Fuel Level,54.1176470588,%
+598,Battery Voltage,13.327,V
+599,MAF,5.05,g/s
+599,Engine Load,26.2745098039,%
+600,Coolant Temp,61,°C
+600,RPM,886.75,RPM
+601,Vehicle Speed,0,km/h
+601,Intake Air Temp,58,°C
+601,Throttle Position,14.1176470588,%
+602,Fuel Level,54.1176470588,%
+602,Battery Voltage,13.361,V
+603,MAF,5.15,g/s
+603,Engine Load,26.2745098039,%
+604,Coolant Temp,61,°C
+606,RPM,885.5,RPM
+606,Vehicle Speed,0,km/h
+606,Intake Air Temp,58,°C
+607,Throttle Position,14.1176470588,%
+607,Fuel Level,54.1176470588,%
+608,Battery Voltage,13.318,V
+608,MAF,4.96,g/s
+609,Engine Load,26.2745098039,%
+609,Coolant Temp,61,°C
+609,RPM,885.75,RPM
+610,Vehicle Speed,0,km/h
+610,Intake Air Temp,58,°C
+611,Throttle Position,14.1176470588,%
+611,Fuel Level,54.1176470588,%
+611,Battery Voltage,13.34,V
+612,MAF,4.92,g/s
+612,Engine Load,25.8823529412,%
+613,Coolant Temp,61,°C
+613,RPM,876.5,RPM
+614,Vehicle Speed,0,km/h
+614,Intake Air Temp,58,°C
+614,Throttle Position,14.1176470588,%
+615,Fuel Level,54.1176470588,%
+615,Battery Voltage,13.338,V
+616,MAF,5.01,g/s
+616,Engine Load,26.6666666667,%
+617,Coolant Temp,61,°C
+617,RPM,878,RPM
+617,Vehicle Speed,0,km/h
+618,Intake Air Temp,58,°C
+620,Throttle Position,14.1176470588,%
+620,Fuel Level,54.1176470588,%
+621,Battery Voltage,13.347,V
+621,MAF,4.92,g/s
+622,Engine Load,25.4901960784,%
+622,Coolant Temp,61,°C
+622,RPM,882,RPM
+623,Vehicle Speed,0,km/h
+624,Intake Air Temp,58,°C
+624,Throttle Position,14.1176470588,%
+624,Fuel Level,54.1176470588,%
+625,Battery Voltage,13.323,V
+625,MAF,4.94,g/s
+626,Engine Load,25.8823529412,%
+626,Coolant Temp,61,°C
+627,RPM,883,RPM
+627,Vehicle Speed,0,km/h
+627,Intake Air Temp,57,°C
+628,Throttle Position,14.1176470588,%
+628,Fuel Level,54.1176470588,%
+629,Battery Voltage,13.334,V
+629,MAF,4.9,g/s
+629,Engine Load,25.4901960784,%
+631,Coolant Temp,61,°C
+631,RPM,884.25,RPM
+632,Vehicle Speed,0,km/h
+632,Intake Air Temp,57,°C
+632,Throttle Position,14.1176470588,%
+633,Fuel Level,54.1176470588,%
+633,Battery Voltage,13.332,V
+635,MAF,4.84,g/s
+636,Engine Load,25.0980392157,%
+636,Coolant Temp,61,°C
+637,RPM,884.5,RPM
+637,Vehicle Speed,0,km/h
+638,Intake Air Temp,57,°C
+638,Throttle Position,14.1176470588,%
+638,Fuel Level,54.1176470588,%
+639,Battery Voltage,13.336,V
+639,MAF,4.86,g/s
+640,Engine Load,25.0980392157,%
+640,Coolant Temp,61,°C
+640,RPM,881.25,RPM
+641,Vehicle Speed,0,km/h
+641,Intake Air Temp,57,°C
+644,Throttle Position,14.1176470588,%
+645,Fuel Level,54.1176470588,%
+645,Battery Voltage,13.335,V
+646,MAF,4.86,g/s
+646,Engine Load,25.4901960784,%
+648,Coolant Temp,61,°C
+648,RPM,880,RPM
+649,Vehicle Speed,0,km/h
+649,Intake Air Temp,57,°C
+649,Throttle Position,14.1176470588,%
+650,Fuel Level,54.1176470588,%
+650,Battery Voltage,13.34,V
+651,MAF,4.71,g/s
+651,Engine Load,25.0980392157,%
+651,Coolant Temp,61,°C
+652,RPM,884,RPM
+652,Vehicle Speed,0,km/h
+653,Intake Air Temp,57,°C
+653,Throttle Position,14.1176470588,%
+653,Fuel Level,54.1176470588,%
+654,Battery Voltage,13.339,V
+654,MAF,4.79,g/s
+655,Engine Load,24.7058823529,%
+655,Coolant Temp,61,°C
+656,RPM,878.5,RPM
+656,Vehicle Speed,0,km/h
+657,Intake Air Temp,57,°C
+657,Throttle Position,14.1176470588,%
+657,Fuel Level,54.1176470588,%
+658,Battery Voltage,13.324,V
+658,MAF,4.71,g/s
+659,Engine Load,25.0980392157,%
+659,Coolant Temp,62,°C
+659,RPM,869,RPM
+660,Vehicle Speed,0,km/h
+661,Intake Air Temp,57,°C
+661,Throttle Position,14.1176470588,%
+661,Fuel Level,54.1176470588,%
+662,Battery Voltage,13.331,V
+662,MAF,4.65,g/s
+663,Engine Load,24.7058823529,%
+663,Coolant Temp,62,°C
+664,RPM,880.75,RPM
+664,Vehicle Speed,0,km/h
+664,Intake Air Temp,57,°C
+665,Throttle Position,14.1176470588,%
+667,Fuel Level,54.1176470588,%
+667,Battery Voltage,13.329,V
+668,MAF,4.75,g/s
+668,Engine Load,25.0980392157,%
+669,Coolant Temp,62,°C
+669,RPM,871,RPM
+669,Vehicle Speed,0,km/h
+670,Intake Air Temp,57,°C
+670,Throttle Position,14.1176470588,%
+672,Fuel Level,54.1176470588,%
+673,Battery Voltage,13.331,V
+673,MAF,4.71,g/s
+673,Engine Load,24.7058823529,%
+674,Coolant Temp,62,°C
+674,RPM,877.25,RPM
+675,Vehicle Speed,0,km/h
+675,Intake Air Temp,57,°C
+676,Throttle Position,14.1176470588,%
+676,Fuel Level,54.1176470588,%
+676,Battery Voltage,13.323,V
+677,MAF,4.63,g/s
+677,Engine Load,24.7058823529,%
+678,Coolant Temp,62,°C
+678,RPM,874.25,RPM
+678,Vehicle Speed,0,km/h
+679,Intake Air Temp,57,°C
+679,Throttle Position,14.1176470588,%
+680,Fuel Level,54.1176470588,%
+680,Battery Voltage,13.335,V
+681,MAF,4.69,g/s
+681,Engine Load,24.3137254902,%
+681,Coolant Temp,62,°C
+682,RPM,880.25,RPM
+682,Vehicle Speed,0,km/h
+682,Intake Air Temp,57,°C
+683,Throttle Position,14.1176470588,%
+683,Fuel Level,54.1176470588,%
+684,Battery Voltage,13.343,V
+684,MAF,4.71,g/s
+685,Engine Load,24.7058823529,%
+685,Coolant Temp,62,°C
+685,RPM,872.25,RPM
+686,Vehicle Speed,0,km/h
+686,Intake Air Temp,57,°C
+686,Throttle Position,13.7254901961,%
+687,Fuel Level,54.1176470588,%
+687,Battery Voltage,13.344,V
+688,MAF,4.58,g/s
+689,Engine Load,24.3137254902,%
+689,Coolant Temp,62,°C
+690,RPM,875.75,RPM
+690,Vehicle Speed,0,km/h
+690,Intake Air Temp,57,°C
+691,Throttle Position,14.1176470588,%
+691,Fuel Level,54.1176470588,%
+692,Battery Voltage,13.339,V
+692,MAF,4.6,g/s
+692,Engine Load,23.5294117647,%
+693,Coolant Temp,62,°C
+697,RPM,881.75,RPM
+698,Vehicle Speed,0,km/h
+700,Intake Air Temp,57,°C
+700,Throttle Position,14.1176470588,%
+701,Fuel Level,54.1176470588,%
+701,Battery Voltage,13.312,V
+702,MAF,4.69,g/s
+702,Engine Load,24.3137254902,%
+703,Coolant Temp,62,°C
+703,RPM,870.25,RPM
+703,Vehicle Speed,0,km/h
+704,Intake Air Temp,57,°C
+704,Throttle Position,13.7254901961,%
+705,Fuel Level,54.1176470588,%
+705,Battery Voltage,13.343,V
+706,MAF,4.52,g/s
+706,Engine Load,24.3137254902,%
+706,Coolant Temp,62,°C
+707,RPM,874,RPM
+707,Vehicle Speed,0,km/h
+708,Intake Air Temp,57,°C
+708,Throttle Position,14.1176470588,%
+708,Fuel Level,54.1176470588,%
+709,Battery Voltage,13.332,V
+709,MAF,4.58,g/s
+710,Engine Load,23.9215686275,%
+710,Coolant Temp,62,°C
+710,RPM,873.75,RPM
+711,Vehicle Speed,0,km/h
+711,Intake Air Temp,57,°C
+711,Throttle Position,14.1176470588,%
+712,Fuel Level,54.1176470588,%
+712,Battery Voltage,13.334,V
+713,MAF,4.56,g/s
+713,Engine Load,24.3137254902,%
+713,Coolant Temp,62,°C
+714,RPM,870.75,RPM
+714,Vehicle Speed,0,km/h
+715,Intake Air Temp,57,°C
+715,Throttle Position,13.7254901961,%
+715,Fuel Level,54.1176470588,%
+716,Battery Voltage,13.319,V
+716,MAF,4.54,g/s
+717,Engine Load,23.9215686275,%
+717,Coolant Temp,62,°C
+717,RPM,873.5,RPM
+718,Vehicle Speed,0,km/h
+718,Intake Air Temp,57,°C
+718,Throttle Position,13.7254901961,%
+719,Fuel Level,54.1176470588,%
+721,Battery Voltage,13.324,V
+721,MAF,4.54,g/s
+721,Engine Load,23.9215686275,%
+722,Coolant Temp,62,°C
+722,RPM,877.5,RPM
+723,Vehicle Speed,0,km/h
+723,Intake Air Temp,57,°C
+723,Throttle Position,14.1176470588,%
+724,Fuel Level,54.1176470588,%
+724,Battery Voltage,13.33,V
+725,MAF,4.6,g/s
+725,Engine Load,23.9215686275,%
+725,Coolant Temp,62,°C
+727,RPM,876,RPM
+728,Vehicle Speed,0,km/h
+728,Intake Air Temp,57,°C
+729,Throttle Position,14.1176470588,%
+729,Fuel Level,54.1176470588,%
+729,Battery Voltage,13.336,V
+730,MAF,4.65,g/s
+730,Engine Load,24.3137254902,%
+731,Coolant Temp,62,°C
+731,RPM,873.25,RPM
+731,Vehicle Speed,0,km/h
+732,Intake Air Temp,57,°C
+732,Throttle Position,14.1176470588,%
+733,Fuel Level,54.1176470588,%
+733,Battery Voltage,13.336,V
+733,MAF,4.56,g/s
+734,Engine Load,24.3137254902,%
+734,Coolant Temp,62,°C
+735,RPM,869,RPM
+735,Vehicle Speed,0,km/h
+736,Intake Air Temp,57,°C
+736,Throttle Position,13.7254901961,%
+736,Fuel Level,54.1176470588,%
+737,Battery Voltage,13.324,V
+737,MAF,4.54,g/s
+738,Engine Load,24.3137254902,%
+738,Coolant Temp,62,°C
+739,RPM,870,RPM
+739,Vehicle Speed,0,km/h
+739,Intake Air Temp,57,°C
+740,Throttle Position,14.1176470588,%
+740,Fuel Level,54.1176470588,%
+741,Battery Voltage,13.343,V
+741,MAF,4.63,g/s
+742,Engine Load,23.9215686275,%
+742,Coolant Temp,62,°C
+743,RPM,870.75,RPM
+744,Vehicle Speed,0,km/h
+745,Intake Air Temp,57,°C
+745,Throttle Position,14.1176470588,%
+746,Fuel Level,54.1176470588,%
+746,Battery Voltage,13.338,V
+749,MAF,4.63,g/s
+749,Engine Load,24.3137254902,%
+750,Coolant Temp,62,°C
+750,RPM,868.5,RPM
+750,Vehicle Speed,0,km/h
+751,Intake Air Temp,57,°C
+751,Throttle Position,13.7254901961,%
+752,Fuel Level,54.1176470588,%
+752,Battery Voltage,13.337,V
+753,MAF,4.4,g/s
+753,Engine Load,23.9215686275,%
+753,Coolant Temp,62,°C
+754,RPM,867.75,RPM
+754,Vehicle Speed,0,km/h
+755,Intake Air Temp,57,°C
+755,Throttle Position,14.1176470588,%
+755,Fuel Level,54.1176470588,%
+756,Battery Voltage,13.345,V
+756,MAF,4.52,g/s
+758,Engine Load,23.5294117647,%
+759,Coolant Temp,62,°C
+759,RPM,877,RPM
+759,Vehicle Speed,0,km/h
+760,Intake Air Temp,57,°C
+760,Throttle Position,13.7254901961,%
+761,Fuel Level,54.1176470588,%
+761,Battery Voltage,13.339,V
+761,MAF,4.5,g/s
+762,Engine Load,24.3137254902,%
+762,Coolant Temp,63,°C
+763,RPM,867.5,RPM
+763,Vehicle Speed,0,km/h
+763,Intake Air Temp,57,°C
+764,Throttle Position,13.7254901961,%
+764,Fuel Level,54.1176470588,%
+765,Battery Voltage,13.347,V
+765,MAF,4.52,g/s
+765,Engine Load,23.9215686275,%
+766,Coolant Temp,63,°C
+766,RPM,871.75,RPM
+767,Vehicle Speed,0,km/h
+767,Intake Air Temp,57,°C
+767,Throttle Position,13.7254901961,%
+768,Fuel Level,54.1176470588,%
+768,Battery Voltage,13.335,V
+770,MAF,4.5,g/s
+771,Engine Load,23.9215686275,%
+771,Coolant Temp,63,°C
+771,RPM,867.5,RPM
+772,Vehicle Speed,0,km/h
+772,Intake Air Temp,57,°C
+773,Throttle Position,13.7254901961,%
+773,Fuel Level,54.1176470588,%
+773,Battery Voltage,13.333,V
+774,MAF,4.44,g/s
+774,Engine Load,23.5294117647,%
+774,Coolant Temp,63,°C
+775,RPM,874.75,RPM
+775,Vehicle Speed,0,km/h
+776,Intake Air Temp,57,°C
+776,Throttle Position,13.7254901961,%
+776,Fuel Level,54.1176470588,%
+777,Battery Voltage,13.327,V
+777,MAF,4.46,g/s
+777,Engine Load,23.9215686275,%
+778,Coolant Temp,63,°C
+778,RPM,873.75,RPM
+779,Vehicle Speed,0,km/h
+779,Intake Air Temp,57,°C
+779,Throttle Position,13.7254901961,%
+780,Fuel Level,54.1176470588,%
+780,Battery Voltage,13.343,V
+780,MAF,4.52,g/s
+782,Engine Load,23.9215686275,%
+782,Coolant Temp,63,°C
+782,RPM,874.25,RPM
+783,Vehicle Speed,0,km/h
+783,Intake Air Temp,57,°C
+783,Throttle Position,13.7254901961,%
+784,Fuel Level,54.1176470588,%
+786,Battery Voltage,13.335,V
+786,MAF,4.4,g/s
+787,Engine Load,23.9215686275,%
+787,Coolant Temp,63,°C
+788,RPM,867,RPM
+788,Vehicle Speed,0,km/h
+789,Intake Air Temp,57,°C
+789,Throttle Position,14.1176470588,%
+790,Fuel Level,54.1176470588,%
+790,Battery Voltage,13.326,V
+790,MAF,4.46,g/s
+791,Engine Load,24.3137254902,%
+791,Coolant Temp,63,°C
+792,RPM,864.5,RPM
+792,Vehicle Speed,0,km/h
+796,Intake Air Temp,57,°C
+797,Throttle Position,14.1176470588,%
+797,Fuel Level,54.1176470588,%
+798,Battery Voltage,13.34,V
+798,MAF,4.52,g/s
+798,Engine Load,24.3137254902,%
+799,Coolant Temp,63,°C
+799,RPM,870,RPM
+800,Vehicle Speed,0,km/h
+800,Intake Air Temp,57,°C
+802,Throttle Position,13.7254901961,%
+803,Fuel Level,54.1176470588,%
+803,Battery Voltage,13.325,V
+804,MAF,4.42,g/s
+804,Engine Load,23.9215686275,%
+805,Coolant Temp,63,°C
+805,RPM,864.25,RPM
+806,Vehicle Speed,0,km/h
+806,Intake Air Temp,57,°C
+806,Throttle Position,14.1176470588,%
+807,Fuel Level,54.1176470588,%
+807,Battery Voltage,13.334,V
+808,MAF,4.56,g/s
+808,Engine Load,24.3137254902,%
+808,Coolant Temp,63,°C
+809,RPM,866.5,RPM
+809,Vehicle Speed,0,km/h
+810,Intake Air Temp,56,°C
+810,Throttle Position,13.7254901961,%
+810,Fuel Level,54.1176470588,%
+811,Battery Voltage,13.325,V
+811,MAF,4.5,g/s
+812,Engine Load,24.3137254902,%
+812,Coolant Temp,63,°C
+813,RPM,866.5,RPM
+813,Vehicle Speed,0,km/h
+813,Intake Air Temp,56,°C
+814,Throttle Position,13.7254901961,%
+814,Fuel Level,54.1176470588,%
+815,Battery Voltage,13.322,V
+815,MAF,4.46,g/s
+816,Engine Load,23.9215686275,%
+816,Coolant Temp,63,°C
+817,RPM,874.5,RPM
+817,Vehicle Speed,0,km/h
+819,Intake Air Temp,56,°C
+820,Throttle Position,14.1176470588,%
+820,Fuel Level,54.1176470588,%
+820,Battery Voltage,13.327,V
+821,MAF,4.58,g/s
+821,Engine Load,24.3137254902,%
+822,Coolant Temp,63,°C
+822,RPM,869.5,RPM
+823,Vehicle Speed,0,km/h
+823,Intake Air Temp,56,°C
+823,Throttle Position,13.7254901961,%
+824,Fuel Level,54.1176470588,%
+824,Battery Voltage,13.31,V
+825,MAF,4.5,g/s
+825,Engine Load,23.9215686275,%
+825,Coolant Temp,63,°C
+826,RPM,867.25,RPM
+826,Vehicle Speed,0,km/h
+827,Intake Air Temp,56,°C
+827,Throttle Position,13.7254901961,%
+828,Fuel Level,54.1176470588,%
+828,Battery Voltage,13.33,V
+828,MAF,4.42,g/s
+829,Engine Load,23.9215686275,%
+829,Coolant Temp,63,°C
+830,RPM,869,RPM
+830,Vehicle Speed,0,km/h
+830,Intake Air Temp,56,°C
+831,Throttle Position,14.1176470588,%
+831,Fuel Level,54.1176470588,%
+832,Battery Voltage,13.345,V
+832,MAF,4.58,g/s
+833,Engine Load,23.9215686275,%
+833,Coolant Temp,63,°C
+833,RPM,869.75,RPM
+834,Vehicle Speed,0,km/h
+834,Intake Air Temp,56,°C
+835,Throttle Position,13.7254901961,%
+835,Fuel Level,54.1176470588,%
+835,Battery Voltage,13.323,V
+836,MAF,4.52,g/s
+836,Engine Load,23.9215686275,%
+837,Coolant Temp,63,°C
+837,RPM,874,RPM
+838,Vehicle Speed,0,km/h
+838,Intake Air Temp,56,°C
+838,Throttle Position,13.7254901961,%
+839,Fuel Level,54.1176470588,%
+839,Battery Voltage,13.31,V
+840,MAF,4.44,g/s
+840,Engine Load,23.9215686275,%
+841,Coolant Temp,64,°C
+841,RPM,868.25,RPM
+841,Vehicle Speed,0,km/h
+842,Intake Air Temp,56,°C
+842,Throttle Position,13.7254901961,%
+843,Fuel Level,54.1176470588,%
+843,Battery Voltage,13.323,V
+844,MAF,4.5,g/s
+844,Engine Load,23.9215686275,%
+844,Coolant Temp,64,°C
+847,RPM,869.5,RPM
+847,Vehicle Speed,0,km/h
+847,Intake Air Temp,56,°C
+848,Throttle Position,13.7254901961,%
+849,Fuel Level,54.1176470588,%
+850,Battery Voltage,13.322,V
+850,MAF,4.48,g/s
+851,Engine Load,23.9215686275,%
+852,Coolant Temp,64,°C
+856,RPM,870.25,RPM
+857,Vehicle Speed,0,km/h
+857,Intake Air Temp,56,°C
+858,Throttle Position,13.7254901961,%
+858,Fuel Level,54.1176470588,%
+859,Battery Voltage,13.328,V
+859,MAF,4.44,g/s
+859,Engine Load,23.5294117647,%
+860,Coolant Temp,64,°C
+860,RPM,865.5,RPM
+861,Vehicle Speed,0,km/h
+861,Intake Air Temp,56,°C
+862,Throttle Position,13.7254901961,%
+862,Fuel Level,54.1176470588,%
+862,Battery Voltage,13.338,V
+863,MAF,4.54,g/s
+864,Engine Load,24.3137254902,%
+864,Coolant Temp,64,°C
+865,RPM,863.75,RPM
+865,Vehicle Speed,0,km/h
+865,Intake Air Temp,56,°C
+866,Throttle Position,13.7254901961,%
+866,Fuel Level,54.9019607843,%
+867,Battery Voltage,13.332,V
+867,MAF,4.4,g/s
+868,Engine Load,23.9215686275,%
+868,Coolant Temp,64,°C
+869,RPM,862.75,RPM
+869,Vehicle Speed,0,km/h
+869,Intake Air Temp,56,°C
+870,Throttle Position,13.7254901961,%
+870,Fuel Level,54.9019607843,%
+871,Battery Voltage,13.344,V
+871,MAF,4.52,g/s
+871,Engine Load,24.7058823529,%
+872,Coolant Temp,64,°C
+872,RPM,849.75,RPM
+873,Vehicle Speed,0,km/h
+874,Intake Air Temp,56,°C
+874,Throttle Position,13.7254901961,%
+874,Fuel Level,54.9019607843,%
+875,Battery Voltage,13.341,V
+875,MAF,4.46,g/s
+876,Engine Load,24.3137254902,%
+876,Coolant Temp,64,°C
+876,RPM,856,RPM
+877,Vehicle Speed,0,km/h
+877,Intake Air Temp,56,°C
+878,Throttle Position,13.7254901961,%
+878,Fuel Level,54.9019607843,%
+879,Battery Voltage,13.349,V
+879,MAF,4.48,g/s
+881,Engine Load,23.9215686275,%
+881,Coolant Temp,64,°C
+882,RPM,866.25,RPM
+882,Vehicle Speed,0,km/h
+883,Intake Air Temp,56,°C
+883,Throttle Position,13.7254901961,%
+883,Fuel Level,54.9019607843,%
+884,Battery Voltage,13.329,V
+884,MAF,4.44,g/s
+885,Engine Load,24.3137254902,%
+885,Coolant Temp,64,°C
+885,RPM,870.25,RPM
+886,Vehicle Speed,0,km/h
+886,Intake Air Temp,56,°C
+887,Throttle Position,13.7254901961,%
+887,Fuel Level,54.9019607843,%
+887,Battery Voltage,13.32,V
+888,MAF,4.52,g/s
+888,Engine Load,24.3137254902,%
+889,Coolant Temp,64,°C
+889,RPM,868.75,RPM
+889,Vehicle Speed,0,km/h
+890,Intake Air Temp,56,°C
+890,Throttle Position,13.7254901961,%
+891,Fuel Level,54.9019607843,%
+891,Battery Voltage,13.337,V
+891,MAF,4.52,g/s
+892,Engine Load,23.9215686275,%
+892,Coolant Temp,64,°C
+892,RPM,872.25,RPM
+893,Vehicle Speed,0,km/h
+893,Intake Air Temp,56,°C
+894,Throttle Position,13.7254901961,%
+894,Fuel Level,54.9019607843,%
+895,Battery Voltage,13.316,V
+895,MAF,4.5,g/s
+895,Engine Load,23.9215686275,%
+896,Coolant Temp,64,°C
+896,RPM,871.75,RPM
+897,Vehicle Speed,0,km/h
+897,Intake Air Temp,56,°C
+898,Throttle Position,13.7254901961,%
+898,Fuel Level,54.9019607843,%
+898,Battery Voltage,13.321,V
+899,MAF,4.48,g/s
+899,Engine Load,23.9215686275,%
+900,Coolant Temp,64,°C
+900,RPM,873,RPM
+900,Vehicle Speed,0,km/h
+901,Intake Air Temp,56,°C
+901,Throttle Position,13.7254901961,%
+901,Fuel Level,54.1176470588,%
+902,Battery Voltage,13.322,V
+904,MAF,4.54,g/s
+905,Engine Load,23.9215686275,%
+905,Coolant Temp,64,°C
+905,RPM,868.25,RPM
+906,Vehicle Speed,0,km/h
+906,Intake Air Temp,56,°C
+907,Throttle Position,13.7254901961,%
+907,Fuel Level,54.1176470588,%
+909,Battery Voltage,13.316,V
+909,MAF,4.52,g/s
+910,Engine Load,24.3137254902,%
+910,Coolant Temp,64,°C
+910,RPM,865.5,RPM
+911,Vehicle Speed,0,km/h
+911,Intake Air Temp,56,°C
+911,Throttle Position,13.7254901961,%
+912,Fuel Level,54.1176470588,%
+912,Battery Voltage,13.344,V
+913,MAF,4.4,g/s
+913,Engine Load,23.5294117647,%
+913,Coolant Temp,64,°C
+914,RPM,867.75,RPM
+914,Vehicle Speed,0,km/h
+914,Intake Air Temp,56,°C
+915,Throttle Position,13.7254901961,%
+915,Fuel Level,54.1176470588,%
+916,Battery Voltage,13.341,V
+916,MAF,4.52,g/s
+916,Engine Load,24.3137254902,%
+917,Coolant Temp,64,°C
+917,RPM,861.25,RPM
+918,Vehicle Speed,0,km/h
+918,Intake Air Temp,56,°C
+918,Throttle Position,13.7254901961,%
+919,Fuel Level,54.1176470588,%
+919,Battery Voltage,13.329,V
+920,MAF,4.4,g/s
+920,Engine Load,23.9215686275,%
+920,Coolant Temp,64,°C
+921,RPM,866.75,RPM
+921,Vehicle Speed,0,km/h
+921,Intake Air Temp,56,°C
+922,Throttle Position,13.7254901961,%
+922,Fuel Level,52.9411764706,%
+923,Battery Voltage,13.339,V
+923,MAF,4.5,g/s
+923,Engine Load,23.5294117647,%
+924,Coolant Temp,64,°C
+924,RPM,869.25,RPM
+924,Vehicle Speed,0,km/h
+925,Intake Air Temp,56,°C
+925,Throttle Position,13.7254901961,%
+926,Fuel Level,52.9411764706,%
+927,Battery Voltage,13.305,V
+927,MAF,4.44,g/s
+928,Engine Load,24.3137254902,%
+928,Coolant Temp,65,°C
+929,RPM,851.5,RPM
+929,Vehicle Speed,0,km/h
+929,Intake Air Temp,56,°C
+930,Throttle Position,13.7254901961,%
+930,Fuel Level,52.9411764706,%
+930,Battery Voltage,13.345,V
+931,MAF,4.5,g/s
+931,Engine Load,24.3137254902,%
+932,Coolant Temp,65,°C
+932,RPM,862.75,RPM
+932,Vehicle Speed,0,km/h
+933,Intake Air Temp,56,°C
+935,Throttle Position,13.7254901961,%
+935,Fuel Level,52.9411764706,%
+935,Battery Voltage,13.337,V
+936,MAF,4.48,g/s
+936,Engine Load,23.9215686275,%
+937,Coolant Temp,65,°C
+937,RPM,864.5,RPM
+937,Vehicle Speed,0,km/h
+938,Intake Air Temp,56,°C
+938,Throttle Position,13.7254901961,%
+939,Fuel Level,52.9411764706,%
+939,Battery Voltage,13.334,V
+940,MAF,4.52,g/s
+940,Engine Load,24.3137254902,%
+940,Coolant Temp,65,°C
+941,RPM,863.5,RPM
+941,Vehicle Speed,0,km/h
+942,Intake Air Temp,56,°C
+942,Throttle Position,13.7254901961,%
+943,Fuel Level,52.9411764706,%
+943,Battery Voltage,13.321,V
+944,MAF,4.44,g/s
+944,Engine Load,24.3137254902,%
+944,Coolant Temp,65,°C
+945,RPM,863,RPM
+945,Vehicle Speed,0,km/h
+946,Intake Air Temp,56,°C
+946,Throttle Position,13.7254901961,%
+946,Fuel Level,52.9411764706,%
+947,Battery Voltage,13.33,V
+948,MAF,4.44,g/s
+948,Engine Load,23.5294117647,%
+948,Coolant Temp,65,°C
+949,RPM,870.25,RPM
+949,Vehicle Speed,0,km/h
+950,Intake Air Temp,56,°C
+952,Throttle Position,13.7254901961,%
+953,Fuel Level,52.9411764706,%
+953,Battery Voltage,13.335,V
+953,MAF,4.54,g/s
+954,Engine Load,23.9215686275,%
+954,Coolant Temp,65,°C
+955,RPM,863.75,RPM
+955,Vehicle Speed,0,km/h
+956,Intake Air Temp,56,°C
+956,Throttle Position,13.7254901961,%
+956,Fuel Level,52.9411764706,%
+957,Battery Voltage,13.333,V
+957,MAF,4.34,g/s
+958,Engine Load,24.3137254902,%
+958,Coolant Temp,65,°C
+958,RPM,851.75,RPM
+959,Vehicle Speed,0,km/h
+959,Intake Air Temp,56,°C
+960,Throttle Position,14.1176470588,%
+960,Fuel Level,52.9411764706,%
+960,Battery Voltage,13.347,V
+961,MAF,4.52,g/s
+961,Engine Load,23.9215686275,%
+962,Coolant Temp,65,°C
+962,RPM,871,RPM
+964,Vehicle Speed,0,km/h
+965,Intake Air Temp,56,°C
+965,Throttle Position,13.7254901961,%
+966,Fuel Level,52.9411764706,%
+966,Battery Voltage,13.316,V
+967,MAF,4.54,g/s
+967,Engine Load,24.3137254902,%
+967,Coolant Temp,65,°C
+968,RPM,863.5,RPM
+968,Vehicle Speed,0,km/h
+969,Intake Air Temp,56,°C
+969,Throttle Position,13.7254901961,%
+969,Fuel Level,52.9411764706,%
+970,Battery Voltage,13.324,V
+970,MAF,4.3,g/s
+971,Engine Load,23.5294117647,%
+971,Coolant Temp,65,°C
+971,RPM,865.25,RPM
+972,Vehicle Speed,0,km/h
+972,Intake Air Temp,56,°C
+973,Throttle Position,13.7254901961,%
+973,Fuel Level,52.9411764706,%
+973,Battery Voltage,13.342,V
+974,MAF,4.52,g/s
+974,Engine Load,23.5294117647,%
+975,Coolant Temp,65,°C
+975,RPM,870.5,RPM
+975,Vehicle Speed,0,km/h
+976,Intake Air Temp,56,°C
+976,Throttle Position,13.7254901961,%
+977,Fuel Level,54.1176470588,%
+977,Battery Voltage,13.313,V
+977,MAF,4.44,g/s
+978,Engine Load,24.7058823529,%
+978,Coolant Temp,65,°C
+979,RPM,853.25,RPM
+979,Vehicle Speed,0,km/h
+980,Intake Air Temp,56,°C
+980,Throttle Position,13.7254901961,%
+980,Fuel Level,52.9411764706,%
+981,Battery Voltage,13.338,V
+981,MAF,4.38,g/s
+982,Engine Load,23.9215686275,%
+982,Coolant Temp,65,°C
+983,RPM,863,RPM
+983,Vehicle Speed,0,km/h
+983,Intake Air Temp,56,°C
+984,Throttle Position,13.7254901961,%
+984,Fuel Level,52.9411764706,%
+985,Battery Voltage,13.337,V
+986,MAF,4.54,g/s
+986,Engine Load,23.9215686275,%
+987,Coolant Temp,65,°C
+987,RPM,861,RPM
+987,Vehicle Speed,0,km/h
+988,Intake Air Temp,56,°C
+988,Throttle Position,13.7254901961,%
+989,Fuel Level,52.9411764706,%
+989,Battery Voltage,13.335,V
+990,MAF,4.5,g/s
+992,Engine Load,24.3137254902,%
+992,Coolant Temp,65,°C
+993,RPM,857.5,RPM
+993,Vehicle Speed,0,km/h
+994,Intake Air Temp,56,°C
+994,Throttle Position,13.7254901961,%
+994,Fuel Level,52.9411764706,%
+995,Battery Voltage,13.336,V
+995,MAF,4.36,g/s
+996,Engine Load,23.5294117647,%
+996,Coolant Temp,65,°C
+996,RPM,861.25,RPM
+997,Vehicle Speed,0,km/h
+997,Intake Air Temp,56,°C
+998,Throttle Position,13.7254901961,%
+998,Fuel Level,52.9411764706,%
+999,Battery Voltage,13.336,V
+999,MAF,4.48,g/s
+999,Engine Load,23.9215686275,%
+1000,Coolant Temp,65,°C
+1002,RPM,862,RPM
+1003,Vehicle Speed,0,km/h
+1003,Intake Air Temp,56,°C
+1003,Throttle Position,13.7254901961,%
+1004,Fuel Level,52.9411764706,%
+1004,Battery Voltage,13.316,V
+1005,MAF,4.4,g/s
+1005,Engine Load,23.9215686275,%
+1005,Coolant Temp,65,°C
+1006,RPM,858,RPM
+1006,Vehicle Speed,0,km/h
+1007,Intake Air Temp,56,°C
+1007,Throttle Position,13.7254901961,%
+1008,Fuel Level,52.9411764706,%
+1008,Battery Voltage,13.342,V
+1008,MAF,4.42,g/s
+1009,Engine Load,23.9215686275,%
+1010,Coolant Temp,65,°C
+1010,RPM,864.75,RPM
+1011,Vehicle Speed,0,km/h
+1011,Intake Air Temp,56,°C
+1012,Throttle Position,13.7254901961,%
+1012,Fuel Level,52.9411764706,%
+1013,Battery Voltage,13.328,V
+1013,MAF,4.34,g/s
+1013,Engine Load,23.9215686275,%
+1014,Coolant Temp,65,°C
+1014,RPM,857.75,RPM
+1015,Vehicle Speed,0,km/h
+1015,Intake Air Temp,56,°C
+1016,Throttle Position,13.7254901961,%
+1016,Fuel Level,52.9411764706,%
+1016,Battery Voltage,13.34,V
+1017,MAF,4.5,g/s
+1017,Engine Load,23.9215686275,%
+1018,Coolant Temp,66,°C
+1018,RPM,869,RPM
+1018,Vehicle Speed,0,km/h
+1019,Intake Air Temp,55,°C
+1019,Throttle Position,13.7254901961,%
+1020,Fuel Level,52.9411764706,%
+1022,Battery Voltage,13.332,V
+1022,MAF,4.36,g/s
+1023,Engine Load,23.5294117647,%
+1023,Coolant Temp,66,°C
+1023,RPM,867.25,RPM
+1024,Vehicle Speed,0,km/h
+1024,Intake Air Temp,55,°C
+1025,Throttle Position,13.7254901961,%
+1025,Fuel Level,52.9411764706,%
+1026,Battery Voltage,13.342,V
+1026,MAF,4.44,g/s
+1026,Engine Load,23.5294117647,%
+1027,Coolant Temp,66,°C
+1027,RPM,865.5,RPM
+1028,Vehicle Speed,0,km/h
+1028,Intake Air Temp,55,°C
+1028,Throttle Position,13.7254901961,%
+1029,Fuel Level,52.9411764706,%
+1029,Battery Voltage,13.33,V
+1030,MAF,4.42,g/s
+1030,Engine Load,24.3137254902,%
+1030,Coolant Temp,66,°C
+1031,RPM,867.25,RPM
+1031,Vehicle Speed,0,km/h
+1032,Intake Air Temp,55,°C
+1032,Throttle Position,13.7254901961,%
+1032,Fuel Level,52.9411764706,%
+1033,Battery Voltage,13.337,V
+1033,MAF,4.48,g/s
+1034,Engine Load,23.9215686275,%
+1034,Coolant Temp,66,°C
+1035,RPM,866.25,RPM
+1035,Vehicle Speed,0,km/h
+1036,Intake Air Temp,55,°C
+1036,Throttle Position,13.7254901961,%
+1036,Fuel Level,52.9411764706,%
+1037,Battery Voltage,13.339,V
+1038,MAF,4.42,g/s
+1038,Engine Load,23.9215686275,%
+1039,Coolant Temp,66,°C
+1039,RPM,862,RPM
+1039,Vehicle Speed,0,km/h
+1040,Intake Air Temp,55,°C
+1041,Throttle Position,13.7254901961,%
+1041,Fuel Level,52.9411764706,%
+1041,Battery Voltage,13.321,V
+1042,MAF,4.36,g/s
+1042,Engine Load,23.9215686275,%
+1043,Coolant Temp,66,°C
+1043,RPM,855.75,RPM
+1043,Vehicle Speed,0,km/h
+1044,Intake Air Temp,55,°C
+1044,Throttle Position,13.7254901961,%
+1045,Fuel Level,54.1176470588,%
+1045,Battery Voltage,13.346,V
+1046,MAF,4.4,g/s
+1046,Engine Load,23.9215686275,%
+1046,Coolant Temp,66,°C
+1047,RPM,856.5,RPM
+1047,Vehicle Speed,0,km/h
+1048,Intake Air Temp,55,°C
+1050,Throttle Position,13.7254901961,%
+1050,Fuel Level,52.9411764706,%
+1051,Battery Voltage,13.328,V
+1053,MAF,4.4,g/s
+1054,Engine Load,23.9215686275,%
+1054,Coolant Temp,66,°C
+1055,RPM,856.5,RPM
+1055,Vehicle Speed,0,km/h
+1055,Intake Air Temp,55,°C
+1056,Throttle Position,13.7254901961,%
+1056,Fuel Level,54.1176470588,%
+1057,Battery Voltage,13.328,V
+1057,MAF,4.44,g/s
+1058,Engine Load,23.9215686275,%
+1058,Coolant Temp,66,°C
+1058,RPM,860.75,RPM
+1059,Vehicle Speed,0,km/h
+1059,Intake Air Temp,55,°C
+1060,Throttle Position,13.7254901961,%
+1060,Fuel Level,52.9411764706,%
+1060,Battery Voltage,13.333,V
+1061,MAF,4.44,g/s
+1061,Engine Load,24.3137254902,%
+1062,Coolant Temp,66,°C
+1062,RPM,852.75,RPM
+1063,Vehicle Speed,0,km/h
+1063,Intake Air Temp,55,°C
+1063,Throttle Position,13.7254901961,%
+1064,Fuel Level,52.9411764706,%
+1064,Battery Voltage,13.346,V
+1065,MAF,4.34,g/s
+1065,Engine Load,23.9215686275,%
+1066,Coolant Temp,66,°C
+1066,RPM,862.75,RPM
+1066,Vehicle Speed,0,km/h
+1067,Intake Air Temp,55,°C
+1067,Throttle Position,13.7254901961,%
+1068,Fuel Level,52.9411764706,%
+1068,Battery Voltage,13.337,V
+1068,MAF,4.46,g/s
+1069,Engine Load,23.5294117647,%
+1069,Coolant Temp,66,°C
+1070,RPM,869.5,RPM
+1070,Vehicle Speed,0,km/h
+1071,Intake Air Temp,55,°C
+1071,Throttle Position,13.7254901961,%
+1071,Fuel Level,54.1176470588,%
+1072,Battery Voltage,13.331,V
+1072,MAF,4.36,g/s
+1073,Engine Load,24.3137254902,%
+1073,Coolant Temp,66,°C
+1074,RPM,861,RPM
+1074,Vehicle Speed,0,km/h
+1074,Intake Air Temp,55,°C
+1075,Throttle Position,13.7254901961,%
+1075,Fuel Level,54.1176470588,%
+1075,Battery Voltage,13.325,V
+1076,MAF,4.42,g/s
+1076,Engine Load,23.5294117647,%
+1077,Coolant Temp,66,°C
+1077,RPM,867.25,RPM
+1079,Vehicle Speed,0,km/h
+1079,Intake Air Temp,55,°C
+1080,Throttle Position,13.7254901961,%
+1080,Fuel Level,52.9411764706,%
+1081,Battery Voltage,13.331,V
+1081,MAF,4.42,g/s
+1082,Engine Load,23.9215686275,%
+1082,Coolant Temp,66,°C
+1082,RPM,861,RPM
+1083,Vehicle Speed,0,km/h
+1083,Intake Air Temp,55,°C
+1084,Throttle Position,13.7254901961,%
+1084,Fuel Level,52.9411764706,%
+1084,Battery Voltage,13.318,V
+1085,MAF,4.34,g/s
+1085,Engine Load,23.9215686275,%
+1086,Coolant Temp,66,°C
+1086,RPM,857,RPM
+1087,Vehicle Speed,0,km/h
+1087,Intake Air Temp,55,°C
+1087,Throttle Position,13.7254901961,%
+1088,Fuel Level,52.9411764706,%
+1088,Battery Voltage,13.331,V
+1089,MAF,4.34,g/s
+1089,Engine Load,23.5294117647,%
+1089,Coolant Temp,67,°C
+1090,RPM,863.75,RPM
+1090,Vehicle Speed,0,km/h
+1091,Intake Air Temp,55,°C
+1091,Throttle Position,13.7254901961,%
+1092,Fuel Level,54.1176470588,%
+1092,Battery Voltage,13.322,V
+1092,MAF,4.38,g/s
+1093,Engine Load,23.5294117647,%
+1093,Coolant Temp,67,°C
+1094,RPM,860.75,RPM
+1094,Vehicle Speed,0,km/h
+1095,Intake Air Temp,55,°C
+1095,Throttle Position,13.7254901961,%
+1095,Fuel Level,52.9411764706,%
+1096,Battery Voltage,13.324,V
+1096,MAF,4.38,g/s
+1097,Engine Load,24.3137254902,%
+1097,Coolant Temp,67,°C
+1097,RPM,852.5,RPM
+1098,Vehicle Speed,0,km/h
+1098,Intake Air Temp,55,°C
+1101,Throttle Position,13.7254901961,%
+1101,Fuel Level,54.1176470588,%
+1102,Battery Voltage,13.317,V
+1102,MAF,4.28,g/s
+1102,Engine Load,23.5294117647,%
+1103,Coolant Temp,67,°C
+1103,RPM,860,RPM
+1104,Vehicle Speed,0,km/h
+1104,Intake Air Temp,55,°C
+1105,Throttle Position,13.7254901961,%
+1105,Fuel Level,54.1176470588,%
+1106,Battery Voltage,13.343,V
+1106,MAF,4.38,g/s
+1106,Engine Load,23.9215686275,%
+1108,Coolant Temp,67,°C
+1109,RPM,860,RPM
+1109,Vehicle Speed,0,km/h
+1110,Intake Air Temp,55,°C
+1110,Throttle Position,13.7254901961,%
+1110,Fuel Level,52.9411764706,%
+1111,Battery Voltage,13.322,V
+1111,MAF,4.38,g/s
+1112,Engine Load,23.9215686275,%
+1112,Coolant Temp,67,°C
+1112,RPM,855.5,RPM
+1113,Vehicle Speed,0,km/h
+1113,Intake Air Temp,55,°C
+1114,Throttle Position,13.7254901961,%
+1114,Fuel Level,52.9411764706,%
+1115,Battery Voltage,13.34,V
+1115,MAF,4.42,g/s
+1115,Engine Load,23.9215686275,%
+1116,Coolant Temp,67,°C
+1116,RPM,861.75,RPM
+1117,Vehicle Speed,0,km/h
+1117,Intake Air Temp,55,°C
+1117,Throttle Position,13.7254901961,%
+1118,Fuel Level,52.9411764706,%
+1118,Battery Voltage,13.318,V
+1119,MAF,4.48,g/s
+1119,Engine Load,24.3137254902,%
+1119,Coolant Temp,67,°C
+1120,RPM,860,RPM
+1120,Vehicle Speed,0,km/h
+1121,Intake Air Temp,55,°C
+1121,Throttle Position,13.7254901961,%
+1121,Fuel Level,52.9411764706,%
+1122,Battery Voltage,13.333,V
+1122,MAF,4.42,g/s
+1123,Engine Load,23.9215686275,%
+1123,Coolant Temp,67,°C
+1123,RPM,857,RPM
+1124,Vehicle Speed,0,km/h
+1124,Intake Air Temp,55,°C
+1125,Throttle Position,13.7254901961,%
+1125,Fuel Level,54.1176470588,%
+1126,Battery Voltage,13.33,V
+1126,MAF,4.44,g/s
+1126,Engine Load,24.3137254902,%
+1127,Coolant Temp,67,°C
+1127,RPM,856.5,RPM
+1128,Vehicle Speed,0,km/h
+1128,Intake Air Temp,55,°C
+1129,Throttle Position,13.7254901961,%
+1129,Fuel Level,54.1176470588,%
+1130,Battery Voltage,13.335,V
+1130,MAF,4.4,g/s
+1130,Engine Load,23.9215686275,%
+1131,Coolant Temp,67,°C
+1131,RPM,869,RPM
+1132,Vehicle Speed,0,km/h
+1132,Intake Air Temp,55,°C
+1132,Throttle Position,13.7254901961,%
+1133,Fuel Level,52.9411764706,%
+1133,Battery Voltage,13.325,V
+1135,MAF,4.4,g/s
+1135,Engine Load,23.9215686275,%
+1136,Coolant Temp,67,°C
+1136,RPM,865.25,RPM
+1137,Vehicle Speed,0,km/h
+1137,Intake Air Temp,55,°C
+1138,Throttle Position,13.7254901961,%
+1138,Fuel Level,52.9411764706,%
+1138,Battery Voltage,13.343,V
+1139,MAF,4.44,g/s
+1139,Engine Load,24.3137254902,%
+1140,Coolant Temp,67,°C
+1140,RPM,855.75,RPM
+1140,Vehicle Speed,0,km/h
+1141,Intake Air Temp,55,°C
+1141,Throttle Position,13.7254901961,%
+1142,Fuel Level,54.1176470588,%
+1142,Battery Voltage,13.34,V
+1143,MAF,4.32,g/s
+1143,Engine Load,23.5294117647,%
+1143,Coolant Temp,67,°C
+1144,RPM,863.5,RPM
+1144,Vehicle Speed,0,km/h
+1145,Intake Air Temp,55,°C
+1145,Throttle Position,13.7254901961,%
+1146,Fuel Level,52.9411764706,%
+1146,Battery Voltage,13.34,V
+1146,MAF,4.42,g/s
+1147,Engine Load,23.9215686275,%
+1147,Coolant Temp,67,°C
+1150,RPM,853,RPM
+1150,Vehicle Speed,0,km/h
+1151,Intake Air Temp,55,°C
+1151,Throttle Position,13.7254901961,%
+1152,Fuel Level,52.9411764706,%
+1152,Battery Voltage,13.325,V
+1153,MAF,4.34,g/s
+1153,Engine Load,23.5294117647,%
+1154,Coolant Temp,67,°C
+1154,RPM,863.5,RPM
+1154,Vehicle Speed,0,km/h
+1155,Intake Air Temp,55,°C
+1155,Throttle Position,13.7254901961,%
+1156,Fuel Level,52.9411764706,%
+1156,Battery Voltage,13.333,V
+1157,MAF,4.38,g/s
+1157,Engine Load,23.9215686275,%
+1158,Coolant Temp,67,°C
+1158,RPM,859.25,RPM
+1158,Vehicle Speed,0,km/h
+1159,Intake Air Temp,55,°C
+1159,Throttle Position,13.7254901961,%
+1159,Fuel Level,52.9411764706,%
+1160,Battery Voltage,13.318,V
+1160,MAF,4.42,g/s
+1161,Engine Load,23.9215686275,%
+1161,Coolant Temp,67,°C
+1162,RPM,860.25,RPM
+1162,Vehicle Speed,0,km/h
+1162,Intake Air Temp,55,°C
+1164,Throttle Position,13.7254901961,%
+1165,Fuel Level,52.9411764706,%
+1165,Battery Voltage,13.325,V
+1165,MAF,4.38,g/s
+1166,Engine Load,23.9215686275,%
+1166,Coolant Temp,67,°C
+1167,RPM,857,RPM
+1167,Vehicle Speed,0,km/h
+1168,Intake Air Temp,55,°C
+1168,Throttle Position,13.7254901961,%
+1168,Fuel Level,54.1176470588,%
+1169,Battery Voltage,13.322,V
+1169,MAF,4.34,g/s
+1170,Engine Load,23.5294117647,%
+1170,Coolant Temp,67,°C
+1170,RPM,858,RPM
+1171,Vehicle Speed,0,km/h
+1171,Intake Air Temp,55,°C
+1172,Throttle Position,13.7254901961,%
+1172,Fuel Level,52.9411764706,%
+1173,Battery Voltage,13.331,V
+1173,MAF,4.34,g/s
+1173,Engine Load,24.3137254902,%
+1174,Coolant Temp,67,°C
+1177,RPM,854,RPM
+1178,Vehicle Speed,0,km/h
+1179,Intake Air Temp,55,°C
+1179,Throttle Position,13.7254901961,%
+1180,Fuel Level,52.9411764706,%
+1180,Battery Voltage,13.451,V
+1180,MAF,4.36,g/s
+1181,Engine Load,23.9215686275,%
+1181,Coolant Temp,67,°C
+1182,RPM,856.75,RPM
+1182,Vehicle Speed,0,km/h
+1182,Intake Air Temp,55,°C
+1183,Throttle Position,13.7254901961,%
+1183,Fuel Level,52.9411764706,%
+1184,Battery Voltage,13.443,V
+1185,MAF,4.18,g/s
+1185,Engine Load,23.5294117647,%
+1185,Coolant Temp,68,°C
+1186,RPM,864.5,RPM
+1186,Vehicle Speed,0,km/h
+1187,Intake Air Temp,55,°C
+1187,Throttle Position,13.7254901961,%
+1188,Fuel Level,52.9411764706,%
+1188,Battery Voltage,13.416,V
+1188,MAF,4.24,g/s
+1189,Engine Load,23.137254902,%
+1189,Coolant Temp,68,°C
+1190,RPM,863.25,RPM
+1190,Vehicle Speed,0,km/h
+1191,Intake Air Temp,55,°C
+1191,Throttle Position,13.7254901961,%
+1191,Fuel Level,52.9411764706,%
+1192,Battery Voltage,13.372,V
+1192,MAF,4.18,g/s
+1193,Engine Load,22.7450980392,%
+1193,Coolant Temp,68,°C
+1194,RPM,859.75,RPM
+1197,Vehicle Speed,0,km/h
+1197,Intake Air Temp,55,°C
+1198,Throttle Position,13.7254901961,%
+1198,Fuel Level,52.9411764706,%
+1198,Battery Voltage,13.351,V
+1199,MAF,4.22,g/s
+1199,Engine Load,23.137254902,%
+1200,Coolant Temp,68,°C
+1200,RPM,859.75,RPM
+1201,Vehicle Speed,0,km/h
+1201,Intake Air Temp,55,°C
+1201,Throttle Position,13.7254901961,%
+1202,Fuel Level,54.1176470588,%
+1202,Battery Voltage,13.329,V
+1205,MAF,4.14,g/s
+1205,Engine Load,22.7450980392,%
+1206,Coolant Temp,68,°C
+1207,RPM,856.75,RPM
+1207,Vehicle Speed,0,km/h
+1207,Intake Air Temp,55,°C
+1208,Throttle Position,13.7254901961,%
+1208,Fuel Level,52.9411764706,%
+1208,Battery Voltage,13.348,V
+1209,MAF,4.22,g/s
+1209,Engine Load,22.7450980392,%
+1210,Coolant Temp,68,°C
+1210,RPM,857.25,RPM
+1211,Vehicle Speed,0,km/h
+1211,Intake Air Temp,55,°C
+1211,Throttle Position,13.7254901961,%
+1212,Fuel Level,52.9411764706,%
+1212,Battery Voltage,13.33,V
+1213,MAF,4.1,g/s
+1213,Engine Load,22.3529411765,%
+1214,Coolant Temp,68,°C
+1214,RPM,862,RPM
+1214,Vehicle Speed,0,km/h
+1215,Intake Air Temp,55,°C
+1215,Throttle Position,13.7254901961,%
+1216,Fuel Level,52.9411764706,%
+1216,Battery Voltage,13.344,V
+1216,MAF,4.16,g/s
+1217,Engine Load,22.3529411765,%
+1217,Coolant Temp,68,°C
+1218,RPM,859,RPM
+1218,Vehicle Speed,0,km/h
+1219,Intake Air Temp,55,°C
+1219,Throttle Position,13.7254901961,%
+1219,Fuel Level,52.9411764706,%
+1220,Battery Voltage,13.33,V
+1220,MAF,4,g/s
+1221,Engine Load,22.3529411765,%
+1221,Coolant Temp,68,°C
+1221,RPM,862.5,RPM
+1222,Vehicle Speed,0,km/h
+1222,Intake Air Temp,55,°C
+1223,Throttle Position,13.7254901961,%
+1223,Fuel Level,52.9411764706,%
+1223,Battery Voltage,13.341,V
+1224,MAF,4.14,g/s
+1224,Engine Load,22.3529411765,%
+1225,Coolant Temp,68,°C
+1225,RPM,860.5,RPM
+1226,Vehicle Speed,0,km/h
+1226,Intake Air Temp,55,°C
+1227,Throttle Position,13.7254901961,%
+1227,Fuel Level,52.9411764706,%
+1228,Battery Voltage,13.318,V
+1228,MAF,4.04,g/s
+1229,Engine Load,22.3529411765,%
+1229,Coolant Temp,68,°C
+1230,RPM,856.5,RPM
+1230,Vehicle Speed,0,km/h
+1231,Intake Air Temp,55,°C
+1231,Throttle Position,13.7254901961,%
+1232,Fuel Level,52.9411764706,%
+1232,Battery Voltage,13.329,V
+1232,MAF,4.14,g/s
+1233,Engine Load,22.3529411765,%
+1233,Coolant Temp,68,°C
+1234,RPM,856.75,RPM
+1234,Vehicle Speed,0,km/h
+1234,Intake Air Temp,55,°C
+1235,Throttle Position,13.7254901961,%
+1235,Fuel Level,52.9411764706,%
+1236,Battery Voltage,13.319,V
+1236,MAF,4.06,g/s
+1236,Engine Load,22.3529411765,%
+1237,Coolant Temp,68,°C
+1237,RPM,856.5,RPM
+1238,Vehicle Speed,0,km/h
+1238,Intake Air Temp,55,°C
+1239,Throttle Position,13.7254901961,%
+1239,Fuel Level,52.9411764706,%
+1239,Battery Voltage,13.324,V
+1240,MAF,4.06,g/s
+1240,Engine Load,22.3529411765,%
+1241,Coolant Temp,68,°C
+1241,RPM,860.25,RPM
+1241,Vehicle Speed,0,km/h
+1242,Intake Air Temp,55,°C
+1242,Throttle Position,13.7254901961,%
+1243,Fuel Level,54.1176470588,%
+1243,Battery Voltage,13.329,V
+1244,MAF,4.12,g/s
+1244,Engine Load,22.3529411765,%
+1244,Coolant Temp,68,°C
+1245,RPM,856.5,RPM
+1246,Vehicle Speed,0,km/h
+1246,Intake Air Temp,55,°C
+1246,Throttle Position,13.7254901961,%
+1247,Fuel Level,54.1176470588,%
+1247,Battery Voltage,13.32,V
+1248,MAF,4.08,g/s
+1248,Engine Load,22.3529411765,%
+1248,Coolant Temp,68,°C
+1249,RPM,857.5,RPM
+1249,Vehicle Speed,0,km/h
+1250,Intake Air Temp,55,°C
+1252,Throttle Position,13.7254901961,%
+1253,Fuel Level,54.1176470588,%
+1253,Battery Voltage,13.319,V
+1254,MAF,4.04,g/s
+1254,Engine Load,21.9607843137,%
+1255,Coolant Temp,68,°C
+1255,RPM,862.25,RPM
+1255,Vehicle Speed,0,km/h
+1256,Intake Air Temp,55,°C
+1256,Throttle Position,13.7254901961,%
+1257,Fuel Level,54.1176470588,%
+1257,Battery Voltage,13.334,V
+1257,MAF,4.12,g/s
+1258,Engine Load,22.3529411765,%
+1258,Coolant Temp,68,°C
+1259,RPM,855.5,RPM
+1259,Vehicle Speed,0,km/h
+1260,Intake Air Temp,55,°C
+1260,Throttle Position,13.7254901961,%
+1260,Fuel Level,54.1176470588,%
+1261,Battery Voltage,13.332,V
+1261,MAF,4,g/s
+1262,Engine Load,22.3529411765,%
+1262,Coolant Temp,68,°C
+1262,RPM,856,RPM
+1263,Vehicle Speed,0,km/h
+1263,Intake Air Temp,55,°C
+1264,Throttle Position,13.7254901961,%
+1264,Fuel Level,52.9411764706,%
+1264,Battery Voltage,13.35,V
+1265,MAF,4.12,g/s
+1265,Engine Load,22.3529411765,%
+1266,Coolant Temp,68,°C
+1266,RPM,853.5,RPM
+1267,Vehicle Speed,0,km/h
+1267,Intake Air Temp,55,°C
+1268,Throttle Position,13.7254901961,%
+1268,Fuel Level,52.9411764706,%
+1268,Battery Voltage,13.335,V
+1269,MAF,4.14,g/s
+1269,Engine Load,22.3529411765,%
+1270,Coolant Temp,68,°C
+1270,RPM,856.75,RPM
+1270,Vehicle Speed,0,km/h
+1271,Intake Air Temp,55,°C
+1271,Throttle Position,13.7254901961,%
+1272,Fuel Level,52.9411764706,%
+1272,Battery Voltage,13.325,V
+1273,MAF,4.02,g/s
+1273,Engine Load,22.3529411765,%
+1274,Coolant Temp,68,°C
+1274,RPM,853.25,RPM
+1274,Vehicle Speed,0,km/h
+1275,Intake Air Temp,54,°C
+1275,Throttle Position,13.7254901961,%
+1276,Fuel Level,54.1176470588,%
+1276,Battery Voltage,13.347,V
+1277,MAF,4.04,g/s
+1277,Engine Load,21.9607843137,%
+1277,Coolant Temp,69,°C
+1278,RPM,858.25,RPM
+1278,Vehicle Speed,0,km/h
+1279,Intake Air Temp,54,°C
+1279,Throttle Position,13.7254901961,%
+1280,Fuel Level,52.9411764706,%
+1280,Battery Voltage,13.333,V
+1280,MAF,4.06,g/s
+1281,Engine Load,22.7450980392,%
+1281,Coolant Temp,69,°C
+1282,RPM,852,RPM
+1282,Vehicle Speed,0,km/h
+1283,Intake Air Temp,54,°C
+1283,Throttle Position,13.7254901961,%
+1284,Fuel Level,52.9411764706,%
+1284,Battery Voltage,13.349,V
+1285,MAF,4,g/s
+1285,Engine Load,21.9607843137,%
+1285,Coolant Temp,69,°C
+1286,RPM,855,RPM
+1286,Vehicle Speed,0,km/h
+1287,Intake Air Temp,54,°C
+1287,Throttle Position,13.7254901961,%
+1287,Fuel Level,52.9411764706,%
+1288,Battery Voltage,13.345,V
+1288,MAF,4.08,g/s
+1289,Engine Load,21.9607843137,%
+1289,Coolant Temp,69,°C
+1290,RPM,858.25,RPM
+1290,Vehicle Speed,0,km/h
+1290,Intake Air Temp,54,°C
+1291,Throttle Position,13.7254901961,%
+1291,Fuel Level,52.9411764706,%
+1292,Battery Voltage,13.314,V
+1292,MAF,4.02,g/s
+1293,Engine Load,22.7450980392,%
+1293,Coolant Temp,69,°C
+1294,RPM,851.5,RPM
+1294,Vehicle Speed,0,km/h
+1294,Intake Air Temp,54,°C
+1295,Throttle Position,13.3333333333,%
+1295,Fuel Level,52.9411764706,%
+1296,Battery Voltage,13.337,V
+1296,MAF,3.96,g/s
+1297,Engine Load,21.568627451,%
+1297,Coolant Temp,69,°C
+1299,RPM,858.25,RPM
+1300,Vehicle Speed,0,km/h
+1300,Intake Air Temp,54,°C
+1301,Throttle Position,13.7254901961,%
+1301,Fuel Level,52.9411764706,%
+1302,Battery Voltage,13.341,V
+1302,MAF,3.98,g/s
+1302,Engine Load,22.3529411765,%
+1303,Coolant Temp,69,°C
+1303,RPM,856,RPM
+1304,Vehicle Speed,0,km/h
+1304,Intake Air Temp,54,°C
+1304,Throttle Position,13.7254901961,%
+1305,Fuel Level,52.9411764706,%
+1305,Battery Voltage,13.337,V
+1306,MAF,4.1,g/s
+1306,Engine Load,21.9607843137,%
+1306,Coolant Temp,69,°C
+1307,RPM,855.75,RPM
+1307,Vehicle Speed,0,km/h
+1308,Intake Air Temp,54,°C
+1308,Throttle Position,13.3333333333,%
+1309,Fuel Level,52.9411764706,%
+1309,Battery Voltage,13.317,V
+1310,MAF,4,g/s
+1310,Engine Load,22.3529411765,%
+1311,Coolant Temp,69,°C
+1311,RPM,851.75,RPM
+1312,Vehicle Speed,0,km/h
+1312,Intake Air Temp,54,°C
+1313,Throttle Position,13.7254901961,%
+1313,Fuel Level,52.9411764706,%
+1313,Battery Voltage,13.334,V
+1314,MAF,4.02,g/s
+1314,Engine Load,21.9607843137,%
+1315,Coolant Temp,69,°C
+1315,RPM,854.5,RPM
+1316,Vehicle Speed,0,km/h
+1316,Intake Air Temp,54,°C
+1317,Throttle Position,13.7254901961,%
+1317,Fuel Level,52.9411764706,%
+1317,Battery Voltage,13.323,V
+1318,MAF,4.02,g/s
+1318,Engine Load,22.3529411765,%
+1319,Coolant Temp,69,°C
+1319,RPM,851.5,RPM
+1319,Vehicle Speed,0,km/h
+1320,Intake Air Temp,54,°C
+1320,Throttle Position,13.3333333333,%
+1321,Fuel Level,52.9411764706,%
+1321,Battery Voltage,13.323,V
+1322,MAF,3.94,g/s
+1322,Engine Load,21.568627451,%
+1322,Coolant Temp,69,°C
+1323,RPM,855.25,RPM
+1323,Vehicle Speed,0,km/h
+1324,Intake Air Temp,54,°C
+1324,Throttle Position,13.7254901961,%
+1324,Fuel Level,52.9411764706,%
+1325,Battery Voltage,13.332,V
+1325,MAF,3.96,g/s
+1326,Engine Load,21.568627451,%
+1326,Coolant Temp,69,°C
+1327,RPM,859.5,RPM
+1327,Vehicle Speed,0,km/h
+1327,Intake Air Temp,54,°C
+1328,Throttle Position,13.7254901961,%
+1328,Fuel Level,52.9411764706,%
+1329,Battery Voltage,13.345,V
+1329,MAF,4.04,g/s
+1329,Engine Load,22.3529411765,%
+1330,Coolant Temp,69,°C
+1330,RPM,854,RPM
+1331,Vehicle Speed,0,km/h
+1331,Intake Air Temp,54,°C
+1332,Throttle Position,13.3333333333,%
+1332,Fuel Level,54.1176470588,%
+1332,Battery Voltage,13.321,V
+1333,MAF,3.98,g/s
+1334,Engine Load,21.9607843137,%
+1334,Coolant Temp,69,°C
+1335,RPM,854.25,RPM
+1335,Vehicle Speed,0,km/h
+1335,Intake Air Temp,54,°C
+1336,Throttle Position,13.7254901961,%
+1336,Fuel Level,54.1176470588,%
+1337,Battery Voltage,13.335,V
+1337,MAF,4.04,g/s
+1337,Engine Load,21.9607843137,%
+1338,Coolant Temp,69,°C
+1338,RPM,851.75,RPM
+1339,Vehicle Speed,0,km/h
+1339,Intake Air Temp,54,°C
+1340,Throttle Position,13.3333333333,%
+1340,Fuel Level,54.1176470588,%
+1340,Battery Voltage,13.335,V
+1341,MAF,3.96,g/s
+1342,Engine Load,21.9607843137,%
+1342,Coolant Temp,69,°C
+1342,RPM,853.75,RPM
+1343,Vehicle Speed,0,km/h
+1343,Intake Air Temp,54,°C
+1344,Throttle Position,13.7254901961,%
+1344,Fuel Level,54.1176470588,%
+1345,Battery Voltage,13.339,V
+1347,MAF,4.06,g/s
+1348,Engine Load,21.568627451,%
+1348,Coolant Temp,69,°C
+1348,RPM,853,RPM
+1349,Vehicle Speed,0,km/h
+1350,Intake Air Temp,54,°C
+1350,Throttle Position,13.7254901961,%
+1350,Fuel Level,54.1176470588,%
+1351,Battery Voltage,13.324,V
+1351,MAF,4.04,g/s
+1352,Engine Load,22.3529411765,%
+1352,Coolant Temp,70,°C
+1353,RPM,847.75,RPM
+1353,Vehicle Speed,0,km/h
+1353,Intake Air Temp,54,°C
+1354,Throttle Position,13.3333333333,%
+1354,Fuel Level,54.1176470588,%
+1355,Battery Voltage,13.334,V
+1355,MAF,3.98,g/s
+1356,Engine Load,22.3529411765,%
+1356,Coolant Temp,70,°C
+1356,RPM,844.25,RPM
+1357,Vehicle Speed,0,km/h
+1357,Intake Air Temp,54,°C
+1358,Throttle Position,13.7254901961,%
+1358,Fuel Level,54.1176470588,%
+1359,Battery Voltage,13.329,V
+1359,MAF,3.98,g/s
+1359,Engine Load,22.3529411765,%
+1360,Coolant Temp,70,°C
+1360,RPM,855.75,RPM
+1361,Vehicle Speed,0,km/h
+1361,Intake Air Temp,54,°C
+1361,Throttle Position,13.3333333333,%
+1362,Fuel Level,54.1176470588,%
+1362,Battery Voltage,13.326,V
+1363,MAF,3.98,g/s
+1364,Engine Load,21.9607843137,%
+1364,Coolant Temp,70,°C
+1365,RPM,855.75,RPM
+1365,Vehicle Speed,0,km/h
+1365,Intake Air Temp,54,°C
+1366,Throttle Position,13.7254901961,%
+1366,Fuel Level,54.1176470588,%
+1367,Battery Voltage,13.347,V
+1367,MAF,4,g/s
+1367,Engine Load,22.3529411765,%
+1368,Coolant Temp,70,°C
+1368,RPM,858.25,RPM
+1369,Vehicle Speed,0,km/h
+1369,Intake Air Temp,54,°C
+1369,Throttle Position,13.7254901961,%
+1370,Fuel Level,54.1176470588,%
+1370,Battery Voltage,13.322,V
+1371,MAF,4,g/s
+1371,Engine Load,21.9607843137,%
+1371,Coolant Temp,70,°C
+1372,RPM,855.75,RPM
+1372,Vehicle Speed,0,km/h
+1373,Intake Air Temp,54,°C
+1373,Throttle Position,13.3333333333,%
+1373,Fuel Level,54.1176470588,%
+1374,Battery Voltage,13.323,V
+1374,MAF,3.92,g/s
+1375,Engine Load,21.9607843137,%
+1375,Coolant Temp,70,°C
+1375,RPM,854,RPM
+1376,Vehicle Speed,0,km/h
+1376,Intake Air Temp,54,°C
+1377,Throttle Position,13.7254901961,%
+1377,Fuel Level,54.1176470588,%
+1378,Battery Voltage,13.33,V
+1378,MAF,4.04,g/s
+1378,Engine Load,21.9607843137,%
+1379,Coolant Temp,70,°C
+1379,RPM,856,RPM
+1380,Vehicle Speed,0,km/h
+1380,Intake Air Temp,54,°C
+1381,Throttle Position,13.7254901961,%
+1381,Fuel Level,54.1176470588,%
+1382,Battery Voltage,13.322,V
+1382,MAF,4,g/s
+1382,Engine Load,21.9607843137,%
+1383,Coolant Temp,70,°C
+1383,RPM,850.75,RPM
+1384,Vehicle Speed,0,km/h
+1385,Intake Air Temp,54,°C
+1385,Throttle Position,13.7254901961,%
+1386,Fuel Level,54.1176470588,%
+1386,Battery Voltage,13.321,V
+1387,MAF,3.98,g/s
+1387,Engine Load,21.9607843137,%
+1388,Coolant Temp,70,°C
+1388,RPM,851.75,RPM
+1388,Vehicle Speed,0,km/h
+1389,Intake Air Temp,54,°C
+1389,Throttle Position,13.7254901961,%
+1390,Fuel Level,54.1176470588,%
+1390,Battery Voltage,13.331,V
+1391,MAF,4,g/s
+1391,Engine Load,21.9607843137,%
+1391,Coolant Temp,70,°C
+1392,RPM,857,RPM
+1392,Vehicle Speed,0,km/h
+1393,Intake Air Temp,54,°C
+1395,Throttle Position,13.7254901961,%
+1395,Fuel Level,54.1176470588,%
+1396,Battery Voltage,13.328,V
+1396,MAF,4,g/s
+1397,Engine Load,21.9607843137,%
+1397,Coolant Temp,70,°C
+1397,RPM,849.75,RPM
+1398,Vehicle Speed,0,km/h
+1398,Intake Air Temp,54,°C
+1399,Throttle Position,13.3333333333,%
+1399,Fuel Level,54.1176470588,%
+1399,Battery Voltage,13.327,V
+1400,MAF,3.92,g/s
+1400,Engine Load,21.568627451,%
+1401,Coolant Temp,70,°C
+1401,RPM,860,RPM
+1402,Vehicle Speed,0,km/h
+1402,Intake Air Temp,54,°C
+1402,Throttle Position,13.7254901961,%
+1403,Fuel Level,54.1176470588,%
+1403,Battery Voltage,13.33,V
+1404,MAF,4.04,g/s
+1404,Engine Load,21.9607843137,%
+1404,Coolant Temp,70,°C
+1405,RPM,848,RPM
+1405,Vehicle Speed,0,km/h
+1406,Intake Air Temp,54,°C
+1406,Throttle Position,13.3333333333,%
+1407,Fuel Level,54.1176470588,%
+1407,Battery Voltage,13.325,V
+1407,MAF,3.96,g/s
+1408,Engine Load,21.9607843137,%
+1408,Coolant Temp,70,°C
+1409,RPM,846.5,RPM
+1409,Vehicle Speed,0,km/h
+1409,Intake Air Temp,54,°C
+1410,Throttle Position,13.3333333333,%
+1410,Fuel Level,54.1176470588,%
+1411,Battery Voltage,13.322,V
+1411,MAF,3.92,g/s
+1412,Engine Load,21.9607843137,%
+1412,Coolant Temp,70,°C
+1412,RPM,848.5,RPM
+1413,Vehicle Speed,0,km/h
+1413,Intake Air Temp,54,°C
+1414,Throttle Position,13.3333333333,%
+1414,Fuel Level,54.1176470588,%
+1414,Battery Voltage,13.321,V
+1415,MAF,3.85,g/s
+1415,Engine Load,21.568627451,%
+1416,Coolant Temp,70,°C
+1416,RPM,852,RPM
+1417,Vehicle Speed,0,km/h
+1417,Intake Air Temp,54,°C
+1418,Throttle Position,13.7254901961,%
+1418,Fuel Level,54.1176470588,%
+1418,Battery Voltage,13.325,V
+1419,MAF,3.96,g/s
+1419,Engine Load,21.568627451,%
+1420,Coolant Temp,70,°C
+1420,RPM,847,RPM
+1421,Vehicle Speed,0,km/h
+1421,Intake Air Temp,54,°C
+1422,Throttle Position,13.3333333333,%
+1422,Fuel Level,54.1176470588,%
+1422,Battery Voltage,13.334,V
+1423,MAF,3.96,g/s
+1423,Engine Load,21.9607843137,%
+1424,Coolant Temp,70,°C
+1424,RPM,843.25,RPM
+1424,Vehicle Speed,0,km/h
+1425,Intake Air Temp,54,°C
+1425,Throttle Position,13.3333333333,%
+1426,Fuel Level,54.1176470588,%
+1426,Battery Voltage,13.328,V
+1426,MAF,3.91,g/s
+1427,Engine Load,21.9607843137,%
+1427,Coolant Temp,70,°C
+1428,RPM,842.25,RPM
+1428,Vehicle Speed,0,km/h
+1429,Intake Air Temp,54,°C
+1429,Throttle Position,13.3333333333,%
+1430,Fuel Level,54.1176470588,%
+1430,Battery Voltage,13.337,V
+1431,MAF,3.96,g/s
+1431,Engine Load,21.9607843137,%
+1432,Coolant Temp,70,°C
+1432,RPM,843,RPM
+1432,Vehicle Speed,0,km/h
+1433,Intake Air Temp,54,°C
+1433,Throttle Position,13.3333333333,%
+1434,Fuel Level,54.1176470588,%
+1434,Battery Voltage,13.346,V
+1434,MAF,3.94,g/s
+1435,Engine Load,21.9607843137,%
+1435,Coolant Temp,70,°C
+1436,RPM,847.75,RPM
+1436,Vehicle Speed,0,km/h
+1437,Intake Air Temp,54,°C
+1437,Throttle Position,13.3333333333,%
+1438,Fuel Level,54.1176470588,%
+1438,Battery Voltage,13.332,V
+1438,MAF,3.92,g/s
+1439,Engine Load,21.9607843137,%
+1439,Coolant Temp,70,°C
+1442,RPM,839.5,RPM
+1442,Vehicle Speed,0,km/h
+1443,Intake Air Temp,54,°C
+1443,Throttle Position,13.3333333333,%
+1443,Fuel Level,54.1176470588,%
+1444,Battery Voltage,13.322,V
+1444,MAF,3.94,g/s
+1445,Engine Load,22.3529411765,%
+1445,Coolant Temp,70,°C
+1446,RPM,843.5,RPM
+1446,Vehicle Speed,0,km/h
+1447,Intake Air Temp,54,°C
+1447,Throttle Position,13.7254901961,%
+1447,Fuel Level,54.1176470588,%
+1448,Battery Voltage,13.34,V
+1449,MAF,3.98,g/s
+1449,Engine Load,22.3529411765,%
+1449,Coolant Temp,70,°C
+1450,RPM,842.5,RPM
+1450,Vehicle Speed,0,km/h
+1451,Intake Air Temp,54,°C
+1452,Throttle Position,13.3333333333,%
+1452,Fuel Level,54.1176470588,%
+1453,Battery Voltage,13.323,V
+1453,MAF,3.91,g/s
+1454,Engine Load,21.9607843137,%
+1454,Coolant Temp,70,°C
+1455,RPM,847.25,RPM
+1455,Vehicle Speed,0,km/h
+1455,Intake Air Temp,54,°C
+1456,Throttle Position,13.7254901961,%
+1456,Fuel Level,54.1176470588,%
+1457,Battery Voltage,13.344,V
+1457,MAF,3.98,g/s
+1458,Engine Load,21.9607843137,%
+1458,Coolant Temp,71,°C
+1458,RPM,843.25,RPM
+1459,Vehicle Speed,0,km/h
+1459,Intake Air Temp,54,°C
+1460,Throttle Position,13.3333333333,%
+1460,Fuel Level,54.1176470588,%
+1460,Battery Voltage,13.342,V
+1461,MAF,3.96,g/s
+1461,Engine Load,21.9607843137,%
+1462,Coolant Temp,71,°C
+1462,RPM,841,RPM
+1463,Vehicle Speed,0,km/h
+1463,Intake Air Temp,54,°C
+1463,Throttle Position,13.3333333333,%
+1464,Fuel Level,54.1176470588,%
+1464,Battery Voltage,13.329,V
+1465,MAF,3.89,g/s
+1465,Engine Load,22.3529411765,%
+1465,Coolant Temp,71,°C
+1466,RPM,840.5,RPM
+1466,Vehicle Speed,0,km/h
+1467,Intake Air Temp,54,°C
+1467,Throttle Position,13.3333333333,%
+1468,Fuel Level,54.1176470588,%
+1468,Battery Voltage,13.34,V
+1468,MAF,3.92,g/s
+1469,Engine Load,21.9607843137,%
+1469,Coolant Temp,71,°C
+1470,RPM,837.5,RPM
+1470,Vehicle Speed,0,km/h
+1471,Intake Air Temp,54,°C
+1471,Throttle Position,13.3333333333,%
+1471,Fuel Level,54.1176470588,%
+1472,Battery Voltage,13.33,V
+1472,MAF,3.98,g/s
+1473,Engine Load,22.3529411765,%
+1473,Coolant Temp,71,°C
+1474,RPM,837,RPM
+1474,Vehicle Speed,0,km/h
+1475,Intake Air Temp,54,°C
+1475,Throttle Position,13.3333333333,%
+1476,Fuel Level,54.1176470588,%
+1476,Battery Voltage,13.338,V
+1477,MAF,3.98,g/s
+1477,Engine Load,22.3529411765,%
+1477,Coolant Temp,71,°C
+1478,RPM,836.25,RPM
+1478,Vehicle Speed,0,km/h
+1479,Intake Air Temp,54,°C
+1479,Throttle Position,13.3333333333,%
+1480,Fuel Level,54.1176470588,%
+1480,Battery Voltage,13.33,V
+1480,MAF,3.96,g/s
+1481,Engine Load,22.3529411765,%
+1481,Coolant Temp,71,°C
+1482,RPM,837.5,RPM
+1482,Vehicle Speed,0,km/h
+1482,Intake Air Temp,54,°C
+1483,Throttle Position,13.3333333333,%
+1483,Fuel Level,54.1176470588,%
+1484,Battery Voltage,13.334,V
+1484,MAF,3.96,g/s
+1484,Engine Load,22.3529411765,%
+1485,Coolant Temp,71,°C
+1485,RPM,835.5,RPM
+1486,Vehicle Speed,0,km/h
+1486,Intake Air Temp,54,°C
+1487,Throttle Position,13.7254901961,%
+1487,Fuel Level,54.1176470588,%
+1487,Battery Voltage,13.326,V
+1490,MAF,3.98,g/s
+1491,Engine Load,22.3529411765,%
+1491,Coolant Temp,71,°C
+1491,RPM,845.5,RPM
+1492,Vehicle Speed,0,km/h
+1492,Intake Air Temp,54,°C
+1493,Throttle Position,13.3333333333,%
+1493,Fuel Level,54.1176470588,%
+1493,Battery Voltage,13.34,V
+1494,MAF,3.98,g/s
+1494,Engine Load,22.3529411765,%
+1495,Coolant Temp,71,°C
+1495,RPM,853.75,RPM
+1496,Vehicle Speed,0,km/h
+1496,Intake Air Temp,54,°C
+1496,Throttle Position,13.3333333333,%
+1497,Fuel Level,54.1176470588,%
+1497,Battery Voltage,13.323,V
+1498,MAF,3.96,g/s
+1499,Engine Load,21.9607843137,%
+1499,Coolant Temp,71,°C
+1500,RPM,844,RPM
+1500,Vehicle Speed,0,km/h
+1500,Intake Air Temp,54,°C
+1501,Throttle Position,13.3333333333,%
+1501,Fuel Level,54.1176470588,%
+1502,Battery Voltage,13.321,V
+1502,MAF,3.92,g/s
+1503,Engine Load,22.3529411765,%
+1503,Coolant Temp,71,°C
+1503,RPM,842.75,RPM
+1504,Vehicle Speed,0,km/h
+1504,Intake Air Temp,54,°C
+1504,Throttle Position,13.3333333333,%
+1505,Fuel Level,54.1176470588,%
+1505,Battery Voltage,13.335,V
+1506,MAF,3.94,g/s
+1506,Engine Load,22.3529411765,%
+1506,Coolant Temp,71,°C
+1507,RPM,836.5,RPM
+1507,Vehicle Speed,0,km/h
+1507,Intake Air Temp,54,°C
+1508,Throttle Position,13.3333333333,%
+1508,Fuel Level,54.1176470588,%
+1509,Battery Voltage,13.341,V
+1509,MAF,3.92,g/s
+1509,Engine Load,22.3529411765,%
+1510,Coolant Temp,71,°C
+1510,RPM,841,RPM
+1510,Vehicle Speed,0,km/h
+1511,Intake Air Temp,54,°C
+1511,Throttle Position,13.3333333333,%
+1512,Fuel Level,54.1176470588,%
+1512,Battery Voltage,13.32,V
+1512,MAF,3.94,g/s
+1513,Engine Load,22.3529411765,%
+1513,Coolant Temp,71,°C
+1513,RPM,838.75,RPM
+1514,Vehicle Speed,0,km/h
+1514,Intake Air Temp,54,°C
+1514,Throttle Position,13.3333333333,%
+1515,Fuel Level,54.1176470588,%
+1515,Battery Voltage,13.34,V
+1516,MAF,3.94,g/s
+1516,Engine Load,22.3529411765,%
+1517,Coolant Temp,71,°C
+1517,RPM,841,RPM
+1518,Vehicle Speed,0,km/h
+1518,Intake Air Temp,54,°C
+1518,Throttle Position,13.3333333333,%
+1519,Fuel Level,54.1176470588,%
+1519,Battery Voltage,13.319,V
+1520,MAF,3.92,g/s
+1520,Engine Load,22.3529411765,%
+1520,Coolant Temp,71,°C
+1521,RPM,844.5,RPM
+1521,Vehicle Speed,0,km/h
+1522,Intake Air Temp,54,°C
+1522,Throttle Position,13.3333333333,%
+1522,Fuel Level,54.1176470588,%
+1523,Battery Voltage,13.34,V
+1523,MAF,3.94,g/s
+1524,Engine Load,22.3529411765,%
+1524,Coolant Temp,71,°C
+1525,RPM,835.75,RPM
+1525,Vehicle Speed,0,km/h
+1525,Intake Air Temp,54,°C
+1526,Throttle Position,13.3333333333,%
+1526,Fuel Level,54.1176470588,%
+1527,Battery Voltage,13.325,V
+1527,MAF,3.96,g/s
+1527,Engine Load,22.3529411765,%
+1528,Coolant Temp,71,°C
+1528,RPM,842.25,RPM
+1529,Vehicle Speed,0,km/h
+1529,Intake Air Temp,54,°C
+1529,Throttle Position,13.3333333333,%
+1530,Fuel Level,54.1176470588,%
+1530,Battery Voltage,13.324,V
+1531,MAF,3.89,g/s
+1531,Engine Load,21.568627451,%
+1532,Coolant Temp,71,°C
+1532,RPM,840.75,RPM
+1532,Vehicle Speed,0,km/h
+1533,Intake Air Temp,54,°C
+1533,Throttle Position,13.3333333333,%
+1536,Fuel Level,54.1176470588,%
+1536,Battery Voltage,13.33,V
+1537,MAF,3.89,g/s
+1537,Engine Load,22.7450980392,%
+1537,Coolant Temp,71,°C
+1538,RPM,826.5,RPM
+1538,Vehicle Speed,0,km/h
+1538,Intake Air Temp,54,°C
+1539,Throttle Position,13.3333333333,%
+1539,Fuel Level,54.1176470588,%
+1540,Battery Voltage,13.33,V
+1540,MAF,3.94,g/s
+1543,Engine Load,22.3529411765,%
+1544,Coolant Temp,71,°C
+1544,RPM,837,RPM
+1545,Vehicle Speed,0,km/h
+1545,Intake Air Temp,54,°C
+1546,Throttle Position,13.3333333333,%
+1546,Fuel Level,54.1176470588,%
+1546,Battery Voltage,13.317,V
+1547,MAF,3.91,g/s
+1547,Engine Load,22.3529411765,%
+1548,Coolant Temp,71,°C
+1548,RPM,838.25,RPM
+1548,Vehicle Speed,0,km/h
+1549,Intake Air Temp,54,°C
+1549,Throttle Position,13.3333333333,%
+1550,Fuel Level,54.1176470588,%
+1550,Battery Voltage,13.33,V
+1551,MAF,3.92,g/s
+1551,Engine Load,22.3529411765,%
+1552,Coolant Temp,71,°C
+1552,RPM,839.75,RPM
+1553,Vehicle Speed,0,km/h
+1553,Intake Air Temp,54,°C
+1553,Throttle Position,13.3333333333,%
+1554,Fuel Level,54.1176470588,%
+1554,Battery Voltage,13.324,V
+1555,MAF,3.98,g/s
+1555,Engine Load,21.9607843137,%
+1556,Coolant Temp,72,°C
+1556,RPM,836.25,RPM
+1557,Vehicle Speed,0,km/h
+1557,Intake Air Temp,54,°C
+1558,Throttle Position,13.3333333333,%
+1558,Fuel Level,54.1176470588,%
+1559,Battery Voltage,13.338,V
+1559,MAF,3.91,g/s
+1559,Engine Load,22.3529411765,%
+1560,Coolant Temp,72,°C
+1560,RPM,834.25,RPM
+1561,Vehicle Speed,0,km/h
+1561,Intake Air Temp,54,°C
+1562,Throttle Position,13.3333333333,%
+1562,Fuel Level,52.9411764706,%
+1563,Battery Voltage,13.33,V
+1563,MAF,3.94,g/s
+1564,Engine Load,22.7450980392,%
+1564,Coolant Temp,72,°C
+1565,RPM,828.5,RPM
+1565,Vehicle Speed,0,km/h
+1566,Intake Air Temp,54,°C
+1566,Throttle Position,13.3333333333,%
+1567,Fuel Level,52.9411764706,%
+1567,Battery Voltage,13.339,V
+1568,MAF,3.96,g/s
+1568,Engine Load,22.7450980392,%
+1569,Coolant Temp,72,°C
+1569,RPM,824.5,RPM
+1569,Vehicle Speed,0,km/h
+1570,Intake Air Temp,54,°C
+1570,Throttle Position,13.3333333333,%
+1571,Fuel Level,52.9411764706,%
+1571,Battery Voltage,13.333,V
+1572,MAF,3.96,g/s
+1572,Engine Load,22.7450980392,%
+1572,Coolant Temp,72,°C
+1573,RPM,839.75,RPM
+1573,Vehicle Speed,0,km/h
+1574,Intake Air Temp,54,°C
+1574,Throttle Position,13.3333333333,%
+1575,Fuel Level,52.9411764706,%
+1575,Battery Voltage,13.334,V
+1575,MAF,3.92,g/s
+1576,Engine Load,21.9607843137,%
+1576,Coolant Temp,72,°C
+1577,RPM,835.75,RPM
+1577,Vehicle Speed,0,km/h
+1577,Intake Air Temp,54,°C
+1578,Throttle Position,13.3333333333,%
+1578,Fuel Level,52.9411764706,%
+1578,Battery Voltage,13.328,V
+1579,MAF,3.91,g/s
+1579,Engine Load,22.7450980392,%
+1580,Coolant Temp,72,°C
+1580,RPM,830.75,RPM
+1580,Vehicle Speed,0,km/h
+1581,Intake Air Temp,54,°C
+1581,Throttle Position,13.3333333333,%
+1582,Fuel Level,52.9411764706,%
+1582,Battery Voltage,13.328,V
+1584,MAF,3.85,g/s
+1585,Engine Load,21.9607843137,%
+1585,Coolant Temp,72,°C
+1586,RPM,831.75,RPM
+1586,Vehicle Speed,0,km/h
+1587,Intake Air Temp,54,°C
+1587,Throttle Position,13.3333333333,%
+1587,Fuel Level,52.9411764706,%
+1588,Battery Voltage,13.319,V
+1588,MAF,3.89,g/s
+1589,Engine Load,22.3529411765,%
+1589,Coolant Temp,72,°C
+1590,RPM,828.25,RPM
+1590,Vehicle Speed,0,km/h
+1590,Intake Air Temp,54,°C
+1591,Throttle Position,13.3333333333,%
+1591,Fuel Level,52.9411764706,%
+1592,Battery Voltage,13.335,V
+1592,MAF,3.96,g/s
+1592,Engine Load,23.137254902,%
+1593,Coolant Temp,72,°C
+1593,RPM,827.5,RPM
+1594,Vehicle Speed,0,km/h
+1594,Intake Air Temp,54,°C
+1594,Throttle Position,13.3333333333,%
+1595,Fuel Level,52.9411764706,%
+1595,Battery Voltage,13.338,V
+1595,MAF,3.96,g/s
+1596,Engine Load,22.7450980392,%
+1596,Coolant Temp,72,°C
+1597,RPM,831,RPM
+1597,Vehicle Speed,0,km/h
+1597,Intake Air Temp,54,°C
+1598,Throttle Position,13.3333333333,%
+1598,Fuel Level,52.9411764706,%
+1598,Battery Voltage,13.332,V
+1599,MAF,3.89,g/s
+1599,Engine Load,22.3529411765,%
+1600,Coolant Temp,72,°C
+1600,RPM,832.75,RPM
+1600,Vehicle Speed,0,km/h
+1602,Intake Air Temp,54,°C
+1602,Throttle Position,13.3333333333,%
+1602,Fuel Level,52.9411764706,%
+1603,Battery Voltage,13.329,V
+1603,MAF,3.89,g/s
+1603,Engine Load,22.3529411765,%
+1604,Coolant Temp,72,°C
+1604,RPM,832,RPM
+1605,Vehicle Speed,0,km/h
+1605,Intake Air Temp,54,°C
+1605,Throttle Position,13.3333333333,%
+1606,Fuel Level,52.9411764706,%
+1606,Battery Voltage,13.336,V
+1607,MAF,3.94,g/s
+1607,Engine Load,21.9607843137,%
+1607,Coolant Temp,72,°C
+1608,RPM,832.5,RPM
+1608,Vehicle Speed,0,km/h
+1609,Intake Air Temp,54,°C
+1609,Throttle Position,13.3333333333,%
+1610,Fuel Level,52.9411764706,%
+1610,Battery Voltage,13.32,V
+1611,MAF,3.85,g/s
+1611,Engine Load,21.568627451,%
+1612,Coolant Temp,72,°C
+1612,RPM,831.75,RPM
+1613,Vehicle Speed,0,km/h
+1613,Intake Air Temp,53,°C
+1614,Throttle Position,13.3333333333,%
+1614,Fuel Level,52.9411764706,%
+1614,Battery Voltage,13.335,V
+1615,MAF,3.81,g/s
+1615,Engine Load,22.7450980392,%
+1616,Coolant Temp,72,°C
+1616,RPM,818.75,RPM
+1616,Vehicle Speed,0,km/h
+1617,Intake Air Temp,53,°C
+1617,Throttle Position,13.3333333333,%
+1618,Fuel Level,52.9411764706,%
+1618,Battery Voltage,13.341,V
+1618,MAF,3.91,g/s
+1619,Engine Load,22.7450980392,%
+1619,Coolant Temp,72,°C
+1620,RPM,824,RPM
+1620,Vehicle Speed,0,km/h
+1620,Intake Air Temp,53,°C
+1621,Throttle Position,13.3333333333,%
+1621,Fuel Level,52.9411764706,%
+1622,Battery Voltage,13.331,V
+1622,MAF,3.96,g/s
+1623,Engine Load,22.7450980392,%
+1623,Coolant Temp,72,°C
+1623,RPM,830.5,RPM
+1624,Vehicle Speed,0,km/h
+1624,Intake Air Temp,53,°C
+1625,Throttle Position,13.3333333333,%
+1625,Fuel Level,52.9411764706,%
+1625,Battery Voltage,13.337,V
+1626,MAF,3.87,g/s
+1628,Engine Load,22.3529411765,%
+1629,Coolant Temp,72,°C
+1629,RPM,834.25,RPM
+1630,Vehicle Speed,0,km/h
+1630,Intake Air Temp,53,°C
+1631,Throttle Position,13.3333333333,%
+1631,Fuel Level,52.9411764706,%
+1631,Battery Voltage,13.324,V
+1632,MAF,3.85,g/s
+1632,Engine Load,21.9607843137,%
+1633,Coolant Temp,72,°C
+1633,RPM,827,RPM
+1634,Vehicle Speed,0,km/h
+1634,Intake Air Temp,53,°C
+1635,Throttle Position,13.3333333333,%
+1635,Fuel Level,52.9411764706,%
+1635,Battery Voltage,13.33,V
+1636,MAF,3.85,g/s
+1636,Engine Load,22.7450980392,%
+1637,Coolant Temp,72,°C
+1637,RPM,826.25,RPM
+1638,Vehicle Speed,0,km/h
+1638,Intake Air Temp,53,°C
+1641,Throttle Position,13.3333333333,%
+1642,Fuel Level,52.9411764706,%
+1642,Battery Voltage,13.344,V
+1643,MAF,3.87,g/s
+1643,Engine Load,22.7450980392,%
+1644,Coolant Temp,72,°C
+1644,RPM,829,RPM
+1644,Vehicle Speed,0,km/h
+1645,Intake Air Temp,53,°C
+1645,Throttle Position,13.3333333333,%
+1646,Fuel Level,52.9411764706,%
+1646,Battery Voltage,13.337,V
+1646,MAF,3.85,g/s
+1647,Engine Load,22.7450980392,%
+1647,Coolant Temp,73,°C
+1648,RPM,823.75,RPM
+1648,Vehicle Speed,0,km/h
+1649,Intake Air Temp,53,°C
+1649,Throttle Position,13.3333333333,%
+1650,Fuel Level,52.9411764706,%
+1650,Battery Voltage,13.324,V
+1650,MAF,3.83,g/s
+1651,Engine Load,22.7450980392,%
+1651,Coolant Temp,73,°C
+1652,RPM,820,RPM
+1652,Vehicle Speed,0,km/h
+1652,Intake Air Temp,53,°C
+1653,Throttle Position,13.3333333333,%
+1653,Fuel Level,52.9411764706,%
+1654,Battery Voltage,13.326,V
+1654,MAF,3.91,g/s
+1655,Engine Load,22.3529411765,%
+1655,Coolant Temp,73,°C
+1656,RPM,822.75,RPM
+1656,Vehicle Speed,0,km/h
+1657,Intake Air Temp,53,°C
+1658,Throttle Position,13.3333333333,%
+1658,Fuel Level,52.9411764706,%
+1658,Battery Voltage,13.338,V
+1659,MAF,3.92,g/s
+1659,Engine Load,22.7450980392,%
+1660,Coolant Temp,73,°C
+1660,RPM,833,RPM
+1661,Vehicle Speed,0,km/h
+1661,Intake Air Temp,53,°C
+1661,Throttle Position,13.3333333333,%
+1662,Fuel Level,52.9411764706,%
+1662,Battery Voltage,13.337,V
+1663,MAF,3.89,g/s
+1663,Engine Load,22.3529411765,%
+1664,Coolant Temp,73,°C
+1664,RPM,821,RPM
+1664,Vehicle Speed,0,km/h
+1665,Intake Air Temp,53,°C
+1665,Throttle Position,13.3333333333,%
+1666,Fuel Level,52.9411764706,%
+1666,Battery Voltage,13.327,V
+1667,MAF,3.85,g/s
+1667,Engine Load,22.3529411765,%
+1668,Coolant Temp,73,°C
+1668,RPM,825.5,RPM
+1669,Vehicle Speed,0,km/h
+1669,Intake Air Temp,53,°C
+1670,Throttle Position,13.3333333333,%
+1670,Fuel Level,52.9411764706,%
+1670,Battery Voltage,13.323,V
+1671,MAF,3.87,g/s
+1671,Engine Load,22.7450980392,%
+1672,Coolant Temp,73,°C
+1672,RPM,821.5,RPM
+1673,Vehicle Speed,0,km/h
+1673,Intake Air Temp,53,°C
+1674,Throttle Position,13.3333333333,%
+1674,Fuel Level,52.9411764706,%
+1675,Battery Voltage,13.336,V
+1675,MAF,3.89,g/s
+1676,Engine Load,22.3529411765,%
+1678,Coolant Temp,73,°C
+1679,RPM,825,RPM
+1679,Vehicle Speed,0,km/h
+1680,Intake Air Temp,53,°C
+1680,Throttle Position,13.3333333333,%
+1680,Fuel Level,52.9411764706,%
+1681,Battery Voltage,13.326,V
+1681,MAF,3.89,g/s
+1682,Engine Load,22.3529411765,%
+1683,Coolant Temp,73,°C
+1683,RPM,823.25,RPM
+1684,Vehicle Speed,0,km/h
+1684,Intake Air Temp,53,°C
+1684,Throttle Position,13.3333333333,%
+1685,Fuel Level,52.9411764706,%
+1685,Battery Voltage,13.338,V
+1686,MAF,3.83,g/s
+1686,Engine Load,22.7450980392,%
+1687,Coolant Temp,73,°C
+1687,RPM,815.5,RPM
+1688,Vehicle Speed,0,km/h
+1688,Intake Air Temp,53,°C
+1688,Throttle Position,13.3333333333,%
+1689,Fuel Level,52.9411764706,%
+1689,Battery Voltage,13.337,V
+1690,MAF,3.81,g/s
+1690,Engine Load,21.9607843137,%
+1690,Coolant Temp,73,°C
+1691,RPM,824,RPM
+1691,Vehicle Speed,0,km/h
+1692,Intake Air Temp,53,°C
+1692,Throttle Position,13.3333333333,%
+1693,Fuel Level,52.9411764706,%
+1693,Battery Voltage,13.336,V
+1693,MAF,3.81,g/s
+1694,Engine Load,22.3529411765,%
+1694,Coolant Temp,73,°C
+1695,RPM,819,RPM
+1695,Vehicle Speed,0,km/h
+1696,Intake Air Temp,53,°C
+1696,Throttle Position,13.3333333333,%
+1697,Fuel Level,52.9411764706,%
+1697,Battery Voltage,13.328,V
+1697,MAF,3.91,g/s
+1698,Engine Load,22.7450980392,%
+1698,Coolant Temp,73,°C
+1699,RPM,812,RPM
+1699,Vehicle Speed,0,km/h
+1700,Intake Air Temp,53,°C
+1700,Throttle Position,13.3333333333,%
+1701,Fuel Level,52.9411764706,%
+1701,Battery Voltage,13.343,V
+1702,MAF,3.89,g/s
+1702,Engine Load,23.137254902,%
+1703,Coolant Temp,73,°C
+1703,RPM,822.5,RPM
+1704,Vehicle Speed,0,km/h
+1704,Intake Air Temp,53,°C
+1705,Throttle Position,13.3333333333,%
+1705,Fuel Level,52.9411764706,%
+1706,Battery Voltage,13.328,V
+1706,MAF,3.85,g/s
+1706,Engine Load,22.3529411765,%
+1707,Coolant Temp,73,°C
+1707,RPM,821,RPM
+1708,Vehicle Speed,0,km/h
+1708,Intake Air Temp,53,°C
+1709,Throttle Position,13.3333333333,%
+1709,Fuel Level,52.9411764706,%
+1710,Battery Voltage,13.327,V
+1710,MAF,3.85,g/s
+1710,Engine Load,22.7450980392,%
+1711,Coolant Temp,73,°C
+1711,RPM,824,RPM
+1712,Vehicle Speed,0,km/h
+1712,Intake Air Temp,53,°C
+1713,Throttle Position,13.3333333333,%
+1713,Fuel Level,52.9411764706,%
+1714,Battery Voltage,13.335,V
+1714,MAF,3.83,g/s
+1714,Engine Load,22.3529411765,%
+1715,Coolant Temp,73,°C
+1715,RPM,816.25,RPM
+1716,Vehicle Speed,0,km/h
+1716,Intake Air Temp,53,°C
+1717,Throttle Position,13.3333333333,%
+1717,Fuel Level,52.9411764706,%
+1717,Battery Voltage,13.316,V
+1718,MAF,3.81,g/s
+1718,Engine Load,22.3529411765,%
+1719,Coolant Temp,73,°C
+1719,RPM,815.75,RPM
+1720,Vehicle Speed,0,km/h
+1720,Intake Air Temp,53,°C
+1721,Throttle Position,13.3333333333,%
+1721,Fuel Level,52.9411764706,%
+1721,Battery Voltage,13.331,V
+1722,MAF,3.85,g/s
+1722,Engine Load,22.7450980392,%
+1725,Coolant Temp,73,°C
+1725,RPM,818,RPM
+1726,Vehicle Speed,0,km/h
+1726,Intake Air Temp,53,°C
+1727,Throttle Position,13.3333333333,%
+1727,Fuel Level,52.9411764706,%
+1728,Battery Voltage,13.324,V
+1728,MAF,3.83,g/s
+1729,Engine Load,22.7450980392,%
+1730,Coolant Temp,73,°C
+1730,RPM,815,RPM
+1730,Vehicle Speed,0,km/h
+1731,Intake Air Temp,53,°C
+1731,Throttle Position,13.3333333333,%
+1731,Fuel Level,52.9411764706,%
+1732,Battery Voltage,13.33,V
+1732,MAF,3.85,g/s
+1733,Engine Load,22.7450980392,%
+1733,Coolant Temp,73,°C
+1733,RPM,812.25,RPM
+1734,Vehicle Speed,0,km/h
+1734,Intake Air Temp,53,°C
+1734,Throttle Position,13.3333333333,%
+1735,Fuel Level,52.9411764706,%
+1735,Battery Voltage,13.33,V
+1736,MAF,3.85,g/s
+1736,Engine Load,22.7450980392,%
+1736,Coolant Temp,73,°C
+1737,RPM,815,RPM
+1737,Vehicle Speed,0,km/h
+1738,Intake Air Temp,53,°C
+1738,Throttle Position,13.3333333333,%
+1738,Fuel Level,52.9411764706,%
+1739,Battery Voltage,13.352,V
+1739,MAF,3.85,g/s
+1739,Engine Load,22.3529411765,%
+1740,Coolant Temp,73,°C
+1740,RPM,821.25,RPM
+1741,Vehicle Speed,0,km/h
+1741,Intake Air Temp,53,°C
+1741,Throttle Position,13.3333333333,%
+1742,Fuel Level,52.9411764706,%
+1742,Battery Voltage,13.322,V
+1742,MAF,3.83,g/s
+1743,Engine Load,22.7450980392,%
+1743,Coolant Temp,73,°C
+1744,RPM,819.25,RPM
+1744,Vehicle Speed,0,km/h
+1744,Intake Air Temp,53,°C
+1745,Throttle Position,13.3333333333,%
+1745,Fuel Level,52.9411764706,%
+1746,Battery Voltage,13.32,V
+1746,MAF,3.83,g/s
+1746,Engine Load,22.7450980392,%
+1747,Coolant Temp,74,°C
+1747,RPM,817.5,RPM
+1748,Vehicle Speed,0,km/h
+1748,Intake Air Temp,53,°C
+1748,Throttle Position,13.3333333333,%
+1749,Fuel Level,52.9411764706,%
+1749,Battery Voltage,13.342,V
+1750,MAF,3.83,g/s
+1750,Engine Load,22.7450980392,%
+1751,Coolant Temp,74,°C
+1751,RPM,816.5,RPM
+1752,Vehicle Speed,0,km/h
+1752,Intake Air Temp,53,°C
+1752,Throttle Position,13.3333333333,%
+1753,Fuel Level,54.1176470588,%
+1753,Battery Voltage,13.345,V
+1754,MAF,3.85,g/s
+1754,Engine Load,22.3529411765,%
+1755,Coolant Temp,74,°C
+1755,RPM,816.75,RPM
+1755,Vehicle Speed,0,km/h
+1756,Intake Air Temp,53,°C
+1756,Throttle Position,13.3333333333,%
+1756,Fuel Level,54.1176470588,%
+1757,Battery Voltage,13.338,V
+1757,MAF,3.85,g/s
+1758,Engine Load,23.137254902,%
+1758,Coolant Temp,74,°C
+1758,RPM,810.75,RPM
+1759,Vehicle Speed,0,km/h
+1759,Intake Air Temp,53,°C
+1760,Throttle Position,13.3333333333,%
+1760,Fuel Level,54.1176470588,%
+1760,Battery Voltage,13.334,V
+1761,MAF,3.83,g/s
+1761,Engine Load,22.3529411765,%
+1761,Coolant Temp,74,°C
+1762,RPM,816.5,RPM
+1762,Vehicle Speed,0,km/h
+1763,Intake Air Temp,53,°C
+1763,Throttle Position,13.3333333333,%
+1763,Fuel Level,54.1176470588,%
+1764,Battery Voltage,13.333,V
+1764,MAF,3.87,g/s
+1765,Engine Load,23.137254902,%
+1766,Coolant Temp,74,°C
+1768,RPM,814,RPM
+1769,Vehicle Speed,0,km/h
+1769,Intake Air Temp,53,°C
+1770,Throttle Position,13.3333333333,%
+1770,Fuel Level,54.1176470588,%
+1770,Battery Voltage,13.337,V
+1771,MAF,3.83,g/s
+1772,Engine Load,22.7450980392,%
+1772,Coolant Temp,74,°C
+1772,RPM,814.25,RPM
+1773,Vehicle Speed,0,km/h
+1773,Intake Air Temp,53,°C
+1774,Throttle Position,13.3333333333,%
+1774,Fuel Level,54.1176470588,%
+1774,Battery Voltage,13.332,V
+1775,MAF,3.83,g/s
+1775,Engine Load,22.3529411765,%
+1776,Coolant Temp,74,°C
+1776,RPM,817.25,RPM
+1776,Vehicle Speed,0,km/h
+1777,Intake Air Temp,53,°C
+1777,Throttle Position,13.3333333333,%
+1778,Fuel Level,54.1176470588,%
+1778,Battery Voltage,13.319,V
+1778,MAF,3.81,g/s
+1779,Engine Load,22.7450980392,%
+1779,Coolant Temp,74,°C
+1779,RPM,815.75,RPM
+1780,Vehicle Speed,0,km/h
+1780,Intake Air Temp,53,°C
+1781,Throttle Position,13.3333333333,%
+1781,Fuel Level,54.1176470588,%
+1782,Battery Voltage,13.34,V
+1782,MAF,3.85,g/s
+1782,Engine Load,22.7450980392,%
+1783,Coolant Temp,74,°C
+1783,RPM,815.75,RPM
+1783,Vehicle Speed,0,km/h
+1784,Intake Air Temp,53,°C
+1784,Throttle Position,13.3333333333,%
+1785,Fuel Level,54.1176470588,%
+1785,Battery Voltage,13.325,V
+1785,MAF,3.81,g/s
+1786,Engine Load,22.7450980392,%
+1786,Coolant Temp,74,°C
+1787,RPM,812,RPM
+1787,Vehicle Speed,0,km/h
+1787,Intake Air Temp,53,°C
+1788,Throttle Position,13.3333333333,%
+1788,Fuel Level,54.1176470588,%
+1789,Battery Voltage,13.341,V
+1789,MAF,3.79,g/s
+1789,Engine Load,22.3529411765,%
+1790,Coolant Temp,74,°C
+1790,RPM,811.75,RPM
+1791,Vehicle Speed,0,km/h
+1791,Intake Air Temp,53,°C
+1792,Throttle Position,13.3333333333,%
+1792,Fuel Level,54.1176470588,%
+1792,Battery Voltage,13.325,V
+1793,MAF,3.83,g/s
+1793,Engine Load,22.7450980392,%
+1794,Coolant Temp,74,°C
+1794,RPM,815.75,RPM
+1795,Vehicle Speed,0,km/h
+1795,Intake Air Temp,53,°C
+1796,Throttle Position,13.3333333333,%
+1796,Fuel Level,54.1176470588,%
+1796,Battery Voltage,13.339,V
+1797,MAF,3.85,g/s
+1797,Engine Load,22.7450980392,%
+1798,Coolant Temp,74,°C
+1798,RPM,811.75,RPM
+1798,Vehicle Speed,0,km/h
+1799,Intake Air Temp,53,°C
+1799,Throttle Position,13.3333333333,%
+1800,Fuel Level,54.1176470588,%
+1800,Battery Voltage,13.329,V
+1801,MAF,3.87,g/s
+1801,Engine Load,23.137254902,%
+1801,Coolant Temp,74,°C
+1802,RPM,809.5,RPM
+1802,Vehicle Speed,0,km/h
+1803,Intake Air Temp,53,°C
+1803,Throttle Position,13.3333333333,%
+1803,Fuel Level,54.1176470588,%
+1804,Battery Voltage,13.325,V
+1804,MAF,3.83,g/s
+1805,Engine Load,22.7450980392,%
+1805,Coolant Temp,74,°C
+1806,RPM,811.75,RPM
+1806,Vehicle Speed,0,km/h
+1806,Intake Air Temp,53,°C
+1807,Throttle Position,13.3333333333,%
+1808,Fuel Level,54.1176470588,%
+1808,Battery Voltage,13.33,V
+1808,MAF,3.85,g/s
+1809,Engine Load,22.7450980392,%
+1809,Coolant Temp,74,°C
+1810,RPM,812.75,RPM
+1812,Vehicle Speed,0,km/h
+1813,Intake Air Temp,53,°C
+1813,Throttle Position,13.3333333333,%
+1814,Fuel Level,54.1176470588,%
+1814,Battery Voltage,13.343,V
+1815,MAF,3.85,g/s
+1815,Engine Load,22.7450980392,%
+1815,Coolant Temp,74,°C
+1816,RPM,812.5,RPM
+1816,Vehicle Speed,0,km/h
+1817,Intake Air Temp,53,°C
+1817,Throttle Position,13.3333333333,%
+1818,Fuel Level,54.1176470588,%
+1818,Battery Voltage,13.35,V
+1819,MAF,3.81,g/s
+1819,Engine Load,22.7450980392,%
+1820,Coolant Temp,74,°C
+1820,RPM,812.5,RPM
+1820,Vehicle Speed,0,km/h
+1821,Intake Air Temp,53,°C
+1821,Throttle Position,13.3333333333,%
+1822,Fuel Level,54.1176470588,%
+1822,Battery Voltage,13.34,V
+1822,MAF,3.81,g/s
+1823,Engine Load,22.7450980392,%
+1823,Coolant Temp,74,°C
+1824,RPM,808.75,RPM
+1824,Vehicle Speed,0,km/h
+1825,Intake Air Temp,53,°C
+1825,Throttle Position,13.3333333333,%
+1826,Fuel Level,54.1176470588,%
+1826,Battery Voltage,13.339,V
+1827,MAF,3.81,g/s
+1827,Engine Load,23.137254902,%
+1828,Coolant Temp,74,°C
+1828,RPM,809.25,RPM
+1828,Vehicle Speed,0,km/h
+1829,Intake Air Temp,53,°C
+1829,Throttle Position,13.3333333333,%
+1830,Fuel Level,54.1176470588,%
+1830,Battery Voltage,13.332,V
+1831,MAF,3.87,g/s
+1831,Engine Load,22.7450980392,%
+1832,Coolant Temp,74,°C
+1832,RPM,812,RPM
+1832,Vehicle Speed,0,km/h
+1833,Intake Air Temp,53,°C
+1833,Throttle Position,13.3333333333,%
+1834,Fuel Level,54.1176470588,%
+1834,Battery Voltage,13.342,V
+1835,MAF,3.89,g/s
+1835,Engine Load,23.137254902,%
+1836,Coolant Temp,74,°C
+1836,RPM,818.25,RPM
+1837,Vehicle Speed,0,km/h
+1837,Intake Air Temp,53,°C
+1838,Throttle Position,13.3333333333,%
+1839,Fuel Level,54.1176470588,%
+1839,Battery Voltage,13.344,V
+1839,MAF,3.83,g/s
+1840,Engine Load,22.7450980392,%
+1840,Coolant Temp,74,°C
+1841,RPM,814,RPM
+1842,Vehicle Speed,0,km/h
+1842,Intake Air Temp,53,°C
+1842,Throttle Position,13.3333333333,%
+1843,Fuel Level,54.1176470588,%
+1843,Battery Voltage,13.345,V
+1844,MAF,3.83,g/s
+1844,Engine Load,22.3529411765,%
+1845,Coolant Temp,74,°C
+1845,RPM,815,RPM
+1846,Vehicle Speed,0,km/h
+1846,Intake Air Temp,53,°C
+1846,Throttle Position,13.3333333333,%
+1847,Fuel Level,54.1176470588,%
+1847,Battery Voltage,13.322,V
+1848,MAF,3.79,g/s
+1848,Engine Load,22.7450980392,%
+1849,Coolant Temp,74,°C
+1849,RPM,809.75,RPM
+1849,Vehicle Speed,0,km/h
+1850,Intake Air Temp,53,°C
+1850,Throttle Position,13.3333333333,%
+1851,Fuel Level,54.1176470588,%
+1851,Battery Voltage,13.329,V
+1852,MAF,3.79,g/s
+1852,Engine Load,22.3529411765,%
+1853,Coolant Temp,74,°C
+1853,RPM,806.25,RPM
+1854,Vehicle Speed,0,km/h
+1854,Intake Air Temp,53,°C
+1854,Throttle Position,13.3333333333,%
+1855,Fuel Level,54.1176470588,%
+1855,Battery Voltage,13.331,V
+1856,MAF,3.78,g/s
+1856,Engine Load,22.7450980392,%
+1857,Coolant Temp,74,°C
+1857,RPM,796.75,RPM
+1857,Vehicle Speed,0,km/h
+1860,Intake Air Temp,53,°C
+1860,Throttle Position,13.3333333333,%
+1861,Fuel Level,54.1176470588,%
+1862,Battery Voltage,13.35,V
+1863,MAF,3.78,g/s
+1863,Engine Load,22.7450980392,%
+1864,Coolant Temp,74,°C
+1865,RPM,801.75,RPM
+1866,Vehicle Speed,0,km/h
+1867,Intake Air Temp,53,°C
+1868,Throttle Position,13.3333333333,%
+1869,Fuel Level,54.1176470588,%
+1870,Battery Voltage,13.333,V
+1871,MAF,3.85,g/s
+1871,Engine Load,23.137254902,%
+1872,Coolant Temp,74,°C
+1872,RPM,801.5,RPM
+1872,Vehicle Speed,0,km/h
+1873,Intake Air Temp,53,°C
+1873,Throttle Position,13.3333333333,%
+1874,Fuel Level,54.1176470588,%
+1874,Battery Voltage,13.347,V
+1875,MAF,3.81,g/s
+1875,Engine Load,22.7450980392,%
+1876,Coolant Temp,74,°C
+1876,RPM,806,RPM
+1876,Vehicle Speed,0,km/h
+1877,Intake Air Temp,53,°C
+1877,Throttle Position,13.3333333333,%
+1878,Fuel Level,54.1176470588,%
+1878,Battery Voltage,13.323,V
+1878,MAF,3.79,g/s
+1879,Engine Load,23.137254902,%
+1879,Coolant Temp,75,°C
+1880,RPM,805.25,RPM
+1880,Vehicle Speed,0,km/h
+1881,Intake Air Temp,53,°C
+1881,Throttle Position,13.3333333333,%
+1881,Fuel Level,54.1176470588,%
+1882,Battery Voltage,13.347,V
+1882,MAF,3.74,g/s
+1883,Engine Load,22.3529411765,%
+1883,Coolant Temp,75,°C
+1884,RPM,803.75,RPM
+1884,Vehicle Speed,0,km/h
+1885,Intake Air Temp,53,°C
+1886,Throttle Position,13.3333333333,%
+1886,Fuel Level,54.1176470588,%
+1886,Battery Voltage,13.349,V
+1887,MAF,3.81,g/s
+1887,Engine Load,22.7450980392,%
+1888,Coolant Temp,75,°C
+1888,RPM,797.25,RPM
+1889,Vehicle Speed,0,km/h
+1889,Intake Air Temp,53,°C
+1890,Throttle Position,13.3333333333,%
+1890,Fuel Level,54.1176470588,%
+1891,Battery Voltage,13.324,V
+1891,MAF,3.79,g/s
+1891,Engine Load,22.7450980392,%
+1892,Coolant Temp,75,°C
+1892,RPM,807,RPM
+1893,Vehicle Speed,0,km/h
+1893,Intake Air Temp,53,°C
+1894,Throttle Position,13.3333333333,%
+1894,Fuel Level,54.1176470588,%
+1895,Battery Voltage,13.343,V
+1895,MAF,3.85,g/s
+1896,Engine Load,23.137254902,%
+1896,Coolant Temp,75,°C
+1896,RPM,808.5,RPM
+1897,Vehicle Speed,0,km/h
+1898,Intake Air Temp,53,°C
+1898,Throttle Position,13.3333333333,%
+1899,Fuel Level,54.1176470588,%
+1899,Battery Voltage,13.34,V
+1900,MAF,3.87,g/s
+1900,Engine Load,22.7450980392,%
+1901,Coolant Temp,75,°C
+1901,RPM,813.5,RPM
+1901,Vehicle Speed,0,km/h
+1902,Intake Air Temp,53,°C
+1902,Throttle Position,13.3333333333,%
+1903,Fuel Level,54.1176470588,%
+1903,Battery Voltage,13.326,V
+1904,MAF,3.85,g/s
+1904,Engine Load,22.7450980392,%
+1904,Coolant Temp,75,°C
+1905,RPM,806.25,RPM
+1905,Vehicle Speed,0,km/h
+1906,Intake Air Temp,53,°C
+1906,Throttle Position,13.3333333333,%
+1906,Fuel Level,54.1176470588,%
+1907,Battery Voltage,13.326,V
+1907,MAF,3.78,g/s
+1908,Engine Load,23.137254902,%
+1908,Coolant Temp,75,°C
+1908,RPM,803,RPM
+1909,Vehicle Speed,0,km/h
+1909,Intake Air Temp,53,°C
+1911,Throttle Position,13.3333333333,%
+1912,Fuel Level,54.1176470588,%
+1915,Battery Voltage,13.346,V
+1916,MAF,3.74,g/s
+1916,Engine Load,22.3529411765,%
+1917,Coolant Temp,75,°C
+1917,RPM,807.25,RPM
+1918,Vehicle Speed,0,km/h
+1919,Intake Air Temp,53,°C
+1919,Throttle Position,13.3333333333,%
+1920,Fuel Level,54.1176470588,%
+1920,Battery Voltage,13.326,V
+1921,MAF,3.78,g/s
+1921,Engine Load,22.3529411765,%
+1941,Coolant Temp,75,°C
+1942,RPM,795.75,RPM
+1943,Vehicle Speed,0,km/h
+1944,Intake Air Temp,53,°C
+1944,Throttle Position,13.3333333333,%
+1945,Fuel Level,54.1176470588,%
+1945,Battery Voltage,13.328,V
+1946,MAF,3.79,g/s
+1946,Engine Load,22.7450980392,%
+1947,Coolant Temp,75,°C
+1947,RPM,794,RPM
+1948,Vehicle Speed,0,km/h
+1948,Intake Air Temp,53,°C
+1949,Throttle Position,13.3333333333,%
+1949,Fuel Level,54.1176470588,%
+1949,Battery Voltage,13.338,V
+1950,MAF,3.83,g/s
+1950,Engine Load,23.137254902,%
+1951,Coolant Temp,75,°C
+1952,RPM,801.25,RPM
+1952,Vehicle Speed,0,km/h
+1952,Intake Air Temp,53,°C
+1953,Throttle Position,13.3333333333,%
+1953,Fuel Level,54.1176470588,%
+1954,Battery Voltage,13.323,V
+1954,MAF,3.81,g/s
+1955,Engine Load,23.137254902,%
+1955,Coolant Temp,75,°C
+1956,RPM,803.25,RPM
+1956,Vehicle Speed,0,km/h
+1956,Intake Air Temp,53,°C
+1957,Throttle Position,13.3333333333,%
+1957,Fuel Level,54.1176470588,%
+1958,Battery Voltage,13.326,V
+1958,MAF,3.81,g/s
+1959,Engine Load,23.137254902,%
+1959,Coolant Temp,75,°C
+1960,RPM,796.75,RPM
+1960,Vehicle Speed,0,km/h
+1960,Intake Air Temp,53,°C
+1961,Throttle Position,13.3333333333,%
+1961,Fuel Level,54.1176470588,%
+1962,Battery Voltage,13.338,V
+1962,MAF,3.83,g/s
+1963,Engine Load,22.7450980392,%
+1963,Coolant Temp,75,°C
+1964,RPM,808.75,RPM
+1964,Vehicle Speed,0,km/h
+1965,Intake Air Temp,53,°C
+1965,Throttle Position,13.3333333333,%
+1966,Fuel Level,54.1176470588,%
+1966,Battery Voltage,13.323,V
+1966,MAF,3.83,g/s
+1967,Engine Load,22.7450980392,%
+1967,Coolant Temp,75,°C
+1968,RPM,807.25,RPM
+1968,Vehicle Speed,0,km/h
+1969,Intake Air Temp,53,°C
+1969,Throttle Position,13.3333333333,%
+1970,Fuel Level,54.1176470588,%
+1970,Battery Voltage,13.339,V
+1970,MAF,3.79,g/s
+1971,Engine Load,23.137254902,%
+1971,Coolant Temp,75,°C
+1972,RPM,803.75,RPM
+1972,Vehicle Speed,0,km/h
+1973,Intake Air Temp,53,°C
+1973,Throttle Position,13.3333333333,%
+1973,Fuel Level,54.1176470588,%
+1974,Battery Voltage,13.325,V
+1974,MAF,3.76,g/s
+1975,Engine Load,22.7450980392,%
+1975,Coolant Temp,75,°C
+1976,RPM,802.5,RPM
+1976,Vehicle Speed,0,km/h
+1977,Intake Air Temp,53,°C
+1977,Throttle Position,13.3333333333,%
+1978,Fuel Level,54.1176470588,%
+1978,Battery Voltage,13.347,V
+1979,MAF,3.79,g/s
+1979,Engine Load,23.137254902,%
+1979,Coolant Temp,75,°C
+1980,RPM,800.75,RPM
+1980,Vehicle Speed,0,km/h
+1981,Intake Air Temp,53,°C
+1981,Throttle Position,13.3333333333,%
+1988,Fuel Level,54.1176470588,%
+1989,Battery Voltage,13.317,V
+1989,MAF,3.78,g/s
+1990,Engine Load,22.7450980392,%
+1990,Coolant Temp,75,°C
+1991,RPM,801.25,RPM
+1991,Vehicle Speed,0,km/h
+1991,Intake Air Temp,53,°C
+1992,Throttle Position,13.3333333333,%
+1992,Fuel Level,54.1176470588,%
+1993,Battery Voltage,13.341,V
+1993,MAF,3.76,g/s
+1993,Engine Load,22.7450980392,%
+1994,Coolant Temp,75,°C
+1994,RPM,791.5,RPM
+1995,Vehicle Speed,0,km/h
+1995,Intake Air Temp,53,°C
+1995,Throttle Position,13.3333333333,%
+1996,Fuel Level,54.1176470588,%
+1996,Battery Voltage,13.325,V
+1997,MAF,3.74,g/s
+1997,Engine Load,22.7450980392,%
+1997,Coolant Temp,75,°C
+1998,RPM,797,RPM
+1998,Vehicle Speed,0,km/h
+1999,Intake Air Temp,53,°C
+1999,Throttle Position,13.3333333333,%
+1999,Fuel Level,54.1176470588,%
+2000,Battery Voltage,13.342,V
+2001,MAF,3.78,g/s
+2001,Engine Load,23.137254902,%
+2002,Coolant Temp,75,°C
+2002,RPM,798.5,RPM
+2003,Vehicle Speed,0,km/h
+2003,Intake Air Temp,53,°C
+2004,Throttle Position,13.3333333333,%
+2004,Fuel Level,54.1176470588,%
+2004,Battery Voltage,13.326,V
+2005,MAF,3.72,g/s
+2005,Engine Load,22.7450980392,%
+2006,Coolant Temp,75,°C
+2006,RPM,798.25,RPM
+2007,Vehicle Speed,0,km/h
+2007,Intake Air Temp,53,°C
+2008,Throttle Position,13.3333333333,%
+2008,Fuel Level,54.1176470588,%
+2009,Battery Voltage,13.339,V
+2009,MAF,3.72,g/s
+2010,Engine Load,21.9607843137,%
+2010,Coolant Temp,75,°C
+2011,RPM,796.5,RPM
+2011,Vehicle Speed,0,km/h
+2012,Intake Air Temp,53,°C
+2012,Throttle Position,13.3333333333,%
+2013,Fuel Level,54.1176470588,%
+2013,Battery Voltage,13.349,V
+2013,MAF,3.72,g/s
+2014,Engine Load,22.7450980392,%
+2014,Coolant Temp,75,°C
+2015,RPM,794,RPM
+2015,Vehicle Speed,0,km/h
+2016,Intake Air Temp,53,°C
+2016,Throttle Position,13.3333333333,%
+2017,Fuel Level,54.1176470588,%
+2017,Battery Voltage,13.338,V
+2018,MAF,3.78,g/s
+2018,Engine Load,22.7450980392,%
+2019,Coolant Temp,75,°C
+2019,RPM,794.75,RPM
+2020,Vehicle Speed,0,km/h
+2020,Intake Air Temp,53,°C
+2021,Throttle Position,13.3333333333,%
+2021,Fuel Level,54.1176470588,%
+2021,Battery Voltage,13.319,V
+2022,MAF,3.7,g/s
+2022,Engine Load,22.3529411765,%
+2023,Coolant Temp,76,°C
+2023,RPM,795.5,RPM
+2024,Vehicle Speed,0,km/h
+2024,Intake Air Temp,53,°C
+2025,Throttle Position,13.3333333333,%
+2025,Fuel Level,54.1176470588,%
+2025,Battery Voltage,13.325,V
+2026,MAF,3.7,g/s
+2026,Engine Load,22.3529411765,%
+2027,Coolant Temp,76,°C
+2027,RPM,792.25,RPM
+2028,Vehicle Speed,0,km/h
+2028,Intake Air Temp,53,°C
+2029,Throttle Position,13.3333333333,%
+2029,Fuel Level,54.1176470588,%
+2029,Battery Voltage,13.339,V
+2030,MAF,3.66,g/s
+2030,Engine Load,22.7450980392,%
+2031,Coolant Temp,76,°C
+2031,RPM,788.5,RPM
+2032,Vehicle Speed,0,km/h
+2032,Intake Air Temp,53,°C
+2033,Throttle Position,13.3333333333,%
+2033,Fuel Level,54.1176470588,%
+2036,Battery Voltage,13.338,V
+2037,MAF,3.72,g/s
+2037,Engine Load,22.7450980392,%
+2038,Coolant Temp,76,°C
+2038,RPM,792.5,RPM
+2038,Vehicle Speed,0,km/h
+2039,Intake Air Temp,53,°C
+2039,Throttle Position,13.3333333333,%
+2040,Fuel Level,54.1176470588,%
+2040,Battery Voltage,13.349,V
+2040,MAF,3.72,g/s
+2041,Engine Load,22.7450980392,%
+2041,Coolant Temp,76,°C
+2042,RPM,791,RPM
+2042,Vehicle Speed,0,km/h
+2043,Intake Air Temp,53,°C
+2043,Throttle Position,13.3333333333,%
+2044,Fuel Level,54.1176470588,%
+2044,Battery Voltage,13.333,V
+2045,MAF,3.76,g/s
+2045,Engine Load,23.137254902,%
+2045,Coolant Temp,76,°C
+2046,RPM,792.75,RPM
+2046,Vehicle Speed,0,km/h
+2047,Intake Air Temp,53,°C
+2047,Throttle Position,13.3333333333,%
+2048,Fuel Level,54.1176470588,%
+2048,Battery Voltage,13.339,V
+2049,MAF,3.76,g/s
+2049,Engine Load,23.137254902,%
+2049,Coolant Temp,76,°C
+2050,RPM,794.75,RPM
+2050,Vehicle Speed,0,km/h
+2051,Intake Air Temp,53,°C
+2051,Throttle Position,13.3333333333,%
+2052,Fuel Level,54.1176470588,%
+2052,Battery Voltage,13.323,V
+2053,MAF,3.66,g/s
+2053,Engine Load,22.3529411765,%
+2054,Coolant Temp,76,°C
+2054,RPM,797.25,RPM
+2054,Vehicle Speed,0,km/h
+2055,Intake Air Temp,53,°C
+2055,Throttle Position,13.3333333333,%
+2056,Fuel Level,54.1176470588,%
+2056,Battery Voltage,13.343,V
+2057,MAF,3.68,g/s
+2057,Engine Load,22.7450980392,%
+2057,Coolant Temp,76,°C
+2058,RPM,785.5,RPM
+2059,Vehicle Speed,0,km/h
+2059,Intake Air Temp,53,°C
+2059,Throttle Position,13.3333333333,%
+2060,Fuel Level,54.1176470588,%
+2060,Battery Voltage,13.331,V
+2061,MAF,3.7,g/s
+2061,Engine Load,22.7450980392,%
+2061,Coolant Temp,76,°C
+2062,RPM,790.25,RPM
+2062,Vehicle Speed,0,km/h
+2063,Intake Air Temp,53,°C
+2063,Throttle Position,13.3333333333,%
+2064,Fuel Level,54.1176470588,%
+2064,Battery Voltage,13.332,V
+2065,MAF,3.7,g/s
+2065,Engine Load,22.7450980392,%
+2066,Coolant Temp,76,°C
+2066,RPM,790.5,RPM
+2066,Vehicle Speed,0,km/h
+2067,Intake Air Temp,53,°C
+2067,Throttle Position,13.3333333333,%
+2068,Fuel Level,54.1176470588,%
+2068,Battery Voltage,13.331,V
+2069,MAF,3.74,g/s
+2069,Engine Load,22.7450980392,%
+2070,Coolant Temp,76,°C
+2070,RPM,792.25,RPM
+2071,Vehicle Speed,0,km/h
+2071,Intake Air Temp,53,°C
+2071,Throttle Position,13.3333333333,%
+2072,Fuel Level,54.1176470588,%
+2072,Battery Voltage,13.34,V
+2073,MAF,3.7,g/s
+2073,Engine Load,23.137254902,%
+2074,Coolant Temp,76,°C
+2074,RPM,792,RPM
+2075,Vehicle Speed,0,km/h
+2075,Intake Air Temp,53,°C
+2075,Throttle Position,13.3333333333,%
+2076,Fuel Level,54.1176470588,%
+2076,Battery Voltage,13.321,V
+2077,MAF,3.68,g/s
+2077,Engine Load,22.3529411765,%
+2078,Coolant Temp,76,°C
+2078,RPM,793.25,RPM
+2079,Vehicle Speed,0,km/h
+2079,Intake Air Temp,53,°C
+2079,Throttle Position,13.3333333333,%
+2080,Fuel Level,54.1176470588,%
+2080,Battery Voltage,13.322,V
+2083,MAF,3.66,g/s
+2084,Engine Load,22.7450980392,%
+2084,Coolant Temp,76,°C
+2085,RPM,789.5,RPM
+2085,Vehicle Speed,0,km/h
+2085,Intake Air Temp,52,°C
+2086,Throttle Position,13.3333333333,%
+2086,Fuel Level,54.1176470588,%
+2087,Battery Voltage,13.33,V
+2087,MAF,3.64,g/s
+2088,Engine Load,21.9607843137,%
+2088,Coolant Temp,76,°C
+2088,RPM,794.25,RPM
+2089,Vehicle Speed,0,km/h
+2089,Intake Air Temp,53,°C
+2090,Throttle Position,13.3333333333,%
+2091,Fuel Level,54.1176470588,%
+2091,Battery Voltage,13.341,V
+2091,MAF,3.66,g/s
+2092,Engine Load,22.7450980392,%
+2092,Coolant Temp,76,°C
+2093,RPM,782.5,RPM
+2093,Vehicle Speed,0,km/h
+2094,Intake Air Temp,52,°C
+2094,Throttle Position,13.3333333333,%
+2094,Fuel Level,54.1176470588,%
+2095,Battery Voltage,13.325,V
+2095,MAF,3.64,g/s
+2096,Engine Load,22.3529411765,%
+2096,Coolant Temp,76,°C
+2097,RPM,785.25,RPM
+2097,Vehicle Speed,0,km/h
+2097,Intake Air Temp,52,°C
+2098,Throttle Position,13.3333333333,%
+2098,Fuel Level,54.1176470588,%
+2099,Battery Voltage,13.328,V
+2100,MAF,3.68,g/s
+2100,Engine Load,22.7450980392,%
+2101,Coolant Temp,76,°C
+2101,RPM,790,RPM
+2102,Vehicle Speed,0,km/h
+2102,Intake Air Temp,52,°C
+2103,Throttle Position,13.3333333333,%
+2103,Fuel Level,54.1176470588,%
+2104,Battery Voltage,13.338,V
+2104,MAF,3.74,g/s
+2105,Engine Load,22.7450980392,%
+2105,Coolant Temp,76,°C
+2106,RPM,785.75,RPM
+2106,Vehicle Speed,0,km/h
+2107,Intake Air Temp,52,°C
+2107,Throttle Position,13.3333333333,%
+2108,Fuel Level,54.1176470588,%
+2108,Battery Voltage,13.332,V
+2108,MAF,3.72,g/s
+2109,Engine Load,23.5294117647,%
+2109,Coolant Temp,76,°C
+2110,RPM,775.5,RPM
+2110,Vehicle Speed,0,km/h
+2111,Intake Air Temp,52,°C
+2111,Throttle Position,13.3333333333,%
+2111,Fuel Level,54.1176470588,%
+2112,Battery Voltage,13.344,V
+2112,MAF,3.66,g/s
+2113,Engine Load,22.3529411765,%
+2113,Coolant Temp,76,°C
+2114,RPM,790,RPM
+2114,Vehicle Speed,0,km/h
+2115,Intake Air Temp,52,°C
+2115,Throttle Position,13.3333333333,%
+2115,Fuel Level,54.1176470588,%
+2116,Battery Voltage,13.331,V
+2117,MAF,3.68,g/s
+2117,Engine Load,22.7450980392,%
+2117,Coolant Temp,76,°C
+2118,RPM,788.25,RPM
+2118,Vehicle Speed,0,km/h
+2119,Intake Air Temp,52,°C
+2119,Throttle Position,13.3333333333,%
+2120,Fuel Level,54.1176470588,%
+2120,Battery Voltage,13.329,V
+2120,MAF,3.68,g/s
+2121,Engine Load,22.7450980392,%
+2121,Coolant Temp,77,°C
+2122,RPM,782.75,RPM
+2122,Vehicle Speed,0,km/h
+2123,Intake Air Temp,52,°C
+2123,Throttle Position,13.3333333333,%
+2124,Fuel Level,54.1176470588,%
+2124,Battery Voltage,13.329,V
+2124,MAF,3.66,g/s
+2125,Engine Load,22.7450980392,%
+2125,Coolant Temp,77,°C
+2126,RPM,783.25,RPM
+2126,Vehicle Speed,0,km/h
+2127,Intake Air Temp,52,°C
+2127,Throttle Position,13.3333333333,%
+2132,Fuel Level,54.1176470588,%
+2135,Battery Voltage,13.331,V
+2135,MAF,3.66,g/s
+2138,Engine Load,22.3529411765,%
+2138,Coolant Temp,77,°C
+2139,RPM,786,RPM
+2139,Vehicle Speed,0,km/h
+2139,Intake Air Temp,52,°C
+2140,Throttle Position,13.3333333333,%
+2140,Fuel Level,54.1176470588,%
+2141,Battery Voltage,13.334,V
+2141,MAF,3.7,g/s
+2142,Engine Load,22.3529411765,%
+2142,Coolant Temp,77,°C
+2142,RPM,788,RPM
+2143,Vehicle Speed,0,km/h
+2143,Intake Air Temp,52,°C
+2144,Throttle Position,13.3333333333,%
+2144,Fuel Level,54.1176470588,%
+2145,Battery Voltage,13.32,V
+2145,MAF,3.7,g/s
+2146,Engine Load,22.7450980392,%
+2146,Coolant Temp,77,°C
+2146,RPM,781.25,RPM
+2147,Vehicle Speed,0,km/h
+2147,Intake Air Temp,52,°C
+2148,Throttle Position,13.3333333333,%
+2148,Fuel Level,54.1176470588,%
+2148,Battery Voltage,13.336,V
+2149,MAF,3.7,g/s
+2149,Engine Load,22.7450980392,%
+2150,Coolant Temp,77,°C
+2150,RPM,787.5,RPM
+2151,Vehicle Speed,0,km/h
+2151,Intake Air Temp,52,°C
+2151,Throttle Position,13.3333333333,%
+2152,Fuel Level,54.1176470588,%
+2152,Battery Voltage,13.334,V
+2153,MAF,3.66,g/s
+2153,Engine Load,22.7450980392,%
+2154,Coolant Temp,77,°C
+2154,RPM,788.5,RPM
+2155,Vehicle Speed,0,km/h
+2155,Intake Air Temp,52,°C
+2155,Throttle Position,13.3333333333,%
+2156,Fuel Level,54.1176470588,%
+2156,Battery Voltage,13.334,V
+2157,MAF,3.63,g/s
+2157,Engine Load,22.3529411765,%
+2158,Coolant Temp,77,°C
+2158,RPM,789.75,RPM
+2159,Vehicle Speed,0,km/h
+2159,Intake Air Temp,52,°C
+2160,Throttle Position,13.3333333333,%
+2160,Fuel Level,54.1176470588,%
+2161,Battery Voltage,13.334,V
+2161,MAF,3.63,g/s
+2162,Engine Load,22.3529411765,%
+2162,Coolant Temp,77,°C
+2162,RPM,784.75,RPM
+2163,Vehicle Speed,0,km/h
+2163,Intake Air Temp,52,°C
+2164,Throttle Position,13.3333333333,%
+2164,Fuel Level,54.1176470588,%
+2165,Battery Voltage,13.334,V
+2165,MAF,3.64,g/s
+2166,Engine Load,23.137254902,%
+2166,Coolant Temp,77,°C
+2167,RPM,785,RPM
+2167,Vehicle Speed,0,km/h
+2168,Intake Air Temp,52,°C
+2168,Throttle Position,13.3333333333,%
+2169,Fuel Level,54.1176470588,%
+2169,Battery Voltage,13.329,V
+2169,MAF,3.64,g/s
+2170,Engine Load,22.3529411765,%
+2170,Coolant Temp,77,°C
+2171,RPM,780.25,RPM
+2171,Vehicle Speed,0,km/h
+2172,Intake Air Temp,52,°C
+2172,Throttle Position,13.3333333333,%
+2173,Fuel Level,54.1176470588,%
+2173,Battery Voltage,13.347,V
+2174,MAF,3.64,g/s
+2174,Engine Load,22.3529411765,%
+2175,Coolant Temp,77,°C
+2175,RPM,784,RPM
+2175,Vehicle Speed,0,km/h
+2176,Intake Air Temp,52,°C
+2176,Throttle Position,13.3333333333,%
+2177,Fuel Level,54.1176470588,%
+2177,Battery Voltage,13.323,V
+2178,MAF,3.64,g/s
+2178,Engine Load,22.7450980392,%
+2179,Coolant Temp,77,°C
+2179,RPM,773.25,RPM
+2179,Vehicle Speed,0,km/h
+2180,Intake Air Temp,52,°C
+2181,Throttle Position,13.3333333333,%
+2181,Fuel Level,54.1176470588,%
+2181,Battery Voltage,13.343,V
+2182,MAF,3.64,g/s
+2183,Engine Load,22.7450980392,%
+2185,Coolant Temp,77,°C
+2186,RPM,781,RPM
+2187,Vehicle Speed,0,km/h
+2187,Intake Air Temp,52,°C
+2187,Throttle Position,13.3333333333,%
+2188,Fuel Level,54.1176470588,%
+2188,Battery Voltage,13.332,V
+2189,MAF,3.72,g/s
+2189,Engine Load,22.7450980392,%
+2190,Coolant Temp,77,°C
+2190,RPM,786.75,RPM
+2191,Vehicle Speed,0,km/h
+2191,Intake Air Temp,52,°C
+2192,Throttle Position,13.3333333333,%
+2192,Fuel Level,54.1176470588,%
+2193,Battery Voltage,13.331,V
+2193,MAF,3.74,g/s
+2193,Engine Load,22.7450980392,%
+2194,Coolant Temp,77,°C
+2194,RPM,785,RPM
+2195,Vehicle Speed,0,km/h
+2195,Intake Air Temp,52,°C
+2196,Throttle Position,13.3333333333,%
+2196,Fuel Level,54.1176470588,%
+2197,Battery Voltage,13.322,V
+2197,MAF,3.68,g/s
+2197,Engine Load,22.7450980392,%
+2198,Coolant Temp,77,°C
+2198,RPM,775.25,RPM
+2199,Vehicle Speed,0,km/h
+2199,Intake Air Temp,52,°C
+2200,Throttle Position,13.3333333333,%
+2200,Fuel Level,54.1176470588,%
+2201,Battery Voltage,13.317,V
+2201,MAF,3.61,g/s
+2201,Engine Load,22.3529411765,%
+2202,Coolant Temp,77,°C
+2202,RPM,781.25,RPM
+2203,Vehicle Speed,0,km/h
+2203,Intake Air Temp,52,°C
+2204,Throttle Position,13.3333333333,%
+2204,Fuel Level,54.1176470588,%
+2204,Battery Voltage,13.328,V
+2205,MAF,3.64,g/s
+2205,Engine Load,22.7450980392,%
+2206,Coolant Temp,77,°C
+2206,RPM,777.5,RPM
+2207,Vehicle Speed,0,km/h
+2207,Intake Air Temp,52,°C
+2208,Throttle Position,13.3333333333,%
+2208,Fuel Level,54.1176470588,%
+2209,Battery Voltage,13.335,V
+2209,MAF,3.61,g/s
+2209,Engine Load,22.3529411765,%
+2210,Coolant Temp,77,°C
+2210,RPM,785,RPM
+2211,Vehicle Speed,0,km/h
+2211,Intake Air Temp,52,°C
+2212,Throttle Position,13.3333333333,%
+2212,Fuel Level,54.1176470588,%
+2212,Battery Voltage,13.316,V
+2213,MAF,3.59,g/s
+2213,Engine Load,21.9607843137,%
+2214,Coolant Temp,77,°C
+2214,RPM,783,RPM
+2215,Vehicle Speed,0,km/h
+2215,Intake Air Temp,52,°C
+2216,Throttle Position,13.3333333333,%
+2216,Fuel Level,54.1176470588,%
+2216,Battery Voltage,13.32,V
+2217,MAF,3.53,g/s
+2217,Engine Load,21.9607843137,%
+2218,Coolant Temp,77,°C
+2218,RPM,781.5,RPM
+2218,Vehicle Speed,0,km/h
+2219,Intake Air Temp,52,°C
+2219,Throttle Position,13.3333333333,%
+2220,Fuel Level,54.1176470588,%
+2220,Battery Voltage,13.339,V
+2221,MAF,3.5,g/s
+2221,Engine Load,21.568627451,%
+2222,Coolant Temp,77,°C
+2222,RPM,785,RPM
+2223,Vehicle Speed,0,km/h
+2223,Intake Air Temp,52,°C
+2224,Throttle Position,13.3333333333,%
+2224,Fuel Level,54.1176470588,%
+2225,Battery Voltage,13.338,V
+2225,MAF,3.48,g/s
+2226,Engine Load,21.1764705882,%
+2226,Coolant Temp,77,°C
+2227,RPM,782,RPM
+2227,Vehicle Speed,0,km/h
+2228,Intake Air Temp,52,°C
+2228,Throttle Position,13.3333333333,%
+2229,Fuel Level,54.1176470588,%
+2229,Battery Voltage,13.342,V
+2229,MAF,3.5,g/s
+2230,Engine Load,21.1764705882,%
+2232,Coolant Temp,77,°C
+2233,RPM,789,RPM
+2234,Vehicle Speed,0,km/h
+2234,Intake Air Temp,52,°C
+2234,Throttle Position,12.9411764706,%
+2235,Fuel Level,54.1176470588,%
+2235,Battery Voltage,13.324,V
+2236,MAF,3.4,g/s
+2236,Engine Load,21.1764705882,%
+2236,Coolant Temp,77,°C
+2237,RPM,782.5,RPM
+2237,Vehicle Speed,0,km/h
+2238,Intake Air Temp,52,°C
+2238,Throttle Position,12.9411764706,%
+2239,Fuel Level,54.1176470588,%
+2239,Battery Voltage,13.321,V
+2240,MAF,3.4,g/s
+2240,Engine Load,20.7843137255,%
+2240,Coolant Temp,77,°C
+2241,RPM,784.25,RPM
+2241,Vehicle Speed,0,km/h
+2242,Intake Air Temp,52,°C
+2242,Throttle Position,12.9411764706,%
+2243,Fuel Level,54.1176470588,%
+2243,Battery Voltage,13.325,V
+2243,MAF,3.42,g/s
+2244,Engine Load,21.1764705882,%
+2244,Coolant Temp,77,°C
+2245,RPM,783.5,RPM
+2245,Vehicle Speed,0,km/h
+2246,Intake Air Temp,52,°C
+2246,Throttle Position,13.3333333333,%
+2247,Fuel Level,54.1176470588,%
+2247,Battery Voltage,13.344,V
+2247,MAF,3.5,g/s
+2248,Engine Load,21.1764705882,%
+2248,Coolant Temp,77,°C
+2249,RPM,778.5,RPM
+2249,Vehicle Speed,0,km/h
+2250,Intake Air Temp,52,°C
+2250,Throttle Position,13.3333333333,%
+2251,Fuel Level,54.9019607843,%
+2251,Battery Voltage,13.313,V
+2252,MAF,3.46,g/s
+2252,Engine Load,21.568627451,%
+2253,Coolant Temp,77,°C
+2253,RPM,775.25,RPM
+2254,Vehicle Speed,0,km/h
+2254,Intake Air Temp,52,°C
+2255,Throttle Position,13.3333333333,%
+2255,Fuel Level,54.9019607843,%
+2256,Battery Voltage,13.336,V
+2256,MAF,3.46,g/s
+2256,Engine Load,21.568627451,%
+2257,Coolant Temp,77,°C
+2257,RPM,776.75,RPM
+2258,Vehicle Speed,0,km/h
+2258,Intake Air Temp,52,°C
+2259,Throttle Position,13.3333333333,%
+2259,Fuel Level,54.1176470588,%
+2259,Battery Voltage,13.342,V
+2260,MAF,3.53,g/s
+2260,Engine Load,22.3529411765,%
+2261,Coolant Temp,77,°C
+2261,RPM,776.25,RPM
+2262,Vehicle Speed,0,km/h
+2262,Intake Air Temp,52,°C
+2262,Throttle Position,13.3333333333,%
+2263,Fuel Level,54.1176470588,%
+2263,Battery Voltage,13.32,V
+2264,MAF,3.51,g/s
+2264,Engine Load,21.9607843137,%
+2265,Coolant Temp,77,°C
+2265,RPM,773,RPM
+2265,Vehicle Speed,0,km/h
+2266,Intake Air Temp,52,°C
+2266,Throttle Position,13.3333333333,%
+2267,Fuel Level,54.1176470588,%
+2267,Battery Voltage,13.313,V
+2267,MAF,3.53,g/s
+2268,Engine Load,21.9607843137,%
+2268,Coolant Temp,77,°C
+2269,RPM,769.75,RPM
+2269,Vehicle Speed,0,km/h
+2270,Intake Air Temp,52,°C
+2270,Throttle Position,13.3333333333,%
+2271,Fuel Level,54.1176470588,%
+2271,Battery Voltage,13.316,V
+2271,MAF,3.53,g/s
+2272,Engine Load,22.3529411765,%
+2272,Coolant Temp,77,°C
+2273,RPM,772.25,RPM
+2273,Vehicle Speed,0,km/h
+2274,Intake Air Temp,52,°C
+2274,Throttle Position,13.3333333333,%
+2275,Fuel Level,54.1176470588,%
+2275,Battery Voltage,13.334,V
+2276,MAF,3.61,g/s
+2276,Engine Load,22.3529411765,%
+2276,Coolant Temp,77,°C
+2279,RPM,771.25,RPM
+2280,Vehicle Speed,0,km/h
+2280,Intake Air Temp,52,°C
+2281,Throttle Position,13.3333333333,%
+2281,Fuel Level,54.1176470588,%
+2281,Battery Voltage,13.317,V
+2282,MAF,3.61,g/s
+2282,Engine Load,22.3529411765,%
+2283,Coolant Temp,78,°C
+2283,RPM,771.5,RPM
+2284,Vehicle Speed,0,km/h
+2284,Intake Air Temp,52,°C
+2285,Throttle Position,13.3333333333,%
+2285,Fuel Level,54.1176470588,%
+2286,Battery Voltage,13.321,V
+2286,MAF,3.61,g/s
+2287,Engine Load,22.3529411765,%
+2287,Coolant Temp,78,°C
+2288,RPM,779.5,RPM
+2288,Vehicle Speed,0,km/h
+2289,Intake Air Temp,52,°C
+2289,Throttle Position,13.3333333333,%
+2289,Fuel Level,54.1176470588,%
+2290,Battery Voltage,13.322,V
+2290,MAF,3.61,g/s
+2291,Engine Load,22.7450980392,%
+2291,Coolant Temp,78,°C
+2292,RPM,781,RPM
+2292,Vehicle Speed,0,km/h
+2292,Intake Air Temp,52,°C
+2293,Throttle Position,13.3333333333,%
+2293,Fuel Level,54.1176470588,%
+2294,Battery Voltage,13.347,V
+2294,MAF,3.61,g/s
+2295,Engine Load,22.3529411765,%
+2295,Coolant Temp,78,°C
+2295,RPM,778,RPM
+2296,Vehicle Speed,0,km/h
+2296,Intake Air Temp,52,°C
+2297,Throttle Position,13.3333333333,%
+2297,Fuel Level,54.1176470588,%
+2298,Battery Voltage,13.341,V
+2298,MAF,3.55,g/s
+2299,Engine Load,21.9607843137,%
+2299,Coolant Temp,78,°C
+2300,RPM,779.5,RPM
+2300,Vehicle Speed,0,km/h
+2300,Intake Air Temp,52,°C
+2301,Throttle Position,13.3333333333,%
+2301,Fuel Level,54.1176470588,%
+2302,Battery Voltage,13.329,V
+2302,MAF,3.61,g/s
+2303,Engine Load,22.7450980392,%
+2303,Coolant Temp,78,°C
+2303,RPM,778.75,RPM
+2304,Vehicle Speed,0,km/h
+2304,Intake Air Temp,52,°C
+2305,Throttle Position,13.3333333333,%
+2305,Fuel Level,54.1176470588,%
+2306,Battery Voltage,13.329,V
+2306,MAF,3.55,g/s
+2307,Engine Load,21.9607843137,%
+2307,Coolant Temp,78,°C
+2308,RPM,778.75,RPM
+2308,Vehicle Speed,0,km/h
+2309,Intake Air Temp,52,°C
+2309,Throttle Position,13.3333333333,%
+2310,Fuel Level,54.1176470588,%
+2310,Battery Voltage,13.323,V
+2311,MAF,3.55,g/s
+2311,Engine Load,21.9607843137,%
+2312,Coolant Temp,78,°C
+2312,RPM,771.75,RPM
+2313,Vehicle Speed,0,km/h
+2313,Intake Air Temp,52,°C
+2314,Throttle Position,13.3333333333,%
+2315,Fuel Level,54.1176470588,%
+2315,Battery Voltage,13.32,V
+2316,MAF,3.53,g/s
+2316,Engine Load,22.3529411765,%
+2317,Coolant Temp,78,°C
+2317,RPM,771,RPM
+2318,Vehicle Speed,0,km/h
+2318,Intake Air Temp,52,°C
+2319,Throttle Position,13.3333333333,%
+2319,Fuel Level,54.1176470588,%
+2319,Battery Voltage,13.322,V
+2320,MAF,3.55,g/s
+2320,Engine Load,21.9607843137,%
+2321,Coolant Temp,78,°C
+2321,RPM,775,RPM
+2322,Vehicle Speed,0,km/h
+2322,Intake Air Temp,52,°C
+2326,Throttle Position,13.3333333333,%
+2326,Fuel Level,54.1176470588,%
+2326,Battery Voltage,13.336,V
+2327,MAF,3.53,g/s
+2327,Engine Load,22.3529411765,%
+2328,Coolant Temp,78,°C
+2328,RPM,772.75,RPM
+2330,Vehicle Speed,0,km/h
+2331,Intake Air Temp,52,°C
+2331,Throttle Position,13.3333333333,%
+2332,Fuel Level,54.1176470588,%
+2332,Battery Voltage,13.338,V
+2333,MAF,3.57,g/s
+2333,Engine Load,22.3529411765,%
+2333,Coolant Temp,78,°C
+2334,RPM,775,RPM
+2334,Vehicle Speed,0,km/h
+2335,Intake Air Temp,52,°C
+2335,Throttle Position,13.3333333333,%
+2336,Fuel Level,54.1176470588,%
+2336,Battery Voltage,13.323,V
+2337,MAF,3.53,g/s
+2337,Engine Load,22.3529411765,%
+2337,Coolant Temp,78,°C
+2338,RPM,776.75,RPM
+2338,Vehicle Speed,0,km/h
+2339,Intake Air Temp,52,°C
+2339,Throttle Position,13.3333333333,%
+2339,Fuel Level,54.1176470588,%
+2340,Battery Voltage,13.323,V
+2340,MAF,3.55,g/s
+2341,Engine Load,22.3529411765,%
+2341,Coolant Temp,78,°C
+2342,RPM,776.75,RPM
+2342,Vehicle Speed,0,km/h
+2343,Intake Air Temp,52,°C
+2343,Throttle Position,13.3333333333,%
+2344,Fuel Level,54.1176470588,%
+2344,Battery Voltage,13.317,V
+2344,MAF,3.53,g/s
+2345,Engine Load,22.3529411765,%
+2345,Coolant Temp,78,°C
+2346,RPM,771,RPM
+2346,Vehicle Speed,0,km/h
+2347,Intake Air Temp,52,°C
+2347,Throttle Position,13.3333333333,%
+2348,Fuel Level,54.1176470588,%
+2348,Battery Voltage,13.34,V
+2348,MAF,3.53,g/s
+2349,Engine Load,22.3529411765,%
+2350,Coolant Temp,78,°C
+2350,RPM,766.5,RPM
+2351,Vehicle Speed,0,km/h
+2351,Intake Air Temp,52,°C
+2351,Throttle Position,13.3333333333,%
+2352,Fuel Level,54.1176470588,%
+2352,Battery Voltage,13.347,V
+2353,MAF,3.57,g/s
+2353,Engine Load,22.3529411765,%
+2354,Coolant Temp,78,°C
+2354,RPM,770.25,RPM
+2354,Vehicle Speed,0,km/h
+2355,Intake Air Temp,52,°C
+2355,Throttle Position,13.3333333333,%
+2356,Fuel Level,54.1176470588,%
+2356,Battery Voltage,13.326,V
+2357,MAF,3.57,g/s
+2357,Engine Load,23.137254902,%
+2357,Coolant Temp,78,°C
+2358,RPM,768.75,RPM
+2358,Vehicle Speed,0,km/h
+2359,Intake Air Temp,52,°C
+2359,Throttle Position,13.3333333333,%
+2360,Fuel Level,54.1176470588,%
+2360,Battery Voltage,13.343,V
+2360,MAF,3.57,g/s
+2361,Engine Load,22.3529411765,%
+2361,Coolant Temp,78,°C
+2362,RPM,774.25,RPM
+2362,Vehicle Speed,0,km/h
+2362,Intake Air Temp,52,°C
+2363,Throttle Position,13.3333333333,%
+2364,Fuel Level,54.1176470588,%
+2364,Battery Voltage,13.335,V
+2365,MAF,3.61,g/s
+2365,Engine Load,22.3529411765,%
+2365,Coolant Temp,78,°C
+2366,RPM,768.5,RPM
+2366,Vehicle Speed,0,km/h
+2367,Intake Air Temp,52,°C
+2367,Throttle Position,13.3333333333,%
+2368,Fuel Level,54.1176470588,%
+2368,Battery Voltage,13.343,V
+2369,MAF,3.53,g/s
+2369,Engine Load,22.7450980392,%
+2370,Coolant Temp,78,°C
+2370,RPM,767.5,RPM
+2371,Vehicle Speed,0,km/h
+2371,Intake Air Temp,52,°C
+2372,Throttle Position,13.3333333333,%
+2372,Fuel Level,54.1176470588,%
+2373,Battery Voltage,13.334,V
+2373,MAF,3.57,g/s
+2374,Engine Load,22.3529411765,%
+2374,Coolant Temp,78,°C
+2375,RPM,770.25,RPM
+2375,Vehicle Speed,0,km/h
+2378,Intake Air Temp,52,°C
+2378,Throttle Position,13.3333333333,%
+2379,Fuel Level,54.1176470588,%
+2379,Battery Voltage,13.327,V
+2379,MAF,3.55,g/s
+2380,Engine Load,22.7450980392,%
+2380,Coolant Temp,78,°C
+2381,RPM,765,RPM
+2381,Vehicle Speed,0,km/h
+2381,Intake Air Temp,52,°C
+2382,Throttle Position,13.3333333333,%
+2382,Fuel Level,54.1176470588,%
+2383,Battery Voltage,13.32,V
+2383,MAF,3.55,g/s
+2383,Engine Load,22.7450980392,%
+2384,Coolant Temp,78,°C
+2384,RPM,767.75,RPM
+2385,Vehicle Speed,0,km/h
+2385,Intake Air Temp,52,°C
+2385,Throttle Position,13.3333333333,%
+2386,Fuel Level,54.1176470588,%
+2386,Battery Voltage,13.343,V
+2387,MAF,3.55,g/s
+2387,Engine Load,22.3529411765,%
+2387,Coolant Temp,78,°C
+2388,RPM,766,RPM
+2388,Vehicle Speed,0,km/h
+2389,Intake Air Temp,52,°C
+2389,Throttle Position,13.3333333333,%
+2389,Fuel Level,54.1176470588,%
+2390,Battery Voltage,13.338,V
+2390,MAF,3.55,g/s
+2391,Engine Load,22.3529411765,%
+2391,Coolant Temp,78,°C
+2392,RPM,763.5,RPM
+2392,Vehicle Speed,0,km/h
+2393,Intake Air Temp,52,°C
+2393,Throttle Position,13.3333333333,%
+2393,Fuel Level,54.1176470588,%
+2394,Battery Voltage,13.325,V
+2394,MAF,3.57,g/s
+2395,Engine Load,22.3529411765,%
+2396,Coolant Temp,78,°C
+2396,RPM,767.25,RPM
+2396,Vehicle Speed,0,km/h
+2397,Intake Air Temp,52,°C
+2397,Throttle Position,13.3333333333,%
+2398,Fuel Level,54.1176470588,%
+2398,Battery Voltage,13.334,V
+2399,MAF,3.57,g/s
+2399,Engine Load,22.3529411765,%
+2400,Coolant Temp,78,°C
+2400,RPM,762.5,RPM
+2400,Vehicle Speed,0,km/h
+2401,Intake Air Temp,52,°C
+2401,Throttle Position,13.3333333333,%
+2402,Fuel Level,54.1176470588,%
+2402,Battery Voltage,13.332,V
+2403,MAF,3.55,g/s
+2403,Engine Load,22.3529411765,%
+2404,Coolant Temp,78,°C
+2404,RPM,767,RPM
+2405,Vehicle Speed,0,km/h
+2405,Intake Air Temp,52,°C
+2406,Throttle Position,13.3333333333,%
+2406,Fuel Level,54.1176470588,%
+2407,Battery Voltage,13.339,V
+2407,MAF,3.59,g/s
+2408,Engine Load,22.7450980392,%
+2408,Coolant Temp,78,°C
+2408,RPM,760.75,RPM
+2409,Vehicle Speed,0,km/h
+2409,Intake Air Temp,52,°C
+2410,Throttle Position,13.3333333333,%
+2410,Fuel Level,54.1176470588,%
+2411,Battery Voltage,13.343,V
+2411,MAF,3.59,g/s
+2411,Engine Load,22.7450980392,%
+2412,Coolant Temp,78,°C
+2412,RPM,767,RPM
+2413,Vehicle Speed,0,km/h
+2413,Intake Air Temp,52,°C
+2414,Throttle Position,13.3333333333,%
+2414,Fuel Level,54.1176470588,%
+2414,Battery Voltage,13.335,V
+2415,MAF,3.57,g/s
+2415,Engine Load,22.3529411765,%
+2416,Coolant Temp,78,°C
+2416,RPM,767.25,RPM
+2417,Vehicle Speed,0,km/h
+2417,Intake Air Temp,52,°C
+2418,Throttle Position,13.3333333333,%
+2418,Fuel Level,54.1176470588,%
+2419,Battery Voltage,13.332,V
+2419,MAF,3.55,g/s
+2419,Engine Load,22.3529411765,%
+2420,Coolant Temp,78,°C
+2420,RPM,763,RPM
+2421,Vehicle Speed,0,km/h
+2421,Intake Air Temp,52,°C
+2424,Throttle Position,13.3333333333,%
+2424,Fuel Level,54.1176470588,%
+2425,Battery Voltage,13.324,V
+2425,MAF,3.55,g/s
+2426,Engine Load,22.7450980392,%
+2426,Coolant Temp,78,°C
+2427,RPM,761.25,RPM
+2427,Vehicle Speed,0,km/h
+2428,Intake Air Temp,52,°C
+2428,Throttle Position,13.3333333333,%
+2429,Fuel Level,54.1176470588,%
+2429,Battery Voltage,13.332,V
+2430,MAF,3.51,g/s
+2430,Engine Load,22.3529411765,%
+2430,Coolant Temp,79,°C
+2431,RPM,759,RPM
+2432,Vehicle Speed,0,km/h
+2432,Intake Air Temp,52,°C
+2433,Throttle Position,13.3333333333,%
+2433,Fuel Level,54.1176470588,%
+2433,Battery Voltage,13.324,V
+2434,MAF,3.51,g/s
+2434,Engine Load,22.3529411765,%
+2435,Coolant Temp,79,°C
+2435,RPM,761.75,RPM
+2436,Vehicle Speed,0,km/h
+2436,Intake Air Temp,52,°C
+2436,Throttle Position,13.3333333333,%
+2437,Fuel Level,54.1176470588,%
+2437,Battery Voltage,13.35,V
+2438,MAF,3.55,g/s
+2438,Engine Load,22.7450980392,%
+2439,Coolant Temp,79,°C
+2439,RPM,766.5,RPM
+2440,Vehicle Speed,0,km/h
+2440,Intake Air Temp,52,°C
+2441,Throttle Position,13.3333333333,%
+2441,Fuel Level,54.1176470588,%
+2441,Battery Voltage,13.351,V
+2442,MAF,3.59,g/s
+2443,Engine Load,22.7450980392,%
+2444,Coolant Temp,79,°C
+2444,RPM,765.25,RPM
+2445,Vehicle Speed,0,km/h
+2445,Intake Air Temp,52,°C
+2445,Throttle Position,13.3333333333,%
+2446,Fuel Level,54.1176470588,%
+2446,Battery Voltage,13.329,V
+2447,MAF,3.57,g/s
+2447,Engine Load,22.7450980392,%
+2448,Coolant Temp,79,°C
+2448,RPM,758.5,RPM
+2448,Vehicle Speed,0,km/h
+2449,Intake Air Temp,52,°C
+2449,Throttle Position,13.3333333333,%
+2450,Fuel Level,54.1176470588,%
+2450,Battery Voltage,13.322,V
+2451,MAF,3.51,g/s
+2451,Engine Load,22.3529411765,%
+2451,Coolant Temp,79,°C
+2452,RPM,770,RPM
+2452,Vehicle Speed,0,km/h
+2453,Intake Air Temp,52,°C
+2453,Throttle Position,13.3333333333,%
+2454,Fuel Level,54.1176470588,%
+2454,Battery Voltage,13.333,V
+2455,MAF,3.53,g/s
+2455,Engine Load,22.7450980392,%
+2456,Coolant Temp,79,°C
+2456,RPM,761.5,RPM
+2456,Vehicle Speed,0,km/h
+2457,Intake Air Temp,52,°C
+2457,Throttle Position,13.3333333333,%
+2458,Fuel Level,54.1176470588,%
+2458,Battery Voltage,13.332,V
+2459,MAF,3.55,g/s
+2459,Engine Load,22.7450980392,%
+2460,Coolant Temp,79,°C
+2460,RPM,760.5,RPM
+2461,Vehicle Speed,0,km/h
+2461,Intake Air Temp,52,°C
+2461,Throttle Position,13.3333333333,%
+2462,Fuel Level,54.1176470588,%
+2462,Battery Voltage,13.33,V
+2463,MAF,3.55,g/s
+2463,Engine Load,22.7450980392,%
+2464,Coolant Temp,79,°C
+2464,RPM,757.75,RPM
+2465,Vehicle Speed,0,km/h
+2465,Intake Air Temp,52,°C
+2466,Throttle Position,13.3333333333,%
+2466,Fuel Level,54.1176470588,%
+2467,Battery Voltage,13.349,V
+2467,MAF,3.53,g/s
+2468,Engine Load,22.3529411765,%
+2468,Coolant Temp,79,°C
+2468,RPM,771.75,RPM
+2469,Vehicle Speed,0,km/h
+2469,Intake Air Temp,52,°C
+2470,Throttle Position,13.3333333333,%
+2472,Fuel Level,54.1176470588,%
+2473,Battery Voltage,13.335,V
+2473,MAF,3.57,g/s
+2473,Engine Load,22.3529411765,%
+2474,Coolant Temp,79,°C
+2474,RPM,762.25,RPM
+2475,Vehicle Speed,0,km/h
+2475,Intake Air Temp,52,°C
+2476,Throttle Position,13.3333333333,%
+2476,Fuel Level,54.1176470588,%
+2476,Battery Voltage,13.327,V
+2477,MAF,3.53,g/s
+2477,Engine Load,22.7450980392,%
+2478,Coolant Temp,79,°C
+2478,RPM,755,RPM
+2479,Vehicle Speed,0,km/h
+2479,Intake Air Temp,52,°C
+2480,Throttle Position,13.3333333333,%
+2480,Fuel Level,54.1176470588,%
+2481,Battery Voltage,13.347,V
+2481,MAF,3.51,g/s
+2481,Engine Load,22.3529411765,%
+2482,Coolant Temp,79,°C
+2482,RPM,770,RPM
+2483,Vehicle Speed,0,km/h
+2483,Intake Air Temp,52,°C
+2484,Throttle Position,13.3333333333,%
+2484,Fuel Level,54.1176470588,%
+2485,Battery Voltage,13.341,V
+2485,MAF,3.57,g/s
+2485,Engine Load,22.3529411765,%
+2486,Coolant Temp,79,°C
+2486,RPM,761.75,RPM
+2487,Vehicle Speed,0,km/h
+2487,Intake Air Temp,52,°C
+2488,Throttle Position,13.3333333333,%
+2488,Fuel Level,54.1176470588,%
+2489,Battery Voltage,13.339,V
+2489,MAF,3.53,g/s
+2490,Engine Load,22.3529411765,%
+2490,Coolant Temp,79,°C
+2491,RPM,759.75,RPM
+2491,Vehicle Speed,0,km/h
+2492,Intake Air Temp,52,°C
+2492,Throttle Position,13.3333333333,%
+2493,Fuel Level,54.1176470588,%
+2493,Battery Voltage,13.326,V
+2493,MAF,3.5,g/s
+2494,Engine Load,22.3529411765,%
+2494,Coolant Temp,79,°C
+2495,RPM,760.25,RPM
+2495,Vehicle Speed,0,km/h
+2495,Intake Air Temp,52,°C
+2496,Throttle Position,13.3333333333,%
+2496,Fuel Level,54.1176470588,%
+2496,Battery Voltage,13.335,V
+2497,MAF,3.51,g/s
+2497,Engine Load,22.3529411765,%
+2498,Coolant Temp,79,°C
+2498,RPM,762.25,RPM
+2498,Vehicle Speed,0,km/h
+2499,Intake Air Temp,52,°C
+2499,Throttle Position,13.3333333333,%
+2500,Fuel Level,54.1176470588,%
+2500,Battery Voltage,13.336,V
+2500,MAF,3.53,g/s
+2501,Engine Load,22.3529411765,%
+2501,Coolant Temp,79,°C
+2501,RPM,762.5,RPM
+2502,Vehicle Speed,0,km/h
+2502,Intake Air Temp,52,°C
+2503,Throttle Position,13.3333333333,%
+2503,Fuel Level,54.1176470588,%
+2503,Battery Voltage,13.333,V
+2504,MAF,3.5,g/s
+2504,Engine Load,21.9607843137,%
+2505,Coolant Temp,79,°C
+2505,RPM,761.5,RPM
+2505,Vehicle Speed,0,km/h
+2506,Intake Air Temp,52,°C
+2506,Throttle Position,13.3333333333,%
+2506,Fuel Level,54.1176470588,%
+2507,Battery Voltage,13.32,V
+2507,MAF,3.5,g/s
+2508,Engine Load,21.9607843137,%
+2508,Coolant Temp,79,°C
+2508,RPM,766.5,RPM
+2509,Vehicle Speed,0,km/h
+2509,Intake Air Temp,52,°C
+2510,Throttle Position,13.3333333333,%
+2510,Fuel Level,54.1176470588,%
+2511,Battery Voltage,13.357,V
+2511,MAF,3.53,g/s
+2512,Engine Load,22.3529411765,%
+2513,Coolant Temp,79,°C
+2513,RPM,756.25,RPM
+2514,Vehicle Speed,0,km/h
+2514,Intake Air Temp,52,°C
+2514,Throttle Position,13.3333333333,%
+2515,Fuel Level,54.1176470588,%
+2517,Battery Voltage,13.322,V
+2518,MAF,3.48,g/s
+2518,Engine Load,22.7450980392,%
+2518,Coolant Temp,79,°C
+2519,RPM,755.5,RPM
+2519,Vehicle Speed,0,km/h
+2520,Intake Air Temp,52,°C
+2520,Throttle Position,13.3333333333,%
+2520,Fuel Level,54.1176470588,%
+2521,Battery Voltage,13.325,V
+2521,MAF,3.51,g/s
+2522,Engine Load,22.3529411765,%
+2522,Coolant Temp,79,°C
+2522,RPM,760.75,RPM
+2523,Vehicle Speed,0,km/h
+2523,Intake Air Temp,52,°C
+2523,Throttle Position,13.3333333333,%
+2524,Fuel Level,54.1176470588,%
+2524,Battery Voltage,13.34,V
+2525,MAF,3.53,g/s
+2525,Engine Load,22.3529411765,%
+2525,Coolant Temp,79,°C
+2526,RPM,758.25,RPM
+2526,Vehicle Speed,0,km/h
+2527,Intake Air Temp,52,°C
+2527,Throttle Position,13.3333333333,%
+2527,Fuel Level,54.1176470588,%
+2528,Battery Voltage,13.346,V
+2528,MAF,3.53,g/s
+2528,Engine Load,22.3529411765,%
+2529,Coolant Temp,79,°C
+2529,RPM,760.25,RPM
+2530,Vehicle Speed,0,km/h
+2530,Intake Air Temp,52,°C
+2530,Throttle Position,13.3333333333,%
+2531,Fuel Level,54.1176470588,%
+2531,Battery Voltage,13.33,V
+2532,MAF,3.51,g/s
+2532,Engine Load,22.3529411765,%
+2533,Coolant Temp,79,°C
+2533,RPM,761,RPM
+2533,Vehicle Speed,0,km/h
+2534,Intake Air Temp,52,°C
+2534,Throttle Position,13.3333333333,%
+2535,Fuel Level,54.1176470588,%
+2535,Battery Voltage,13.323,V
+2536,MAF,3.5,g/s
+2536,Engine Load,22.7450980392,%
+2536,Coolant Temp,79,°C
+2537,RPM,765,RPM
+2537,Vehicle Speed,0,km/h
+2538,Intake Air Temp,52,°C
+2538,Throttle Position,13.3333333333,%
+2539,Fuel Level,54.1176470588,%
+2539,Battery Voltage,13.328,V
+2539,MAF,3.5,g/s
+2540,Engine Load,22.3529411765,%
+2540,Coolant Temp,79,°C
+2541,RPM,752.75,RPM
+2541,Vehicle Speed,0,km/h
+2541,Intake Air Temp,52,°C
+2542,Throttle Position,13.3333333333,%
+2542,Fuel Level,54.1176470588,%
+2543,Battery Voltage,13.332,V
+2543,MAF,3.53,g/s
+2543,Engine Load,22.7450980392,%
+2544,Coolant Temp,79,°C
+2544,RPM,756.25,RPM
+2545,Vehicle Speed,0,km/h
+2545,Intake Air Temp,52,°C
+2546,Throttle Position,13.3333333333,%
+2546,Fuel Level,54.1176470588,%
+2546,Battery Voltage,13.328,V
+2547,MAF,3.55,g/s
+2547,Engine Load,22.3529411765,%
+2548,Coolant Temp,79,°C
+2548,RPM,757.75,RPM
+2549,Vehicle Speed,0,km/h
+2549,Intake Air Temp,52,°C
+2550,Throttle Position,13.3333333333,%
+2550,Fuel Level,54.1176470588,%
+2550,Battery Voltage,13.332,V
+2551,MAF,3.53,g/s
+2551,Engine Load,22.7450980392,%
+2552,Coolant Temp,79,°C
+2552,RPM,755.5,RPM
+2553,Vehicle Speed,0,km/h
+2553,Intake Air Temp,52,°C
+2554,Throttle Position,12.9411764706,%
+2554,Fuel Level,54.1176470588,%
+2555,Battery Voltage,13.326,V
+2556,MAF,3.48,g/s
+2556,Engine Load,21.9607843137,%
+2557,Coolant Temp,80,°C
+2557,RPM,758.25,RPM
+2558,Vehicle Speed,0,km/h
+2558,Intake Air Temp,52,°C
+2558,Throttle Position,13.3333333333,%
+2559,Fuel Level,54.1176470588,%
+2559,Battery Voltage,13.349,V
+2562,MAF,3.5,g/s
+2562,Engine Load,21.9607843137,%
+2563,Coolant Temp,80,°C
+2563,RPM,757.75,RPM
+2564,Vehicle Speed,0,km/h
+2564,Intake Air Temp,51,°C
+2564,Throttle Position,13.3333333333,%
+2565,Fuel Level,54.1176470588,%
+2565,Battery Voltage,13.342,V
+2566,MAF,3.5,g/s
+2566,Engine Load,22.7450980392,%
+2567,Coolant Temp,80,°C
+2567,RPM,749.75,RPM
+2568,Vehicle Speed,0,km/h
+2568,Intake Air Temp,51,°C
+2569,Throttle Position,12.9411764706,%
+2569,Fuel Level,54.1176470588,%
+2570,Battery Voltage,13.319,V
+2570,MAF,3.48,g/s
+2571,Engine Load,22.3529411765,%
+2571,Coolant Temp,80,°C
+2571,RPM,756.75,RPM
+2572,Vehicle Speed,0,km/h
+2572,Intake Air Temp,51,°C
+2573,Throttle Position,12.9411764706,%
+2573,Fuel Level,54.1176470588,%
+2573,Battery Voltage,13.321,V
+2574,MAF,3.5,g/s
+2574,Engine Load,22.3529411765,%
+2575,Coolant Temp,80,°C
+2575,RPM,759.25,RPM
+2576,Vehicle Speed,0,km/h
+2576,Intake Air Temp,51,°C
+2576,Throttle Position,13.3333333333,%
+2577,Fuel Level,54.1176470588,%
+2577,Battery Voltage,13.341,V
+2578,MAF,3.53,g/s
+2579,Engine Load,22.7450980392,%
+2579,Coolant Temp,80,°C
+2580,RPM,754,RPM
+2580,Vehicle Speed,0,km/h
+2581,Intake Air Temp,51,°C
+2581,Throttle Position,12.9411764706,%
+2581,Fuel Level,54.1176470588,%
+2582,Battery Voltage,13.339,V
+2582,MAF,3.51,g/s
+2583,Engine Load,22.3529411765,%
+2583,Coolant Temp,80,°C
+2584,RPM,749,RPM
+2584,Vehicle Speed,0,km/h
+2585,Intake Air Temp,51,°C
+2585,Throttle Position,13.3333333333,%
+2585,Fuel Level,54.1176470588,%
+2586,Battery Voltage,13.348,V
+2586,MAF,3.51,g/s
+2587,Engine Load,22.3529411765,%
+2587,Coolant Temp,80,°C
+2587,RPM,753.5,RPM
+2588,Vehicle Speed,0,km/h
+2588,Intake Air Temp,51,°C
+2589,Throttle Position,13.3333333333,%
+2589,Fuel Level,54.1176470588,%
+2590,Battery Voltage,13.336,V
+2590,MAF,3.53,g/s
+2591,Engine Load,22.7450980392,%
+2591,Coolant Temp,80,°C
+2591,RPM,752.5,RPM
+2592,Vehicle Speed,0,km/h
+2592,Intake Air Temp,51,°C
+2593,Throttle Position,12.9411764706,%
+2593,Fuel Level,54.1176470588,%
+2596,Battery Voltage,13.311,V
+2597,MAF,3.48,g/s
+2597,Engine Load,22.7450980392,%
+2598,Coolant Temp,80,°C
+2598,RPM,751.75,RPM
+2599,Vehicle Speed,0,km/h
+2599,Intake Air Temp,51,°C
+2600,Throttle Position,13.3333333333,%
+2600,Fuel Level,54.1176470588,%
+2600,Battery Voltage,13.346,V
+2601,MAF,3.5,g/s
+2601,Engine Load,22.3529411765,%
+2602,Coolant Temp,80,°C
+2602,RPM,751.5,RPM
+2603,Vehicle Speed,0,km/h
+2603,Intake Air Temp,51,°C
+2604,Throttle Position,13.3333333333,%
+2604,Fuel Level,54.1176470588,%
+2604,Battery Voltage,13.342,V
+2605,MAF,3.51,g/s
+2605,Engine Load,22.3529411765,%
+2606,Coolant Temp,80,°C
+2606,RPM,756,RPM
+2607,Vehicle Speed,0,km/h
+2607,Intake Air Temp,51,°C
+2607,Throttle Position,13.3333333333,%
+2608,Fuel Level,54.1176470588,%
+2608,Battery Voltage,13.357,V
+2609,MAF,3.5,g/s
+2611,Engine Load,22.7450980392,%
+2612,Coolant Temp,80,°C
+2612,RPM,754.25,RPM
+2613,Vehicle Speed,0,km/h
+2613,Intake Air Temp,51,°C
+2614,Throttle Position,12.9411764706,%
+2614,Fuel Level,54.1176470588,%
+2614,Battery Voltage,13.328,V
+2615,MAF,3.46,g/s
+2615,Engine Load,21.9607843137,%
+2616,Coolant Temp,80,°C
+2616,RPM,753.75,RPM
+2616,Vehicle Speed,0,km/h
+2617,Intake Air Temp,51,°C
+2617,Throttle Position,12.9411764706,%
+2618,Fuel Level,54.1176470588,%
+2618,Battery Voltage,13.336,V
+2619,MAF,3.42,g/s
+2619,Engine Load,21.9607843137,%
+2620,Coolant Temp,80,°C
+2620,RPM,755.75,RPM
+2620,Vehicle Speed,0,km/h
+2621,Intake Air Temp,51,°C
+2621,Throttle Position,13.3333333333,%
+2622,Fuel Level,54.1176470588,%
+2622,Battery Voltage,13.327,V
+2623,MAF,3.48,g/s
+2623,Engine Load,22.3529411765,%
+2623,Coolant Temp,80,°C
+2624,RPM,752.75,RPM
+2624,Vehicle Speed,0,km/h
+2625,Intake Air Temp,51,°C
+2625,Throttle Position,12.9411764706,%
+2626,Fuel Level,54.1176470588,%
+2626,Battery Voltage,13.336,V
+2627,MAF,3.46,g/s
+2627,Engine Load,22.3529411765,%
+2628,Coolant Temp,80,°C
+2628,RPM,753.5,RPM
+2628,Vehicle Speed,0,km/h
+2629,Intake Air Temp,51,°C
+2629,Throttle Position,13.3333333333,%
+2630,Fuel Level,54.1176470588,%
+2630,Battery Voltage,13.347,V
+2631,MAF,3.48,g/s
+2631,Engine Load,22.3529411765,%
+2631,Coolant Temp,80,°C
+2632,RPM,749.5,RPM
+2632,Vehicle Speed,0,km/h
+2633,Intake Air Temp,51,°C
+2633,Throttle Position,12.9411764706,%
+2634,Fuel Level,54.1176470588,%
+2634,Battery Voltage,13.321,V
+2635,MAF,3.48,g/s
+2635,Engine Load,22.3529411765,%
+2635,Coolant Temp,80,°C
+2636,RPM,752.75,RPM
+2636,Vehicle Speed,0,km/h
+2637,Intake Air Temp,51,°C
+2637,Throttle Position,12.9411764706,%
+2638,Fuel Level,54.1176470588,%
+2638,Battery Voltage,13.319,V
+2639,MAF,3.4,g/s
+2639,Engine Load,21.9607843137,%
+2640,Coolant Temp,80,°C
+2640,RPM,755.25,RPM
+2641,Vehicle Speed,0,km/h
+2641,Intake Air Temp,51,°C
+2641,Throttle Position,12.9411764706,%
+2642,Fuel Level,54.1176470588,%
+2642,Battery Voltage,13.338,V
+2643,MAF,3.46,g/s
+2643,Engine Load,22.3529411765,%
+2644,Coolant Temp,80,°C
+2644,RPM,750,RPM
+2644,Vehicle Speed,0,km/h
+2645,Intake Air Temp,51,°C
+2645,Throttle Position,12.9411764706,%
+2646,Fuel Level,54.1176470588,%
+2646,Battery Voltage,13.336,V
+2647,MAF,3.46,g/s
+2647,Engine Load,21.9607843137,%
+2648,Coolant Temp,80,°C
+2648,RPM,754,RPM
+2648,Vehicle Speed,0,km/h
+2649,Intake Air Temp,51,°C
+2650,Throttle Position,12.9411764706,%
+2650,Fuel Level,54.1176470588,%
+2650,Battery Voltage,13.344,V
+2651,MAF,3.44,g/s
+2651,Engine Load,22.3529411765,%
+2652,Coolant Temp,80,°C
+2652,RPM,755,RPM
+2653,Vehicle Speed,0,km/h
+2653,Intake Air Temp,51,°C
+2654,Throttle Position,12.9411764706,%
+2654,Fuel Level,54.1176470588,%
+2654,Battery Voltage,13.356,V
+2655,MAF,3.5,g/s
+2655,Engine Load,22.7450980392,%
+2658,Coolant Temp,81,°C
+2658,RPM,758.5,RPM
+2659,Vehicle Speed,0,km/h
+2659,Intake Air Temp,51,°C
+2659,Throttle Position,12.9411764706,%
+2660,Fuel Level,54.1176470588,%
+2660,Battery Voltage,13.328,V
+2661,MAF,3.46,g/s
+2661,Engine Load,22.3529411765,%
+2661,Coolant Temp,81,°C
+2662,RPM,757,RPM
+2663,Vehicle Speed,0,km/h
+2663,Intake Air Temp,51,°C
+2664,Throttle Position,12.9411764706,%
+2664,Fuel Level,54.1176470588,%
+2664,Battery Voltage,13.322,V
+2665,MAF,3.46,g/s
+2665,Engine Load,21.9607843137,%
+2666,Coolant Temp,81,°C
+2666,RPM,750.5,RPM
+2667,Vehicle Speed,0,km/h
+2667,Intake Air Temp,51,°C
+2667,Throttle Position,12.9411764706,%
+2668,Fuel Level,54.1176470588,%
+2668,Battery Voltage,13.348,V
+2669,MAF,3.44,g/s
+2669,Engine Load,22.3529411765,%
+2670,Coolant Temp,81,°C
+2670,RPM,755.5,RPM
+2670,Vehicle Speed,0,km/h
+2671,Intake Air Temp,51,°C
+2671,Throttle Position,12.9411764706,%
+2672,Fuel Level,54.1176470588,%
+2672,Battery Voltage,13.335,V
+2673,MAF,3.44,g/s
+2673,Engine Load,22.3529411765,%
+2674,Coolant Temp,81,°C
+2674,RPM,750.5,RPM
+2675,Vehicle Speed,0,km/h
+2675,Intake Air Temp,51,°C
+2675,Throttle Position,12.9411764706,%
+2676,Fuel Level,54.1176470588,%
+2676,Battery Voltage,13.356,V
+2677,MAF,3.46,g/s
+2677,Engine Load,22.3529411765,%
+2678,Coolant Temp,81,°C
+2678,RPM,742.5,RPM
+2678,Vehicle Speed,0,km/h
+2679,Intake Air Temp,51,°C
+2679,Throttle Position,12.9411764706,%
+2680,Fuel Level,54.1176470588,%
+2680,Battery Voltage,13.343,V
+2681,MAF,3.46,g/s
+2681,Engine Load,21.9607843137,%
+2682,Coolant Temp,81,°C
+2682,RPM,755.75,RPM
+2683,Vehicle Speed,0,km/h
+2683,Intake Air Temp,51,°C
+2684,Throttle Position,12.9411764706,%
+2684,Fuel Level,54.9019607843,%
+2685,Battery Voltage,13.348,V
+2685,MAF,3.44,g/s
+2686,Engine Load,21.9607843137,%
+2686,Coolant Temp,81,°C
+2686,RPM,750.5,RPM
+2687,Vehicle Speed,0,km/h
+2687,Intake Air Temp,51,°C
+2688,Throttle Position,12.9411764706,%
+2688,Fuel Level,54.9019607843,%
+2689,Battery Voltage,13.344,V
+2689,MAF,3.4,g/s
+2689,Engine Load,22.3529411765,%
+2690,Coolant Temp,81,°C
+2690,RPM,749,RPM
+2691,Vehicle Speed,0,km/h
+2691,Intake Air Temp,51,°C
+2692,Throttle Position,12.9411764706,%
+2692,Fuel Level,54.9019607843,%
+2693,Battery Voltage,13.334,V
+2693,MAF,3.42,g/s
+2693,Engine Load,22.3529411765,%
+2694,Coolant Temp,81,°C
+2698,RPM,748.25,RPM
+2699,Vehicle Speed,0,km/h
+2699,Intake Air Temp,51,°C
+2700,Throttle Position,12.9411764706,%
+2700,Fuel Level,54.9019607843,%
+2700,Battery Voltage,13.331,V
+2701,MAF,3.42,g/s
+2701,Engine Load,21.9607843137,%
+2702,Coolant Temp,81,°C
+2702,RPM,752.25,RPM
+2703,Vehicle Speed,0,km/h
+2703,Intake Air Temp,51,°C
+2704,Throttle Position,12.9411764706,%
+2704,Fuel Level,54.9019607843,%
+2705,Battery Voltage,13.325,V
+2705,MAF,3.44,g/s
+2706,Engine Load,22.3529411765,%
+2706,Coolant Temp,81,°C
+2709,RPM,751.25,RPM
+2709,Vehicle Speed,0,km/h
+2710,Intake Air Temp,51,°C
+2710,Throttle Position,12.9411764706,%
+2710,Fuel Level,54.9019607843,%
+2711,Battery Voltage,13.326,V
+2711,MAF,3.42,g/s
+2712,Engine Load,21.9607843137,%
+2712,Coolant Temp,81,°C
+2713,RPM,754.25,RPM
+2713,Vehicle Speed,0,km/h
+2713,Intake Air Temp,51,°C
+2714,Throttle Position,12.9411764706,%
+2714,Fuel Level,54.9019607843,%
+2715,Battery Voltage,13.323,V
+2715,MAF,3.46,g/s
+2716,Engine Load,22.3529411765,%
+2717,Coolant Temp,81,°C
+2717,RPM,747.5,RPM
+2717,Vehicle Speed,0,km/h
+2718,Intake Air Temp,51,°C
+2718,Throttle Position,12.9411764706,%
+2719,Fuel Level,54.9019607843,%
+2719,Battery Voltage,13.326,V
+2720,MAF,3.46,g/s
+2720,Engine Load,21.9607843137,%
+2721,Coolant Temp,81,°C
+2722,RPM,753.25,RPM
+2722,Vehicle Speed,0,km/h
+2722,Intake Air Temp,51,°C
+2723,Throttle Position,12.9411764706,%
+2724,Fuel Level,54.9019607843,%
+2724,Battery Voltage,13.338,V
+2724,MAF,3.46,g/s
+2725,Engine Load,22.3529411765,%
+2725,Coolant Temp,81,°C
+2726,RPM,754.25,RPM
+2726,Vehicle Speed,0,km/h
+2727,Intake Air Temp,51,°C
+2727,Throttle Position,12.9411764706,%
+2727,Fuel Level,54.9019607843,%
+2728,Battery Voltage,13.311,V
+2728,MAF,3.44,g/s
+2729,Engine Load,21.9607843137,%
+2729,Coolant Temp,81,°C
+2730,RPM,749.25,RPM
+2730,Vehicle Speed,0,km/h
+2731,Intake Air Temp,51,°C
+2731,Throttle Position,12.9411764706,%
+2732,Fuel Level,54.9019607843,%
+2732,Battery Voltage,13.315,V
+2732,MAF,3.4,g/s
+2733,Engine Load,22.3529411765,%
+2733,Coolant Temp,81,°C
+2734,RPM,747,RPM
+2734,Vehicle Speed,0,km/h
+2735,Intake Air Temp,51,°C
+2735,Throttle Position,12.9411764706,%
+2735,Fuel Level,54.9019607843,%
+2736,Battery Voltage,13.33,V
+2736,MAF,3.42,g/s
+2737,Engine Load,21.9607843137,%
+2737,Coolant Temp,81,°C
+2738,RPM,758.5,RPM
+2738,Vehicle Speed,0,km/h
+2739,Intake Air Temp,51,°C
+2739,Throttle Position,12.9411764706,%
+2739,Fuel Level,54.9019607843,%
+2740,Battery Voltage,13.329,V
+2740,MAF,3.46,g/s
+2741,Engine Load,22.3529411765,%
+2741,Coolant Temp,81,°C
+2742,RPM,757,RPM
+2742,Vehicle Speed,0,km/h
+2743,Intake Air Temp,51,°C
+2743,Throttle Position,12.9411764706,%
+2743,Fuel Level,54.9019607843,%
+2744,Battery Voltage,13.325,V
+2744,MAF,3.42,g/s
+2745,Engine Load,21.9607843137,%
+2745,Coolant Temp,81,°C
+2746,RPM,749.5,RPM
+2747,Vehicle Speed,0,km/h
+2747,Intake Air Temp,51,°C
+2748,Throttle Position,12.9411764706,%
+2748,Fuel Level,54.9019607843,%
+2749,Battery Voltage,13.319,V
+2749,MAF,3.4,g/s
+2750,Engine Load,21.9607843137,%
+2750,Coolant Temp,81,°C
+2750,RPM,746.25,RPM
+2751,Vehicle Speed,0,km/h
+2752,Intake Air Temp,51,°C
+2752,Throttle Position,12.9411764706,%
+2752,Fuel Level,54.9019607843,%
+2753,Battery Voltage,13.326,V
+2753,MAF,3.38,g/s
+2754,Engine Load,21.9607843137,%
+2754,Coolant Temp,81,°C
+2757,RPM,746,RPM
+2757,Vehicle Speed,0,km/h
+2758,Intake Air Temp,51,°C
+2758,Throttle Position,12.9411764706,%
+2758,Fuel Level,54.9019607843,%
+2759,Battery Voltage,13.321,V
+2759,MAF,3.4,g/s
+2760,Engine Load,22.3529411765,%
+2760,Coolant Temp,81,°C
+2760,RPM,746.75,RPM
+2761,Vehicle Speed,0,km/h
+2761,Intake Air Temp,51,°C
+2762,Throttle Position,12.9411764706,%
+2762,Fuel Level,54.9019607843,%
+2763,Battery Voltage,13.341,V
+2763,MAF,3.42,g/s
+2763,Engine Load,21.9607843137,%
+2764,Coolant Temp,81,°C
+2764,RPM,750.75,RPM
+2765,Vehicle Speed,0,km/h
+2765,Intake Air Temp,51,°C
+2766,Throttle Position,12.9411764706,%
+2766,Fuel Level,54.9019607843,%
+2766,Battery Voltage,13.319,V
+2767,MAF,3.42,g/s
+2767,Engine Load,22.3529411765,%
+2768,Coolant Temp,82,°C
+2768,RPM,752.25,RPM
+2769,Vehicle Speed,0,km/h
+2769,Intake Air Temp,51,°C
+2770,Throttle Position,12.9411764706,%
+2770,Fuel Level,54.9019607843,%
+2770,Battery Voltage,13.339,V
+2771,MAF,3.38,g/s
+2771,Engine Load,21.568627451,%
+2772,Coolant Temp,82,°C
+2772,RPM,752,RPM
+2773,Vehicle Speed,0,km/h
+2773,Intake Air Temp,51,°C
+2774,Throttle Position,12.9411764706,%
+2774,Fuel Level,54.9019607843,%
+2775,Battery Voltage,13.316,V
+2775,MAF,3.38,g/s
+2776,Engine Load,21.9607843137,%
+2776,Coolant Temp,82,°C
+2777,RPM,750.5,RPM
+2777,Vehicle Speed,0,km/h
+2778,Intake Air Temp,51,°C
+2778,Throttle Position,12.9411764706,%
+2779,Fuel Level,54.9019607843,%
+2779,Battery Voltage,13.314,V
+2779,MAF,3.38,g/s
+2780,Engine Load,21.9607843137,%
+2780,Coolant Temp,82,°C
+2781,RPM,747.25,RPM
+2781,Vehicle Speed,0,km/h
+2782,Intake Air Temp,51,°C
+2782,Throttle Position,12.9411764706,%
+2782,Fuel Level,54.9019607843,%
+2783,Battery Voltage,13.334,V
+2783,MAF,3.44,g/s
+2784,Engine Load,22.3529411765,%
+2784,Coolant Temp,82,°C
+2785,RPM,742.75,RPM
+2785,Vehicle Speed,0,km/h
+2785,Intake Air Temp,51,°C
+2786,Throttle Position,12.9411764706,%
+2786,Fuel Level,54.9019607843,%
+2787,Battery Voltage,13.332,V
+2787,MAF,3.38,g/s
+2788,Engine Load,21.9607843137,%
+2788,Coolant Temp,82,°C
+2788,RPM,750.5,RPM
+2789,Vehicle Speed,0,km/h
+2789,Intake Air Temp,51,°C
+2790,Throttle Position,12.9411764706,%
+2790,Fuel Level,54.9019607843,%
+2791,Battery Voltage,13.319,V
+2791,MAF,3.42,g/s
+2792,Engine Load,21.9607843137,%
+2792,Coolant Temp,82,°C
+2793,RPM,754.75,RPM
+2794,Vehicle Speed,0,km/h
+2794,Intake Air Temp,51,°C
+2794,Throttle Position,12.9411764706,%
+2795,Fuel Level,54.9019607843,%
+2795,Battery Voltage,13.299,V
+2796,MAF,3.42,g/s
+2796,Engine Load,22.3529411765,%
+2797,Coolant Temp,82,°C
+2797,RPM,751.5,RPM
+2797,Vehicle Speed,0,km/h
+2798,Intake Air Temp,51,°C
+2798,Throttle Position,12.9411764706,%
+2799,Fuel Level,54.9019607843,%
+2799,Battery Voltage,13.318,V
+2800,MAF,3.38,g/s
+2800,Engine Load,22.3529411765,%
+2801,Coolant Temp,82,°C
+2801,RPM,746.25,RPM
+2804,Vehicle Speed,0,km/h
+2804,Intake Air Temp,51,°C
+2805,Throttle Position,12.9411764706,%
+2805,Fuel Level,54.9019607843,%
+2805,Battery Voltage,13.327,V
+2806,MAF,3.38,g/s
+2806,Engine Load,21.9607843137,%
+2807,Coolant Temp,82,°C
+2807,RPM,752,RPM
+2807,Vehicle Speed,0,km/h
+2808,Intake Air Temp,51,°C
+2808,Throttle Position,12.9411764706,%
+2809,Fuel Level,54.9019607843,%
+2810,Battery Voltage,13.333,V
+2810,MAF,3.4,g/s
+2811,Engine Load,21.9607843137,%
+2811,Coolant Temp,82,°C
+2812,RPM,747.5,RPM
+2812,Vehicle Speed,0,km/h
+2813,Intake Air Temp,51,°C
+2813,Throttle Position,12.9411764706,%
+2814,Fuel Level,54.9019607843,%
+2814,Battery Voltage,13.337,V
+2815,MAF,3.42,g/s
+2815,Engine Load,21.568627451,%
+2816,Coolant Temp,82,°C
+2816,RPM,750.25,RPM
+2816,Vehicle Speed,0,km/h
+2817,Intake Air Temp,51,°C
+2817,Throttle Position,12.9411764706,%
+2818,Fuel Level,54.9019607843,%
+2818,Battery Voltage,13.327,V
+2819,MAF,3.42,g/s
+2819,Engine Load,21.9607843137,%
+2820,Coolant Temp,82,°C
+2820,RPM,752.75,RPM
+2820,Vehicle Speed,0,km/h
+2821,Intake Air Temp,51,°C
+2821,Throttle Position,12.9411764706,%
+2822,Fuel Level,54.9019607843,%
+2822,Battery Voltage,13.345,V
+2823,MAF,3.42,g/s
+2823,Engine Load,21.9607843137,%
+2824,Coolant Temp,82,°C
+2824,RPM,756.5,RPM
+2824,Vehicle Speed,0,km/h
+2825,Intake Air Temp,51,°C
+2825,Throttle Position,12.9411764706,%
+2826,Fuel Level,54.9019607843,%
+2826,Battery Voltage,13.348,V
+2827,MAF,3.42,g/s
+2827,Engine Load,22.3529411765,%
+2827,Coolant Temp,82,°C
+2828,RPM,746.25,RPM
+2828,Vehicle Speed,0,km/h
+2829,Intake Air Temp,51,°C
+2829,Throttle Position,12.9411764706,%
+2830,Fuel Level,54.9019607843,%
+2830,Battery Voltage,13.356,V
+2831,MAF,3.42,g/s
+2831,Engine Load,21.9607843137,%
+2832,Coolant Temp,82,°C
+2832,RPM,752,RPM
+2832,Vehicle Speed,0,km/h
+2833,Intake Air Temp,51,°C
+2833,Throttle Position,12.9411764706,%
+2834,Fuel Level,54.9019607843,%
+2834,Battery Voltage,13.361,V
+2835,MAF,3.46,g/s
+2835,Engine Load,21.9607843137,%
+2835,Coolant Temp,82,°C
+2836,RPM,753.25,RPM
+2836,Vehicle Speed,0,km/h
+2837,Intake Air Temp,51,°C
+2837,Throttle Position,12.9411764706,%
+2838,Fuel Level,54.1176470588,%
+2838,Battery Voltage,13.342,V
+2839,MAF,3.44,g/s
+2839,Engine Load,22.3529411765,%
+2840,Coolant Temp,82,°C
+2840,RPM,743,RPM
+2841,Vehicle Speed,0,km/h
+2841,Intake Air Temp,51,°C
+2842,Throttle Position,12.9411764706,%
+2842,Fuel Level,54.1176470588,%
+2842,Battery Voltage,13.358,V
+2843,MAF,3.4,g/s
+2843,Engine Load,21.9607843137,%
+2844,Coolant Temp,82,°C
+2844,RPM,753.25,RPM
+2845,Vehicle Speed,0,km/h
+2846,Intake Air Temp,51,°C
+2847,Throttle Position,12.9411764706,%
+2848,Fuel Level,52.9411764706,%
+2849,Battery Voltage,13.345,V
+2849,MAF,3.44,g/s
+2850,Engine Load,22.3529411765,%
+2851,Coolant Temp,82,°C
+2852,RPM,755.75,RPM
+2852,Vehicle Speed,0,km/h
+2855,Intake Air Temp,51,°C
+2855,Throttle Position,12.9411764706,%
+2856,Fuel Level,54.1176470588,%
+2856,Battery Voltage,13.324,V
+2857,MAF,3.42,g/s
+2857,Engine Load,21.9607843137,%
+2858,Coolant Temp,82,°C
+2858,RPM,750,RPM
+2858,Vehicle Speed,0,km/h
+2859,Intake Air Temp,51,°C
+2859,Throttle Position,12.9411764706,%
+2860,Fuel Level,52.9411764706,%
+2860,Battery Voltage,13.332,V
+2861,MAF,3.38,g/s
+2861,Engine Load,22.3529411765,%
+2862,Coolant Temp,82,°C
+2862,RPM,743.75,RPM
+2862,Vehicle Speed,0,km/h
+2863,Intake Air Temp,51,°C
+2863,Throttle Position,12.9411764706,%
+2864,Fuel Level,52.9411764706,%
+2864,Battery Voltage,13.339,V
+2865,MAF,3.38,g/s
+2865,Engine Load,21.9607843137,%
+2866,Coolant Temp,82,°C
+2866,RPM,747,RPM
+2867,Vehicle Speed,0,km/h
+2867,Intake Air Temp,51,°C
+2868,Throttle Position,12.9411764706,%
+2868,Fuel Level,52.9411764706,%
+2869,Battery Voltage,13.32,V
+2869,MAF,3.38,g/s
+2870,Engine Load,21.568627451,%
+2870,Coolant Temp,82,°C
+2871,RPM,755.5,RPM
+2871,Vehicle Speed,0,km/h
+2872,Intake Air Temp,51,°C
+2872,Throttle Position,12.9411764706,%
+2872,Fuel Level,52.9411764706,%
+2873,Battery Voltage,13.318,V
+2873,MAF,3.38,g/s
+2874,Engine Load,21.568627451,%
+2874,Coolant Temp,82,°C
+2875,RPM,759.25,RPM
+2875,Vehicle Speed,0,km/h
+2876,Intake Air Temp,51,°C
+2876,Throttle Position,12.9411764706,%
+2877,Fuel Level,52.9411764706,%
+2877,Battery Voltage,13.337,V
+2878,MAF,3.42,g/s
+2878,Engine Load,22.3529411765,%
+2878,Coolant Temp,82,°C
+2879,RPM,747.5,RPM
+2879,Vehicle Speed,0,km/h
+2880,Intake Air Temp,51,°C
+2880,Throttle Position,12.9411764706,%
+2881,Fuel Level,52.9411764706,%
+2881,Battery Voltage,13.35,V
+2882,MAF,3.44,g/s
+2882,Engine Load,22.3529411765,%
+2882,Coolant Temp,82,°C
+2883,RPM,754.75,RPM
+2883,Vehicle Speed,0,km/h
+2884,Intake Air Temp,51,°C
+2884,Throttle Position,12.9411764706,%
+2885,Fuel Level,52.9411764706,%
+2885,Battery Voltage,13.348,V
+2885,MAF,3.4,g/s
+2886,Engine Load,21.9607843137,%
+2886,Coolant Temp,82,°C
+2887,RPM,753.25,RPM
+2887,Vehicle Speed,0,km/h
+2888,Intake Air Temp,51,°C
+2888,Throttle Position,12.9411764706,%
+2888,Fuel Level,52.9411764706,%
+2889,Battery Voltage,13.329,V
+2889,MAF,3.4,g/s
+2890,Engine Load,21.9607843137,%
+2890,Coolant Temp,82,°C
+2891,RPM,755.5,RPM
+2891,Vehicle Speed,0,km/h
+2892,Intake Air Temp,51,°C
+2892,Throttle Position,12.9411764706,%
+2893,Fuel Level,52.9411764706,%
+2893,Battery Voltage,13.337,V
+2894,MAF,3.38,g/s
+2894,Engine Load,21.568627451,%
+2894,Coolant Temp,82,°C
+2895,RPM,754.5,RPM
+2895,Vehicle Speed,0,km/h
+2896,Intake Air Temp,51,°C
+2896,Throttle Position,12.9411764706,%
+2897,Fuel Level,52.9411764706,%
+2897,Battery Voltage,13.315,V
+2898,MAF,3.38,g/s
+2898,Engine Load,21.9607843137,%
+2898,Coolant Temp,82,°C
+2899,RPM,755.5,RPM
+2899,Vehicle Speed,0,km/h
+2900,Intake Air Temp,51,°C
+2902,Throttle Position,12.9411764706,%
+2903,Fuel Level,52.9411764706,%
+2903,Battery Voltage,13.334,V
+2904,MAF,3.38,g/s
+2904,Engine Load,21.568627451,%
+2904,Coolant Temp,82,°C
+2905,RPM,759.5,RPM
+2905,Vehicle Speed,0,km/h
+2906,Intake Air Temp,51,°C
+2906,Throttle Position,12.9411764706,%
+2907,Fuel Level,52.9411764706,%
+2907,Battery Voltage,13.34,V
+2908,MAF,3.4,g/s
+2908,Engine Load,21.9607843137,%
+2908,Coolant Temp,82,°C
+2909,RPM,750.25,RPM
+2909,Vehicle Speed,0,km/h
+2910,Intake Air Temp,51,°C
+2911,Throttle Position,12.9411764706,%
+2911,Fuel Level,52.9411764706,%
+2912,Battery Voltage,13.327,V
+2912,MAF,3.38,g/s
+2913,Engine Load,21.568627451,%
+2913,Coolant Temp,82,°C
+2913,RPM,745,RPM
+2914,Vehicle Speed,0,km/h
+2914,Intake Air Temp,51,°C
+2915,Throttle Position,12.9411764706,%
+2916,Fuel Level,52.9411764706,%
+2917,Battery Voltage,13.342,V
+2917,MAF,3.38,g/s
+2918,Engine Load,21.9607843137,%
+2918,Coolant Temp,82,°C
+2919,RPM,750.5,RPM
+2919,Vehicle Speed,0,km/h
+2920,Intake Air Temp,51,°C
+2920,Throttle Position,12.9411764706,%
+2920,Fuel Level,52.9411764706,%
+2921,Battery Voltage,13.338,V
+2921,MAF,3.38,g/s
+2922,Engine Load,21.9607843137,%
+2922,Coolant Temp,82,°C
+2923,RPM,745.75,RPM
+2923,Vehicle Speed,0,km/h
+2924,Intake Air Temp,51,°C
+2924,Throttle Position,12.9411764706,%
+2925,Fuel Level,52.9411764706,%
+2925,Battery Voltage,13.348,V
+2925,MAF,3.42,g/s
+2926,Engine Load,21.568627451,%
+2926,Coolant Temp,83,°C
+2927,RPM,754,RPM
+2927,Vehicle Speed,0,km/h
+2928,Intake Air Temp,51,°C
+2928,Throttle Position,12.9411764706,%
+2929,Fuel Level,52.9411764706,%
+2929,Battery Voltage,13.349,V
+2929,MAF,3.38,g/s
+2930,Engine Load,21.9607843137,%
+2930,Coolant Temp,83,°C
+2931,RPM,753.75,RPM
+2931,Vehicle Speed,0,km/h
+2932,Intake Air Temp,51,°C
+2932,Throttle Position,12.9411764706,%
+2932,Fuel Level,52.9411764706,%
+2933,Battery Voltage,13.343,V
+2933,MAF,3.38,g/s
+2934,Engine Load,21.9607843137,%
+2934,Coolant Temp,83,°C
+2935,RPM,753,RPM
+2935,Vehicle Speed,0,km/h
+2935,Intake Air Temp,51,°C
+2936,Throttle Position,12.9411764706,%
+2936,Fuel Level,52.9411764706,%
+2937,Battery Voltage,13.335,V
+2937,MAF,3.4,g/s
+2937,Engine Load,21.9607843137,%
+2938,Coolant Temp,83,°C
+2939,RPM,749.75,RPM
+2939,Vehicle Speed,0,km/h
+2940,Intake Air Temp,51,°C
+2940,Throttle Position,12.9411764706,%
+2941,Fuel Level,52.9411764706,%
+2941,Battery Voltage,13.339,V
+2941,MAF,3.4,g/s
+2942,Engine Load,21.9607843137,%
+2942,Coolant Temp,83,°C
+2943,RPM,745,RPM
+2943,Vehicle Speed,0,km/h
+2944,Intake Air Temp,51,°C
+2944,Throttle Position,12.9411764706,%
+2945,Fuel Level,52.9411764706,%
+2945,Battery Voltage,13.349,V
+2945,MAF,3.4,g/s
+2946,Engine Load,22.3529411765,%
+2946,Coolant Temp,83,°C
+2947,RPM,743.25,RPM
+2947,Vehicle Speed,0,km/h
+2948,Intake Air Temp,51,°C
+2948,Throttle Position,12.9411764706,%
+2951,Fuel Level,52.9411764706,%
+2951,Battery Voltage,13.359,V
+2952,MAF,3.42,g/s
+2952,Engine Load,21.9607843137,%
+2953,Coolant Temp,83,°C
+2953,RPM,753.75,RPM
+2953,Vehicle Speed,0,km/h
+2954,Intake Air Temp,51,°C
+2954,Throttle Position,12.9411764706,%
+2955,Fuel Level,52.9411764706,%
+2955,Battery Voltage,13.334,V
+2956,MAF,3.38,g/s
+2956,Engine Load,22.3529411765,%
+2957,Coolant Temp,83,°C
+2957,RPM,755,RPM
+2958,Vehicle Speed,0,km/h
+2958,Intake Air Temp,51,°C
+2959,Throttle Position,12.9411764706,%
+2959,Fuel Level,52.9411764706,%
+2959,Battery Voltage,13.347,V
+2960,MAF,3.42,g/s
+2960,Engine Load,21.9607843137,%
+2961,Coolant Temp,83,°C
+2961,RPM,748,RPM
+2961,Vehicle Speed,0,km/h
+2962,Intake Air Temp,51,°C
+2962,Throttle Position,12.9411764706,%
+2963,Fuel Level,52.9411764706,%
+2963,Battery Voltage,13.319,V
+2964,MAF,3.38,g/s
+2964,Engine Load,21.9607843137,%
+2965,Coolant Temp,83,°C
+2965,RPM,747.25,RPM
+2966,Vehicle Speed,0,km/h
+2966,Intake Air Temp,51,°C
+2966,Throttle Position,12.9411764706,%
+2967,Fuel Level,52.9411764706,%
+2967,Battery Voltage,13.33,V
+2968,MAF,3.38,g/s
+2968,Engine Load,21.9607843137,%
+2969,Coolant Temp,83,°C
+2969,RPM,757,RPM
+2969,Vehicle Speed,0,km/h
+2970,Intake Air Temp,51,°C
+2970,Throttle Position,12.9411764706,%
+2971,Fuel Level,52.9411764706,%
+2971,Battery Voltage,13.343,V
+2972,MAF,3.44,g/s
+2972,Engine Load,21.9607843137,%
+2972,Coolant Temp,83,°C
+2973,RPM,753.75,RPM
+2973,Vehicle Speed,0,km/h
+2974,Intake Air Temp,51,°C
+2974,Throttle Position,12.9411764706,%
+2975,Fuel Level,52.9411764706,%
+2975,Battery Voltage,13.338,V
+2975,MAF,3.42,g/s
+2976,Engine Load,22.3529411765,%
+2976,Coolant Temp,83,°C
+2977,RPM,746,RPM
+2977,Vehicle Speed,0,km/h
+2978,Intake Air Temp,51,°C
+2978,Throttle Position,12.9411764706,%
+2979,Fuel Level,52.9411764706,%
+2979,Battery Voltage,13.343,V
+2980,MAF,3.38,g/s
+2980,Engine Load,21.9607843137,%
+2980,Coolant Temp,83,°C
+2981,RPM,751,RPM
+2982,Vehicle Speed,0,km/h
+2982,Intake Air Temp,51,°C
+2982,Throttle Position,12.9411764706,%
+2983,Fuel Level,52.9411764706,%
+2983,Battery Voltage,13.343,V
+2984,MAF,3.42,g/s
+2984,Engine Load,21.9607843137,%
+2985,Coolant Temp,83,°C
+2985,RPM,752,RPM
+2986,Vehicle Speed,0,km/h
+2986,Intake Air Temp,51,°C
+2987,Throttle Position,12.9411764706,%
+2987,Fuel Level,52.9411764706,%
+2987,Battery Voltage,13.337,V
+2988,MAF,3.42,g/s
+2988,Engine Load,21.9607843137,%
+2989,Coolant Temp,83,°C
+2989,RPM,756.25,RPM
+2990,Vehicle Speed,0,km/h
+2990,Intake Air Temp,51,°C
+2991,Throttle Position,12.9411764706,%
+2991,Fuel Level,52.9411764706,%
+2991,Battery Voltage,13.347,V
+2992,MAF,3.38,g/s
+2992,Engine Load,22.3529411765,%
+2993,Coolant Temp,83,°C
+2993,RPM,749.75,RPM
+2994,Vehicle Speed,0,km/h
+2994,Intake Air Temp,51,°C
+2994,Throttle Position,12.9411764706,%
+2995,Fuel Level,52.9411764706,%
+2998,Battery Voltage,13.354,V
+2998,MAF,3.38,g/s
+2998,Engine Load,21.9607843137,%
+2999,Coolant Temp,83,°C
+2999,RPM,751.25,RPM
+3000,Vehicle Speed,0,km/h
+3000,Intake Air Temp,51,°C
+3001,Throttle Position,12.9411764706,%
+3001,Fuel Level,52.9411764706,%
+3001,Battery Voltage,13.333,V
+3002,MAF,3.38,g/s
+3002,Engine Load,21.9607843137,%
+3003,Coolant Temp,83,°C
+3003,RPM,752.75,RPM
+3004,Vehicle Speed,0,km/h
+3004,Intake Air Temp,51,°C
+3004,Throttle Position,12.9411764706,%
+3005,Fuel Level,52.9411764706,%
+3005,Battery Voltage,13.33,V
+3006,MAF,3.37,g/s
+3006,Engine Load,21.9607843137,%
+3007,Coolant Temp,83,°C
+3007,RPM,746.25,RPM
+3007,Vehicle Speed,0,km/h
+3008,Intake Air Temp,51,°C
+3009,Throttle Position,12.9411764706,%
+3010,Fuel Level,52.9411764706,%
+3010,Battery Voltage,13.32,V
+3011,MAF,3.38,g/s
+3011,Engine Load,21.9607843137,%
+3012,Coolant Temp,83,°C
+3012,RPM,750.25,RPM
+3013,Vehicle Speed,0,km/h
+3013,Intake Air Temp,51,°C
+3014,Throttle Position,12.9411764706,%
+3014,Fuel Level,52.9411764706,%
+3015,Battery Voltage,13.325,V
+3015,MAF,3.38,g/s
+3016,Engine Load,21.9607843137,%
+3016,Coolant Temp,83,°C
+3017,RPM,749.75,RPM
+3017,Vehicle Speed,0,km/h
+3018,Intake Air Temp,51,°C
+3018,Throttle Position,12.9411764706,%
+3018,Fuel Level,52.9411764706,%
+3019,Battery Voltage,13.333,V
+3019,MAF,3.38,g/s
+3020,Engine Load,21.9607843137,%
+3020,Coolant Temp,83,°C
+3021,RPM,749,RPM
+3021,Vehicle Speed,0,km/h
+3021,Intake Air Temp,51,°C
+3022,Throttle Position,12.9411764706,%
+3022,Fuel Level,52.9411764706,%
+3023,Battery Voltage,13.35,V
+3023,MAF,3.42,g/s
+3024,Engine Load,21.9607843137,%
+3024,Coolant Temp,83,°C
+3024,RPM,751.25,RPM
+3025,Vehicle Speed,0,km/h
+3025,Intake Air Temp,51,°C
+3026,Throttle Position,12.9411764706,%
+3026,Fuel Level,52.9411764706,%
+3027,Battery Voltage,13.344,V
+3027,MAF,3.4,g/s
+3028,Engine Load,22.3529411765,%
+3028,Coolant Temp,83,°C
+3028,RPM,750.5,RPM
+3029,Vehicle Speed,0,km/h
+3030,Intake Air Temp,51,°C
+3030,Throttle Position,12.9411764706,%
+3031,Fuel Level,52.9411764706,%
+3031,Battery Voltage,13.339,V
+3031,MAF,3.38,g/s
+3032,Engine Load,21.9607843137,%
+3032,Coolant Temp,83,°C
+3033,RPM,753.25,RPM
+3034,Vehicle Speed,0,km/h
+3034,Intake Air Temp,50,°C
+3034,Throttle Position,12.9411764706,%
+3035,Fuel Level,52.9411764706,%
+3035,Battery Voltage,13.344,V
+3036,MAF,3.38,g/s
+3036,Engine Load,21.568627451,%
+3037,Coolant Temp,83,°C
+3037,RPM,752.5,RPM
+3038,Vehicle Speed,0,km/h
+3038,Intake Air Temp,50,°C
+3038,Throttle Position,12.9411764706,%
+3039,Fuel Level,52.9411764706,%
+3039,Battery Voltage,13.327,V
+3040,MAF,3.4,g/s
+3040,Engine Load,21.9607843137,%
+3041,Coolant Temp,83,°C
+3041,RPM,748,RPM
+3042,Vehicle Speed,0,km/h
+3042,Intake Air Temp,50,°C
+3043,Throttle Position,12.9411764706,%
+3043,Fuel Level,52.9411764706,%
+3044,Battery Voltage,13.316,V
+3046,MAF,3.35,g/s
+3047,Engine Load,21.568627451,%
+3047,Coolant Temp,83,°C
+3048,RPM,752.5,RPM
+3048,Vehicle Speed,0,km/h
+3048,Intake Air Temp,50,°C
+3049,Throttle Position,12.9411764706,%
+3049,Fuel Level,52.9411764706,%
+3050,Battery Voltage,13.322,V
+3050,MAF,3.38,g/s
+3051,Engine Load,21.9607843137,%
+3051,Coolant Temp,83,°C
+3052,RPM,746.25,RPM
+3052,Vehicle Speed,0,km/h
+3052,Intake Air Temp,50,°C
+3053,Throttle Position,12.9411764706,%
+3053,Fuel Level,52.9411764706,%
+3054,Battery Voltage,13.343,V
+3054,MAF,3.38,g/s
+3055,Engine Load,22.3529411765,%
+3055,Coolant Temp,83,°C
+3055,RPM,753.5,RPM
+3056,Vehicle Speed,0,km/h
+3057,Intake Air Temp,51,°C
+3057,Throttle Position,12.9411764706,%
+3057,Fuel Level,52.9411764706,%
+3058,Battery Voltage,13.31,V
+3058,MAF,3.37,g/s
+3059,Engine Load,21.9607843137,%
+3059,Coolant Temp,83,°C
+3060,RPM,751.75,RPM
+3060,Vehicle Speed,0,km/h
+3060,Intake Air Temp,50,°C
+3061,Throttle Position,12.9411764706,%
+3061,Fuel Level,52.9411764706,%
+3062,Battery Voltage,13.325,V
+3062,MAF,3.38,g/s
+3063,Engine Load,21.9607843137,%
+3063,Coolant Temp,83,°C
+3064,RPM,758,RPM
+3064,Vehicle Speed,0,km/h
+3064,Intake Air Temp,50,°C
+3065,Throttle Position,12.9411764706,%
+3065,Fuel Level,52.9411764706,%
+3066,Battery Voltage,13.312,V
+3069,MAF,3.37,g/s
+3069,Engine Load,21.9607843137,%
+3070,Coolant Temp,83,°C
+3070,RPM,751,RPM
+3071,Vehicle Speed,0,km/h
+3071,Intake Air Temp,50,°C
+3071,Throttle Position,12.9411764706,%
+3072,Fuel Level,52.9411764706,%
+3072,Battery Voltage,13.341,V
+3073,MAF,3.4,g/s
+3073,Engine Load,21.9607843137,%
+3074,Coolant Temp,83,°C
+3074,RPM,746.75,RPM
+3075,Vehicle Speed,0,km/h
+3075,Intake Air Temp,50,°C
+3075,Throttle Position,12.9411764706,%
+3076,Fuel Level,52.9411764706,%
+3076,Battery Voltage,13.333,V
+3077,MAF,3.37,g/s
+3077,Engine Load,21.568627451,%
+3078,Coolant Temp,83,°C
+3078,RPM,751.75,RPM
+3078,Vehicle Speed,0,km/h
+3079,Intake Air Temp,50,°C
+3079,Throttle Position,12.9411764706,%
+3080,Fuel Level,52.9411764706,%
+3080,Battery Voltage,13.353,V
+3081,MAF,3.4,g/s
+3084,Engine Load,21.9607843137,%
+3084,Coolant Temp,84,°C
+3085,RPM,747.5,RPM
+3085,Vehicle Speed,0,km/h
+3086,Intake Air Temp,50,°C
+3086,Throttle Position,12.9411764706,%
+3086,Fuel Level,52.9411764706,%
+3087,Battery Voltage,13.351,V
+3087,MAF,3.42,g/s
+3088,Engine Load,22.3529411765,%
+3088,Coolant Temp,84,°C
+3089,RPM,752.5,RPM
+3089,Vehicle Speed,0,km/h
+3090,Intake Air Temp,50,°C
+3090,Throttle Position,12.9411764706,%
+3091,Fuel Level,52.9411764706,%
+3091,Battery Voltage,13.343,V
+3091,MAF,3.38,g/s
+3092,Engine Load,21.9607843137,%
+3092,Coolant Temp,84,°C
+3093,RPM,747,RPM
+3093,Vehicle Speed,0,km/h
+3094,Intake Air Temp,50,°C
+3094,Throttle Position,12.9411764706,%
+3094,Fuel Level,52.9411764706,%
+3095,Battery Voltage,13.357,V
+3095,MAF,3.4,g/s
+3098,Engine Load,21.568627451,%
+3098,Coolant Temp,84,°C
+3099,RPM,754.75,RPM
+3099,Vehicle Speed,0,km/h
+3100,Intake Air Temp,50,°C
+3100,Throttle Position,12.9411764706,%
+3101,Fuel Level,52.9411764706,%
+3101,Battery Voltage,13.336,V
+3101,MAF,3.35,g/s
+3102,Engine Load,21.568627451,%
+3103,Coolant Temp,84,°C
+3103,RPM,754.75,RPM
+3104,Vehicle Speed,0,km/h
+3104,Intake Air Temp,50,°C
+3105,Throttle Position,12.9411764706,%
+3105,Fuel Level,52.9411764706,%
+3106,Battery Voltage,13.325,V
+3106,MAF,3.37,g/s
+3107,Engine Load,21.568627451,%
+3107,Coolant Temp,84,°C
+3107,RPM,759.25,RPM
+3108,Vehicle Speed,0,km/h
+3108,Intake Air Temp,50,°C
+3109,Throttle Position,12.9411764706,%
+3109,Fuel Level,52.9411764706,%
+3110,Battery Voltage,13.334,V
+3110,MAF,3.38,g/s
+3111,Engine Load,21.9607843137,%
+3111,Coolant Temp,84,°C
+3112,RPM,750.5,RPM
+3112,Vehicle Speed,0,km/h
+3112,Intake Air Temp,50,°C
+3113,Throttle Position,12.9411764706,%
+3113,Fuel Level,52.9411764706,%
+3114,Battery Voltage,13.311,V
+3114,MAF,3.37,g/s
+3115,Engine Load,21.9607843137,%
+3115,Coolant Temp,84,°C
+3115,RPM,749.75,RPM
+3116,Vehicle Speed,0,km/h
+3116,Intake Air Temp,50,°C
+3117,Throttle Position,12.9411764706,%
+3117,Fuel Level,52.9411764706,%
+3118,Battery Voltage,13.323,V
+3118,MAF,3.37,g/s
+3119,Engine Load,21.568627451,%
+3119,Coolant Temp,84,°C
+3120,RPM,751.5,RPM
+3120,Vehicle Speed,0,km/h
+3121,Intake Air Temp,50,°C
+3121,Throttle Position,12.9411764706,%
+3121,Fuel Level,52.9411764706,%
+3122,Battery Voltage,13.318,V
+3122,MAF,3.37,g/s
+3123,Engine Load,21.9607843137,%
+3123,Coolant Temp,84,°C
+3124,RPM,754.5,RPM
+3124,Vehicle Speed,0,km/h
+3124,Intake Air Temp,50,°C
+3125,Throttle Position,12.9411764706,%
+3125,Fuel Level,52.9411764706,%
+3126,Battery Voltage,13.337,V
+3126,MAF,3.35,g/s
+3127,Engine Load,21.568627451,%
+3127,Coolant Temp,84,°C
+3127,RPM,751.25,RPM
+3128,Vehicle Speed,0,km/h
+3128,Intake Air Temp,50,°C
+3129,Throttle Position,12.9411764706,%
+3129,Fuel Level,52.9411764706,%
+3130,Battery Voltage,13.349,V
+3130,MAF,3.37,g/s
+3131,Engine Load,21.9607843137,%
+3131,Coolant Temp,84,°C
+3132,RPM,749,RPM
+3132,Vehicle Speed,0,km/h
+3133,Intake Air Temp,50,°C
+3133,Throttle Position,12.9411764706,%
+3134,Fuel Level,52.9411764706,%
+3134,Battery Voltage,13.346,V
+3135,MAF,3.35,g/s
+3135,Engine Load,21.9607843137,%
+3135,Coolant Temp,84,°C
+3136,RPM,751.75,RPM
+3136,Vehicle Speed,0,km/h
+3137,Intake Air Temp,50,°C
+3137,Throttle Position,12.9411764706,%
+3138,Fuel Level,52.9411764706,%
+3138,Battery Voltage,13.37,V
+3138,MAF,3.37,g/s
+3139,Engine Load,21.9607843137,%
+3139,Coolant Temp,84,°C
+3140,RPM,751,RPM
+3140,Vehicle Speed,0,km/h
+3141,Intake Air Temp,50,°C
+3141,Throttle Position,12.9411764706,%
+3141,Fuel Level,52.9411764706,%
+3142,Battery Voltage,13.347,V
+3142,MAF,3.37,g/s
+3143,Engine Load,21.9607843137,%
+3145,Coolant Temp,84,°C
+3146,RPM,752.25,RPM
+3147,Vehicle Speed,0,km/h
+3147,Intake Air Temp,50,°C
+3147,Throttle Position,12.9411764706,%
+3148,Fuel Level,54.1176470588,%
+3148,Battery Voltage,13.361,V
+3149,MAF,3.38,g/s
+3149,Engine Load,22.3529411765,%
+3150,Coolant Temp,84,°C
+3150,RPM,754.75,RPM
+3151,Vehicle Speed,0,km/h
+3151,Intake Air Temp,50,°C
+3151,Throttle Position,12.9411764706,%
+3152,Fuel Level,54.1176470588,%
+3152,Battery Voltage,13.372,V
+3153,MAF,3.38,g/s
+3153,Engine Load,21.9607843137,%
+3154,Coolant Temp,84,°C
+3154,RPM,757.25,RPM
+3154,Vehicle Speed,0,km/h
+3155,Intake Air Temp,50,°C
+3155,Throttle Position,12.9411764706,%
+3156,Fuel Level,54.1176470588,%
+3156,Battery Voltage,13.347,V
+3157,MAF,3.37,g/s
+3157,Engine Load,21.9607843137,%
+3158,Coolant Temp,84,°C
+3158,RPM,749,RPM
+3159,Vehicle Speed,0,km/h
+3159,Intake Air Temp,50,°C
+3159,Throttle Position,12.9411764706,%
+3160,Fuel Level,54.1176470588,%
+3160,Battery Voltage,13.353,V
+3161,MAF,3.37,g/s
+3161,Engine Load,21.9607843137,%
+3162,Coolant Temp,84,°C
+3162,RPM,748,RPM
+3163,Vehicle Speed,0,km/h
+3163,Intake Air Temp,50,°C
+3163,Throttle Position,12.9411764706,%
+3164,Fuel Level,54.1176470588,%
+3164,Battery Voltage,13.334,V
+3165,MAF,3.33,g/s
+3165,Engine Load,21.568627451,%
+3166,Coolant Temp,84,°C
+3166,RPM,751.5,RPM
+3166,Vehicle Speed,0,km/h
+3167,Intake Air Temp,50,°C
+3167,Throttle Position,12.9411764706,%
+3168,Fuel Level,54.1176470588,%
+3168,Battery Voltage,13.344,V
+3169,MAF,3.33,g/s
+3169,Engine Load,21.568627451,%
+3170,Coolant Temp,84,°C
+3170,RPM,753.5,RPM
+3171,Vehicle Speed,0,km/h
+3171,Intake Air Temp,50,°C
+3171,Throttle Position,12.9411764706,%
+3172,Fuel Level,54.1176470588,%
+3172,Battery Voltage,13.326,V
+3173,MAF,3.33,g/s
+3173,Engine Load,21.568627451,%
+3174,Coolant Temp,84,°C
+3174,RPM,752,RPM
+3174,Vehicle Speed,0,km/h
+3175,Intake Air Temp,50,°C
+3175,Throttle Position,12.9411764706,%
+3176,Fuel Level,54.1176470588,%
+3176,Battery Voltage,13.346,V
+3177,MAF,3.35,g/s
+3177,Engine Load,21.9607843137,%
+3178,Coolant Temp,84,°C
+3178,RPM,752,RPM
+3179,Vehicle Speed,0,km/h
+3179,Intake Air Temp,50,°C
+3180,Throttle Position,12.9411764706,%
+3180,Fuel Level,54.1176470588,%
+3180,Battery Voltage,13.323,V
+3181,MAF,3.35,g/s
+3181,Engine Load,21.9607843137,%
+3182,Coolant Temp,84,°C
+3182,RPM,749.5,RPM
+3183,Vehicle Speed,0,km/h
+3183,Intake Air Temp,50,°C
+3183,Throttle Position,12.9411764706,%
+3184,Fuel Level,54.1176470588,%
+3184,Battery Voltage,13.349,V
+3185,MAF,3.37,g/s
+3185,Engine Load,21.9607843137,%
+3186,Coolant Temp,84,°C
+3186,RPM,753,RPM
+3187,Vehicle Speed,0,km/h
+3187,Intake Air Temp,50,°C
+3188,Throttle Position,12.9411764706,%
+3188,Fuel Level,54.1176470588,%
+3189,Battery Voltage,13.33,V
+3190,MAF,3.38,g/s
+3190,Engine Load,21.9607843137,%
+3191,Coolant Temp,84,°C
+3193,RPM,758.75,RPM
+3194,Vehicle Speed,0,km/h
+3195,Intake Air Temp,50,°C
+3195,Throttle Position,12.9411764706,%
+3195,Fuel Level,54.1176470588,%
+3196,Battery Voltage,13.334,V
+3196,MAF,3.35,g/s
+3197,Engine Load,21.568627451,%
+3197,Coolant Temp,84,°C
+3198,RPM,752.75,RPM
+3198,Vehicle Speed,0,km/h
+3199,Intake Air Temp,50,°C
+3199,Throttle Position,12.9411764706,%
+3199,Fuel Level,54.1176470588,%
+3200,Battery Voltage,13.341,V
+3200,MAF,3.33,g/s
+3201,Engine Load,21.9607843137,%
+3201,Coolant Temp,84,°C
+3202,RPM,747,RPM
+3202,Vehicle Speed,0,km/h
+3203,Intake Air Temp,50,°C
+3203,Throttle Position,12.9411764706,%
+3204,Fuel Level,54.1176470588,%
+3204,Battery Voltage,13.319,V
+3204,MAF,3.33,g/s
+3205,Engine Load,21.568627451,%
+3205,Coolant Temp,84,°C
+3206,RPM,751,RPM
+3206,Vehicle Speed,0,km/h
+3206,Intake Air Temp,50,°C
+3207,Throttle Position,12.9411764706,%
+3207,Fuel Level,54.1176470588,%
+3208,Battery Voltage,13.332,V
+3208,MAF,3.35,g/s
+3209,Engine Load,21.568627451,%
+3209,Coolant Temp,84,°C
+3210,RPM,750,RPM
+3210,Vehicle Speed,0,km/h
+3210,Intake Air Temp,50,°C
+3211,Throttle Position,12.9411764706,%
+3211,Fuel Level,54.1176470588,%
+3212,Battery Voltage,13.323,V
+3212,MAF,3.33,g/s
+3213,Engine Load,21.568627451,%
+3213,Coolant Temp,84,°C
+3213,RPM,752.25,RPM
+3214,Vehicle Speed,0,km/h
+3215,Intake Air Temp,50,°C
+3215,Throttle Position,12.9411764706,%
+3215,Fuel Level,54.1176470588,%
+3216,Battery Voltage,13.343,V
+3217,MAF,3.35,g/s
+3217,Engine Load,21.9607843137,%
+3218,Coolant Temp,84,°C
+3218,RPM,749.75,RPM
+3219,Vehicle Speed,0,km/h
+3219,Intake Air Temp,50,°C
+3220,Throttle Position,12.9411764706,%
+3220,Fuel Level,54.1176470588,%
+3220,Battery Voltage,13.333,V
+3221,MAF,3.35,g/s
+3221,Engine Load,21.568627451,%
+3222,Coolant Temp,84,°C
+3222,RPM,749.75,RPM
+3223,Vehicle Speed,0,km/h
+3223,Intake Air Temp,50,°C
+3223,Throttle Position,12.9411764706,%
+3224,Fuel Level,54.1176470588,%
+3224,Battery Voltage,13.309,V
+3225,MAF,3.35,g/s
+3226,Engine Load,21.568627451,%
+3226,Coolant Temp,84,°C
+3227,RPM,757.25,RPM
+3227,Vehicle Speed,0,km/h
+3227,Intake Air Temp,50,°C
+3228,Throttle Position,12.9411764706,%
+3228,Fuel Level,54.1176470588,%
+3229,Battery Voltage,13.334,V
+3229,MAF,3.35,g/s
+3230,Engine Load,21.9607843137,%
+3230,Coolant Temp,84,°C
+3230,RPM,748.75,RPM
+3231,Vehicle Speed,0,km/h
+3231,Intake Air Temp,50,°C
+3232,Throttle Position,12.9411764706,%
+3232,Fuel Level,54.1176470588,%
+3233,Battery Voltage,13.303,V
+3233,MAF,3.31,g/s
+3234,Engine Load,21.568627451,%
+3234,Coolant Temp,84,°C
+3234,RPM,750.25,RPM
+3235,Vehicle Speed,0,km/h
+3235,Intake Air Temp,50,°C
+3236,Throttle Position,12.9411764706,%
+3236,Fuel Level,54.1176470588,%
+3237,Battery Voltage,13.322,V
+3237,MAF,3.37,g/s
+3237,Engine Load,21.9607843137,%
+3238,Coolant Temp,84,°C
+3240,RPM,757.25,RPM
+3241,Vehicle Speed,0,km/h
+3241,Intake Air Temp,50,°C
+3241,Throttle Position,12.9411764706,%
+3242,Fuel Level,54.1176470588,%
+3242,Battery Voltage,13.318,V
+3243,MAF,3.35,g/s
+3243,Engine Load,21.568627451,%
+3244,Coolant Temp,84,°C
+3244,RPM,756,RPM
+3244,Vehicle Speed,0,km/h
+3245,Intake Air Temp,50,°C
+3245,Throttle Position,12.9411764706,%
+3246,Fuel Level,54.1176470588,%
+3246,Battery Voltage,13.326,V
+3247,MAF,3.33,g/s
+3247,Engine Load,21.568627451,%
+3248,Coolant Temp,84,°C
+3248,RPM,750,RPM
+3249,Vehicle Speed,0,km/h
+3249,Intake Air Temp,50,°C
+3249,Throttle Position,12.9411764706,%
+3250,Fuel Level,54.1176470588,%
+3250,Battery Voltage,13.343,V
+3251,MAF,3.37,g/s
+3251,Engine Load,21.9607843137,%
+3251,Coolant Temp,84,°C
+3252,RPM,744.25,RPM
+3252,Vehicle Speed,0,km/h
+3253,Intake Air Temp,50,°C
+3253,Throttle Position,12.9411764706,%
+3254,Fuel Level,54.1176470588,%
+3254,Battery Voltage,13.358,V
+3254,MAF,3.37,g/s
+3255,Engine Load,21.9607843137,%
+3255,Coolant Temp,85,°C
+3256,RPM,748.25,RPM
+3256,Vehicle Speed,0,km/h
+3257,Intake Air Temp,50,°C
+3257,Throttle Position,12.9411764706,%
+3257,Fuel Level,54.1176470588,%
+3258,Battery Voltage,13.36,V
+3258,MAF,3.38,g/s
+3259,Engine Load,21.9607843137,%
+3259,Coolant Temp,85,°C
+3259,RPM,748.25,RPM
+3260,Vehicle Speed,0,km/h
+3260,Intake Air Temp,50,°C
+3260,Throttle Position,12.9411764706,%
+3261,Fuel Level,54.1176470588,%
+3261,Battery Voltage,13.331,V
+3262,MAF,3.35,g/s
+3262,Engine Load,21.568627451,%
+3262,Coolant Temp,85,°C
+3263,RPM,759.75,RPM
+3263,Vehicle Speed,0,km/h
+3264,Intake Air Temp,50,°C
+3264,Throttle Position,12.9411764706,%
+3264,Fuel Level,54.1176470588,%
+3265,Battery Voltage,13.367,V
+3265,MAF,3.35,g/s
+3266,Engine Load,21.568627451,%
+3266,Coolant Temp,85,°C
+3266,RPM,757.25,RPM
+3267,Vehicle Speed,0,km/h
+3267,Intake Air Temp,50,°C
+3268,Throttle Position,12.9411764706,%
+3268,Fuel Level,54.1176470588,%
+3269,Battery Voltage,13.357,V
+3269,MAF,3.4,g/s
+3270,Engine Load,21.9607843137,%
+3270,Coolant Temp,85,°C
+3271,RPM,749.25,RPM
+3271,Vehicle Speed,0,km/h
+3272,Intake Air Temp,50,°C
+3272,Throttle Position,12.9411764706,%
+3272,Fuel Level,54.1176470588,%
+3273,Battery Voltage,13.328,V
+3273,MAF,3.35,g/s
+3274,Engine Load,21.9607843137,%
+3274,Coolant Temp,85,°C
+3275,RPM,750,RPM
+3275,Vehicle Speed,0,km/h
+3276,Intake Air Temp,50,°C
+3276,Throttle Position,12.9411764706,%
+3277,Fuel Level,54.1176470588,%
+3277,Battery Voltage,13.333,V
+3277,MAF,3.33,g/s
+3278,Engine Load,21.9607843137,%
+3278,Coolant Temp,85,°C
+3279,RPM,748.25,RPM
+3279,Vehicle Speed,0,km/h
+3280,Intake Air Temp,50,°C
+3280,Throttle Position,12.9411764706,%
+3280,Fuel Level,54.1176470588,%
+3281,Battery Voltage,13.339,V
+3281,MAF,3.33,g/s
+3282,Engine Load,21.568627451,%
+3282,Coolant Temp,85,°C
+3282,RPM,748.75,RPM
+3285,Vehicle Speed,0,km/h
+3285,Intake Air Temp,50,°C
+3286,Throttle Position,12.9411764706,%
+3286,Fuel Level,54.1176470588,%
+3286,Battery Voltage,13.344,V
+3287,MAF,3.33,g/s
+3287,Engine Load,21.568627451,%
+3288,Coolant Temp,85,°C
+3288,RPM,750,RPM
+3288,Vehicle Speed,0,km/h
+3289,Intake Air Temp,50,°C
+3289,Throttle Position,12.9411764706,%
+3290,Fuel Level,54.1176470588,%
+3290,Battery Voltage,13.332,V
+3290,MAF,3.37,g/s
+3291,Engine Load,21.568627451,%
+3291,Coolant Temp,85,°C
+3292,RPM,752.5,RPM
+3292,Vehicle Speed,0,km/h
+3293,Intake Air Temp,50,°C
+3293,Throttle Position,12.9411764706,%
+3294,Fuel Level,54.1176470588,%
+3294,Battery Voltage,13.332,V
+3295,MAF,3.37,g/s
+3295,Engine Load,21.9607843137,%
+3295,Coolant Temp,85,°C
+3296,RPM,754.5,RPM
+3296,Vehicle Speed,0,km/h
+3296,Intake Air Temp,50,°C
+3297,Throttle Position,12.9411764706,%
+3297,Fuel Level,54.1176470588,%
+3298,Battery Voltage,13.322,V
+3298,MAF,3.33,g/s
+3299,Engine Load,21.9607843137,%
+3300,Coolant Temp,85,°C
+3300,RPM,747.75,RPM
+3301,Vehicle Speed,0,km/h
+3302,Intake Air Temp,50,°C
+3302,Throttle Position,12.9411764706,%
+3303,Fuel Level,54.1176470588,%
+3304,Battery Voltage,13.315,V
+3304,MAF,3.35,g/s
+3306,Engine Load,21.9607843137,%
+3307,Coolant Temp,85,°C
+3308,RPM,754.25,RPM
+3309,Vehicle Speed,0,km/h
+3321,Intake Air Temp,50,°C
+3324,Throttle Position,12.9411764706,%
+3325,Fuel Level,54.1176470588,%
+3326,Battery Voltage,13.322,V
+3327,MAF,3.33,g/s
+3328,Engine Load,21.568627451,%
+3329,Coolant Temp,85,°C
+3329,RPM,759,RPM
+3330,Vehicle Speed,0,km/h
+3331,Intake Air Temp,50,°C
+3332,Throttle Position,12.9411764706,%
+3333,Fuel Level,54.1176470588,%
+3334,Battery Voltage,13.325,V
+3334,MAF,3.35,g/s
+3335,Engine Load,21.568627451,%
+3353,Coolant Temp,85,°C
+3356,RPM,755,RPM
+3357,Vehicle Speed,0,km/h
+3358,Intake Air Temp,50,°C
+3360,Throttle Position,12.9411764706,%
+3361,Fuel Level,54.1176470588,%
+3362,Battery Voltage,13.338,V
+3363,MAF,3.38,g/s
+3364,Engine Load,21.9607843137,%
+3365,Coolant Temp,85,°C
+3366,RPM,752.25,RPM
+3367,Vehicle Speed,0,km/h
+3368,Intake Air Temp,50,°C
+3369,Throttle Position,12.9411764706,%
+3370,Fuel Level,54.1176470588,%
+3371,Battery Voltage,13.343,V
+3372,MAF,3.35,g/s
+3374,Engine Load,21.568627451,%
+3375,Coolant Temp,85,°C
+3376,RPM,755.75,RPM
+3377,Vehicle Speed,0,km/h
+3378,Intake Air Temp,50,°C
+3379,Throttle Position,12.9411764706,%
+3381,Fuel Level,54.1176470588,%
+3382,Battery Voltage,13.32,V
+3383,MAF,3.33,g/s
+3384,Engine Load,21.9607843137,%
+3385,Coolant Temp,85,°C
+3386,RPM,749,RPM
+3387,Vehicle Speed,0,km/h
+3388,Intake Air Temp,50,°C
+3389,Throttle Position,12.9411764706,%
+3390,Fuel Level,54.1176470588,%
+3391,Battery Voltage,13.347,V
+3393,MAF,3.33,g/s
+3394,Engine Load,21.1764705882,%
+3395,Coolant Temp,85,°C
+3396,RPM,752,RPM
+3397,Vehicle Speed,0,km/h
+3408,Intake Air Temp,50,°C
+3414,Throttle Position,12.9411764706,%
+3416,Fuel Level,54.1176470588,%
+3417,Battery Voltage,13.335,V
+3418,MAF,3.38,g/s
+3420,Engine Load,21.568627451,%
+3421,Coolant Temp,85,°C
+3422,RPM,752.75,RPM
+3423,Vehicle Speed,0,km/h
+3423,Intake Air Temp,50,°C
+3424,Throttle Position,12.9411764706,%
+3425,Fuel Level,54.1176470588,%
+3425,Battery Voltage,13.332,V
+3427,MAF,3.33,g/s
+3427,Engine Load,21.9607843137,%
+3428,Coolant Temp,85,°C
+3429,RPM,751.25,RPM
+3430,Vehicle Speed,0,km/h
+3431,Intake Air Temp,50,°C
+3431,Throttle Position,12.9411764706,%
+3432,Fuel Level,54.1176470588,%
+3433,Battery Voltage,13.34,V
+3433,MAF,3.35,g/s
+3434,Engine Load,21.1764705882,%
+3435,Coolant Temp,85,°C
+3435,RPM,749.75,RPM
+3436,Vehicle Speed,0,km/h
+3437,Intake Air Temp,50,°C
+3437,Throttle Position,12.9411764706,%
+3438,Fuel Level,54.1176470588,%
+3438,Battery Voltage,13.32,V
+3439,MAF,3.37,g/s
+3440,Engine Load,21.9607843137,%
+3440,Coolant Temp,85,°C
+3441,RPM,748,RPM
+3442,Vehicle Speed,0,km/h
+3443,Intake Air Temp,50,°C
+3444,Throttle Position,12.9411764706,%
+3444,Fuel Level,54.1176470588,%
+3445,Battery Voltage,13.332,V
+3445,MAF,3.37,g/s
+3446,Engine Load,21.9607843137,%
+3447,Coolant Temp,85,°C
+3447,RPM,747.25,RPM
+3448,Vehicle Speed,0,km/h
+3449,Intake Air Temp,50,°C
+3449,Throttle Position,12.9411764706,%
+3450,Fuel Level,54.1176470588,%
+3451,Battery Voltage,13.331,V
+3451,MAF,3.35,g/s
+3452,Engine Load,21.568627451,%
+3453,Coolant Temp,85,°C
+3453,RPM,754.25,RPM
+3454,Vehicle Speed,0,km/h
+3455,Intake Air Temp,50,°C
+3455,Throttle Position,12.9411764706,%
+3456,Fuel Level,54.1176470588,%
+3457,Battery Voltage,13.352,V
+3458,MAF,3.38,g/s
+3458,Engine Load,21.9607843137,%
+3459,Coolant Temp,85,°C
+3460,RPM,755.75,RPM
+3460,Vehicle Speed,0,km/h
+3461,Intake Air Temp,50,°C
+3461,Throttle Position,12.9411764706,%
+3462,Fuel Level,54.1176470588,%
+3463,Battery Voltage,13.331,V
+3463,MAF,3.37,g/s
+3464,Engine Load,21.9607843137,%
+3465,Coolant Temp,85,°C
+3465,RPM,753.25,RPM
+3466,Vehicle Speed,0,km/h
+3467,Intake Air Temp,50,°C
+3467,Throttle Position,12.9411764706,%
+3468,Fuel Level,54.1176470588,%
+3468,Battery Voltage,13.32,V
+3469,MAF,3.33,g/s
+3470,Engine Load,21.1764705882,%
+3471,Coolant Temp,85,°C
+3471,RPM,749.75,RPM
+3472,Vehicle Speed,0,km/h
+3472,Intake Air Temp,50,°C
+3473,Throttle Position,12.9411764706,%
+3473,Fuel Level,54.1176470588,%
+3474,Battery Voltage,13.319,V
+3475,MAF,3.35,g/s
+3475,Engine Load,21.568627451,%
+3476,Coolant Temp,85,°C
+3476,RPM,749.75,RPM
+3477,Vehicle Speed,0,km/h
+3478,Intake Air Temp,50,°C
+3478,Throttle Position,12.9411764706,%
+3479,Fuel Level,54.1176470588,%
+3480,Battery Voltage,13.315,V
+3480,MAF,3.33,g/s
+3481,Engine Load,21.568627451,%
+3481,Coolant Temp,85,°C
+3482,RPM,753.75,RPM
+3483,Vehicle Speed,0,km/h
+3483,Intake Air Temp,50,°C
+3488,Throttle Position,12.9411764706,%
+3489,Fuel Level,54.1176470588,%
+3490,Battery Voltage,13.339,V
+3490,MAF,3.35,g/s
+3491,Engine Load,21.568627451,%
+3491,Coolant Temp,85,°C
+3492,RPM,752.75,RPM
+3493,Vehicle Speed,0,km/h
+3494,Intake Air Temp,50,°C
+3494,Throttle Position,12.9411764706,%
+3495,Fuel Level,54.1176470588,%
+3495,Battery Voltage,13.352,V
+3496,MAF,3.37,g/s
+3497,Engine Load,21.568627451,%
+3497,Coolant Temp,85,°C
+3498,RPM,748.5,RPM
+3499,Vehicle Speed,0,km/h
+3500,Intake Air Temp,50,°C
+3500,Throttle Position,12.9411764706,%
+3501,Fuel Level,54.1176470588,%
+3502,Battery Voltage,13.335,V
+3502,MAF,3.33,g/s
+3503,Engine Load,21.568627451,%
+3503,Coolant Temp,85,°C
+3504,RPM,744.25,RPM
+3505,Vehicle Speed,0,km/h
+3505,Intake Air Temp,50,°C
+3506,Throttle Position,12.9411764706,%
+3507,Fuel Level,54.1176470588,%
+3507,Battery Voltage,13.332,V
+3508,MAF,3.33,g/s
+3509,Engine Load,21.568627451,%
+3510,Coolant Temp,85,°C
+3510,RPM,753.75,RPM
+3511,Vehicle Speed,0,km/h
+3511,Intake Air Temp,50,°C
+3512,Throttle Position,12.9411764706,%
+3513,Fuel Level,54.1176470588,%
+3513,Battery Voltage,13.341,V
+3514,MAF,3.35,g/s
+3515,Engine Load,21.568627451,%
+3515,Coolant Temp,85,°C
+3516,RPM,748.75,RPM
+3516,Vehicle Speed,0,km/h
+3517,Intake Air Temp,50,°C
+3518,Throttle Position,12.9411764706,%
+3518,Fuel Level,54.1176470588,%
+3519,Battery Voltage,13.344,V
+3520,MAF,3.33,g/s
+3520,Engine Load,21.9607843137,%
+3521,Coolant Temp,85,°C
+3521,RPM,753,RPM
+3522,Vehicle Speed,0,km/h
+3523,Intake Air Temp,50,°C
+3523,Throttle Position,12.9411764706,%
+3524,Fuel Level,54.1176470588,%
+3525,Battery Voltage,13.327,V
+3526,MAF,3.35,g/s
+3526,Engine Load,21.568627451,%
+3527,Coolant Temp,85,°C
+3527,RPM,749.25,RPM
+3528,Vehicle Speed,0,km/h
+3529,Intake Air Temp,50,°C
+3529,Throttle Position,12.9411764706,%
+3530,Fuel Level,54.1176470588,%
+3531,Battery Voltage,13.341,V
+3531,MAF,3.35,g/s
+3532,Engine Load,21.568627451,%
+3533,Coolant Temp,85,°C
+3533,RPM,752,RPM
+3534,Vehicle Speed,0,km/h
+3534,Intake Air Temp,50,°C
+3535,Throttle Position,12.9411764706,%
+3536,Fuel Level,54.1176470588,%
+3536,Battery Voltage,13.329,V
+3537,MAF,3.33,g/s
+3538,Engine Load,21.9607843137,%
+3538,Coolant Temp,85,°C
+3539,RPM,746.25,RPM
+3540,Vehicle Speed,0,km/h
+3540,Intake Air Temp,50,°C
+3541,Throttle Position,12.9411764706,%
+3542,Fuel Level,54.1176470588,%
+3542,Battery Voltage,13.313,V
+3543,MAF,3.33,g/s
+3543,Engine Load,21.568627451,%
+3544,Coolant Temp,85,°C
+3545,RPM,747,RPM
+3546,Vehicle Speed,0,km/h
+3546,Intake Air Temp,50,°C
+3547,Throttle Position,12.9411764706,%
+3548,Fuel Level,54.1176470588,%
+3548,Battery Voltage,13.298,V
+3549,MAF,3.31,g/s
+3550,Engine Load,21.9607843137,%
+3550,Coolant Temp,85,°C
+3551,RPM,749.75,RPM
+3552,Vehicle Speed,0,km/h
+3552,Intake Air Temp,50,°C
+3553,Throttle Position,12.9411764706,%
+3557,Fuel Level,54.1176470588,%
+3558,Battery Voltage,13.347,V
+3558,MAF,3.37,g/s
+3559,Engine Load,21.568627451,%
+3560,Coolant Temp,85,°C
+3560,RPM,754,RPM
+3561,Vehicle Speed,0,km/h
+3561,Intake Air Temp,50,°C
+3562,Throttle Position,12.9411764706,%
+3563,Fuel Level,54.1176470588,%
+3563,Battery Voltage,13.346,V
+3564,MAF,3.38,g/s
+3565,Engine Load,21.568627451,%
+3565,Coolant Temp,85,°C
+3566,RPM,755.25,RPM
+3567,Vehicle Speed,0,km/h
+3567,Intake Air Temp,50,°C
+3568,Throttle Position,12.9411764706,%
+3569,Fuel Level,54.1176470588,%
+3569,Battery Voltage,13.312,V
+3570,MAF,3.4,g/s
+3570,Engine Load,22.3529411765,%
+3571,Coolant Temp,86,°C
+3572,RPM,751.75,RPM
+3572,Vehicle Speed,0,km/h
+3573,Intake Air Temp,50,°C
+3574,Throttle Position,12.9411764706,%
+3574,Fuel Level,54.1176470588,%
+3575,Battery Voltage,13.345,V
+3575,Fuel Level,100,%
+3576,Battery Voltage,12.31,V
+3577,MAF,0.14,g/s
+3577,Engine Load,0,%
+3578,Coolant Temp,85,°C
+3579,RPM,0,RPM
+3579,Vehicle Speed,0,km/h
+3580,Intake Air Temp,53,°C
+3581,Throttle Position,21.9607843137,%
+3582,Fuel Level,52.9411764706,%
+3582,Battery Voltage,10.165,V
+3583,MAF,0.91,g/s
+3584,Engine Load,0,%
+3584,Coolant Temp,85,°C
+3585,RPM,0,RPM
+3586,Vehicle Speed,0,km/h
+3586,Intake Air Temp,53,°C
+3587,Throttle Position,21.9607843137,%
+3588,Fuel Level,54.1176470588,%
+3588,Battery Voltage,10.187,V
+3589,MAF,0,g/s
+3590,Engine Load,45.0980392157,%
+3590,Coolant Temp,85,°C
+3591,RPM,189.25,RPM
+3592,Vehicle Speed,0,km/h
+3592,Intake Air Temp,53,°C
+3593,Throttle Position,21.9607843137,%
+3594,Fuel Level,54.1176470588,%
+3594,Battery Voltage,10.918,V
+3595,MAF,5.17,g/s
+3596,Engine Load,41.1764705882,%
+3596,Coolant Temp,85,°C
+3597,RPM,860,RPM
+3598,Vehicle Speed,0,km/h
+3607,Intake Air Temp,53,°C
+3608,Throttle Position,10.5882352941,%
+3609,Fuel Level,52.9411764706,%
+3609,Battery Voltage,11.698,V
+3610,MAF,1.46,g/s
+3611,Engine Load,18.0392156863,%
+3612,Coolant Temp,85,°C
+3613,RPM,1044.25,RPM
+3613,Vehicle Speed,0,km/h
+3614,Intake Air Temp,53,°C
+3614,Throttle Position,13.3333333333,%
+3615,Fuel Level,52.9411764706,%
+3616,Battery Voltage,11.833,V
+3616,MAF,2.17,g/s
+3617,Engine Load,11.3725490196,%
+3618,Coolant Temp,85,°C
+3618,RPM,1064.75,RPM
+3619,Vehicle Speed,0,km/h
+3620,Intake Air Temp,53,°C
+3620,Throttle Position,14.1176470588,%
+3621,Fuel Level,52.9411764706,%
+3621,Battery Voltage,11.869,V
+3622,MAF,4.71,g/s
+3623,Engine Load,12.9411764706,%
+3623,Coolant Temp,85,°C
+3624,RPM,1064.5,RPM
+3625,Vehicle Speed,0,km/h
+3625,Intake Air Temp,53,°C
+3626,Throttle Position,12.9411764706,%
+3626,Fuel Level,52.9411764706,%
+3627,Battery Voltage,11.884,V
+3628,MAF,3.57,g/s
+3628,Engine Load,14.5098039216,%
+3629,Coolant Temp,85,°C
+3630,RPM,989.25,RPM
+3630,Vehicle Speed,0,km/h
+3631,Intake Air Temp,53,°C
+3635,Throttle Position,12.9411764706,%
+3636,Fuel Level,52.9411764706,%
+3636,Battery Voltage,11.964,V
+3637,MAF,3.18,g/s
+3638,Engine Load,14.5098039216,%
+3638,Coolant Temp,85,°C
+3639,RPM,953.5,RPM
+3639,Vehicle Speed,0,km/h
+3640,Intake Air Temp,53,°C
+3641,Throttle Position,12.9411764706,%
+3641,Fuel Level,52.9411764706,%
+3642,Battery Voltage,12.016,V
+3643,MAF,3.14,g/s
+3643,Engine Load,14.5098039216,%
+3644,Coolant Temp,85,°C
+3645,RPM,937,RPM
+3645,Vehicle Speed,0,km/h
+3646,Intake Air Temp,53,°C
+3646,Throttle Position,12.9411764706,%
+3647,Fuel Level,52.9411764706,%
+3648,Battery Voltage,12.048,V
+3648,MAF,3.18,g/s
+3649,Engine Load,15.6862745098,%
+3650,Coolant Temp,85,°C
+3650,RPM,908.75,RPM
+3651,Vehicle Speed,0,km/h
+3652,Intake Air Temp,53,°C
+3652,Throttle Position,12.9411764706,%
+3653,Fuel Level,52.9411764706,%
+3654,Battery Voltage,12.086,V
+3655,MAF,3.19,g/s
+3655,Engine Load,16.4705882353,%
+3656,Coolant Temp,85,°C
+3657,RPM,860,RPM
+3657,Vehicle Speed,0,km/h
+3658,Intake Air Temp,52,°C
+3659,Throttle Position,12.9411764706,%
+3660,Fuel Level,52.9411764706,%
+3660,Battery Voltage,12.106,V
+3661,MAF,2.91,g/s
+3661,Engine Load,18.8235294118,%
+3662,Coolant Temp,85,°C
+3663,RPM,745.25,RPM
+3663,Vehicle Speed,0,km/h
+3664,Intake Air Temp,52,°C
+3665,Throttle Position,12.5490196078,%
+3665,Fuel Level,52.9411764706,%
+3666,Battery Voltage,12.142,V
+3667,MAF,2.64,g/s
+3667,Engine Load,18.8235294118,%
+3668,Coolant Temp,85,°C
+3668,RPM,724.25,RPM
+3669,Vehicle Speed,0,km/h
+3670,Intake Air Temp,52,°C
+3670,Throttle Position,12.5490196078,%
+3671,Fuel Level,52.9411764706,%
+3672,Battery Voltage,12.225,V
+3672,MAF,2.55,g/s
+3673,Engine Load,17.6470588235,%
+3673,Coolant Temp,85,°C
+3674,RPM,735.25,RPM
+3675,Vehicle Speed,0,km/h
+3675,Intake Air Temp,52,°C
+3676,Throttle Position,12.5490196078,%
+3677,Fuel Level,52.9411764706,%
+3677,Battery Voltage,12.283,V
+3678,MAF,2.59,g/s
+3679,Engine Load,17.6470588235,%
+3679,Coolant Temp,86,°C
+3680,RPM,736,RPM
+3680,Vehicle Speed,0,km/h
+3681,Intake Air Temp,52,°C
+3682,Throttle Position,12.5490196078,%
+3682,Fuel Level,52.9411764706,%
+3683,Battery Voltage,12.341,V
+3683,MAF,2.69,g/s
+3684,Engine Load,18.0392156863,%
+3685,Coolant Temp,86,°C
+3685,RPM,737.25,RPM
+3686,Vehicle Speed,0,km/h
+3687,Intake Air Temp,52,°C
+3687,Throttle Position,12.5490196078,%
+3688,Fuel Level,52.9411764706,%
+3688,Battery Voltage,12.385,V
+3689,MAF,2.83,g/s
+3690,Engine Load,18.8235294118,%
+3690,Coolant Temp,86,°C
+3691,RPM,725,RPM
+3692,Vehicle Speed,0,km/h
+3692,Intake Air Temp,52,°C
+3693,Throttle Position,12.9411764706,%
+3694,Fuel Level,52.9411764706,%
+3694,Battery Voltage,12.462,V
+3695,MAF,3.14,g/s
+3696,Engine Load,20.7843137255,%
+3696,Coolant Temp,86,°C
+3697,RPM,746,RPM
+3697,Vehicle Speed,0,km/h
+3698,Intake Air Temp,52,°C
+3699,Throttle Position,12.9411764706,%
+3702,Fuel Level,52.9411764706,%
+3703,Battery Voltage,12.506,V
+3704,MAF,3.12,g/s
+3704,Engine Load,20.7843137255,%
+3705,Coolant Temp,86,°C
+3706,RPM,746.5,RPM
+3706,Vehicle Speed,0,km/h
+3707,Intake Air Temp,52,°C
+3707,Throttle Position,12.9411764706,%
+3708,Fuel Level,52.9411764706,%
+3709,Battery Voltage,12.551,V
+3710,MAF,3.19,g/s
+3710,Engine Load,20.3921568627,%
+3711,Coolant Temp,86,°C
+3712,RPM,751.75,RPM
+3712,Vehicle Speed,0,km/h
+3713,Intake Air Temp,52,°C
+3713,Throttle Position,12.9411764706,%
+3714,Fuel Level,52.9411764706,%
+3715,Battery Voltage,12.582,V
+3720,MAF,3.25,g/s
+3722,Engine Load,20.7843137255,%
+3723,Coolant Temp,86,°C
+3724,RPM,753.75,RPM
+3724,Vehicle Speed,0,km/h
+3725,Intake Air Temp,51,°C
+3726,Throttle Position,12.9411764706,%
+3727,Fuel Level,52.9411764706,%
+3727,Battery Voltage,12.606,V
+3728,MAF,3.27,g/s
+3729,Engine Load,21.1764705882,%
+3729,Coolant Temp,86,°C
+3730,RPM,756.5,RPM
+3731,Vehicle Speed,0,km/h
+3731,Intake Air Temp,51,°C
+3732,Throttle Position,12.9411764706,%
+3733,Fuel Level,52.9411764706,%
+3733,Battery Voltage,12.641,V
+3734,MAF,3.23,g/s
+3734,Engine Load,21.1764705882,%
+3735,Coolant Temp,86,°C
+3736,RPM,754.25,RPM
+3737,Vehicle Speed,0,km/h
+3737,Intake Air Temp,51,°C
+3738,Throttle Position,12.9411764706,%
+3738,Fuel Level,52.9411764706,%
+3739,Battery Voltage,12.685,V
+3740,MAF,3.23,g/s
+3740,Engine Load,20.7843137255,%
+3741,Coolant Temp,86,°C
+3741,RPM,759.25,RPM
+3742,Vehicle Speed,0,km/h
+3743,Intake Air Temp,51,°C
+3743,Throttle Position,12.9411764706,%
+3744,Fuel Level,52.9411764706,%
+3745,Battery Voltage,12.732,V
+3745,MAF,3.27,g/s
+3746,Engine Load,21.1764705882,%
+3746,Coolant Temp,86,°C
+3747,RPM,753.25,RPM
+3748,Vehicle Speed,0,km/h
+3749,Intake Air Temp,51,°C
+3749,Throttle Position,12.9411764706,%
+3750,Fuel Level,52.9411764706,%
+3750,Battery Voltage,12.806,V
+3751,MAF,3.23,g/s
+3752,Engine Load,21.1764705882,%
+3752,Coolant Temp,86,°C
+3753,RPM,753.25,RPM
+3753,Vehicle Speed,0,km/h
+3754,Intake Air Temp,51,°C
+3755,Throttle Position,12.9411764706,%
+3755,Fuel Level,52.9411764706,%
+3756,Battery Voltage,12.856,V
+3757,MAF,3.31,g/s
+3757,Engine Load,21.1764705882,%
+3758,Coolant Temp,86,°C
+3758,RPM,751.5,RPM
+3759,Vehicle Speed,0,km/h
+3760,Intake Air Temp,51,°C
+3760,Throttle Position,12.9411764706,%
+3761,Fuel Level,52.9411764706,%
+3762,Battery Voltage,12.895,V
+3762,MAF,3.29,g/s
+3763,Engine Load,21.568627451,%
+3764,Coolant Temp,86,°C
+3764,RPM,747.75,RPM
+3765,Vehicle Speed,0,km/h
+3766,Intake Air Temp,51,°C
+3766,Throttle Position,12.9411764706,%
+3767,Fuel Level,52.9411764706,%
+3768,Battery Voltage,12.952,V
+3768,MAF,3.37,g/s
+3769,Engine Load,21.1764705882,%
+3769,Coolant Temp,86,°C
+3770,RPM,756.5,RPM
+3771,Vehicle Speed,0,km/h
+3771,Intake Air Temp,51,°C
+3772,Throttle Position,12.9411764706,%
+3773,Fuel Level,52.9411764706,%
+3776,Battery Voltage,12.988,V
+3777,MAF,3.35,g/s
+3777,Engine Load,21.9607843137,%
+3778,Coolant Temp,86,°C
+3779,RPM,747.75,RPM
+3779,Vehicle Speed,0,km/h
+3780,Intake Air Temp,51,°C
+3780,Throttle Position,12.9411764706,%
+3781,Fuel Level,52.9411764706,%
+3782,Battery Voltage,13.063,V
+3783,MAF,3.38,g/s
+3783,Engine Load,21.568627451,%
+3784,Coolant Temp,86,°C
+3785,RPM,752.75,RPM
+3785,Vehicle Speed,0,km/h
+3786,Intake Air Temp,51,°C
+3787,Throttle Position,12.9411764706,%
+3787,Fuel Level,52.9411764706,%
+3788,Battery Voltage,13.144,V
+3789,MAF,3.42,g/s
+3789,Engine Load,21.9607843137,%
+3790,Coolant Temp,86,°C
+3790,RPM,754.5,RPM
+3791,Vehicle Speed,0,km/h
+3792,Intake Air Temp,51,°C
+3792,Throttle Position,13.3333333333,%
+3793,Fuel Level,52.9411764706,%
+3794,Battery Voltage,13.201,V
+3794,MAF,3.44,g/s
+3795,Engine Load,22.3529411765,%
+3795,Coolant Temp,86,°C
+3796,RPM,748,RPM
+3797,Vehicle Speed,0,km/h
+3797,Intake Air Temp,51,°C
+3798,Throttle Position,13.3333333333,%
+3798,Fuel Level,52.9411764706,%
+3799,Battery Voltage,13.25,V
+3800,MAF,3.46,g/s
+3800,Engine Load,22.7450980392,%
+3801,Coolant Temp,86,°C
+3802,RPM,747.25,RPM
+3802,Vehicle Speed,0,km/h
+3803,Intake Air Temp,51,°C
+3804,Throttle Position,13.3333333333,%
+3804,Fuel Level,54.1176470588,%
+3805,Battery Voltage,13.317,V
+3805,MAF,3.53,g/s
+3806,Engine Load,22.7450980392,%
+3807,Coolant Temp,86,°C
+3807,RPM,747.75,RPM
+3808,Vehicle Speed,0,km/h
+3809,Intake Air Temp,51,°C
+3810,Throttle Position,13.3333333333,%
+3811,Fuel Level,52.9411764706,%
+3811,Battery Voltage,13.326,V
+3812,MAF,3.51,g/s
+3812,Engine Load,23.137254902,%
+3814,Coolant Temp,86,°C
+3814,RPM,750.5,RPM
+3815,Vehicle Speed,0,km/h
+3816,Intake Air Temp,51,°C
+3816,Throttle Position,13.3333333333,%
+3817,Fuel Level,54.1176470588,%
+3818,Battery Voltage,13.342,V
+3818,MAF,3.51,g/s
+3819,Engine Load,23.137254902,%
+3820,Coolant Temp,86,°C
+3820,RPM,752.25,RPM
+3821,Vehicle Speed,0,km/h
+3822,Intake Air Temp,51,°C
+3822,Throttle Position,13.3333333333,%
+3823,Fuel Level,54.1176470588,%
+3824,Battery Voltage,13.361,V
+3824,MAF,3.5,g/s
+3825,Engine Load,22.7450980392,%
+3825,Coolant Temp,86,°C
+3826,RPM,751.25,RPM
+3827,Vehicle Speed,0,km/h
+3827,Intake Air Temp,51,°C
+3828,Throttle Position,13.3333333333,%
+3828,Fuel Level,52.9411764706,%
+3829,Battery Voltage,13.365,V
+3830,MAF,3.51,g/s
+3830,Engine Load,23.137254902,%
+3831,Coolant Temp,86,°C
+3832,RPM,754.25,RPM
+3832,Vehicle Speed,0,km/h
+3833,Intake Air Temp,51,°C
+3834,Throttle Position,13.3333333333,%
+3834,Fuel Level,54.1176470588,%
+3835,Battery Voltage,13.382,V
+3835,MAF,3.5,g/s
+3836,Engine Load,23.137254902,%
+3837,Coolant Temp,86,°C
+3838,RPM,750.75,RPM
+3838,Vehicle Speed,0,km/h
+3839,Intake Air Temp,51,°C
+3840,Throttle Position,12.9411764706,%
+3840,Fuel Level,54.1176470588,%
+3841,Battery Voltage,13.354,V
+3845,MAF,3.46,g/s
+3845,Engine Load,23.137254902,%
+3846,Coolant Temp,86,°C
+3847,RPM,744.5,RPM
+3847,Vehicle Speed,0,km/h
+3848,Intake Air Temp,51,°C
+3848,Throttle Position,12.9411764706,%
+3849,Fuel Level,54.1176470588,%
+3850,Battery Voltage,13.349,V
+3850,MAF,3.42,g/s
+3851,Engine Load,22.7450980392,%
+3852,Coolant Temp,86,°C
+3852,RPM,741,RPM
+3853,Vehicle Speed,0,km/h
+3853,Intake Air Temp,51,°C
+3854,Throttle Position,12.9411764706,%
+3855,Fuel Level,54.1176470588,%
+3855,Battery Voltage,13.34,V
+3856,MAF,3.4,g/s
+3856,Engine Load,22.3529411765,%
+3857,Coolant Temp,86,°C
+3858,RPM,754,RPM
+3858,Vehicle Speed,0,km/h
+3859,Intake Air Temp,50,°C
+3859,Throttle Position,12.9411764706,%
+3860,Fuel Level,54.1176470588,%
+3861,Battery Voltage,13.34,V
+3861,MAF,3.4,g/s
+3862,Engine Load,21.9607843137,%
+3862,Coolant Temp,86,°C
+3863,RPM,755,RPM
+3864,Vehicle Speed,0,km/h
+3864,Intake Air Temp,50,°C
+3865,Throttle Position,12.9411764706,%
+3865,Fuel Level,54.1176470588,%
+3866,Battery Voltage,13.344,V
+3867,MAF,3.44,g/s
+3867,Engine Load,22.3529411765,%
+3868,Coolant Temp,86,°C
+3869,RPM,752.75,RPM
+3869,Vehicle Speed,0,km/h
+3870,Intake Air Temp,50,°C
+3871,Throttle Position,12.9411764706,%
+3871,Fuel Level,54.1176470588,%
+3872,Battery Voltage,13.333,V
+3872,MAF,3.35,g/s
+3873,Engine Load,21.9607843137,%
+3874,Coolant Temp,86,°C
+3874,RPM,751.25,RPM
+3875,Vehicle Speed,0,km/h
+3876,Intake Air Temp,50,°C
+3876,Throttle Position,12.9411764706,%
+3877,Fuel Level,54.1176470588,%
+3877,Battery Voltage,13.354,V
+3878,MAF,3.35,g/s
+3878,Engine Load,21.9607843137,%
+3879,Coolant Temp,86,°C
+3880,RPM,753.5,RPM
+3882,Vehicle Speed,0,km/h
+3883,Intake Air Temp,50,°C
+3884,Throttle Position,12.9411764706,%
+3885,Fuel Level,54.1176470588,%
+3886,Battery Voltage,13.342,V
+3887,MAF,3.38,g/s
+3887,Engine Load,21.568627451,%
+3888,Coolant Temp,86,°C
+3888,RPM,751,RPM
+3889,Vehicle Speed,0,km/h
+3889,Intake Air Temp,50,°C
+3890,Throttle Position,12.9411764706,%
+3890,Fuel Level,54.1176470588,%
+3891,Battery Voltage,13.327,V
+3891,MAF,3.35,g/s
+3892,Engine Load,21.9607843137,%
+3892,Coolant Temp,86,°C
+3893,RPM,750.75,RPM
+3893,Vehicle Speed,0,km/h
+3894,Intake Air Temp,50,°C
+3894,Throttle Position,12.9411764706,%
+3895,Fuel Level,54.1176470588,%
+3895,Battery Voltage,13.334,V
+3896,MAF,3.35,g/s
+3896,Engine Load,21.9607843137,%
+3897,Coolant Temp,86,°C
+3897,RPM,751,RPM
+3898,Vehicle Speed,0,km/h
+3898,Intake Air Temp,50,°C
+3899,Throttle Position,12.9411764706,%
+3899,Fuel Level,54.1176470588,%
+3900,Battery Voltage,13.323,V
+3901,MAF,3.35,g/s
+3901,Engine Load,21.568627451,%
+3901,Coolant Temp,86,°C
+3902,RPM,755.25,RPM
+3902,Vehicle Speed,0,km/h
+3903,Intake Air Temp,50,°C
+3904,Throttle Position,12.9411764706,%
+3904,Fuel Level,54.1176470588,%
+3905,Battery Voltage,13.341,V
+3917,MAF,3.33,g/s
+3920,Engine Load,21.9607843137,%
+3921,Coolant Temp,86,°C
+3921,RPM,753,RPM
+3922,Vehicle Speed,0,km/h
+3922,Intake Air Temp,50,°C
+3923,Throttle Position,12.9411764706,%
+3923,Fuel Level,54.1176470588,%
+3924,Battery Voltage,13.321,V
+3925,MAF,3.31,g/s
+3925,Engine Load,21.9607843137,%
+3926,Coolant Temp,86,°C
+3926,RPM,746.75,RPM
+3926,Vehicle Speed,0,km/h
+3927,Intake Air Temp,50,°C
+3927,Throttle Position,12.9411764706,%
+3928,Fuel Level,54.1176470588,%
+3929,Battery Voltage,13.351,V
+3929,MAF,3.33,g/s
+3930,Engine Load,21.568627451,%
+3930,Coolant Temp,86,°C
+3931,RPM,758.25,RPM
+3931,Vehicle Speed,0,km/h
+3932,Intake Air Temp,50,°C
+3932,Throttle Position,12.9411764706,%
+3933,Fuel Level,54.1176470588,%
+3933,Battery Voltage,13.348,V
+3934,MAF,3.35,g/s
+3934,Engine Load,21.9607843137,%
+3935,Coolant Temp,86,°C
+3935,RPM,753,RPM
+3936,Vehicle Speed,0,km/h
+3936,Intake Air Temp,50,°C
+3937,Throttle Position,12.9411764706,%
+3937,Fuel Level,54.1176470588,%
+3938,Battery Voltage,13.325,V
+3938,MAF,3.33,g/s
+3939,Engine Load,21.9607843137,%
+3940,Coolant Temp,86,°C
+3941,RPM,757.75,RPM

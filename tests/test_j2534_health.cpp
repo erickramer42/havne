@@ -1188,13 +1188,14 @@ TEST_F(J2534HealthTest, LongRepliesArriveWhole)
 
     ASSERT_GE(replies.count.load(), 6) << "the long replies didn't arrive";
     EXPECT_EQ(replies.length[0], 203u);
-    EXPECT_EQ(replies.flags[0], 0u);
+    EXPECT_EQ(replies.flags[0], ECUIO_FRAME_FLAG_REASSEMBLED);
     EXPECT_TRUE(replies.filled[0]);
     EXPECT_EQ(replies.length[1], 4095u);
-    EXPECT_EQ(replies.flags[1], 0u);
+    EXPECT_EQ(replies.flags[1], ECUIO_FRAME_FLAG_REASSEMBLED);
     EXPECT_TRUE(replies.filled[1]);
     EXPECT_EQ(replies.length[2], ECUIO_FRAME_DATA_MAX);
-    EXPECT_EQ(replies.flags[2], ECUIO_FRAME_FLAG_TRUNCATED);
+    EXPECT_EQ(replies.flags[2],
+              ECUIO_FRAME_FLAG_TRUNCATED | ECUIO_FRAME_FLAG_REASSEMBLED);
     EXPECT_TRUE(replies.filled[2]);
 }
 

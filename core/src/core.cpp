@@ -405,12 +405,23 @@ void ecuio_detail_set_vendor(const char* call, long status,
         ecuio_text_one_line(text);
     }
     const char* name = ecuio_pt_status_name(status);
+    /* An open refused with a status of the vendor's own and no text says
+     * nothing a user can act on; the two usual causes, for any vendor,
+     * are no adapter and another program holding it (the VX answers 34
+     * to both: docs/bench-sessions/2026-11-02-vehicle.md). The vendor's
+     * text, when it gave one, goes first below. */
+    const bool open_hint = name == nullptr && strcmp(call, "PassThruOpen") == 0;
     if (name == nullptr) {
         name = "vendor-specific";
     }
     if (text[0] != '\0') {
         ecuio_detail_set("%s returned status %ld (0x%lX, %s): %s", call, status,
                          static_cast<unsigned long>(status), name, text);
+    } else if (open_hint) {
+        ecuio_detail_set("%s returned status %ld (0x%lX, %s): is the adapter "
+                         "attached, and not open in another program?",
+                         call, status, static_cast<unsigned long>(status),
+                         name);
     } else {
         ecuio_detail_set("%s returned status %ld (0x%lX, %s)", call, status,
                          static_cast<unsigned long>(status), name);
@@ -839,6 +850,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_SURROGATE_FAILED:        return "surrogate process failed";
         case ECUIO_ERR_RECORDING_CHANGED:       return "the recording changed after it was opened";
         case ECUIO_ERR_REPORT_CHANGED:          return "the diagnostics report changed since it was saved";
+        case ECUIO_ERR_RECORDING_FAILED:        return "the recording couldn't be made or written";
         default:                                return "unknown status";
     }
 }
@@ -1056,6 +1068,11 @@ ecuio_status_t ecuio_session_create(
     const size_t n = strlen(chosen);
     memcpy(profile, chosen, n);
     profile[n] = '\0';
+    try {
+        s->uri = transport_uri;
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
     *out_session = s.release();
     return ECUIO_OK;
 }
@@ -1099,6 +1116,11 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         session->transport->ops->detach(session, session->transport->impl);
         delete session->transport;
         session->transport = nullptr;
+    }
+    /* The worker has stopped: the recorder takes no more frames, and its
+     * notes go on until the caller closes it (ADR-0049 section 1) */
+    if (session->record_link != nullptr) {
+        ecuio_record_detach(*session->record_link);
     }
 
     {
@@ -1222,6 +1244,17 @@ void ecuio_session_dispatch_callbacks(
     ECUIO_PROBE5(frame, session, frame->arbitration_id, frame->flags,
                  frame->data_length, frame->timestamp_us);
 
+    /* A recording's host_us, stamped before any callback (ADR-0049
+     * section 1); the link is set before start and kept until the
+     * session is freed */
+    ecuio_record_link* link = session->record_link.get();
+    uint64_t host_us = 0;
+    if (link != nullptr &&
+        link->active.load(std::memory_order_relaxed) != nullptr) {
+        const uint64_t now = ecuio_clock_us();
+        host_us = now > link->zero_us ? now - link->zero_us : 0;
+    }
+
     /* Both lists as they stand when the frame arrives */
     snapshot_of<ecuio_frame_callback_t> frames;
     snapshot_of<ecuio_values_callback_t> values;
@@ -1239,13 +1272,22 @@ void ecuio_session_dispatch_callbacks(
         }
     }
 
-    /* Then the frame's values (ADR-0024), decoded only for a values
-     * callback */
-    if (!values_taken || values.size() == 0) {
+    /* Then the frame's values (ADR-0024), decoded for a values callback
+     * or a recording; the recording takes the frame and its values as
+     * one record */
+    const bool want_values = values_taken && values.size() > 0;
+    ecuio_recorder_t* recorder =
+        link != nullptr ? ecuio_record_pin(*link) : nullptr;
+    if (!want_values && recorder == nullptr) {
         return;
     }
     const uint32_t count = decode_values(session, frame);
-    if (count == 0) {
+    if (recorder != nullptr) {
+        ecuio_recorder_put_frame(recorder, host_us, frame,
+                                 session->values.data(), count);
+        ecuio_record_unpin(*link);
+    }
+    if (!want_values || count == 0) {
         return;
     }
     ecuio_value_batch_t batch{};

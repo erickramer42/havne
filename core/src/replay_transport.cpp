@@ -6,6 +6,10 @@
 //          and end of file, an early stop's error state (a bad row, a
 //          file gone, fewer rows; rows added played no further), the
 //          query);
+//          an early stop in a recording's link line
+//          (RecorderTest.AReplayThatStopsEarlySaysSoInALinkLine); the
+//          source's frame flags line passed on
+//          (RecorderTest.AReplayPassesOnItsSourcesFrameFlagsLine);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
 //          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
 //          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues;
@@ -51,6 +55,55 @@ using namespace ecuio_frames_csv;
 constexpr uint32_t kSpeedMin = 100;
 constexpr uint32_t kSpeedMax = 100000;
 constexpr uint32_t kSpeedDefault = 1000;
+
+/* What the source recording's header says of its frames' flags
+ * (ADR-0049 section 2), so a recording of this replay says the same:
+ * the line in the events.log beside a frames.csv, read up to the
+ * header's blank line. Only core's two words are taken; anything else,
+ * a file not named frames.csv (its folder's events.log isn't its own),
+ * or no such line is an older recording's, whose flag says nothing. */
+std::string source_frame_flags(const std::string& frames_csv)
+{
+    const char* const older = "from an older recording";
+    const size_t slash = frames_csv.find_last_of("/\\");
+    if (slash == std::string::npos ||
+        frames_csv.compare(slash + 1, std::string::npos, "frames.csv") != 0) {
+        return older;
+    }
+    native_path events;
+    if (!events.set(frames_csv.substr(0, slash + 1) + "events.log")) {
+        return older;
+    }
+    FILE* f = events.open();
+    if (f == nullptr) {
+        return older;
+    }
+    std::vector<char> buf(256);
+    bool too_long = false;
+    std::string found = older;
+    static const char kFirst[] = "ecuio session recording, format ";
+    static const char kKey[] = "frame flags  ";
+    if (read_line(f, buf, &too_long) && !too_long &&
+        std::strncmp(buf.data(), kFirst, sizeof kFirst - 1) == 0) {
+        for (int n = 0; n < 1000 && read_line(f, buf, &too_long); ++n) {
+            if (too_long) {
+                break;
+            }
+            if (buf[0] == '\0') {
+                break;
+            }
+            if (std::strncmp(buf.data(), kKey, sizeof kKey - 1) == 0) {
+                const char* v = buf.data() + sizeof kKey - 1;
+                if (std::strcmp(v, "complete") == 0) {
+                    found = v;
+                }
+                break;
+            }
+        }
+    }
+    std::fclose(f);
+    return found;
+}
 
 /* The whole file, checked: every row parses. Gives the row count and the
  * session time of the last row. Reads through the worker's own line buffer
@@ -170,8 +223,10 @@ namespace {
  * count goes first, so a reader that sees the code sees its episode. */
 void stop_early(ecuio_replay_transport* t)
 {
-    t->session->error_count.fetch_add(1);
+    const uint32_t episodes = t->session->error_count.fetch_add(1) + 1;
     t->session->last_error.store(ECUIO_ERR_RECORDING_CHANGED);
+    ecuio_record_link_state(t->session->record_link.get(),
+                            ECUIO_ERR_RECORDING_CHANGED, episodes);
 }
 
 /* Sends the file's frames, paced by their session time over the speed;
@@ -413,6 +468,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
                              "this one's frames all share one time");
             return ECUIO_ERR_BAD_URI;
         }
+        session->source_frame_flags = source_frame_flags(path);
         impl->session = session;
         impl->speed_milli = speed;
         impl->loop = loop;

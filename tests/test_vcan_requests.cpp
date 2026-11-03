@@ -9,11 +9,14 @@
 //          answering as the ECU (vcan_recording_ecu.h, ADR-0041 section
 //          4), whole and with replies broken at the ISO-TP level.
 //          SimBusTest: the simulated ECU (ADR-0046, core's ISO-TP sender)
-//          answering an obd2 session, a clear and every fault. Each
+//          answering an obd2 session, a clear and every fault. The
+//          rate's proof after the first echo (ADR-0040 section 3 and its
+//          appendix of 2026-11-02) on vcan0 started unproven. Each
 //          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
 //          that a failure.
 
 #include "ecuio/core.h"
+#include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/sim.h"
@@ -116,6 +119,7 @@ protected:
 struct Delivered {
     std::mutex mutex;
     std::vector<std::vector<uint8_t>> replies;
+    size_t unflagged = 0; /* replies without ECUIO_FRAME_FLAG_REASSEMBLED */
     size_t size()
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -132,12 +136,14 @@ void on_reply(const ecuio_frame_t* f, void* user_data)
     auto* d = static_cast<Delivered*>(user_data);
     std::lock_guard<std::mutex> lock(d->mutex);
     d->replies.emplace_back(f->data, f->data + f->data_length);
+    d->unflagged += (f->flags & ECUIO_FRAME_FLAG_REASSEMBLED) == 0;
 }
 
 /* What a session against the recording's ECU came to */
 struct FaultRun {
     std::vector<std::vector<uint8_t>> whole;     /* the ECU's, in order */
     std::vector<std::vector<uint8_t>> delivered; /* the session's */
+    size_t unflagged = 0; /* of them, not flagged reassembled */
     std::set<uint8_t> refused;
     std::set<uint8_t> answered;
     unsigned silent = 0, late = 0, bad_sequence = 0, stalled = 0;
@@ -207,6 +213,7 @@ protected:
         {
             std::lock_guard<std::mutex> lock(d.mutex);
             out->delivered = d.replies;
+            out->unflagged = d.unflagged;
         }
         out->refused = ecu.refused();
         out->answered = ecu.answered();
@@ -226,7 +233,8 @@ protected:
     }
 
     /* What holds under every fault: the session delivered each reply the
-     * bus carried whole, in order, and nothing else; the walk read the
+     * bus carried whole, in order, flagged reassembled, and nothing else;
+     * the walk read the
      * car's bitmaps; the rotation kept each PID the recording holds and
      * no other (the bitmaps' and the refusals' left), each was answered,
      * and packing held;
@@ -237,6 +245,7 @@ protected:
         EXPECT_TRUE(r.delivered == r.whole)
             << "a reply delivered that the bus didn't carry whole, or one "
                "it did left out";
+        EXPECT_EQ(r.unflagged, 0u) << "each is ISO-TP's reassembly";
         EXPECT_NE(r.support.flags & ECUIO_SUPPORT_COMPLETE, 0u);
         EXPECT_EQ(r.support.ranges, 0x3Fu) << "the car's bitmaps, 00 to A0";
         EXPECT_EQ(r.support.requests - r.support.dropped, recorded_.size())
@@ -559,6 +568,121 @@ TEST_F(SocketCanRequestTest, ARequestingSessionOnVcanNeedsNoRate)
     vcan_bus::Ecu ecu;
     Session s("?profile=obd2&baud=250000&identify=0&diagnose=0");
     EXPECT_EQ(s.status(), ECUIO_OK) << "vcan has no rate: " << s.detail();
+}
+
+/* Requesting sessions on vcan created while it lives start with the
+ * rate unproven, as on a real controller, with this quiet time */
+class Unproven
+{
+public:
+    explicit Unproven(int64_t quiet_us)
+    {
+        ecuio_socketcan_set_vcan_unproven(quiet_us);
+    }
+    ~Unproven() { ecuio_socketcan_set_vcan_unproven(0); }
+    Unproven(const Unproven&) = delete;
+    Unproven& operator=(const Unproven&) = delete;
+};
+
+/* The session's requests (0x7E0) a raw listener reads within ms */
+unsigned requests_within(int fd, int ms)
+{
+    unsigned n = 0;
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            end - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            return n;
+        }
+        can_frame f{};
+        if (vcan_bus::read_for(fd, &f, sizeof f,
+                               static_cast<int>(left.count())) ==
+                static_cast<long>(sizeof f) &&
+            (f.can_id & CAN_ERR_FLAG) == 0 &&
+            (f.can_id & CAN_SFF_MASK) == vcan_bus::kRequest) {
+            ++n;
+        }
+    }
+}
+
+/* Unproven, the first echo proves nothing yet: the ECU's reply does (the
+ * quiet time here outlasts the test), and the rotation runs */
+TEST_F(SocketCanRequestTest, AnUnprovenSessionIsProvenByTheEcusReply)
+{
+    Unproven unproven(60'000'000);
+    vcan_bus::Ecu ecu;
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    ecuio_channel_support_t sup{};
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000ms))
+        << "the walk needs requests past the first";
+    int32_t e = -1;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* Unproven with no ECU: once N_As passes after the echo with no error
+ * frame, the rate is proven and requests go on (each unanswered) */
+TEST_F(SocketCanRequestTest, AnUnprovenSessionIsProvenByQuietAfterItsEcho)
+{
+    Unproven unproven(25'000); /* N_As */
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    ASSERT_TRUE(listener.ok());
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    EXPECT_GE(requests_within(listener.get(), 1500), 2u)
+        << "sending stopped after the first echo";
+    int32_t e = -1;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_NE(e, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+}
+
+/* The desk bus's adapter (ADR-0040's appendix of 2026-11-02): the frame
+ * echoed, then the controller reported the missing ACK. An error frame
+ * after the first echo, within the quiet time, halts the sending as one
+ * before it does */
+TEST_F(SocketCanRequestTest, AnErrorFrameAfterTheFirstEchoHalts)
+{
+    Unproven unproven(1'000'000); /* long, so the test's wake can't miss it */
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    ASSERT_TRUE(listener.ok());
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    can_frame f{};
+    bool first = false;
+    const auto end = std::chrono::steady_clock::now() + 2000ms;
+    while (!first && std::chrono::steady_clock::now() < end) {
+        first = vcan_bus::read_for(listener.get(), &f, sizeof f, 100) ==
+                    static_cast<long>(sizeof f) &&
+                (f.can_id & CAN_SFF_MASK) == vcan_bus::kRequest;
+    }
+    ASSERT_TRUE(first) << "no first request";
+    can_frame err{};
+    err.can_id = CAN_ERR_FLAG | CAN_ERR_ACK;
+    err.len = 8;
+    ASSERT_EQ(::write(listener.get(), &err, sizeof err),
+              static_cast<ssize_t>(sizeof err));
+    int32_t e = -1;
+    uint32_t n = 0;
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_error_state(s.get(), &e, &n) == ECUIO_OK &&
+                   e == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+        },
+        1000ms))
+        << "an error after the first echo left the rate proven";
+    EXPECT_EQ(requests_within(listener.get(), 1500), 0u)
+        << "a request sent after the error";
 }
 
 /* Reply timing (ADR-0042) on SocketCAN: a row per request in the

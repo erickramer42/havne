@@ -2,7 +2,8 @@
 //             struct behind the opaque ecuio_session_t
 // Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
 //          their buffers and def index, the absent signals' counts, the info, support, identity and diagnostics
-//          copies, the timing report's); HARNESS: the J2534, ELM327 and
+//          copies, the timing report's; RecorderTest the recorder's
+//          link); HARNESS: the J2534, ELM327 and
 //          SocketCAN suites, whose workers write support[], identity[],
 //          diagnostics[] and the timing rows
 
@@ -14,11 +15,13 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "def_index.h"
+#include "recorder.h"
 #include "uds_generic.h"
 
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -111,6 +114,15 @@ struct ecuio_session {
     std::atomic<uint32_t> clear_generation[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_flags[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    /* The URI create was given, for a recording's header */
+    std::string uri;
+    /* A replay's: its source's frame flags line (ADR-0049 section 2),
+     * set by attach, read by a recording's attach */
+    std::string source_frame_flags;
+    /* The recorder's link (ADR-0049, recorder.h), set by
+     * ecuio_session_record before start and kept until the session is
+     * freed, so the worker reads it without a lock */
+    std::shared_ptr<ecuio_record_link> record_link;
 };
 
 #endif /* ECUIO_SESSION_H */

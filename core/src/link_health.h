@@ -4,12 +4,14 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: every rule below and the backoff step, session-free
 //     (CoreTest.Link*, test_core); through a worker HARNESS
-//     (J2534HealthTest).
+//     (J2534HealthTest); each transition in a recording's events.log
+//     (RecorderTest.ALinkTransition*).
 
 #ifndef ECUIO_LINK_HEALTH_H
 #define ECUIO_LINK_HEALTH_H
 
 #include "ecuio/core.h"
+#include "recorder.h"
 
 #include <atomic>
 #include <stdint.h>
@@ -39,15 +41,19 @@ constexpr uint32_t LINK_HEALTH_QUIET_RUN = 10;
 
 /* A worker's view of its link (the full table is in docs/j2534.md). It
  * publishes through the session's two atomics, which
- * ecuio_session_get_error_state reads, and only on transitions; the
- * rest is the worker's alone. */
+ * ecuio_session_get_error_state reads, and only on transitions, each
+ * also a link record for the session's recording (ADR-0049 section 1);
+ * the rest is the worker's alone. */
 struct link_health {
     link_health(std::atomic<int32_t>& published_state,
-                std::atomic<uint32_t>& published_episodes)
-        : published(published_state), episodes(published_episodes) {}
+                std::atomic<uint32_t>& published_episodes,
+                ecuio_record_link* recording = nullptr)
+        : published(published_state), episodes(published_episodes),
+          record(recording) {}
 
     std::atomic<int32_t>& published;    /* the session's last_error */
     std::atomic<uint32_t>& episodes;    /* the session's error_count */
+    ecuio_record_link* record;          /* the session's, or NULL */
     int32_t state = ECUIO_OK;
     bool write_failed = false;   /* latched by a failed write, cleared
                                   * only by a sent one */
@@ -63,6 +69,7 @@ inline void link_set_state(link_health& h, int32_t state)
         h.published.store(state);
         h.recovered = h.recovered || state == ECUIO_OK;
         h.state = state;
+        ecuio_record_link_state(h.record, state, h.episodes.load());
     }
 }
 

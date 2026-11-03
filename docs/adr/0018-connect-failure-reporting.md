@@ -170,6 +170,14 @@ opens in a row worked
 ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)). The
 DLL gives no text with it, so the error line names the status only.
 
+*Amended 2026-11-02 (the hint):* a `PassThruOpen` refused with a status
+J2534-1 doesn't define and no text from the vendor ends instead with
+the two usual causes, for any vendor: `PassThruOpen returned status 34
+(0x22, vendor-specific): is the adapter attached, and not open in
+another program?`. A vendor's own text, a status the standard names, or
+any other call keeps the plain form.
+`CoreTest.AnOpenRefusedWithoutTextAsksAfterTheAdapter`.
+
 ## Appendix: `LOAD_FAILED`'s words (2026-10-26)
 
 `ecuio_status_string(ECUIO_ERR_LOAD_FAILED)` reads "couldn't load what

@@ -11,7 +11,8 @@ every frame, recorded and replayed on request. It runs on Windows,
 Linux and Android, builds and passes its tests on macOS, and runs on
 the iOS Simulator. It reaches the car through J2534 Pass-Thru adapters
 on Windows and ELM327-compatible adapters over USB, Bluetooth or WiFi
-everywhere; SocketCAN on Linux has run on a virtual bus so far. A
+everywhere; SocketCAN on Linux has listened through a real controller
+on a desk bus, and asked only on a virtual bus so far. A
 simulated vehicle runs every page with no hardware.
 
 Underneath is a Qt-free C++17 core that does all the vehicle I/O and
@@ -89,7 +90,8 @@ a quarter mile off launch control on a warm loop.*
 - **Three kinds of adapter:** J2534 on Windows; ELM327 over a serial
   port, Bluetooth or WiFi, on the desktop and on Android, where
   sessions keep running in the background; SocketCAN on Linux,
-  listening or making requests, so far on a virtual bus
+  listening (a real controller on a desk bus too) or making requests
+  (so far on a virtual bus)
   ([docs/j2534.md](docs/j2534.md),
   [docs/elm327.md](docs/elm327.md), [docs/linux.md](docs/linux.md)).
 - **Trouble codes:** each ECU's check-engine light, its stored, pending
@@ -221,12 +223,13 @@ release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
-| Later | SocketCAN through a real controller, once its desk and car runs are made; an iPhone download, once a tester's device run works; discovery and capture formats; a plugin framework; older buses |
+| v0.4.0 | Recordings in core and a log viewer that overlays runs, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller |
+| v0.5.0-v0.9.0 | Your own PIDs and DIDs, imported in bulk, and computed signals such as boost; manufacturer data through plugins; exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
+| 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
-issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each
-release changed.
+issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release
+changed.
 
 ## Documentation
 

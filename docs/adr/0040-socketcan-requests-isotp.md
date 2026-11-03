@@ -1,8 +1,10 @@
 # ADR-0040: SocketCAN requests: ISO-TP in core, and a controller that sends only after its first request proves the rate
 
 - **Status:** Accepted. Built on 2026-10-31 and verified on `vcan0`;
-  section 2's one-shot rule is provisional until the desk run (BENCH
-  prep #32).
+  section 2's one-shot rule confirmed on a desk bus (the appendix of
+  2026-11-02); section 3's proof waits after the echo for a reply or
+  N_As with no error frame, since one adapter echoes first (the same
+  appendix).
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) (the
   transport, the netlink checks, the simulated car on `vcan0`);
@@ -346,3 +348,51 @@ test car through the VX:
 0x7DF answered 144 times in 10 s with no timeout, against 145 through
 0x7E0 ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
 SocketCAN's side has met only the simulated ECU.
+
+## Appendix: 2026-11-02, the desk bus
+
+A real controller sent for the first time, on a desk bus with no car:
+the Innomaker USB2CAN (`gs_usb`, no one-shot mode) in WSL, one
+terminator, and the VX as the other node
+([2026-11-02-socketcan-desk](../bench-sessions/2026-11-02-socketcan-desk.md)).
+Havne refuses that controller for sending, so `cansend` sent.
+
+- **Section 2 keeps one-shot mode.** With no node to acknowledge it, a
+  frame drove the controller error-passive within about 1.5 ms, and its
+  transmit counter then sat at 128 for 15 s with no bus-off, until the
+  interface went down; at a wrong rate against the VX, the same. ISO
+  11898-1 leaves an error-passive transmitter's counter unchanged on an
+  acknowledgement error, so section 2's "until it goes error-passive or
+  bus-off" ends at error-passive and goes on resending there. Core can't
+  stop that from user space, and `restart-ms 0` doesn't either:
+  `SOCKETCAN_SEND_NEEDS_ONE_SHOT` stays true.
+- **Section 3's echo isn't proof on this adapter.** The frame no node
+  could acknowledge was echoed, and counted in the TX statistics,
+  1.5 ms before the first `no-acknowledgement-on-tx` error frame, so
+  "echoes a frame only once ... a node acknowledged it" is false for
+  this firmware. The worker takes the first matching echo as proof
+  (`socketcan_proof_on`), and once proven an error frame is the link
+  health's, not a halt: on an adapter that echoes this way and offers
+  one-shot mode, a request at a wrong rate would prove the rate it
+  failed at. Known Issue #40; the proof should wait out the request's
+  N_As after its echo for an error frame, or for its reply, and a
+  controller that may echo early is checked on the desk first.
+- **Seen beside it:** an interface last up with `listen-only on` stays
+  listen-only through `ip link set ... up type can bitrate N` unless
+  `listen-only off` is said, and a `cansend` through it returns 0 and
+  sends nothing; the refusal for a controller without one-shot mode
+  suggests `one-shot on` even when the driver's supported modes lack it.
+
+*Amended 2026-11-02 (the proof's fix):* section 3's table reads, for an
+unproven session: the echo starts the proof, and nothing more is sent
+until the request's reply comes (proven) or N_As (25 ms) passes after
+the echo with no error frame (proven); an error frame in that time
+halts the sending, as one before the echo does
+(`socketcan_proof_on`, `socketcan_proof_settle` in
+`core/src/socketcan_wire.h`). `vcan` still starts proven; a test-only
+switch (`ecuio_socketcan_set_vcan_unproven`) starts it unproven, so
+the proof runs on `vcan0`.
+`SocketCanTest.AnEchoThenAReplyOrQuietProvesTheRateAndAnErrorHalts`,
+`SocketCanRequestTest.AnUnprovenSessionIsProvenByTheEcusReply`,
+`.AnUnprovenSessionIsProvenByQuietAfterItsEcho`,
+`.AnErrorFrameAfterTheFirstEchoHalts`.
