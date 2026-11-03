@@ -4,6 +4,7 @@ add_library(ecuio-core STATIC
     src/dtc_titles.cpp
     src/host_clock.cpp
     src/profile_registry.cpp
+    src/recorder.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp
@@ -77,6 +78,7 @@ if(NOT ANDROID AND NOT IOS)
             include/ecuio/core.h
             include/ecuio/j2534.h
             include/ecuio/profile.h
+            include/ecuio/recording.h
             include/ecuio/serial.h
             include/ecuio/signals.h
             include/ecuio/sim.h
