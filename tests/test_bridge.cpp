@@ -909,6 +909,60 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     }
 }
 
+/* The app's Mark (ADR-0049 section 4): a marker in markers.csv at the
+ * time it's tapped, "Mark N" unless labeled, counted per recording, said
+ * in the activity log; nothing to mark without a recording. */
+TEST(BridgeTest, AMarkGoesIntoTheRecording)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    EXPECT_FALSE(bridge.mark()) << "no recording";
+    EXPECT_EQ(bridge.markCount(), 0);
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://marks").isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    EXPECT_TRUE(bridge.mark());
+    EXPECT_TRUE(bridge.mark(QStringLiteral("  launch, \"go\"  ")));
+    EXPECT_TRUE(bridge.mark(QStringLiteral(" ")));
+    EXPECT_EQ(bridge.markCount(), 3);
+    EXPECT_TRUE(log.contains(QStringLiteral("Marked: Mark 1")));
+    EXPECT_TRUE(log.contains(QStringLiteral("Marked: launch, \"go\"")));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_FALSE(bridge.mark()) << "the recording ended";
+    EXPECT_EQ(bridge.markCount(), 3) << "the last recording's";
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString dir = root.path() + QStringLiteral("/") + folders.first();
+    const QList<QByteArray> rows =
+        fileLines(dir + QStringLiteral("/markers.csv"));
+    ASSERT_EQ(rows.size(), 4);
+    EXPECT_EQ(rows[0], QByteArray("host_us,label"));
+    EXPECT_TRUE(rows[1].endsWith(",Mark 1")) << rows[1].toStdString();
+    EXPECT_TRUE(rows[2].endsWith(",\"launch, \"\"go\"\"\""))
+        << rows[2].toStdString();
+    EXPECT_TRUE(rows[3].endsWith(",Mark 3")) << rows[3].toStdString();
+    EXPECT_LE(rows[1].split(',')[0].toLongLong(),
+              rows[3].split(',')[0].toLongLong());
+    const QByteArray events = readFile(dir + QStringLiteral("/events.log"));
+    EXPECT_FALSE(events.contains("Marked:"))
+        << "markers.csv holds them, not notes";
+
+    // A new recording counts from one
+    ASSERT_TRUE(bridge.connectSession("mock://marks-again").isEmpty());
+    EXPECT_EQ(bridge.markCount(), 0);
+    EXPECT_TRUE(bridge.mark());
+    EXPECT_EQ(log.count(QStringLiteral("Marked: Mark 1")), 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* An app closed while connected: the bridge's destructor destroys the
  * session itself and ends the recording, with no disconnect first. */
 TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
@@ -4965,6 +5019,8 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_EQ(field(0, "uri"),
               at + "20261028-143012-2 Daily driver?profile=raw");
     EXPECT_EQ(field(0, "source"), "") << "no events.log";
+    EXPECT_EQ(field(0, "folder"),
+              root.path().toStdString() + "/20261028-143012-2 Daily driver");
     EXPECT_EQ(field(1, "title"), "2026-10-28 14:30:12 \xC2\xB7 Daily driver");
     EXPECT_EQ(field(1, "source"),
               "elm327://192.168.4.1:23?profile=raw&poll=0x0C");

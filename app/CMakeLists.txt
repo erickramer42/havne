@@ -31,6 +31,8 @@ qt_add_library(app_ui STATIC
     bridgesingleton.h
     carryover.cpp
     carryover.h
+    recordingview.cpp
+    recordingview.h
     sessionbridge.cpp
     sessionbridge.h
     latencystats.h
@@ -52,12 +54,14 @@ qt_add_qml_module(app_ui
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml
+        qml/RecordingsPage.qml
         qml/SettingsPage.qml
         qml/NavButton.qml
         qml/Theme.qml
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
+        qml/StripChart.qml
         qml/VehicleBook.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml

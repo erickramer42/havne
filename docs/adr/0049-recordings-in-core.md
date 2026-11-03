@@ -1165,3 +1165,72 @@ since a runner's noise only ever slows a run. And the floor is 0.7,
 which still fails a recorder that costs the worker twice what it does
 on Linux. The 10% bar is judged as before, on the dev machine by
 `--record`.
+
+## Appendix: the viewer (2026-11-03)
+
+Step 5 is built: the app's Recordings page (`app/qml/RecordingsPage.qml`)
+on the reader and the check, through `app/recordingview.h`, with Live's
+chart shared as `app/qml/StripChart.qml`.
+
+- **The page.** The recordings list moves there from Settings, each
+  row's Replay still filling Settings' field. Open reads the recording
+  off the GUI thread (the reader's open, then the frames check, with
+  progress and a cancel), then shows its signals, the ranked ones
+  plotted as Live plots them, and the chart over the part in view: drag
+  to pan, the wheel or a pinch to zoom, a tap for the values in force
+  then. The markers and the check's findings sit on the time axis, and
+  each listed finding centers the view on itself.
+- **Columns.** The chart asks for a column every two pixels. A column
+  narrower than a second reads raw rows, and a dense recording zoomed
+  out a little reads a great many: a 50-signal 10 Hz hour panned at a
+  tenth of its length is about 180,000 rows a frame, which held the
+  laptop to 30 frames a second. Past 20,000 rows in view
+  (`rawRowsPerFrame`), columns stay a second wide and come from the
+  summaries.
+- **The frame rate.** Section 10 asks for 60 frames a second panning
+  and pinching with four signals at the viewer's full width, on the
+  test phone and the laptop, and a GPU path if the Canvas can't. A
+  developer-mode frame test on the page moves the view every frame for
+  six seconds, panning for half and zooming in and out for half, with
+  four signals plotted, and counts the charts drawn and the frames the
+  window shows. Its recordings are `bench_recording --keep`'s two
+  hours. The Canvas meets the bar drawn on the GUI thread
+  (`Canvas.Immediate`), without antialiasing while the view moves and
+  once more with it when the view rests, 150 ms after its last change.
+  Charts drawn a second:
+
+  | Hour | Laptop, 1020 px, 144 Hz screen | Test phone, 344 px, 120 Hz screen |
+  |---|---|---|
+  | The fixture's | 141 | 61-62 |
+  | Dense, 50 signals at 10 Hz | 124 | 62 |
+
+  The page's frame callback ran about 62 times a second on the phone,
+  so 62 is the ceiling there; its window showed 92 to 117 frames a
+  second. Antialiasing was nearly all of a crowded chart's cost: on the
+  phone the dense hour drew 21 charts a second with it and 62 without,
+  and half the resolution instead reached 52. `Canvas.Threaded`, tried
+  first, counted 144 a second on the laptop but presented earlier
+  paints: once the view stopped, a chart it had left stayed up until
+  later frames, on both machines. Drawn on the GUI thread, each chart
+  is in the next frame, so the charts drawn are the charts seen. No GPU
+  path is needed.
+- **Two runs overlaid.** A second recording opens beside the first,
+  its signals of the same names drawn dashed in the first's colors on
+  the same value scale. They line up as `havne-cli view --align-on`
+  lines them up: on their starts, their UTC starts, a marker, or a
+  signal rising or falling through a level after the hysteresis, the
+  level typed in the units on screen and turned back into the recorded
+  ones (every display conversion is a rising line). The axis is the
+  first recording's time, over both, so it runs below zero when the
+  second starts earlier. A view from before a recording's start reads
+  its columns as `havne-cli view` does (the appendix "the reader and
+  `havne-cli view`"): the column across the start is a query of its
+  own, ended at its last whole second when columns are a second or
+  wider, so no sample is lost or counted twice
+  (`RecordingViewTest.AWindowFromBeforeTheStartCountsEverySampleOnce`).
+  The two pulls of `tests/fixtures/recording/` align at the times the
+  CLI's goldens give.
+- **Marks.** While a session records, the header's Mark writes
+  "Mark N" to `markers.csv` (section 4), N counting the recording's
+  marks, as a line typed into `havne-cli stream --record` does, so two
+  runs marked at the same moment line up on "Mark 1".

@@ -388,7 +388,13 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   what's wrong with it (gaps, rate drops, late IDs, overflows, broken
   ISO-TP sequences) and `events.log` for the link's changes and the
   sleeps, its memory per ID, not per frame; `havne-cli info` prints
-  its findings.
+  its findings. The app's Recordings page is the viewer on both
+  (`RecordingView`, `app/recordingview.h`: the open and the check on a
+  thread of its own, then the columns, the values at a cursor and the
+  alignments on the GUI thread), drawn by Live's chart
+  (`StripChart.qml`); a second recording overlays the first, aligned
+  as `havne-cli view` aligns them, and the header's Mark writes a
+  marker while recording.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial
@@ -397,8 +403,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   precision of its own. The bridge converts on the way out; its
   history and recordings keep the decoded values.
 - **Pages:** **Home** (status), **Dashboard** (gauges and shift
-  lights), **Live** (value table and strip chart), **Log** (the
-  activity log; in developer mode, the raw frames), **Settings**
+  lights), **Live** (value table and strip chart), **Diagnostics**
+  (trouble codes, readiness, the freeze frame), **Log** (the activity
+  log; in developer mode, the raw frames), **Recordings** (the
+  recordings list and the viewer), **Settings**
   (vehicles, device picker, URI, developer mode). Settings is
   the one place a session is connected; the header and Home open it.
   It composes the URI from a preset or a device (a J2534 interface or

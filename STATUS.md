@@ -161,8 +161,10 @@ bus ([roadmap](#roadmap)).
     ([docs/j2534.md](docs/j2534.md#session-lifecycle)); all four states
     have shown on the VX.
   - **The UI:** Dashboard gauges with peak hold and stale dimming,
-    Live's table and strip chart, the Log page's activity log, and
-    Settings composing the URI; developer mode (off until switched on:
+    Live's table and strip chart, the Log page's activity log, the
+    Recordings page's viewer (pan, zoom, a cursor, the frames check's
+    findings, two runs overlaid and aligned, and a Mark while
+    recording), and Settings composing the URI; developer mode (off until switched on:
     the `mock://` preset and the Log page's raw frame table with its
     bridge counters), zoom, metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
@@ -294,7 +296,8 @@ bus ([roadmap](#roadmap)).
     recorder on a thread of its own, so the frames the Log page drops
     under load are recorded too
     ([ADR-0049](docs/adr/0049-recordings-in-core.md)), and read back
-    offline by core's reader and `havne-cli view`, and a surrogate
+    offline by core's reader, the Recordings page and `havne-cli
+    view`, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -336,7 +339,7 @@ bus ([roadmap](#roadmap)).
 | Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | none |
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
 | Bridge and models | Worker to GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| QML pages | Home, Dashboard, Live, Diagnostics, Log, Recordings, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
 | ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
 | Android app | Android 12 and later; Bluetooth through the phone, background sessions. On one phone and one car, with the MX+; built in CI, no tests run on the phone | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md) |
@@ -446,7 +449,7 @@ section 10 orders the work).
   frame, and the bridge's looping run keeps 0.96 of its rate, inside
   the 10% budget (`bench_bridge --record`, the ADR's appendices of
   2026-11-02 and 2026-11-03); CI's load test gates the recorded run at
-  0.8 of the unrecorded one.
+  0.7 of the unrecorded one, the faster of two runs each.
 - **The reader** opens a recording offline. One pass on open builds a
   sparse index (`host_us` only increases) and each signal's lowest and
   highest per second, so memory follows the recording's seconds, not
@@ -458,12 +461,16 @@ section 10 orders the work).
   0.2 s on either (`bench_recording`, the ADR's appendix of
   2026-11-03).
 - **The viewer**, in the app and as `havne-cli view` (JSON lines,
-  goldens; the CLI's is built, aligned on a rise, a fall, a marker or
-  the UTC starts): seek, scrub and zoom (pinch on the phone), and two runs
-  overlaid on a common zero, a threshold crossing or a marker. Live's
-  strip chart becomes the shared chart. Marks written while
-  recording (a tap in the app, a line typed into `havne-cli`), and two
-  recordings aligned on their wall-clock starts.
+  goldens), both built (step 5): the Recordings page pans, zooms
+  (pinch on the phone) and reads the values at a cursor, with the
+  frames check's findings on the time axis, and overlays a second run
+  dashed, aligned as `havne-cli view --align-on` aligns two: on their
+  starts, their UTC starts, a marker, or a rise or fall through a
+  level. Live's strip chart is the shared chart, and draws a dense hour
+  at 62 charts a second on the test phone and 124 on the laptop, past
+  the 60 asked (the ADR's appendix "the viewer"). Marks are written
+  while recording: the header's Mark in the app, a line typed into
+  `havne-cli stream --record`.
 - **`havne-cli info <recording>`:** duration, each signal's count and
   rate, the link events and sleeps, and what's wrong offline: gaps,
   rate drops, an ID first seen late, overflow flags, broken ISO-TP

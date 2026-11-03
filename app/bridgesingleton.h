@@ -10,6 +10,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "adapterrelay.h"
+#include "recordingview.h"
 #include "sessionbridge.h"
 
 // Exposes main()'s bridge to QML as the `Bridge` singleton of the App
@@ -58,6 +59,14 @@ public:
         QJSEngine::setObjectOwnership(relay, QJSEngine::CppOwnership);
         return relay;
     }
+};
+
+// A recording opened for the Recordings page (ADR-0049 step 5): each
+// page makes its own
+struct RecordingViewForeign {
+    Q_GADGET
+    QML_FOREIGN(RecordingView)
+    QML_NAMED_ELEMENT(RecordingView)
 };
 
 // The bridge's model properties, typed for qmllint. Not creatable or

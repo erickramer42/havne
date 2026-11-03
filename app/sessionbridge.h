@@ -11,6 +11,8 @@
 //          the VIN core reads, CoreTest.TheVinIsService09sThenF190s;
 //          BridgeTest.UnplottedNames*, ...), the default
 //          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
+//          a mark in a recording (ADR-0049 section 4,
+//          BridgeTest.AMarkGoesIntoTheRecording);
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
 //          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
 //          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
@@ -425,6 +427,8 @@ class SessionBridge : public QObject
     Q_PROPERTY(QString recordingFolder READ recordingFolder NOTIFY recordingStateChanged)
     Q_PROPERTY(QUrl recordingFolderUrl READ recordingFolderUrl NOTIFY recordingStateChanged)
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
+    // The marks put in the recording under way, or the last one
+    Q_PROPERTY(int markCount READ markCount NOTIFY markCountChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
@@ -546,11 +550,11 @@ public:
     // bitrate }, kind "can" or "vcan", bitrate in bit/s (0 for vcan). A
     // netlink read; nothing is opened. Empty elsewhere.
     Q_INVOKABLE QVariantList discoverCanInterfaces() const;
-    // The newest recordings first, at most limit, for Settings to replay
-    // by a tap: one map per folder holding a frames.csv, { title, uri,
-    // source, profile } as QStrings. title is the folder's date and
-    // label ("2026-10-28 14:30:12 · Daily driver"), uri its replay://
-    // URI (replayUriFor), source the recorded URI as the pill shows it
+    // The newest recordings first, at most limit, for the Recordings page
+    // to open or replay by a tap: one map per folder holding a frames.csv,
+    // { title, uri, folder, source, profile } as QStrings. title is the
+    // folder's date and label ("2026-10-28 14:30:12 · Daily driver"), uri
+    // its replay:// URI (replayUriFor), folder its path, source the recorded URI as the pill shows it
     // (uriLabelFor), "" when events.log doesn't name one. Reads the
     // earlier product name's folder too, when it's another (ADR-0001's
     // appendix of 2026-10-28), newest first across both. A directory
@@ -572,6 +576,12 @@ public:
     QString recordingFolder() const;
     QUrl recordingFolderUrl() const;
     bool recordingActive() const { return m_recorder != nullptr; }
+    int markCount() const { return m_markCount; }
+    // A marker in the recording under way (ADR-0049 section 4: the app's
+    // Mark, as a line typed into havne-cli stream --record): label, or
+    // "Mark N" for an empty one, N counting this recording's marks. False
+    // with no recording, or one core refused it (a write failed).
+    Q_INVOKABLE bool mark(const QString& label = QString());
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
     // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
@@ -735,6 +745,7 @@ signals:
     void logPausedChanged();
     void recordingChanged();
     void recordingStateChanged();
+    void markCountChanged();
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
@@ -946,6 +957,7 @@ private:
         nullptr;                       // the session's, until stopRecording
     QString m_recordingFolder;         // the current or last one, absolute
     bool m_noting = true;              // logUnnoted clears it for its line
+    int m_markCount = 0;               // the recording's marks, from 0
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only

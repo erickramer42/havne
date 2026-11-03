@@ -147,10 +147,6 @@ TestCase {
         // The longest vehicle label, wider than the column on any font (a
         // wider one, Linux's, put two presets past the edge)
         page.vehicles = VehicleBook.add(VehicleBook.empty(), "W".repeat(40))
-        page.recordings = [{ title: "2026-10-28 14:30:12 · A vehicle label forty characters long",
-                             uri: "replay://C:/rec/x?profile=raw",
-                             source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C",
-                             profile: "raw" }]
         const column = find(page, "settingsColumn")
         tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
         waitForPolish(column)
@@ -200,15 +196,13 @@ TestCase {
             { tag: "profile", section: "profileSection", title: "What to read", summary: "Default",
               parts: ["profile_raw", "profileHint"] },
             { tag: "recording", section: "recordingSection", title: "Recording",
-              summary: "off · 1 saved", parts: ["recordBox", "recordingsCaption", "recordingList"] },
+              summary: "off", parts: ["recordBox", "recordStatus"] },
             { tag: "display", section: "displaySection", title: "Display",
               summary: "100 % · metric", parts: ["units_metric", "developerBox"] },
         ]
     }
     function test_sectionsStartFoldedAndOpenFromTheirHeadings(data) {
         const page = createPage(true)
-        page.recordings = [{ title: "2026-10-28 14:30:12", uri: "replay://C:/rec/x?profile=mock",
-                             source: "mock://demo", profile: "mock" }]
         page.j2534Devices = []
         page.serialPorts = [{ name: "COM5", device: "" }]
         page.canInterfaces = []
@@ -528,14 +522,12 @@ TestCase {
         verify(!find(page, "bleScanButton").visible, "no scan without Bluetooth")
     }
 
-    // A recording that ends joins the list, and its row fills the field
-    // with its replay under the profile and DIDs it was recorded with
+    // A recording's replay (the Recordings page's Replay, through Main)
+    // fills the field under the profile and DIDs it was recorded with
     // (test_qml's recordings go to a scratch folder)
-    function test_aRecordingsRowFillsTheFieldWithItsReplay() {
+    function test_aRecordingsReplayFillsTheFieldAndConnects() {
         const page = createPage()
         const uri = find(page, "uriField")
-        const list = find(page, "recordingList")
-        const before = list.count
 
         Bridge.recording = true
         uri.text = "mock://recorded?profile=uds-generic&did=F190:text"
@@ -545,15 +537,12 @@ TestCase {
         // with none is refused as a replay ("holds no frames")
         tryVerify(() => Bridge.frameCount > 0, 10000, "a frame is recorded")
         Bridge.disconnectSession()
-        tryVerify(() => list.count === Math.min(before + 1, page.recordingsListed), 10000,
-                  "the recording that ended is listed")
-        verify(find(page, "recordingsCaption").visible)
-        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        compare(find(list.itemAtIndex(0), "recordingDetail").text,
-                "mock://recorded?profile=uds-generic&did=F190:text · replays as uds-generic")
+        tryVerify(() => !Bridge.recordingActive, 10000, "the recording ends")
+        const row = Bridge.recentRecordings(1)[0]
+        compare(row.source, "mock://recorded?profile=uds-generic&did=F190:text")
 
         press(page, "profile_raw")
-        mouseClick(find(list.itemAtIndex(0), "recordingRowArea"))
+        page.pickRecording(row.uri)
         verify(uri.text.startsWith("replay://")
                && uri.text.endsWith("?profile=uds-generic&did=F190:text"), uri.text)
         verify(find(page, "profile_uds-generic").highlighted, "the row reads its profile back")

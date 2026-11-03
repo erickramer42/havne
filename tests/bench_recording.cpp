@@ -4,6 +4,7 @@
 //          phone; docs/testing.md "Performance" records its figures
 //
 // bench_recording [--fixture <dir>] [--scratch <dir>] [--runs N] [--bound S]
+//                 [--keep]
 // bench_recording --open <recording> [--runs N] [--bound S]
 //
 // Writes two hours into a folder of its own under scratch (TEMP or TMPDIR
@@ -14,6 +15,8 @@
 //     frames.csv) looped to an hour under obd2, as RecordingTest checks it
 //     (recording_hour.h), the hour section 9's bound is on;
 //   - a dense hour: 50 number signals at 10 Hz each, for the margin.
+// --keep leaves the two hours where they were written and names them,
+// for the Recordings page's frame test (ADR-0049 section 10 step 5).
 // --open times a recording already on disk instead. Each open after the
 // first finds the files in the OS's cache, as an open right after a
 // session does. Exits 1 when a median passes the bound (2 s by default:
@@ -162,7 +165,7 @@ int usage()
 {
     std::fprintf(stderr,
                  "usage: bench_recording [--fixture <dir>] [--scratch <dir>] "
-                 "[--runs N] [--bound S]\n"
+                 "[--runs N] [--bound S] [--keep]\n"
                  "       bench_recording --open <recording> [--runs N] "
                  "[--bound S]\n");
     return 2;
@@ -180,8 +183,13 @@ int main(int argc, char** argv)
     std::string open;
     unsigned runs = 5;
     double bound_s = 2.0;
+    bool keep = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
+        if (a == "--keep") {
+            keep = true;
+            continue;
+        }
         if (i + 1 >= argc) {
             return usage();
         }
@@ -240,6 +248,10 @@ int main(int argc, char** argv)
         c.hour.write(folder);
         ok = time_open(c.label, folder, runs, bound_s, bound_of(c.hour)) && ok;
     }
-    fs::remove_all(root, ec);
+    if (keep) {
+        std::printf("\nKept: %s\n", root.generic_u8string().c_str());
+    } else {
+        fs::remove_all(root, ec);
+    }
     return ok ? 0 : 1;
 }

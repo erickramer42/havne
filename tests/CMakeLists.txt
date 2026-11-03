@@ -488,6 +488,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     add_executable(test_bridge
         test_bridge.cpp
+        test_recording_view.cpp
+        ../app/recordingview.cpp
         ../app/sessionbridge.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
@@ -507,9 +509,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ${CMAKE_SOURCE_DIR}/core/src
     )
 
-    # The engine-start fixture, which both decode paths read (ADR-0024)
+    # The engine-start fixture, which both decode paths read (ADR-0024),
+    # and the recordings RecordingViewTest opens (ADR-0049)
     target_compile_definitions(test_bridge PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -576,10 +580,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         Qt6::QuickTest
     )
     # Run with no -input, it runs every file in this directory. The
-    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023)
+    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023); the
+    # Recordings page opens the recording fixtures (ADR-0049)
     target_compile_definitions(test_qml PRIVATE
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
     )
 
     # Windows: deployed like the app, into a directory of its own (the
