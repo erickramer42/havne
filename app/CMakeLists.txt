@@ -34,8 +34,6 @@ qt_add_library(app_ui STATIC
     sessionbridge.cpp
     sessionbridge.h
     latencystats.h
-    sessionrecorder.cpp
-    sessionrecorder.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml PROPERTIES

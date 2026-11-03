@@ -391,7 +391,6 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(test_bridge
         test_bridge.cpp
         ../app/sessionbridge.cpp
-        ../app/sessionrecorder.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
         ../app/carryover.cpp
@@ -441,7 +440,6 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
-        ../app/sessionrecorder.cpp
         ../app/carryover.cpp
     )
     set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)

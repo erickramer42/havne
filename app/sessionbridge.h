@@ -31,6 +31,7 @@
 #include <QUrl>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -40,8 +41,22 @@
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
+#include "ecuio/recording.h"
 #include "latencystats.h"
-#include "sessionrecorder.h"
+
+// ecuio_clock_us as a chrono clock: the bridge stamps a frame's and a
+// value's arrival with it, for the delivery figures
+struct HostClock {
+    using duration = std::chrono::microseconds;
+    using rep = duration::rep;
+    using period = duration::period;
+    using time_point = std::chrono::time_point<HostClock>;
+    static constexpr bool is_steady = true;
+    static time_point now() noexcept
+    {
+        return time_point(duration(static_cast<rep>(ecuio_clock_us())));
+    }
+};
 
 // The Log page's frames, newest first by default. The last MaxFrames
 // in a fixed ring of plain rows: each frame overwrites the oldest once
@@ -402,7 +417,8 @@ class SessionBridge : public QObject
     // Session recording (ADR-0017), off by default: the Settings switch.
     // It takes effect at the next connect and can't change while a
     // session is up or in flight, so a recording always covers a whole
-    // session.
+    // session. Core writes it (ADR-0049): the bridge opens the recorder,
+    // attaches it before the session starts and notes its activity lines.
     Q_PROPERTY(bool recording READ recording WRITE setRecording NOTIFY recordingChanged)
     // The current or last recording, for display: relative to Documents
     // when it's there, so no account name shows. Empty before the first.
@@ -555,7 +571,7 @@ public:
     void setRecording(bool on);
     QString recordingFolder() const;
     QUrl recordingFolderUrl() const;
-    bool recordingActive() const { return m_recorder.active(); }
+    bool recordingActive() const { return m_recorder != nullptr; }
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
     // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
@@ -673,12 +689,12 @@ public:
     // Test seam: record a replay too, to compare it with its source. The
     // app never records one: it would copy the recording it plays
     void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
+    // Test seam: the session's recorder, for core's internal.h seams
+    // (a failed write); nullptr with none
+    ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
-    // Test seam: reply timing's snapshots this often in session time, not
-    // every 10 s
-    void setTimingEveryForTesting(uint64_t us) { m_timingEveryUs = us; }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -725,14 +741,16 @@ signals:
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
-    void handleFrameInternal(const ecuio_frame_t* frame, SessionRecorder::Clock::time_point arrived);
+    void handleFrameInternal(const ecuio_frame_t* frame,
+                             HostClock::time_point arrived);
     // Core's values callback (ADR-0024): WORKER thread, stages a frame's
     // values under m_valuesMutex
     static void onValues(const ecuio_value_batch_t* batch, void* user_data);
     // GUI thread, before the session starts: sizes the staging for set
     void prepareValueStaging(const ecuio_signal_set_t* set);
-    // GUI thread: swaps the staging out and drains it, every sample to
-    // the recorder and each signal's newest into the model's batch
+    // GUI thread: swaps the staging out and drains it, each sample's wait
+    // into the delivery figures and each signal's window into the model's
+    // batch
     void drainValues();
     // GUI thread: drainValues, then the batch into the model (the tick,
     // and once more at disconnect)
@@ -745,9 +763,16 @@ private:
     // test root, else Documents/<earlierProductName()>/recordings; "" when
     // that's recordingsRoot() itself or there's no Documents folder
     QString earlierRecordingsRoot() const;
-    void startRecording(const QString& uri, const ecuio_signal_set_t* set);
+    // Before the session starts: the recorder opened on recordingsRoot()
+    // and attached, when the switch is on and the URI isn't a replay's
+    void startRecording(ecuio_session_t* session, const QString& uri);
+    // Its last notes, then closed with why; "" with nothing open
     void stopRecording(const QString& why);
-    QString recordingSummary(const QString& why) const;
+    // The tick: a write that failed stops the recording, once
+    void pollRecording();
+    // An activity line core's recording writes in its own form (a link
+    // transition, a sleep): shown, never noted
+    void logUnnoted(const QString& line);
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
@@ -797,11 +822,11 @@ private:
 
     // One coalesce window of decoded values, written by onValues on the
     // worker. Sized at connect and never grown there: a sample past the
-    // limit is counted, and only the recording misses it (a numeric
-    // signal's newest value is kept regardless).
+    // limit is counted and goes untimed (a numeric signal's newest,
+    // lowest and highest are kept regardless; the recording is core's).
     struct ValueStaging {
         struct Sample {
-            SessionRecorder::Clock::time_point arrived;
+            HostClock::time_point arrived;
             uint32_t def = 0;          // index into the session's set
             uint32_t textAt = 0;       // a text sample's bytes in text
             uint32_t textLen = 0;
@@ -825,7 +850,7 @@ private:
         uint32_t dropped = 0;          // samples past a limit this window
 
         void prepare(size_t defs, size_t samplesMax, size_t textMax);
-        void stage(uint32_t def, SessionRecorder::Clock::time_point arrived,
+        void stage(uint32_t def, HostClock::time_point arrived,
                    uint64_t frameUs, const ecuio_value_t& v);
         void reset();
     };
@@ -853,7 +878,7 @@ private:
     // thread (in the async entry and the queued completion), so a plain
     // bool suffices despite the worker's existence.
     QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
-    QString startSession(ecuio_session_t* session);
+    QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
     bool m_connecting = false;
@@ -888,11 +913,6 @@ private:
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
-    // The tick: reply timing's snapshot into latency.csv every 10 s of
-    // session time (ADR-0042 section 3); the last comes at the teardown
-    void pollTiming();
-    uint64_t m_timingEveryUs = 10u * 1000 * 1000;
-    uint64_t m_timingNextUs = 0;
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // What each channel's ECU reported of its diagnostics (ADR-0037),
     // logged once per completed read
@@ -922,7 +942,10 @@ private:
     quint64 m_valuesStaged = 0;
 
     bool m_recording = false;
-    SessionRecorder m_recorder;
+    ecuio_recorder_t* m_recorder =
+        nullptr;                       // the session's, until stopRecording
+    QString m_recordingFolder;         // the current or last one, absolute
+    bool m_noting = true;              // logUnnoted clears it for its line
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only
