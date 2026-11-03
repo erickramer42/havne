@@ -5846,6 +5846,11 @@ TEST(BridgeTest, SessionInfoTextDescribesAReplay)
               "Session: replay of a recording, 7194 frames over 275.2 s at "
               "full speed; "
               "profile obd2");
+    info.replay_rows_torn = 1;
+    EXPECT_EQ(SessionBridge::sessionInfoText(info).toStdString(),
+              "Session: replay of a recording, 7194 frames over 275.2 s at "
+              "full speed, its last row cut short and left out; "
+              "profile obd2");
 }
 
 /* ADR-0044: Diagnostics' lookup of a typed code: spaces and lower case

@@ -7,7 +7,8 @@
 //          the inspection line (CliInspectionTest, ADR-0045) is core's verdict;
 //          the simulated ECU's lines (CliSimTest, ADR-0046); the DID
 //          scan's line and --until-scanned's end (CliScanTest, ADR-0020);
-//          the lines typed into stream --record (CliMarkLinesTest, ADR-0049).
+//          the lines typed into stream --record (CliMarkLinesTest, ADR-0049);
+//          view's grammar, axis and lines (CliViewTest, ADR-0049).
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
@@ -19,6 +20,7 @@
 #include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
+#include "view_lines.h"
 #include "vin_line.h"
 
 #include <gtest/gtest.h>
@@ -815,4 +817,216 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
     EXPECT_EQ(std::string(e.data(), e.size()),
               std::string("{\"type\":\"end\",\"reason\":\"bus-failed\",") +
                   counts + "\"failed\":true}");
+}
+
+TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)
+{
+    cli::AlignOn a;
+    ASSERT_TRUE(cli::parse_align_on("rise:RPM:4000", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::rise);
+    EXPECT_EQ(a.signal, "RPM");
+    EXPECT_EQ(a.level, 4000);
+    /* The level is the last colon's: a name may hold one */
+    ASSERT_TRUE(cli::parse_align_on("fall:Trim:B1:-2.5", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::fall);
+    EXPECT_EQ(a.signal, "Trim:B1");
+    EXPECT_EQ(a.level, -2.5);
+    ASSERT_TRUE(cli::parse_align_on("marker:lap: 2", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::marker);
+    EXPECT_EQ(a.label, "lap: 2");
+    ASSERT_TRUE(cli::parse_align_on("utc", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::utc);
+    for (const char* bad : {"", "UTC", "rise", "rise:RPM", "rise::4000",
+                            "rise:RPM:", "rise:RPM:fast", "rise:RPM:inf",
+                            "rise:RPM:4000x", "marker:", "sideways:RPM:1"}) {
+        EXPECT_FALSE(cli::parse_align_on(bad, a)) << bad;
+    }
+    EXPECT_EQ(a.kind, cli::AlignOn::utc) << "a refusal leaves it as it was";
+}
+
+TEST(CliViewTest, SecondsAreSignedAndToTheMicrosecond)
+{
+    int64_t us = 0;
+    ASSERT_TRUE(cli::parse_seconds("-5", us));
+    EXPECT_EQ(us, -5000000);
+    ASSERT_TRUE(cli::parse_seconds("1.0000015", us));
+    EXPECT_EQ(us, 1000002);
+    ASSERT_TRUE(cli::parse_seconds("0", us));
+    EXPECT_EQ(us, 0);
+    for (const char* bad : {"", "soon", "5s", "nan", "1e10", "-1e10"}) {
+        EXPECT_FALSE(cli::parse_seconds(bad, us)) << bad;
+    }
+}
+
+TEST(CliViewTest, TheAxisRoundsOutToWholeColumns)
+{
+    cli::Axis a;
+    ASSERT_TRUE(cli::make_axis(-5000000, 10000000, 15, a));
+    EXPECT_EQ(a.column_us, 1000000);
+    EXPECT_EQ(a.to_us, 10000000);
+    ASSERT_TRUE(cli::make_axis(0, 10, 3, a));
+    EXPECT_EQ(a.column_us, 4);
+    EXPECT_EQ(a.to_us, 12);
+    EXPECT_FALSE(cli::make_axis(5, 5, 3, a));
+    EXPECT_FALSE(cli::make_axis(0, 10, 0, a));
+}
+
+TEST(CliViewTest, AWindowCoversWhatTheRecordingHoldsOnce)
+{
+    cli::Axis a;
+    cli::Window w;
+    /* Unaligned: the whole axis, one query */
+    ASSERT_TRUE(cli::make_axis(0, 10000000, 10, a));
+    ASSERT_TRUE(cli::window_of(a, 0, w));
+    EXPECT_EQ(w.first, 0u);
+    EXPECT_EQ(w.count, 10u);
+    EXPECT_FALSE(w.partial);
+    EXPECT_EQ(w.t0_us, 0u);
+    EXPECT_EQ(w.t1_us, 10000000u);
+
+    /* Starting 3.5 s into the axis, wide columns: half a second of column
+     * 3 holds no whole second, so the query starts at column 4, which
+     * takes second 0 (it starts before the query) */
+    ASSERT_TRUE(cli::window_of(a, 3500000, w));
+    EXPECT_FALSE(w.partial);
+    EXPECT_EQ(w.first, 4u);
+    EXPECT_EQ(w.count, 6u);
+    EXPECT_EQ(w.t0_us, 500000u);
+    /* 3 s columns: the column across its start ends at its last whole
+     * second, and the second across the split goes to the next */
+    ASSERT_TRUE(cli::make_axis(0, 30000000, 10, a));
+    ASSERT_TRUE(cli::window_of(a, 4500000, w));
+    EXPECT_TRUE(w.partial);
+    EXPECT_EQ(w.first, 1u);
+    EXPECT_EQ(w.count, 9u);
+    EXPECT_EQ(w.partial_t1_us, 1000000u);
+    EXPECT_EQ(w.t0_us, 1500000u);
+    EXPECT_EQ(w.t1_us, 25500000u);
+
+    /* Narrow columns: the raw rows, split exactly */
+    ASSERT_TRUE(cli::make_axis(0, 1000000, 10, a)); /* 100 ms */
+    ASSERT_TRUE(cli::window_of(a, 250000, w));
+    EXPECT_TRUE(w.partial);
+    EXPECT_EQ(w.first, 2u);
+    EXPECT_EQ(w.count, 8u);
+    EXPECT_EQ(w.partial_t1_us, 50000u);
+    EXPECT_EQ(w.t0_us, 50000u);
+
+    /* On a column boundary: no partial column */
+    ASSERT_TRUE(cli::window_of(a, 300000, w));
+    EXPECT_FALSE(w.partial);
+    EXPECT_EQ(w.first, 3u);
+    EXPECT_EQ(w.t0_us, 0u);
+
+    /* The axis ends inside the column across its start */
+    ASSERT_TRUE(cli::window_of(a, 950000, w));
+    EXPECT_TRUE(w.partial);
+    EXPECT_EQ(w.first, 9u);
+    EXPECT_EQ(w.count, 1u);
+    EXPECT_EQ(w.partial_t1_us, 50000u);
+
+    /* All of the axis before it, or the axis ending where it starts */
+    EXPECT_FALSE(cli::window_of(a, 1000000, w));
+    EXPECT_FALSE(cli::window_of(a, 5000000, w));
+    /* Started before the axis: a later part of it */
+    ASSERT_TRUE(cli::window_of(a, -2000000, w));
+    EXPECT_EQ(w.first, 0u);
+    EXPECT_EQ(w.t0_us, 2000000u);
+    EXPECT_EQ(w.t1_us, 3000000u);
+}
+
+TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
+{
+    char buf[1024];
+    ecuio_recording_info_t info{};
+    info.format = ECUIO_RECORDING_FORMAT_OLDER;
+    info.flags = ECUIO_RECORDING_INFO_NO_SUMMARY;
+    info.duration_us = 30000000;
+    info.signal_count = 2;
+    info.rows_torn = 1;
+    info.records_dropped = 4;
+    cli::Line o(buf, sizeof buf);
+    cli::opened_line(o, 1, info);
+    EXPECT_EQ(std::string(o.data(), o.size()),
+              "{\"type\":\"opened\",\"recording\":1,\"format\":\"older\","
+              "\"duration_us\":30000000,\"utc_start_us\":null,\"signals\":2,"
+              "\"markers\":0,\"summary\":false,\"rows_torn\":1,"
+              "\"records_dropped\":4,\"notes_dropped\":0}");
+
+    ecuio_recording_signal_t s{};
+    std::strcpy(s.name, "RPM");
+    std::strcpy(s.unit, "rpm");
+    s.plot_rank = 1;
+    s.samples = 2;
+    s.lowest = 800;
+    s.highest = 2512.5;
+    s.first_us = 100;
+    s.last_us = 200;
+    cli::Line n(buf, sizeof buf);
+    cli::signal_line(n, 0, 3, s);
+    EXPECT_EQ(
+        std::string(n.data(), n.size()),
+        "{\"type\":\"signal\",\"recording\":0,\"index\":3,\"name\":\"RPM\","
+        "\"unit\":\"rpm\",\"text\":false,\"decimals\":0,\"rank\":1,"
+        "\"samples\":2,\"lowest\":800,\"highest\":2512.5,"
+        "\"first_us\":100,\"last_us\":200}");
+    ecuio_recording_signal_t none = s;
+    none.samples = 0;
+    none.first_us = ECUIO_RECORDING_NONE;
+    none.last_us = ECUIO_RECORDING_NONE;
+    cli::Line e(buf, sizeof buf);
+    cli::signal_line(e, 0, 3, none);
+    EXPECT_NE(std::string(e.data(), e.size())
+                  .find("\"lowest\":null,\"highest\":null,\"first_us\":null,"
+                        "\"last_us\":null}"),
+              std::string::npos);
+    ecuio_recording_signal_t vin{};
+    std::strcpy(vin.name, "VIN");
+    vin.flags = ECUIO_RECORDING_SIGNAL_TEXT;
+    vin.samples = 1;
+    cli::Line t(buf, sizeof buf);
+    cli::signal_line(t, 0, 4, vin);
+    EXPECT_EQ(std::string(t.data(), t.size()).find("lowest"), std::string::npos)
+        << "a text signal has no range";
+
+    cli::Line al(buf, sizeof buf);
+    cli::align_line(al, 1, "rise:RPM:4000", true, 24600000, -24600000);
+    EXPECT_EQ(std::string(al.data(), al.size()),
+              "{\"type\":\"align\",\"recording\":1,\"on\":\"rise:RPM:4000\","
+              "\"found\":true,\"host_us\":24600000,\"offset_us\":-24600000}");
+    cli::Line nf(buf, sizeof buf);
+    cli::align_line(nf, 0, "marker:pull", false, 0, 0);
+    EXPECT_EQ(std::string(nf.data(), nf.size()),
+              "{\"type\":\"align\",\"recording\":0,\"on\":\"marker:pull\","
+              "\"found\":false,\"host_us\":null,\"offset_us\":null}");
+
+    /* Columns from the third on: the others empty */
+    cli::Window w;
+    w.first = 2;
+    w.count = 2;
+    ecuio_recording_column_t cols[2] = {};
+    cols[0].samples = 3;
+    cols[0].lowest = 1;
+    cols[0].highest = 2.5;
+    cli::Line c(buf, sizeof buf);
+    cli::columns_line(c, 0, s, w, 4, cols);
+    EXPECT_EQ(std::string(c.data(), c.size()),
+              "{\"type\":\"columns\",\"recording\":0,\"signal\":\"RPM\","
+              "\"samples\":[0,0,3,0],\"lowest\":[null,null,1,null],"
+              "\"highest\":[null,null,2.5,null]}");
+    cli::Line ct(buf, sizeof buf);
+    cli::columns_line(ct, 0, vin, w, 2, nullptr);
+    EXPECT_EQ(std::string(ct.data(), ct.size()),
+              "{\"type\":\"columns\",\"recording\":0,\"signal\":\"VIN\","
+              "\"samples\":[0,0]}");
+
+    cli::Line at(buf, sizeof buf);
+    cli::at_begin(at, 1, -2000000);
+    cli::at_value(at, true, s, 300, "2512.5");
+    cli::at_value(at, false, vin, ECUIO_RECORDING_NONE, "");
+    cli::at_end(at);
+    EXPECT_EQ(std::string(at.data(), at.size()),
+              "{\"type\":\"at\",\"recording\":1,\"t_us\":-2000000,\"values\":"
+              "[{\"signal\":\"RPM\",\"host_us\":300,\"text\":\"2512.5\"},"
+              "{\"signal\":\"VIN\",\"host_us\":null,\"text\":\"\"}]}");
 }

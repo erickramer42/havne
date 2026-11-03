@@ -21,6 +21,11 @@
 //          (CliRecordTest, tests/cli_record.py), a close held past an
 //          interrupt (Windows, the fake DLL's slow disconnect), the line
 //          splitting UNIT (CliMarkLinesTest), a console's typing by hand;
+//          view (ADR-0049 section 5): golden runs on
+//          tests/fixtures/recording/, every sample counted once and the
+//          aligned pulls equal (CliViewRunTest, tests/cli_view.py), its
+//          usage errors (CliUsageTest), its grammar, axis and lines UNIT
+//          (CliViewTest);
 //          main's catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
@@ -28,6 +33,7 @@
 
 #include "diagnostics_line.h"
 #include "timing_line.h"
+#include "view_lines.h"
 #include "vin_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
@@ -434,6 +440,10 @@ void write_session(Output& out, const ecuio_session_info_t& info)
             l.key("faults");
             l.raw("true");
         }
+        if (info.replay_rows_torn != 0) {
+            l.key("rows_torn");
+            l.u64(info.replay_rows_torn);
+        }
         l.ch('}');
     }
     l.ch('}');
@@ -774,6 +784,9 @@ void usage(FILE* to)
         "[--label <name>]]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli sim <uri> --on <vcan> [--seconds S]\n"
+        "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
+        "                      [--to S] [--columns N] [--at S]\n"
+        "                      [--align-on <what>] [--hysteresis H]\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -804,6 +817,15 @@ void usage(FILE* to)
         "recording's,\n"
         "         replay://<absolute path>[?loop=1][&vin=<VIN>][&faults=...].\n"
         "         Ends at Ctrl+C or after S seconds.\n"
+        "view     reads recordings offline (the folders stream --record and\n"
+        "         the app write): what each holds, then each signal's lowest,\n"
+        "         highest and count in N columns (100) from --from to --to\n"
+        "         seconds; the plotted signals unless --signal names them,\n"
+        "         and with --at the values in force then. --align-on puts\n"
+        "         several on one axis, its zero at rise:<signal>:<level>\n"
+        "         (reaching it after being --hysteresis below),\n"
+        "         fall:<signal>:<level>, marker:<label>, or utc (their\n"
+        "         wall-clock starts).\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -813,7 +835,7 @@ void usage(FILE* to)
         "\n"
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
-        "      3 the connect failed.\n");
+        "      3 the connect, or a recording's open, failed.\n");
 }
 
 bool parse_count(const char* text, uint64_t& out)
@@ -1447,6 +1469,331 @@ int run_dtc(const char* typed)
     return out.ok() ? kExitOk : kExitFailed;
 }
 
+struct ViewArgs {
+    std::vector<const char*> folders;
+    std::vector<std::string> signals; // --signal, in order; none: the ranked
+    bool has_from = false;
+    bool has_to = false;
+    bool has_at = false;
+    int64_t from_us = 0;
+    int64_t to_us = 0;
+    int64_t at_us = 0;
+    uint32_t columns = 100;
+    const char* align_text = nullptr;
+    cli::AlignOn align;
+    double hysteresis = 0;
+    bool has_hysteresis = false;
+};
+
+struct RecordingCloser {
+    void operator()(ecuio_recording_t* r) const { ecuio_recording_close(r); }
+};
+
+// One recording opened for view: what it holds, the signals it shows,
+// and where the axis puts it
+struct Viewed {
+    std::unique_ptr<ecuio_recording_t, RecordingCloser> r;
+    ecuio_recording_info_t info{};
+    std::vector<ecuio_recording_signal_t> signals;
+    std::vector<uint32_t> shown;
+    bool aligned = true;
+    uint64_t align_host_us = ECUIO_RECORDING_NONE;
+    int64_t offset_us = 0;
+
+    // The index of a signal by name, or UINT32_MAX
+    uint32_t find(const std::string& name) const
+    {
+        for (uint32_t k = 0; k < signals.size(); ++k) {
+            if (name ==
+                std::string(signals[k].name,
+                            strnlen(signals[k].name, sizeof signals[k].name))) {
+                return k;
+            }
+        }
+        return UINT32_MAX;
+    }
+};
+
+// A recording read offline (ADR-0049 section 5): every recording opens,
+// then the names are checked (a name in none is a usage error, before any
+// output), then the lines. A failed open or query is an error line, exit 3.
+int run_view(const ViewArgs& args)
+{
+    Output out;
+    std::vector<Viewed> views(args.folders.size());
+    for (size_t i = 0; i < args.folders.size(); ++i) {
+        ecuio_recording_t* r = nullptr;
+        const ecuio_status_t rc =
+            ecuio_recording_open(args.folders[i], nullptr, nullptr, &r);
+        if (rc != ECUIO_OK) {
+            write_start(out);
+            write_error(out, rc);
+            return out.ok() ? kExitConnect : kExitFailed;
+        }
+        Viewed& v = views[i];
+        v.r.reset(r);
+        ecuio_recording_get_info(r, &v.info);
+        v.signals.resize(v.info.signal_count);
+        for (uint32_t k = 0; k < v.info.signal_count; ++k) {
+            ecuio_recording_get_signal(r, k, &v.signals[k]);
+        }
+    }
+    auto in_any = [&](const std::string& name) {
+        return std::any_of(views.begin(), views.end(), [&](const Viewed& v) {
+            return v.find(name) != UINT32_MAX;
+        });
+    };
+    for (const std::string& name : args.signals) {
+        if (!in_any(name)) {
+            std::fprintf(stderr, "havne-cli: no recording has a signal '%s'\n",
+                         name.c_str());
+            return kExitUsage;
+        }
+    }
+    const bool threshold = args.align.kind == cli::AlignOn::rise ||
+                           args.align.kind == cli::AlignOn::fall;
+    if (threshold) {
+        if (!in_any(args.align.signal)) {
+            std::fprintf(stderr, "havne-cli: no recording has a signal '%s'\n",
+                         args.align.signal.c_str());
+            return kExitUsage;
+        }
+        for (const Viewed& v : views) {
+            const uint32_t k = v.find(args.align.signal);
+            if (k != UINT32_MAX &&
+                (v.signals[k].flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0) {
+                std::fprintf(stderr,
+                             "havne-cli: '%s' is text: it crosses no level\n",
+                             args.align.signal.c_str());
+                return kExitUsage;
+            }
+        }
+    }
+
+    // The signals each shows: those named, in order, or its ranked ones by
+    // rank
+    for (Viewed& v : views) {
+        if (!args.signals.empty()) {
+            for (const std::string& name : args.signals) {
+                const uint32_t k = v.find(name);
+                if (k != UINT32_MAX) {
+                    v.shown.push_back(k);
+                }
+            }
+        } else {
+            for (uint32_t k = 0; k < v.signals.size(); ++k) {
+                if (v.signals[k].plot_rank != 0) {
+                    v.shown.push_back(k);
+                }
+            }
+            std::stable_sort(
+                v.shown.begin(), v.shown.end(), [&](uint32_t a, uint32_t b) {
+                    return v.signals[a].plot_rank < v.signals[b].plot_rank;
+                });
+        }
+    }
+
+    // Where each recording's zero lands: the event at 0, or the UTC
+    // starts' differences from the earliest
+    uint64_t utc_min = UINT64_MAX;
+    for (const Viewed& v : views) {
+        if (v.info.utc_start_us != 0) {
+            utc_min = (std::min)(utc_min, v.info.utc_start_us);
+        }
+    }
+    for (Viewed& v : views) {
+        switch (args.align.kind) {
+        case cli::AlignOn::none:
+            break;
+        case cli::AlignOn::utc:
+            v.aligned = v.info.utc_start_us != 0;
+            if (v.aligned) {
+                v.offset_us =
+                    static_cast<int64_t>(v.info.utc_start_us - utc_min);
+            }
+            break;
+        default: {
+            ecuio_recording_find_t what{};
+            if (threshold) {
+                what.kind = ECUIO_RECORDING_FIND_THRESHOLD;
+                what.signal = v.find(args.align.signal);
+                what.direction = args.align.kind == cli::AlignOn::rise
+                                     ? ECUIO_RECORDING_FIND_RISING
+                                     : ECUIO_RECORDING_FIND_FALLING;
+                what.level = args.align.level;
+                what.hysteresis = args.hysteresis;
+            } else {
+                what.kind = ECUIO_RECORDING_FIND_MARKER;
+                what.label_utf8 = args.align.label.c_str();
+            }
+            uint64_t at = ECUIO_RECORDING_NONE;
+            if (!threshold || what.signal != UINT32_MAX) {
+                const ecuio_status_t rc =
+                    ecuio_recording_find(v.r.get(), &what, 0, &at);
+                if (rc != ECUIO_OK) {
+                    write_start(out);
+                    write_error(out, rc,
+                                "the recording changed while it was read");
+                    return out.ok() ? kExitConnect : kExitFailed;
+                }
+            }
+            v.aligned = at != ECUIO_RECORDING_NONE;
+            v.align_host_us = at;
+            v.offset_us = v.aligned ? -static_cast<int64_t>(at) : 0;
+            break;
+        }
+        }
+    }
+
+    // The axis: given, or from the first recording's start to the last's
+    // end on it
+    int64_t from = INT64_MAX;
+    int64_t to = INT64_MIN;
+    for (const Viewed& v : views) {
+        if (v.aligned) {
+            from = (std::min)(from, v.offset_us);
+            to = (std::max)(to, v.offset_us +
+                                    static_cast<int64_t>(v.info.duration_us));
+        }
+    }
+    if (from == INT64_MAX) {
+        from = 0;
+        to = 0;
+    }
+    if (to <= from) {
+        to = from + 1000000; /* nothing recorded: a second */
+    }
+    if (args.has_from) {
+        from = args.from_us;
+    }
+    if (args.has_to) {
+        to = args.to_us;
+    }
+    cli::Axis axis;
+    if (!cli::make_axis(from, to, args.columns, axis)) {
+        std::fprintf(stderr, "havne-cli: --from must come before --to, here "
+                             "on the recordings' axis\n");
+        return kExitUsage;
+    }
+
+    write_start(out);
+    char buf[2048];
+    for (uint32_t i = 0; i < views.size(); ++i) {
+        const Viewed& v = views[i];
+        cli::Line l(buf, sizeof buf);
+        cli::opened_line(l, i, v.info);
+        write_line(out, l);
+        for (uint32_t k = 0; k < v.signals.size(); ++k) {
+            cli::Line s(buf, sizeof buf);
+            cli::signal_line(s, i, k, v.signals[k]);
+            write_line(out, s);
+        }
+        for (uint32_t k = 0; k < v.info.marker_count; ++k) {
+            ecuio_recording_marker_t m{};
+            ecuio_recording_get_marker(v.r.get(), k, &m);
+            BigLine b(256 + static_cast<size_t>(m.label_length) * 6);
+            cli::marker_line(b.line, i, k, m);
+            write_line(out, b.line);
+        }
+    }
+    if (args.align.kind != cli::AlignOn::none) {
+        for (uint32_t i = 0; i < views.size(); ++i) {
+            const Viewed& v = views[i];
+            BigLine b(512 + std::strlen(args.align_text) * 6);
+            cli::align_line(b.line, i, args.align_text, v.aligned,
+                            v.align_host_us, v.offset_us);
+            write_line(out, b.line);
+        }
+    }
+    {
+        cli::Line l(buf, sizeof buf);
+        cli::axis_line(l, axis);
+        write_line(out, l);
+    }
+    std::vector<ecuio_recording_column_t> cols;
+    for (uint32_t i = 0; i < views.size(); ++i) {
+        const Viewed& v = views[i];
+        if (!v.aligned || v.shown.empty()) {
+            continue;
+        }
+        cli::Window w;
+        const bool any = cli::window_of(axis, v.offset_us, w);
+        const size_t signals = v.shown.size();
+        if (any) {
+            /* Signal by signal, w.count columns each: the partial column's
+             * own query first, then the rest's */
+            cols.assign(signals * w.count, {});
+            const uint32_t partial = w.partial ? 1 : 0;
+            const uint32_t rest = w.count - partial;
+            std::vector<ecuio_recording_column_t> got(signals *
+                                                      (std::max)(rest, 1u));
+            ecuio_status_t rc = ECUIO_OK;
+            if (partial != 0) {
+                rc = ecuio_recording_query(v.r.get(), v.shown.data(),
+                                           static_cast<uint32_t>(signals), 0,
+                                           w.partial_t1_us, got.data(), 1);
+                for (size_t n = 0; rc == ECUIO_OK && n < signals; ++n) {
+                    cols[n * w.count] = got[n];
+                }
+            }
+            if (rc == ECUIO_OK && rest != 0) {
+                rc = ecuio_recording_query(v.r.get(), v.shown.data(),
+                                           static_cast<uint32_t>(signals),
+                                           w.t0_us, w.t1_us, got.data(), rest);
+                for (size_t n = 0; rc == ECUIO_OK && n < signals; ++n) {
+                    std::copy(
+                        got.begin() + static_cast<std::ptrdiff_t>(n * rest),
+                        got.begin() +
+                            static_cast<std::ptrdiff_t>((n + 1) * rest),
+                        cols.begin() +
+                            static_cast<std::ptrdiff_t>(n * w.count + partial));
+                }
+            }
+            if (rc != ECUIO_OK) {
+                write_error(out, rc, "the recording changed while it was read");
+                return out.ok() ? kExitConnect : kExitFailed;
+            }
+        }
+        for (size_t n = 0; n < v.shown.size(); ++n) {
+            BigLine b(cli::columns_line_bytes(axis.columns));
+            cli::columns_line(b.line, i, v.signals[v.shown[n]], w, axis.columns,
+                              any ? cols.data() + n * w.count : nullptr);
+            write_line(out, b.line);
+        }
+    }
+    if (args.has_at) {
+        std::vector<char> text(32768);
+        for (uint32_t i = 0; i < views.size(); ++i) {
+            const Viewed& v = views[i];
+            if (!v.aligned) {
+                continue;
+            }
+            const int64_t t = args.at_us - v.offset_us;
+            BigLine b(256 + v.shown.size() * (128 + text.size() * 6));
+            cli::at_begin(b.line, i, args.at_us);
+            for (size_t n = 0; n < v.shown.size(); ++n) {
+                uint64_t host = ECUIO_RECORDING_NONE;
+                text[0] = '\0';
+                if (t >= 0) {
+                    const ecuio_status_t rc = ecuio_recording_text_at(
+                        v.r.get(), v.shown[n], static_cast<uint64_t>(t),
+                        text.data(), static_cast<uint32_t>(text.size()), &host);
+                    if (rc != ECUIO_OK) {
+                        write_error(out, rc,
+                                    "the recording changed while it was read");
+                        return out.ok() ? kExitConnect : kExitFailed;
+                    }
+                }
+                cli::at_value(b.line, n == 0, v.signals[v.shown[n]], host,
+                              text.data());
+            }
+            cli::at_end(b.line);
+            write_line(out, b.line);
+        }
+    }
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
 int run_devices()
 {
     Output out;
@@ -1788,6 +2135,83 @@ int run(int argc, char** argv)
     }
     if (command == "dtc" && argc == 3) {
         return run_dtc(argv[2]);
+    }
+    if (command == "view") {
+        ViewArgs view;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            const bool has_value = i + 1 < argc;
+            if (a == "--signal" && has_value) {
+                view.signals.emplace_back(argv[++i]);
+            } else if ((a == "--from" || a == "--to" || a == "--at") &&
+                       has_value) {
+                int64_t us = 0;
+                if (!cli::parse_seconds(argv[++i], us)) {
+                    std::fprintf(stderr, "havne-cli: %s takes seconds\n",
+                                 a.c_str());
+                    return kExitUsage;
+                }
+                if (a == "--from") {
+                    view.from_us = us;
+                    view.has_from = true;
+                } else if (a == "--to") {
+                    view.to_us = us;
+                    view.has_to = true;
+                } else {
+                    view.at_us = us;
+                    view.has_at = true;
+                }
+            } else if (a == "--columns" && has_value) {
+                uint64_t n = 0;
+                if (!parse_count(argv[++i], n) || n > 10000) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --columns takes 1 to 10000\n");
+                    return kExitUsage;
+                }
+                view.columns = static_cast<uint32_t>(n);
+            } else if (a == "--align-on" && has_value) {
+                view.align_text = argv[++i];
+                if (!cli::parse_align_on(view.align_text, view.align)) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --align-on takes "
+                                 "rise:<signal>:<level>, "
+                                 "fall:<signal>:<level>, marker:<label> or "
+                                 "utc\n");
+                    return kExitUsage;
+                }
+            } else if (a == "--hysteresis" && has_value) {
+                if (!cli::parse_decimal(argv[++i], view.hysteresis) ||
+                    view.hysteresis < 0) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --hysteresis takes 0 or more\n");
+                    return kExitUsage;
+                }
+                view.has_hysteresis = true;
+            } else if (a.rfind("--", 0) == 0) {
+                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+                usage(stderr);
+                return kExitUsage;
+            } else {
+                view.folders.push_back(argv[i]);
+            }
+        }
+        if (view.folders.empty()) {
+            std::fprintf(stderr,
+                         "havne-cli: view needs a recording's folder\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (view.has_hysteresis && view.align.kind != cli::AlignOn::rise &&
+            view.align.kind != cli::AlignOn::fall) {
+            std::fprintf(stderr, "havne-cli: --hysteresis goes with "
+                                 "--align-on rise: or fall:\n");
+            return kExitUsage;
+        }
+        if (view.has_from && view.has_to && view.from_us >= view.to_us) {
+            std::fprintf(stderr, "havne-cli: --from must come before --to\n");
+            return kExitUsage;
+        }
+        return run_view(view);
     }
     if (command == "play") {
 #if HAVNE_CLI_PLAY

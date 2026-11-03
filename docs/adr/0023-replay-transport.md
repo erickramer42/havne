@@ -284,6 +284,19 @@ rewritten: the state, the code, the episode, one line, no "Replay
 finished") and `.LinkStateMapsEveryPublishedCode`; `QmlTest.theme` and
 `.liveview` for the label, color and banner.
 
+**Note (2026-11-03): a torn last row is left out.** ADR-0049 section
+7's change to section 3 is built: a last row with no newline, a write
+cut short when the recording's process or the power stopped, is left
+out at attach and counted in the session info's `replay_rows_torn` (a
+reserved word, 0 or 1), and a recording of that row alone holds no
+frames. Any other bad row is still refused with its line number. A row
+attach read whole that has lost its newline by the time the worker
+reaches it is a file changed since attach,
+`ECUIO_ERR_RECORDING_CHANGED`. The app's Session line says ", its last
+row cut short and left out", `havne-cli`'s `replay` object adds
+`rows_torn` when it isn't 0, and the simulated ECU's loader leaves the
+row out too.
+
 **Note (2026-11-03): core writes what it reads.** The recorder is
 core's ([ADR-0049](0049-recordings-in-core.md)), so section 6's round
 trip records the mock session through core's recorder and replays it

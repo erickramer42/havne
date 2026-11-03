@@ -19,6 +19,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_vin` | VIN decode (`core/src/vin.cpp`, ADR-0043): arbitrary text as a VIN under an arbitrary latest model year, and as a manufacturer code. A refusal leaves the info zeroed; a decode is 17 characters, its year 0 or 1980-2039 and never past the bound once the note's later half, its check digit 0-9 or X matching position 9 exactly when flagged, its code 3 or 6 long, its reserved room zero; a make is never NULL; two calls agree. |
 | `fuzz_dtc` | A typed trouble code (`ecuio_dtc_parse`, `core/src/dtc_titles.cpp`, ADR-0044): arbitrary text. A refusal leaves the code untouched; a parse formats back to the same text through `ecuio_dtc_format`, and its title is never NULL. |
 | `fuzz_sim` | The simulated ECU (`core/src/sim_ecu.h`, ADR-0046): arbitrary text as its URI, and a run of arbitrary requests off the bus in either mode under faults, its car stepped between them. A refused URI says why; a parsed one holds a 17-character VIN and faults in range; a reply stays within its buffer and is a positive reply to the request's service or a three-byte negative one naming it; two ECUs given the same requests answer the same. |
+| `fuzz_recording` | A recording's files ([ADR-0049](../docs/adr/0049-recordings-in-core.md) section 5), the first byte picking one: each line through every parser of `core/src/recording_rows.h` (`signals.csv`'s and `markers.csv`'s rows, `events.log`'s signal, UTC and activity lines, its summary and drop lines), where a parsed name stays within 31 bytes, a unit within 15 and decimal places within 3, and two parses agree, NaN bits included; or a folder, the input cut at 0x1E bytes into `events.log`, `signals.csv` and `markers.csv` in a scratch folder in `TEMP`/`TMPDIR` and opened through `ecuio_recording_open`. The status is `ECUIO_OK` or `ECUIO_ERR_LOAD_FAILED` with a one-line detail that never holds the path; an open recording's counts agree with its queries (one column over everything holds every sample, from the summaries or the raw rows), its names and units are terminated, and `text_at` and `find` succeed within the signal's times; two opens agree. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -36,7 +37,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -50,7 +51,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

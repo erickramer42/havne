@@ -126,7 +126,7 @@ jobs:
     if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     needs: core-and-tests
-    timeout-minutes: 15
+    timeout-minutes: 20 # a minute a harness, and the build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -157,7 +157,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query \
             fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp \
-            fuzz_vin fuzz_dtc fuzz_sim
+            fuzz_vin fuzz_dtc fuzz_sim fuzz_recording
 
       - name: fuzz_decode_signal (60 s)
         run: |
@@ -223,6 +223,12 @@ jobs:
         run: |
           mkdir -p artifacts
           ./build-fuzz/fuzz/fuzz_sim -max_total_time=60 -timeout=25 \
+            -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
+
+      - name: fuzz_recording (60 s)
+        run: |
+          mkdir -p artifacts
+          ./build-fuzz/fuzz/fuzz_recording -max_total_time=60 -timeout=25 \
             -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
 
       - name: Upload fuzz artifacts

@@ -3442,13 +3442,19 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
         const bool loop = (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
         const bool faults =
             (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0;
-        return QStringLiteral(
-                   "Session: replay of a recording, %1 frames over %2 s %3%4%5; ")
+        // A last row cut short by a crash or a power cut (ADR-0049 section 7)
+        const QString torn =
+            info.replay_rows_torn != 0
+                ? QStringLiteral(", its last row cut short and left out")
+                : QString();
+        return QStringLiteral("Session: replay of a recording, %1 frames over "
+                              "%2 s %3%4%5%6; ")
                    .arg(info.replay_frames)
                    .arg(QString::number(info.replay_span_ms / 1000.0, 'f', 1),
                         speed, loop ? QStringLiteral(", looping") : QString(),
                         faults ? QStringLiteral(", with faults injected")
-                               : QString()) +
+                               : QString(),
+                        torn) +
                profile;
     }
     if (info.backend == ECUIO_BACKEND_SOCKETCAN) {

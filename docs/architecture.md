@@ -131,7 +131,8 @@ session decodes under `?profile=obd2` because its defs match replies,
 not requests. The bridge logs "Replay finished" once at the end of the
 file, and the session stays open. A file that changed after create
 stops playback early with `ECUIO_ERR_RECORDING_CHANGED`, which the
-link state shows as `stopped`.
+link state shows as `stopped`. A last row with no newline, a write cut
+short, is left out and counted in the session info.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Signal defs:** each def says where its value sits in a frame
@@ -376,7 +377,14 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   frames the Log page drops are recorded too. The bridge opens the
   recorder, attaches it before the session starts, notes its activity
   lines and closes it after the teardown; `havne-cli stream --record`
-  does the same.
+  does the same. Reading one back is core's too: `ecuio_recording_open`
+  reads the folder once into each signal's per-second summaries and
+  an index of where each second starts, so its memory follows the
+  recording's seconds, not its size, and a query answers each column's
+  lowest and highest from the summaries, or from the raw rows when
+  zoomed in. `havne-cli view` writes what it reads as JSON lines,
+  several recordings aligned on a threshold, a marker or their UTC
+  starts.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial

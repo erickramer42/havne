@@ -293,7 +293,8 @@ bus ([roadmap](#roadmap)).
     ([ADR-0017](docs/adr/0017-session-recording.md)), written by core's
     recorder on a thread of its own, so the frames the Log page drops
     under load are recorded too
-    ([ADR-0049](docs/adr/0049-recordings-in-core.md)), and a surrogate
+    ([ADR-0049](docs/adr/0049-recordings-in-core.md)), and read back
+    offline by core's reader and `havne-cli view`, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -448,11 +449,17 @@ section 10 orders the work).
   0.8 of the unrecorded one.
 - **The reader** opens a recording offline. One pass on open builds a
   sparse index (`host_us` only increases) and each signal's lowest and
-  highest per stretch, so memory follows the index, not the recording.
-  A torn last row is skipped; the `signals.csv` parser gets a fuzz
-  target.
+  highest per second, so memory follows the recording's seconds, not
+  its size. A torn last row is dropped and counted, by the reader and
+  by `replay://`. It is built (step 3), with a fuzz target over every
+  parser and whole folders: the replay fixture's hour opens in about
+  9 ms on the laptop and 10 ms on the test phone, against bounds of
+  2 s and 10 s, and a dense hour of 50 signals at 10 Hz in about
+  0.2 s on either (`bench_recording`, the ADR's appendix of
+  2026-11-03).
 - **The viewer**, in the app and as `havne-cli view` (JSON lines,
-  goldens): seek, scrub and zoom (pinch on the phone), and two runs
+  goldens; the CLI's is built, aligned on a rise, a fall, a marker or
+  the UTC starts): seek, scrub and zoom (pinch on the phone), and two runs
   overlaid on a common zero, a threshold crossing or a marker. Live's
   strip chart becomes the shared chart. Marks written while
   recording (a tap in the app, a line typed into `havne-cli`), and two

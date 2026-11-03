@@ -445,3 +445,53 @@ pipe broke 2 ms after the child resumed, and `havne-cli` wrote the
 error line and exited 3, 27 s in
 ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)). The
 deadline wasn't reached; a stall after the spawn has met only the fake.
+
+## Appendix: 2026-11-03, view
+
+`havne-cli view <recording>... [--signal <name>]... [--from S] [--to S]
+[--columns N] [--at S] [--align-on <what>] [--hysteresis H]` reads
+recordings offline through core's reader
+([ADR-0049](0049-recordings-in-core.md) section 5): the folders
+`stream --record` and the app write. Its lines, schema 1:
+
+| `type` | When | Fields |
+|---|---|---|
+| `opened` | each recording, in the order given | `recording` (its place), `format` (`core`, `older`, `unknown`), `duration_us`, `utc_start_us` (null without one), `signals`, `markers`, `summary` (false when `events.log` has no end line), `rows_torn`, `records_dropped`, `notes_dropped` |
+| `signal` | each of its signals | `recording`, `index`, `name`, `unit`, `text`, `decimals`, `rank`, `samples`, a number's `lowest` and `highest` (null with no samples), `first_us`, `last_us` (null with none) |
+| `marker` | each of its markers | `recording`, `index`, `host_us`, `label` |
+| `align` | with `--align-on`, each recording | `recording`, `on`, `found`, `host_us` (the event's), `offset_us`: the axis's time minus the recording's own |
+| `axis` | once | `from_us`, `to_us`, `columns`, `column_us` |
+| `columns` | each recording placed on the axis, each signal shown | `recording`, `signal`, `samples`, and a number's `lowest` and `highest`, one entry a column, null where one is empty |
+| `at` | with `--at`, each recording placed | `recording`, `t_us`, `values`: each shown signal's `text` in force then, as `signals.csv` holds it, and its `host_us` (null and `""` before its first) |
+
+- **The axis:** its zero is each recording's own start, or with
+  `--align-on` an event: `rise:<signal>:<level>` (the first sample
+  reaching the level after one below it by more than `--hysteresis`),
+  `fall:<signal>:<level>`, `marker:<label>`, or `utc` (the earliest
+  start at zero, the others at their UTC starts' difference). The level
+  is the text after the last colon, so a signal's name may hold one. A
+  recording without the event has `found` false and no `columns` or
+  `at` line. By default the axis runs from the earliest start on it to
+  the latest end, in 100 columns (1 to 10,000), its end rounded out to
+  a whole column so every recording's columns start on the same
+  microsecond.
+- **The signals shown:** those `--signal` names, in its order, else
+  each recording's ranked ones by rank, as the viewer plots by default.
+- **No `end` line:** a view is a list, as `devices` is, and exit 0 says
+  it is whole.
+- **Exit codes:** a recording that won't open, or a read that finds the
+  file changed, writes an `error` line with core's detail and exits 3,
+  whose meaning widens to "the connect, or a recording's open,
+  failed". A name no recording has, a threshold on a text signal, a
+  `--from` not before `--to` and every malformed option are usage
+  (exit 2) with nothing on standard output; the names are checked after
+  the opens and before the first line.
+
+Tests: goldens on two recordings of one pull written by hand
+(`tests/fixtures/recording/`, the second's pull 10 s later into it),
+one, aligned on its rise with `--at`, on its marker, on the UTC
+starts, a rise its hysteresis keeps from being found, and a folder with
+no recording (`CliGoldenTest.View*`); every sample counted once and the
+aligned pulls' columns equal (`CliViewRunTest`, `tests/cli_view.py`);
+the grammar, the axis and each line (`CliViewTest`); the usage errors
+(`CliUsageTest.View*`).
