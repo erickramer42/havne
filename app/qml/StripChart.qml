@@ -29,6 +29,11 @@ Canvas {
     property var drawn: null
     // Called after the traces, before the labels: decorate(ctx, layout)
     property var decorate: null
+    // What drawing has cost since the page last zeroed them: paints, and
+    // their total and longest time in ms (onPaint's own, to the ms)
+    property int paints: 0
+    property real paintMs: 0
+    property real paintMaxMs: 0
 
     readonly property real zoom: Theme.zoom
     property real shownW: 0
@@ -37,8 +42,22 @@ Canvas {
     height: shownH * zoom
     scale: 1 / zoom
     transformOrigin: Item.TopLeft
+    // Rasterized on a thread of the Canvas's own: on the GUI thread
+    // (Immediate) the fill held a dense hour's pan to 36 frames/s on a
+    // 144 Hz laptop screen while onPaint took 2 ms; threaded, 144
+    // (the Recordings page's frame test, 2026-11-03)
+    renderStrategy: Canvas.Threaded
 
     onPaint: {
+        const begun = Date.now()
+        draw()
+        const took = Date.now() - begun
+        paints += 1
+        paintMs += took
+        paintMaxMs = Math.max(paintMaxMs, took)
+    }
+
+    function draw() {
         const ctx = getContext("2d")
         ctx.reset()
         ctx.scale(zoom, zoom)

@@ -223,6 +223,33 @@ TestCase {
         compare(page.cursorMs, 7920)
     }
 
+    // The frame test (developer mode only): it moves the view for its
+    // seconds, then says what it measured, in the log too, and puts the
+    // ticks and the view back
+    function test_theFrameTestMeasuresAndPutsTheViewBack() {
+        const page = openFindings()
+        verify(!find(page, "frameTest").visible, "hidden outside developer mode")
+        Theme.developerMode = true
+        verify(find(page, "frameTest").visible)
+        page.frameTestSeconds = 0.6
+        page.setView(5000, 6000)
+        let logged = ""
+        const log = line => { logged = line }
+        Bridge.logMessage.connect(log)
+        mouseClick(find(page, "frameTest"))
+        verify(page.frameTesting)
+        tryVerify(() => !page.frameTesting, 5000, "the test ends")
+        Bridge.logMessage.disconnect(log)
+        Theme.developerMode = false
+        const result = find(page, "frameTestResult").text
+        verify(/^Frame test, 1 plotted at \d+ px: [\d.]+ frames\/s shown panning, [\d.]+ zooming; [\d.]+ charts drawn\/s/.test(result),
+               result)
+        compare(logged, result, "the activity log has it")
+        verify(page.plotted[0], "the ticks are back")
+        compare(page.viewT0, 0)
+        compare(page.viewT1, 20000)
+    }
+
     // A folder the reader refuses says why; All recordings goes back
     function test_aRefusedFolderSaysWhyAndBackGoesToTheList() {
         const page = createPage()

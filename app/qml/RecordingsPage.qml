@@ -46,6 +46,71 @@ Page {
     property var readout: ({})
     readonly property real minSpanMs: 200
     readonly property int rowHeight: 40
+    // A column narrower than a second reads the recording's raw rows of
+    // every signal in it (ADR-0049 section 5); a second or wider, the
+    // reader's per-second summaries. Past this many rows in view, columns
+    // stay a second wide: a 50-signal 10 Hz hour panned at two pixels a
+    // column read about 180,000 rows a frame and drew at 30 frames/s on the
+    // laptop (the frame test, 2026-11-03)
+    readonly property int rawRowsPerFrame: 20000
+    // The recording's rows a second, every signal's together
+    property real rowsPerSecond: 0
+
+    // The frame test (developer mode; ADR-0049 section 10 step 5's 60 fps
+    // on pan and pinch): four signals plotted, then for frameTestSeconds
+    // the view moves every frame, panning a tenth of the recording a second
+    // for the first half, then zooming in and out about its middle as a
+    // pinch does. It counts the frames the window presents and times each
+    // chart paint, and says so on the page and in the activity log.
+    property real frameTestSeconds: 6
+    property string frameTestResult: ""
+    property var frameTest: null
+    readonly property bool frameTesting: frameTest !== null
+
+    function startFrameTest() {
+        const four = {}
+        for (const s of recording.signalList.filter(s => !s.isText && s.samples > 0).slice(0, 4))
+            four[s.index] = true
+        frameTest = { begun: Date.now(), frames: [0, 0], plotted: plotted, signals: Object.keys(four).length }
+        plotted = four
+        chart.paints = 0
+        chart.paintMs = 0
+        chart.paintMaxMs = 0
+        setView(0, durationMs() / 10)
+        frameTestResult = qsTr("Measuring…")
+    }
+
+    function frameStep(elapsedS) {
+        const whole = durationMs()
+        const span = viewT1 - viewT0
+        if (elapsedS < frameTestSeconds / 2) {
+            // A tenth of the recording a second, back to the start at its end
+            let t0 = whole / 10 * elapsedS
+            t0 = t0 % Math.max(1, whole - span)
+            setView(t0, t0 + span)
+        } else {
+            // In for 0.75 s, out for 0.75 s, about the middle
+            const inward = Math.floor((elapsedS - frameTestSeconds / 2) / 0.75) % 2 === 0
+            zoomAt((viewT0 + viewT1) / 2, inward ? 0.97 : 1 / 0.97)
+        }
+    }
+
+    function finishFrameTest() {
+        const t = frameTest
+        const seconds = (Date.now() - t.begun) / 1000
+        frameTest = null
+        plotted = t.plotted
+        showAll()
+        // Frames shown in each half, panning then zooming
+        const half = seconds / 2
+        frameTestResult = qsTr("Frame test, %1 plotted at %2 px: %3 frames/s shown panning, %4 zooming; "
+                               + "%5 charts drawn/s, %6 ms a chart on average, %7 ms at most")
+            .arg(t.signals).arg(Math.round(chart.shownW))
+            .arg((t.frames[0] / half).toFixed(1)).arg((t.frames[1] / half).toFixed(1))
+            .arg((chart.paints / seconds).toFixed(1))
+            .arg((chart.paintMs / Math.max(1, chart.paints)).toFixed(1)).arg(chart.paintMaxMs)
+        Bridge.logEvent(frameTestResult)
+    }
 
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
@@ -112,8 +177,9 @@ Page {
         return viewT0 + (x - chart.x) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
-    // The chart's series: each plotted number's columns over the view, two
-    // pixels a column, its label the cursor's value while that's in view
+    // The chart's series: each plotted number's columns over the view, its
+    // label the cursor's value while that's in view. Two pixels a column,
+    // or a second when that would read more than rawRowsPerFrame rows
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
@@ -121,7 +187,10 @@ Page {
         const indexes = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
         if (indexes.length === 0)
             return []
-        const n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
+        const spanS = (viewT1 - viewT0) / 1000
+        let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
+        if (spanS * rowsPerSecond > rawRowsPerFrame)
+            n = Math.max(1, Math.min(n, Math.floor(spanS)))
         const inView = cursorMs >= viewT0 && cursorMs <= viewT1
         return recording.columns(indexes, viewT0, viewT1, n).map(c => {
             const s = sigs[c.index]
@@ -210,6 +279,10 @@ Page {
                 defaults[s.index] = s.plotted
             root.plotted = defaults
             root.readout = ({})
+            let rows = 0
+            for (const s of recording.signalList)
+                rows += s.samples
+            root.rowsPerSecond = rows / (root.durationMs() / 1000)
             root.cursorMs = -1
             root.showAll()
         }
@@ -230,6 +303,25 @@ Page {
     }
     onVisibleChanged: if (visible && !viewing) refresh()
     Component.onCompleted: refresh()
+
+    FrameAnimation {
+        running: root.frameTesting
+        onTriggered: {
+            const elapsed = (Date.now() - root.frameTest.begun) / 1000
+            if (elapsed >= root.frameTestSeconds)
+                root.finishFrameTest()
+            else
+                root.frameStep(elapsed)
+        }
+    }
+    Connections {
+        target: root.Window.window
+        enabled: root.frameTesting
+        function onFrameSwapped() {
+            const zooming = (Date.now() - root.frameTest.begun) / 1000 >= root.frameTestSeconds / 2
+            root.frameTest.frames[zooming ? 1 : 0] += 1
+        }
+    }
 
     ColumnLayout {
         id: column
@@ -472,6 +564,14 @@ Page {
                 Accessible.name: qsTr("Zoom in")
                 onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 0.5)
             }
+            ThemedButton {
+                objectName: "frameTest"
+                visible: Theme.developerMode
+                enabled: !root.frameTesting
+                text: qsTr("Frame test")
+                Layout.maximumWidth: 120
+                onClicked: root.startFrameTest()
+            }
             Label {
                 objectName: "cursorTime"
                 Layout.fillWidth: true
@@ -577,6 +677,16 @@ Page {
             TapHandler {
                 onTapped: (eventPoint, button) => root.setCursor(root.timeAt(eventPoint.position.x))
             }
+        }
+
+        Label {
+            objectName: "frameTestResult"
+            visible: Theme.developerMode && root.frameTestResult !== ""
+                     && recording.state === RecordingView.Open
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: root.frameTestResult
         }
 
         // The frames check: what it found, each row centering the view on
