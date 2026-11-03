@@ -296,6 +296,43 @@ if(TARGET havne-cli)
         set_tests_properties(CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
             CliRecordTest.TypedLinesAreMarkers CliRecordTest.AFolderThatCantBeMadeFails
             PROPERTIES TIMEOUT 60)
+        # view (ADR-0049 section 5) on two recordings of one pull, written
+        # by hand (tests/fixtures/recording/: pull-late's starts 10 s later
+        # into it, its UTC start 90 s later, a marker 0.5 s before each):
+        # what one holds, the two aligned on the pull's rise (with the
+        # values at a time), its marker and their UTC starts, a rise its
+        # hysteresis keeps from being found, and a folder with no
+        # recording; then every sample counted once at many zooms, and the
+        # aligned pulls' columns equal
+        set(_cli_pulls ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording)
+        app_cli_golden(ViewShowsWhatARecordingHolds view-one.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early --columns 12)
+        app_cli_golden(ViewAlignsTwoRecordingsOnARise view-rise.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
+               --from -2 --to 8 --columns 10 --at 2 --signal RPM --signal VIN)
+        app_cli_golden(ViewAlignsOnAMarker view-marker.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on marker:pull --columns 8
+               --signal Throttle)
+        app_cli_golden(ViewAlignsOnTheUtcStarts view-utc.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on utc --columns 4 --signal Coolant)
+        app_cli_golden(ViewLeavesOutARecordingItCantAlign view-unaligned.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               --align-on rise:RPM:2010 --hysteresis 30 --columns 2 --signal RPM)
+        app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
+        add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
+                    ${_cli_pulls}/pull-late)
+        add_test(NAME CliViewRunTest.AlignedPullsAgree
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py agree
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
+                    ${_cli_pulls}/pull-late)
+        set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
+            CliViewRunTest.AlignedPullsAgree PROPERTIES TIMEOUT 60)
         # Ctrl+Break while the fake DLL's disconnect hangs: the recording
         # ends whole without waiting for it (skipped where there's no
         # console, as CliSignalTest is)
@@ -331,6 +368,28 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    # view's refusals come before any recording opens, but for a name no
+    # recording has, which comes after the opens and before any line
+    app_cli_usage(ViewWithoutARecordingIsUsage "view")
+    app_cli_usage(ViewColumnsOfZeroIsUsage "view|x|--columns|0")
+    app_cli_usage(ViewTooManyColumnsIsUsage "view|x|--columns|10001")
+    app_cli_usage(ViewAnUnknownAlignmentIsUsage "view|x|--align-on|sideways")
+    app_cli_usage(ViewARiseWithoutALevelIsUsage "view|x|--align-on|rise:RPM")
+    app_cli_usage(ViewHysteresisWithoutARiseIsUsage
+        "view|x|--align-on|marker:pull|--hysteresis|5")
+    app_cli_usage(ViewANegativeHysteresisIsUsage
+        "view|x|--align-on|rise:RPM:1|--hysteresis|-1")
+    app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
+    app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
+    app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
+    set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)
+    app_cli_usage(ViewASignalNoRecordingHasIsUsage
+        "view|${_cli_pull_early}|--signal|Boost")
+    app_cli_usage(ViewAlignedOnASignalNoRecordingHasIsUsage
+        "view|${_cli_pull_early}|--align-on|rise:Boost:1")
+    app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
+    app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
+        "view|${_cli_pull_early}|--from|100")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
     # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
     # deadline
