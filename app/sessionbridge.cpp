@@ -1072,6 +1072,7 @@ QVariantList SessionBridge::recentRecordings(int limit) const
         QVariantMap row;
         row["title"] = title;
         row["uri"] = uri;
+        row["folder"] = folder;
         row["source"] = uriLabelFor(recorded);
         // After the query's "?profile=", the last ? in it
         row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)

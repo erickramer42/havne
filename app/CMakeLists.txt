@@ -54,6 +54,7 @@ qt_add_qml_module(app_ui
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml
+        qml/RecordingsPage.qml
         qml/SettingsPage.qml
         qml/NavButton.qml
         qml/Theme.qml

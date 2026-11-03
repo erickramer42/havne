@@ -546,11 +546,11 @@ public:
     // bitrate }, kind "can" or "vcan", bitrate in bit/s (0 for vcan). A
     // netlink read; nothing is opened. Empty elsewhere.
     Q_INVOKABLE QVariantList discoverCanInterfaces() const;
-    // The newest recordings first, at most limit, for Settings to replay
-    // by a tap: one map per folder holding a frames.csv, { title, uri,
-    // source, profile } as QStrings. title is the folder's date and
-    // label ("2026-10-28 14:30:12 · Daily driver"), uri its replay://
-    // URI (replayUriFor), source the recorded URI as the pill shows it
+    // The newest recordings first, at most limit, for the Recordings page
+    // to open or replay by a tap: one map per folder holding a frames.csv,
+    // { title, uri, folder, source, profile } as QStrings. title is the
+    // folder's date and label ("2026-10-28 14:30:12 · Daily driver"), uri
+    // its replay:// URI (replayUriFor), folder its path, source the recorded URI as the pill shows it
     // (uriLabelFor), "" when events.log doesn't name one. Reads the
     // earlier product name's folder too, when it's another (ADR-0001's
     // appendix of 2026-10-28), newest first across both. A directory

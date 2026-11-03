@@ -5,7 +5,9 @@
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
 //          (2026-10-27); Home's Connect... opens Settings with Adapter
-//          unfolded (2026-10-28). The safe area's margins (Android's system
+//          unfolded (2026-10-28); the Recordings page's Replay putting its
+//          URI in Settings' field, and seven tabs inside 384 px (2026-11-03).
+//          The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
 //          and the "Display:" line a phone logs in developer mode:
 //          BENCH, the phone run sheet.
@@ -69,12 +71,17 @@ ApplicationWindow {
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
-    readonly property int settingsPage: 5
+    readonly property int settingsPage: 6
 
     function gotoPage(index) { stack.currentIndex = index }
     // Connect... from any page: Settings, with what to connect to open
     function openConnect() {
         settingsView.showAdapters()
+        gotoPage(settingsPage)
+    }
+    // A recording's Replay: its URI in Settings' field, ready to connect
+    function replayRecording(uri) {
+        settingsView.pickRecording(uri)
         gotoPage(settingsPage)
     }
 
@@ -288,6 +295,7 @@ ApplicationWindow {
                                 { label: qsTr("Live"),   icon: "" },
                                 { label: qsTr("Diagnostics"), icon: "" },
                                 { label: qsTr("Log"),       icon: "" },
+                                { label: qsTr("Recordings"), icon: "" },
                                 { label: qsTr("Settings"),  icon: "" }
                             ]
                             delegate: NavButton {
@@ -322,6 +330,10 @@ ApplicationWindow {
                         onConnectRequested: root.openConnect()
                     }
                     LogPage { objectName: "logPage" }
+                    RecordingsPage {
+                        objectName: "recordingsPage"
+                        onReplayRequested: uri => root.replayRecording(uri)
+                    }
                     SettingsPage {
                         id: settingsView
                         objectName: "settingsPage"
@@ -373,6 +385,7 @@ ApplicationWindow {
                 ThemedTabButton { text: qsTr("Live") }
                 ThemedTabButton { text: qsTr("Codes") }
                 ThemedTabButton { text: qsTr("Log") }
+                ThemedTabButton { text: qsTr("Recs") }
                 ThemedTabButton { text: qsTr("Settings") }
             }
         }

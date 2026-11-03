@@ -24,8 +24,9 @@
 //          a typed VIN decoded and kept nowhere (ADR-0043,
 //          test_aTypedVinIsDecodedOnTheDevice);
 //          every item inside the page's width at a phone's (320 px); a
-//          recording that ends listed, its row filling the field with a
-//          replay that connects under the recorded profile and DIDs; the
+//          recording's replay (pickRecording, from the Recordings page)
+//          filling the field and connecting under the recorded profile
+//          and DIDs; the
 //          five sections folded at first, each heading's summary,
 //          chevron and fold; Connect... elsewhere opening Adapter; the
 //          Record line saying a
@@ -338,18 +339,10 @@ Pane {
         canInterfaces = Bridge.discoverCanInterfaces()
     }
 
-    // The newest recordings, [{ title, uri, source, profile }, ...]
-    // (Bridge.recentRecordings): read at start and after each recording
-    // ends. A row fills the field with its replay:// URI, under the
-    // profile it was recorded with, so a phone needs nothing typed
-    readonly property int recordingsListed: 20
-    property var recordings: []
-
-    function refreshRecordings() {
-        recordings = Bridge.recentRecordings(recordingsListed)
-    }
-
-    // Set like typed text, so the profile row and the DID field read it
+    // A recording's replay:// URI from the Recordings page (Main's
+    // replayRecording), under the profile it was recorded with, so a phone
+    // needs nothing typed. Set like typed text, so the profile row and the
+    // DID field read it
     function pickRecording(uri) {
         uriField.text = uri
         showUriField()
@@ -588,7 +581,6 @@ Pane {
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Adapter first opens
-        refreshRecordings()
         // Set like typed text, so the profile row and the DID field read
         // it back
         if (uriField.text === "")
@@ -629,11 +621,6 @@ Pane {
             sessionSettings.recording = Bridge.recording
         }
 
-        // A recording that ended joins the list
-        function onRecordingStateChanged() {
-            if (!Bridge.recordingActive)
-                page.refreshRecordings()
-        }
     }
 
     // A tick or an untick on Live is the picked vehicle's from now on
@@ -1248,9 +1235,7 @@ Pane {
                 id: recordingSection
                 objectName: "recordingSection"
                 title: qsTr("Recording")
-                summary: (Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off"))
-                         + (page.recordings.length > 0
-                            ? qsTr(" · %1 saved").arg(page.recordings.length) : "")
+                summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off")
 
                 // ---- Recording (ADR-0017) ----
                 // Off until switched on, and kept between runs. It takes effect
@@ -1298,83 +1283,6 @@ Pane {
                         text: qsTr("Open folder")
                         visible: Bridge.recordingFolder !== "" && !Theme.mobile
                         onClicked: Qt.openUrlExternally(Bridge.recordingFolderUrl)
-                    }
-                }
-
-                Label {
-                    objectName: "recordingsCaption"
-                    visible: page.recordings.length > 0
-                    text: qsTr("Recent recordings: select one to put its replay in the field above")
-                    color: Theme.textDim
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-
-                // Sized like the device list: up to deviceRowsShown rows, then
-                // it scrolls
-                ListView {
-                    id: recordingList
-                    objectName: "recordingList"
-                    // No current row: ListView gives a current one a default
-                    // highlight, which animates to its size and, after the
-                    // section opened at a phone's width, lay past the edge
-                    currentIndex: -1
-                    highlightFollowsCurrentItem: false
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: contentHeight
-                    Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
-                    visible: count > 0
-                    clip: true
-                    spacing: 2
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: page.recordings
-
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
-                    delegate: Rectangle {
-                        id: recordingRow
-                        required property var modelData
-                        width: recordingList.width
-                        height: page.deviceRowHeight
-                        radius: Theme.radius
-                        color: recordingMouse.containsMouse ? Theme.elevatedLight : Theme.elevated
-                        border.width: page.isChosen(recordingRow.modelData.uri) ? 2 : 0
-                        border.color: Theme.primary
-
-                        MouseArea {
-                            id: recordingMouse
-                            objectName: "recordingRowArea"
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: page.idle
-                            onClicked: page.pickRecording(recordingRow.modelData.uri)
-                        }
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: Theme.spacing
-                            spacing: 2
-
-                            Label {
-                                objectName: "recordingTitle"
-                                text: recordingRow.modelData.title
-                                color: page.idle ? Theme.text : Theme.textDim
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                            Label {
-                                objectName: "recordingDetail"
-                                text: recordingRow.modelData.source !== ""
-                                      ? qsTr("%1 · replays as %2").arg(recordingRow.modelData.source)
-                                                                  .arg(recordingRow.modelData.profile)
-                                      : qsTr("replays as %1").arg(recordingRow.modelData.profile)
-                                color: Theme.textDim
-                                font.pointSize: 8
-                                elide: Text.ElideMiddle
-                                Layout.fillWidth: true
-                            }
-                        }
                     }
                 }
             }

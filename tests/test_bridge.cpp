@@ -4965,6 +4965,8 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_EQ(field(0, "uri"),
               at + "20261028-143012-2 Daily driver?profile=raw");
     EXPECT_EQ(field(0, "source"), "") << "no events.log";
+    EXPECT_EQ(field(0, "folder"),
+              root.path().toStdString() + "/20261028-143012-2 Daily driver");
     EXPECT_EQ(field(1, "title"), "2026-10-28 14:30:12 \xC2\xB7 Daily driver");
     EXPECT_EQ(field(1, "source"),
               "elm327://192.168.4.1:23?profile=raw&poll=0x0C");

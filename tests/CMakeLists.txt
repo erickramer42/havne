@@ -580,10 +580,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         Qt6::QuickTest
     )
     # Run with no -input, it runs every file in this directory. The
-    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023)
+    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023); the
+    # Recordings page opens the recording fixtures (ADR-0049)
     target_compile_definitions(test_qml PRIVATE
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

@@ -76,7 +76,7 @@ TestCase {
     function test_everyPageFitsAPhonesWidth_data() {
         return [{ tag: "homePage" }, { tag: "dashboardPage" }, { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
-                { tag: "settingsPage" }]
+                { tag: "recordingsPage" }, { tag: "recordingsViewer" }, { tag: "settingsPage" }]
     }
 
     function test_everyPageFitsAPhonesWidth(data) {
@@ -88,12 +88,25 @@ TestCase {
         // Android's 14 sp text at the test phone's font scale, 1.15
         main.font.pixelSize = 16
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const name = data.tag === "logFrames" ? "logPage" : data.tag
+        const name = data.tag === "logFrames" ? "logPage"
+                   : data.tag === "recordingsViewer" ? "recordingsPage" : data.tag
         const page = find(main.contentItem, name)
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         verify(page.visible, name + " is on screen")
         if (data.tag === "logFrames")
             find(page, "view_frames").clicked()
+        // A long title and source, and the findings fixture in the viewer
+        const row = { title: "2026-10-28 14:30:12 · A vehicle label forty characters long",
+                      uri: "replay://C:/rec/x?profile=raw",
+                      folder: Harness.recordingFixtures + "/findings",
+                      source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C", profile: "raw" }
+        if (name === "recordingsPage")
+            page.recordings = [row]
+        if (data.tag === "recordingsViewer") {
+            page.open(row)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+            page.setCursor(5000)
+        }
         if (data.tag === "diagnosticsPage") {
             tryVerify(() => find(page, "clearCodes").enabled, 2000, "the report is read")
             find(page, "clearCodes").clicked()
