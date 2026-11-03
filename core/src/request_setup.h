@@ -7,7 +7,9 @@
 //          and diagnostics reports, Read again, a clear),
 //          Elm327SessionTest (the same through an ELM327);
 //          reply timing (ADR-0042): Elm327SessionTest.Timing*,
-//          J2534HealthTest.VxTiming*, SocketCanRequestTest.Timing*
+//          J2534HealthTest.VxTiming*, SocketCanRequestTest.Timing*;
+//          its copy for a recording (ADR-0049): RecorderTest.ReplyTiming*,
+//          .TheFinalTiming*, Elm327SessionTest.ARecordingHolds*
 //
 // What a requesting transport (J2534, ELM327) derives from its URI and
 // profile before it opens anything: the request keys' values, the
@@ -403,7 +405,7 @@ inline void ecuio_publish_timing(ecuio_session_t* session,
         return;
     }
     published_at = now_us;
-    std::lock_guard<std::mutex> lock(session->timing_mutex);
+    std::unique_lock<std::mutex> lock(session->timing_mutex);
     ecuio_session_timing_t& t = session->timing;
     t.snapshot_us = now_us > 0 ? static_cast<uint64_t>(now_us) : 0;
     t.interval_clock = e.timing->interval_clock;
@@ -425,6 +427,11 @@ inline void ecuio_publish_timing(ecuio_session_t* session,
             row.request[k] = q.bytes[k];
         }
     }
+    lock.unlock();
+    /* The recording's copy (ADR-0049 section 1), unlocked: only this
+     * worker writes the rows, and the final copy may wait for room */
+    ecuio_record_timing(session->record_link.get(), t, session->timing_rows,
+                        e.count, final);
 }
 
 /* Hands what channel c's ECU has said it is to the session, for

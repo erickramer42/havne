@@ -18,7 +18,10 @@
 //          the rate's proof after the first echo (ADR-0040's appendix of
 //          2026-11-02), on
 //          vcan0 started unproven (ecuio_socketcan_set_vcan_unproven):
-//          SocketCanRequestTest.AnUnproven*
+//          SocketCanRequestTest.AnUnproven*. A recording's link lines
+//          (ADR-0049) come through link_health.h, tested there
+//          (RecorderTest.ALinkTransition*) and through the fake ELM327;
+//          these workers' argument by code reading
 //
 // socketcan:// (ADR-0032, ADR-0040): a Linux CAN interface. Attach reads
 // the interface through rtnetlink and refuses one a session can't use
@@ -282,7 +285,7 @@ void request_worker(ecuio_socketcan_transport* t)
     ecuio_session_t* s = t->session;
     ecuio_request_engine& e = t->engine;
     isotp_rx& iso = *t->isotp;
-    link_health h(s->last_error, s->error_count);
+    link_health h(s->last_error, s->error_count, s->record_link.get());
     socketcan_clock clock;
     uint32_t drops = 0;
     bool overflow_pending = false;
@@ -576,7 +579,7 @@ void socketcan_worker(ecuio_socketcan_transport* t)
         return;
     }
     ecuio_session_t* s = t->session;
-    link_health h(s->last_error, s->error_count);
+    link_health h(s->last_error, s->error_count, s->record_link.get());
     socketcan_clock clock;
     ecuio_frame_t* frame = t->frame.get();
     uint32_t drops = 0; /* SO_RXQ_OVFL's count on this socket */

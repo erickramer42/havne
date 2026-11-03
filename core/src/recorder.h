@@ -57,4 +57,21 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               const ecuio_frame_t* frame,
                               const ecuio_value_t* values, uint32_t count);
 
+/* On the worker that judges the link, at each transition: its state and
+ * episode count at their time, pinned here; link may be NULL. One that
+ * doesn't fit is carried, the latest state, and goes in ahead of the
+ * next record that fits, so a full ring loses frames but never the
+ * link's state. Never blocks, never allocates. */
+void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
+                             uint32_t episodes);
+
+/* On a requesting worker, as it publishes reply timing: the rows every
+ * 10 s of session time and when final, pinned here; link may be NULL.
+ * The final one, the worker's last record, waits up to 1 s for room and
+ * is dropped and counted only if none comes. Never allocates. */
+void ecuio_record_timing(ecuio_record_link* link,
+                         const ecuio_session_timing_t& timing,
+                         const ecuio_request_timing_t* rows, uint32_t count,
+                         bool final);
+
 #endif /* ECUIO_RECORDER_H */

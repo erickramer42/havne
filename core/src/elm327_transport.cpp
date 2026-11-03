@@ -26,7 +26,9 @@
 //          reopen, the open's wait and its stop. BENCH: the Win32 port,
 //          the VX's WiFi.
 //          Reply timing (ADR-0042):
-//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock
+//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock;
+//          a recording's link lines and latency.csv (ADR-0049):
+//          Elm327SessionTest.ARecordingHoldsTheLinksTransitionsAndReplyTiming
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -1160,7 +1162,8 @@ bool backoff_sleep(transport* t, uint32_t ms)
 void elm327_worker(transport* t)
 {
     ecuio_request_engine& e = t->engine;
-    link_health h(t->session->last_error, t->session->error_count);
+    link_health h(t->session->last_error, t->session->error_count,
+                  t->session->record_link.get());
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};

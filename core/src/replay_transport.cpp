@@ -6,6 +6,8 @@
 //          and end of file, an early stop's error state (a bad row, a
 //          file gone, fewer rows; rows added played no further), the
 //          query);
+//          an early stop in a recording's link line
+//          (RecorderTest.AReplayThatStopsEarlySaysSoInALinkLine);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
 //          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
 //          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues;
@@ -170,8 +172,10 @@ namespace {
  * count goes first, so a reader that sees the code sees its episode. */
 void stop_early(ecuio_replay_transport* t)
 {
-    t->session->error_count.fetch_add(1);
+    const uint32_t episodes = t->session->error_count.fetch_add(1) + 1;
     t->session->last_error.store(ECUIO_ERR_RECORDING_CHANGED);
+    ecuio_record_link_state(t->session->record_link.get(),
+                            ECUIO_ERR_RECORDING_CHANGED, episodes);
 }
 
 /* Sends the file's frames, paced by their session time over the speed;

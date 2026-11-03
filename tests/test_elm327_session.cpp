@@ -7,7 +7,8 @@
 //          the session info, the requests, multi-frame replies,
 //          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
 //          the signals core lists unsupported (ADR-0039 section 6),
-//          link health and recovery, and that the worker allocates
+//          link health and recovery, a recording's link lines and
+//          latency.csv (ADR-0049), and that the worker allocates
 //          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
 //          against the fake on a pseudo-terminal; Elm327TcpTest (every
 //          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
@@ -20,6 +21,7 @@
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
+#include "ecuio/recording.h"
 #include "elm327_log.h" /* core/src */
 #include "elm327_protocol.h" /* core/src: elm327_pack_count */
 #include "elm327_port.h" /* core/src */
@@ -809,6 +811,63 @@ TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
     EXPECT_EQ(after_count, count) << "readable after close";
     EXPECT_GT(after.snapshot_us, t.snapshot_us) << "the final rows";
     EXPECT_GT(answered(), before) << "the last half second's answers";
+}
+
+/* A recorded ELM327 session (ADR-0049 section 1): the worker's link
+ * transitions are events.log's link lines, and its final reply timing,
+ * its last record, is latency.csv's rows under the channel's ECU */
+TEST_F(Elm327SessionTest, ARecordingHoldsTheLinksTransitionsAndReplyTiming)
+{
+    const fs::path root = fs::temp_directory_path() / "ecuio-elm327-recording";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    const std::string root8 = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len), ECUIO_OK);
+    const fs::path folder = fs::u8path(buf);
+    ASSERT_EQ(ecuio_session_record(s.s, rec), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 3000));
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 5; }, 3000));
+    ecuio_session_destroy(s.s);
+    s.s = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+
+    const auto read = [](const fs::path& p) {
+        std::ifstream f(p, std::ios::binary);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        std::string out;
+        for (char c : ss.str()) {
+            if (c != '\r')
+                out += c;
+        }
+        return out;
+    };
+    const std::string events = read(folder / "events.log");
+    const size_t quiet =
+        events.find("  link  vehicle not responding (state 8, 0 episodes)\n");
+    ASSERT_NE(quiet, std::string::npos) << events;
+    EXPECT_NE(events.find("  link  recovered (state 0, 0 episodes)\n", quiet),
+              std::string::npos)
+        << events;
+    const std::string latency = read(folder / "latency.csv");
+    EXPECT_EQ(latency.rfind(ECUIO_TIMING_COLUMNS "\n", 0), 0u) << latency;
+    EXPECT_NE(latency.find(",0x7E8,01 0C,"), std::string::npos) << latency;
+    EXPECT_NE(latency.find(",host\n"), std::string::npos) << latency;
+    fs::remove_all(root, ec);
 }
 
 /* Identification's replies span frames (the VIN's 20 bytes: a First

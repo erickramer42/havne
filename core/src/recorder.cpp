@@ -3,13 +3,16 @@
 // Testing: HARNESS: RecorderTest (test_core): the mock and the replay
 //          fixture recorded, the CSV files against the app's
 //          (BridgeTest's round trip), the seams in internal.h for drops,
-//          failed writes, a held writer and syncs, the statuses
+//          failed writes, a held writer and syncs, the statuses; link
+//          transitions and reply timing with the test as the worker, and
+//          through the fake ELM327 (Elm327SessionTest.ARecordingHolds*)
 //
-// The worker copies each frame and its values into a byte ring
-// (single producer, single consumer); a writer thread of the
-// recorder's own drains it into frames.csv and signals.csv in
-// ADR-0017's rows, and the caller's notes and marks, which come through
-// a queue of their own, into events.log and markers.csv. The writer
+// The worker copies each frame and its values, its link transitions and
+// its reply timing into a byte ring (single producer, single consumer);
+// a writer thread of the recorder's own drains it into frames.csv,
+// signals.csv, events.log's link lines and latency.csv in ADR-0017's
+// rows, and the caller's notes and marks, which come through a queue of
+// their own, into events.log and markers.csv. The writer
 // never holds the session: what it writes reached it through the ring
 // or the queue, or was copied at attach.
 
@@ -57,15 +60,36 @@ constexpr auto kIdleWake = std::chrono::milliseconds(100);
 constexpr auto kFlushEvery = std::chrono::milliseconds(100);
 constexpr auto kSyncEvery = std::chrono::seconds(2);
 
-/* A record in the ring: this head, then its body. A frame's body is
- * frame_body, the frame's used bytes, then each value as value_head
- * followed by its double or its text. */
+constexpr uint64_t kTimingEveryUs = 10000000;
+constexpr auto kFinalTimingWait = std::chrono::seconds(1);
+constexpr auto kFinalTimingRetry = std::chrono::milliseconds(10);
+
+/* A record in the ring: this head, then its body, which starts with its
+ * host_us. A frame's body is frame_body, the frame's used bytes, then
+ * each value as value_head followed by its double or its text; a link
+ * transition's is link_body; reply timing's is timing_body, then its
+ * rows. */
 struct record_head {
     uint32_t size; /* the whole record, head included */
     uint32_t type;
-    uint64_t dropped_before; /* records the ring had no room for */
+    uint64_t dropped_before; /* frames the ring had no room for */
 };
 constexpr uint32_t kRecordFrame = 1;
+constexpr uint32_t kRecordLink = 2;
+constexpr uint32_t kRecordTiming = 3;
+
+struct link_body {
+    uint64_t host_us;
+    int32_t state;
+    uint32_t episodes;
+};
+
+struct timing_body {
+    uint64_t host_us;
+    ecuio_session_timing_t timing;
+    uint32_t rows;
+    uint32_t pad;
+};
 
 struct frame_body {
     uint64_t host_us;
@@ -411,6 +435,58 @@ std::string absolute(const std::string& path)
 #endif
 }
 
+/* A link state in the words the reader and a person both take:
+ * "adapter fault (state 9, 3 episodes)" */
+std::string link_text(int32_t state, uint32_t episodes)
+{
+    std::string s;
+    switch (state) {
+    case ECUIO_OK:
+        s = "recovered";
+        break;
+    case ECUIO_ERR_VEHICLE_TIMEOUT:
+        s = "vehicle not responding";
+        break;
+    case ECUIO_ERR_REQUEST_FAILED:
+        s = "requests failing";
+        break;
+    case ECUIO_ERR_TRANSPORT_HARD_FAILURE:
+        s = "adapter fault";
+        break;
+    case ECUIO_ERR_RECORDING_CHANGED:
+        s = "replay stopped: its recording changed after it was opened";
+        break;
+    default:
+        s = ecuio_status_string(static_cast<ecuio_status_t>(state));
+        break;
+    }
+    return s + " (state " + std::to_string(state) + ", " +
+           std::to_string(episodes) +
+           (episodes == 1 ? " episode)" : " episodes)");
+}
+
+/* The interval's clock as havne-cli's timing lines name it */
+const char* clock_name(uint32_t clock)
+{
+    switch (clock) {
+    case ECUIO_TIMING_CLOCK_HOST:
+        return "host";
+    case ECUIO_TIMING_CLOCK_ADAPTER:
+        return "adapter";
+    case ECUIO_TIMING_CLOCK_KERNEL:
+        return "kernel";
+    default:
+        return "none";
+    }
+}
+
+/* A quantile, or nothing when it has too few samples */
+void append_quantile(std::string& out, uint32_t us, bool has)
+{
+    if (has)
+        append_u64(out, us);
+}
+
 bool sync_file(FILE* f)
 {
     if (f == nullptr)
@@ -432,6 +508,7 @@ struct ecuio_recorder {
     FILE* signals = nullptr;
     FILE* events = nullptr;
     FILE* markers = nullptr;
+    FILE* latency = nullptr;
 
     /* The ring: the worker advances head, the writer tail; both only
      * grow, so head - tail is what's queued */
@@ -439,12 +516,20 @@ struct ecuio_recorder {
     uint32_t cap = 0;
     std::atomic<uint64_t> head{0};
     std::atomic<uint64_t> tail{0};
-    uint64_t pending_dropped = 0; /* the worker's alone */
     std::atomic<uint64_t> records_dropped{0};
+
+    /* The worker's alone: frames dropped since the last record, a link
+     * transition still to go in, the next timing snapshot's session time */
+    uint64_t pending_dropped = 0;
+    bool link_pending = false;
+    link_body pending_link{};
+    uint64_t timing_next_us = kTimingEveryUs;
 
     /* Fixed at attach */
     std::shared_ptr<ecuio_record_link> link;
     std::vector<def_entry> defs; /* sorted by id */
+    uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t channels = 0;
     std::chrono::system_clock::time_point start_wall{};
     std::atomic<bool> attached{false};
     std::atomic<bool> detached{false};
@@ -472,7 +557,10 @@ struct ecuio_recorder {
 
     /* The writer's own */
     std::vector<uint8_t> scratch;
-    std::string frame_out, value_out, event_out, marker_out;
+    std::string frame_out, value_out, event_out, marker_out, latency_out;
+    /* Each request's answers, refusals and timeouts at its last row, so
+     * latency.csv gets only the rows that changed */
+    uint64_t timing_totals[ECUIO_PROFILE_MAX_REQUESTS] = {};
 
     bool failed() const
     {
@@ -563,20 +651,112 @@ struct ecuio_recorder {
         event_out += '\n';
     }
 
-    void take_frame(const uint8_t* body, size_t size, uint64_t dropped_before)
+    void drop_line(uint64_t host_us, uint64_t dropped)
+    {
+        event_line(host_us, "drop",
+                   "the recording dropped " + std::to_string(dropped) +
+                       (dropped == 1 ? " frame" : " frames") +
+                       ": the disk fell behind");
+    }
+
+    void take_link(const uint8_t* body, size_t size)
+    {
+        if (size < sizeof(link_body))
+            return;
+        link_body lb;
+        std::memcpy(&lb, body, sizeof lb);
+        event_line(lb.host_us, "link", link_text(lb.state, lb.episodes));
+    }
+
+    /* latency.csv's rows whose counts changed since their last row
+     * (ADR-0017's appendix of 2026-10-31), the file made with the first */
+    void take_timing(const uint8_t* body, size_t size)
+    {
+        if (size < sizeof(timing_body))
+            return;
+        timing_body tb;
+        std::memcpy(&tb, body, sizeof tb);
+        const ecuio_session_timing_t& t = tb.timing;
+        const uint64_t ms = (t.snapshot_us + 500) / 1000;
+        char at[32];
+        std::snprintf(at, sizeof at, "%llu.%03llu",
+                      static_cast<unsigned long long>(ms / 1000),
+                      static_cast<unsigned long long>(ms % 1000));
+        static const char kHex[] = "0123456789ABCDEF";
+        for (uint32_t i = 0; i < tb.rows && i < ECUIO_PROFILE_MAX_REQUESTS;
+             ++i) {
+            const size_t off = sizeof tb + i * sizeof(ecuio_request_timing_t);
+            if (off + sizeof(ecuio_request_timing_t) > size)
+                break;
+            ecuio_request_timing_t r;
+            std::memcpy(&r, body + off, sizeof r);
+            const uint64_t total =
+                uint64_t{r.answered} + r.refused + r.timeouts;
+            if (total == timing_totals[i])
+                continue;
+            timing_totals[i] = total;
+            const bool latency_has = r.answered + r.refused > 0;
+            const bool interval_has = r.intervals > 0;
+            latency_out += at;
+            latency_out += ',';
+            append_hex(latency_out,
+                       r.channel < channels ? rx_ids[r.channel] : 0);
+            latency_out += ',';
+            for (uint8_t k = 0; k < r.length && k < 3; ++k) {
+                if (k > 0)
+                    latency_out += ' ';
+                latency_out += kHex[r.request[k] >> 4];
+                latency_out += kHex[r.request[k] & 0x0F];
+            }
+            for (uint32_t n : {r.answered, r.refused, r.timeouts, r.packed}) {
+                latency_out += ',';
+                append_u64(latency_out, n);
+            }
+            latency_out += ',';
+            append_quantile(latency_out, r.latency_p50_us, latency_has);
+            latency_out += ',';
+            append_quantile(latency_out, r.latency_p99_us,
+                            (r.flags & ECUIO_TIMING_LATENCY_P99) != 0);
+            latency_out += ',';
+            append_quantile(latency_out, r.latency_p999_us,
+                            (r.flags & ECUIO_TIMING_LATENCY_P999) != 0);
+            latency_out += ',';
+            append_quantile(latency_out, r.latency_max_us, latency_has);
+            latency_out += ',';
+            append_u64(latency_out, r.intervals);
+            latency_out += ',';
+            append_u64(latency_out, r.intervals_mixed);
+            latency_out += ',';
+            append_quantile(latency_out, r.interval_p50_us, interval_has);
+            latency_out += ',';
+            append_quantile(latency_out, r.interval_p99_us,
+                            (r.flags & ECUIO_TIMING_INTERVAL_P99) != 0);
+            latency_out += ',';
+            append_quantile(latency_out, r.interval_p999_us,
+                            (r.flags & ECUIO_TIMING_INTERVAL_P999) != 0);
+            latency_out += ',';
+            append_quantile(latency_out, r.interval_max_us, interval_has);
+            latency_out += ',';
+            latency_out += clock_name(t.interval_clock);
+            latency_out += '\n';
+        }
+        if (!latency_out.empty() && latency == nullptr && !failed()) {
+            latency = open_file(folder + "/latency.csv");
+            if (latency == nullptr) {
+                fail(errno != 0 ? errno : EIO);
+                return;
+            }
+            latency_out.insert(0, ECUIO_TIMING_COLUMNS "\n");
+        }
+    }
+
+    void take_frame(const uint8_t* body, size_t size)
     {
         if (size < sizeof(frame_body))
             return;
         frame_body fb;
         std::memcpy(&fb, body, sizeof fb);
         size_t at = sizeof fb;
-        if (dropped_before > 0) {
-            event_line(fb.host_us, "drop",
-                       "the recording dropped " +
-                           std::to_string(dropped_before) +
-                           (dropped_before == 1 ? " frame" : " frames") +
-                           ": the disk fell behind");
-        }
         if (at + fb.length > size)
             return;
         append_u64(frame_out, fb.host_us);
@@ -647,8 +827,23 @@ struct ecuio_recorder {
             if (scratch.size() < body)
                 scratch.resize(body);
             copy_out(t + sizeof rh, scratch.data(), body);
-            if (rh.type == kRecordFrame) {
-                take_frame(scratch.data(), body, rh.dropped_before);
+            if (rh.dropped_before > 0 && body >= sizeof(uint64_t)) {
+                uint64_t host_us;
+                std::memcpy(&host_us, scratch.data(), sizeof host_us);
+                drop_line(host_us, rh.dropped_before);
+            }
+            switch (rh.type) {
+            case kRecordFrame:
+                take_frame(scratch.data(), body);
+                break;
+            case kRecordLink:
+                take_link(scratch.data(), body);
+                break;
+            case kRecordTiming:
+                take_timing(scratch.data(), body);
+                break;
+            default:
+                break;
             }
             t += rh.size;
             any = true;
@@ -656,6 +851,8 @@ struct ecuio_recorder {
         tail.store(t, std::memory_order_release);
         write(frames, frame_out);
         write(signals, value_out);
+        write(events, event_out);
+        write(latency, latency_out);
         return any;
     }
 
@@ -703,7 +900,7 @@ struct ecuio_recorder {
 
     void flush_all()
     {
-        for (FILE* f : {frames, signals, events, markers}) {
+        for (FILE* f : {frames, signals, events, markers, latency}) {
             if (f != nullptr && !failed() && std::fflush(f) != 0) {
                 fail(errno != 0 ? errno : EIO);
             }
@@ -712,7 +909,7 @@ struct ecuio_recorder {
 
     void sync_all()
     {
-        for (FILE* f : {frames, signals, events, markers}) {
+        for (FILE* f : {frames, signals, events, markers, latency}) {
             if (f != nullptr && !failed() && !sync_file(f)) {
                 fail(errno != 0 ? errno : EIO);
             }
@@ -756,7 +953,7 @@ struct ecuio_recorder {
 
     void close_files()
     {
-        for (FILE** f : {&frames, &signals, &events, &markers}) {
+        for (FILE** f : {&frames, &signals, &events, &markers, &latency}) {
             if (*f != nullptr) {
                 if (std::fclose(*f) != 0 && !failed()) {
                     fail(errno != 0 ? errno : EIO);
@@ -782,6 +979,108 @@ void ecuio_record_detach(ecuio_record_link& link)
     }
 }
 
+namespace {
+
+/* The worker's: whether size bytes fit in the ring */
+bool ring_has_room(const ecuio_recorder_t* r, uint64_t size)
+{
+    const uint64_t h = r->head.load(std::memory_order_relaxed);
+    const uint64_t t = r->tail.load(std::memory_order_acquire);
+    return size <= r->cap - (h - t);
+}
+
+/* The worker's: a carried link transition into the ring ahead of
+ * anything else; false while it still doesn't fit. It carries no drop
+ * count, so the drop line keeps the time of the record after the drops. */
+bool put_pending_link(ecuio_recorder_t* r)
+{
+    if (!r->link_pending)
+        return true;
+    const uint64_t size = sizeof(record_head) + sizeof(link_body);
+    if (!ring_has_room(r, size))
+        return false;
+    const uint64_t h = r->head.load(std::memory_order_relaxed);
+    const record_head rh{static_cast<uint32_t>(size), kRecordLink, 0};
+    r->copy_in(h, &rh, sizeof rh);
+    r->copy_in(h + sizeof rh, &r->pending_link, sizeof r->pending_link);
+    r->head.store(h + size, std::memory_order_release);
+    r->link_pending = false;
+    return true;
+}
+
+uint64_t host_us_now(const ecuio_record_link& link)
+{
+    const uint64_t now = ecuio_clock_us();
+    return now > link.zero_us ? now - link.zero_us : 0;
+}
+
+} // namespace
+
+void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
+                             uint32_t episodes)
+{
+    if (link == nullptr)
+        return;
+    ecuio_recorder_t* r = ecuio_record_pin(*link);
+    if (r == nullptr)
+        return;
+    /* A transition still carried gives way to this one: the latest state
+     * and count are what a reader needs */
+    r->pending_link = link_body{host_us_now(*link), state, episodes};
+    r->link_pending = true;
+    put_pending_link(r);
+    ecuio_record_unpin(*link);
+}
+
+void ecuio_record_timing(ecuio_record_link* link,
+                         const ecuio_session_timing_t& timing,
+                         const ecuio_request_timing_t* rows, uint32_t count,
+                         bool final)
+{
+    if (link == nullptr)
+        return;
+    const uint32_t n = (std::min)(count, uint32_t{ECUIO_PROFILE_MAX_REQUESTS});
+    const uint64_t size = sizeof(record_head) + sizeof(timing_body) +
+                          uint64_t{n} * sizeof(ecuio_request_timing_t);
+    const auto give_up = std::chrono::steady_clock::now() + kFinalTimingWait;
+    for (;;) {
+        ecuio_recorder_t* r = ecuio_record_pin(*link);
+        if (r == nullptr)
+            return;
+        if (!final && timing.snapshot_us < r->timing_next_us) {
+            ecuio_record_unpin(*link);
+            return;
+        }
+        if (put_pending_link(r) && ring_has_room(r, size)) {
+            const uint64_t h = r->head.load(std::memory_order_relaxed);
+            const record_head rh{static_cast<uint32_t>(size), kRecordTiming,
+                                 r->pending_dropped};
+            r->pending_dropped = 0;
+            const timing_body tb{host_us_now(*link), timing, n, 0};
+            r->copy_in(h, &rh, sizeof rh);
+            r->copy_in(h + sizeof rh, &tb, sizeof tb);
+            r->copy_in(h + sizeof rh + sizeof tb, rows,
+                       n * sizeof(ecuio_request_timing_t));
+            r->head.store(h + size, std::memory_order_release);
+            r->timing_next_us = timing.snapshot_us + kTimingEveryUs;
+            ecuio_record_unpin(*link);
+            return;
+        }
+        /* No room: a snapshot every 10 s is dropped and counted once, and
+         * the next one's totals cover it; the final one waits for the
+         * writer, unpinned, so a detach meanwhile never waits on it */
+        if (!final || size > r->cap ||
+            std::chrono::steady_clock::now() >= give_up) {
+            r->records_dropped.fetch_add(1, std::memory_order_relaxed);
+            r->timing_next_us = timing.snapshot_us + kTimingEveryUs;
+            ecuio_record_unpin(*link);
+            return;
+        }
+        ecuio_record_unpin(*link);
+        std::this_thread::sleep_for(kFinalTimingRetry);
+    }
+}
+
 void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               const ecuio_frame_t* frame,
                               const ecuio_value_t* values, uint32_t count)
@@ -797,13 +1096,14 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                                           ? values[i].text_len
                                           : sizeof(double));
     }
-    const uint64_t h = r->head.load(std::memory_order_relaxed);
-    const uint64_t t = r->tail.load(std::memory_order_acquire);
-    if (size > r->cap - (h - t)) {
+    /* A carried link transition goes first, or the frame waits behind
+     * it, dropped */
+    if (!put_pending_link(r) || !ring_has_room(r, size)) {
         ++r->pending_dropped;
         r->records_dropped.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    const uint64_t h = r->head.load(std::memory_order_relaxed);
     record_head rh{static_cast<uint32_t>(size), kRecordFrame,
                    r->pending_dropped};
     r->pending_dropped = 0;
@@ -1027,6 +1327,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                      "(host_us / 1e6 in the CSV files), kind, text\n\n";
     }
     recorder->defs = std::move(defs);
+    recorder->channels = (std::min)(session->info.channel_count,
+                                    uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
+    for (uint32_t i = 0; i < recorder->channels; ++i) {
+        recorder->rx_ids[i] = session->info.rx_ids[i];
+    }
     recorder->link = link;
     session->record_link = link;
     link->active.store(recorder, std::memory_order_release);
@@ -1164,6 +1469,16 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
         const uint64_t now = ecuio_clock_us();
         const uint64_t host_us =
             now > r->link->zero_us ? now - r->link->zero_us : 0;
+        /* What the worker couldn't queue before it let go: the detach
+         * waited for it, so its fields are this thread's now */
+        if (r->link_pending) {
+            r->event_line(
+                r->pending_link.host_us, "link",
+                link_text(r->pending_link.state, r->pending_link.episodes));
+        }
+        if (r->pending_dropped > 0) {
+            r->drop_line(host_us, r->pending_dropped);
+        }
         r->event_out += '\n';
         r->event_line(
             host_us, "end",
