@@ -243,7 +243,10 @@ TestCase {
         verify(!chart.antialiasing)
         tryVerify(() => !chart.moving, 2000, "the view rests")
         verify(chart.antialiasing)
-        // The rest's own paint: none comes without it
+        // The rest's own paint runs in the next frame's polish, which a
+        // slow runner delivers after the rest is seen: count from after it.
+        // None comes without it
+        verify(waitForPolish(chart), "the rest drawn")
         const paints = chart.paints
         wait(page.settleMs * 2)
         compare(chart.paints, paints, "no paint asked for while resting")
