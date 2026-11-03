@@ -1,6 +1,6 @@
 # ADR-0049: Recordings in core: a shared writer and an indexed reader
 
-- **Status:** Proposed.
+- **Status:** Accepted.
 - **Date:** 2026-11-02.
 - **Builds on:** [ADR-0017](0017-session-recording.md) (the recording
   folder and its files, whose "recorder in core" alternative this
