@@ -380,13 +380,17 @@ void ecuio_recording_close(ecuio_recording_t* r);
 
 /* --- The frames check (ADR-0049 section 6) ---------------------------- */
 
+/* The defaults a zero field of ecuio_check_options_t takes */
+#define ECUIO_CHECK_DEFAULT_GAP_US         1000000u /* 1 s */
+#define ECUIO_CHECK_DEFAULT_RATE_DROP_X100 400u     /* 4x the median */
+#define ECUIO_CHECK_DEFAULT_SETTLE_US      2000000u /* 2 s */
+
 /* What the check looks for; zero fields take the defaults */
 typedef struct ecuio_check_options {
-    uint64_t gap_us;         /* 0 for the default, 1 s */
-    uint32_t rate_drop_x100; /* 0 for the default, 400 (4x the median);
-                                else more than 100 */
+    uint64_t gap_us;         /* 0 for the default */
+    uint32_t rate_drop_x100; /* 0 for the default; else more than 100 */
     uint32_t flags;          /* zero */
-    uint64_t settle_us;      /* 0 for the default, 2 s */
+    uint64_t settle_us;      /* 0 for the default */
     uint64_t reserved[4];    /* zero; ABI growth space */
 } ecuio_check_options_t;
 

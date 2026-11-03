@@ -25,13 +25,17 @@
 //          tests/fixtures/recording/, every sample counted once and the
 //          aligned pulls equal (CliViewRunTest, tests/cli_view.py), its
 //          usage errors (CliUsageTest), its grammar, axis and lines UNIT
-//          (CliViewTest);
+//          (CliViewTest); info (ADR-0049 section 6): golden runs on
+//          tests/fixtures/recording/findings, the replay fixture and a
+//          folder with no frames.csv, its usage errors (CliUsageTest), its
+//          lines UNIT (CliInfoTest);
 //          main's catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
 // Public headers only: what any program linking core can do.
 
 #include "diagnostics_line.h"
+#include "info_lines.h"
 #include "timing_line.h"
 #include "view_lines.h"
 #include "vin_line.h"
@@ -787,6 +791,8 @@ void usage(FILE* to)
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
+        "       havne-cli info <recording> [--gap S] [--rate-drop X] "
+        "[--settle S]\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -826,6 +832,11 @@ void usage(FILE* to)
         "         (reaching it after being --hysteresis below),\n"
         "         fall:<signal>:<level>, marker:<label>, or utc (their\n"
         "         wall-clock starts).\n"
+        "info     checks a recording's frames offline: what it holds, then\n"
+        "         each gap (no frame for over --gap seconds, 1), ID whose\n"
+        "         interval passed --rate-drop times its median (4), ID first\n"
+        "         seen over --settle seconds in (2), overflow, broken ISO-TP\n"
+        "         sequence, link change and sleep, then a summary.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -835,7 +846,7 @@ void usage(FILE* to)
         "\n"
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
-        "      3 the connect, or a recording's open, failed.\n");
+        "      3 the connect, a recording's open or its check failed.\n");
 }
 
 bool parse_count(const char* text, uint64_t& out)
@@ -1485,6 +1496,30 @@ struct ViewArgs {
     bool has_hysteresis = false;
 };
 
+struct InfoArgs {
+    const char* folder = nullptr;
+    ecuio_check_options_t options{};
+};
+
+// The check's findings, kept until it ends: an error line then stands
+// alone, as a failed open's does
+struct Findings {
+    std::vector<ecuio_check_finding_t> list;
+    bool out_of_memory = false;
+};
+
+int keep_finding(const ecuio_check_finding_t* f, void* user)
+{
+    auto* found = static_cast<Findings*>(user);
+    try {
+        found->list.push_back(*f);
+    } catch (const std::bad_alloc&) {
+        found->out_of_memory = true;
+        return 1;
+    }
+    return 0;
+}
+
 struct RecordingCloser {
     void operator()(ecuio_recording_t* r) const { ecuio_recording_close(r); }
 };
@@ -2108,6 +2143,73 @@ int run_play(const PlayArgs& args)
 }
 #endif
 
+// A recording checked offline (ADR-0049 section 6): the frames check runs
+// whatever the reader makes of the folder (one with frames.csv alone
+// still has its frames checked), then the lines: what the reader found,
+// each finding, the summary. A failed check is an error line, exit 3.
+int run_info(const InfoArgs& args)
+{
+    Output out;
+    std::unique_ptr<ecuio_recording_t, RecordingCloser> r;
+    ecuio_recording_t* opened = nullptr;
+    const ecuio_status_t open_rc =
+        ecuio_recording_open(args.folder, nullptr, nullptr, &opened);
+    r.reset(opened);
+    const std::string open_detail = ecuio_last_error_detail();
+
+    Findings found;
+    ecuio_check_summary_t summary{};
+    const ecuio_status_t rc = ecuio_recording_check(
+        args.folder, &args.options, nullptr, keep_finding, &found, &summary);
+    if (rc != ECUIO_OK) {
+        write_start(out);
+        if (found.out_of_memory) {
+            write_error(out, ECUIO_ERR_OUT_OF_MEMORY,
+                        "the findings didn't fit in memory");
+        } else {
+            write_error(out, rc);
+        }
+        return out.ok() ? kExitConnect : kExitFailed;
+    }
+
+    write_start(out);
+    char buf[2048];
+    if (open_rc == ECUIO_OK) {
+        ecuio_recording_info_t info{};
+        ecuio_recording_get_info(r.get(), &info);
+        cli::Line l(buf, sizeof buf);
+        cli::opened_line(l, 0, info);
+        write_line(out, l);
+        for (uint32_t k = 0; k < info.signal_count; ++k) {
+            ecuio_recording_signal_t s{};
+            ecuio_recording_get_signal(r.get(), k, &s);
+            cli::Line sl(buf, sizeof buf);
+            cli::signal_line(sl, 0, k, s);
+            write_line(out, sl);
+        }
+        for (uint32_t k = 0; k < info.marker_count; ++k) {
+            ecuio_recording_marker_t m{};
+            ecuio_recording_get_marker(r.get(), k, &m);
+            BigLine b(256 + static_cast<size_t>(m.label_length) * 6);
+            cli::marker_line(b.line, 0, k, m);
+            write_line(out, b.line);
+        }
+    } else {
+        BigLine b(1024 + open_detail.size() * 6);
+        cli::open_failed_line(b.line, 0, open_rc, open_detail.c_str());
+        write_line(out, b.line);
+    }
+    for (const ecuio_check_finding_t& f : found.list) {
+        cli::Line l(buf, sizeof buf);
+        cli::finding_line(l, f);
+        write_line(out, l);
+    }
+    cli::Line l(buf, sizeof buf);
+    cli::summary_line(l, summary, args.options);
+    write_line(out, l);
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
 int run(int argc, char** argv)
 {
 #ifdef _WIN32
@@ -2212,6 +2314,51 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
         return run_view(view);
+    }
+    if (command == "info") {
+        InfoArgs info;
+        info.options.gap_us = ECUIO_CHECK_DEFAULT_GAP_US;
+        info.options.rate_drop_x100 = ECUIO_CHECK_DEFAULT_RATE_DROP_X100;
+        info.options.settle_us = ECUIO_CHECK_DEFAULT_SETTLE_US;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            const bool has_value = i + 1 < argc;
+            if ((a == "--gap" || a == "--settle") && has_value) {
+                int64_t us = 0;
+                if (!cli::parse_seconds(argv[++i], us) || us <= 0) {
+                    std::fprintf(stderr,
+                                 "havne-cli: %s takes seconds, more than 0\n",
+                                 a.c_str());
+                    return kExitUsage;
+                }
+                (a == "--gap" ? info.options.gap_us : info.options.settle_us) =
+                    static_cast<uint64_t>(us);
+            } else if (a == "--rate-drop" && has_value) {
+                if (!cli::parse_rate_drop(argv[++i],
+                                          info.options.rate_drop_x100)) {
+                    std::fprintf(stderr, "havne-cli: --rate-drop takes a "
+                                         "multiple of the median, more than "
+                                         "1\n");
+                    return kExitUsage;
+                }
+            } else if (a.rfind("--", 0) == 0) {
+                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+                usage(stderr);
+                return kExitUsage;
+            } else if (info.folder != nullptr) {
+                std::fprintf(stderr, "havne-cli: info takes one recording\n");
+                return kExitUsage;
+            } else {
+                info.folder = argv[i];
+            }
+        }
+        if (info.folder == nullptr) {
+            std::fprintf(stderr,
+                         "havne-cli: info needs a recording's folder\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        return run_info(info);
     }
     if (command == "play") {
 #if HAVNE_CLI_PLAY

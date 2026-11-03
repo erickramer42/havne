@@ -592,7 +592,7 @@ TEST(RecordingCheckTest, TheFixtureWithOneOfEachFindingReportsEachAtItsTime)
                       event_at(82500000, "asleep  Asleep for 2.5 s: nothing "
                                          "was read meanwhile") +
                           event_at(160000000, "link  vehicle not responding "
-                                              "(state 7, 2 episodes)")));
+                                              "(state 8, 2 episodes)")));
     const Checked after(f.utf8());
     ASSERT_EQ(after.rc, ECUIO_OK) << ecuio_last_error_detail();
 
@@ -603,7 +603,7 @@ TEST(RecordingCheckTest, TheFixtureWithOneOfEachFindingReportsEachAtItsTime)
         {ECUIO_CHECK_RATE_DROP, 0x7E8, drop_at, drop_end - drop_at, 1, 0, 0},
         {ECUIO_CHECK_OVERFLOW, 0, overflow_at, 0, 1, kWhole, 0},
         {ECUIO_CHECK_ISOTP, 0x7E8, 150000000, 0, 1, 0, 0},
-        {ECUIO_CHECK_LINK, 0, 160000000, 0, 2, kWhole, 7},
+        {ECUIO_CHECK_LINK, 0, 160000000, 0, 2, kWhole, 8},
     };
     std::vector<Finding> want = before.found;
     want.insert(want.end(), put.begin(), put.end());

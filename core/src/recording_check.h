@@ -31,9 +31,9 @@
 
 namespace ecuio_check {
 
-constexpr uint64_t kGapUs = 1000000;
-constexpr uint32_t kRateDropX100 = 400;
-constexpr uint64_t kSettleUs = 2000000;
+constexpr uint64_t kGapUs = ECUIO_CHECK_DEFAULT_GAP_US;
+constexpr uint32_t kRateDropX100 = ECUIO_CHECK_DEFAULT_RATE_DROP_X100;
+constexpr uint64_t kSettleUs = ECUIO_CHECK_DEFAULT_SETTLE_US;
 /* An ID's rate is judged only after this many intervals */
 constexpr uint64_t kJudgedAfter = 16;
 

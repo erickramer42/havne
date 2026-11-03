@@ -334,6 +334,22 @@ if(TARGET havne-cli)
                     ${_cli_pulls}/pull-late)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
             CliViewRunTest.AlignedPullsAgree PROPERTIES TIMEOUT 60)
+        # info (ADR-0049 section 6) on a recording with one of each finding
+        # (tests/fixtures/recording/findings, wire frames written by hand: a
+        # gap, a rate drop, a sleep, a late ID, an overflow, a cut First
+        # Frame and the link's two lines), the same with the thresholds
+        # raised, the replay fixture (frames.csv alone: the reader can't
+        # open it, the check still runs) and a folder with no frames.csv
+        app_cli_golden(InfoListsWhatsWrongWithARecording info-findings.jsonl
+            -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/findings)
+        app_cli_golden(InfoTakesTheThresholds info-thresholds.jsonl
+            -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/findings
+               --gap 3 --rate-drop 10 --settle 20)
+        app_cli_golden(InfoChecksFramesTheReaderCantOpen info-frames-only.jsonl
+            -- $<TARGET_FILE:havne-cli> info
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        app_cli_golden(InfoRefusesAFolderWithNoFrames info-no-frames.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/pull-early)
         # Ctrl+Break while the fake DLL's disconnect hangs: the recording
         # ends whole without waiting for it (skipped where there's no
         # console, as CliSignalTest is)
@@ -391,6 +407,12 @@ if(TARGET havne-cli)
     app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
     app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
         "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(InfoWithoutARecordingIsUsage "info")
+    app_cli_usage(InfoTwoRecordingsIsUsage "info|x|y")
+    app_cli_usage(InfoAGapOfZeroIsUsage "info|x|--gap|0")
+    app_cli_usage(InfoARateDropOfOneIsUsage "info|x|--rate-drop|1")
+    app_cli_usage(InfoSettleThatIsntSecondsIsUsage "info|x|--settle|soon")
+    app_cli_usage(InfoAnUnknownOptionIsUsage "info|x|--fast")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
     # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
     # deadline
