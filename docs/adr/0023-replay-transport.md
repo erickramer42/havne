@@ -284,6 +284,15 @@ rewritten: the state, the code, the episode, one line, no "Replay
 finished") and `.LinkStateMapsEveryPublishedCode`; `QmlTest.theme` and
 `.liveview` for the label, color and banner.
 
+**Note (2026-11-03): core writes what it reads.** The recorder is
+core's ([ADR-0049](0049-recordings-in-core.md)), so section 6's round
+trip records the mock session through core's recorder and replays it
+through this transport, and a change of columns is a change to
+`core/src/recorder.cpp` and `core/src/frames_csv.h` in one commit. A
+recording of a replay carries its source's `frame flags` line, read at
+attach. ADR-0049 section 7's change to the rule that a bad row is
+refused, a torn last row dropped and counted, comes with its reader.
+
 **Note (2026-10-30): a pass plays attach's rows.** A recording cut
 short after attach (a copy truncated, a file regenerated smaller) ended
 its pass at the end of the file as if whole, so nothing said that

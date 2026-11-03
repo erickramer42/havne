@@ -167,6 +167,12 @@ running (ranges across the runs; milliseconds as median / p99):
   decode visiting every def instead of the ones the index finds, both
   failed (27x, 0.48), where the 10,000 frames a second floor still
   passed at 229,915.
+- **Recorded runs:** the looping run and the 100x pass run again with
+  core's recorder attached ([ADR-0049](adr/0049-recordings-in-core.md)).
+  The looping one gates CI at 0.8 of its unrecorded rate (0.96 on the
+  dev machine, 471,840 frames a second against 493,534, and 1.01 under
+  WSL, 2026-11-03, no record dropped in either); the 100x one must
+  write all 7,074 frames and 7,061 values with no record dropped.
 - **The looping runs pass the staging's capacity:** at about 400,000
   frames a second the bridge counts most values past it, as
   [ADR-0024](adr/0024-decode-on-the-worker.md) bounds it; the model
@@ -199,12 +205,13 @@ running (ranges across the runs; milliseconds as median / p99):
   waits out the rest of it.
 - **Frames reach the GUI thread** in under a quarter of a millisecond
   at the median, and within 1 to 3 ms at p99 even at full speed.
-- **The limit it found:** at full speed the recording misses about two
-  thirds of the values. The staging holds 16,384 values a window,
-  164,000 a second, against 480,000 to 570,000 arriving. The pages lose nothing: each
-  window keeps every signal's newest, lowest and highest value whatever
-  the limit, and the activity log says when the recording misses some.
-  A full classic CAN bus at four values a frame gives 18,000 a second.
+- **The limit it found:** at full speed the staging holds 16,384
+  values a window, 164,000 a second, against 480,000 to 570,000
+  arriving, and the Delivery line counts the rest. The pages lose
+  nothing: each window keeps every signal's newest, lowest and highest
+  value whatever the limit. The recording loses nothing either: core
+  writes it from the worker, past the staging. A full classic CAN bus
+  at four values a frame gives 18,000 a second.
 - **In CI:** `win-build` and `linux-build` run `bench_bridge --load`
   on every push and put its table in the run's summary, so each run
   publishes a second and third machine's figures. The step fails on a
@@ -234,13 +241,28 @@ running (ranges across the runs; milliseconds as median / p99):
 
 ### Recording's cost on the worker
 
-`bench_bridge --record` replays the engine-start fixture under `obd2`
-on core's own session, looping at full speed, to a frame callback that
-counts and a values callback that does nothing, as the bridge's are.
-Recorded and unrecorded runs alternate, five of 3 s each, with the
-process held to one logical processor on each of two physical cores
-(Windows and Linux; elsewhere the bench says it isn't, and where the
-threads land moves the figures by tens of percent). Then two recorded
+`bench_bridge --record` first runs the load test's looping run through
+a `SessionBridge`, recorded and unrecorded alternated, five of 3 s
+each, with the process held to one logical processor on each of three
+physical cores (Windows and Linux; elsewhere the bench says it isn't,
+and where the threads land moves the figures by tens of percent). That
+is the run [ADR-0049](adr/0049-recordings-in-core.md)'s 10% is judged
+on, and the bench fails below 0.9. On the dev machine, 2026-11-03
+(Release; frames a second through the worker, median and range):
+
+| Run | Worker frames/s |
+|---|---|
+| Not recorded | 534,618 (515,656 to 542,733) |
+| Recorded | 514,763 (495,563 to 556,927) |
+
+Recorded, the bridge's worker kept 0.96 of its rate. At over a hundred
+times a saturated classic bus's rate, the writer, sharing those three
+cores, fell behind and dropped 22,125 records, each counted.
+
+Then it replays the engine-start fixture under `obd2` on core's own
+session, looping at full speed, to a frame callback that counts and a
+values callback that does nothing, as the bridge's are, alternated the
+same way on two physical cores. Then two recorded
 passes, at full speed and at 100x, must put every frame and value in
 the files with none dropped. Exit status 1 on a failed check; not run
 in CI.
@@ -258,9 +280,9 @@ worker, median and range):
   worker runs about 8 million frames a second, so 0.75 of its rate),
   about 20 ns of it on every frame and the rest on each record
   written. A frame costs this worker only about 0.2 us, so the share
-  is large; the bridge's worker spends about 2.5 us on one, and
-  [ADR-0049](adr/0049-recordings-in-core.md)'s 10% is judged on its
-  run (the ADR's appendix "the worker's cost, measured"). The check
+  is large; the bridge's worker spends about 2.5 us on one, and the
+  10% is judged on its run, above (the ADR's appendices "the worker's
+  cost, measured" and "the bridge's cost, measured"). The check
   here bounds the nanoseconds against regressions: at most 75 a
   frame, which a busy loop on every recorded frame fails (107 and
   142 ns).
@@ -379,7 +401,7 @@ round trip each, negligible at the transport's read cap
 | The surrogate holds a 1 ms timer: through the fake as the VX (a reply 4 ms after its write, each read held for one 10 ms slice), every request's median latency is under 14 ms, where Windows' default 15.6 ms step put it at 15.4 to 16.4 ([ADR-0042](adr/0042-reply-timing.md)'s appendix of 2026-11-01) | `J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep` (mutation-checked 2026-11-01: no `timeBeginPeriod` failed every request) |
 | `latency.csv` and the CLI's `timing` lines (ADR-0042 section 3): one column list for both (`ECUIO_TIMING_COLUMNS`), a quantile with too few samples empty or `null`, a snapshot every 10 s of session time carrying the rows that changed; a recording of a requesting session through the fake DLL holds the header, then snapshots under their `t_s`, each request's answers never falling from one row to its next, the intervals on the adapter's clock; the activity log's "Reply timing:" line names the requests, their outcomes, the spread of their median latencies, the clock and ISO-TP's counts | `CliTimingTest.*`, `BridgeTest.ARecordingKeepsReplyTimingsSnapshots` (Windows), `.TimingTextNamesTheRequestsAndTheClock`; `havne-cli stream` against the fake DLL for 12 s wrote one snapshot at 10 s and one at the end (manual, 2026-10-31) |
 | The recording holds every value core decodes: over the vehicle fixture under `obd2`, the bridge's `signals.csv` equals, row for row, the batches core delivers to a session of its own | `BridgeTest.RecordingHoldsEveryValueCoreDecodes` |
-| The bridge stages values from the worker (ADR-0024): a frame dropped at the in-flight cap keeps its values, so with the event loop held while 5,000 frames flood in, thousands drop, yet the recording holds every row's value in order and the row shows the last; past a window's sample limit the recording misses values, the activity log says so once and gives the count at disconnect, and the row still shows the newest; a disconnect drains the window it ends | `BridgeTest.ValuesSurviveFramesDroppedAtTheCap`, `.ValuesPastTheWindowsLimitAreCountedAndLogged`, `.ValuesStagedAtDisconnectAreRecorded`. Each fails against a mutant: values never staged, the newest lost past the limit, samples never recorded, no drain at disconnect, the limit never counted, the warning never logged, a staging never reset. The first also fails when the dropped-frame count is zeroed after the worker starts |
+| The bridge stages values from the worker (ADR-0024): a frame dropped at the in-flight cap keeps its values, so with the event loop held while 5,000 frames flood in, thousands drop, yet the recording holds every frame and every row's value in order, its last note says how many frames the Log page skipped, and the row shows the last; past a window's sample limit the row still shows the newest, the Delivery line counts the values past the limit, and the recording holds every one | `BridgeTest.ValuesSurviveFramesDroppedAtTheCap`, `.ValuesPastTheWindowsLimitAreCountedAndLogged`. Each fails against a mutant: values never staged, the newest lost past the limit, the limit never counted, a staging never reset, no skipped-frames note (2026-11-03). The first also fails when the dropped-frame count is zeroed after the worker starts |
 | Real-car recordings decode on the worker as they decoded in the car: each recording's `frames.csv`, replayed through the bridge under the profile and DIDs its connect used, records the values its own `signals.csv` holds. 24,632 values over 25 connects (the two vehicle sessions and the bench), 2026-10-26 | `BridgeTest.VehicleRecordingsReplayToTheirOwnValues`, local only: it skips unless `ECUIO_BENCH_RAW` names the recordings' folder (`Testing/bench-raw`, never committed). A mismatch names the recording, row and signal, never a value |
 | Settings' recent recordings: the newest first across the current name's folder and the earlier name's (ADR-0001's appendix of 2026-10-28), only folders holding a `frames.csv`, each titled by its date and label, its `replay://` URI under the profile the recording's `events.log` names (its `did=` under `uds-generic`; else the scheme's default, `raw` with none named); a recording that ends joins the list, and its row fills the field with a replay that connects | `BridgeTest.ReplayUriForTakesTheRecordedProfile`, `.RecentRecordingsListTheNewestFirst`, `.RecentRecordingsReplayUnderTheirOwnProfile`, `.RecentRecordingsReadTheEarlierNamesFolderToo`; `QmlTest.settings`' `test_aRecordingsRowFillsTheFieldWithItsReplay`, which failed with the refresh after a recording removed (2026-10-28). `test_qml` lists a scratch folder, never Documents |
 | The earlier name's preferences carried over: every key copied once into an empty store, never over a store that holds keys, the earlier store left as it was, nothing done while the names are equal (ADR-0001's appendix of 2026-10-28) | `BridgeTest.CarryOverCopiesTheEarlierPreferencesOnce`, `.CarryOverNeverWritesOverAStoreThatHasPreferences`, both against a scratch ini store; mutation-checked. The activity log's "Preferences carried over" line (`main()`): manual smoke at the rename |
@@ -426,7 +448,7 @@ round trip each, negligible at the transport's read cap
 | Frames after a loss at the adapter (`ECUIO_FRAME_FLAG_OVERFLOW`): counted in `onFrame`, reported on the tick as `overflowFrames`, the first of a session with one activity-log line; the count readable after the disconnect and started again by the next connect | `BridgeTest.FramesAfterALossAtTheAdapterAreCountedAndLoggedOnce`, checked against a mutation of the once-a-session line and of the reset at connect (2026-10-27). The Log page's `overflowLabel` shows it in the frame view |
 | The frame log's rows hold a payload up to 64 bytes inline and a longer one in a heap block only while the row is shown: a ring of 200-byte frames rounded by 27-byte ones holds no heap bytes, 64 bytes stays inline and 65 spills; Clear keeps the slots and frees the blocks, and a ring cleared before it filled grows only as far as it's used | `BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown` (the model directly, through its slot and heap-byte seams). Each of five mutations fails it: a short frame keeping the block, Clear dropping the ring or keeping the blocks, growth by the cap alone, and the boundary at 63. Log page smoke, 2026-10-25: under `mock://demo` before and after Clear, and the fake's 203-byte `62 F1 A0` replies between 5-byte `62 1E 1C` ones, each row with its own length and bytes |
 | The activity log's "Delivery:" line at disconnect: frames received, dropped at the in-flight cap and still queued, then how long frames took to reach the GUI thread and values the model (median, p99, max), the line naming exactly the figures the bridge kept. Over the engine-start fixture at full speed every frame is accounted for and every handled frame and staged value timed. A quantile reads at the top of its bucket: exact below 16 us, at most 12.5 % high past that, the maximum exact | `BridgeTest.LatencyStatsReadsQuantilesWithinABucket`, `.DeliveryTextNamesFramesDropsAndTimes`, `.DisconnectLogsTheDelivery`; the line's place by `.DisconnectTearsDownOffGuiThread` and `.RecordingWritesFramesValuesAndEvents` (`events.log`). The fixture case failed with either timing left out (2026-10-26). App smoke under `mock://demo`, 2026-10-26: "Delivery: 98 frames, none dropped; to the GUI thread in median 95 us, p99 8.7 ms, max 8.7 ms; 819 values, to the model in median 53 ms, p99 109 ms, max 109 ms" |
-| Session recording ([ADR-0017](adr/0017-session-recording.md)): off by default; with it on, one folder per connect holding every accepted frame (paused or not, host time never going backwards), each decoded value and the activity lines from `Connected:` through `Disconnected:`; the switch holds during a session; recording sets `ECUIO_SUR_LOG_FRAMES` in the OS environment the surrogate inherits and removes it at the next unrecorded connect, leaving a launch value alone | `BridgeTest.RecordingIsOffByDefault`, `.RecordingWritesFramesValuesAndEvents`, `.RecordingSwitchHoldsDuringASession`, `.RecordingTurnsOnSurrogateFrameLogging` |
+| Session recording ([ADR-0017](adr/0017-session-recording.md), through core's recorder, [ADR-0049](adr/0049-recordings-in-core.md)): off by default; with it on, one folder per connect, attached before the session starts, holding every frame the session read (paused or not, host time never going backwards), each decoded value, the app's header lines under `caller` and the activity lines from `Connected:` through `Disconnected:` as notes, the `Link:` lines left to core's own; a folder that can't be made is `Recording failed:` and the session runs unrecorded; a failed write is `Recording stopped:` with its reason, and the session runs on; the switch holds during a session; recording sets `ECUIO_SUR_LOG_FRAMES` in the OS environment the surrogate inherits and removes it at the next unrecorded connect, leaving a launch value alone | `BridgeTest.RecordingIsOffByDefault`, `.RecordingWritesFramesValuesAndEvents`, `.RecordingThatCantStartIsLoggedAndTheSessionRuns`, `.AFailedWriteStopsTheRecordingAndTheSessionRuns`, `.DestroyedWhileRecordingClosesSessionAndRecording`, `.RecordingSwitchHoldsDuringASession`, `.RecordingTurnsOnSurrogateFrameLogging`. Each fails against a mutant (2026-11-03): the `Link:` lines noted, the recorder attached after start, a failed write ignored |
 | Replay ([ADR-0023](adr/0023-replay-transport.md)): each recorded row goes out with its ID, flags and bytes (an empty payload and a whole 4,096-byte message included), stamped with the recording's session time rebased to the first row; a backward stamp (a raw adapter clock wrapping) is timed by its host step; `loop=1` carries the stamps on, never decreasing; one second of recording takes about a second at speed 1 and a tenth at 10; each frame is due at its time from the start of playback, so frames a 400 ms stall held up go out at once and 200 short steps still take about a second, at speed 1 and 10; a close during an hour-long gap returns at once; the end of the file sends nothing more, and a row that turned bad after attach, or a file deleted before start, ends playback with `ECUIO_ERR_RECORDING_CHANGED` and one episode in the error state, which a clean end leaves at `ECUIO_OK`; the session info names the backend, frames, span, speed and loop | `CoreTest.ReplaySendsTheRecordedFramesAtTheirRebasedTimes`, `.ReplayTimesABackwardStampByTheHostClock`, `.ReplayLoopsWithStampsThatNeverDecrease`, `.ReplayPacesByTheRecordingsTimeOverTheSpeed`, `.ReplayCatchesUpAfterALateFrameAndNeverDrifts`, `.ReplayClosesAtOnceDuringAGap`, `.ReplayStopsAtARowThatTurnedBadAfterAttach`, `.ReplayOfARecordingThatWentAwaySaysSo`; also in the x86 tree. Each failed against its mutation (2026-10-25): no host fallback, stamps not rebased, the speed ignored, no pacing, loop stamps restarting, a sleep for the condition wait (the close hung), a bad row sent anyway. Each wait timed from the last send instead of the start (2026-10-26) passes `.ReplayPacesByTheRecordingsTimeOverTheSpeed` and fails `.ReplayCatchesUpAfterALateFrameAndNeverDrifts`: 3.5 s on the condition variable, whose short waits Windows rounds up, and 1.4-1.6 s busy-waited, where only the stall shows |
 | Replay faults (ADR-0041): `?faults=` takes each kind once at a percent over 0 and up to 100 with three decimals at most, a stall's length 1 to 10000 ms, `?seed=` from 1, and refuses anything else (`BAD_URI`); the same seed plays the same frames, flags and stamps, another seed others; a replay without faults counts its rows and nothing else; a drop removes the frame and flags nothing, an overflow removes it and flags a later one (consecutive losses one flag), a corruption flips exactly one bit, a truncation shortens the data and keeps the rest, a stall pushes every later stamp back by its length and paces them so; each near its rate (six standard deviations) | `CoreTest.ReplayFaultsReadTheirQuery`, `.ReplayFaultsAreTheSameFromTheSameSeed`, `.ReplayFaultsDoWhatTheyCount`, `.ReplayFaultsStallThePace` (mutation-checked 2026-10-31: no overflow flag, a stall not stamped) |
 | A faulted replay of the test car's engine start (seed 3, every kind) finishes and the activity log says what its faults did, the Session line that it has them; its recording holds exactly the frames delivered, and the bridge's overflow count is the frames flagged in it; `havne-cli stream` ends with `replay-end` and the same counts | `BridgeTest.AFaultedReplayFinishesAndRecordsWhatItDelivered` (mutation-checked 2026-10-31: the end judged by frames delivered alone never comes), `CliGoldenTest.ReplayWithFaultsEndsAndCountsThem` |

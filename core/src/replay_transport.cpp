@@ -11,7 +11,7 @@
 //          source's frame flags line passed on
 //          (RecorderTest.AReplayPassesOnItsSourcesFrameFlagsLine);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
-//          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
+//          round trip through core's recorder), .ReplayThatStopsEarlySaysSo;
 //          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues;
 //          CoreTest.ReplayFaults* (?faults= and ?seed=: each kind's
 //          effect, its count and the same faults from the same seed),

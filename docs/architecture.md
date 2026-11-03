@@ -59,10 +59,10 @@ threads onto the GUI thread.
 | Step | Where | Thread |
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, or a J2534 read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp` | transport worker |
-| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
+| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)); a recording session also puts the frame and its values into its recorder's ring, which the recorder's thread writes to the folder ([ADR-0049](adr/0049-recordings-in-core.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `SessionBridge::onFrame`, `onValues` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
-| 5. Every 100 ms the staging is swapped out: every sample goes to the recording, and each signal's window (newest, lowest and highest, at their frames' times) into the signal model; link health is polled | coalesce timer | GUI |
+| 5. Every 100 ms the staging is swapped out: each signal's window (newest, lowest and highest, at their frames' times) goes into the signal model; link health and the recording's state are polled | coalesce timer | GUI |
 | 6. Pages bind to the models: Log to frames, Live and Dashboard to signals | QML | GUI |
 
 **Why each step is shaped this way:**
@@ -76,8 +76,9 @@ threads onto the GUI thread.
 - **Backpressure:** it bounds frames *in flight*, never a lifetime
   count, so a fast bus drops frames rather than freezing the stream
   ([ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md)). A
-  dropped frame misses the frame log and `frames.csv`; its values,
-  staged from the worker, don't.
+  dropped frame misses the frame log, and its values, staged from the
+  worker, don't. The recording misses neither: core writes it from the
+  worker, before the bridge's callbacks.
 - **Decode on the worker:** core runs the match and decode, so every
   front end gets values without a loop of its own, and the GUI thread's
   cost per frame doesn't grow with the profile
@@ -365,15 +366,17 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   its delivery figures in the activity log: frames received and
   dropped, and how long frames took to reach the GUI thread and values
   the model (median, p99, max).
-- **Recording is the bridge's too**
-  ([ADR-0017](adr/0017-session-recording.md)): with it on, the
-  bridge writes every frame it accepts, each decoded value and the
-  activity lines to one folder per connect. It sits where those three
-  already meet, on the GUI thread. Core has a recorder of its own
-  ([ADR-0049](adr/0049-recordings-in-core.md), `ecuio/recording.h`),
-  which `havne-cli stream --record` uses: the worker queues each frame
-  and its values into a ring, and the recorder's thread writes the
-  same folder, so a slow disk never holds the worker up.
+- **Recording is core's**
+  ([ADR-0017](adr/0017-session-recording.md),
+  [ADR-0049](adr/0049-recordings-in-core.md), `ecuio/recording.h`):
+  with it on, one folder per connect holds every frame the session
+  read, each decoded value and the activity lines. The worker queues
+  each frame and its values into a ring and the recorder's thread
+  writes the files, so a slow disk never holds the worker up and the
+  frames the Log page drops are recorded too. The bridge opens the
+  recorder, attaches it before the session starts, notes its activity
+  lines and closes it after the teardown; `havne-cli stream --record`
+  does the same.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial

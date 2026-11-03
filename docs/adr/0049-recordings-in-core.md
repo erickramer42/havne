@@ -1012,3 +1012,29 @@ run, recorded against unrecorded, as section 9 says, with its CI gate.
 Here the bench checks a bound against regressions instead: recording
 adds at most 75 ns a frame. A busy loop of 200 turns on every recorded
 frame fails it (107 and 142 ns in two runs).
+
+## Appendix: the bridge's cost, measured (2026-11-03)
+
+Step 2 judges section 9's 10% on the bridge's looping run:
+`bench_bridge --record` replays the engine-start fixture under `obd2`
+through a `SessionBridge` at full speed, five runs of 3 s each way,
+recorded and unrecorded alternated, with the process held to one
+logical processor on each of three physical cores. One run (Release):
+
+| Run | Worker frames a second, median (lowest to highest) |
+|---|---|
+| Not recorded | 534,618 (515,656 to 542,733) |
+| Recorded | 514,763 (495,563 to 556,927) |
+
+The recorded runs went at 0.96 of the unrecorded rate, so the 10% is
+met, and `--record` fails below 0.9. At this rate, over a hundred times
+a saturated classic bus's, the writer sharing those three cores fell
+behind and 22,125 records were dropped and counted. The core-side runs
+of the appendix above follow in the same bench, with their bound of
+75 ns a frame.
+
+CI's gate is `--load`'s: its looping run again with a recorder
+attached, at least 0.8 of the unrecorded run in the same bench. It read
+0.96 on Windows (471,840 frames a second against 493,534) and 1.01
+under WSL, with no record dropped in either. The recorded pass at 100x
+writes all 7,074 frames and 7,061 values with none dropped, on both.

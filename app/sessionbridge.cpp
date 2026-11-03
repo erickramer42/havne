@@ -23,7 +23,9 @@
 //          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
-//          core lists them, session recording (BridgeTest.Recording*) and
+//          core lists them, session recording through core's recorder
+//          (ADR-0049; BridgeTest.Recording*: the caller lines, the notes,
+//          the activity lines core writes itself never noted) and
 //          the recent ones' replay URIs (.RecentRecordings*,
 //          .ReplayUriForTakesTheRecordedProfile), display
 //          units on the rows, the chart and not the recording
@@ -784,7 +786,6 @@ SessionBridge::SessionBridge(QObject* parent)
         pollChannelDiagnostics();
         pollReplayEnd();
         pollSleep();
-        pollTiming();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -794,19 +795,18 @@ SessionBridge::SessionBridge(QObject* parent)
         // queues a report as it drops (at most one pending).
         notifyDropped();
         flushValues();
-        // On disk within a tick, so a crash loses at most 100 ms
-        m_recorder.flush();
-        if (m_recorder.active() && !m_recorder.ok()) {
-            const QString folder = recordingFolder();
-            stopRecording(QStringLiteral("a write failed"));
-            emit logMessage(QStringLiteral("Recording stopped: can't write to %1").arg(folder));
-        }
+        pollRecording();
     });
 
-    // The activity lines, link transitions included, go into the
-    // recording's events.log too
+    // The activity lines go into the recording's events.log as notes,
+    // but for those core writes in its own form (logUnnoted)
     connect(this, &SessionBridge::logMessage, this,
-            [this](const QString& line) { m_recorder.event(line); });
+            [this](const QString& line) {
+                if (m_recorder != nullptr && m_noting) {
+                    (void)ecuio_recorder_note(m_recorder,
+                                              line.toUtf8().constData());
+                }
+            });
 }
 
 
@@ -838,8 +838,9 @@ SessionBridge::~SessionBridge()
         destroySessionLocked();
     }
     // Closed without stopRecording's signal: QML may already be gone
-    if (m_recorder.active()) {
-        m_recorder.stop(recordingSummary(QStringLiteral("the app closed")));
+    if (m_recorder != nullptr) {
+        (void)ecuio_recorder_close(m_recorder, "the app closed");
+        m_recorder = nullptr;
     }
     ecuio_shutdown();
 }
@@ -1016,7 +1017,7 @@ QVariantList SessionBridge::recentRecordings(int limit) const
     if (limit <= 0) {
         return out;
     }
-    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (SessionRecorder::start): by name,
+    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder): by name,
     // last first, is newest first
     static const QRegularExpression kName(
         QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
@@ -1118,7 +1119,8 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
 // handleFrameInternal after applyConnectedState, and its values wait in
 // the staging, sized here, for the first tick. On failure the session
 // is destroyed.
-QString SessionBridge::startSession(ecuio_session_t* session)
+QString SessionBridge::startSession(ecuio_session_t* session,
+                                    const QString& uri)
 {
     // Zeroed before the worker starts, not at the apply: a replay at max
     // can pass the in-flight cap before then, and those drops count
@@ -1133,13 +1135,16 @@ QString SessionBridge::startSession(ecuio_session_t* session)
     m_frameLatency.clear();
     m_valueLatency.clear();
     m_valuesStaged = 0;
-    m_timingNextUs = m_timingEveryUs;
     prepareValueStaging(ecuio_session_signal_set(session));
+    // Attached before the worker starts, so the recording holds every frame
+    startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);
     const ecuio_status_t rc = ecuio_session_start(session);
     if (rc != ECUIO_OK) {
         m_accepting.store(false, std::memory_order_release);
         const QString err = failureText(rc);
+        // The folder keeps its header and says why there are no frames
+        stopRecording(QStringLiteral("the session didn't start: %1").arg(err));
         ecuio_unregister_frame_callback(session, &SessionBridge::onFrame, this);
         ecuio_unregister_values_callback(session, &SessionBridge::onValues, this);
         ecuio_session_destroy(session);
@@ -1158,8 +1163,6 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     // of them starts must be refused, not replace this session
     m_session = session;
     m_connected.store(true, std::memory_order_release);
-    // Before the queued frames run, so the recording holds every one
-    startRecording(uri, ecuio_session_signal_set(session));
     ecuio_session_info_t info{};
     const bool haveInfo = ecuio_session_get_info(session, &info) == ECUIO_OK;
     m_adapterVersions = haveInfo ? versionsText(info) : QString();
@@ -1243,7 +1246,7 @@ QString SessionBridge::connectSession(const QString& typed)
     ecuio_session_t* session = nullptr;
     err = connectCoreOnly(uri, &session);
     if (err.isEmpty()) {
-        err = startSession(session);
+        err = startSession(session, uri);
     }
     if (!err.isEmpty()) {
         emit logMessage(QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
@@ -1297,7 +1300,7 @@ void SessionBridge::connectSessionAsync(const QString& typed)
             ecuio_session_t* session = m_pendingSession.exchange(nullptr);
             QString err = core_err;
             if (err.isEmpty()) {
-                err = startSession(session);
+                err = startSession(session, uri);
             }
             if (err.isEmpty()) {
                 applyConnectedState(session, uri);
@@ -1334,13 +1337,7 @@ void SessionBridge::disconnectSession()
     m_disconnecting = true;
     m_coalesceTimer->stop();
     notifyFrameCounts();   // the last tick's worth
-    flushValues();         // and its values, the recording's among them
-    if (m_valuesDropped > 0) {
-        emit logMessage(QStringLiteral("Values the recording missed: %1, past %2 "
-                                       "in one 100 ms window")
-                            .arg(m_valuesDropped)
-                            .arg(m_valueSampleLimit));
-    }
+    flushValues();         // and its values
     emit logMessage(deliveryText(deliveryStats()));
     m_valueSet = nullptr;  // the drain's; onValues stops at m_accepting
     m_stagingBuffer.clear();
@@ -1396,11 +1393,6 @@ void SessionBridge::disconnectSession()
                 emit disconnectingChanged();
                 const QString timingLine = timingText(timing, rows);
                 if (!timingLine.isEmpty()) {
-                    m_recorder.timing(
-                        timing, rows.data(), static_cast<uint32_t>(rows.size()),
-                        info.rx_ids,
-                        std::min<uint32_t>(info.channel_count,
-                                           ECUIO_SESSION_INFO_MAX_CHANNELS));
                     emit logMessage(timingLine);
                 }
                 emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
@@ -1461,15 +1453,16 @@ QString SessionBridge::displayUnit(const QString& unit) const
 
 QString SessionBridge::recordingFolder() const
 {
-    const QString folder = m_recorder.folder();
-    if (folder.isEmpty()) return {};
-    return documentsRelative(folder);
+    if (m_recordingFolder.isEmpty()) {
+        return {};
+    }
+    return documentsRelative(m_recordingFolder);
 }
 
 QUrl SessionBridge::recordingFolderUrl() const
 {
-    const QString folder = m_recorder.folder();
-    return folder.isEmpty() ? QUrl() : QUrl::fromLocalFile(folder);
+    return m_recordingFolder.isEmpty() ? QUrl()
+                                       : QUrl::fromLocalFile(m_recordingFolder);
 }
 
 // Recording turns on the surrogate's payload logging for the spawns it
@@ -1518,7 +1511,7 @@ QString SessionBridge::earlierRecordingsRoot() const
     return docs.isEmpty() || root == recordingsRoot() ? QString() : root;
 }
 
-void SessionBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)
+void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
 {
     if (!m_recording) return;
     // A replay would copy the recording it plays
@@ -1536,59 +1529,104 @@ void SessionBridge::startRecording(const QString& uri, const ecuio_signal_set_t*
         return;
     }
 
-    QStringList names;
-    for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
-        names << QString::fromUtf8(set->defs[i].name,
-                                   static_cast<qsizetype>(qstrnlen(set->defs[i].name,
-                                                                   sizeof set->defs[i].name)));
-    }
-    const QByteArray frameLogging = qgetenv("ECUIO_SUR_LOG_FRAMES");
-    const QStringList header = {
-        QStringLiteral("Havne session recording (ADR-0017)"),
-        QStringLiteral("started  %1 (local time)")
-            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))),
-        QStringLiteral("core     %1").arg(coreVersion()),
-        QStringLiteral("uri      %1").arg(uri),
-        set == nullptr
-            ? QStringLiteral("signals  none: the raw profile, frames only")
-            : QStringLiteral("signals  %1: %2").arg(names.size()).arg(names.join(QStringLiteral(", "))),
-        m_setFrameLogging
-            ? QStringLiteral("surrogate frame logging  on, set by this recording")
-            : frameLogging.isNull()
-                ? QStringLiteral("surrogate frame logging  off")
-                : QStringLiteral("surrogate frame logging  ECUIO_SUR_LOG_FRAMES=%1, set at launch")
-                      .arg(QString::fromUtf8(frameLogging)),
-    };
-
     // The picked vehicle names an adapter's session only (ADR-0027 section 1):
-    // a mock or a replay isn't that car
+    // a mock or a replay isn't that car. Core reduces the label to what a
+    // folder's name may hold (ADR-0049 section 2).
     const bool adapter =
         uri.startsWith(QStringLiteral("j2534://"), Qt::CaseInsensitive) ||
         uri.startsWith(QStringLiteral("elm327://"), Qt::CaseInsensitive);
-    QString error;
-    if (!m_recorder.start(root, header, &error,
-                          adapter ? folderLabel(m_vehicleLabel) : QString())) {
-        emit logMessage(QStringLiteral("Recording failed: %1").arg(error));
+    const QByteArray frameLogging = qgetenv("ECUIO_SUR_LOG_FRAMES");
+    // The app's own header lines, which core writes under "caller"
+    QList<QByteArray> lines = {
+        QStringLiteral("Havne %1").arg(coreVersion()).toUtf8(),
+        (m_setFrameLogging
+             ? QStringLiteral(
+                   "surrogate frame logging  on, set by this recording")
+         : frameLogging.isNull()
+             ? QStringLiteral("surrogate frame logging  off")
+             : QStringLiteral("surrogate frame logging  "
+                              "ECUIO_SUR_LOG_FRAMES=%1, set at launch")
+                   .arg(QString::fromUtf8(frameLogging)))
+            .toUtf8(),
+    };
+    if (adapter && !m_vehicleLabel.isEmpty()) {
+        lines << QStringLiteral("vehicle  %1").arg(m_vehicleLabel).toUtf8();
+    }
+    std::vector<const char*> header;
+    for (const QByteArray& l : lines) {
+        header.push_back(l.constData());
+    }
+    const QByteArray root8 = root.toUtf8();
+    const QByteArray label8 = adapter ? m_vehicleLabel.toUtf8() : QByteArray();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.constData();
+    o.label_utf8 = label8.constData();
+    o.header_lines = header.data();
+    o.header_line_count = static_cast<uint32_t>(header.size());
+    ecuio_recorder_t* recorder = nullptr;
+    ecuio_status_t rc = ecuio_recorder_open(&o, &recorder);
+    if (rc != ECUIO_OK) {
+        emit logMessage(QStringLiteral("Recording failed: %1")
+                            .arg(QString::fromUtf8(ecuio_last_error_detail())));
         return;
     }
+    rc = ecuio_session_record(session, recorder);
+    if (rc != ECUIO_OK) {
+        (void)ecuio_recorder_close(recorder,
+                                   "the session couldn't be recorded");
+        emit logMessage(QStringLiteral("Recording failed: %1")
+                            .arg(QString::fromUtf8(ecuio_status_string(rc))));
+        return;
+    }
+    char folder[4096];
+    uint32_t length = 0;
+    (void)ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length);
+    m_recorder = recorder;
+    m_recordingFolder = QString::fromUtf8(folder);
     emit recordingStateChanged();
     emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
 }
 
-QString SessionBridge::recordingSummary(const QString& why) const
-{
-    return QStringLiteral("end      %1: %2 frames, %3 values, %4 frames dropped by the bridge")
-        .arg(why)
-        .arg(m_recorder.frameRows())
-        .arg(m_recorder.sampleRows())
-        .arg(m_droppedFrames.load(std::memory_order_relaxed));
-}
-
 void SessionBridge::stopRecording(const QString& why)
 {
-    if (!m_recorder.active()) return;
-    m_recorder.stop(recordingSummary(why));
+    if (m_recorder == nullptr) {
+        return;
+    }
+    // The frames the Log page skipped are in the recording all the same
+    const int skipped = m_droppedFrames.load(std::memory_order_relaxed);
+    if (skipped > 0) {
+        (void)ecuio_recorder_note(
+            m_recorder,
+            QStringLiteral(
+                "the Log page skipped %1 frames; the recording has them")
+                .arg(skipped)
+                .toUtf8()
+                .constData());
+    }
+    ecuio_recorder_t* recorder = m_recorder;
+    m_recorder = nullptr;
+    (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+}
+
+void SessionBridge::pollRecording()
+{
+    ecuio_recorder_state_t st{};
+    if (m_recorder == nullptr ||
+        ecuio_recorder_get_state(m_recorder, &st) != ECUIO_OK ||
+        st.state != ECUIO_RECORDING_FAILED) {
+        return;
+    }
+    const QString reason = QString::fromUtf8(st.reason);
+    stopRecording(QStringLiteral("a write failed"));
+    emit logMessage(QStringLiteral("Recording stopped: %1").arg(reason));
+}
+
+void SessionBridge::logUnnoted(const QString& line)
+{
+    m_noting = false;
+    emit logMessage(line);
+    m_noting = true;
 }
 
 void SessionBridge::setLogPaused(bool paused)
@@ -1640,8 +1678,8 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     // is possible.
     const ecuio_frame_t copy = *frame;
     // Stamped here, as it arrives, not when the GUI thread gets to it:
-    // the recording's host clock
-    const auto arrived = SessionRecorder::Clock::now();
+    // the frame's wait for the GUI thread starts here
+    const auto arrived = HostClock::now();
     self->m_inFlightFrames.fetch_add(1, std::memory_order_relaxed);
 
     // Lifetime contract: invoking with `self` as context object means the
@@ -1654,8 +1692,8 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     }, Qt::QueuedConnection);
 }
 
-void SessionBridge::handleFrameInternal(
-    const ecuio_frame_t* frame, SessionRecorder::Clock::time_point arrived)
+void SessionBridge::handleFrameInternal(const ecuio_frame_t* frame,
+                                        HostClock::time_point arrived)
 {
     if (!m_connected.load(std::memory_order_acquire)) return;
 
@@ -1666,11 +1704,8 @@ void SessionBridge::handleFrameInternal(
                          : static_cast<uint16_t>(sizeof(frame->data));
 
     m_frameLatency.add(std::chrono::duration_cast<std::chrono::microseconds>(
-                           SessionRecorder::Clock::now() - arrived)
+                           HostClock::now() - arrived)
                            .count());
-
-    // Recorded whether or not the log is paused
-    m_recorder.frame(arrived, *frame, len);
 
     // Paused: counted, but kept out of the frame log. Its values come
     // from core's worker through onValues, paused or not (ADR-0024).
@@ -1758,12 +1793,12 @@ void SessionBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
 }
 
 // Keeps a numeric signal's window (newest, lowest, highest, each at its
-// frame's time) whatever the limits; a sample past one is counted, and
-// only the recording misses it. Grows nothing: prepare reserved the
-// limits.
-void SessionBridge::ValueStaging::stage(
-    uint32_t def, SessionRecorder::Clock::time_point arrived, uint64_t frameUs,
-    const ecuio_value_t& v)
+// frame's time) whatever the limits; a sample past one is counted and
+// goes untimed. Grows nothing: prepare reserved the limits.
+void SessionBridge::ValueStaging::stage(uint32_t def,
+                                        HostClock::time_point arrived,
+                                        uint64_t frameUs,
+                                        const ecuio_value_t& v)
 {
     const bool isText = v.text != nullptr;
     if (!isText) {
@@ -1831,7 +1866,7 @@ void SessionBridge::onValues(const ecuio_value_batch_t* batch, void* user_data)
     SessionBridge* self = static_cast<SessionBridge*>(user_data);
     if (!batch || !self) return;
     if (!self->m_accepting.load(std::memory_order_acquire)) return;
-    const auto arrived = SessionRecorder::Clock::now();
+    const auto arrived = HostClock::now();
     std::lock_guard<std::mutex> lock(self->m_valuesMutex);
     ValueStaging& staging = self->m_valueStaging[self->m_activeStaging];
     for (uint32_t i = 0; i < batch->count; ++i) {
@@ -1856,20 +1891,12 @@ void SessionBridge::drainValues()
     // The worker writes the other one now, so this one is the GUI
     // thread's until the next swap. Its values reach the model with this
     // drain, so each one's wait ends here.
-    const auto drained = SessionRecorder::Clock::now();
+    const auto drained = HostClock::now();
     m_valuesStaged += full->samples.size() + full->dropped;
     for (const ValueStaging::Sample& s : full->samples) {
         m_valueLatency.add(std::chrono::duration_cast<std::chrono::microseconds>(
                                drained - s.arrived)
                                .count());
-        const ecuio_signal_def_t& def = m_valueSet->defs[s.def];
-        if (s.isText) {
-            m_recorder.sample(s.arrived, def,
-                              QString::fromLatin1(full->text.data() + s.textAt,
-                                                  static_cast<qsizetype>(s.textLen)));
-        } else {
-            m_recorder.sample(s.arrived, def, s.value);
-        }
     }
     for (size_t i = 0; i < full->has.size(); ++i) {
         if (!full->has[i]) continue;
@@ -1892,14 +1919,8 @@ void SessionBridge::drainValues()
             m_stagingBuffer.push_back(w);
         }
     }
-    if (full->dropped > 0) {
-        if (m_valuesDropped == 0) {
-            emit logMessage(QStringLiteral("Values are arriving faster than %1 in "
-                                           "100 ms: the recording misses some")
-                                .arg(m_valueSampleLimit));
-        }
-        m_valuesDropped += full->dropped;
-    }
+    // Past the limit a value goes untimed; the Delivery line counts it
+    m_valuesDropped += full->dropped;
     full->reset();
 }
 
@@ -2063,34 +2084,6 @@ SessionBridge::timingText(const ecuio_session_timing_t& t,
     return line;
 }
 
-void SessionBridge::pollTiming()
-{
-    if (m_session == nullptr || !m_recorder.active()) {
-        return;
-    }
-    ecuio_session_timing_t t{};
-    uint32_t count = 0;
-    if (ecuio_session_get_timing(m_session, &t, nullptr, 0, &count) !=
-            ECUIO_OK ||
-        count == 0 || t.snapshot_us < m_timingNextUs) {
-        return;
-    }
-    std::vector<ecuio_request_timing_t> rows(count);
-    if (ecuio_session_get_timing(m_session, &t, rows.data(), count, &count) !=
-        ECUIO_OK) {
-        return;
-    }
-    m_timingNextUs = t.snapshot_us + m_timingEveryUs;
-    ecuio_session_info_t info{};
-    (void)ecuio_session_get_info(m_session, &info);
-    m_recorder.timing(
-        t, rows.data(),
-        std::min<uint32_t>(count, static_cast<uint32_t>(rows.size())),
-        info.rx_ids,
-        std::min<uint32_t>(info.channel_count,
-                           ECUIO_SESSION_INFO_MAX_CHANNELS));
-}
-
 void SessionBridge::pollLinkHealth()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
@@ -2111,15 +2104,15 @@ void SessionBridge::pollLinkHealth()
      * alone turns "connected with frozen values" into a named fault
      * in the existing log surface. */
     if (prev != ECUIO_OK && last_error == ECUIO_OK) {
-        emit logMessage(QStringLiteral("Link: recovered"));
+        logUnnoted(QStringLiteral("Link: recovered"));
     } else if (last_error == ECUIO_ERR_VEHICLE_TIMEOUT) {
-        emit logMessage(QStringLiteral("Link: vehicle not responding"));
+        logUnnoted(QStringLiteral("Link: vehicle not responding"));
     } else if (last_error == ECUIO_ERR_REQUEST_FAILED) {
-        emit logMessage(QStringLiteral("Link: requests failing (%1 episode(s))")
-                            .arg(m_errorEpisodes));
+        logUnnoted(QStringLiteral("Link: requests failing (%1 episode(s))")
+                       .arg(m_errorEpisodes));
     } else if (last_error == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
-        emit logMessage(QStringLiteral("Link: adapter fault (%1 episode(s))")
-                            .arg(m_errorEpisodes));
+        logUnnoted(QStringLiteral("Link: adapter fault (%1 episode(s))")
+                       .arg(m_errorEpisodes));
     } else if (last_error == ECUIO_ERR_RECORDING_CHANGED) {
         // Stopped, not finished: pollReplayEnd stays quiet. The worker
         // counted every frame it sent before it published the code.
@@ -3408,9 +3401,8 @@ void SessionBridge::pollSleep()
     if (rise < 1000000u) {
         return;
     }
-    emit logMessage(
-        QStringLiteral("Asleep for %1 s: nothing was read meanwhile")
-            .arg(static_cast<double>(rise) / 1e6, 0, 'f', 1));
+    logUnnoted(QStringLiteral("Asleep for %1 s: nothing was read meanwhile")
+                   .arg(static_cast<double>(rise) / 1e6, 0, 'f', 1));
 }
 
 /* The published state strings, in one place; QML's Theme.linkColor and
