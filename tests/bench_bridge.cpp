@@ -33,8 +33,9 @@
 // nothing. Exit status 1 on any failed check.
 //
 // --record measures core's recorder on the worker (ADR-0049 section 9):
-// the fixture replayed by core's own session, recorded and unrecorded
-// runs alternated, and recorded passes checked whole (recordTest).
+// the fixture replayed by core's own session on two physical cores,
+// recorded and unrecorded runs alternated, and recorded passes checked
+// whole (recordTest).
 //
 // The defs sit four to a CAN ID, 16 bits each, as a passive-bus profile
 // packs them; each frame carries one ID, so it decodes four values and
@@ -68,6 +69,15 @@
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <sched.h>
+#endif
 
 namespace {
 
@@ -396,20 +406,20 @@ double decodeMicros(int n)
 // core's own session, since the bridge keeps its own recorder: the
 // fixture replayed under obd2 by core's worker to a frame callback that
 // counts and a values callback that does nothing, as the bridge's.
-// Three kinds of looping run alternate, kRecordRounds of each: unrecorded;
-// unrecorded beside a thread that formats numbers as fast as it can; and
-// recorded (a recorder with its default ring attached before start). At
-// full speed the writer can't keep up, so it never rests, and a busy
-// second thread slows the worker by about a third on its own (the shared
-// core and caches; measured 2026-11-02). The budget is the worker's own
-// cost, so the recorded median is checked against the busy one; against
-// the bare one it's reported. Then one recorded pass at full speed and
-// one at 100x must put every frame and value in the files, none dropped
+// Recorded runs (a recorder with its default ring attached before start)
+// alternate with unrecorded ones, kRecordRounds of each, the process held
+// to two physical cores (pinToTwoCores), and their medians are compared.
+// A frame costs this worker so little that the recorder's fixed cost per
+// frame is a large share of it here, and that share follows the rest of
+// the worker's speed; section 9's 10% is judged on the bridge's run,
+// where the worker does a frame's real work. This check bounds the
+// recorder's own cost, the nanoseconds a frame it adds, against
+// regressions. Then one recorded pass at full speed and one at 100x must
+// put every frame and value in the files, none dropped
 constexpr int kRecordRounds = 5;
-constexpr double kMinRecordedShare = 0.9;
+constexpr double kMaxRecordedNs = 75.0; // dev: 42 to 47, Windows and Linux,
+                                        // 2026-11-02
 constexpr quint64 kFixtureValues = 7061;
-
-enum class CoreMode { plain, busy, recorded };
 
 struct CoreRun {
     double workerRate = 0.0;     // looping: frames a second through the worker
@@ -421,12 +431,14 @@ struct CoreRun {
 
 void countFrame(const ecuio_frame_t*, void* n)
 {
-    static_cast<std::atomic<quint64>*>(n)->fetch_add(1, std::memory_order_relaxed);
+    static_cast<std::atomic<quint64>*>(n)->fetch_add(1,
+                                                     std::memory_order_relaxed);
 }
 
 double since(std::chrono::steady_clock::time_point t)
 {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t)
+        .count();
 }
 
 void sleepFor(double seconds)
@@ -434,20 +446,91 @@ void sleepFor(double seconds)
     std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
 }
 
-// A thread formatting doubles as the writer does, until stop
-std::thread busyThread(const std::atomic<bool>& stop)
+#if defined(__linux__)
+int readSysInt(const char* format, int cpu)
 {
-    return std::thread([&stop] {
-        char text[32];
-        double x = 0.0;
-        while (!stop.load(std::memory_order_relaxed))
-            std::snprintf(text, sizeof(text), "%.12g", x += 1.37);
-    });
+    char path[128];
+    std::snprintf(path, sizeof(path), format, cpu);
+    FILE* f = std::fopen(path, "r");
+    int v = -1;
+    if (f) {
+        if (std::fscanf(f, "%d", &v) != 1)
+            v = -1;
+        std::fclose(f);
+    }
+    return v;
+}
+#endif
+
+// The process held to one logical processor on each of two physical
+// cores, so the worker and the writer never share a core: otherwise where
+// the OS puts them decides the figures (a busy thread on the worker's own
+// core slowed it by about 40%, on another by about 4%, 2026-11-02). Its
+// processors in *which; false where it can't be done. Threads started
+// later inherit it, the sessions' among them
+bool pinToTwoCores(std::string* which)
+{
+#if defined(_WIN32)
+    DWORD bytes = 0;
+    GetLogicalProcessorInformation(nullptr, &bytes);
+    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> info(
+        bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+    if (info.empty() || !GetLogicalProcessorInformation(info.data(), &bytes))
+        return false;
+    DWORD_PTR mask = 0;
+    int cores = 0;
+    for (const SYSTEM_LOGICAL_PROCESSOR_INFORMATION& i : info) {
+        if (i.Relationship != RelationProcessorCore || i.ProcessorMask == 0)
+            continue;
+        mask |= i.ProcessorMask & (~i.ProcessorMask + 1); // its first
+        if (++cores == 2)
+            break;
+    }
+    if (cores < 2 || !SetProcessAffinityMask(GetCurrentProcess(), mask))
+        return false;
+    char text[64];
+    std::snprintf(text, sizeof(text), "processor mask 0x%llx",
+                  static_cast<unsigned long long>(mask));
+    *which = text;
+    return true;
+#elif defined(__linux__)
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0)
+        return false;
+    std::vector<std::pair<int, int>> seen; // (package, core)
+    cpu_set_t pick;
+    CPU_ZERO(&pick);
+    std::string names;
+    for (int c = 0; c < CPU_SETSIZE && seen.size() < 2; ++c) {
+        if (!CPU_ISSET(c, &allowed))
+            continue;
+        const std::pair<int, int> id{
+            readSysInt(
+                "/sys/devices/system/cpu/cpu%d/topology/physical_package_id",
+                c),
+            readSysInt("/sys/devices/system/cpu/cpu%d/topology/core_id", c)};
+        if (id.first < 0 || id.second < 0)
+            return false;
+        if (std::find(seen.begin(), seen.end(), id) != seen.end())
+            continue;
+        seen.push_back(id);
+        CPU_SET(c, &pick);
+        names += (names.empty() ? "processors " : " and ") + std::to_string(c);
+    }
+    if (seen.size() < 2 || sched_setaffinity(0, sizeof(pick), &pick) != 0)
+        return false;
+    *which = names;
+    return true;
+#else
+    (void)which;
+    return false;
+#endif
 }
 
-// One replay of the fixture by core's worker; recorded runs record under
-// root
-CoreRun coreReplay(const char* query, bool sustained, CoreMode mode, const char* root)
+// One replay of the fixture by core's worker; a recording under root when
+// root isn't null
+CoreRun coreReplay(const char* query, bool sustained, const char* root)
 {
     const std::string uri = std::string("replay://") + ECUIO_REPLAY_FIXTURES +
                             "/2026-10-25-engine-start?profile=obd2&" + query;
@@ -461,7 +544,7 @@ CoreRun coreReplay(const char* query, bool sustained, CoreMode mode, const char*
     ecuio_register_frame_callback(session, countFrame, &frames);
     ecuio_register_values_callback(session, ignoreValues, nullptr);
     ecuio_recorder_t* recorder = nullptr;
-    if (mode == CoreMode::recorded) {
+    if (root) {
         ecuio_record_options_t o{};
         o.root_utf8 = root;
         if (ecuio_recorder_open(&o, &recorder) != ECUIO_OK ||
@@ -472,10 +555,6 @@ CoreRun coreReplay(const char* query, bool sustained, CoreMode mode, const char*
         }
     }
     CoreRun run;
-    std::atomic<bool> stop{false};
-    std::thread busy;
-    if (mode == CoreMode::busy)
-        busy = busyThread(stop);
     const auto t0 = std::chrono::steady_clock::now();
     ecuio_session_start(session);
     if (sustained) {
@@ -483,7 +562,8 @@ CoreRun coreReplay(const char* query, bool sustained, CoreMode mode, const char*
         const quint64 frames0 = frames.load();
         const auto t1 = std::chrono::steady_clock::now();
         sleepFor(kSustainSeconds);
-        run.workerRate = static_cast<double>(frames.load() - frames0) / since(t1);
+        run.workerRate =
+            static_cast<double>(frames.load() - frames0) / since(t1);
     } else {
         while (frames.load() < kFixtureFrames && since(t0) < 30.0)
             sleepFor(0.001);
@@ -491,7 +571,8 @@ CoreRun coreReplay(const char* query, bool sustained, CoreMode mode, const char*
         run.passed = frames.load() == kFixtureFrames;
         while (recorder && since(t0) < 30.0) {
             ecuio_recorder_get_state(recorder, &run.rec);
-            if (run.rec.frame_rows + run.rec.records_dropped >= kFixtureFrames &&
+            if (run.rec.frame_rows + run.rec.records_dropped >=
+                    kFixtureFrames &&
                 run.rec.value_rows >= kFixtureValues)
                 break;
             sleepFor(0.001);
@@ -500,9 +581,6 @@ CoreRun coreReplay(const char* query, bool sustained, CoreMode mode, const char*
     }
     if (recorder)
         ecuio_recorder_get_state(recorder, &run.rec);
-    stop = true;
-    if (busy.joinable())
-        busy.join();
     ecuio_session_close(session);
     ecuio_session_destroy(session);
     if (recorder)
@@ -525,75 +603,86 @@ bool recordTest()
         std::fprintf(stderr, "no temporary folder for the recordings\n");
         std::exit(1);
     }
+    std::string pinned;
+    const bool held = pinToTwoCores(&pinned);
     const QByteArray root = dir.path().toUtf8();
     const char* loop = "speed=max&loop=1";
-    std::vector<double> plain, busy, recorded;
+    std::vector<double> plain, recorded;
     quint64 loopWritten = 0, loopDropped = 0;
     for (int i = 0; i < kRecordRounds; ++i) {
-        plain.push_back(coreReplay(loop, true, CoreMode::plain, nullptr).workerRate);
-        busy.push_back(coreReplay(loop, true, CoreMode::busy, nullptr).workerRate);
-        const CoreRun r = coreReplay(loop, true, CoreMode::recorded, root.constData());
+        plain.push_back(coreReplay(loop, true, nullptr).workerRate);
+        const CoreRun r = coreReplay(loop, true, root.constData());
         recorded.push_back(r.workerRate);
         loopWritten += r.rec.frame_rows;
         loopDropped += r.rec.records_dropped;
     }
-    const CoreRun fast = coreReplay("speed=max", false, CoreMode::recorded, root.constData());
-    const CoreRun paced = coreReplay("speed=100", false, CoreMode::recorded, root.constData());
+    const CoreRun fast = coreReplay("speed=max", false, root.constData());
+    const CoreRun paced = coreReplay("speed=100", false, root.constData());
 
-    const double share = median(recorded) / median(busy);
-    std::printf("\n### Recording: the engine-start fixture under obd2, core's worker\n\n"
-                "%d looping runs of %.0f s of each kind, alternated; frames a "
+    const double share = median(recorded) / median(plain);
+    const double costNs = 1e9 / median(recorded) - 1e9 / median(plain);
+    std::printf("\n### Recording: the engine-start fixture under obd2, core's "
+                "worker\n\n"
+                "%d looping runs of %.0f s each way, alternated, %s; frames a "
                 "second through the worker, median (lowest to highest).\n\n",
-                kRecordRounds, kSustainSeconds);
+                kRecordRounds, kSustainSeconds,
+                held ? ("held to " + pinned).c_str()
+                     : "NOT held to two cores, so where the OS put the "
+                       "threads moves the figures");
     std::printf("| Run | Worker frames/s | Rows written | Records dropped |\n"
                 "|---|---|---|---|\n");
-    auto row = [](const char* label, const std::vector<double>& v, const std::string& written,
-                  const std::string& dropped) {
-        std::printf("| %s | %.0f (%.0f to %.0f) | %s | %s |\n", label, median(v),
-                    *std::min_element(v.begin(), v.end()),
+    auto row = [](const char* label, const std::vector<double>& v,
+                  const std::string& written, const std::string& dropped) {
+        std::printf("| %s | %.0f (%.0f to %.0f) | %s | %s |\n", label,
+                    median(v), *std::min_element(v.begin(), v.end()),
                     *std::max_element(v.begin(), v.end()), written.c_str(),
                     dropped.c_str());
     };
     row("not recorded", plain, "-", "-");
-    row("not recorded, a busy thread beside it", busy, "-", "-");
-    row("recorded", recorded, std::to_string(loopWritten), std::to_string(loopDropped));
-    std::printf("\nRecorded at %.2f of the rate beside a busy thread (the worker's "
-                "own cost), %.2f of the bare rate.\n\n",
-                share, median(recorded) / median(plain));
-    std::printf("| Recorded pass | Last frame, s | Files whole, s | frames.csv rows | "
-                "signals.csv rows | Records dropped |\n|---|---|---|---|---|---|\n");
-    for (const auto& p : {std::make_pair("full speed", &fast), std::make_pair("100x", &paced)}) {
-        std::printf("| %s | %.3f | %.3f | %llu | %llu | %llu |\n", p.first,
-                    p.second->seconds, p.second->writtenSeconds,
-                    static_cast<unsigned long long>(p.second->rec.frame_rows),
-                    static_cast<unsigned long long>(p.second->rec.value_rows),
-                    static_cast<unsigned long long>(p.second->rec.records_dropped));
+    row("recorded", recorded, std::to_string(loopWritten),
+        std::to_string(loopDropped));
+    std::printf("\nRecorded at %.2f of the unrecorded rate: %.0f ns a frame "
+                "more.\n\n",
+                share, costNs);
+    std::printf(
+        "| Recorded pass | Last frame, s | Files whole, s | frames.csv rows | "
+        "signals.csv rows | Records dropped |\n|---|---|---|---|---|---|\n");
+    const std::pair<const char*, const CoreRun*> passes[] = {
+        {"full speed", &fast}, {"100x", &paced}};
+    for (const auto& p : passes) {
+        std::printf(
+            "| %s | %.3f | %.3f | %llu | %llu | %llu |\n", p.first,
+            p.second->seconds, p.second->writtenSeconds,
+            static_cast<unsigned long long>(p.second->rec.frame_rows),
+            static_cast<unsigned long long>(p.second->rec.value_rows),
+            static_cast<unsigned long long>(p.second->rec.records_dropped));
     }
 
     std::vector<std::string> failed;
     char bound[160];
     std::snprintf(bound, sizeof(bound),
-                  "recorded at %.2f of the rate beside a busy thread, under %.2f", share,
-                  kMinRecordedShare);
-    if (share < kMinRecordedShare)
+                  "recording added %.0f ns a frame, over %.0f", costNs,
+                  kMaxRecordedNs);
+    if (costNs > kMaxRecordedNs)
         failed.push_back(bound);
-    for (const auto& p : {std::make_pair("full speed", &fast), std::make_pair("100x", &paced)}) {
+    for (const auto& p : passes) {
         const CoreRun& r = *p.second;
         const std::string at = std::string(p.first) + ": ";
         if (!r.passed)
             failed.push_back(at + "not every frame reached the callback");
         if (r.rec.records_dropped != 0)
             failed.push_back(at + "records dropped");
-        if (r.rec.frame_rows != kFixtureFrames || r.rec.value_rows != kFixtureValues)
+        if (r.rec.frame_rows != kFixtureFrames ||
+            r.rec.value_rows != kFixtureValues)
             failed.push_back(at + "the files missed rows");
         if (r.rec.state != ECUIO_RECORDING_ACTIVE)
             failed.push_back(at + "the recording failed: " + r.rec.reason);
     }
     if (failed.empty()) {
-        std::printf("\nEvery check passed: recorded at least %.2f of the rate beside "
-                    "a busy thread; each recorded pass wrote every frame and value, "
+        std::printf("\nEvery check passed: recording added at most %.0f ns a "
+                    "frame; each recorded pass wrote every frame and value, "
                     "none dropped.\n",
-                    kMinRecordedShare);
+                    kMaxRecordedNs);
         return true;
     }
     std::printf("\n");
