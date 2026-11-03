@@ -5167,7 +5167,7 @@ TEST(BridgeTest, RecentRecordingsReplayUnderTheirOwnProfile)
 namespace {
 
 /* What core's values callback delivers, as signals.csv rows: name and
- * value, formatted as SessionRecorder writes them */
+ * value, formatted as core's recorder writes them */
 struct CoreRows {
     QHash<uint16_t, QByteArray> names;
     std::vector<std::pair<QByteArray, QByteArray>> rows;

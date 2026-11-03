@@ -406,3 +406,21 @@ recorded too.
   reads 1,261 at 10x and at `max`, against 1,232 and 758 before.
 - On `mock://demo` the trace shows the drive cycle's noise inside each
   window, which the newest value alone smoothed away.
+
+## Appendix: the recorder writes from the worker (2026-11-03)
+
+With the recorder in core ([ADR-0049](0049-recordings-in-core.md)
+section 1):
+
+- **Section 1:** dispatch decodes while a values callback is registered
+  or the session records, so a session that wants frames only still
+  records its values.
+- **Sections 7 and 8:** the worker puts each frame and its values into
+  the recorder's ring as one record, so `signals.csv` no longer comes
+  from the staging. The staging feeds the model alone, and past its
+  capacity it costs Live samples, never the recording. Every value the
+  decode produces is recorded, those of frames the bridge drops at its
+  cap included.
+- **Consequences:** `frames.csv` and `signals.csv` agree on every
+  frame: a frame and its values are written together or dropped
+  together, and a drop is a `drop` line in `events.log` at its time.

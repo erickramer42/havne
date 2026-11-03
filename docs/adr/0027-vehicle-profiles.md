@@ -249,3 +249,17 @@ saved before keeps its unticks; one with `plotted` that isn't a list
 of names drops the document whole, as any damaged field does
 (section 5). `rememberPlotting` stores both, `setPlotChoices` applies
 them.
+
+## Appendix: core names the folder (2026-11-03)
+
+A recording's folder is core's to name
+([ADR-0049](0049-recordings-in-core.md) section 2), so section 2's
+label rule is core's: `ecuio_recorder_open` reduces the label to ASCII
+letters and digits, space, `-`, `_`, `.` and any character past ASCII,
+runs of spaces made one, at most 40 characters, with no dot or space
+at its end, and a tie's `-n` goes before the label
+(`<yyyyMMdd-HHmmss>[-n][ <label>]`). The bridge passes the picked
+vehicle's label for an adapter's session only (section 1), and writes
+it into `events.log`'s header as a `caller` line (`vehicle  <label>`),
+so the header names the car even when the VIN never settles it.
+`vehicleLabel` is what the bridge hands `ecuio_recorder_open`.

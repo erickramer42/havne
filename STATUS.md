@@ -290,7 +290,10 @@ bus ([roadmap](#roadmap)).
     ([2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
-    ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
+    ([ADR-0017](docs/adr/0017-session-recording.md)), written by core's
+    recorder on a thread of its own, so the frames the Log page drops
+    under load are recorded too
+    ([ADR-0049](docs/adr/0049-recordings-in-core.md)), and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -436,12 +439,13 @@ section 10 orders the work).
 - **The writer** moves from the app's recorder into core, on a thread
   the worker feeds: frames the app drops under load are recorded too,
   and a failed write or a full disk is an error the recording
-  reports. Step 1 is built: core's recorder (`ecuio/recording.h`)
-  and `havne-cli stream --record <dir>`, which writes the folder the
-  app does; it costs core's worker 30 to 50 ns a frame
-  (`bench_bridge --record`, the ADR's appendix of 2026-11-02).
-  Step 2 moves the app onto it and judges the worker's 10% budget
-  on the bridge's looping run, with its CI gate.
+  reports. Steps 1 and 2 are built: core's recorder
+  (`ecuio/recording.h`), `havne-cli stream --record <dir>`, and the
+  app recording through it. It costs core's own worker 30 to 50 ns a
+  frame, and the bridge's looping run keeps 0.96 of its rate, inside
+  the 10% budget (`bench_bridge --record`, the ADR's appendices of
+  2026-11-02 and 2026-11-03); CI's load test gates the recorded run at
+  0.8 of the unrecorded one.
 - **The reader** opens a recording offline. One pass on open builds a
   sparse index (`host_us` only increases) and each signal's lowest and
   highest per stretch, so memory follows the index, not the recording.
