@@ -959,6 +959,7 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     std::strcpy(s.name, "RPM");
     std::strcpy(s.unit, "rpm");
     s.plot_rank = 1;
+    s.group = ECUIO_SIGNAL_GROUP_ENGINE;
     s.samples = 2;
     s.lowest = 800;
     s.highest = 2512.5;
@@ -970,8 +971,9 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
         std::string(n.data(), n.size()),
         "{\"type\":\"signal\",\"recording\":0,\"index\":3,\"name\":\"RPM\","
         "\"unit\":\"rpm\",\"text\":false,\"decimals\":0,\"rank\":1,"
-        "\"samples\":2,\"lowest\":800,\"highest\":2512.5,"
-        "\"first_us\":100,\"last_us\":200,\"rate_hz\":10000}");
+        "\"group\":\"Engine\",\"samples\":2,\"lowest\":800,"
+        "\"highest\":2512.5,\"first_us\":100,\"last_us\":200,"
+        "\"rate_hz\":10000}");
     ecuio_recording_signal_t none = s;
     none.samples = 0;
     none.first_us = ECUIO_RECORDING_NONE;
@@ -986,8 +988,11 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     std::strcpy(vin.name, "VIN");
     vin.flags = ECUIO_RECORDING_SIGNAL_TEXT;
     vin.samples = 1;
+    vin.group = 200; /* a group this core doesn't know: "" */
     cli::Line t(buf, sizeof buf);
     cli::signal_line(t, 0, 4, vin);
+    EXPECT_NE(std::string(t.data(), t.size()).find("\"group\":\"\","),
+              std::string::npos);
     EXPECT_EQ(std::string(t.data(), t.size()).find("lowest"), std::string::npos)
         << "a text signal has no range";
     EXPECT_NE(std::string(t.data(), t.size()).find("\"rate_hz\":null"),

@@ -28,6 +28,8 @@
 #include <QSortFilterProxyModel>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
 #include <QUrl>
@@ -209,12 +211,15 @@ public:
                          * a window's newest value still counts.
                          * Notified with ValueRole. */
         WindowLowRole,
-        RowRole,        /* the row in this model, which toggleSubscribed
+        RowRole,    /* the row in this model, which toggleSubscribed
                          * takes and chartData's `row` names, whatever
                          * row a filtered view shows it at */
-        HiddenRole      /* core reports it unsupported or absent
+        HiddenRole, /* core reports it unsupported or absent
                          * (applyUnsupported, applyAbsent): Live
                          * leaves the row out */
+        GroupRole   /* the def's group (ECUIO_SIGNAL_GROUP_*,
+                         * ADR-0050), for Live's filter. Fixed per
+                         * signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -324,6 +329,7 @@ private:
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
+        uint8_t group = 0;        // the def's group (ADR-0050)
         // The user's tick or untick; Default follows plotDefault
         PlotChoice choice = PlotChoice::Default;
         bool plotDefault = false; // judgePlotted's default for the row
@@ -370,15 +376,38 @@ private:
 // Live's list: SignalListModel without its hidden rows (ADR-0039 section 6).
 // The Dashboard reads the whole model, so a gauge keeps its row either
 // way; a row keeps its model row (RowRole) for its plot box and color.
+// Its filter (ADR-0050) narrows the rows further, a row shown or not
+// by SignalFilter's rule; its group choices come from the rows
+// core leaves in.
 class LiveSignalModel : public QSortFilterProxyModel
 {
     Q_OBJECT
+    Q_PROPERTY(SignalFilter* filter READ filter CONSTANT)
+    // The groups' codes among the rows core leaves in, for the choices
+    Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
+    // The rows core leaves in, before the filter: what "of N" counts
+    Q_PROPERTY(int shownCount READ shownCount NOTIFY groupsChanged)
 
 public:
     explicit LiveSignalModel(SignalListModel* source, QObject* parent = nullptr);
 
+    SignalFilter* filter() const { return m_filter; }
+    QVariantList groups() const { return m_groups; }
+    int shownCount() const { return m_shownCount; }
+
+signals:
+    void groupsChanged();
+
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
+
+private:
+    void refilter();
+    void judgeGroups();
+
+    SignalFilter* m_filter;
+    QVariantList m_groups;
+    int m_shownCount = 0;
 };
 
 class SessionBridge : public QObject

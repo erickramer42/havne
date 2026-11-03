@@ -5,10 +5,10 @@ core  0.3.6
 uri  mock://pull
 profile  test
 frame flags  complete
-signal  RPM,number,rpm,0,2
-signal  Throttle,number,%,1,3
-signal  Coolant,number,°C,0,1
-signal  VIN,text,,0,0
+signal  RPM,number,rpm,0,2,1
+signal  Throttle,number,%,1,3,2
+signal  Coolant,number,°C,0,1,1
+signal  VIN,text,,0,0,0
 caller  havne-cli 0.3.6
 columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
 

@@ -688,6 +688,9 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         l.string(d.unit, sizeof d.unit);
         l.key("decimals");
         l.u64(d.decimal_places);
+        l.key("group");
+        const char* group = ecuio_signal_group_name(d.group);
+        l.string(group, std::strlen(group));
         l.ch('}');
     }
     l.ch(']');

@@ -407,7 +407,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   (trouble codes, readiness, the freeze frame), **Log** (the activity
   log; in developer mode, the raw frames), **Recordings** (the
   recordings list and the viewer), **Settings**
-  (vehicles, device picker, URI, developer mode). Settings is
+  (vehicles, device picker, URI, developer mode). Live and the
+  Recordings page share one signal filter (`SignalFilterBar.qml`, its
+  rule in `app/signalfilter.h`, [ADR-0050](adr/0050-finding-a-signal.md)):
+  words over the name and unit, plotted only, and the groups core
+  gives each def. Settings is
   the one place a session is connected; the header and Home open it.
   It composes the URI from a preset or a device (a J2534 interface or
   a serial port), a profile row

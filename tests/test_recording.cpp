@@ -354,9 +354,18 @@ TEST(RecordingRowsTest, EventsLogsLinesParse)
                       "C");
     EXPECT_EQ(s.decimal_places, 2);
     EXPECT_EQ(s.plot_rank, 14);
+    EXPECT_EQ(s.group, 0) << "a recording from before groups";
+    /* ADR-0050: the group, a sixth field */
+    const std::string grouped = "RPM,number,rpm,0,1,1";
+    rows::header_signal g;
+    ASSERT_TRUE(
+        rows::parse_header_signal(grouped.data(), grouped.size(), g, &why));
+    EXPECT_EQ(g.plot_rank, 1);
+    EXPECT_EQ(g.group, 1);
     for (const char* b :
          {"RPM,count,rpm,0,1", "RPM,number,rpm,4,1", "RPM,number,rpm,0,256",
-          "RPM,number,rpm,0", "RPM,number,rpm,0,1,x"}) {
+          "RPM,number,rpm,0", "RPM,number,rpm,0,1,x", "RPM,number,rpm,0,1,256",
+          "RPM,number,rpm,0,1,1,1", "RPM,number,rpm,0,1,"}) {
         EXPECT_FALSE(rows::parse_header_signal(b, std::strlen(b), s, &why))
             << b;
     }
@@ -463,6 +472,7 @@ TEST(RecordingTest, AFolderTheRecorderWroteOpensWithItsHeader)
         EXPECT_STREQ(s.unit, set->defs[k].unit);
         EXPECT_EQ(s.decimal_places, set->defs[k].decimal_places) << s.name;
         EXPECT_EQ(s.plot_rank, set->defs[k].plot_rank) << s.name;
+        EXPECT_EQ(s.group, set->defs[k].group) << s.name;
         total += s.samples;
     }
     EXPECT_EQ(total, value_rows);

@@ -389,6 +389,48 @@ TestCase {
     }
 
     // A folder the reader refuses says why; All recordings goes back
+    // Finding a signal among many (ADR-0050): a box for each group the
+    // recording holds, words and a group narrowing its rows, Plotted
+    // only; back to the list clears the filter
+    function test_theFilterNarrowsTheSignalRows() {
+        const page = openEarly()
+        const rows = find(page, "signalRows")
+        const all = rows.count
+        const bar = find(page, "recordingFilter")
+        // Edited as typing edits it, keeping the field's binding
+        const field = find(bar, "filterText")
+        field.insert(0, "THR")
+        field.textEdited()
+        tryCompare(rows, "count", 1)
+        compare(rows.model[0].name, "Throttle")
+        field.remove(0, field.length)
+        field.textEdited()
+        tryCompare(rows, "count", all)
+
+        mouseClick(find(bar, "filterButton"))
+        tryVerify(() => bar.options.opened, 2000, "the filter's options open")
+        const boxes = bar.options.contentItem
+        for (const code of [0, 1, 2])
+            verify(findChild(boxes, "group_" + code), "a box for group " + code)
+        verify(!findChild(boxes, "group_3"))
+        // A box's own handler, as a tap runs it
+        findChild(boxes, "group_1").toggled()
+        tryCompare(rows, "count", 2)
+        compare(rows.model.map(s => s.name).join(","), "RPM,Coolant")
+
+        const plottedOnly = findChild(boxes, "plottedOnly")
+        plottedOnly.toggle()
+        plottedOnly.toggled()
+        const plotted = rows.model.filter(s => page.plotted[s.index] === true).length
+        tryCompare(rows, "count", plotted)
+        bar.options.close()
+
+        mouseClick(find(page, "backToList"))
+        page.open(earlyRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens again")
+        compare(find(page, "signalRows").count, all, "back to the list cleared the filter")
+    }
+
     function test_aRefusedFolderSaysWhyAndBackGoesToTheList() {
         const page = createPage()
         page.open({ title: "Gone", folder: Harness.recordingFixtures + "/no-such-recording" })

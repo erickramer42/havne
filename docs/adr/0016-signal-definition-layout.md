@@ -360,3 +360,15 @@ profile, `uds-generic`'s generated defs or an imported set can put one
 into a recording's `signals.csv`. No built-in def is refused: no
 Service 01 name or unit starts with one, and `uds-generic`'s names
 start `DID` or `0x`. `SignalsTest.ValidatorRefusesANameOrUnitAFormulaWouldStart`.
+
+## Appendix: the group (2026-11-03)
+
+`group` takes the second of the display block's reserved bytes
+(offset 90), leaving `display_reserved[1]` at 91: the part of the car
+the def reads, one of `ECUIO_SIGNAL_GROUP_*`, which
+`ecuio_signal_group_name` names
+([ADR-0050](0050-finding-a-signal.md)). Every value is valid, as the
+plot rank's is, so the validator no longer checks that byte (one
+reserved byte fewer in `SignalsTest.ValidatorRefusesEveryNonzeroReservedByte`);
+the layout, its size and `ECUIO_SIGNAL_SET_LAYOUT` are unchanged, and
+a set that leaves it zero groups every def under Other.

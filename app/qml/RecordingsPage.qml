@@ -5,7 +5,8 @@
 //          default plotted, the chart's series over the view), the cursor's
 //          readout, pan and zoom kept inside the recording, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
-//          fall), a finding's row centering the view, a refused folder's
+//          fall), a finding's row centering the view, the signal rows'
+//          filter (SignalFilterBar.qml, ADR-0050), a refused folder's
 //          error, back to the list;
 //          every item inside a phone's width (tst_phone.qml). RecordingView
 //          itself: test_bridge (RecordingViewTest); the chart's layout:
@@ -48,6 +49,18 @@ Page {
     readonly property bool hasCursor: !isNaN(cursorMs)
     // Signal index -> plotted, from the recording's default at the open
     property var plotted: ({})
+    // The signal rows the filter leaves (ADR-0050): the recording's own
+    // list while it's off. Every filter property shares one change
+    // signal, so reading active re-filters on any change; the ticks are
+    // read only under Plotted only, so a tick otherwise keeps the list
+    readonly property var shownSignals: {
+        const f = signalFilter
+        if (!f.active)
+            return recording.signalList
+        const marks = f.plottedOnly ? root.plotted : ({})
+        return recording.signalList.filter(s => f.matches(s.name, s.unit, s.group,
+                                                          marks[s.index] === true))
+    }
     // Signal index -> { text, unit } at the cursor
     property var readout: ({})
     readonly property real minSpanMs: 200
@@ -163,6 +176,7 @@ Page {
         alignLevel = NaN
         alignHysteresis = 0
         openedTitle = ""
+        signalFilter.clear()
         refresh()
     }
 
@@ -460,6 +474,11 @@ Page {
         return n === 0 ? qsTr("Frames check: nothing found in %1 frames").arg(check.frames)
                        : n === 1 ? qsTr("Frames check: 1 finding")
                                  : qsTr("Frames check: %1 findings").arg(n)
+    }
+
+    // The signal rows' filter: Live has its own
+    SignalFilter {
+        id: signalFilter
     }
 
     RecordingView {
@@ -782,6 +801,14 @@ Page {
             text: root.compareStatus
         }
 
+        SignalFilterBar {
+            objectName: "recordingFilter"
+            visible: recording.state === RecordingView.Open
+            Layout.fillWidth: true
+            filter: signalFilter
+            codes: recording.signalList.map(s => s.group)
+        }
+
         // The recording's signals: a tick plots one, and beside each its
         // value at the cursor
         ListView {
@@ -795,7 +822,7 @@ Page {
             currentIndex: -1
             highlightFollowsCurrentItem: false
             boundsBehavior: Flickable.StopAtBounds
-            model: recording.signalList
+            model: root.shownSignals
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: Rectangle {

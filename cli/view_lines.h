@@ -18,6 +18,7 @@
 #include "jsonl.h"
 
 #include "ecuio/recording.h"
+#include "ecuio/signals.h"
 
 #include <cerrno>
 #include <cmath>
@@ -250,7 +251,8 @@ inline void rate_hz(Line& l, const ecuio_recording_signal_t& s)
 }
 
 // A signal: {"type":"signal", recording, index, name, unit, text,
-// decimals, rank, samples, lowest and highest (a number's, null with no
+// decimals, rank, group (its name; "" for a code this core doesn't
+// know), samples, lowest and highest (a number's, null with no
 // samples), first_us|null, last_us|null, rate_hz|null}
 inline void signal_line(Line& l, uint32_t recording, uint32_t index,
                         const ecuio_recording_signal_t& s)
@@ -271,6 +273,9 @@ inline void signal_line(Line& l, uint32_t recording, uint32_t index,
     l.u64(s.decimal_places);
     l.key("rank");
     l.u64(s.plot_rank);
+    l.key("group");
+    const char* group = ecuio_signal_group_name(s.group);
+    l.string(group, std::strlen(group));
     l.key("samples");
     l.u64(s.samples);
     if (!text) {

@@ -1234,3 +1234,12 @@ chart shared as `app/qml/StripChart.qml`.
   "Mark N" to `markers.csv` (section 4), N counting the recording's
   marks, as a line typed into `havne-cli stream --record` does, so two
   runs marked at the same moment line up on "Mark 1".
+
+## Appendix: the signal line's group (2026-11-03)
+
+> **Amended 2026-11-03 ([ADR-0050](0050-finding-a-signal.md)):**
+> section 4's `signal` line ends with the def's group, a sixth field
+> after the plot rank, and the reader fills `group` in
+> `ecuio_recording_signal_t` from it (the first of its two reserved
+> bytes, offset 54). A line of five fields, a recording from before
+> groups, opens with every signal under Other.

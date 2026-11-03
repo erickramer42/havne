@@ -35,6 +35,8 @@ qt_add_library(app_ui STATIC
     recordingview.h
     sessionbridge.cpp
     sessionbridge.h
+    signalfilter.cpp
+    signalfilter.h
     latencystats.h
 )
 
@@ -72,6 +74,7 @@ qt_add_qml_module(app_ui
         qml/DigitalGauge.qml
         qml/BarGauge.qml
         qml/ShiftLightBar.qml
+        qml/SignalFilterBar.qml
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

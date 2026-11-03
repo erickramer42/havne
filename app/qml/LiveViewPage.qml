@@ -3,7 +3,8 @@
 //          and banner text by test_qml (tests/qml/tst_liveview.qml, and
 //          tst_linkhealth.qml for the banner in each link state), which
 //          finds items by objectName, the rows an ECU lacks left out with
-//          the note saying how many (against the fake J2534 DLL), and the
+//          the note saying how many (against the fake J2534 DLL), the
+//          filter above the list (SignalFilterBar.qml, ADR-0050), and the
 //          list giving up rows so the
 //          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
@@ -71,10 +72,14 @@ Page {
         if (Bridge.connecting) return qsTr("Connecting…")
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
         if (!Bridge.connected) return qsTr("Connect a session to stream decoded values")
-        if (signalList.count === 0)
+        if (Bridge.liveSignalModel.shownCount === 0)
             return qsTr("This profile decodes no signals; its frames are on the Log page")
+        if (Bridge.liveSignalModel.filter.active)
+            return qsTr("Showing %1 of %2 signals · plotting %3")
+                       .arg(signalList.count).arg(Bridge.liveSignalModel.shownCount)
+                       .arg(Bridge.signalModel.subscribedCount)
         return qsTr("Plotting %1 of %2 signals · values update at 10 Hz")
-                   .arg(Bridge.signalModel.subscribedCount).arg(signalList.count)
+                   .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount)
     }
 
     // The link-health banner's message. Unknown states read as degraded,
@@ -94,7 +99,7 @@ Page {
 
     function chartEmptyText() {
         if (!Bridge.connected) return qsTr("No session")
-        if (signalList.count === 0) return qsTr("No decoded signals")
+        if (Bridge.liveSignalModel.shownCount === 0) return qsTr("No decoded signals")
         if (Bridge.signalModel.subscribedCount === 0)
             return qsTr("No signals plotted; tick a row to plot it")
         return qsTr("Waiting for data…")
@@ -106,7 +111,19 @@ Page {
         anchors.margins: Theme.pageMargin
         spacing: 12
 
-        PageHeader { title: qsTr("Live signals") }
+        PageHeader {
+            title: qsTr("Live signals")
+
+            // Finding a signal among many (ADR-0050): the list's own
+            // filter, in the title's row so a short page loses no height
+            SignalFilterBar {
+                objectName: "liveFilter"
+                Layout.fillWidth: true
+                visible: Bridge.connected && Bridge.liveSignalModel.shownCount > 0
+                filter: Bridge.liveSignalModel.filter
+                codes: Bridge.liveSignalModel.groups
+            }
+        }
 
         // Link-health banner: shown for every state but ok (quiet,
         // requests, fault, degraded) from Bridge.linkState, colored by

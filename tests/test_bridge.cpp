@@ -3437,6 +3437,137 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
  * 44 data PIDs to 0x60, whose bit says a fourth exists), a chain
  * answered to its end, one unanswered, and requests dropped for each
  * reason, past the eight a report lists. */
+/* Finding a signal among many (ADR-0050): every word in the name or the
+ * unit, ignoring case; plotted rows only; the chosen groups, a code
+ * core doesn't name counted as Other; the choices in code order */
+TEST(BridgeTest, SignalFilterMatchesWordsPlottedRowsAndGroups)
+{
+    SignalFilter f;
+    int changes = 0;
+    QObject::connect(&f, &SignalFilter::changed, [&changes]() { ++changes; });
+    EXPECT_FALSE(f.active());
+    EXPECT_TRUE(
+        f.matches(QStringLiteral("RPM"), QStringLiteral("RPM"), 1, false));
+
+    f.setText(QStringLiteral("  COOL   temp "));
+    EXPECT_TRUE(f.active());
+    EXPECT_TRUE(f.matches(QStringLiteral("Coolant Temp"), QStringLiteral("°C"),
+                          1, false));
+    EXPECT_FALSE(f.matches(QStringLiteral("Engine Oil Temp"),
+                           QStringLiteral("°C"), 1, false))
+        << "every word";
+    f.setText(QStringLiteral("temp °c"));
+    EXPECT_TRUE(f.matches(QStringLiteral("Engine Oil Temp"),
+                          QStringLiteral("°C"), 1, false))
+        << "a word in the unit";
+    f.setText(QStringLiteral("psi"));
+    EXPECT_TRUE(f.matches(QStringLiteral("Fuel Pressure"),
+                          QStringLiteral("psi"), 3, false));
+    EXPECT_FALSE(f.matches(QStringLiteral("Fuel Pressure"),
+                           QStringLiteral("kPa"), 3, false));
+    f.setText(QString());
+    EXPECT_FALSE(f.active());
+
+    f.setPlottedOnly(true);
+    EXPECT_FALSE(
+        f.matches(QStringLiteral("RPM"), QStringLiteral("RPM"), 1, false));
+    EXPECT_TRUE(
+        f.matches(QStringLiteral("RPM"), QStringLiteral("RPM"), 1, true));
+    f.setPlottedOnly(false);
+
+    f.toggleGroup(ECUIO_SIGNAL_GROUP_ENGINE);
+    EXPECT_TRUE(f.chosen(ECUIO_SIGNAL_GROUP_ENGINE));
+    EXPECT_TRUE(f.matches(QStringLiteral("RPM"), QString(),
+                          ECUIO_SIGNAL_GROUP_ENGINE, false));
+    EXPECT_FALSE(f.matches(QStringLiteral("MAF"), QString(),
+                           ECUIO_SIGNAL_GROUP_AIR, false));
+    f.toggleGroup(ECUIO_SIGNAL_GROUP_AIR);
+    EXPECT_TRUE(f.matches(QStringLiteral("MAF"), QString(),
+                          ECUIO_SIGNAL_GROUP_AIR, false))
+        << "either chosen group";
+    f.toggleGroup(200);
+    EXPECT_TRUE(f.chosen(ECUIO_SIGNAL_GROUP_OTHER))
+        << "an unknown code is Other's";
+    EXPECT_TRUE(f.matches(QStringLiteral("DID 1E1C"), QString(), 0, false));
+    EXPECT_TRUE(
+        f.matches(QStringLiteral("Next year's"), QString(), 250, false));
+    EXPECT_EQ(f.groups(), (QVariantList{0, 1, 2}));
+    f.toggleGroup(ECUIO_SIGNAL_GROUP_ENGINE);
+    EXPECT_FALSE(f.chosen(ECUIO_SIGNAL_GROUP_ENGINE))
+        << "a second tap lets it go";
+
+    const QVariantList choices = f.groupChoices(QVariantList{3, 1, 1, 200, 0});
+    ASSERT_EQ(choices.size(), 3);
+    EXPECT_EQ(choices[0].toMap().value(QStringLiteral("code")).toInt(), 0);
+    EXPECT_EQ(choices[0].toMap().value(QStringLiteral("name")).toString(),
+              QStringLiteral("Other"));
+    EXPECT_EQ(choices[1].toMap().value(QStringLiteral("name")).toString(),
+              QStringLiteral("Engine"));
+    EXPECT_EQ(choices[2].toMap().value(QStringLiteral("name")).toString(),
+              QStringLiteral("Fuel"));
+
+    f.clear();
+    EXPECT_FALSE(f.active());
+    EXPECT_TRUE(f.groups().isEmpty());
+    EXPECT_EQ(changes, 11);
+}
+
+/* Live's list through its filter (ADR-0050): the mock's rows by word,
+ * group and plotted; a tick under "Plotted only" re-filters; the groups
+ * and the count before the filter leave out the rows core hides */
+TEST(BridgeTest, LiveListFollowsItsFilter)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_mock_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    ASSERT_EQ(live.rowCount(), rows);
+    EXPECT_EQ(live.shownCount(), rows);
+    EXPECT_EQ(live.groups(), (QVariantList{1, 2, 4, 6}))
+        << "Engine, Air, Oxygen sensors, Vehicle";
+    const auto names = [&live]() {
+        QStringList n;
+        for (int r = 0; r < live.rowCount(); ++r) {
+            n << live.data(live.index(r, 0), SignalListModel::NameRole)
+                     .toString();
+        }
+        return n;
+    };
+
+    live.filter()->setText(QStringLiteral("temp"));
+    EXPECT_EQ(names(), (QStringList{QStringLiteral("Coolant Temp"),
+                                    QStringLiteral("Intake Air Temp"),
+                                    QStringLiteral("Engine Oil Temp")}));
+    live.filter()->toggleGroup(ECUIO_SIGNAL_GROUP_AIR);
+    EXPECT_EQ(names(), QStringList{QStringLiteral("Intake Air Temp")});
+    live.filter()->clear();
+    EXPECT_EQ(live.rowCount(), rows);
+
+    live.filter()->setPlottedOnly(true);
+    EXPECT_EQ(live.rowCount(), rows) << "the mock plots every row";
+    model.toggleSubscribed(0); /* RPM */
+    EXPECT_EQ(live.rowCount(), rows - 1);
+    EXPECT_FALSE(names().contains(QStringLiteral("RPM")));
+    EXPECT_EQ(live.shownCount(), rows) << "the count before the filter";
+    live.filter()->clear();
+
+    /* obd2's Diagnostics rows hidden by core: no choice, not counted */
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> diag;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].group == ECUIO_SIGNAL_GROUP_DIAGNOSTICS) {
+            diag.push_back(set->defs[i].id);
+        }
+    }
+    ASSERT_FALSE(diag.empty());
+    EXPECT_TRUE(live.groups().contains(QVariant(8)));
+    model.applyAbsent(diag);
+    EXPECT_FALSE(live.groups().contains(QVariant(8)));
+    EXPECT_EQ(live.shownCount(),
+              model.rowCount() - static_cast<int>(diag.size()));
+}
+
 /* Live leaves out the rows core judges unsupported (ADR-0039 section 6;
  * the rule is PidSupportTest's): on the first vehicle's bitmaps (00, 20
  * and 40 answered), 0x5C among them; a PID past an answered range, and a

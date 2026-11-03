@@ -1,9 +1,9 @@
 {"schema": 1, "type": "start"}
 {"duration_us": 30000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signals": 4, "summary": true, "type": "opened", "utc_start_us": 1793718000000000}
-{"decimals": 0, "first_us": 100000, "highest": 6806, "index": 0, "last_us": 29900000, "lowest": 1981, "name": "RPM", "rank": 2, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "rpm"}
-{"decimals": 1, "first_us": 101000, "highest": 100, "index": 1, "last_us": 29901000, "lowest": 0, "name": "Throttle", "rank": 3, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "%"}
-{"decimals": 0, "first_us": 1002000, "highest": 90, "index": 2, "last_us": 29002000, "lowest": 88, "name": "Coolant", "rank": 1, "rate_hz": 1, "recording": 0, "samples": 29, "text": false, "type": "signal", "unit": "\u00b0C"}
-{"decimals": 0, "first_us": 500000, "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "rate_hz": null, "recording": 0, "samples": 1, "text": true, "type": "signal", "unit": ""}
+{"decimals": 0, "first_us": 100000, "group": "Engine", "highest": 6806, "index": 0, "last_us": 29900000, "lowest": 1981, "name": "RPM", "rank": 2, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "rpm"}
+{"decimals": 1, "first_us": 101000, "group": "Air", "highest": 100, "index": 1, "last_us": 29901000, "lowest": 0, "name": "Throttle", "rank": 3, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "%"}
+{"decimals": 0, "first_us": 1002000, "group": "Engine", "highest": 90, "index": 2, "last_us": 29002000, "lowest": 88, "name": "Coolant", "rank": 1, "rate_hz": 1, "recording": 0, "samples": 29, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 500000, "group": "Other", "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "rate_hz": null, "recording": 0, "samples": 1, "text": true, "type": "signal", "unit": ""}
 {"host_us": 11500000, "index": 0, "label": "pull", "recording": 0, "type": "marker"}
 {"column_us": 2500000, "columns": 12, "from_us": 0, "to_us": 30000000, "type": "axis"}
 {"highest": [88, 88, 88, 88, 88, 88, 89, 89, 89, 89, 90, 90], "lowest": [88, 88, 88, 88, 88, 88, 88, 89, 89, 89, 90, 90], "recording": 0, "samples": [2, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2], "signal": "Coolant", "type": "columns"}
