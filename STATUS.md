@@ -48,7 +48,8 @@ bus ([roadmap](#roadmap)).
     back at its own pace or up to 100x faster. `?faults=` injects faults
     as it plays ([ADR-0041](docs/adr/0041-replay-fault-injection.md),
     proposed): frames dropped, lost to an overflow, corrupted, cut short
-    or held back, the same each time from `?seed=`.
+    or held back, the same each time from `?seed=`. `?from=` and `?to=`
+    play a stretch alone, in the seconds the viewer shows.
   - **ELM327 adapters** in core, on every platform
     ([ADR-0026](docs/adr/0026-elm327-transport.md)): `elm327://<port>`
     on a serial port, USB or Bluetooth SPP, or at a WiFi adapter's
@@ -481,8 +482,11 @@ section 10 orders the work).
   of 1 s (the ADR's appendix of 2026-11-03). No car recording yet
   holds wire frames with its frame flags said, so the ISO-TP kind has
   run only on recordings written for the tests.
-- **A stretch replayed:** `replay://<recording>?from=<s>&to=<s>`, on
-  Live or through `havne-cli sim` on a virtual bus.
+- **A stretch replayed**, built: `replay://<recording>?from=<s>&to=<s>`
+  in the viewer's seconds, on Live or through `havne-cli sim` on a
+  virtual bus, and the viewer's Replay view hands on the part in view
+  ([ADR-0023](docs/adr/0023-replay-transport.md)'s appendix "a stretch
+  replayed").
 
 **Finding a signal among many**, built
 ([ADR-0050](docs/adr/0050-finding-a-signal.md)). Each signal def

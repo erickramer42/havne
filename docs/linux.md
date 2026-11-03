@@ -174,7 +174,9 @@ every Nth reply. `replay:///path/to/recording` answers as the car in
 a recording did instead: each request gets the reply the recording
 holds for it at the sim's time since it started (the car's own
 bitmaps, values, identification and codes; `?loop=1` goes round the
-recording, `?vin=` replaces its VIN; a clear is refused). It answers
+recording, `?from=` and `?to=` answer from a stretch of it alone, in
+the seconds `havne-cli view` shows, `?vin=` replaces its VIN; a clear
+is refused). It answers
 only on a `vcan` interface, never on a car's bus.
 
 ## Where Havne keeps things
