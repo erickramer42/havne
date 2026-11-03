@@ -495,3 +495,38 @@ no recording (`CliGoldenTest.View*`); every sample counted once and the
 aligned pulls' columns equal (`CliViewRunTest`, `tests/cli_view.py`);
 the grammar, the axis and each line (`CliViewTest`); the usage errors
 (`CliUsageTest.View*`).
+
+## Appendix: 2026-11-03, info
+
+`havne-cli info <recording> [--gap S] [--rate-drop X] [--settle S]`
+checks a recording's frames offline through core's frames check
+([ADR-0049](0049-recordings-in-core.md) section 6 and its appendix of
+2026-11-03). `--gap` and `--settle` take seconds, more than 0, and
+`--rate-drop` a multiple of an ID's median interval, more than 1; each
+defaults to core's (1 s, 10, 2 s). Its lines, schema 1:
+
+| `type` | When | Fields |
+|---|---|---|
+| `opened`, `signal`, `marker` | when the reader opens the folder | as view's, `recording` 0 |
+| `open_failed` | when it can't | `recording` 0, `code`, `message`, `detail` (core's) |
+| `finding` | each, in the order the check settles them | `kind` (`gap`, `rate-drop`, `late-id`, `overflow`, `isotp`, `link`, `asleep`), `id` (`"0x7E8"`, or null for the whole bus's), `extended`, `at_us`, `length_us`, `count`, and a link's `code` and `message`, the state's |
+| `summary` | last | `duration_us`, `frames`, `ids`, `torn_rows`, `isotp` (`checked`, `flags-unknown` or `no-wire`), `findings` (each kind's count), and the `gap_us`, `rate_drop` and `settle_us` checked against |
+
+- **The reader is optional, the check isn't.** A folder holding
+  `frames.csv` alone, as the replay fixture's does, gets an
+  `open_failed` line and is checked all the same. A check that fails (no
+  `frames.csv`, a row it refuses) writes an `error` line alone and
+  exits 3, whose meaning widens to "the connect, a recording's open or
+  its check, failed"; the findings are kept until the check ends, so no
+  finding comes before an error.
+- **Findings never change the exit code:** 0 says the check ran.
+- **`signal` lines add `rate_hz`,** view's too: a signal's samples a
+  second from its first to its last, null with fewer than two.
+- **No `end` line:** the summary is last, and the output a list, as
+  view's is.
+
+Tests: goldens on a recording written with one of each finding
+(`tests/fixtures/recording/findings`), the same with the thresholds
+raised, the replay fixture, and a folder with no `frames.csv`
+(`CliGoldenTest.Info*`); each line and `--rate-drop`'s forms
+(`CliInfoTest`); the usage errors (`CliUsageTest.Info*`).

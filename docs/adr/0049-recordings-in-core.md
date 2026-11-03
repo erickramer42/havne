@@ -1084,3 +1084,67 @@ going to the next column by the reader's rule. No sample is lost or
 counted twice (`CliViewRunTest.ColumnsCountEverySampleOnce`, over
 alignments and zooms from one column to 9,999); the viewer has the same
 case to meet in step 5.
+
+## Appendix: the frames check and `havne-cli info` (2026-11-03)
+
+Step 4 is built: the check (section 6, `core/src/recording_check.h` and
+`core/src/recording_check.cpp`), `fuzz_recording`'s folders checked as
+well as opened, and `havne-cli info`, whose lines are ADR-0031's
+appendix of 2026-11-03, info. Four things differ from section 6 as
+written:
+
+- **Findings come as they settle, not in time order.** Each is passed
+  at the frame or `events.log` line that ends it, so a run (a rate
+  drop, overflows in a row, a first frame left open) comes after
+  anything that began within it; `at_us` still places it. Time order
+  would hold every finding until each ID's open run ended, and the
+  check's memory would then follow what's wrong with a recording, not
+  its IDs. The viewer places findings by `at_us`.
+- **Two more kinds.** `ECUIO_CHECK_LINK` (6) is each `link` line in
+  `events.log`, its state in `code` (the room section 6 calls
+  `reserved0`, an `ecuio_status_t`) and its episodes in `count`;
+  `ECUIO_CHECK_ASLEEP` (7) is each sleep, over the stretch its line
+  covers. A finding on a 29-bit ID carries
+  `ECUIO_CHECK_FINDING_EXTENDED`, and the summary says why ISO-TP
+  sequences went unchecked: `ECUIO_CHECK_ISOTP_FLAGS_UNKNOWN` (the
+  header has no `frame flags  complete` line) or
+  `ECUIO_CHECK_ISOTP_NO_WIRE` (no frame on those IDs came as it crossed
+  the bus).
+- **ISO-TP only on ISO 15765-4's IDs:** 0x7DF, 0x7E0 to 0x7EF, and the
+  29-bit 0x18DAxxxx and 0x18DB33F1. Another ID's first byte isn't a
+  protocol control byte, and a broadcast frame starting 0x2N would read
+  as a consecutive frame.
+- **The defaults are public:** `ECUIO_CHECK_DEFAULT_GAP_US`,
+  `ECUIO_CHECK_DEFAULT_RATE_DROP_X100` and
+  `ECUIO_CHECK_DEFAULT_SETTLE_US` in `ecuio/recording.h`, so a front end
+  can say what it checked against.
+
+**The defaults, measured.** `havne-cli info` ran over the car
+recordings on hand: 16 made through J2534 (28 minutes), 50 through an
+ELM327 adapter on the test phone (152 minutes), and the replay fixture
+(a copy of one of the J2534 ones with its identifying frames taken out,
+5 minutes). Every one is in the older format, which says nothing of its
+frame flags, so the ISO-TP kind was skipped in all of them; a car
+recording of wire frames is still to come. Rate drops by the multiple,
+with the recordings that had any:
+
+| Multiple | J2534 | ELM327 | The replay fixture |
+|---|---|---|---|
+| 4x | 45, in 3 of 16 | 1,360, in 36 of 50 | 36 |
+| 6x | 18, in 3 | 259, in 20 | 16 |
+| 8x | 7, in 1 | 174, in 10 | 7 |
+| 10x | 4, in 1 | 155, in 4 | 4 |
+| 20x | none | 4, in 3 | none |
+
+At 4x most of them are the request loop's own rhythm. A reply ID's
+interval follows the requests, and a one-shot request, a slow reply or
+a reconnect stretches it 100 to 400 ms past a median of 20 to 40 ms.
+What's left at 10x are stalls: 151 of the ELM327 drops come from one
+recording whose requests stalled for about 0.4 s again and again, the
+others are single stalls of 0.35 to 1 s, and the fixture's 4 are about
+0.56 s against its 39 ms median. **The rate drop's default is 10x.**
+
+Gaps over 1 s: 3 in the J2534 recordings (1.2 to 31 s) and 20 in the
+ELM327 ones (1.8 to 305 s), each a stretch with no frame at all; at
+2 s, 2 and 18. **The gap stays 1 s.** No recording has a late ID at any
+settle time from 2 s to 30 s, so nothing sets it, and **it stays 2 s**.
