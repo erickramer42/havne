@@ -378,8 +378,132 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
  * may overlap it. */
 void ecuio_recording_close(ecuio_recording_t* r);
 
-/* The check (step 4) and the export (v0.6.0) join this header later;
- * ADR-0049 sections 6 and 8. */
+/* --- The frames check (ADR-0049 section 6) ---------------------------- */
+
+/* The defaults a zero field of ecuio_check_options_t takes */
+#define ECUIO_CHECK_DEFAULT_GAP_US         1000000u /* 1 s */
+#define ECUIO_CHECK_DEFAULT_RATE_DROP_X100 1000u    /* 10x the median */
+#define ECUIO_CHECK_DEFAULT_SETTLE_US      2000000u /* 2 s */
+
+/* What the check looks for; zero fields take the defaults */
+typedef struct ecuio_check_options {
+    uint64_t gap_us;         /* 0 for the default */
+    uint32_t rate_drop_x100; /* 0 for the default; else more than 100 */
+    uint32_t flags;          /* zero */
+    uint64_t settle_us;      /* 0 for the default */
+    uint64_t reserved[4];    /* zero; ABI growth space */
+} ecuio_check_options_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_check_options_t) == 56,
+              "ecuio_check_options_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_check_options_t) == 56,
+               "ecuio_check_options_t size is ABI");
+#endif
+
+/* ecuio_check_finding_t.kind; append-only, and the summary's counts index */
+#define ECUIO_CHECK_GAP       1u /* no frame at all for longer than gap_us,
+                                    outside a sleep: the whole bus's */
+#define ECUIO_CHECK_RATE_DROP 2u /* an ID's intervals past rate_drop_x100 /
+                                    100 of its median; a run of them one */
+#define ECUIO_CHECK_LATE_ID   3u /* an ID first seen more than settle_us
+                                    after the first frame */
+#define ECUIO_CHECK_OVERFLOW  4u /* frames flagged OVERFLOW, a run of them
+                                    one: the whole bus's */
+#define ECUIO_CHECK_ISOTP     5u /* on ISO 15765-4's IDs, a consecutive frame
+                                    out of order, or a first frame never
+                                    completed */
+#define ECUIO_CHECK_LINK      6u /* an events.log link line: code its state,
+                                    count its episodes */
+#define ECUIO_CHECK_ASLEEP    7u /* an events.log asleep line: the sleep */
+
+/* ecuio_check_finding_t.flags */
+#define ECUIO_CHECK_FINDING_WHOLE_BUS 0x1u /* no ID's: a gap, an overflow,
+                                              a link line, a sleep */
+#define ECUIO_CHECK_FINDING_EXTENDED  0x2u /* a 29-bit ID */
+
+/* One finding. Passed to the callback as the check settles it, in the
+ * order it reads: at the frame or events.log line that ends it, so a run
+ * comes after what began within it; at_us and length_us place it. */
+typedef struct ecuio_check_finding {
+    uint32_t kind;           /* ECUIO_CHECK_* */
+    uint32_t arbitration_id; /* the ID's; 0 with WHOLE_BUS (0x000 is an ID) */
+    uint64_t at_us;          /* host_us where it starts */
+    uint64_t length_us;      /* how long it lasted; 0 for an instant */
+    uint64_t count;          /* the frames it covers; a link's episodes */
+    uint32_t flags;          /* ECUIO_CHECK_FINDING_* */
+    int32_t code;            /* a link's state (an ecuio_status_t); else 0 */
+    uint64_t reserved[2];    /* zero; ABI growth space */
+} ecuio_check_finding_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_check_finding_t) == 56,
+              "ecuio_check_finding_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_check_finding_t) == 56,
+               "ecuio_check_finding_t size is ABI");
+#endif
+
+/* ecuio_check_summary_t.flags: why ISO-TP sequences weren't checked */
+#define ECUIO_CHECK_SKIPPED_ISOTP       0x1u /* the kind was skipped */
+#define ECUIO_CHECK_ISOTP_FLAGS_UNKNOWN 0x2u /* events.log doesn't say its
+                                                frame flags are complete (an
+                                                older recording, a replay of
+                                                one, or no events.log) */
+#define ECUIO_CHECK_ISOTP_NO_WIRE       0x4u /* no frame on ISO 15765-4's IDs
+                                                came as it crossed the bus:
+                                                each a reassembled payload,
+                                                or none */
+
+typedef struct ecuio_check_summary {
+    uint64_t duration_us;  /* the latest host_us of a frame or an
+                              events.log line */
+    uint64_t frames;
+    uint32_t ids;          /* IDs seen, error frames left out */
+    uint32_t flags;        /* ECUIO_CHECK_SKIPPED_ISOTP and why */
+    uint64_t counts[8];    /* findings by kind: counts[ECUIO_CHECK_GAP] and
+                              on; a kind past the eighth only through the
+                              callback */
+    uint64_t torn_rows;    /* frames.csv's last row dropped (section 7) */
+    uint64_t reserved[4];  /* zero; ABI growth space */
+} ecuio_check_summary_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_check_summary_t) == 128,
+              "ecuio_check_summary_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_check_summary_t) == 128,
+               "ecuio_check_summary_t size is ABI");
+#endif
+
+/* Called on the checking thread, once per finding; a nonzero return stops
+ * the check (ECUIO_ERR_CANCELED) */
+typedef int (*ecuio_check_finding_callback_t)(
+    const ecuio_check_finding_t* finding, void* user_data);
+
+/*
+ * One pass over the recording in folder_utf8: frames.csv, and events.log's
+ * header, link and asleep lines when it has one. Memory follows the IDs
+ * seen, not the file. options NULL for every default; finding NULL for the
+ * summary alone; progress as ecuio_recording_open's, over frames.csv.
+ * *out is filled on success and on a stop. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT
+ * for a NULL folder or out; ECUIO_ERR_INVALID_ARGUMENT for nonzero flags or
+ * reserved, or a rate_drop_x100 of 1 to 100; ECUIO_ERR_LOAD_FAILED for a
+ * folder with no frames.csv or a row the check refuses ("frames.csv line
+ * N: ...", never the path; a row earlier than the one before it among
+ * them); ECUIO_ERR_CANCELED when progress or finding returned nonzero;
+ * ECUIO_ERR_OUT_OF_MEMORY. A last row with no newline is dropped and
+ * counted (torn_rows).
+ */
+ecuio_status_t ecuio_recording_check(const char* folder_utf8,
+                                     const ecuio_check_options_t* options,
+                                     ecuio_open_progress_t progress,
+                                     ecuio_check_finding_callback_t finding,
+                                     void* user_data,
+                                     ecuio_check_summary_t* out);
+
+/* The export (v0.6.0) joins this header later; ADR-0049 section 8. */
 
 #ifdef __cplusplus
 }

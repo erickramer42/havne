@@ -1,0 +1,9 @@
+{"schema": 1, "type": "start"}
+{"code": 7, "detail": "the folder has no signals.csv", "message": "couldn't load what the URI names", "recording": 0, "type": "open_failed"}
+{"at_us": 181973480, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 564877, "type": "finding"}
+{"at_us": 189066799, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 556256, "type": "finding"}
+{"at_us": 190388506, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 390281, "type": "finding"}
+{"at_us": 228686408, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 430334, "type": "finding"}
+{"at_us": 262157066, "count": 0, "extended": false, "id": null, "kind": "gap", "length_us": 12312475, "type": "finding"}
+{"at_us": 289622962, "count": 0, "extended": false, "id": null, "kind": "gap", "length_us": 1183715, "type": "finding"}
+{"duration_us": 297640718, "findings": {"asleep": 0, "gap": 2, "isotp": 0, "late-id": 0, "link": 0, "overflow": 0, "rate-drop": 4}, "frames": 7074, "gap_us": 1000000, "ids": 1, "isotp": "flags-unknown", "rate_drop": 10, "settle_us": 2000000, "torn_rows": 0, "type": "summary"}

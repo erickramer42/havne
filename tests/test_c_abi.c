@@ -142,6 +142,8 @@ int main(void)
     uint64_t reading_at = 0;
     uint32_t reading_pick = 0;
     char reading_text[8];
+    ecuio_check_options_t check_options;
+    ecuio_check_summary_t check_summary;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     frame.arbitration_id = 0x7FF;
@@ -312,6 +314,24 @@ int main(void)
         return 1;
     }
     ecuio_recording_close(NULL);
+    /* The frames check (ADR-0049 section 6): its layout and refusals */
+    memset(&check_options, 0, sizeof check_options);
+    check_options.flags = 1;
+    if (sizeof(ecuio_check_options_t) != 56 ||
+        sizeof(ecuio_check_finding_t) != 56 ||
+        offsetof(ecuio_check_finding_t, code) != 36 ||
+        sizeof(ecuio_check_summary_t) != 128 ||
+        offsetof(ecuio_check_summary_t, counts) != 24 ||
+        offsetof(ecuio_check_summary_t, torn_rows) != 88 ||
+        ECUIO_CHECK_GAP != 1 || ECUIO_CHECK_ASLEEP != 7 ||
+        ecuio_recording_check(NULL, NULL, NULL, NULL, NULL, &check_summary) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_check(".", NULL, NULL, NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_check(".", &check_options, NULL, NULL, NULL,
+                              &check_summary) != ECUIO_ERR_INVALID_ARGUMENT) {
+        return 1;
+    }
     if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_vin_make(NULL)[0] != 0 || ecuio_vin_source()[0] == 0) {
         return 1;

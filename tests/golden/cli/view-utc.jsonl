@@ -1,15 +1,15 @@
 {"schema": 1, "type": "start"}
 {"duration_us": 30000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signals": 4, "summary": true, "type": "opened", "utc_start_us": 1793718000000000}
-{"decimals": 0, "first_us": 100000, "highest": 6806, "index": 0, "last_us": 29900000, "lowest": 1981, "name": "RPM", "rank": 2, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "rpm"}
-{"decimals": 1, "first_us": 101000, "highest": 100, "index": 1, "last_us": 29901000, "lowest": 0, "name": "Throttle", "rank": 3, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "%"}
-{"decimals": 0, "first_us": 1002000, "highest": 90, "index": 2, "last_us": 29002000, "lowest": 88, "name": "Coolant", "rank": 1, "recording": 0, "samples": 29, "text": false, "type": "signal", "unit": "\u00b0C"}
-{"decimals": 0, "first_us": 500000, "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "recording": 0, "samples": 1, "text": true, "type": "signal", "unit": ""}
+{"decimals": 0, "first_us": 100000, "highest": 6806, "index": 0, "last_us": 29900000, "lowest": 1981, "name": "RPM", "rank": 2, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "rpm"}
+{"decimals": 1, "first_us": 101000, "highest": 100, "index": 1, "last_us": 29901000, "lowest": 0, "name": "Throttle", "rank": 3, "rate_hz": 10, "recording": 0, "samples": 299, "text": false, "type": "signal", "unit": "%"}
+{"decimals": 0, "first_us": 1002000, "highest": 90, "index": 2, "last_us": 29002000, "lowest": 88, "name": "Coolant", "rank": 1, "rate_hz": 1, "recording": 0, "samples": 29, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 500000, "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "rate_hz": null, "recording": 0, "samples": 1, "text": true, "type": "signal", "unit": ""}
 {"host_us": 11500000, "index": 0, "label": "pull", "recording": 0, "type": "marker"}
 {"duration_us": 40000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 1, "records_dropped": 0, "rows_torn": 0, "signals": 4, "summary": true, "type": "opened", "utc_start_us": 1793718090000000}
-{"decimals": 0, "first_us": 100000, "highest": 6806, "index": 0, "last_us": 39900000, "lowest": 1981, "name": "RPM", "rank": 2, "recording": 1, "samples": 399, "text": false, "type": "signal", "unit": "rpm"}
-{"decimals": 1, "first_us": 101000, "highest": 100, "index": 1, "last_us": 39901000, "lowest": 0, "name": "Throttle", "rank": 3, "recording": 1, "samples": 399, "text": false, "type": "signal", "unit": "%"}
-{"decimals": 0, "first_us": 1002000, "highest": 90, "index": 2, "last_us": 39002000, "lowest": 88, "name": "Coolant", "rank": 1, "recording": 1, "samples": 39, "text": false, "type": "signal", "unit": "\u00b0C"}
-{"decimals": 0, "first_us": 500000, "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "recording": 1, "samples": 1, "text": true, "type": "signal", "unit": ""}
+{"decimals": 0, "first_us": 100000, "highest": 6806, "index": 0, "last_us": 39900000, "lowest": 1981, "name": "RPM", "rank": 2, "rate_hz": 10, "recording": 1, "samples": 399, "text": false, "type": "signal", "unit": "rpm"}
+{"decimals": 1, "first_us": 101000, "highest": 100, "index": 1, "last_us": 39901000, "lowest": 0, "name": "Throttle", "rank": 3, "rate_hz": 10, "recording": 1, "samples": 399, "text": false, "type": "signal", "unit": "%"}
+{"decimals": 0, "first_us": 1002000, "highest": 90, "index": 2, "last_us": 39002000, "lowest": 88, "name": "Coolant", "rank": 1, "rate_hz": 1, "recording": 1, "samples": 39, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 500000, "index": 3, "last_us": 500000, "name": "VIN", "rank": 0, "rate_hz": null, "recording": 1, "samples": 1, "text": true, "type": "signal", "unit": ""}
 {"host_us": 21500000, "index": 0, "label": "pull", "recording": 1, "type": "marker"}
 {"found": true, "host_us": null, "offset_us": 0, "on": "utc", "recording": 0, "type": "align"}
 {"found": true, "host_us": null, "offset_us": 90000000, "on": "utc", "recording": 1, "type": "align"}

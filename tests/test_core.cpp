@@ -48,6 +48,13 @@ extern "C" {
 #include "surrogate_log_names.h" /* core/src: the surrogate logs pruning keeps */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 
+/* new_counter's count for the binary's other files, which can't include
+ * the header that replaces operator new (test_recording_check.cpp) */
+unsigned long news_on_this_thread()
+{
+    return new_counter::on_this_thread();
+}
+
 namespace {
 
 std::atomic<int> g_callback_count{0};

@@ -8,11 +8,13 @@
 //          the simulated ECU's lines (CliSimTest, ADR-0046); the DID
 //          scan's line and --until-scanned's end (CliScanTest, ADR-0020);
 //          the lines typed into stream --record (CliMarkLinesTest, ADR-0049);
-//          view's grammar, axis and lines (CliViewTest, ADR-0049).
+//          view's grammar, axis and lines (CliViewTest, ADR-0049);
+//          info's lines and --rate-drop (CliInfoTest, ADR-0049).
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
 #include "diagnostics_line.h"
+#include "info_lines.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "mark_lines.h"
@@ -969,7 +971,7 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
         "{\"type\":\"signal\",\"recording\":0,\"index\":3,\"name\":\"RPM\","
         "\"unit\":\"rpm\",\"text\":false,\"decimals\":0,\"rank\":1,"
         "\"samples\":2,\"lowest\":800,\"highest\":2512.5,"
-        "\"first_us\":100,\"last_us\":200}");
+        "\"first_us\":100,\"last_us\":200,\"rate_hz\":10000}");
     ecuio_recording_signal_t none = s;
     none.samples = 0;
     none.first_us = ECUIO_RECORDING_NONE;
@@ -978,7 +980,7 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     cli::signal_line(e, 0, 3, none);
     EXPECT_NE(std::string(e.data(), e.size())
                   .find("\"lowest\":null,\"highest\":null,\"first_us\":null,"
-                        "\"last_us\":null}"),
+                        "\"last_us\":null,\"rate_hz\":null}"),
               std::string::npos);
     ecuio_recording_signal_t vin{};
     std::strcpy(vin.name, "VIN");
@@ -988,6 +990,9 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     cli::signal_line(t, 0, 4, vin);
     EXPECT_EQ(std::string(t.data(), t.size()).find("lowest"), std::string::npos)
         << "a text signal has no range";
+    EXPECT_NE(std::string(t.data(), t.size()).find("\"rate_hz\":null"),
+              std::string::npos)
+        << "one sample has no rate";
 
     cli::Line al(buf, sizeof buf);
     cli::align_line(al, 1, "rise:RPM:4000", true, 24600000, -24600000);
@@ -1029,4 +1034,123 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
               "{\"type\":\"at\",\"recording\":1,\"t_us\":-2000000,\"values\":"
               "[{\"signal\":\"RPM\",\"host_us\":300,\"text\":\"2512.5\"},"
               "{\"signal\":\"VIN\",\"host_us\":null,\"text\":\"\"}]}");
+}
+
+TEST(CliInfoTest, RateDropIsAMultipleOverOne)
+{
+    uint32_t x100 = 0;
+    ASSERT_TRUE(cli::parse_rate_drop("4", x100));
+    EXPECT_EQ(x100, 400u);
+    ASSERT_TRUE(cli::parse_rate_drop("1.5", x100));
+    EXPECT_EQ(x100, 150u);
+    ASSERT_TRUE(cli::parse_rate_drop("1.01", x100));
+    EXPECT_EQ(x100, 101u) << "the check's least";
+    for (const char* bad :
+         {"1", "1.004", "0.5", "0", "-4", "x", "", "4x", "inf", "1e9"}) {
+        EXPECT_FALSE(cli::parse_rate_drop(bad, x100)) << bad;
+    }
+}
+
+TEST(CliInfoTest, EachKindAndSkipHasItsWord)
+{
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_GAP), "gap");
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_RATE_DROP), "rate-drop");
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_LATE_ID), "late-id");
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_OVERFLOW), "overflow");
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_ISOTP), "isotp");
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_LINK), "link");
+    EXPECT_STREQ(cli::check_kind_word(ECUIO_CHECK_ASLEEP), "asleep");
+    EXPECT_STREQ(cli::check_kind_word(99), "unknown");
+    EXPECT_STREQ(cli::isotp_word(0), "checked");
+    EXPECT_STREQ(cli::isotp_word(ECUIO_CHECK_SKIPPED_ISOTP |
+                                 ECUIO_CHECK_ISOTP_FLAGS_UNKNOWN),
+                 "flags-unknown");
+    EXPECT_STREQ(
+        cli::isotp_word(ECUIO_CHECK_SKIPPED_ISOTP | ECUIO_CHECK_ISOTP_NO_WIRE),
+        "no-wire");
+}
+
+TEST(CliInfoTest, TheLinesCarryWhatTheCheckFound)
+{
+    char buf[1024];
+    ecuio_check_finding_t drop{};
+    drop.kind = ECUIO_CHECK_RATE_DROP;
+    drop.arbitration_id = 0x18DAF110;
+    drop.flags = ECUIO_CHECK_FINDING_EXTENDED;
+    drop.at_us = 7920000;
+    drop.length_us = 800000;
+    drop.count = 2;
+    cli::Line d(buf, sizeof buf);
+    cli::finding_line(d, drop);
+    EXPECT_EQ(std::string(d.data(), d.size()),
+              "{\"type\":\"finding\",\"kind\":\"rate-drop\",\"id\":"
+              "\"0x18DAF110\",\"extended\":true,\"at_us\":7920000,"
+              "\"length_us\":800000,\"count\":2}");
+
+    /* The whole bus's has no ID, though 0x000 is one */
+    ecuio_check_finding_t gap{};
+    gap.kind = ECUIO_CHECK_GAP;
+    gap.flags = ECUIO_CHECK_FINDING_WHOLE_BUS;
+    gap.at_us = 4950000;
+    gap.length_us = 1550000;
+    cli::Line g(buf, sizeof buf);
+    cli::finding_line(g, gap);
+    EXPECT_EQ(std::string(g.data(), g.size()),
+              "{\"type\":\"finding\",\"kind\":\"gap\",\"id\":null,"
+              "\"extended\":false,\"at_us\":4950000,\"length_us\":1550000,"
+              "\"count\":0}");
+    ecuio_check_finding_t zero{};
+    zero.kind = ECUIO_CHECK_LATE_ID;
+    zero.count = 1;
+    cli::Line z(buf, sizeof buf);
+    cli::finding_line(z, zero);
+    EXPECT_NE(std::string(z.data(), z.size()).find("\"id\":\"0x0\""),
+              std::string::npos);
+
+    /* A link's state, by code and core's words */
+    ecuio_check_finding_t link{};
+    link.kind = ECUIO_CHECK_LINK;
+    link.flags = ECUIO_CHECK_FINDING_WHOLE_BUS;
+    link.at_us = 18000000;
+    link.count = 1;
+    link.code = ECUIO_ERR_VEHICLE_TIMEOUT;
+    cli::Line k(buf, sizeof buf);
+    cli::finding_line(k, link);
+    EXPECT_EQ(std::string(k.data(), k.size()),
+              std::string("{\"type\":\"finding\",\"kind\":\"link\",\"id\":null,"
+                          "\"extended\":false,\"at_us\":18000000,"
+                          "\"length_us\":0,\"count\":1,\"code\":8,"
+                          "\"message\":\"") +
+                  ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT) + "\"}");
+
+    ecuio_check_summary_t s{};
+    s.duration_us = 19950000;
+    s.frames = 515;
+    s.ids = 3;
+    s.torn_rows = 1;
+    s.flags = ECUIO_CHECK_SKIPPED_ISOTP | ECUIO_CHECK_ISOTP_NO_WIRE;
+    for (uint32_t kind = ECUIO_CHECK_GAP; kind <= ECUIO_CHECK_ASLEEP; ++kind) {
+        s.counts[kind] = kind * 10;
+    }
+    ecuio_check_options_t o{};
+    o.gap_us = 1000000;
+    o.rate_drop_x100 = 450;
+    o.settle_us = 2000000;
+    cli::Line m(buf, sizeof buf);
+    cli::summary_line(m, s, o);
+    EXPECT_EQ(std::string(m.data(), m.size()),
+              "{\"type\":\"summary\",\"duration_us\":19950000,\"frames\":515,"
+              "\"ids\":3,\"torn_rows\":1,\"isotp\":\"no-wire\",\"findings\":{"
+              "\"gap\":10,\"rate-drop\":20,\"late-id\":30,\"overflow\":40,"
+              "\"isotp\":50,\"link\":60,\"asleep\":70},\"gap_us\":1000000,"
+              "\"rate_drop\":4.5,\"settle_us\":2000000}");
+
+    cli::Line f(buf, sizeof buf);
+    cli::open_failed_line(f, 0, ECUIO_ERR_LOAD_FAILED,
+                          "the folder has no signals.csv");
+    EXPECT_EQ(std::string(f.data(), f.size()),
+              std::string("{\"type\":\"open_failed\",\"recording\":0,"
+                          "\"code\":7,\"message\":\"") +
+                  ecuio_status_string(ECUIO_ERR_LOAD_FAILED) +
+                  "\",\"detail\":\"the folder has no signals.csv\"}");
 }

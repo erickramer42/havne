@@ -465,8 +465,14 @@ section 10 orders the work).
   recording (a tap in the app, a line typed into `havne-cli`), and two
   recordings aligned on their wall-clock starts.
 - **`havne-cli info <recording>`:** duration, each signal's count and
-  rate, the link events, and what's wrong offline: gaps, rate drops, an
-  ID never seen before, overflow flags, broken ISO-TP sequences.
+  rate, the link events and sleeps, and what's wrong offline: gaps,
+  rate drops, an ID first seen late, overflow flags, broken ISO-TP
+  sequences. It is built (step 4), on core's frames check
+  (`ecuio_recording_check`), whose defaults are set against the car
+  recordings on hand: a rate drop at 10x an ID's median interval, a gap
+  of 1 s (the ADR's appendix of 2026-11-03). No car recording yet
+  holds wire frames with its frame flags said, so the ISO-TP kind has
+  run only on recordings written for the tests.
 - **A stretch replayed:** `replay://<recording>?from=<s>&to=<s>`, on
   Live or through `havne-cli sim` on a virtual bus.
 

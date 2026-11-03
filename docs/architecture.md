@@ -384,7 +384,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   lowest and highest from the summaries, or from the raw rows when
   zoomed in. `havne-cli view` writes what it reads as JSON lines,
   several recordings aligned on a threshold, a marker or their UTC
-  starts.
+  starts. `ecuio_recording_check` reads `frames.csv` in one pass for
+  what's wrong with it (gaps, rate drops, late IDs, overflows, broken
+  ISO-TP sequences) and `events.log` for the link's changes and the
+  sleeps, its memory per ID, not per frame; `havne-cli info` prints
+  its findings.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial

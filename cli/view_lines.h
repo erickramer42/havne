@@ -236,9 +236,22 @@ inline void opened_line(Line& l, uint32_t recording,
     l.ch('}');
 }
 
+// A signal's samples a second from its first to its last, or null with
+// fewer than two or none apart
+inline void rate_hz(Line& l, const ecuio_recording_signal_t& s)
+{
+    if (s.samples < 2 || s.first_us == ECUIO_RECORDING_NONE ||
+        s.last_us == ECUIO_RECORDING_NONE || s.last_us <= s.first_us) {
+        l.raw("null");
+        return;
+    }
+    l.number(static_cast<double>(s.samples - 1) * 1e6 /
+             static_cast<double>(s.last_us - s.first_us));
+}
+
 // A signal: {"type":"signal", recording, index, name, unit, text,
 // decimals, rank, samples, lowest and highest (a number's, null with no
-// samples), first_us|null, last_us|null}
+// samples), first_us|null, last_us|null, rate_hz|null}
 inline void signal_line(Line& l, uint32_t recording, uint32_t index,
                         const ecuio_recording_signal_t& s)
 {
@@ -278,6 +291,8 @@ inline void signal_line(Line& l, uint32_t recording, uint32_t index,
     us_or_null(l, s.first_us);
     l.key("last_us");
     us_or_null(l, s.last_us);
+    l.key("rate_hz");
+    rate_hz(l, s);
     l.ch('}');
 }
 

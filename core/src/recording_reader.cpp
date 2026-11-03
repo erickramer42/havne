@@ -14,7 +14,7 @@
 // rows of the seconds they need, which a cache of 8 MiB keeps.
 
 #include "error_detail.h"
-#include "frames_csv.h" /* native_path */
+#include "frames_csv.h" /* native_path, file_size, seek_to */
 #include "recording_rows.h"
 
 #include "ecuio/internal.h"
@@ -33,6 +33,8 @@
 #include <vector>
 
 namespace rows = ecuio_recording_rows;
+using ecuio_frames_csv::file_size;
+using ecuio_frames_csv::seek_to;
 
 namespace {
 
@@ -105,32 +107,6 @@ struct marker_entry {
     uint64_t host_us;
     std::string label;
 };
-
-bool seek_to(FILE* f, uint64_t offset)
-{
-#ifdef _WIN32
-    return _fseeki64(f, static_cast<__int64>(offset), SEEK_SET) == 0;
-#else
-    return fseeko(f, static_cast<off_t>(offset), SEEK_SET) == 0;
-#endif
-}
-
-uint64_t file_size(FILE* f)
-{
-#ifdef _WIN32
-    if (_fseeki64(f, 0, SEEK_END) != 0) {
-        return 0;
-    }
-    const __int64 n = _ftelli64(f);
-#else
-    if (fseeko(f, 0, SEEK_END) != 0) {
-        return 0;
-    }
-    const off_t n = ftello(f);
-#endif
-    (void)seek_to(f, 0);
-    return n > 0 ? static_cast<uint64_t>(n) : 0;
-}
 
 /* Lines from a file, their byte offsets counted exactly (a NUL is a byte
  * like any other, so fgets and strlen won't do) */
