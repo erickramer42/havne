@@ -434,6 +434,10 @@ void write_session(Output& out, const ecuio_session_info_t& info)
             l.key("faults");
             l.raw("true");
         }
+        if (info.replay_rows_torn != 0) {
+            l.key("rows_torn");
+            l.u64(info.replay_rows_torn);
+        }
         l.ch('}');
     }
     l.ch('}');

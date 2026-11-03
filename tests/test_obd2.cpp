@@ -5386,6 +5386,19 @@ TEST(SimRecordingTest, TheLoaderReadsTheFixture)
 }
 
 // What the loader refuses, by the line, never naming the path
+// A last row with no newline is a write cut short (ADR-0049 section 7):
+// left out, whether or not it would parse
+TEST(SimRecordingTest, ATornLastRowIsLeftOut)
+{
+    ScratchCsv csv("sim-torn", "host_us,timestamp_us,id,flags,data\n"
+                               "1,1,0x7E8,0x0,41 0C 1A F8\n"
+                               "2,2,0x7E8,0x0,41 0D 20");
+    ecuio_sim_recording r;
+    ASSERT_EQ(ecuio_sim_load_recording(csv.path, &r), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(r.replies.size(), 1u) << "only 41 0C's reply";
+}
+
 TEST(SimRecordingTest, TheLoadersRefusals)
 {
     const std::string header = "host_us,timestamp_us,id,flags,data\n";

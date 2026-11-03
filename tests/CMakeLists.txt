@@ -262,6 +262,11 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
+        # A last row cut short is left out and counted (ADR-0049 section 7)
+        add_test(NAME CliReplayTest.ATornLastRowIsLeftOut
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_torn.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliReplayTest.ATornLastRowIsLeftOut PROPERTIES TIMEOUT 30)
         # stream --record (ADR-0049): the engine start recorded to its last
         # frame, its folder against tests/golden/recording/ and its frames
         # against the fixture's (rewrite both with the command plus

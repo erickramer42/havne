@@ -3211,6 +3211,84 @@ TEST(CoreTest, ReplayClosesAtOnceDuringAGap)
 /* Attach reads the whole file: anything but a frames.csv, or a bad row,
  * fails create with its line number. Either line ending reads, and a
  * whole-message payload arrives whole. */
+/* ADR-0049 section 7: a last row with no newline is a write cut short,
+ * left out and counted; a recording of it alone holds no frames */
+TEST(CoreTest, ReplayDropsATornLastRowAndCountsIt)
+{
+    TempRecording rec(std::string(kFramesHeader) + "1,1,0x7E8,0x0,41 0C 1F 40\n"
+                                                   "2,2,0x7E8,0x0,41 0D 20\n"
+                                                   "3,3,0x7E8,0x0,41 0C 1F");
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?speed=max").c_str(), &session),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_EQ(info.replay_frames, 2u);
+    EXPECT_EQ(info.replay_rows_torn, 1u);
+    ReplayCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, replay_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 2; }, 5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(cap.count(), 2u) << "the torn row isn't played";
+    int32_t last = -1;
+    uint32_t episodes = 99;
+    ASSERT_EQ(ecuio_session_get_error_state(session, &last, &episodes),
+              ECUIO_OK);
+    EXPECT_EQ(last, ECUIO_OK) << "a whole pass, not a changed file";
+    EXPECT_EQ(episodes, 0u);
+    ecuio_session_destroy(session);
+
+    TempRecording whole(std::string(kFramesHeader) +
+                        "1,1,0x7E8,0x0,41 0C 1F 40\n");
+    ASSERT_EQ(ecuio_session_create(whole.uri().c_str(), &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_EQ(info.replay_rows_torn, 0u);
+    ecuio_session_destroy(session);
+
+    TempRecording only(std::string(kFramesHeader) + "1,1,0x7E8,0x0,41 0C");
+    EXPECT_EQ(ecuio_session_create(only.uri().c_str(), &session),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the recording's frames.csv holds no frames");
+}
+
+/* A row attach read whole that has lost its newline when the worker
+ * reaches it is a file changed since attach, not a torn row to skip */
+TEST(CoreTest, ReplayOfARowThatLostItsNewlineSaysTheFileChanged)
+{
+    const std::string rows = std::string(kFramesHeader) +
+                             "1,1,0x7E8,0x0,41 0C 1F 40\n"
+                             "2,2,0x7E8,0x0,41 0D 20\n";
+    TempRecording rec(rows);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?speed=max").c_str(), &session),
+              ECUIO_OK);
+    {
+        FILE* f = std::fopen(rec.csv.c_str(), "wb");
+        ASSERT_NE(f, nullptr);
+        std::fwrite(rows.data(), 1, rows.size() - 1, f); /* the last '\n' */
+        std::fclose(f);
+    }
+    ReplayCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, replay_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    int32_t last = -1;
+    uint32_t episodes = 0;
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_error_state(session, &last, &episodes) ==
+                       ECUIO_OK &&
+                   last == ECUIO_ERR_RECORDING_CHANGED;
+        },
+        5000));
+    EXPECT_EQ(cap.count(), 1u);
+    ecuio_session_destroy(session);
+}
+
 TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
 {
     const std::string ok_row = "1,1,0x7E8,0x0,41 0C 1F 40\n";

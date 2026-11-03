@@ -2,8 +2,9 @@
 //             ALL platforms
 // Testing: UNIT: CoreTest.Replay* (replay_transport.cpp's reader: the
 //          refusals with their line numbers, either line ending, a
-//          whole-message payload); SimRecordingTest (test_obd2: the
-//          simulated ECU's recording, sim_recording.h); FUZZ:
+//          whole-message payload, a torn last row dropped);
+//          SimRecordingTest (test_obd2: the simulated ECU's recording,
+//          sim_recording.h, a torn last row dropped); FUZZ:
 //          fuzz_replay_file
 //
 // Reading a recording's frames.csv (ADR-0017): its header row, one row at
@@ -86,10 +87,17 @@ struct native_path {
 };
 
 /* One line without its ending (LF or CRLF). False at the end of the file;
- * *too_long when the line doesn't fit kLineMax. */
-inline bool read_line(FILE* f, std::vector<char>& buf, bool* too_long)
+ * *too_long when the line doesn't fit kLineMax; *torn, when given, for the
+ * file's last bytes with no newline after them: a write cut short (a
+ * crash, a pulled cable, a power cut), which ADR-0049 section 7 drops and
+ * counts rather than refuses. */
+inline bool read_line(FILE* f, std::vector<char>& buf, bool* too_long,
+                      bool* torn = nullptr)
 {
     *too_long = false;
+    if (torn != nullptr) {
+        *torn = false;
+    }
     /* No lock is held here: the worker's wait block ends before the next
      * read. clang-tidy 22's analyzer loses the unique_lock's unlock. */
     // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection)
@@ -102,6 +110,8 @@ inline bool read_line(FILE* f, std::vector<char>& buf, bool* too_long)
     } else if (!std::feof(f)) {
         *too_long = true;
         return true;
+    } else if (torn != nullptr) {
+        *torn = true;
     }
     if (n > 0 && buf[n - 1] == '\r') {
         buf[--n] = '\0';

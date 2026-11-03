@@ -388,8 +388,12 @@ ecuio_status_t ecuio_sim_load_recording(const std::string& path,
         row prev, cur;
         uint64_t at_us = 0, rows = 0, line_no = 1;
         bool too_long = false;
-        while (read_line(f.get(), line, &too_long)) {
+        bool torn = false;
+        while (read_line(f.get(), line, &too_long, &torn)) {
             ++line_no;
+            if (torn) {
+                break; /* a write cut short: left out (ADR-0049 section 7) */
+            }
             const char* why = nullptr;
             if (too_long) {
                 why = "the line is longer than any frame's row";
