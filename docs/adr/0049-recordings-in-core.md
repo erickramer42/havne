@@ -941,3 +941,69 @@ ADR-0023, not part of this record.
 - The reader's memory follows the recording's length, not its size:
   a long, sparse session costs little, and a multi-hour one with many
   signals costs its seconds times its signals, stated by the bound.
+
+## Appendix: the ring's record sizes (2026-11-02)
+
+A record is its head (16 bytes: its size, its type and the drop count),
+then for a frame 32 bytes (`host_us`, `timestamp_us`, the ID, the
+flags, the length and the value count), the frame's used bytes, and per
+value 8 bytes of head followed by its double (8) or its text's bytes.
+Records are packed end to end, unpadded. A link transition is 32 bytes;
+a reply-timing snapshot 96 plus 80 per request.
+
+| Record | Bytes |
+|---|---|
+| A classic 8-byte frame, listened to raw | 56 |
+| The same with one number decoded | 72 |
+| A Service 01 reply through obd2 (`41 0C 1F 40` and its value) | 68 |
+| The engine-start fixture through obd2, on average (7,074 frames, 7,061 values) | 67 |
+| The mock's telemetry frame (12 bytes, 9 values) | 204 |
+| A 64-byte CAN FD frame, listened to raw | 112 |
+
+Section 1's estimate for classic CAN (some 40 bytes) was low. The
+default 4 MiB holds about 19 s of a saturated classic 500 kbit/s bus
+listened to raw (about 4,000 frames a second at 56 bytes), and about
+15 s with a number decoded from each frame, not over 20 s. The FD
+figure stands: about 7 s at about 5,500 frames a second of 112 bytes. A
+requesting session's few hundred replies a second take minutes to fill
+it. `RecorderTest` sizes a ring in whole records of one shape (65
+bytes: a 1-byte frame and its number), so a change to the layout fails
+a test.
+
+## Appendix: the worker's cost, measured (2026-11-02)
+
+`bench_bridge --record` runs step 1's measurement on core's own
+session: the engine-start fixture replayed under `obd2`, looping at
+full speed, to a frame callback that counts and a values callback that
+does nothing, as the bridge's are. Three kinds of run alternate, five
+of 3 s each. On the dev machine (8 cores, 16 threads, Release):
+
+| Run | Worker frames a second, median (lowest to highest) |
+|---|---|
+| Not recorded | 5,317,779 (4,984,134 to 5,409,957) |
+| Not recorded, a thread formatting numbers beside it | 3,477,131 (3,390,293 to 3,558,270) |
+| Recorded | 3,357,944 (3,293,312 to 3,399,326) |
+
+At 5 million frames a second the writer can't keep up: it wrote about
+830,000 frame rows a second, and three records in four were dropped.
+So it never rests, and a second thread that never rests slows the
+worker by about a third whatever it does: the thread formatting
+numbers, with no recording at all, costs as much. Section 9's 10% is
+read as the worker's own cost, so the check compares the recorded runs
+with that busy one: 0.97 of its rate. Against the bare rate they ran
+at 0.63, which the bench prints beside it. Two further runs bound
+the parts: with a 4 KB ring, which drops nearly every record and
+leaves the writer idle, the recorded runs held 0.89 of the bare rate
+(the drop path: the clock read, the pin, the size); 200 turns of a busy
+loop added to every recorded frame (about 40 ns) brought the check to
+0.75, failing it. The same work added only where a record is written
+read 0.90, because at full speed one frame in four is.
+
+These rates are a stress figure. At the bridge's rate (about 400,000
+frames a second, over ten times the worker's cost per frame here), the
+same 20 ns or so is under 1%; at a saturated classic bus's 4,000
+frames a second it is under 0.01% of a core. Both recorded passes, at
+full speed and at 100x, put all 7,074 frames and 7,061 values in the
+files with no record dropped. Step 2's bridge run and its CI gate
+compare recorded with unrecorded as section 9 says, at the bridge's
+rate, where the writer may keep up.
