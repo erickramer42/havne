@@ -15,6 +15,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - `havne-cli stream --record <folder>` records the session into a folder of its own under `<folder>`, named for when it started, with the files the app writes (`frames.csv`, `signals.csv` and `events.log`; `markers.csv` and `latency.csv` once they have a row). `--label <name>` adds a name to the folder's. Each line typed while it runs is a marker. The recording is written on a thread of its own, so a slow disk never holds the session up; a write that fails says why in a `recording` line, and the stream exits 1.
 - `ecuio/recording.h` in core's C API: a recorder opened on a folder, attached to a session before it starts, with notes, markers and its state.
+- `havne-cli view <recording>...` reads recordings offline: what each holds, then each signal's lowest, highest and count over time in columns (`--columns`, `--from`, `--to`), and with `--at` the values at a moment. `--align-on` puts several on one axis, at a signal rising or falling through a level, a marker, or their wall-clock starts.
+- A reader in `ecuio/recording.h`: `ecuio_recording_open` reads a recording's folder once, with a progress callback that can cancel it (`ECUIO_ERR_CANCELED`), then answers a time range's lowest and highest per column, the value in force at a time, and the first time a signal crosses a level or a marker was set. An hour of recording opens in a fraction of a second.
 
 ### Changed
 
@@ -23,6 +25,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A frame carrying a whole ISO-TP message, as a requesting session's replies and an ELM327 adapter's monitor deliver them, is flagged `0x100` (`ECUIO_FRAME_FLAG_REASSEMBLED`), and the Log page's and `havne-cli`'s `frame` lines show it.
 - A signal whose name or unit starts with `=`, `+`, `-`, `@`, a tab or a carriage return is refused when its profile is registered (validator code 18): a spreadsheet opening the recording would run it as a formula.
 - A J2534 adapter that refuses to open without saying why gets an error that asks whether the adapter is attached and not open in another program, the two usual causes, instead of naming the status alone.
+- A replay of a recording whose last row was cut short, as a crash or a power loss leaves it, plays the rest instead of refusing the recording, and says so: the Session line adds ", its last row cut short and left out", and `havne-cli`'s `session` line counts it in `rows_torn`. The simulated ECU loading such a recording leaves the row out too.
 
 ### Fixed
 

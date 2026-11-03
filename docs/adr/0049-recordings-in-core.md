@@ -1038,3 +1038,49 @@ attached, at least 0.8 of the unrecorded run in the same bench. It read
 0.96 on Windows (471,840 frames a second against 493,534) and 1.01
 under WSL, with no record dropped in either. The recorded pass at 100x
 writes all 7,074 frames and 7,061 values with none dropped, on both.
+
+## Appendix: the reader and `havne-cli view` (2026-11-03)
+
+Step 3 is built: the reader (section 5, `core/src/recording_reader.cpp`
+and `core/src/recording_rows.h`), its fuzz target (`fuzz_recording`,
+the rows and a whole folder), a torn last row dropped and counted in
+the reader and in `replay://` (section 7), and `havne-cli view`, whose
+lines are ADR-0031's appendix of 2026-11-03.
+
+**The open, measured.** `bench_recording` (`tests/bench_recording.cpp`,
+not in ctest) writes section 9's hour, the replay fixture's session
+under `obd2` laid down twelve times 300 s apart, and a dense hour of 50
+number signals at 10 Hz each, then opens each five times. It builds
+core-only for Android with the NDK, so the test phone (Android 16) runs
+it from a shell, its scratch folder first in `/data/local/tmp`, then on
+shared storage, where the app keeps its recordings. Medians:
+
+| Hour | Rows | `signals.csv` | Laptop (MSVC) | Laptop (GCC, WSL) | Test phone | Test phone, shared storage |
+|---|---|---|---|---|---|---|
+| The fixture's, 130 signals | 84,732 | 2.8 MB | 8.9 ms | 5.9 ms | 9.1 ms | 10.0 ms |
+| Dense, 50 signals at 10 Hz | 1,800,000 | 50.2 MB | 167 ms | 114 ms | 204 ms | 213 ms |
+
+Each reader's tables came to section 5's bound to the byte (1.04 MB
+and 5.82 MB), since every second of both hours has samples. Every open
+found the files in the system's cache, the bench having just written
+them; a cold open is unmeasured (the phone needs root to drop its
+cache). Section 9's 2 s and 10 s are met by two orders of magnitude, so
+the per-second index stays in memory, and the alternative of an index
+file isn't needed.
+
+**Alignment to the second at wide zoom.** A column of a second or more
+combines whole seconds' summaries, so two recordings aligned on events
+at different fractions of a second agree there to the second, not
+exactly; narrower columns read the raw rows and agree exactly. The
+viewer zoomed out draws columns wider than a second, where that
+difference is less than a column.
+
+**An axis that starts before a recording.** The reader's times start at
+the recording's own zero, so an aligned axis that starts earlier can't
+be one query. `havne-cli view` queries the column across the
+recording's start on its own: exactly to the split in raw columns, and
+to its last whole second in wide ones, the second across the split
+going to the next column by the reader's rule. No sample is lost or
+counted twice (`CliViewRunTest.ColumnsCountEverySampleOnce`, over
+alignments and zooms from one column to 9,999); the viewer has the same
+case to meet in step 5.
