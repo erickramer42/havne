@@ -64,7 +64,7 @@ constexpr uint32_t kSpeedDefault = 1000;
  * or no such line is an older recording's, whose flag says nothing. */
 std::string source_frame_flags(const std::string& frames_csv)
 {
-    const std::string older = "from an older recording";
+    const char* const older = "from an older recording";
     const size_t slash = frames_csv.find_last_of("/\\");
     if (slash == std::string::npos ||
         frames_csv.compare(slash + 1, std::string::npos, "frames.csv") != 0) {
