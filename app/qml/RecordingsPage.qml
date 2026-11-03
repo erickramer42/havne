@@ -6,8 +6,8 @@
 //          readout, pan and zoom kept inside the recording, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
 //          fall), a finding's row centering the view, the signal rows'
-//          filter (SignalFilterBar.qml, ADR-0050), a refused folder's
-//          error, back to the list;
+//          filter (SignalFilterBar.qml, ADR-0050), Replay view handing on
+//          the stretch in view, a refused folder's error, back to the list;
 //          every item inside a phone's width (tst_phone.qml). RecordingView
 //          itself: test_bridge (RecordingViewTest); the chart's layout:
 //          tst_chartlayout.qml; the drawing is manual smoke (docs/testing.md).
@@ -20,7 +20,8 @@ import App
 pragma ComponentBehavior: Bound
 
 // The recordings a session saved (ADR-0049), newest first: Open shows one
-// in the viewer, Replay puts its replay:// URI in Settings' field. The
+// in the viewer, Replay puts its replay:// URI in Settings' field, and the
+// viewer's Replay view the part in view's (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
@@ -38,6 +39,7 @@ Page {
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
     property string openedTitle: ""
+    property string openedUri: ""
     readonly property bool viewing: recording.state !== RecordingView.Closed
 
     // The part of the axis in view, in ms since the recording started
@@ -163,7 +165,25 @@ Page {
 
     function open(row) {
         openedTitle = row.title
+        openedUri = row.uri !== undefined ? row.uri : ""
         recording.open(row.folder)
+    }
+
+    // Seconds to the ms with no trailing zeros, as core's replay takes them
+    function secondsText(ms) {
+        return String(Number((ms / 1000).toFixed(3)))
+    }
+
+    // The opened recording's replay:// URI for the part in view
+    // (ADR-0023's appendix "a stretch replayed"): from and to in the
+    // recording's own seconds, none while the whole recording is in view
+    function stretchUri() {
+        const from = Math.max(0, Math.floor(viewT0))
+        const to = Math.min(durationMs(), Math.ceil(viewT1))
+        if (from <= 0 && to >= durationMs())
+            return openedUri
+        return openedUri + (openedUri.indexOf("?") >= 0 ? "&" : "?")
+               + "from=" + secondsText(from) + "&to=" + secondsText(to)
     }
 
     function backToList() {
@@ -176,6 +196,7 @@ Page {
         alignLevel = NaN
         alignHysteresis = 0
         openedTitle = ""
+        openedUri = ""
         signalFilter.clear()
         refresh()
     }
@@ -677,6 +698,15 @@ Page {
                 color: Theme.text
                 elide: Text.ElideRight
                 Layout.fillWidth: true
+            }
+            // The part in view replayed as a session, Settings' field
+            // filled as the list's Replay fills it
+            ThemedButton {
+                objectName: "replayView"
+                visible: recording.state === RecordingView.Open
+                text: qsTr("Replay view")
+                Accessible.name: qsTr("Replay the part in view as a session")
+                onClicked: root.replayRequested(root.stretchUri())
             }
         }
 

@@ -125,6 +125,26 @@ TestCase {
         verify(!page.viewing, "Replay doesn't open the viewer")
     }
 
+    // The viewer's Replay view hands on the part in view as a stretch of
+    // the row's URI, in the recording's seconds; the whole recording in
+    // view, the row's URI alone
+    function test_replayViewHandsOnTheStretchInView() {
+        const page = openFindings()
+        replaySpy.target = page
+        replaySpy.clear()
+        const button = find(page, "replayView")
+        verify(button.visible)
+        button.clicked()
+        compare(replaySpy.signalArguments[0][0], findingsRow.uri, "all in view")
+        page.setView(2500, 7250)
+        button.clicked()
+        compare(replaySpy.signalArguments[1][0], findingsRow.uri + "&from=2.5&to=7.25")
+        page.setView(0, 4000)
+        button.clicked()
+        compare(replaySpy.signalArguments[2][0], findingsRow.uri + "&from=0&to=4")
+        compare(replaySpy.count, 3)
+    }
+
     // Open shows the recording: its signal plotted by default, the chart's
     // series over the whole recording, the check's findings listed
     function test_openShowsTheViewer() {
