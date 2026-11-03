@@ -6,9 +6,10 @@
 //          signal, the default plotted, the chart's series over the view,
 //          the frames check's findings), the cursor's readout, the view
 //          kept inside the recording through setView, zoom, a drag and the
-//          wheel, a finding's row centering the view, a refused folder's
-//          error, and back to the list. test_qml's recordings go to a
-//          scratch folder.
+//          wheel, the chart without antialiasing while the view moves and
+//          with it at rest, a finding's row centering the view, a refused
+//          folder's error, and back to the list. test_qml's recordings go
+//          to a scratch folder.
 
 import QtQuick
 import QtTest
@@ -206,6 +207,30 @@ TestCase {
         compare(page.viewT1 - page.viewT0, 20000)
         win.width = size[0]
         win.height = size[1]
+    }
+
+    // While the view moves the chart draws without antialiasing, and once
+    // it rests, draws again with it; a single change keeps it
+    function test_theChartDropsAntialiasingWhileTheViewMoves() {
+        const page = openFindings()
+        const chart = find(page, "chart")
+        page.setView(0, 4000)
+        tryVerify(() => !chart.moving, 2000, "rested after opening")
+        page.setView(1000, 5000)
+        verify(!chart.moving, "one change is not a move")
+        verify(chart.antialiasing)
+        page.setView(1100, 5100)
+        verify(chart.moving, "a second change soon after is")
+        verify(!chart.antialiasing)
+        tryVerify(() => !chart.moving, 2000, "the view rests")
+        verify(chart.antialiasing)
+        // The rest's own paint: none comes without it
+        const paints = chart.paints
+        wait(page.settleMs * 2)
+        compare(chart.paints, paints, "no paint asked for while resting")
+        chart.moving = true
+        chart.moving = false
+        tryVerify(() => chart.paints > paints, 2000, "drawn again with antialiasing")
     }
 
     // A finding's row centers the view on it and puts the cursor at its

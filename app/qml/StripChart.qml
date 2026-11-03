@@ -1,6 +1,7 @@
 // File/layer: app/qml/StripChart.qml | Qt6 Quick, UI layer
 // Testing: the layout it strokes is ChartLayout's (tst_chartlayout.qml);
-//          Live's chart through it (tst_liveview.qml, tst_phone.qml); the
+//          Live's chart through it (tst_liveview.qml, tst_phone.qml);
+//          antialiasing dropped while moving (tst_recordings.qml); the
 //          drawing itself is manual smoke (docs/testing.md)
 
 import QtQuick
@@ -34,6 +35,13 @@ Canvas {
     property int paints: 0
     property real paintMs: 0
     property real paintMaxMs: 0
+    // Set while a page moves the view: drawn without antialiasing, most of
+    // a crowded chart's cost on the CPU (a dense hour's pan on the test
+    // phone, 21 charts a second with it, 62 without), then once more with
+    // it when the view rests
+    property bool moving: false
+    antialiasing: !moving
+    onMovingChanged: if (!moving) requestPaint()
 
     readonly property real zoom: Theme.zoom
     property real shownW: 0
@@ -42,11 +50,10 @@ Canvas {
     height: shownH * zoom
     scale: 1 / zoom
     transformOrigin: Item.TopLeft
-    // Rasterized on a thread of the Canvas's own: on the GUI thread
-    // (Immediate) the fill held a dense hour's pan to 36 frames/s on a
-    // 144 Hz laptop screen while onPaint took 2 ms; threaded, 144
-    // (the Recordings page's frame test, 2026-11-03)
-    renderStrategy: Canvas.Threaded
+    // Rasterized on the GUI thread, so each frame shows the chart its paint
+    // drew. Threaded falls behind: the window presents an earlier paint, and
+    // once the view stops a chart it has left stays up until later frames
+    renderStrategy: Canvas.Immediate
 
     onPaint: {
         const begun = Date.now()

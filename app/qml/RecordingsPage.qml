@@ -131,13 +131,20 @@ Page {
         return recording.durationMs > 0 ? recording.durationMs : 1000
     }
 
-    // The view, kept inside the recording and no narrower than minSpanMs
+    // The view, kept inside the recording and no narrower than minSpanMs.
+    // A change within settleMs of the last is the view moving (a drag, a
+    // pinch, the wheel): the chart draws it without antialiasing until the
+    // view rests
+    readonly property int settleMs: 150
     function setView(t0, t1) {
         const whole = durationMs()
         const span = Math.min(whole, Math.max(minSpanMs, t1 - t0))
         const start = Math.min(Math.max(0, t0), whole - span)
         viewT0 = start
         viewT1 = start + span
+        if (settle.running)
+            chart.moving = true
+        settle.restart()
         chart.requestPaint()
     }
     function zoomAt(t, factor) {
@@ -303,6 +310,12 @@ Page {
     }
     onVisibleChanged: if (visible && !viewing) refresh()
     Component.onCompleted: refresh()
+
+    Timer {
+        id: settle
+        interval: root.settleMs
+        onTriggered: chart.moving = false
+    }
 
     FrameAnimation {
         running: root.frameTesting
