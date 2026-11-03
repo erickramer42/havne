@@ -1738,6 +1738,15 @@ void listen_on(Session& s, const std::string& u = uri("?profile=raw"))
     ASSERT_TRUE(wait_for(fake_monitoring, 3000));
 }
 
+/* When the fake took the last AT MA (steady_us): the transport's quiet
+ * windows and checks run from its write, which the test thread's poll in
+ * listen_on can trail by a loaded machine's scheduling */
+int64_t monitor_started()
+{
+    return on_fake<int64_t>(
+        [](fake_elm327::adapter& a) { return a.monitor_us; });
+}
+
 } // namespace
 
 /* A session that asks nothing runs the setup, then AT MA and nothing
@@ -1797,13 +1806,10 @@ TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)
 {
     Session s;
     listen_on(s);
-    const auto from = std::chrono::steady_clock::now();
+    const int64_t from = monitor_started();
     ASSERT_TRUE(
         wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 3000));
-    EXPECT_GE(std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - from)
-                  .count(),
-              800)
+    EXPECT_GE(fake_elm327::steady_us() - from, 800000)
         << "ten windows of 100 ms";
     on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
     EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 2000));
@@ -1814,28 +1820,23 @@ TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)
 
 /* 5 s with no line: the monitor is stopped with a space, never a CR;
  * the adapter's STOPPED and prompt show it's there, and AT MA starts
- * again with no failure */
+ * again with no failure; both gaps on the fake's stamps */
 TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedEveryFiveSeconds)
 {
     Session s;
     listen_on(s);
-    const auto from = std::chrono::steady_clock::now();
+    const int64_t first_monitor = monitor_started();
     ASSERT_TRUE(wait_for(
         [] {
             return on_fake<uint32_t>(
                        [](fake_elm327::adapter& a) { return a.stops; }) >= 1;
         },
         8000));
-    const auto stopped = std::chrono::steady_clock::now();
-    EXPECT_GE(
-        std::chrono::duration_cast<std::chrono::milliseconds>(stopped - from)
-            .count(),
-        4900);
+    const int64_t stopped =
+        on_fake<int64_t>([](fake_elm327::adapter& a) { return a.stop_us; });
+    EXPECT_GE(stopped - first_monitor, 4900000);
     ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 2000));
-    EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - stopped)
-                  .count(),
-              90)
+    EXPECT_LT(monitor_started() - stopped, 90000)
         << "AT MA again at once, not on the backoff";
     EXPECT_EQ(
         on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.stops; }), 1u);
@@ -1858,13 +1859,10 @@ TEST_F(Elm327SessionTest, AHungMonitorIsAHardFailureAndRecovers)
     Session s;
     listen_on(s);
     set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
-    const auto from = std::chrono::steady_clock::now();
+    const int64_t from = monitor_started();
     ASSERT_TRUE(wait_for(
         [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 12000));
-    EXPECT_GE(std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - from)
-                  .count(),
-              9800)
+    EXPECT_GE(fake_elm327::steady_us() - from, 9800000)
         << "5 s with no line, then 5 s with no prompt";
     set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
     ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
