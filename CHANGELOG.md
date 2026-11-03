@@ -35,6 +35,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- A SocketCAN session that sends requests no longer drops a long reply, a VIN among them, when the computer is busy: the kernel's times of the session's own frames, and of frames read slightly out of order, no longer put a stall into the reply's timing.
 - A SocketCAN session that sends requests counts the bus rate as proven only once its first request is answered, or 25 ms pass after the controller echoed it with no error frame. An adapter can echo a frame no node acknowledged and report the missing acknowledgement after, so a wrong rate could pass for the right one.
 
 ## [0.3.6] - 2026-11-02

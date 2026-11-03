@@ -614,6 +614,12 @@ inline bool socketcan_error_is_hard(uint32_t can_id)
  * wall clock stepped: the host's delta stands in */
 constexpr uint64_t SOCKETCAN_CLOCK_SLACK_US = 1000000;
 
+/* Frames reach a socket nearly in the order the kernel stamped them, not
+ * exactly: each CPU queues the frames it sends, so a frame can be read
+ * after one stamped later (ADR-0032's appendix "frames out of order").
+ * A backward delta up to this is such a frame, not a step */
+constexpr uint64_t SOCKETCAN_CLOCK_REORDER_US = 100000;
+
 struct socketcan_clock {
     bool started = false;
     uint64_t last_kernel_ns = 0;
@@ -627,9 +633,11 @@ struct socketcan_clock {
 /* A frame's session time from the kernel's receive time (ns, wall clock;
  * 0 when the frame came without one) and the session's host time at the
  * read (us since attach). The first frame takes the host's time; each
- * later one adds the kernel's delta since the frame before, unless it
- * stepped. Frames read late after a stall keep their kernel spacing.
- * Never decreases. */
+ * later one adds the kernel's delta since the newest frame before,
+ * unless it stepped. Frames read late after a stall keep their kernel
+ * spacing; one stamped up to SOCKETCAN_CLOCK_REORDER_US before the
+ * newest takes the newest's time, so a stall never enters the spacing
+ * of frames read out of order across it. Never decreases. */
 inline uint64_t socketcan_clock_step(socketcan_clock& c, uint64_t kernel_ns,
                                      uint64_t host_us)
 {
@@ -639,6 +647,11 @@ inline uint64_t socketcan_clock_step(socketcan_clock& c, uint64_t kernel_ns,
         c.last_host_us = host_us;
         c.last_out_us = host_us;
         return host_us;
+    }
+    if (kernel_ns != 0 && kernel_ns < c.last_kernel_ns &&
+        (c.last_kernel_ns - kernel_ns) / 1000 <= SOCKETCAN_CLOCK_REORDER_US) {
+        c.last_host_us = host_us; /* the kernel's newest stays */
+        return c.last_out_us;
     }
     const uint64_t host_delta =
         host_us >= c.last_host_us ? host_us - c.last_host_us : 0;

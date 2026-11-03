@@ -14,7 +14,10 @@
 //          ISO-TP's N_Cr on the kernel's receive times:
 //          SocketCanRequestTest.AReplyOnTimeSurvivesAWorkerHeldUpMidMessage
 //          (a worker held inside its reads; one held between passes, which
-//          the expiry after the reads covers, by code reading only);
+//          the expiry after the reads covers, by code reading only), and
+//          the session's own echoes left out of the clock by the same
+//          case run under load, where it failed with them in (ADR-0032's
+//          appendix "frames out of order");
 //          the rate's proof after the first echo (ADR-0040's appendix of
 //          2026-11-02), on
 //          vcan0 started unproven (ecuio_socketcan_set_vcan_unproven):
@@ -470,14 +473,22 @@ void request_worker(ecuio_socketcan_transport* t)
                 }
             }
             now = now_us(t);
-            const uint64_t stamp = socketcan_clock_step(
-                clock, kernel_ns, static_cast<uint64_t>(now));
-            newest = static_cast<int64_t>(stamp);
             uint32_t can_id;
             std::memcpy(&can_id, raw, 4);
             const uint8_t len = raw[4];
+            /* This socket's own frame, back: its stamp can trail the
+             * frames it brought on by a stall (ADR-0032's appendix
+             * "frames out of order"), and nothing reads it, so it leaves
+             * the clock alone */
+            const bool own = (msg.msg_flags & MSG_CONFIRM) != 0;
+            uint64_t stamp = 0;
+            if (!own) {
+                stamp = socketcan_clock_step(clock, kernel_ns,
+                                             static_cast<uint64_t>(now));
+                newest = static_cast<int64_t>(stamp);
+            }
 
-            if (can_id & CAN_ERR_FLAG) {
+            if (can_id & CAN_ERR_FLAG) { /* never this socket's own */
                 socketcan_raw in;
                 in.can_id = can_id;
                 in.len = len;
@@ -500,7 +511,7 @@ void request_worker(ecuio_socketcan_transport* t)
                 can_id & (can_id & CAN_EFF_FLAG ? CAN_EFF_MASK : CAN_SFF_MASK);
             f.len = len;
             std::memcpy(f.data, raw + 8, len);
-            if ((msg.msg_flags & MSG_CONFIRM) != 0) {
+            if (own) {
                 if (pending.active && f.id == pending.f.id &&
                     f.len == pending.f.len &&
                     std::memcmp(f.data, pending.f.data, f.len) == 0) {
