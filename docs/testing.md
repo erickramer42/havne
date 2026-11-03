@@ -169,8 +169,10 @@ running (ranges across the runs; milliseconds as median / p99):
   passed at 229,915.
 - **Recorded runs:** the looping run and the 100x pass run again with
   core's recorder attached ([ADR-0049](adr/0049-recordings-in-core.md)).
-  The looping one gates CI at 0.8 of its unrecorded rate (0.96 on the
-  dev machine, 471,840 frames a second against 493,534, and 1.01 under
+  The looping pair runs twice, unrecorded and recorded alternated, and
+  the faster recorded run gates CI at 0.7 of the faster unrecorded one
+  (one pair read about 0.8 on shared Linux runners and 0.9 on Windows
+  ones; 0.96 on the dev machine, 471,840 frames a second against 493,534, and 1.01 under
   WSL, 2026-11-03, no record dropped in either); the 100x one must
   write all 7,074 frames and 7,061 values with no record dropped.
 - **The looping runs pass the staging's capacity:** at about 400,000

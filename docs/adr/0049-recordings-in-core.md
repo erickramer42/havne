@@ -1039,6 +1039,9 @@ attached, at least 0.8 of the unrecorded run in the same bench. It read
 under WSL, with no record dropped in either. The recorded pass at 100x
 writes all 7,074 frames and 7,061 values with none dropped, on both.
 
+**Note (2026-11-03): the gate is 0.7, the faster of two runs each.**
+The appendix "CI's recording gate" below has the runners' figures.
+
 ## Appendix: the reader and `havne-cli view` (2026-11-03)
 
 Step 3 is built: the reader (section 5, `core/src/recording_reader.cpp`
@@ -1148,3 +1151,17 @@ Gaps over 1 s: 3 in the J2534 recordings (1.2 to 31 s) and 20 in the
 ELM327 ones (1.8 to 305 s), each a stretch with no frame at all; at
 2 s, 2 and 18. **The gap stays 1 s.** No recording has a late ID at any
 settle time from 2 s to 30 s, so nothing sets it, and **it stays 2 s**.
+
+## Appendix: CI's recording gate (2026-11-03)
+
+On GitHub's shared runners, one pair of looping runs (unrecorded, then
+recorded) read 0.80 to 0.82 on Linux in each of five dev runs where the
+writer kept up, and 0.89 in one where it fell behind and dropped
+records, which costs the worker less. One run read 0.76 and failed the
+gate of 0.8 with no change to the recorder. Windows read 0.87 to 0.93.
+So the gate has two changes. `--load` runs the looping pair twice,
+unrecorded and recorded alternated, and compares the faster of each,
+since a runner's noise only ever slows a run. And the floor is 0.7,
+which still fails a recorder that costs the worker twice what it does
+on Linux. The 10% bar is judged as before, on the dev machine by
+`--record`.
