@@ -10,7 +10,8 @@ import App
 // A strip chart: what ChartLayout.layout returns for the series its
 // fetch() gives, stroked on a Canvas. Live and the Recordings page each
 // make one. Traces take Theme.seriesColor and Theme.seriesDash by row, so
-// a page's list rows can be its legend. A Canvas paints an image at its
+// a page's list rows can be its legend (a series' own dash, when it has
+// one, in place of its row's). A Canvas paints an image at its
 // own size, which Main.qml's zoom would stretch: this one is Theme.zoom
 // times the size it shows at, scaled back by as much, so its pixels meet
 // the screen's one to one, and onPaint draws in the shown size.
@@ -123,7 +124,7 @@ Canvas {
             const color = Theme.seriesColor(tr.row)
             ctx.strokeStyle = color
             ctx.fillStyle = color
-            ctx.setLineDash(Theme.seriesDash(tr.row))
+            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row))
             for (const piece of tr.pieces) {
                 if (!piece.band) {
                     ctx.lineWidth = ChartLayout.lineW
@@ -160,7 +161,7 @@ Canvas {
             if (!tr.labeled) continue   // no room: its row shows the value
             const c = Theme.seriesColor(tr.row)
             ctx.strokeStyle = c
-            ctx.setLineDash(Theme.seriesDash(tr.row))
+            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row))
             ctx.beginPath()
             ctx.moveTo(l.labelX, tr.labelY)
             ctx.lineTo(l.labelX + ChartLayout.swatchW, tr.labelY)

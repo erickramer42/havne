@@ -3,7 +3,8 @@
 //          RecordingViewTest.*) on tests/fixtures/recording/: the open
 //          and check off the GUI thread, a cancel, a refusal, the
 //          signals in display units and the default plotted ones,
-//          columns, the values at a time, markers and findings
+//          columns (a window from before the start too), the values at a
+//          time, markers and findings, the alignment finds
 
 #pragma once
 
@@ -97,10 +98,20 @@ public:
     // columns columns over [t0Ms, t1Ms) for each signal index in
     // signalIndexes: one map each, { index, lows: [...], highs: [...],
     // samples: [...] }, a column with no sample NaN in lows and highs;
-    // display units. Empty when not open, for a bad range or index, or
-    // when the file changed (stale goes true).
+    // display units. t0Ms may be before the start (a view aligned on
+    // another recording): the columns before it are empty. Empty when not
+    // open, for a bad range or index, or when the file changed (stale
+    // goes true).
     Q_INVOKABLE QVariantList columns(const QVariantList& signalIndexes,
                                      double t0Ms, double t1Ms, int columns);
+    // Where two recordings line up (ADR-0049 section 5, as havne-cli view
+    // --align-on finds it): the first time a number signal reaches level
+    // (display units) rising, or falling, after being hysteresis beyond
+    // it, or the first marker labeled label. -1 for none, a text signal,
+    // a bad index, or a recording not open.
+    Q_INVOKABLE double findThreshold(int signal, double level,
+                                     double hysteresis, bool rising);
+    Q_INVOKABLE double findMarker(const QString& label);
     // Each signal's value in force at tMs, as the cursor shows it: one map
     // each, { index, text (a number in display units, its decimals; a text
     // signal's as recorded; "" before its first sample), unit, atMs (-1
@@ -132,6 +143,11 @@ private:
     // A recorded number as displayed: the value, its unit and decimals
     ecuio_display_value_t shown(const Signal& s, double value) const;
     bool signalIndex(const QVariant& v, uint32_t* out) const;
+    // Fills cols (ids.size() x n, zeroed) over [t0Ms, t1Ms), the part
+    // before the start left empty; false on a query's failure
+    bool query(const std::vector<uint32_t>& ids, double t0Ms, double t1Ms,
+               uint32_t n, std::vector<ecuio_recording_column_t>& cols);
+    double found(const ecuio_recording_find_t& what);
 
     int m_state = Closed;
     QString m_folder;

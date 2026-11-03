@@ -6,8 +6,9 @@
 //          labels nudged apart inside the plot, a crowded trace's band;
 //          a recording's columns over a fixed span (a line through calm
 //          columns, a band where one swings past its neighbors' lean, a
-//          steep ramp a line, a gap past gapMs a break) and absolute ticks.
-//          No bridge, no session.
+//          steep ramp a line, a gap past gapMs a break) and absolute ticks,
+//          before zero too; a scaleKey's shared range and lane, a series'
+//          dash. No bridge, no session.
 
 import QtQuick
 import QtTest
@@ -200,6 +201,48 @@ TestCase {
         compare(xs[0], 0)
         compare(xs[2], l.plotW - 1)
         near(xs[1], (l.plotW - 1) / 2, 0.01, "time runs left to right")
+    }
+
+    // Series sharing a scaleKey (one signal in two recordings) take one
+    // range over both, so a value sits at one height in each; flat ones
+    // share a lane
+    function test_aScaleKeySharesOneRange() {
+        const a = series(0, [[0, 0], [1000, 100]])
+        const b = series(0, [[0, 0], [1000, 200]])
+        const apart = layout([a, b], { minSpanUnits: 0 })
+        for (const tr of apart.traces)
+            near(tr.segments[0][1].y, apart.top, 0.01, "each its own: its maximum at the top")
+
+        a.scaleKey = 0
+        b.scaleKey = 0
+        const shared = layout([a, b], { minSpanUnits: 0 })
+        near(shared.traces.find(t => t.endY > shared.top + 1).segments[0][1].y,
+             shared.top + shared.plotH / 2, 0.01, "100 of 200: halfway")
+        near(shared.traces.find(t => t.endY <= shared.top + 1).segments[0][1].y, shared.top, 0.01,
+             "200 at the top")
+
+        const flats = layout([series(0, [[0, 7], [1000, 7]]), series(1, [[0, 3], [1000, 3]]),
+                              series(2, [[0, 7], [1000, 7]])].map((s, i) => {
+                                  if (i !== 1) s.scaleKey = 5
+                                  return s
+                              }), { minSpanUnits: 0 })
+        const y = row => flats.traces.find(t => t.row === row).segments[0][0].y
+        near(y(0), y(2), 0.01, "one key, one lane")
+        near(y(0), flats.top + flats.plotH / 3, 0.01, "the first lane")
+        near(y(1), flats.top + flats.plotH * 2 / 3, 0.01, "the unkeyed one the second")
+    }
+
+    // A series' dash reaches its trace; without one the trace has none
+    // and its row's is drawn
+    function test_aSeriesDashReachesItsTrace() {
+        const s = columns(1, [1, 2], [1, 2])
+        s.dash = [8, 4]
+        const l = layout([s, columns(2, [1, 2], [1, 2])], { span: { t0: 0, t1: 1000 } })
+        compare(JSON.stringify(l.traces.find(t => t.row === 1).dash), "[8,4]")
+        compare(l.traces.find(t => t.row === 2).dash, undefined)
+        const pairs = series(3, [[0, 1], [1000, 2]])
+        pairs.dash = [2, 3]
+        compare(JSON.stringify(layout([pairs]).traces[0].dash), "[2,3]")
     }
 
     // A step of two units over a minimum span of twenty takes a tenth of
@@ -481,5 +524,18 @@ TestCase {
             compare(tick.caption, String(tick.seconds))
         }
         verify(l.ticks[0].captioned)
+    }
+
+    // An axis aligned on another recording starts before zero: its ticks
+    // run through zero on the same steps, with room for the caption at
+    // either end (here the one before zero is the wider: 10 s steps, where
+    // "20" alone would fit 2 s ones)
+    function test_absoluteTicksRunThroughZero() {
+        const caption = s => s < 0 ? "before " + (-s) : String(s)
+        const l = layout([columns(0, [1, 2, 3], [1, 2, 3])],
+                         { span: { t0: -10000, t1: 20000 }, absolute: true, caption: caption })
+        compare(l.ticks.map(t => t.seconds).join(","), "-10,0,10,20")
+        near(l.ticks[1].x, 10000 / 30000 * (l.plotW - 1), 0.01, "zero")
+        compare(l.ticks[0].caption, "before 10")
     }
 }

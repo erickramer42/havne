@@ -1,6 +1,7 @@
 // File/layer: app/recordingview.cpp | Qt6 Core, app layer, C++17
 // Testing: UNIT: test_bridge (tests/test_recording_view.cpp,
-//          RecordingViewTest.*) on tests/fixtures/recording/
+//          RecordingViewTest.*) on tests/fixtures/recording/; a window from
+//          before the start counted against the whole recording's samples
 
 #include "recordingview.h"
 
@@ -46,6 +47,18 @@ uint64_t fromMs(double ms)
         return std::numeric_limits<uint64_t>::max();
     }
     return static_cast<uint64_t>(us);
+}
+
+// A time from QML that may be before the start, to the microsecond; false
+// for NaN or past a few hundred years either way
+bool signedUs(double ms, int64_t* out)
+{
+    const double us = std::round(ms * 1000.0);
+    if (!(std::fabs(us) < 9e15)) {
+        return false;
+    }
+    *out = static_cast<int64_t>(us);
+    return true;
 }
 
 QString detailOr(ecuio_status_t rc)
@@ -455,11 +468,6 @@ QVariantList RecordingView::columns(const QVariantList& signalIndexes,
         columns > kMaxColumns) {
         return {};
     }
-    const uint64_t t0 = fromMs(t0Ms);
-    const uint64_t t1 = fromMs(t1Ms);
-    if (t1 <= t0) {
-        return {};
-    }
     std::vector<uint32_t> ids;
     for (const QVariant& v : signalIndexes) {
         uint32_t i = 0;
@@ -470,13 +478,7 @@ QVariantList RecordingView::columns(const QVariantList& signalIndexes,
     }
     const size_t n = static_cast<size_t>(columns);
     std::vector<ecuio_recording_column_t> cols(ids.size() * n);
-    const ecuio_status_t rc = ecuio_recording_query(
-        m_reader, ids.data(), static_cast<uint32_t>(ids.size()), t0, t1,
-        cols.data(), static_cast<uint32_t>(columns));
-    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
-        markStale();
-    }
-    if (rc != ECUIO_OK) {
+    if (!query(ids, t0Ms, t1Ms, static_cast<uint32_t>(n), cols)) {
         return {};
     }
 
@@ -505,6 +507,119 @@ QVariantList RecordingView::columns(const QVariantList& signalIndexes,
         });
     }
     return out;
+}
+
+// The reader takes no time before the start, so a window from before it
+// is split as havne-cli view splits one (cli/view_lines.h, window_of):
+// the columns wholly before the start stay empty, the one across it is a
+// query of its own from 0, and the rest another. Columns of a second or
+// more place whole seconds, each in the column it starts in, the first
+// column taking one that starts before it: there the column across the
+// start ends at its last whole second, and the second across the split
+// goes to the next column, so none is counted twice.
+bool RecordingView::query(const std::vector<uint32_t>& ids, double t0Ms,
+                          double t1Ms, uint32_t n,
+                          std::vector<ecuio_recording_column_t>& cols)
+{
+    int64_t t0 = 0;
+    int64_t t1 = 0;
+    if (!signedUs(t0Ms, &t0) || !signedUs(t1Ms, &t1) || t1 <= t0) {
+        return false;
+    }
+    const auto nsig = static_cast<uint32_t>(ids.size());
+    std::vector<ecuio_recording_column_t> got;
+    // count columns over [from, to) into columns [first, first + count)
+    const auto into = [&](uint64_t from, uint64_t to, uint32_t first,
+                          uint32_t count) {
+        got.assign(static_cast<size_t>(nsig) * count, {});
+        const ecuio_status_t rc = ecuio_recording_query(
+            m_reader, ids.data(), nsig, from, to, got.data(), count);
+        if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+            markStale();
+        }
+        if (rc != ECUIO_OK) {
+            return false;
+        }
+        for (size_t k = 0; k < nsig; ++k) {
+            std::copy(
+                got.begin() + static_cast<std::ptrdiff_t>(k * count),
+                got.begin() + static_cast<std::ptrdiff_t>((k + 1) * count),
+                cols.begin() + static_cast<std::ptrdiff_t>(k * n + first));
+        }
+        return true;
+    };
+    if (t0 >= 0) {
+        return into(static_cast<uint64_t>(t0), static_cast<uint64_t>(t1), 0, n);
+    }
+    if (t1 <= 0) {
+        return true; // all before the start
+    }
+    const int64_t width = (t1 - t0 + n - 1) / n;
+    // The first column starting at the start or later: t0 + n x width
+    // reaches t1, past 0, so it's within the n
+    const auto skip = static_cast<uint32_t>((-t0 + width - 1) / width);
+    const uint32_t rest = n - skip;
+    const auto restT0 = static_cast<uint64_t>(t0 + skip * width);
+    if (skip > 0 && restT0 > 0) {
+        uint64_t end = restT0;
+        if (rest > 0 && width >= 1000000) {
+            end = restT0 / 1000000 * 1000000;
+        }
+        if (end > 0 && !into(0, end, skip - 1, 1)) {
+            return false;
+        }
+    }
+    return rest == 0 ||
+           into(restT0, static_cast<uint64_t>(t0 + n * width), skip, rest);
+}
+
+double RecordingView::found(const ecuio_recording_find_t& what)
+{
+    uint64_t at = ECUIO_RECORDING_NONE;
+    const ecuio_status_t rc = ecuio_recording_find(m_reader, &what, 0, &at);
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    return rc == ECUIO_OK ? toMsOrNone(at) : -1.0;
+}
+
+double RecordingView::findThreshold(int signal, double level, double hysteresis,
+                                    bool rising)
+{
+    uint32_t i = 0;
+    if (m_reader == nullptr || !signalIndex(signal, &i) ||
+        (m_signals[i].pub.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0 ||
+        !std::isfinite(level) || !(hysteresis >= 0)) {
+        return -1.0;
+    }
+    // The level as recorded: every display conversion is a rising line
+    // (signalList's ranges rest on it too), so two points of it invert it
+    const Signal& s = m_signals[i];
+    const double at0 = shown(s, 0).value;
+    const double slope = shown(s, 1).value - at0;
+    if (!(slope > 0)) {
+        return -1.0;
+    }
+    ecuio_recording_find_t what{};
+    what.kind = ECUIO_RECORDING_FIND_THRESHOLD;
+    what.signal = i;
+    what.direction =
+        rising ? ECUIO_RECORDING_FIND_RISING : ECUIO_RECORDING_FIND_FALLING;
+    what.level = (level - at0) / slope;
+    what.hysteresis = hysteresis / slope;
+    return found(what);
+}
+
+double RecordingView::findMarker(const QString& label)
+{
+    if (m_reader == nullptr) {
+        return -1.0;
+    }
+    const QByteArray utf8 = label.toUtf8();
+    ecuio_recording_find_t what{};
+    what.kind = ECUIO_RECORDING_FIND_MARKER;
+    what.label_utf8 = utf8.constData();
+    return found(what);
 }
 
 QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,

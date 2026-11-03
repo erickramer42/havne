@@ -76,7 +76,8 @@ TestCase {
     function test_everyPageFitsAPhonesWidth_data() {
         return [{ tag: "homePage" }, { tag: "dashboardPage" }, { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
-                { tag: "recordingsPage" }, { tag: "recordingsViewer" }, { tag: "settingsPage" }]
+                { tag: "recordingsPage" }, { tag: "recordingsViewer" }, { tag: "recordingsCompare" },
+                { tag: "settingsPage" }]
     }
 
     function test_everyPageFitsAPhonesWidth(data) {
@@ -89,7 +90,8 @@ TestCase {
         main.font.pixelSize = 16
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const name = data.tag === "logFrames" ? "logPage"
-                   : data.tag === "recordingsViewer" ? "recordingsPage" : data.tag
+                   : data.tag === "recordingsViewer" || data.tag === "recordingsCompare"
+                   ? "recordingsPage" : data.tag
         const page = find(main.contentItem, name)
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         verify(page.visible, name + " is on screen")
@@ -102,9 +104,16 @@ TestCase {
                       source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C", profile: "raw" }
         if (name === "recordingsPage")
             page.recordings = [row]
-        if (data.tag === "recordingsViewer") {
+        if (data.tag === "recordingsViewer" || data.tag === "recordingsCompare") {
             page.open(row)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+            page.setCursor(5000)
+        }
+        // Compared with itself, aligned on a rise: every field shown
+        if (data.tag === "recordingsCompare") {
+            page.compareWith(row)
+            tryVerify(() => page.compareAligned, 10000, "the compared one opens")
+            page.setAlignOn("rise")
             page.setCursor(5000)
         }
         if (data.tag === "diagnosticsPage") {

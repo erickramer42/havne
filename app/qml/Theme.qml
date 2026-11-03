@@ -99,6 +99,11 @@ QtObject {
     function seriesDash(row: int): var {
         return traceDashes[Math.floor(row / seriesColors.length) % traceDashes.length]
     }
+    // A second recording's trace of a row: the next pattern along from the
+    // row's own, so the two read apart however the row is drawn
+    function seriesCompareDash(row: int): var {
+        return traceDashes[(Math.floor(row / seriesColors.length) + 1) % traceDashes.length]
+    }
 
     // Link state -> color. Whitelists the healthy and the explained
     // states; fault, degraded and any future state fall to danger.

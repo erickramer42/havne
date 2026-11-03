@@ -3,7 +3,9 @@
 //          tests/fixtures/recording/: the open and the check off the GUI
 //          thread, the refusals, a later open winning, a close canceling a
 //          pass under way, the signals in display units and the default
-//          plotted ones, columns, the values at a time, markers, findings.
+//          plotted ones, columns (a window from before the start: every
+//          sample once), the values at a time, markers, findings, the
+//          alignment finds against havne-cli view's goldens.
 //          Part of test_bridge, whose main() makes the QCoreApplication.
 
 #include <gtest/gtest.h>
@@ -289,6 +291,100 @@ TEST(RecordingViewTest, ColumnsHoldEachColumnsRange)
     EXPECT_TRUE(v.columns({99}, 0, 1000, 1).isEmpty()) << "no such signal";
     EXPECT_TRUE(v.columns({rpm}, 0, 1000, 0).isEmpty()) << "no columns";
     EXPECT_FALSE(v.stale());
+}
+
+// A window from before the start (a view aligned on another recording):
+// the columns wholly before it empty, and every sample counted once
+// wherever the start falls in a column, narrow or a second and wider
+TEST(RecordingViewTest, AWindowFromBeforeTheStartCountsEverySampleOnce)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const QVariantMap rpmSignal = signalNamed(v, "RPM");
+    const int rpm = rpmSignal.value(QStringLiteral("index")).toInt();
+    const double total = rpmSignal.value(QStringLiteral("samples")).toDouble();
+    ASSERT_GT(total, 0);
+    for (const double t0 :
+         {-0.5, -250.0, -1000.0, -1234.567, -10000.0, -29999.0}) {
+        for (const int n : {1, 3, 7, 30, 31, 299, 3000}) {
+            const QVariantList cols = v.columns({rpm}, t0, 31000, n);
+            ASSERT_EQ(cols.size(), 1) << t0 << " ms, " << n;
+            const QList<double> samples = doubles(cols[0].toMap(), "samples");
+            const QList<double> lows = doubles(cols[0].toMap(), "lows");
+            ASSERT_EQ(samples.size(), n);
+            double sum = 0;
+            for (int c = 0; c < n; ++c) {
+                sum += samples[c];
+                if (t0 + (31000 - t0) * (c + 1) / n < -1) {
+                    EXPECT_EQ(samples[c], 0) << t0 << " ms, " << n << ": " << c;
+                    EXPECT_TRUE(std::isnan(lows[c]));
+                }
+            }
+            EXPECT_EQ(sum, total) << t0 << " ms, " << n;
+        }
+    }
+
+    // Ten seconds before: ten empty columns, then the recording's own
+    const QList<double> early =
+        doubles(v.columns({rpm}, -10000, 30000, 40)[0].toMap(), "highs");
+    const QList<double> own =
+        doubles(v.columns({rpm}, 0, 30000, 30)[0].toMap(), "highs");
+    ASSERT_EQ(early.size(), 40);
+    for (int c = 0; c < 10; ++c) {
+        EXPECT_TRUE(std::isnan(early[c])) << c;
+    }
+    for (int c = 0; c < 30; ++c) {
+        EXPECT_EQ(early[10 + c], own[c]) << c;
+    }
+    const QList<double> before =
+        doubles(v.columns({rpm}, -5000, -1000, 4)[0].toMap(), "samples");
+    EXPECT_EQ(before, QList<double>(4, 0.0)) << "a window wholly before it";
+    EXPECT_FALSE(v.stale());
+}
+
+// Where two recordings line up, as havne-cli view --align-on finds it
+// (tests/golden/cli/view-rise.jsonl, view-marker.jsonl,
+// view-unaligned.jsonl), and a level in display units
+TEST(RecordingViewTest, TheAlignmentFindsAreHavneClisOwn)
+{
+    RecordingView early;
+    RecordingView late;
+    early.open(fixture("pull-early"));
+    late.open(fixture("pull-late"));
+    ASSERT_TRUE(waitFor([&] { return settled(early) && settled(late); }));
+    const int rpm =
+        signalNamed(early, "RPM").value(QStringLiteral("index")).toInt();
+    const int vin =
+        signalNamed(early, "VIN").value(QStringLiteral("index")).toInt();
+    EXPECT_EQ(early.findThreshold(rpm, 4000, 500, true), 14600);
+    EXPECT_EQ(late.findThreshold(rpm, 4000, 500, true), 24600);
+    EXPECT_EQ(early.findMarker(QStringLiteral("pull")), 11500);
+    EXPECT_EQ(late.findMarker(QStringLiteral("pull")), 21500);
+    EXPECT_EQ(early.findThreshold(rpm, 2010, 30, true), -1)
+        << "its hysteresis keeps it from being found";
+    const double fall = early.findThreshold(rpm, 4000, 500, false);
+    EXPECT_GT(fall, 14600) << "after the pull";
+    EXPECT_LT(fall, 30000);
+    EXPECT_EQ(early.findMarker(QStringLiteral("pul")), -1) << "matched whole";
+    EXPECT_EQ(early.findThreshold(vin, 1, 0, true), -1) << "a text signal";
+    EXPECT_EQ(early.findThreshold(99, 1, 0, true), -1) << "no such signal";
+    EXPECT_EQ(early.findThreshold(rpm, 4000, -1, true), -1)
+        << "a negative hysteresis";
+
+    // Coolant reaching 89.5 deg C, or the same level in deg F
+    const int coolant =
+        signalNamed(early, "Coolant").value(QStringLiteral("index")).toInt();
+    const double metric = early.findThreshold(coolant, 89.5, 1.0, true);
+    ASSERT_GT(metric, 0);
+    early.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(early.findThreshold(coolant, 89.5 * 9 / 5 + 32, 1.8, true),
+              metric);
+    EXPECT_EQ(early.findThreshold(coolant, 89.5, 0.5, true), -1)
+        << "89.5 deg F: the coolant never falls below it";
+
+    RecordingView closed;
+    EXPECT_EQ(closed.findMarker(QStringLiteral("pull")), -1);
 }
 
 // The cursor's readout: the value in force at a time, its decimals, and

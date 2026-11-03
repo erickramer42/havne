@@ -286,7 +286,10 @@ QtObject {
     //         or a recording's { columns: { lows: [...], highs: [...] }, row,
     //         decimals, unit } over opts.span, a column with no sample NaN;
     //         either may carry labelValue, the label's value (else the
-    //         newest sample's, or the last column's highest)
+    //         newest sample's, or the last column's highest), scaleKey
+    //         (series with the same one share a value range: one signal
+    //         in two recordings) and dash (its trace's stroke, else its
+    //         row's)
     // opts: { gapMs, minSpanUnits, measure(text) -> width,
     //         format(value, decimals, unit) -> text,
     //         caption(seconds) -> text (a time tick's, 0 for now; optional),
@@ -301,8 +304,8 @@ QtObject {
     // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds, captioned,
     //   caption, align ("right" for now, else "center") }] newest first,
     //   or in time order when absolute,
-    //   traces: [{ row, segments: [[{x, y}]], pieces (what's drawn,
-    //              each a segment's line or, crowded, bandPieces'),
+    //   traces: [{ row, dash, segments: [[{x, y}]], pieces (what's
+    //              drawn, each a segment's line or, crowded, bandPieces'),
     //              endY, label, labeled, labelY }]
     //   in label order top down, labelX }
     function layout(series, width, height, opts) {
@@ -360,10 +363,31 @@ QtObject {
             const label = opts.format(value, s.decimals, s.unit)
             labelW = Math.max(labelW, opts.measure(label))
             traces.push({ sp: sp, cols: cols, row: s.row, vMin: range.vMin, vMax: range.vMax,
-                          flat: range.flat, label: label, value: value })
+                          flat: range.flat, label: label, value: value, decimals: s.decimals,
+                          scaleKey: s.scaleKey, dash: s.dash })
         }
         if (traces.length === 0)
             return null
+
+        // Traces sharing a scaleKey take one range over all their values,
+        // so a value sits at one height in each
+        const byKey = {}
+        for (const tr of traces) {
+            if (tr.scaleKey !== undefined)
+                (byKey[tr.scaleKey] = byKey[tr.scaleKey] || []).push(tr)
+        }
+        for (const key in byKey) {
+            const group = byKey[key]
+            if (group.length < 2)
+                continue
+            const range = valueRange([].concat(...group.map(tr => tr.sp)), group[0].decimals,
+                                     opts.minSpanUnits)
+            for (const tr of group) {
+                tr.vMin = range.vMin
+                tr.vMax = range.vMax
+                tr.flat = range.flat
+            }
+        }
 
         const plotH = Math.max(1, height - axisH - top - bottomPad)
         const plotW = Math.max(1, width - Math.min(Math.ceil(labelW) + swatchW + labelGap,
@@ -373,12 +397,17 @@ QtObject {
         const swing = Math.max(bandSwingMin, bandSwingShare * plotH)
 
         // Flat traces each get a lane of their own instead of stacking on
-        // one line, top down in list order; the label carries the value
-        const flatCount = traces.filter(tr => tr.flat).length
-        let lane = 0
+        // one line, top down in list order (one a scaleKey, which shares
+        // its range); the label carries the value
+        const laneOf = tr => tr.scaleKey !== undefined ? "key " + tr.scaleKey : tr
+        const flats = []
+        for (const tr of traces) {
+            if (tr.flat && flats.indexOf(laneOf(tr)) < 0)
+                flats.push(laneOf(tr))
+        }
         for (const tr of traces) {
             if (tr.flat)
-                tr.lane = 1 - (++lane) / (flatCount + 1)
+                tr.lane = 1 - (flats.indexOf(laneOf(tr)) + 1) / (flats.length + 1)
         }
 
         const hGrid = []
@@ -394,7 +423,9 @@ QtObject {
         const caption = opts.caption || (s => String(s))
         const ticks = []
         if (opts.absolute) {
-            const widest = opts.measure(caption(Math.ceil(tMax / 1000)))
+            // The widest caption is at an end: a time before zero has a sign
+            const widest = Math.max(opts.measure(caption(Math.ceil(tMax / 1000))),
+                                    opts.measure(caption(Math.floor(tMin / 1000))))
             const stepS = tickStep(spanS, (plotW - 1) / spanS, widest + captionGap)
             for (let k = Math.ceil(tMin / 1000 / stepS); k * stepS * 1000 <= tMax; ++k) {
                 const x = xOf(k * stepS * 1000)
@@ -429,6 +460,7 @@ QtObject {
                                    bottom: traceY(tr.cols.lows[c]) })
                 }
                 out.push({ row: tr.row,
+                           dash: tr.dash,
                            segments: [],
                            pieces: columnPieces(sampled, Math.floor(opts.gapMs / colMs), swing),
                            endY: traceY(tr.value),
@@ -447,6 +479,7 @@ QtObject {
                                        : [{ band: false, points: seg }])
             }
             out.push({ row: tr.row,
+                       dash: tr.dash,
                        segments: segs,
                        pieces: pieces,
                        endY: traceY(tr.sp[tr.sp.length - 1]),

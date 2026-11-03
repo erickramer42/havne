@@ -3,8 +3,10 @@
 //          Bridge.recentRecordings, a recording that ends joining it, Replay
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
-//          readout, pan and zoom kept inside the recording, a finding's row
-//          centering the view, a refused folder's error, back to the list;
+//          readout, pan and zoom kept inside the recording, a second
+//          recording overlaid and aligned (starts, UTC, a marker, a rise or
+//          fall), a finding's row centering the view, a refused folder's
+//          error, back to the list;
 //          every item inside a phone's width (tst_phone.qml). RecordingView
 //          itself: test_bridge (RecordingViewTest); the chart's layout:
 //          tst_chartlayout.qml; the drawing is manual smoke (docs/testing.md).
@@ -21,7 +23,9 @@ pragma ComponentBehavior: Bound
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
-// frames check's findings on it, and the findings listed.
+// frames check's findings on it, and the findings listed. A second
+// recording can be overlaid, its traces dashed in the first's colors,
+// lined up as havne-cli view --align-on lines two up.
 Page {
     id: root
     background: Rectangle { color: Theme.bg }
@@ -35,11 +39,13 @@ Page {
     property string openedTitle: ""
     readonly property bool viewing: recording.state !== RecordingView.Closed
 
-    // The part of the recording in view, in ms since it started, and the
-    // cursor's time (-1 for none)
+    // The part of the axis in view, in ms since the recording started
+    // (before it too, with a compared recording that starts earlier), and
+    // the cursor's time (NaN for none)
     property real viewT0: 0
     property real viewT1: 1000
-    property real cursorMs: -1
+    property real cursorMs: NaN
+    readonly property bool hasCursor: !isNaN(cursorMs)
     // Signal index -> plotted, from the recording's default at the open
     property var plotted: ({})
     // Signal index -> { text, unit } at the cursor
@@ -55,6 +61,32 @@ Page {
     readonly property int rawRowsPerFrame: 20000
     // The recording's rows a second, every signal's together
     property real rowsPerSecond: 0
+
+    // A second recording overlaid (ADR-0049 step 5): its signals of the
+    // same names drawn dashed beside the first's, sharing their scales,
+    // on the first's axis at compareOffsetMs (its own time plus the
+    // offset). alignOn says how the two line up: "start", "utc", "marker"
+    // (alignLabel), "rise" or "fall" (alignSignal reaching alignLevel, in
+    // display units, after being alignHysteresis beyond it)
+    readonly property bool comparing: compare.state !== RecordingView.Closed
+    property string compareTitle: ""
+    property bool compareAligned: false
+    property real compareOffsetMs: 0
+    property string compareStatus: ""
+    property var compareByName: ({})
+    property real compareRowsPerSecond: 0
+    // The first's signal index -> the compared one's value at the cursor
+    property var compareReadout: ({})
+    property string alignOn: "start"
+    property string alignLabel: ""
+    property string alignSignal: ""
+    property real alignLevel: NaN
+    property real alignHysteresis: 0
+    onAlignOnChanged: align()
+    onAlignLabelChanged: align()
+    onAlignSignalChanged: align()
+    onAlignLevelChanged: align()
+    onAlignHysteresisChanged: align()
 
     // The frame test (developer mode; ADR-0049 section 10 step 5's 60 fps
     // on pan and pinch): four signals plotted, then for frameTestSeconds
@@ -123,6 +155,13 @@ Page {
 
     function backToList() {
         recording.close()
+        stopComparing()
+        alignChoice.currentIndex = 0
+        alignOn = "start"
+        alignLabel = ""
+        alignSignal = ""
+        alignLevel = NaN
+        alignHysteresis = 0
         openedTitle = ""
         refresh()
     }
@@ -131,15 +170,25 @@ Page {
         return recording.durationMs > 0 ? recording.durationMs : 1000
     }
 
-    // The view, kept inside the recording and no narrower than minSpanMs.
+    // The axis: the recording, and an aligned compared one on it
+    function axisStart() {
+        return compareAligned ? Math.min(0, compareOffsetMs) : 0
+    }
+    function axisEnd() {
+        return compareAligned ? Math.max(durationMs(), compareOffsetMs + compare.durationMs)
+                              : durationMs()
+    }
+
+    // The view, kept inside the axis and no narrower than minSpanMs.
     // A change within settleMs of the last is the view moving (a drag, a
     // pinch, the wheel): the chart draws it without antialiasing until the
     // view rests
     readonly property int settleMs: 150
     function setView(t0, t1) {
-        const whole = durationMs()
-        const span = Math.min(whole, Math.max(minSpanMs, t1 - t0))
-        const start = Math.min(Math.max(0, t0), whole - span)
+        const lo = axisStart()
+        const hi = axisEnd()
+        const span = Math.min(hi - lo, Math.max(minSpanMs, t1 - t0))
+        const start = Math.min(Math.max(lo, t0), hi - span)
         viewT0 = start
         viewT1 = start + span
         if (settle.running)
@@ -151,7 +200,7 @@ Page {
         setView(t - (t - viewT0) * factor, t + (viewT1 - t) * factor)
     }
     function showAll() {
-        setView(0, durationMs())
+        setView(axisStart(), axisEnd())
     }
     // A time placed in the middle of the view, the view's span kept
     function centerOn(t) {
@@ -160,12 +209,15 @@ Page {
     }
 
     function setCursor(t) {
-        cursorMs = Math.min(Math.max(0, t), durationMs())
+        cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
         const values = {}
         const indexes = recording.signalList.map(s => s.index)
-        for (const v of recording.valuesAt(indexes, cursorMs))
-            values[v.index] = v
+        if (cursorMs >= 0) {
+            for (const v of recording.valuesAt(indexes, cursorMs))
+                values[v.index] = v
+        }
         readout = values
+        compareReadout = compareValuesAt(cursorMs)
         chart.requestPaint()
     }
 
@@ -185,8 +237,9 @@ Page {
     }
 
     // The chart's series: each plotted number's columns over the view, its
-    // label the cursor's value while that's in view. Two pixels a column,
-    // or a second when that would read more than rawRowsPerFrame rows
+    // label the cursor's value while that's in view, then the compared
+    // recording's of the same names, dashed. Two pixels a column, or a
+    // second when that would read more than rawRowsPerFrame rows
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
@@ -196,16 +249,148 @@ Page {
             return []
         const spanS = (viewT1 - viewT0) / 1000
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
-        if (spanS * rowsPerSecond > rawRowsPerFrame)
+        if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
         const inView = cursorMs >= viewT0 && cursorMs <= viewT1
-        return recording.columns(indexes, viewT0, viewT1, n).map(c => {
+        const labelOf = at => inView && at && at.text !== "" ? Number(at.text) : NaN
+        const out = recording.columns(indexes, viewT0, viewT1, n).map(c => {
             const s = sigs[c.index]
-            const at = root.readout[c.index]
-            const value = inView && at && at.text !== "" ? Number(at.text) : NaN
-            return { columns: { lows: c.lows, highs: c.highs }, row: c.index,
-                     decimals: s.decimals, unit: s.unit, labelValue: value }
+            return { columns: { lows: c.lows, highs: c.highs }, row: c.index, scaleKey: c.index,
+                     decimals: s.decimals, unit: s.unit, labelValue: labelOf(root.readout[c.index]) }
         })
+        if (!compareAligned)
+            return out
+        const theirs = compare.signalList
+        const pairs = indexes.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
+                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText)
+        if (pairs.length === 0)
+            return out
+        const cols = compare.columns(pairs.map(p => p.theirs), viewT0 - compareOffsetMs,
+                                     viewT1 - compareOffsetMs, n)
+        for (let k = 0; k < cols.length; ++k) {
+            const mine = pairs[k].mine
+            const s = theirs[pairs[k].theirs]
+            out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs }, row: mine,
+                       scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]) })
+        }
+        return out
+    }
+
+    // The compared recording's values at axis time t, by the first's
+    // signal index, the names matched
+    function compareValuesAt(t) {
+        const out = {}
+        if (!compareAligned || isNaN(t) || t - compareOffsetMs < 0)
+            return out
+        const mine = recording.signalList.filter(s => root.compareByName[s.name] !== undefined)
+        const got = compare.valuesAt(mine.map(s => root.compareByName[s.name]), t - compareOffsetMs)
+        for (let k = 0; k < got.length; ++k)
+            out[mine[k].index] = got[k]
+        return out
+    }
+
+    function compareWith(row) {
+        compareTitle = row.title
+        compareAligned = false
+        compareStatus = qsTr("Opening %1…").arg(row.title)
+        compare.open(row.folder)
+    }
+    function stopComparing() {
+        compare.close()
+        compareTitle = ""
+        compareStatus = ""
+        compareAligned = false
+        compareReadout = ({})
+        if (recording.state === RecordingView.Open)
+            showAll()
+    }
+
+    // The first recording's markers' labels, each once, and its number
+    // signals' names: what the alignment can be on
+    function markerLabels() {
+        const out = []
+        for (const m of recording.markers) {
+            if (out.indexOf(m.label) < 0)
+                out.push(m.label)
+        }
+        return out
+    }
+    function numberNames() {
+        return recording.signalList.filter(s => !s.isText).map(s => s.name)
+    }
+    function setAlignOn(on) {
+        if (on === "marker" && alignLabel === "")
+            alignLabel = markerLabels()[0] || ""
+        if ((on === "rise" || on === "fall") && alignSignal === "")
+            alignSignal = numberNames()[0] || ""
+        alignOn = on
+    }
+    // A number as typed, in the locale or plain; NaN for none
+    function numberOf(text) {
+        if (text.trim() === "")
+            return NaN
+        try {
+            return Number.fromLocaleString(Qt.locale(), text.trim())
+        } catch (e) {
+            const v = Number(text.trim())
+            return isFinite(v) ? v : NaN
+        }
+    }
+
+    // Lines the compared recording up on the first: its offset, whether
+    // it's drawn, and the status saying so
+    function align() {
+        compareAligned = false
+        compareStatus = compare.state === RecordingView.Failed
+                        ? qsTr("%1 can't be opened: %2").arg(compareTitle).arg(compare.error) : ""
+        if (compare.state === RecordingView.Open && recording.state === RecordingView.Open)
+            alignOpen()
+        if (recording.state !== RecordingView.Open)
+            return
+        showAll()
+        if (hasCursor)
+            setCursor(cursorMs)
+    }
+    function alignOpen() {
+        let here = 0
+        let there = 0
+        let what = qsTr("their starts")
+        if (alignOn === "utc") {
+            what = qsTr("their UTC starts")
+            here = recording.info.utcStartMs > 0 ? recording.info.utcStartMs : -1
+            there = compare.info.utcStartMs > 0 ? compare.info.utcStartMs : -1
+        } else if (alignOn === "marker") {
+            what = qsTr("the marker %1").arg(alignLabel)
+            here = alignLabel !== "" ? recording.findMarker(alignLabel) : -1
+            there = alignLabel !== "" ? compare.findMarker(alignLabel) : -1
+        } else if (alignOn === "rise" || alignOn === "fall") {
+            const s = recording.signalList.find(x => x.name === alignSignal)
+            if (!s || isNaN(alignLevel)) {
+                compareStatus = qsTr("Dashed: %1. Choose a signal and type a level to align on").arg(compareTitle)
+                return
+            }
+            const verb = alignOn === "rise" ? qsTr("rising to %1") : qsTr("falling to %1")
+            what = qsTr("%1 %2").arg(alignSignal).arg(verb.arg(valueText(alignLevel, s.decimals, s.unit)))
+            const j = compareByName[alignSignal]
+            here = recording.findThreshold(s.index, alignLevel, alignHysteresis, alignOn === "rise")
+            there = j !== undefined ? compare.findThreshold(j, alignLevel, alignHysteresis, alignOn === "rise") : -1
+        }
+        if (here < 0 || there < 0) {
+            compareStatus = alignOn === "utc"
+                ? qsTr("%1 isn't drawn: an older recording has no UTC start").arg(compareTitle)
+                : here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has %2").arg(compareTitle).arg(what)
+                : here < 0 ? qsTr("%1 isn't drawn: this recording has no %2").arg(compareTitle).arg(what)
+                : qsTr("%1 isn't drawn: it has no %2").arg(compareTitle).arg(what)
+            return
+        }
+        compareOffsetMs = alignOn === "utc" ? there - here : here - there
+        compareAligned = true
+        compareStatus = alignOn === "start" ? qsTr("Dashed: %1, aligned on %2").arg(compareTitle).arg(what)
+            : alignOn === "utc" ? qsTr("Dashed: %1, aligned on %2, %3 apart").arg(compareTitle).arg(what)
+                                    .arg(timeText(Math.abs(compareOffsetMs), true))
+            : qsTr("Dashed: %1, aligned on %2, at %3 here and %4 there").arg(compareTitle).arg(what)
+                  .arg(timeText(here, true)).arg(timeText(there, true))
     }
 
     function valueText(v, decimals, unit) {
@@ -213,8 +398,10 @@ Page {
         return unit !== "" ? n + " " + unit : n
     }
 
-    // 12.3 s, 1:02.3, 1:02:03
+    // 12.3 s, 1:02.3, 1:02:03; before the start (an aligned axis), -12.3 s
     function timeText(ms, tenths) {
+        if (ms < 0)
+            return "-" + timeText(-ms, tenths)
         const s = ms / 1000
         if (s < 60)
             return tenths ? qsTr("%1 s").arg(s.toFixed(1)) : qsTr("%1 s").arg(Math.round(s))
@@ -290,13 +477,36 @@ Page {
             for (const s of recording.signalList)
                 rows += s.samples
             root.rowsPerSecond = rows / (root.durationMs() / 1000)
-            root.cursorMs = -1
+            root.cursorMs = NaN
             root.showAll()
         }
         onSignalListChanged: {
-            if (root.cursorMs >= 0)
+            if (root.hasCursor)
                 root.setCursor(root.cursorMs)
             chart.requestPaint()
+        }
+    }
+
+    RecordingView {
+        id: compare
+        unitSystem: Bridge.unitSystem
+        onStateChanged: {
+            if (compare.state === RecordingView.Open) {
+                const names = {}
+                let rows = 0
+                for (const s of compare.signalList) {
+                    names[s.name] = s.index
+                    rows += s.samples
+                }
+                root.compareByName = names
+                root.compareRowsPerSecond = rows / Math.max(1, compare.durationMs / 1000)
+            }
+            if (compare.state !== RecordingView.Opening)
+                root.align()
+        }
+        onSignalListChanged: {
+            if (root.hasCursor)
+                root.setCursor(root.cursorMs)
         }
     }
 
@@ -484,6 +694,94 @@ Page {
             text: recording.state === RecordingView.Open ? root.infoText() : ""
         }
 
+        // Another recording to overlay, and how the two line up
+        RowLayout {
+            visible: recording.state === RecordingView.Open
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+            ComboBox {
+                id: compareChoice
+                objectName: "compareChoice"
+                readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
+                Layout.fillWidth: true
+                model: [root.comparing ? root.compareTitle : qsTr("Compare with…")]
+                       .concat(others.map(r => r.title))
+                enabled: others.length > 0
+                Accessible.name: qsTr("Compare with another recording")
+                onActivated: index => {
+                    if (index > 0)
+                        root.compareWith(others[index - 1])
+                    currentIndex = 0
+                }
+            }
+            ThemedButton {
+                objectName: "stopCompare"
+                visible: root.comparing
+                text: qsTr("Stop")
+                Accessible.name: qsTr("Stop comparing")
+                onClicked: root.stopComparing()
+            }
+        }
+        Flow {
+            visible: root.comparing && recording.state === RecordingView.Open
+            Layout.fillWidth: true
+            spacing: 6
+            ComboBox {
+                id: alignChoice
+                objectName: "alignChoice"
+                width: 170
+                textRole: "text"
+                valueRole: "value"
+                model: [{ text: qsTr("Align the starts"), value: "start" },
+                        { text: qsTr("Align UTC starts"), value: "utc" },
+                        { text: qsTr("Align a marker"), value: "marker" },
+                        { text: qsTr("Align a rise"), value: "rise" },
+                        { text: qsTr("Align a fall"), value: "fall" }]
+                onActivated: root.setAlignOn(currentValue)
+            }
+            ComboBox {
+                objectName: "alignMarker"
+                visible: root.alignOn === "marker"
+                width: 150
+                model: recording.state === RecordingView.Open ? root.markerLabels() : []
+                onActivated: root.alignLabel = currentText
+            }
+            ComboBox {
+                objectName: "alignSignal"
+                visible: root.alignOn === "rise" || root.alignOn === "fall"
+                width: 150
+                model: recording.state === RecordingView.Open ? root.numberNames() : []
+                onActivated: root.alignSignal = currentText
+            }
+            TextField {
+                objectName: "alignLevel"
+                visible: root.alignOn === "rise" || root.alignOn === "fall"
+                width: 100
+                placeholderText: qsTr("Level")
+                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                onEditingFinished: root.alignLevel = root.numberOf(text)
+            }
+            TextField {
+                objectName: "alignHysteresis"
+                visible: root.alignOn === "rise" || root.alignOn === "fall"
+                width: 100
+                placeholderText: qsTr("Hysteresis")
+                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                onEditingFinished: {
+                    const v = root.numberOf(text)
+                    root.alignHysteresis = v >= 0 ? v : 0
+                }
+            }
+        }
+        Label {
+            objectName: "compareStatus"
+            visible: root.comparing && recording.state === RecordingView.Open
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: root.compareStatus
+        }
+
         // The recording's signals: a tick plots one, and beside each its
         // value at the cursor
         ListView {
@@ -543,9 +841,22 @@ Page {
                               : signalRow.modelData.isText ? signalRow.at.text
                               : root.valueText(Number(signalRow.at.text), signalRow.modelData.decimals,
                                                signalRow.at.unit)
-                        Layout.maximumWidth: Math.round(signalRow.width * 0.5)
+                        Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
                         elide: Text.ElideRight
                         color: Theme.text
+                        font.family: Theme.monoFamily
+                    }
+                    // The compared recording's, at the cursor
+                    Label {
+                        objectName: "compareValue"
+                        readonly property var at: root.compareReadout[signalRow.signalIndex]
+                        visible: root.compareAligned
+                        text: !at || at.atMs < 0 ? qsTr("—")
+                              : signalRow.modelData.isText ? at.text
+                              : root.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
+                        Layout.maximumWidth: Math.round(signalRow.width * 0.3)
+                        elide: Text.ElideRight
+                        color: Theme.textDim
                         font.family: Theme.monoFamily
                     }
                 }
@@ -591,8 +902,8 @@ Page {
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
                 color: Theme.textDim
-                text: root.cursorMs < 0 ? qsTr("Tap the chart to read the values at a time")
-                                        : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
+                text: !root.hasCursor ? qsTr("Tap the chart to read the values at a time")
+                                      : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
             }
         }
 

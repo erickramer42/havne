@@ -7,9 +7,12 @@
 //          the frames check's findings), the cursor's readout, the view
 //          kept inside the recording through setView, zoom, a drag and the
 //          wheel, the chart without antialiasing while the view moves and
-//          with it at rest, a finding's row centering the view, a refused
-//          folder's error, and back to the list. test_qml's recordings go
-//          to a scratch folder.
+//          with it at rest, a second recording overlaid (dashed beside the
+//          first's rows, sharing their scales) and aligned on the starts, a
+//          rise, a marker and the UTC starts as havne-cli view aligns them
+//          (tests/fixtures/recording/pull-early and pull-late), a finding's
+//          row centering the view, a refused folder's error, and back to
+//          the list. test_qml's recordings go to a scratch folder.
 
 import QtQuick
 import QtTest
@@ -58,6 +61,22 @@ TestCase {
         title: "2026-11-03 10:00:00 · Findings", uri: "replay://x?profile=obd2",
         folder: Harness.recordingFixtures + "/findings", source: "socketcan://vcan0?profile=obd2",
         profile: "obd2" })
+
+    readonly property var earlyRow: ({
+        title: "2026-11-03 10:00:00 · Early", uri: "replay://x?profile=obd2",
+        folder: Harness.recordingFixtures + "/pull-early", source: "", profile: "obd2" })
+    readonly property var lateRow: ({
+        title: "2026-11-03 10:01:30 · Late", uri: "replay://y?profile=obd2",
+        folder: Harness.recordingFixtures + "/pull-late", source: "", profile: "obd2" })
+
+    // Opens pull-early with pull-late listed beside it
+    function openEarly() {
+        const page = createPage()
+        page.recordings = [lateRow, earlyRow]
+        page.open(earlyRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        return page
+    }
 
     // Opens the findings fixture from its row and waits for the viewer
     function openFindings() {
@@ -196,7 +215,7 @@ TestCase {
             mouseMove(frame, x - dx, y)
         mouseRelease(frame, x - 200, y)
         verify(page.viewT0 > 0, "dragged later: " + page.viewT0)
-        verify(page.cursorMs < 0, "a drag places no cursor")
+        verify(!page.hasCursor, "a drag places no cursor")
         mouseClick(frame, x, y)
         verify(page.cursorMs > page.viewT0 && page.cursorMs < page.viewT1,
                "a tap places the cursor in view: " + page.cursorMs)
@@ -231,6 +250,100 @@ TestCase {
         chart.moving = true
         chart.moving = false
         tryVerify(() => chart.paints > paints, 2000, "drawn again with antialiasing")
+    }
+
+    // Another recording overlays the first: its signals of the same names
+    // dashed beside their rows' own, sharing their scales, aligned on the
+    // starts until told otherwise; Stop takes it away
+    function test_aComparedRecordingIsDrawnDashed() {
+        const page = openEarly()
+        const choice = find(page, "compareChoice")
+        compare(choice.count, 2, "the placeholder and the other recording")
+        verify(!find(page, "stopCompare").visible)
+        choice.activated(1)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(choice.currentText, lateRow.title, "the choice names it")
+        verify(find(page, "stopCompare").visible)
+        compare(page.compareOffsetMs, 0)
+        compare(page.viewT0, 0)
+        compare(page.viewT1, 40000, "to the longer one's end")
+        const all = page.series(400)
+        compare(all.length, 6, "three plotted, each twice")
+        const dashed = all.filter(s => s.dash !== undefined)
+        compare(dashed.length, 3)
+        for (const s of dashed) {
+            compare(JSON.stringify(s.dash), JSON.stringify(Theme.seriesCompareDash(s.row)))
+            compare(s.scaleKey, s.row)
+            verify(all.some(m => m.dash === undefined && m.row === s.row && m.scaleKey === s.row),
+                   "beside its row's own, on one scale")
+        }
+        compare(find(page, "compareStatus").text,
+                "Dashed: " + lateRow.title + ", aligned on their starts")
+        find(page, "stopCompare").clicked()
+        verify(!page.comparing)
+        compare(page.series(400).length, 3)
+        compare(page.viewT1, 30000)
+    }
+
+    // Aligned on a rise, a marker or the UTC starts, where havne-cli view
+    // lines the two pulls up (tests/golden/cli/view-rise.jsonl: 14.6 s and
+    // 24.6 s; view-marker.jsonl; view-utc.jsonl: 90 s apart)
+    function test_theAlignmentsAreHavneClisOwn() {
+        const page = openEarly()
+        page.compareWith(lateRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        const status = find(page, "compareStatus")
+
+        page.setAlignOn("rise")
+        compare(page.alignSignal, "RPM", "the first number signal")
+        verify(!page.compareAligned, "no level yet")
+        verify(status.text.indexOf("type a level") >= 0, status.text)
+        page.alignHysteresis = 500
+        page.alignLevel = 4000
+        verify(page.compareAligned)
+        compare(page.compareOffsetMs, -10000)
+        compare(page.viewT0, -10000, "from the compared one's start")
+        compare(page.viewT1, 30000)
+        verify(status.text.indexOf("at 14.6 s here and 24.6 s there") > 0, status.text)
+
+        // One pull, ten seconds apart: at the cursor the two agree, and
+        // before the first's start only the compared one has values
+        const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
+        page.setCursor(14600)
+        compare(page.compareReadout[rpm].text, page.readout[rpm].text)
+        const row = find(page, "signalRows").itemAtIndex(rpm)
+        compare(find(row, "compareValue").text, find(row, "cursorValue").text)
+        page.setCursor(-5000)
+        compare(page.cursorMs, -5000)
+        compare(find(page, "cursorTime").text, "At -5.0 s")
+        verify(page.readout[rpm] === undefined, "nothing of the first's yet")
+        verify(page.compareReadout[rpm].atMs >= 0)
+
+        // Its hysteresis keeps 2010 from being found (view-unaligned.jsonl)
+        page.alignHysteresis = 30
+        page.alignLevel = 2010
+        verify(!page.compareAligned)
+        verify(status.text.indexOf("isn't drawn") > 0, status.text)
+        compare(page.viewT0, 0, "back to the first alone")
+        compare(page.viewT1, 30000)
+        compare(page.series(400).length, 3)
+
+        page.setAlignOn("marker")
+        compare(page.alignLabel, "pull")
+        verify(page.compareAligned)
+        compare(page.compareOffsetMs, -10000, "11.5 s here, 21.5 s there")
+        page.setAlignOn("utc")
+        compare(page.compareOffsetMs, 90000)
+        compare(page.viewT1, 130000)
+        verify(status.text.indexOf("1:30.0 apart") > 0, status.text)
+        page.setAlignOn("start")
+        compare(page.compareOffsetMs, 0)
+
+        // Back to the list ends the comparison and its alignment
+        find(page, "backToList").clicked()
+        verify(!page.comparing)
+        compare(page.alignOn, "start")
+        compare(page.alignLabel, "")
     }
 
     // A finding's row centers the view on it and puts the cursor at its
