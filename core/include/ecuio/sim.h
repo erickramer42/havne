@@ -26,7 +26,8 @@ extern "C" {
  *
  * The URI, one of:
  *   mock://<label>[?values=drive|canned][&vin=<VIN>][&faults=<f>:<n>[,...]]
- *   replay://<absolute path>[?loop=0|1][&vin=<VIN>][&faults=<f>:<n>[,...]]
+ *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
+ *            [&faults=<f>:<n>[,...]]
  * mock://, the mock's car. values: drive (the default) answers Service 01
  * from the mock's drive cycle, canned the fakes' one reading per linear
  * J1979 PID. vin: what Service 09 item 02 answers, a made-up one by
@@ -36,8 +37,10 @@ extern "C" {
  * ECU's time since create, the car's own bitmaps, identification and
  * codes; a request it holds no reply for is refused, and a clear always
  * (a recording can't say what follows one). loop=1 goes round the
- * recording; by default its last replies hold. vin: what 09 02 answers
- * instead of the recording's.
+ * recording; by default its last replies hold. from and to: a stretch of
+ * it alone, in the seconds the recording viewer and havne-cli view show
+ * (at most three decimals), its first row at the ECU's start. vin: what
+ * 09 02 answers instead of the recording's.
  * faults, both: silent, late, bad_sequence and stalled, each every nth
  * reply (1-10000), the bitmaps never broken.
  */

@@ -16,7 +16,8 @@
 //          CoreTest.ReplayFaults* (?faults= and ?seed=: each kind's
 //          effect, its count and the same faults from the same seed),
 //          BridgeTest.ReplayFaults* (the bridge and the recorder under
-//          them)
+//          them); CoreTest.ReplayStretch* (?from= and ?to=: the rows
+//          played, their stamps, a loop of the stretch, the refusals)
 //
 // replay:// (ADR-0023): a recording's frames.csv (ADR-0017) played back
 // through the frame API. Attach reads the whole file once and refuses a
@@ -27,12 +28,14 @@
 // that a file changed since attach stops playback with
 // ECUIO_ERR_RECORDING_CHANGED in the error state. ?faults= (ADR-0041)
 // drops, corrupts, cuts short or holds back frames as they play, drawn
-// from ?seed= so the same URI plays the same faults.
+// from ?seed= so the same URI plays the same faults. ?from= and ?to=
+// (recording_stretch.h) play a stretch alone, its first frame at 0.
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "error_detail.h"
 #include "frames_csv.h"
+#include "recording_stretch.h"
 #include "replay_faults.h"
 #include "session.h"
 #include "uri_query.h"
@@ -106,13 +109,23 @@ std::string source_frame_flags(const std::string& frames_csv)
     return found;
 }
 
+/* What attach learns of the file for the worker: the rows before the
+ * stretch, the last row a pass reads, the frames it plays and the session
+ * time of its last (its first is 0) */
+struct file_plan {
+    uint64_t skip = 0;
+    uint64_t rows = 0;
+    uint64_t frames = 0;
+    uint64_t span_us = 0;
+};
+
 /* The whole file, checked: every row parses, a torn last one aside (left
- * out and counted in *torn). Gives the row count and the session time of
- * the last row. Reads through the worker's own line buffer and frame,
- * which attach has made. */
+ * out and counted in *torn), and the stretch holds a frame. Reads through
+ * the worker's own line buffer and frame, which attach has made. */
 ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
-                          ecuio_frame_t* frame, uint64_t* rows,
-                          uint64_t* span_us, uint32_t* torn)
+                          ecuio_frame_t* frame,
+                          const ecuio_stretch::stretch& stretch,
+                          file_plan* plan, uint32_t* torn)
 {
     FILE* f = path.open();
     if (f == nullptr) {
@@ -125,8 +138,11 @@ ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
     }
     row prev, cur;
     uint64_t n = 0, span = 0, line_no = 1;
+    uint64_t first_us = 0, last_us = 0;
     bool too_long = false;
     bool cut = false;
+    ecuio_stretch::cursor in(stretch);
+    file_plan p;
     while (read_line(f, buf, &too_long, &cut)) {
         ++line_no;
         if (cut) {
@@ -145,19 +161,36 @@ ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
             std::fclose(f);
             return ECUIO_ERR_LOAD_FAILED;
         }
-        if (n > 0) {
-            span += step_us(prev, cur);
+        if (n == 0) {
+            first_us = cur.host_us;
         }
-        prev = cur;
+        last_us = cur.host_us;
         ++n;
+        if (in.plays(cur.host_us)) {
+            if (p.frames == 0) {
+                p.skip = n - 1;
+            } else {
+                span += step_us(prev, cur);
+            }
+            prev = cur;
+            ++p.frames;
+            p.rows = n;
+            p.span_us = span;
+        }
     }
     std::fclose(f);
     if (n == 0) {
         ecuio_detail_set("the recording's frames.csv holds no frames");
         return ECUIO_ERR_LOAD_FAILED;
     }
-    *rows = n;
-    *span_us = span;
+    if (p.frames == 0) {
+        char why[192];
+        ecuio_stretch::describe_empty(stretch, first_us, last_us, why,
+                                      sizeof why);
+        ecuio_detail_set("%s", why);
+        return ECUIO_ERR_LOAD_FAILED;
+    }
+    *plan = p;
     return ECUIO_OK;
 }
 
@@ -211,8 +244,8 @@ struct ecuio_replay_transport {
     native_path path;                     /* the frames.csv */
     std::vector<char> line;               /* kLineMax + 2 */
     std::unique_ptr<ecuio_frame_t> frame; /* 4 KB, off the worker's stack */
-    uint64_t rows = 0;                    /* attach's count, what a pass
-                                             plays */
+    uint64_t skip = 0;                    /* rows before the stretch */
+    uint64_t rows = 0;                    /* the last row a pass reads */
     uint32_t speed_milli = kSpeedDefault; /* 0 = max */
     bool loop = false;
     replay_faults faults; /* ?faults=, ?seed= */
@@ -273,6 +306,9 @@ void replay_worker(ecuio_replay_transport* t)
                 std::fclose(f);
                 stop_early(t);
                 return;
+            }
+            if (n <= t->skip) {
+                continue; /* before the stretch: read, never sent */
             }
             if (!first) {
                 pass_us += step_us(prev, cur);
@@ -382,7 +418,7 @@ const ecuio_transport_ops_t kReplayTransportOps = {replay_start, replay_detach};
 extern "C" {
 
 const char* const ecuio_replay_query_keys[] = {
-    "profile", "did", "speed", "loop", "faults", "seed", nullptr};
+    "profile", "did", "speed", "loop", "faults", "seed", "from", "to", nullptr};
 
 ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
                                              const char* uri,
@@ -394,8 +430,13 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
     uint32_t speed = kSpeedDefault;
     bool loop = false;
     replay_faults faults;
+    ecuio_stretch::stretch stretch;
     for (size_t i = 0; i < query->count; ++i) { /* duplicates: last wins */
         const ecuio_uri::param& p = query->params[i];
+        if (!ecuio_stretch::take(p, &stretch)) {
+            ecuio_detail_set("%s", ecuio_stretch::kValueWhy);
+            return ECUIO_ERR_BAD_URI;
+        }
         if (p.is("speed") && !parse_speed(p, &speed)) {
             ecuio_detail_set("?speed= takes a factor from 0.1 to 100, at most "
                              "three decimals, or max");
@@ -427,6 +468,10 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
             return ECUIO_ERR_BAD_URI;
         }
     }
+    if (!ecuio_stretch::ordered(stretch)) {
+        ecuio_detail_set("%s", ecuio_stretch::kOrderWhy);
+        return ECUIO_ERR_BAD_URI;
+    }
 
     const char* body = uri + std::strlen("replay://");
     const char* q = std::strchr(body, '?');
@@ -440,7 +485,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
 
     /* Every allocation from here is inside the try: a bad_alloc becomes
      * OUT_OF_MEMORY, never an exception out of ecuio_session_create */
-    uint64_t rows = 0, span_us = 0;
+    file_plan plan;
     uint32_t torn = 0;
     try {
         std::string path(body, body_len);
@@ -465,16 +510,21 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         impl->line.resize(kLineMax + 2);
         impl->frame.reset(new ecuio_frame_t());
         const ecuio_status_t checked = check_file(
-            impl->path, impl->line, impl->frame.get(), &rows, &span_us, &torn);
+            impl->path, impl->line, impl->frame.get(), stretch, &plan, &torn);
         if (checked != ECUIO_OK) {
             return checked;
         }
-        impl->rows = rows;
+        impl->skip = plan.skip;
+        impl->rows = plan.rows;
         /* A pass with no span would never wait: the worker would spin,
          * sending the same instant again and again */
-        if (loop && span_us == 0) {
-            ecuio_detail_set("?loop=1 needs a recording that spans time; "
-                             "this one's frames all share one time");
+        if (loop && plan.span_us == 0) {
+            ecuio_detail_set(stretch.given()
+                                 ? "?loop=1 needs a stretch that spans time; "
+                                   "this one's frames all share one time"
+                                 : "?loop=1 needs a recording that spans "
+                                   "time; this one's frames all share one "
+                                   "time");
             return ECUIO_ERR_BAD_URI;
         }
         session->source_frame_flags = source_frame_flags(path);
@@ -489,9 +539,10 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     session->info.backend = ECUIO_BACKEND_REPLAY;
-    session->info.replay_frames =
-        rows > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(rows);
-    const uint64_t span_ms = span_us / 1000;
+    session->info.replay_frames = plan.frames > UINT32_MAX
+                                      ? UINT32_MAX
+                                      : static_cast<uint32_t>(plan.frames);
+    const uint64_t span_ms = plan.span_us / 1000;
     session->info.replay_span_ms =
         span_ms > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(span_ms);
     session->info.replay_speed_milli = speed;

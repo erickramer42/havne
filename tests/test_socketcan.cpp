@@ -779,5 +779,14 @@ TEST(SimTest, ARecordingIsReadBeforeTheInterface)
         << c.detail;
     c = sim_create((fixture + "?loop=1").c_str(), "nosuchcan9");
     EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED) << "it spans time";
+    // The URI's stretch reaches the loader: one past the recording's end
+    // is the recording's refusal, one inside it the interface's
+    c = sim_create((fixture + "?from=1000").c_str(), "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("no frames from 1000 s on"), std::string::npos)
+        << c.detail;
+    c = sim_create((fixture + "?from=10&to=40").c_str(), "nosuchcan9");
+    EXPECT_NE(c.detail.find("no interface nosuchcan9"), std::string::npos)
+        << c.detail;
 }
 #endif

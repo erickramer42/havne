@@ -325,3 +325,67 @@ instant again and again, as fast as it can. Create refuses it
 frames all share one time"); attach already knows the span from its
 check of the file. Played once, such a recording plays.
 `CoreTest.ReplayRefusesToLoopARecordingWithNoSpan`.
+
+## Appendix: a stretch replayed (2026-11-03)
+
+A recording an hour long holds the minute that matters somewhere in
+it: the pull, the stall, the gap `havne-cli info` found at 123.4 s.
+Replaying it from the top to reach that minute takes the hour, or a
+speed at which the minute flashes past. [ADR-0049](0049-recordings-in-core.md)
+put the stretch on v0.4.0's list and left it to this record.
+
+**Decision.** Two keys, `from=<s>` and `to=<s>`, choose the stretch:
+
+```
+replay://<path>[?...][&from=<s>][&to=<s>]
+```
+
+- **In the recording's own seconds.** They are `host_us`, time since
+  the recorded session started on the host's clock: the axis of the
+  viewer, `havne-cli view` and `havne-cli info`. A time read off any of
+  them replays as written. Session time (`timestamp_us`'s steps), which
+  section 4 paces by, starts at the first row and follows the adapter's
+  clock, so no tool shows it.
+- **The rows from the first at or after `from` up to the first past
+  `to`.** Either key may be left out: from the start, or to the end.
+  At most three decimals (the ms), no sign, no locale; `to` must come
+  after `from`. A bad value or that order is `BAD_URI` at create. A
+  stretch that holds no frame is `LOAD_FAILED`, saying where the
+  recording's frames run ("the recording holds no frames from 400 s on:
+  its frames run from 0.036 s to 297.64 s", the engine start's).
+- **Its first frame is 0.** Section 4's rule holds for the stretch:
+  stamps start at 0 and follow the session time between its rows, and
+  pacing starts with its first frame, not at `from`. The rows before
+  it are read (attach has checked them), never waited for.
+- **The session describes the stretch.** `replay_frames` and
+  `replay_span_ms` count its frames and span, so the bridge's "Replay
+  finished" and `havne-cli`'s end at the last frame come at its end,
+  and `loop=1` plays the stretch again, refused when its frames all
+  share one time. Faults (ADR-0041) fall on its frames alone. The
+  session info carries no `from` or `to`: the URI on the "Connected:"
+  line and in `havne-cli`'s output names them.
+- **The simulated ECU takes the same two keys**
+  ([ADR-0046](0046-simulated-ecu.md) section 7): `havne-cli sim
+  "replay://<path>?from=100&to=160" --on vcan0` answers as the car did
+  in that minute, its first row at the ECU's start. Both cut a
+  recording through one rule, `core/src/recording_stretch.h`.
+- **The viewer's Replay view** puts the part in view in Settings' URI
+  field, as the list's Replay puts the whole recording, and leaves the
+  keys out while the whole recording is in view.
+
+**Alternatives considered.** Seconds of session time (the stamps a
+replay gives) would match nothing a user sees. A row number, or a
+frame count, is exact, but no tool shows one. Rebasing the stretch's
+stamps to `from` rather than to its first frame would keep the gap up
+to its first frame as silence; nothing reads that gap, and the first
+row at 0 is the rule every other replay keeps.
+
+Tests: `CoreTest.ReplayStretchPlaysItsRowsAlone` (the rows by
+`host_us`, the stamps by session time, the info's counts, a repeated
+key), `.ReplayStretchStartsAtOnceAndLoopsItself`,
+`.ReplayStretchRefusals`; `SimRecordingTest.AStretchAnswersFromItsOwnRows`,
+`SimEcuTest.TheUrisKeysAndRefusals`,
+`SimTest.ARecordingIsReadBeforeTheInterface` (Linux: the URI's stretch
+reaches the loader); `CliGoldenTest.ReplayPlaysAStretch` (two seconds of
+the engine start); `QmlTest.recordings`'
+`test_replayViewHandsOnTheStretchInView`.

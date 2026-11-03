@@ -2,9 +2,9 @@
 //             (SocketCAN), a refusal elsewhere
 // Testing: UNIT: SimTest (test_socketcan): the arguments and the URI's
 //          refusals on every platform, NO_TRANSPORT off Linux, a
-//          recording read before the interface; SimRecordingTest
-//          (test_obd2): the loader on the committed fixture and its
-//          refusals; HARNESS: SimBusTest (test_vcan, Linux): a requesting
+//          recording read before the interface, its stretch with it;
+//          SimRecordingTest (test_obd2): the loader on the committed
+//          fixture, a stretch's rows, and its refusals; HARNESS: SimBusTest (test_vcan, Linux): a requesting
 //          socketcan:// session against it on vcan0 reads the drive
 //          cycle's values, the diagnostics and the VIN, clears, and stays
 //          in step under every fault, and reads a recording as its car
@@ -15,7 +15,8 @@
 // sender as 0x7E8, broken as the faults say. One worker thread ticks the
 // ECU's clock (and the mock's drive cycle) every 50 ms, reads, answers
 // and sends; it allocates nothing. A replay:// recording is read whole at
-// create (ecuio_sim_load_recording, every platform) and only read after.
+// create (ecuio_sim_load_recording, every platform; a stretch of it alone
+// under from= and to=, recording_stretch.h) and only read after.
 
 #include "ecuio/sim.h"
 
@@ -362,7 +363,8 @@ int open_socket(int32_t ifindex)
 #endif /* ECUIO_HAVE_SOCKETCAN */
 
 ecuio_status_t ecuio_sim_load_recording(const std::string& path,
-                                        ecuio_sim_recording* out)
+                                        ecuio_sim_recording* out,
+                                        const ecuio_stretch::stretch& stretch)
 {
     using namespace ecuio_frames_csv;
     try {
@@ -386,9 +388,11 @@ ecuio_status_t ecuio_sim_load_recording(const std::string& path,
         }
         ecuio_sim_recording rec;
         row prev, cur;
-        uint64_t at_us = 0, rows = 0, line_no = 1;
+        uint64_t at_us = 0, rows = 0, played = 0, line_no = 1;
+        uint64_t first_us = 0, last_us = 0;
         bool too_long = false;
         bool torn = false;
+        ecuio_stretch::cursor in(stretch);
         while (read_line(f.get(), line, &too_long, &torn)) {
             ++line_no;
             if (torn) {
@@ -405,16 +409,34 @@ ecuio_status_t ecuio_sim_load_recording(const std::string& path,
                                  static_cast<unsigned long long>(line_no), why);
                 return ECUIO_ERR_LOAD_FAILED;
             }
-            if (rows > 0) {
+            if (rows == 0) {
+                first_us = cur.host_us;
+            }
+            last_us = cur.host_us;
+            ++rows;
+            if (!in.plays(cur.host_us)) {
+                continue;
+            }
+            if (played > 0) {
                 at_us += step_us(prev, cur);
             }
             prev = cur;
-            ++rows;
+            ++played;
             ecuio_sim_recording_take(rec, static_cast<int64_t>(at_us), *frame);
         }
+        if (rows > 0 && played == 0) {
+            char why[192];
+            ecuio_stretch::describe_empty(stretch, first_us, last_us, why,
+                                          sizeof why);
+            ecuio_detail_set("%s", why);
+            return ECUIO_ERR_LOAD_FAILED;
+        }
         if (rec.replies.empty()) {
-            ecuio_detail_set("the recording holds no reply from the engine "
-                             "ECU (0x7E8) to answer with");
+            ecuio_detail_set(stretch.given()
+                                 ? "the stretch holds no reply from the "
+                                   "engine ECU (0x7E8) to answer with"
+                                 : "the recording holds no reply from the "
+                                   "engine ECU (0x7E8) to answer with");
             return ECUIO_ERR_LOAD_FAILED;
         }
         *out = std::move(rec);
@@ -454,7 +476,8 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
         ecuio_status_t loaded = ECUIO_ERR_OUT_OF_MEMORY;
         try {
             loaded = ecuio_sim_load_recording(
-                std::string(config.path, config.path_len), &s->recording);
+                std::string(config.path, config.path_len), &s->recording,
+                config.stretch);
         } catch (const std::bad_alloc&) {
         }
         if (loaded != ECUIO_OK) {
@@ -462,8 +485,11 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
         }
         /* A loop with no span would answer one instant forever */
         if (config.loop && s->recording.span_us == 0) {
-            ecuio_detail_set("loop=1 needs a recording that spans time; "
-                             "its replies all share one time");
+            ecuio_detail_set(config.stretch.given()
+                                 ? "loop=1 needs a stretch that spans time; "
+                                   "its replies all share one time"
+                                 : "loop=1 needs a recording that spans "
+                                   "time; its replies all share one time");
             return ECUIO_ERR_BAD_URI;
         }
         s->recording.loop = config.loop;

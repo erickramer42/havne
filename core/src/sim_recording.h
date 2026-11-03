@@ -24,6 +24,7 @@
 
 #include "ecuio/core.h"
 #include "obd2_reply.h"
+#include "recording_stretch.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -322,11 +323,13 @@ inline uint32_t ecuio_sim_recording_answer(const ecuio_sim_recording& r,
 }
 
 /* Reads a recording's frames.csv (path: the file, or the folder holding
- * it; UTF-8, absolute) into *out, which it replaces. LOAD_FAILED with the
- * detail set for a file that won't open or a row that won't parse (its
- * line number, never the path), or a recording with no reply from the
- * engine ECU; OUT_OF_MEMORY. In sim.cpp. */
-ecuio_status_t ecuio_sim_load_recording(const std::string& path,
-                                        ecuio_sim_recording* out);
+ * it; UTF-8, absolute) into *out, which it replaces: the stretch's rows
+ * alone (recording_stretch.h; the whole file by default), its first at 0.
+ * LOAD_FAILED with the detail set for a file that won't open or a row
+ * that won't parse (its line number, never the path), a stretch with no
+ * frames, or no reply from the engine ECU; OUT_OF_MEMORY. In sim.cpp. */
+ecuio_status_t
+ecuio_sim_load_recording(const std::string& path, ecuio_sim_recording* out,
+                         const ecuio_stretch::stretch& stretch = {});
 
 #endif /* ECUIO_SIM_RECORDING_H */

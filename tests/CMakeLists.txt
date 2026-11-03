@@ -239,6 +239,13 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream
                "${_cli_replay}?profile=obd2&speed=max&faults=drop:10,overflow:5,corrupt:2,truncate:2,stall:1:5&seed=3"
                --values)
+        # Two seconds of the engine start (ADR-0023's appendix "a stretch
+        # replayed"): its first frame stamped 0, the session line counting
+        # the stretch's frames, the end at its last
+        app_cli_golden(ReplayPlaysAStretch replay-stretch.jsonl
+            -- $<TARGET_FILE:havne-cli> stream
+               "${_cli_replay}?profile=obd2&speed=max&from=100&to=102"
+               --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
         # A typed VIN's decode (ADR-0043), made up around FAKE: the model

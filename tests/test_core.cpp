@@ -3015,6 +3015,165 @@ TEST(CoreTest, ReplayRefusesToLoopARecordingWithNoSpan)
     }
 }
 
+/* Six rows a second apart by host_us, their adapter stamps 7 s ahead and
+ * 0.25 s apart, so a stretch chosen by host_us and timed by timestamp_us
+ * shows which clock does which; row i carries 41 0D i */
+std::string stretch_rows()
+{
+    std::string text = kFramesHeader;
+    for (int i = 0; i < 6; ++i) {
+        char row[64];
+        std::snprintf(row, sizeof row, "%d,%d,0x7E8,0x0,41 0D %02X\n",
+                      i * 1000000, 7000000 + i * 250000, i);
+        text += row;
+    }
+    return text;
+}
+
+/* ?from= and ?to= (ADR-0023's appendix "a stretch replayed") play the
+ * rows from the first at or after from to the last at or before to, by
+ * host_us, the viewer's and havne-cli view's seconds; the first is
+ * stamped 0 and the rest by the recording's session time; the info counts
+ * the stretch's frames and span */
+TEST(CoreTest, ReplayStretchPlaysItsRowsAlone)
+{
+    TempRecording rec(stretch_rows());
+    struct Case {
+        const char* query;
+        std::vector<int> rows;
+    };
+    const Case cases[] = {
+        {"?speed=max&from=1.5&to=4", {2, 3, 4}},
+        {"?speed=max&from=4", {4, 5}},
+        {"?speed=max&to=1", {0, 1}},
+        {"?speed=max&from=0.5&to=0.999&from=3&to=3.5", {3}}, /* last wins */
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.query);
+        ReplayCapture cap;
+        ecuio_session_t* session = start_replay(rec.uri(c.query), &cap);
+        ASSERT_NE(session, nullptr);
+        ASSERT_TRUE(
+            wait_for([&] { return cap.count() >= c.rows.size(); }, 2000));
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+        EXPECT_EQ(info.replay_frames, c.rows.size());
+        EXPECT_EQ(info.replay_span_ms, (c.rows.size() - 1) * 250u);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        int32_t last = -1;
+        uint32_t episodes = 99;
+        ASSERT_EQ(ecuio_session_get_error_state(session, &last, &episodes),
+                  ECUIO_OK);
+        EXPECT_EQ(last, ECUIO_OK) << "the stretch's end isn't an early stop";
+        ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ASSERT_EQ(cap.frames.size(), c.rows.size()) << "nothing past to";
+        for (size_t i = 0; i < c.rows.size(); ++i) {
+            EXPECT_EQ(int{cap.frames[i].data[2]}, c.rows[i]) << "frame " << i;
+            EXPECT_EQ(cap.frames[i].timestamp_us, i * 250000u)
+                << "frame " << i << ": 0 first, then session time";
+        }
+        ecuio_session_destroy(session);
+    }
+}
+
+/* The rows before a stretch are read but never waited for: at speed 1
+ * its first frame goes out at once, the next a second of session time
+ * later; a loop plays the stretch again, its stamps carried on */
+TEST(CoreTest, ReplayStretchStartsAtOnceAndLoopsItself)
+{
+    std::string text = kFramesHeader;
+    for (int i = 0; i < 5; ++i) {
+        char row[64];
+        std::snprintf(row, sizeof row, "%d,%d,0x7E8,0x0,41 0D %02X\n",
+                      i * 1000000, i * 300000, i);
+        text += row;
+    }
+    TempRecording rec(text);
+    ReplayCapture cap;
+    const auto started = std::chrono::steady_clock::now();
+    ecuio_session_t* session = start_replay(rec.uri("?from=3&to=4"), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 2; }, 3000));
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    const auto ms = [&](size_t i) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   cap.arrived[i] - started)
+            .count();
+    };
+    EXPECT_LT(ms(0), 250) << "not after the 0.9 s of rows before it";
+    EXPECT_GE(ms(1) - ms(0), 250) << "the stretch's own 0.3 s";
+    EXPECT_LT(ms(1) - ms(0), 800);
+    ecuio_session_destroy(session);
+
+    ReplayCapture looped;
+    session = start_replay(rec.uri("?speed=max&loop=1&from=3&to=4"), &looped);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return looped.count() >= 6; }, 2000));
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    for (size_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(int{looped.frames[i].data[2]}, static_cast<int>(3 + i % 2))
+            << "frame " << i;
+        EXPECT_EQ(looped.frames[i].timestamp_us, (i + 1) / 2 * 300000u)
+            << "frame " << i;
+    }
+    ecuio_session_destroy(session);
+}
+
+/* What a stretch refuses, at create: a value that isn't seconds or to
+ * not after from (BAD_URI), a stretch with no frames, saying where the
+ * frames run (LOAD_FAILED), and a loop of one instant (BAD_URI) */
+TEST(CoreTest, ReplayStretchRefusals)
+{
+    TempRecording rec(stretch_rows());
+    const char* const bad_values[] = {
+        "?from=-1",       "?from=1.2345", "?from=abc", "?to=",   "?from=1e3",
+        "?to=1000000001", "?from=.5",     "?from=5.",  "?to=1,5"};
+    for (const char* q : bad_values) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri(q).c_str(), &session),
+                  ECUIO_ERR_BAD_URI)
+            << q;
+        EXPECT_EQ(session, nullptr);
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     "?from= and ?to= take the recording's seconds, as the "
+                     "viewer and havne-cli view show them, with at most three "
+                     "decimals")
+            << q;
+    }
+    for (const char* q : {"?from=2&to=2", "?from=3&to=1"}) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri(q).c_str(), &session),
+                  ECUIO_ERR_BAD_URI)
+            << q;
+        EXPECT_STREQ(ecuio_last_error_detail(), "?to= must come after ?from=")
+            << q;
+    }
+    struct Empty {
+        const char* query;
+        const char* says;
+    };
+    const Empty empties[] = {
+        {"?from=10", "the recording holds no frames from 10 s on: its frames "
+                     "run from 0 s to 5 s"},
+        {"?from=1.2&to=1.8", "the recording holds no frames from 1.2 s to "
+                             "1.8 s: its frames run from 0 s to 5 s"},
+    };
+    for (const Empty& e : empties) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri(e.query).c_str(), &session),
+                  ECUIO_ERR_LOAD_FAILED)
+            << e.query;
+        EXPECT_STREQ(ecuio_last_error_detail(), e.says);
+    }
+    ecuio_session_t* session = nullptr;
+    EXPECT_EQ(ecuio_session_create(rec.uri("?loop=1&from=2&to=2.5").c_str(),
+                                   &session),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?loop=1 needs a stretch that spans time; this one's frames "
+                 "all share one time");
+}
+
 /* One second of recording takes about a second at speed 1 and a tenth of
  * that at 10; the frames keep the recording's times either way */
 TEST(CoreTest, ReplayPacesByTheRecordingsTimeOverTheSpeed)
@@ -3684,7 +3843,7 @@ TEST(CoreTest, ReplayJudgesItsPathAndQuery)
         ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "replay:// takes no query key 'baud', only profile, did, "
-                 "speed, loop, faults and seed");
+                 "speed, loop, faults, seed, from and to");
 
     TempRecording empty_dir_marker("", /*as_folder=*/true);
     std::remove(empty_dir_marker.csv.c_str());
