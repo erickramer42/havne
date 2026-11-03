@@ -344,7 +344,7 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/findings)
         app_cli_golden(InfoTakesTheThresholds info-thresholds.jsonl
             -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/findings
-               --gap 3 --rate-drop 10 --settle 20)
+               --gap 3 --rate-drop 20 --settle 20)
         app_cli_golden(InfoChecksFramesTheReaderCantOpen info-frames-only.jsonl
             -- $<TARGET_FILE:havne-cli> info
                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)

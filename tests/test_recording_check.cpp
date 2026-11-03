@@ -304,7 +304,10 @@ TEST(CheckRulesTest, AGapIsTheWholeBusQuietPastItsLengthOutsideASleep)
     check::event sleep2 = sleep1;
     sleep2.at_us = 13000000;
     sleep2.length_us = 2000000;
-    const Fed fed(rows, false, {sleep1, sleep2});
+    /* 4x the median: the gap's and the sleeps' intervals are far past it */
+    ecuio_check_options_t strict{};
+    strict.rate_drop_x100 = 400;
+    const Fed fed(rows, false, {sleep1, sleep2}, strict);
     const std::vector<Finding> gaps = fed.of(ECUIO_CHECK_GAP);
     ASSERT_EQ(gaps.size(), 2u);
     EXPECT_EQ(gaps[0],
@@ -317,7 +320,8 @@ TEST(CheckRulesTest, AGapIsTheWholeBusQuietPastItsLengthOutsideASleep)
     EXPECT_EQ(sleeps[0],
               Finding(ECUIO_CHECK_ASLEEP, 0, 5650000, 2500000, 0, kWhole, 0));
     /* The 0.95 s quiet is under the gap's length but 9.5x the ID's 100 ms:
-     * a rate drop; the intervals across the gap and the sleeps aren't */
+     * a rate drop at 4x; the intervals across the gap and the sleeps
+     * aren't */
     const std::vector<Finding> drops = fed.of(ECUIO_CHECK_RATE_DROP);
     ASSERT_EQ(drops.size(), 1u);
     EXPECT_EQ(drops[0],
@@ -330,24 +334,24 @@ TEST(CheckRulesTest, ARateDropIsARunOfIntervalsPastTheMedian)
 {
     std::vector<Row> rows;
     every(rows, 0x7E8, 0, 40000, 20);               /* 19 intervals of 40 ms */
-    every(rows, 0x7E8, 760000 + 200000, 200000, 3); /* three of 200 ms */
-    every(rows, 0x7E8, 1360000 + 40000, 40000, 20);
+    every(rows, 0x7E8, 760000 + 480000, 480000, 3); /* three of 480 ms */
+    every(rows, 0x7E8, 2200000 + 40000, 40000, 20);
     every(rows, 0x7E9, 0, 300000, 8); /* a slow ID, steady */
     by_time(rows);
     const Fed fed(rows);
     const std::vector<Finding> drops = fed.of(ECUIO_CHECK_RATE_DROP);
     ASSERT_EQ(drops.size(), 1u);
     EXPECT_EQ(drops[0],
-              Finding(ECUIO_CHECK_RATE_DROP, 0x7E8, 760000, 600000, 3, 0, 0));
+              Finding(ECUIO_CHECK_RATE_DROP, 0x7E8, 760000, 1440000, 3, 0, 0));
     EXPECT_EQ(fed.of(ECUIO_CHECK_GAP).size(), 0u);
 
-    /* Under 16 intervals an ID isn't judged; a higher multiple lets 5x by */
+    /* Under 16 intervals an ID isn't judged; a higher multiple lets 12x by */
     std::vector<Row> few;
     every(few, 0x7E8, 0, 40000, 10);
-    every(few, 0x7E8, 360000 + 400000, 40000, 10);
+    every(few, 0x7E8, 360000 + 600000, 40000, 10);
     EXPECT_EQ(Fed(few).of(ECUIO_CHECK_RATE_DROP).size(), 0u);
     ecuio_check_options_t lenient{};
-    lenient.rate_drop_x100 = 600;
+    lenient.rate_drop_x100 = 1500;
     EXPECT_EQ(Fed(rows, false, {}, lenient).of(ECUIO_CHECK_RATE_DROP).size(),
               0u);
 }
@@ -446,7 +450,7 @@ TEST(CheckRulesTest, FindingsComeAsTheyAreSettled)
 {
     std::vector<Row> rows;
     every(rows, 0x7E8, 0, 40000, 20);
-    every(rows, 0x7E8, 760000 + 400000, 40000, 20);  /* a rate drop */
+    every(rows, 0x7E8, 760000 + 600000, 40000, 20);  /* a rate drop */
     rows.push_back(Row{2800000, 0x7E9, 0, "41 00"}); /* a late ID after it */
     by_time(rows);
     check::event link{};

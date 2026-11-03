@@ -834,7 +834,7 @@ void usage(FILE* to)
         "         wall-clock starts).\n"
         "info     checks a recording's frames offline: what it holds, then\n"
         "         each gap (no frame for over --gap seconds, 1), ID whose\n"
-        "         interval passed --rate-drop times its median (4), ID first\n"
+        "         interval passed --rate-drop times its median (10), ID first\n"
         "         seen over --settle seconds in (2), overflow, broken ISO-TP\n"
         "         sequence, link change and sleep, then a summary.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"

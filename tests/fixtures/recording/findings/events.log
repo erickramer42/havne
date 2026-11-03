@@ -12,4 +12,4 @@ columns  local time, seconds since the recording started (host_us / 1e6 in the C
 10:00:13.000  +13.000  asleep  Asleep for 3.0 s: nothing was read meanwhile
 10:00:18.000  +18.000  link  vehicle not responding (state 8, 1 episode)
 10:00:18.500  +18.500  link  recovered (state 0, 1 episode)
-10:00:20.000  +20.000  end  havne-cli: seconds: 515 frames, 307 values, 0 records dropped, 0 notes dropped
+10:00:20.000  +20.000  end  havne-cli: seconds: 509 frames, 307 values, 0 records dropped, 0 notes dropped

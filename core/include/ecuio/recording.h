@@ -382,7 +382,7 @@ void ecuio_recording_close(ecuio_recording_t* r);
 
 /* The defaults a zero field of ecuio_check_options_t takes */
 #define ECUIO_CHECK_DEFAULT_GAP_US         1000000u /* 1 s */
-#define ECUIO_CHECK_DEFAULT_RATE_DROP_X100 400u     /* 4x the median */
+#define ECUIO_CHECK_DEFAULT_RATE_DROP_X100 1000u    /* 10x the median */
 #define ECUIO_CHECK_DEFAULT_SETTLE_US      2000000u /* 2 s */
 
 /* What the check looks for; zero fields take the defaults */

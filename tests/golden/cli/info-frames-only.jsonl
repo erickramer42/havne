@@ -1,41 +1,9 @@
 {"schema": 1, "type": "start"}
 {"code": 7, "detail": "the folder has no signals.csv", "message": "couldn't load what the URI names", "recording": 0, "type": "open_failed"}
-{"at_us": 107712677, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 270532, "type": "finding"}
-{"at_us": 108060911, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 223008, "type": "finding"}
-{"at_us": 180171370, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 352618, "type": "finding"}
-{"at_us": 181727002, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 185775, "type": "finding"}
 {"at_us": 181973480, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 564877, "type": "finding"}
-{"at_us": 182858299, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 163225, "type": "finding"}
-{"at_us": 183641074, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 191907, "type": "finding"}
-{"at_us": 184011700, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 288863, "type": "finding"}
-{"at_us": 185290663, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 209696, "type": "finding"}
-{"at_us": 185642319, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 184804, "type": "finding"}
 {"at_us": 189066799, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 556256, "type": "finding"}
-{"at_us": 189711175, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 203535, "type": "finding"}
-{"at_us": 190055798, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 247417, "type": "finding"}
 {"at_us": 190388506, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 390281, "type": "finding"}
-{"at_us": 192760623, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 288093, "type": "finding"}
-{"at_us": 193254714, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 373674, "type": "finding"}
-{"at_us": 194514208, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 164497, "type": "finding"}
-{"at_us": 198496363, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 185735, "type": "finding"}
-{"at_us": 199576716, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 206124, "type": "finding"}
-{"at_us": 199938160, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 184297, "type": "finding"}
-{"at_us": 200219537, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 264623, "type": "finding"}
-{"at_us": 205136215, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 186893, "type": "finding"}
-{"at_us": 209730285, "count": 2, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 363558, "type": "finding"}
 {"at_us": 228686408, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 430334, "type": "finding"}
-{"at_us": 231488266, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 188269, "type": "finding"}
-{"at_us": 238028382, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 170042, "type": "finding"}
-{"at_us": 238317492, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 242225, "type": "finding"}
-{"at_us": 242184909, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 233840, "type": "finding"}
-{"at_us": 256136408, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 218753, "type": "finding"}
 {"at_us": 262157066, "count": 0, "extended": false, "id": null, "kind": "gap", "length_us": 12312475, "type": "finding"}
-{"at_us": 280151326, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 207051, "type": "finding"}
-{"at_us": 288967412, "count": 3, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 615065, "type": "finding"}
 {"at_us": 289622962, "count": 0, "extended": false, "id": null, "kind": "gap", "length_us": 1183715, "type": "finding"}
-{"at_us": 290806677, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 275960, "type": "finding"}
-{"at_us": 291172366, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 205182, "type": "finding"}
-{"at_us": 291480737, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 204323, "type": "finding"}
-{"at_us": 291958522, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 200587, "type": "finding"}
-{"at_us": 297055865, "count": 2, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 584853, "type": "finding"}
-{"duration_us": 297640718, "findings": {"asleep": 0, "gap": 2, "isotp": 0, "late-id": 0, "link": 0, "overflow": 0, "rate-drop": 36}, "frames": 7074, "gap_us": 1000000, "ids": 1, "isotp": "flags-unknown", "rate_drop": 4, "settle_us": 2000000, "torn_rows": 0, "type": "summary"}
+{"duration_us": 297640718, "findings": {"asleep": 0, "gap": 2, "isotp": 0, "late-id": 0, "link": 0, "overflow": 0, "rate-drop": 4}, "frames": 7074, "gap_us": 1000000, "ids": 1, "isotp": "flags-unknown", "rate_drop": 10, "settle_us": 2000000, "torn_rows": 0, "type": "summary"}
