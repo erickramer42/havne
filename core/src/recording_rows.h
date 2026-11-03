@@ -238,10 +238,12 @@ struct signal_row {
 };
 
 /* A NUL inside a row: a C caller would read the name or label short of
- * what the reader holds, so no row may carry one */
+ * what the reader holds, so no row may carry one. An empty row may come
+ * with no buffer at all (an empty vector's data()), which memchr can't
+ * take even for no bytes. */
 inline bool holds_nul(const char* p, size_t n, const char** why)
 {
-    if (std::memchr(p, '\0', n) != nullptr) {
+    if (n != 0 && std::memchr(p, '\0', n) != nullptr) {
         *why = "the row holds a NUL byte";
         return true;
     }
