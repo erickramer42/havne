@@ -1,7 +1,8 @@
 // File/layer: core/src/signals.cpp | C++17, Qt-free
 // Testing: UNIT: BE vs LE round-trip, mux acceptance/rejection, the frame
 //          gate (an error frame applies to no def), validator rules,
-//          display-unit conversion (SignalsTest.DisplayConvert*)
+//          display-unit conversion (SignalsTest.DisplayConvert*), the
+//          groups' names (SignalsTest.EachGroupHasAName)
 
 #include <ecuio/signals.h>
 #include <ecuio/internal.h>
@@ -408,7 +409,8 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     }
 
     /* Zero, so a later field can take this room and existing sets
-     * still load. No flag is defined. plot_rank takes any value. */
+     * still load. No flag is defined. plot_rank and group take any
+     * value. */
     if (signal->reserved0 != 0 ||
         !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||
         !all_zero(signal->display_reserved, sizeof signal->display_reserved) ||
@@ -482,4 +484,14 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
     }
     *out = result;
     return ECUIO_DISPLAY_OK;
+}
+
+const char* ecuio_signal_group_name(uint32_t group)
+{
+    /* ECUIO_SIGNAL_GROUP_*, by code (ADR-0050) */
+    static const char* const kNames[] = {
+        "Other",     "Engine",  "Air",        "Fuel",        "Oxygen sensors",
+        "Emissions", "Vehicle", "Electrical", "Diagnostics",
+    };
+    return group < sizeof kNames / sizeof kNames[0] ? kNames[group] : "";
 }

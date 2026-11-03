@@ -1,6 +1,6 @@
 {"schema": 1, "type": "start"}
 {"duration_us": 20000000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signals": 1, "summary": true, "type": "opened", "utc_start_us": 1793721600000000}
-{"decimals": 0, "first_us": 100300, "highest": 1610, "index": 0, "last_us": 19950300, "lowest": 804, "name": "RPM", "rank": 1, "rate_hz": 15.415617128463476, "recording": 0, "samples": 307, "text": false, "type": "signal", "unit": "rpm"}
+{"decimals": 0, "first_us": 100300, "group": "Other", "highest": 1610, "index": 0, "last_us": 19950300, "lowest": 804, "name": "RPM", "rank": 1, "rate_hz": 15.415617128463476, "recording": 0, "samples": 307, "text": false, "type": "signal", "unit": "rpm"}
 {"host_us": 2000000, "index": 0, "label": "lap", "recording": 0, "type": "marker"}
 {"at_us": 4950000, "count": 0, "extended": false, "id": null, "kind": "gap", "length_us": 1550000, "type": "finding"}
 {"at_us": 7920000, "count": 1, "extended": false, "id": "0x3E9", "kind": "rate-drop", "length_us": 1400000, "type": "finding"}

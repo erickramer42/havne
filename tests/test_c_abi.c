@@ -49,6 +49,7 @@ typedef char abi_def_byte_length_check[(offsetof(ecuio_signal_def_t, byte_length
 typedef char abi_def_scale_check[(offsetof(ecuio_signal_def_t, scale) == 24) ? 1 : -1];
 typedef char abi_def_name_check[(offsetof(ecuio_signal_def_t, name) == 40) ? 1 : -1];
 typedef char abi_def_plot_rank_check[(offsetof(ecuio_signal_def_t, plot_rank) == 89) ? 1 : -1];
+typedef char abi_def_group_check[(offsetof(ecuio_signal_def_t, group) == 90) ? 1 : -1];
 typedef char abi_def_flags_check[(offsetof(ecuio_signal_def_t, flags) == 92) ? 1 : -1];
 typedef char abi_def_reserved_check[(offsetof(ecuio_signal_def_t, reserved) == 96) ? 1 : -1];
 typedef char abi_set_layout_check[(offsetof(ecuio_signal_set_t, layout_version) == 0) ? 1 : -1];
@@ -198,6 +199,10 @@ int main(void)
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
         return 1;
     }
+    if (strcmp(ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_DIAGNOSTICS),
+               "Diagnostics") != 0) {
+        return 1;
+    }
     if (ecuio_display_convert("km/h", 0, 100.0, ECUIO_UNITS_IMPERIAL, &shown) !=
             ECUIO_DISPLAY_OK ||
         strcmp(shown.unit, "mph") != 0 || shown.converted != 1) {
@@ -291,6 +296,7 @@ int main(void)
     if (sizeof(ecuio_recording_info_t) != 96 ||
         sizeof(ecuio_recording_signal_t) != 128 ||
         offsetof(ecuio_recording_signal_t, samples) != 56 ||
+        offsetof(ecuio_recording_signal_t, group) != 54 ||
         offsetof(ecuio_recording_marker_t, label_utf8) != 32 ||
         sizeof(ecuio_recording_column_t) != 24 ||
         offsetof(ecuio_recording_find_t, label_utf8) != 64 ||

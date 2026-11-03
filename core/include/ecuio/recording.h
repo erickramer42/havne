@@ -207,7 +207,9 @@ typedef struct ecuio_recording_signal {
     uint8_t decimal_places; /* an older recording's: the most its values
                                show, at most 3 */
     uint8_t plot_rank;      /* 0 in an older recording */
-    uint8_t reserved0[2];   /* zero */
+    uint8_t group;          /* ECUIO_SIGNAL_GROUP_* (ADR-0050); 0 in an
+                               older recording */
+    uint8_t reserved0[1];   /* zero */
     uint64_t samples;
     double lowest;          /* a number's; 0 for text or no samples */
     double highest;
@@ -221,11 +223,15 @@ static_assert(sizeof(ecuio_recording_signal_t) == 128,
               "ecuio_recording_signal_t size is ABI");
 static_assert(offsetof(ecuio_recording_signal_t, samples) == 56,
               "recording signal samples offset is ABI");
+static_assert(offsetof(ecuio_recording_signal_t, group) == 54,
+              "recording signal group offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recording_signal_t) == 128,
                "ecuio_recording_signal_t size is ABI");
 _Static_assert(offsetof(ecuio_recording_signal_t, samples) == 56,
                "recording signal samples offset is ABI");
+_Static_assert(offsetof(ecuio_recording_signal_t, group) == 54,
+               "recording signal group offset is ABI");
 #endif
 
 /* A marker. Pointer last, as ecuio_value_t's: the label lives in the

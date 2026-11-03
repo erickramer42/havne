@@ -311,13 +311,16 @@ inline bool parse_marker_row(const char* line, size_t n, uint64_t* host_us,
     return true;
 }
 
-/* events.log's "signal  <name>,<number|text>,<unit>,<decimals>,<rank>" */
+/* events.log's "signal  <name>,<number|text>,<unit>,<decimals>,<rank>"
+ * and then ",<group>" (ADR-0050), which a recording from before groups
+ * leaves out */
 struct header_signal {
     std::string name;
     std::string unit;
     bool text = false;
     uint8_t decimal_places = 0;
     uint8_t plot_rank = 0;
+    uint8_t group = 0;
 };
 
 inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
@@ -330,7 +333,7 @@ inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
     const char* end = text + n;
     bool last = false;
     std::string field;
-    *why = "the signal line isn't name,kind,unit,decimals,rank";
+    *why = "the signal line isn't name,kind,unit,decimals,rank[,group]";
     if (!next_field(p, end, s.name, &last) || last) {
         return false;
     }
@@ -363,12 +366,21 @@ inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
         return false;
     }
     s.decimal_places = static_cast<uint8_t>(v);
-    if (!next_field(p, end, field, &last) || !last ||
+    if (!next_field(p, end, field, &last) ||
         !parse_count(field.data(), field.size(), &v) || v > 255) {
         *why = "the signal's plot rank isn't 0 to 255";
         return false;
     }
     s.plot_rank = static_cast<uint8_t>(v);
+    if (last) {
+        return true;
+    }
+    if (!next_field(p, end, field, &last) || !last ||
+        !parse_count(field.data(), field.size(), &v) || v > 255) {
+        *why = "the signal's group isn't 0 to 255";
+        return false;
+    }
+    s.group = static_cast<uint8_t>(v);
     return true;
 }
 

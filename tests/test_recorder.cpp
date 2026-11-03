@@ -118,6 +118,7 @@ void register_profile()
                                "C");
     kDefs[0].decimal_places = 1;
     kDefs[0].plot_rank = 2;
+    kDefs[0].group = ECUIO_SIGNAL_GROUP_FUEL;
     kDefs[1].id = 2;
     kDefs[1].message_id = kTextId;
     kDefs[1].kind = ECUIO_VALUE_TEXT;
@@ -419,9 +420,9 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     EXPECT_NE(events.find("\nprofile  rec-test\n"), std::string::npos);
     EXPECT_NE(events.find("\nframe flags  complete\n"), std::string::npos);
     EXPECT_NE(events.find("\nsignal  Half,number,\xC2\xB0"
-                          "C,1,2\n"),
+                          "C,1,2,3\n"),
               std::string::npos);
-    EXPECT_NE(events.find("\nsignal  Words,text,,0,0\n"), std::string::npos);
+    EXPECT_NE(events.find("\nsignal  Words,text,,0,0,0\n"), std::string::npos);
     EXPECT_NE(events.find("\ncaller  surrogate frame logging  off\n"),
               std::string::npos);
     EXPECT_NE(events.find("\ncaller  two lines\n"), std::string::npos);

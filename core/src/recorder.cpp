@@ -1461,7 +1461,8 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       (is_text_kind(d.kind) ? ",text," : ",number,") +
                       csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)) + "," +
                       std::to_string(d.decimal_places) + "," +
-                      std::to_string(d.plot_rank) + "\n";
+                      std::to_string(d.plot_rank) + "," +
+                      std::to_string(d.group) + "\n";
         }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;

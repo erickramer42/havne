@@ -87,7 +87,7 @@ constexpr double kWideV = 8.0 / 65536.0;
 #define U      ECUIO_VALUE_UINT
 #define S      ECUIO_VALUE_INT
 
-/* Ranked below (kPlotOrder), so not const */
+/* Ranked and grouped below (kPlotOrder, kPidGroups), so not const */
 ecuio_signal_def_t kObd2Defs[] = {
     obd2_def(ECUIO_OBD2_SIG_ENGINE_LOAD_ID, "Engine Load", ECUIO_VALUE_UINT, 8,
              100.0 / 255.0, 0.0, "%", 1, 0x04, ECUIO_BYTE_ORDER_LE),
@@ -273,6 +273,79 @@ const uint16_t kPlotOrder[] = {
     ECUIO_OBD2_PID_SIG_ID(0x44, 0),   /* commanded lambda */
 };
 
+/* Each PID's group (ADR-0050): the part of the car its fields read.
+ * Throttle and pedal go with the air they meter; a PID's fields share
+ * its group, but for kGroupExceptions */
+struct pid_group {
+    uint8_t pid;
+    uint8_t group;
+};
+#define G_ENGINE ECUIO_SIGNAL_GROUP_ENGINE
+#define G_AIR    ECUIO_SIGNAL_GROUP_AIR
+#define G_FUEL   ECUIO_SIGNAL_GROUP_FUEL
+#define G_O2     ECUIO_SIGNAL_GROUP_OXYGEN
+#define G_EMIT   ECUIO_SIGNAL_GROUP_EMISSIONS
+#define G_CAR    ECUIO_SIGNAL_GROUP_VEHICLE
+#define G_ELEC   ECUIO_SIGNAL_GROUP_ELECTRICAL
+#define G_DIAG   ECUIO_SIGNAL_GROUP_DIAGNOSTICS
+const pid_group kPidGroups[] = {
+    {0x04, G_ENGINE}, {0x05, G_ENGINE}, {0x06, G_FUEL},   {0x07, G_FUEL},
+    {0x08, G_FUEL},   {0x09, G_FUEL},   {0x0A, G_FUEL},   {0x0B, G_AIR},
+    {0x0C, G_ENGINE}, {0x0D, G_CAR},    {0x0E, G_ENGINE}, {0x0F, G_AIR},
+    {0x10, G_AIR},    {0x11, G_AIR},    {0x14, G_O2},     {0x15, G_O2},
+    {0x16, G_O2},     {0x17, G_O2},     {0x18, G_O2},     {0x19, G_O2},
+    {0x1A, G_O2},     {0x1B, G_O2},     {0x1F, G_ENGINE}, {0x21, G_DIAG},
+    {0x22, G_FUEL},   {0x23, G_FUEL},   {0x24, G_O2},     {0x25, G_O2},
+    {0x26, G_O2},     {0x27, G_O2},     {0x28, G_O2},     {0x29, G_O2},
+    {0x2A, G_O2},     {0x2B, G_O2},     {0x2C, G_EMIT},   {0x2D, G_EMIT},
+    {0x2E, G_EMIT},   {0x2F, G_FUEL},   {0x30, G_DIAG},   {0x31, G_DIAG},
+    {0x32, G_EMIT},   {0x33, G_AIR},    {0x34, G_O2},     {0x35, G_O2},
+    {0x36, G_O2},     {0x37, G_O2},     {0x38, G_O2},     {0x39, G_O2},
+    {0x3A, G_O2},     {0x3B, G_O2},     {0x3C, G_EMIT},   {0x3D, G_EMIT},
+    {0x3E, G_EMIT},   {0x3F, G_EMIT},   {0x42, G_ELEC},   {0x43, G_ENGINE},
+    {0x44, G_FUEL},   {0x45, G_AIR},    {0x46, G_AIR},    {0x47, G_AIR},
+    {0x48, G_AIR},    {0x49, G_AIR},    {0x4A, G_AIR},    {0x4B, G_AIR},
+    {0x4C, G_AIR},    {0x4D, G_DIAG},   {0x4E, G_DIAG},   {0x4F, G_O2},
+    {0x50, G_AIR},    {0x52, G_FUEL},   {0x53, G_EMIT},   {0x54, G_EMIT},
+    {0x55, G_O2},     {0x56, G_O2},     {0x57, G_O2},     {0x58, G_O2},
+    {0x59, G_FUEL},   {0x5A, G_AIR},    {0x5B, G_ELEC},   {0x5C, G_ENGINE},
+    {0x5D, G_FUEL},   {0x5E, G_FUEL},   {0x61, G_ENGINE}, {0x62, G_ENGINE},
+    {0x63, G_ENGINE}, {0x64, G_ENGINE}, {0x66, G_AIR},    {0x67, G_ENGINE},
+    {0x68, G_AIR},    {0x8E, G_ENGINE}, {0xA2, G_FUEL},   {0xA6, G_CAR},
+};
+
+/* A field placed apart from its PID: 4F's largest intake pressure
+ * beside the air, not the O2 maxima it shares a reply with */
+const struct {
+    uint16_t id;
+    uint8_t group;
+} kGroupExceptions[] = {
+    {ECUIO_OBD2_PID_SIG_ID(0x4F, 3), G_AIR},
+};
+#undef G_DIAG
+#undef G_ELEC
+#undef G_CAR
+#undef G_EMIT
+#undef G_O2
+#undef G_FUEL
+#undef G_AIR
+#undef G_ENGINE
+
+uint8_t obd2_group(const ecuio_signal_def_t& d)
+{
+    for (const auto& e : kGroupExceptions) {
+        if (e.id == d.id) {
+            return e.group;
+        }
+    }
+    for (const pid_group& g : kPidGroups) {
+        if (g.pid == (d.mux_key & 0xFFu)) {
+            return g.group;
+        }
+    }
+    return ECUIO_SIGNAL_GROUP_OTHER;
+}
+
 #undef S
 #undef U
 #undef NM
@@ -295,6 +368,9 @@ const ecuio_signal_set_t kObd2Set = [] {
                 d.plot_rank = static_cast<uint8_t>(r + 1);
             }
         }
+    }
+    for (ecuio_signal_def_t& d : kObd2Defs) {
+        d.group = obd2_group(d);
     }
     ecuio_signal_set_t s = {};
     s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;

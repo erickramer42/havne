@@ -328,6 +328,7 @@ bool ecuio_recording::read_events(const std::string& folder)
                     s.pub.flags = hs.text ? ECUIO_RECORDING_SIGNAL_TEXT : 0;
                     s.pub.decimal_places = hs.decimal_places;
                     s.pub.plot_rank = hs.plot_rank;
+                    s.pub.group = hs.group;
                 }
             } else if (rows::starts_with(p, n, "utc  ")) {
                 if (!rows::parse_utc(p + 5, n - 5, &info.utc_start_us)) {
