@@ -151,6 +151,36 @@ TEST_F(SignalDecodeTest, ValidateSignal_NameUnitDecimals)
     signal.unit[sizeof(signal.unit) - 1] = '\0';
     signal.decimal_places = 4;
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_DECIMALS);
+}
+
+/* A recording writes names and units into signals.csv, where a
+ * spreadsheet runs a cell starting with one of these as a formula
+ * (ADR-0049 section 8); one anywhere after the first is plain text */
+TEST(SignalsTest, ValidatorRefusesANameOrUnitAFormulaWouldStart)
+{
+    ecuio_signal_def_t signal = {};
+    signal.kind = ECUIO_VALUE_UINT;
+    signal.bit_length = 8;
+    const char* name_ok = "Boost (-1 to +2)";
+    memcpy(signal.name, name_ok, strlen(name_ok) + 1);
+    memcpy(signal.unit, "km/h", 5);
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
+
+    const char leads[] = {'=', '+', '-', '@', '\t', '\r'};
+    for (char c : leads) {
+        SCOPED_TRACE(static_cast<int>(c));
+        ecuio_signal_def_t d = signal;
+        d.name[0] = c;
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_FORMULA);
+        d = signal;
+        d.unit[0] = c;
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_FORMULA);
+    }
+
+    /* An empty name or unit is no formula */
+    signal.name[0] = '\0';
+    signal.unit[0] = '\0';
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
     signal.decimal_places = 3;
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
 
