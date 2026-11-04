@@ -586,6 +586,19 @@ less, **M** a few days, **L** a week or more or an ADR first.
 - **A phone's density (M):** control heights, spacing and the default
   zoom on a phone; the test phone's run of the viewer read best at 75 %,
   and on its side the viewer's controls fill the screen above the chart.
+- **The strip chart maximized (S):** a toggle (a button, a double-click,
+  `F`) that gives Live's and the viewer's chart the whole page, the
+  cursor's values in a strip beside it, and a splitter between the
+  signal list and the chart, remembered per page. On a phone on its
+  side the chart takes the page by itself.
+- **Chart panes, two cursors and the span's statistics (L, an ADR
+  first):** traces in stacked panes on one time axis, each pane with a
+  y-axis in its units and its own vertical zoom; a second cursor, with
+  the time between the two and each signal's change, lowest, highest
+  and mean over the span; a drag that boxes a span to zoom to, and the
+  arrow keys stepping the cursor a sample at a time; on Live, a pause
+  that scrolls back through the buffer while the session runs. v0.5.0's
+  computed signals want panes too.
 - **Low-glare and night themes (M):** Theme roles for the analog gauge
   first; warning and danger told apart by more than hue.
 - **User-configurable dashboards (L):** pages built from the gauge
