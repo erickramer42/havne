@@ -255,5 +255,5 @@ option and while listen-only, then answered the VX's `obd2` session
 over J2534 in normal mode: identification (the VIN a segmented reply),
 the diagnostics, the inspection line and the drive cycle's values,
 packed, every reply acknowledged and none unflowed, `can0` error-active
-with every error counter 0. One frame on 0x7E8 from another socket
+with no error counted. One frame on 0x7E8 from another socket
 ended it `yielded`. BENCH prep #33 is confirmed for that controller.

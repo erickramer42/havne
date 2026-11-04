@@ -124,9 +124,10 @@ The USB2CAN transmits only in reply, onto this two-node bus only.
 - [ ] The VX's session walks the sim's bitmaps, reads its VIN
       (`ZZZFAKE11M0000001`), its diagnostics and the inspection line,
       and RPM goes from 0 to idle 15 s after `sim` starts
-- [ ] Every reply is acknowledged: `can0` stays error-active with its
-      error counters at 0, and `sim`'s `unflowed` stays 0 (the VX's
-      Flow Control reaches it)
+- [ ] Every reply is acknowledged: `can0` stays error-active, its
+      error counters unchanged (they count since the adapter was
+      attached: compare before and after), and `sim`'s `unflowed`
+      stays 0 (the VX's Flow Control reaches it)
 - [ ] With the VX's session closed, `sim` sends nothing (it only
       replies): the TX count holds
 - [ ] Another node on 0x7E8: in a second WSL shell,

@@ -44,7 +44,7 @@ Windows `havne-cli stream "j2534://OBDX Pro - VX" --values --seconds 60`
 | Values | RPM 0 through the key on, the engine catching at 12.8 s of the VX's session (about 15 s of the sim's), 1,981 r/min at 60 s; 2,625 frames, none dropped |
 | Packing | 466 of 467 replies to `01 4E` packed; reply latency on the adapter's clock 12.3 ms median, 13.3 ms P99, 14.4 ms at most; no timeout, nothing refused but the two identification items |
 | The sim's counts | requests and replies equal on every `sim_stats` line (2,625 of each on the last before the yield below), `unflowed` 0, `refused` 11 per VX session |
-| `can0` | error-active through the run, every error counter 0; 7,794 frames sent in the VX's minute, every one acknowledged |
+| `can0` | error-active through the run, and no error counted: RX and TX errors 0, and the controller's count of error-passive episodes unchanged at the 30 that 2026-11-02's runs without an acknowledging node left (it counts since the adapter was attached); 7,794 frames sent in the VX's minute, every one acknowledged |
 
 A first, shorter run a few minutes earlier gave the same: 315 requests,
 315 replies, 11 refused, `unflowed` 0.
@@ -63,7 +63,7 @@ socket, so another node to the sim) at 19:00:41.63.
 - The VX's session reported `vehicle not responding (timeout)` once the
   replies stopped.
 - `can0` at the end: error-active, its counters at TX 15,899 and RX
-  282,066, every error counter 0; then down.
+  282,066, no error counted; then down.
 
 ## Findings
 
