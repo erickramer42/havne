@@ -224,17 +224,33 @@ TestCase {
         // A drag in steps, as a pointer moves (mouseDrag's two moves don't
         // carry a DragHandler past its threshold)
         // The test's window is 200 px: grown to the page, so the pointer
-        // lands on the chart
+        // lands on the chart. The press waits for that size and the layout
+        // after it, and a miss says where it landed
         const win = frame.Window.window
         const size = [win.width, win.height]
         win.width = page.width
         win.height = page.height
+        tryVerify(() => win.width >= page.width && win.height >= page.height, 5000,
+                  "the window grown: " + win.width + "x" + win.height)
+        verify(waitForPolish(win), "the grown window laid out")
         const x = frame.width / 2, y = frame.height / 2
+        const at = frame.mapToItem(null, x, y)
+        verify(x > 200 && at.x < win.width && at.y < win.height,
+               "the press lands on the chart: " + frame.width + "x" + frame.height
+               + " at " + at.x + "," + at.y + " in " + win.width + "x" + win.height)
+        // Whether the drag went active tells a press that missed from a
+        // drag that moved nothing
+        const pan = find(frame, "chartPan")
+        let panned = false
+        const seen = () => { if (pan.active) panned = true }
+        pan.activeChanged.connect(seen)
         mousePress(frame, x, y)
         for (let dx = 10; dx <= 200; dx += 10)
-            mouseMove(frame, x - dx, y)
+            mouseMove(frame, x - dx, y, 10)
         mouseRelease(frame, x - 200, y)
-        verify(page.viewT0 > 0, "dragged later: " + page.viewT0)
+        pan.activeChanged.disconnect(seen)
+        verify(page.viewT0 > 0, "dragged later: " + page.viewT0
+               + (panned ? ", the drag went active" : ", the drag never went active"))
         verify(!page.hasCursor, "a drag places no cursor")
         mouseClick(frame, x, y)
         verify(page.cursorMs > page.viewT0 && page.cursorMs < page.viewT1,
@@ -449,9 +465,12 @@ TestCase {
         bar.options.close()
 
         mouseClick(find(page, "backToList"))
+        verify(!page.viewing, "the click on All recordings went back to the list")
         page.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens again")
-        compare(find(page, "signalRows").count, all, "back to the list cleared the filter")
+        compare(find(page, "signalRows").count, all, "back to the list cleared the filter: text '"
+                + bar.filter.text + "', plotted only " + bar.filter.plottedOnly
+                + ", groups [" + bar.filter.groups + "]")
     }
 
     function test_aRefusedFolderSaysWhyAndBackGoesToTheList() {
