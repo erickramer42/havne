@@ -36,6 +36,11 @@ constexpr uint32_t kRateDropX100 = ECUIO_CHECK_DEFAULT_RATE_DROP_X100;
 constexpr uint64_t kSettleUs = ECUIO_CHECK_DEFAULT_SETTLE_US;
 /* An ID's rate is judged only after this many intervals */
 constexpr uint64_t kJudgedAfter = 16;
+/* A slow interval this short is no rate drop: inside Live's 100 ms window
+ * it changes nothing a reader sees, and a USB adapter's bursts hand the
+ * host frames microseconds apart, so an ID's median there can be far
+ * under any interval that matters */
+constexpr uint64_t kDropFloorUs = 100000;
 
 /* A streaming median: the P-square estimator (Jain and Chlamtac, 1985),
  * five markers, exact over the first five observations */
@@ -287,6 +292,15 @@ public:
             return true; /* its ID is the error's class, not a node's */
         }
         const bool extended = (flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
+        const bool wire = isotp_ && iso15765_id(id, extended) &&
+                          (flags & ECUIO_FRAME_FLAG_REASSEMBLED) == 0;
+        /* On the wire a consecutive frame or a flow control is part of a
+         * message: the ID's rate is its messages', as an adapter that
+         * reassembles delivers them, the recordings the defaults were set
+         * against */
+        const bool message_part =
+            wire && length > 0 &&
+            ((data[0] >> 4) == 0x2 || (data[0] >> 4) == 0x3);
         const uint64_t key = (extended ? (uint64_t{1} << 32) : 0) | id;
         auto found = ids_.find(key);
         if (found == ids_.end()) {
@@ -297,13 +311,15 @@ public:
                       0, 1, 0)) {
                 return false;
             }
-        } else if (!interval(found->second, id, extended, host_us)) {
+        } else if (!message_part &&
+                   !interval(found->second, id, extended, host_us)) {
             return false;
         }
         id_state& s = found->second;
-        s.last_us = host_us;
-        if (isotp_ && iso15765_id(id, extended) &&
-            (flags & ECUIO_FRAME_FLAG_REASSEMBLED) == 0) {
+        if (!message_part) {
+            s.last_us = host_us;
+        }
+        if (wire) {
             wire_seen_ = true;
             return isotp_frame(s, id, extended, host_us, data, length);
         }
@@ -477,8 +493,9 @@ private:
         const double median = s.median.value();
         const bool judged = s.median.count() >= kJudgedAfter && median > 0;
         s.median.add(static_cast<double>(gap));
-        if (judged && static_cast<double>(gap) * 100.0 >
-                          median * static_cast<double>(drop_x100_)) {
+        if (judged && gap >= kDropFloorUs &&
+            static_cast<double>(gap) * 100.0 >
+                median * static_cast<double>(drop_x100_)) {
             if (s.drop_count == 0) {
                 s.drop_at = s.last_us;
             }

@@ -1152,6 +1152,25 @@ ELM327 ones (1.8 to 305 s), each a stretch with no frame at all; at
 2 s, 2 and 18. **The gap stays 1 s.** No recording has a late ID at any
 settle time from 2 s to 30 s, so nothing sets it, and **it stays 2 s**.
 
+*Amended 2026-11-03, on the first recording of wire frames:* the
+SocketCAN car run's listener recording
+([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md))
+gave 2,425 rate drops on 0x7E8 in 67 s. Its frames came as they
+crossed the bus: each reply a first frame and consecutive frames
+about 5 ms apart, the pauses between requests near 10x that, and a
+USB adapter's bursts handing the host frames microseconds apart, so
+the median was far under any interval that matters. The rule
+gains two things. On ISO 15765-4's IDs, when the frames came as they
+crossed the bus, an ID's interval is between messages, as the
+reassembled recordings above measured it: a consecutive frame and a
+flow control neither end an interval nor start one. And a slow
+interval under 100 ms is no rate drop: inside Live's 100 ms window
+it changes nothing a reader sees. Every recording above keeps its
+counts (155 in the ELM327 ones, 4 in the J2534 ones, 4 in the
+fixture); the car's listener recording finds 2, the end of its
+resent frame and one 112 ms reply interval, and the desk run's
+none. The multiple stays 10x.
+
 ## Appendix: CI's recording gate (2026-11-03)
 
 On GitHub's shared runners, one pair of looping runs (unrecorded, then

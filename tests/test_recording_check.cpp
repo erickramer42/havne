@@ -356,6 +356,49 @@ TEST(CheckRulesTest, ARateDropIsARunOfIntervalsPastTheMedian)
               0u);
 }
 
+TEST(CheckRulesTest, ASlowIntervalUnderATenthOfASecondIsNoRateDrop)
+{
+    /* Frames 1 ms apart, as a USB adapter's bursts hand them over, then
+     * 60 ms (60x the median, under the floor) and 150 ms (over it) */
+    std::vector<Row> rows;
+    every(rows, 0x7E8, 0, 1000, 100);
+    every(rows, 0x7E8, 99000 + 60000, 1000, 100);
+    every(rows, 0x7E8, 258000 + 150000, 1000, 100);
+    const std::vector<Finding> drops = Fed(rows).of(ECUIO_CHECK_RATE_DROP);
+    ASSERT_EQ(drops.size(), 1u);
+    EXPECT_EQ(drops[0],
+              Finding(ECUIO_CHECK_RATE_DROP, 0x7E8, 258000, 150000, 1, 0, 0));
+}
+
+TEST(CheckRulesTest, OnTheWireAnIdsRateIsItsMessages)
+{
+    /* 0x7E8's replies as they crossed the bus: a first frame and two
+     * consecutive frames 5 ms apart, every 150 ms, the tester's flow
+     * control on 0x7E0; then one reply 2 s late, while another ID keeps
+     * the bus from a gap */
+    std::vector<Row> rows;
+    uint64_t t = 0;
+    for (int i = 0; i < 40; ++i) {
+        t += i == 30 ? 2000000 : 150000;
+        rows.push_back(Row{t, 0x7E8, 0, "10 0F 49 02 01 46 41 4B"});
+        rows.push_back(Row{t + 200, 0x7E0, 0, "30 00 00 00 00 00 00 00"});
+        rows.push_back(Row{t + 5000, 0x7E8, 0, "21 45 4A 32 35 33 34 56"});
+        rows.push_back(Row{t + 10000, 0x7E8, 0, "22 49 4E 30 30 30 30 31"});
+    }
+    every(rows, 0x123, 50000, 100000, static_cast<int>(t / 100000) + 1, "00");
+    by_time(rows);
+    const Fed wire(rows, true);
+    EXPECT_EQ(wire.of(ECUIO_CHECK_ISOTP).size(), 0u) << "every message whole";
+    const std::vector<Finding> drops = wire.of(ECUIO_CHECK_RATE_DROP);
+    ASSERT_EQ(drops.size(), 1u) << "only the late reply, not each pause";
+    EXPECT_EQ(drops[0], Finding(ECUIO_CHECK_RATE_DROP, 0x7E8, 30 * 150000,
+                                2000000, 1, 0, 0));
+
+    /* With the frame flags unknown each frame is judged: the pauses after
+     * the consecutive frames are drops */
+    EXPECT_GT(Fed(rows, false).of(ECUIO_CHECK_RATE_DROP).size(), 10u);
+}
+
 TEST(CheckRulesTest, ALateIdIsSeenPastTheSettleTimeAndZeroIsAnId)
 {
     std::vector<Row> rows;
