@@ -11,6 +11,7 @@
 //          relay over loopback TCP with a fake adapter (ADR-0047,
 //          BridgeTest.Relay*)
 
+#include <cmath>
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
@@ -3929,7 +3930,8 @@ TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
 /* The chart's window (LiveViewPage's 10 to 120 s): chartData keeps the
  * samples of the last windowMs before the newest plotted one, and with
  * columns, each slice's lowest and highest in time order and the newest
- * sample, never more than two a slice plus it */
+ * sample, never more than two a slice plus it. Slices are counted from
+ * time 0, so the window's first may be partial */
 TEST(BridgeTest, ChartDataKeepsTheWindowAndEachSlicesExtremes)
 {
     SignalListModel model;
@@ -3971,13 +3973,13 @@ TEST(BridgeTest, ChartDataKeepsTheWindowAndEachSlicesExtremes)
      * whole window's samples show them */
     const QVariantList full = samples(model.chartData(5000), 0);
     const QVariantList wave = samples(cut, 0);
-    const double from = 19990.0 - 5000.0;
     const double slice = 5000.0 / columns;
     std::map<int, std::pair<double, double>> want, got;
     const auto note = [&](std::map<int, std::pair<double, double>>& m,
                           const QVariantList& v) {
         for (int i = 0; i < v.size(); i += 2) {
-            const int k = static_cast<int>((v.at(i).toDouble() - from) / slice);
+            const int k =
+                static_cast<int>(std::floor(v.at(i).toDouble() / slice));
             const double x = v.at(i + 1).toDouble();
             auto it = m.find(k);
             if (it == m.end()) {
@@ -3991,6 +3993,60 @@ TEST(BridgeTest, ChartDataKeepsTheWindowAndEachSlicesExtremes)
     note(want, full);
     note(got, wave);
     EXPECT_EQ(got, want) << "each slice's lowest and highest";
+}
+
+/* A window that slides keeps its points: a sample stays in its slice
+ * however far the window has moved, so between two updates every slice
+ * away from the window's ends keeps the same lowest and highest, and a
+ * noisy trace scrolls instead of shimmering */
+TEST(BridgeTest, ChartDataKeepsEachSlicesPointsAsTheWindowSlides)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    /* A noisy trace: a value that jumps sample to sample */
+    const auto noise = [](qint64 t) {
+        return static_cast<double>((t * 7919) % 97);
+    };
+    qint64 t = 0;
+    const auto feed = [&](qint64 until) {
+        for (; t < until; t += 10)
+            model.updateValues({{uint16_t(1001), noise(t)}}, t);
+    };
+    const qint64 windowMs = 10000;
+    const int columns = 300; /* a phone's chart: 33.3 ms a slice */
+    const auto points = [&]() {
+        std::map<double, double> out;
+        const QVariantList v = model.chartData(windowMs, columns)
+                                   .at(0)
+                                   .toMap()
+                                   .value("samples")
+                                   .toList();
+        for (int i = 0; i < v.size(); i += 2)
+            out[v.at(i).toDouble()] = v.at(i + 1).toDouble();
+        return out;
+    };
+    feed(20000);
+    const std::map<double, double> before = points();
+    feed(20130); /* one 100 ms update and a bit: not a slice's width */
+    const std::map<double, double> after = points();
+
+    /* The stretch both windows hold whole, a slice clear of either end */
+    const double slice = static_cast<double>(windowMs) / columns;
+    const double lo = 20120.0 - windowMs + slice;
+    const double hi = 19990.0 - slice;
+    const auto inside = [&](const std::map<double, double>& m) {
+        std::map<double, double> out;
+        for (const auto& p : m)
+            if (p.first >= lo && p.first <= hi)
+                out.insert(p);
+        return out;
+    };
+    ASSERT_GT(inside(before).size(), 100u);
+    EXPECT_EQ(inside(after), inside(before))
+        << "the same points, slice for slice";
 }
 
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)

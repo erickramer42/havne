@@ -60,6 +60,7 @@
 #include "ecuio/socketcan.h"
 #include "ecuio/vin.h"
 
+#include <cmath>
 #include <QMetaObject>
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -579,7 +580,12 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
                 put(s);
                 continue;
             }
-            const qint64 k = static_cast<qint64>(static_cast<double>(s.timestampMs - from) / sliceMs);
+            // Slices counted from time 0, not from the window's start:
+            // the window slides with every update, and slices measured
+            // from it would put the same samples in other slices each
+            // time, so a noisy trace's peaks crawl as it scrolls
+            const qint64 k = static_cast<qint64>(
+                std::floor(static_cast<double>(s.timestampMs) / sliceMs));
             if (k != slice) {
                 flush();
                 slice = k;
