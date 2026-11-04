@@ -501,8 +501,10 @@ had the Innomaker USB2CAN listen (BENCH prep #26) and kept
 one-shot rule: without it, a frame nobody acknowledges is sent again
 forever. The USB2CAN offers no one-shot mode, so it listens only.
 - The refusal names only modes the controller offers, and
-  `havne-cli devices` shows each CAN interface's bit rate, controller
-  state and supported modes, so a refusal is explained before a run.
+  `havne-cli devices` and Settings show each CAN interface's bit rate,
+  controller state and supported modes, so a refusal is explained
+  before a run: built (ADR-0040's appendix "the desk bus", amended
+  2026-11-03); the supported modes need Linux 6.0.
 - The simulated ECU on the desk bus, behind an explicit flag, silent if
   anything else answers on its reply ID, so the VX reads it through
   J2534 over real wire; whether that flag lets a controller without

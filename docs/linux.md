@@ -106,7 +106,10 @@ Linux desktop a Classic adapter goes through `rfcomm` as above.
 ### SocketCAN
 
 `socketcan://` uses a CAN interface you have brought up; Havne never
-configures one. Settings and `havne-cli devices` list them.
+configures one. Settings and `havne-cli devices` list them, each with
+its bit rate, the controller's state, the modes it's in and, from Linux
+6.0, the modes its driver offers, so a connect's refusal is explained
+before you try it.
 
 **Listening** (`raw`, the default, or `mock`) sends nothing and needs a
 controller that can't transmit, so bring it up in listen-only mode at
@@ -133,10 +136,11 @@ sudo ip link set can0 up type can bitrate 500000 restart-ms 0 one-shot on
 havne-cli stream "socketcan://can0?profile=obd2&baud=500000" --values
 ```
 
-Not every adapter's driver offers one-shot mode
-(`ip -details link show can0` lists what it supports); one without it
-can listen but not ask: without it, a frame nobody acknowledges is
-sent again until the interface goes down
+Not every adapter's driver offers one-shot mode (`havne-cli devices`
+and `ip -details link show can0` list what it supports); one without
+it can listen but not ask, and Havne refuses it for asking: without
+it, a frame nobody acknowledges is sent again until the interface goes
+down
 ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)).
 When an interface goes from listening to asking, say `listen-only off`:
 `ip link set` keeps the mode it last had. No real controller has sent
