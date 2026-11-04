@@ -41,7 +41,7 @@ Page {
         property int chartWindowS: 30
     }
 
-    readonly property int rowHeight: 44
+    readonly property int rowHeight: Theme.rowHeight
     // The strip chart's least height; the list gives up rows before the
     // chart goes below it
     readonly property int chartMinHeight: 120
@@ -133,7 +133,7 @@ Page {
             objectName: "linkBanner"
             visible: Bridge.connected && Bridge.linkState !== "ok"
             Layout.fillWidth: true
-            implicitHeight: 40
+            implicitHeight: Theme.controlHeight + 4
             radius: Theme.radius
             color: Qt.alpha(Theme.linkColor(Bridge.linkState), 0.15)
 

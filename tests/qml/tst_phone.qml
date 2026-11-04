@@ -4,8 +4,8 @@
 //          items lie inside the window's width, the Log page in its
 //          Frames view too. The pages' own tests run them at 320 px
 //          alone; this one runs them as the window holds them, the
-//          relay's line beside its button, and the header's Mark while
-//          recording. How they
+//          relay's line beside its button, the header's Mark while
+//          recording, and developer mode's frame-rate badge. How they
 //          look on a phone is the phone's run.
 
 import QtQuick
@@ -174,6 +174,45 @@ TestCase {
 
     // While a session records, the header's Mark marks it from any page,
     // counting its marks, and the header still fits a phone
+    // A phone's density: upright (narrower than 720) and on its side
+    // (shorter than 480), and not in a desktop's window
+    function test_densityFollowsThePhonesShape_data() {
+        return [{ tag: "upright", w: 384, h: 832, dense: true },
+                { tag: "on its side", w: 832, h: 384, dense: true },
+                { tag: "a laptop", w: 1280, h: 650, dense: false }]
+    }
+    function test_densityFollowsThePhonesShape(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = data.h
+        tryCompare(Theme, "dense", data.dense)
+        compare(Theme.pageMargin, data.dense ? 10 : 16)
+        const live = find(main.contentItem, "livePage")
+        compare(live.rowHeight, data.dense ? 36 : 44, "Live's rows follow it")
+    }
+
+    // Developer mode's corner badge: hidden otherwise, and counting the
+    // frames the window draws while a session moves the page
+    function test_theFrameRateBadgeCountsInDeveloperMode() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        const badge = find(main.contentItem, "frameRate")
+        verify(!badge.visible, "hidden out of developer mode")
+        compare(main.framesPerSecond, 0)
+        Theme.developerMode = true
+        verify(badge.visible, "shown in developer mode")
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        tryVerify(() => main.framesPerSecond > 0, 5000, "the frames drawn are counted")
+        Theme.developerMode = false
+        verify(!badge.visible, "hidden again")
+        compare(main.framesPerSecond, 0, "the count starts over next time")
+    }
+
     function test_theHeadersMarkMarksTheRecording() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")

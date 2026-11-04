@@ -16,7 +16,7 @@ Button {
 
     background: Rectangle {
         implicitWidth: 120
-        implicitHeight: 36
+        implicitHeight: Theme.controlHeight
         radius: Theme.radius
         color: control.down    ? control.pressedColor
              : control.hovered ? control.hoverColor

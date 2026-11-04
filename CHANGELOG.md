@@ -11,6 +11,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Changed
+
+- On a phone, upright or on its side, and in a window as small, pages are denser: smaller margins, spacing, buttons, toolbar and sidebar, and shorter rows on Live, so more of each page fits at 100 %.
+
+### Added
+
+- In developer mode, a corner badge counts the frames the window draws each second.
+
 ## [0.4.0] - 2026-11-04
 
 ### Added

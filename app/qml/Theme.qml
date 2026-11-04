@@ -3,7 +3,10 @@
 //          linkLabel for every state and the trace palette's rules
 //          (seriesColor and seriesDash through tst_liveview.qml's rows);
 //          developerMode's effect on the Log page and Settings:
-//          tests/qml/tst_log.qml; how the palette looks is manual smoke.
+//          tests/qml/tst_log.qml; dense by the window's shape:
+//          tests/qml/tst_phone.qml; how the palette and a dense page
+//          look is manual smoke (run-havne at 384 x 832 and 832 x 384)
+//          and the phone's run.
 pragma Singleton
 import QtQuick
 
@@ -24,8 +27,19 @@ QtObject {
     readonly property color danger:         "#f87171"
     readonly property color info:           "#60a5fa"
     readonly property int radius:           8
-    readonly property int spacing:          8
-    readonly property int pageMargin:       16
+
+    // A phone's density: Main.qml sets dense when the layout (after the
+    // zoom) is narrower than 720 px or shorter than 480 px, a phone
+    // upright or on its side, or a window as small. Margins, spacing and
+    // control heights then shrink, so a page shows more of itself at
+    // 100 %: the test phone's run of v0.4.0 read best at 75 %.
+    property bool dense: false
+    readonly property int spacing:          dense ? 6 : 8
+    readonly property int pageMargin:       dense ? 10 : 16
+    readonly property int controlHeight:    dense ? 32 : 36
+    readonly property int rowHeight:        dense ? 36 : 44
+    readonly property int toolBarHeight:    dense ? 40 : 48
+    readonly property int sidebarWidth:     dense ? 150 : 220
 
     // A phone or tablet: touch only, no keyboard shortcuts, no file
     // manager for the app's own folders
