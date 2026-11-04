@@ -128,7 +128,11 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* handl
                                                  uint32_t timestamp,
                                                  uint32_t rx_flags);
 
-/* Polite SHUTDOWN, bounded wait, then job-object kill. NULL-safe. */
+/* Polite SHUTDOWN, bounded wait, then job-object kill. NULL-safe.
+ * ECUIO_OK when the child was still running, answered the shutdown and
+ * exited 0 (or there was no child); ECUIO_ERR_SURROGATE_FAILED when it
+ * had exited on its own, wedged or exited otherwise. The handle is
+ * freed either way. */
 ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* handle);
 
 /* Path of this session's log, which holds the child's lines and the

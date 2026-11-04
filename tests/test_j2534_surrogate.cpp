@@ -14,8 +14,10 @@
 //          a child from other shared headers refused at OP_OPEN,
 //          device and channel ID 0 handled as real IDs, malformed
 //          requests refused by the client before sending and by the
-//          child on arrival, and a surrogate exe that exits before the
-//          handshake.
+//          child on arrival, a surrogate exe that exits before the
+//          handshake, and a close that fails for a child that exited on
+//          its own or was killed (so every close == OK asserts the
+//          child survived what came before).
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -947,13 +949,55 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
 
-    /* Close kills the child instead of waiting 1.5 s twice. */
+    /* Close kills the child instead of waiting 1.5 s twice, and says
+     * it didn't shut down cleanly */
     t0 = clock::now();
-    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(1000));
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+    EXPECT_NE(log.find("close: the child didn't shut down cleanly "
+                       "(unresponsive, killed)"),
+              std::string::npos)
+        << log;
+}
+
+/* A child that exits on its own (a crash, or a child loop that ends on
+ * a vendor status, which ADR-0014 forbids) fails the close: every test
+ * that ends with sur_close == ECUIO_OK thereby asserts its child lived
+ * through the refusals before it. The child is killed from outside,
+ * found by the PID the fake records at PassThruOpen. */
+TEST(J2534SurrogateTest, ACloseFailsWhenTheChildExitedOnItsOwn)
+{
+    fake_control::Page* page = fake_control::create_for_this_process();
+    ASSERT_NE(page, nullptr);
+    fake_control::reset(page);
+    struct PageReset {
+        fake_control::Page* p;
+        ~PageReset() { fake_control::reset(p); }
+    } page_reset{page};
+
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    const DWORD pid = fake_control::opener_pid(page);
+    ASSERT_NE(pid, 0u) << "the fake's PassThruOpen didn't record its process";
+    ASSERT_NE(pid, GetCurrentProcessId())
+        << "the fake ran in the test, not the child";
+
+    HANDLE child = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(TerminateProcess(child, 9));
+    EXPECT_EQ(WaitForSingleObject(child, 5000), WAIT_OBJECT_0);
+    CloseHandle(child);
+
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("close: the child had already exited (code 9)"),
+              std::string::npos)
+        << log;
 }
 
 /* A reply the client never asked for (the child answers OP_CONNECT
@@ -1014,7 +1058,8 @@ TEST(J2534SurrogateTest, RequestIdMismatchMakesTheChildUnresponsive)
     EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(h, msg, sizeof(msg), 0, 0),
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
-    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED)
+        << "a child out of step is killed, not shut down";
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("DESYNC"), std::string::npos) << log;

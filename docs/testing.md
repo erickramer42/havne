@@ -594,6 +594,7 @@ round trip each, negligible at the transport's read cap
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor: behaviorally, since the child didn't yet log filter ops. The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test to x86 surrogate to x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
+| The child lives through every refusal (ADR-0014): `ecuio_j2534_sur_close` is `ECUIO_OK` only for a child still running that answers `OP_SHUTDOWN` and exits 0, so each test's closing check asserts its child survived what came before; a child that exited on its own, or a wedged one killed, closes `ECUIO_ERR_SURROGATE_FAILED` with a session-log line | `J2534SurrogateTest.ACloseFailsWhenTheChildExitedOnItsOwn` (the child killed by the PID the fake records), `.UnresponsiveChildFailsFastAfterTwoMissedDeadlines`, `.RequestIdMismatchMakesTheChildUnresponsive`; cross-arch too. A child that exits after any refused op (2026-11-04) fails 9 cases, two of them only at their close (`IoctlWhitelistRefusesUnsupportedIds`, `FilterStartStopLifecycle`), which passed with a dead child before |
 | A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
 | An `OP_READ` answered past its deadline: the next transaction drains the late reply and drops its frame, logged with the count ("drain_pending: dropped 1 frame(s)"), and the next read gets its own reply's frame | `J2534SurrogateTest.LateReadReplyIsDroppedAndLogged` (`ECUIO_FAKE_READ_DELAY_MS`). With the log line removed (checked by hand, 2026-10-23), it failed |
 | Device and channel ID 0 are real IDs in the child: with a fake that hands out 0 for both, a frame reads once connected, and a close with no disconnect first still disconnects channel 0 and closes device 0 | `J2534SurrogateTest.DeviceAndChannelIdZeroAreRealIds` (`ECUIO_FAKE_ZERO_IDS`). With the child's flags replaced by `ID != 0` (checked by hand, 2026-10-23): in the read gate, no frame arrived; at shutdown, neither call was made |
@@ -892,10 +893,6 @@ requests and quiet states
 - **The fake never segments a reply.** Every reply is one message,
   so a `START_OF_MESSAGE` indication appears only where a test queues
   one by hand (`IndicationsAheadOfAReplyAreSkipped`).
-- **Child survival after a refused op isn't asserted.** The surrogate
-  child must stay alive after a vendor refusal (ADR-0014). Tests check
-  the refusal's status, but `sur_close` returns `ECUIO_OK` whether or not
-  the child is still alive, so an early exit would go unnoticed.
 - **The client's skew paths aren't exercised.** No test child sends a
   `num_frames` or ioctl `data_len` past the wire limit. Reaching
   either needs a misbehaving child, such as a fault-injection knob in
