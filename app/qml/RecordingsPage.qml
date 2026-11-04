@@ -1031,6 +1031,7 @@ Page {
             // tap places the cursor
             DragHandler {
                 id: pan
+                objectName: "chartPan"
                 target: null
                 property real startT0: 0
                 onActiveChanged: if (active) startT0 = root.viewT0

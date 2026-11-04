@@ -69,12 +69,16 @@ TestCase {
         title: "2026-11-03 10:01:30 · Late", uri: "replay://y?profile=obd2",
         folder: Harness.recordingFixtures + "/pull-late", source: "", profile: "obd2" })
 
+    // A recording that opens moves the page's items at the layout's next
+    // polish, a frame later; a case whose checks all pass at once would
+    // otherwise press where an item was before it opened
     // Opens pull-early with pull-late listed beside it
     function openEarly() {
         const page = createPage()
         page.recordings = [lateRow, earlyRow]
         page.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
         return page
     }
 
@@ -88,6 +92,7 @@ TestCase {
         verify(page.viewing, "the viewer replaces the list")
         verify(!list.visible)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
         return page
     }
 
@@ -224,17 +229,33 @@ TestCase {
         // A drag in steps, as a pointer moves (mouseDrag's two moves don't
         // carry a DragHandler past its threshold)
         // The test's window is 200 px: grown to the page, so the pointer
-        // lands on the chart
+        // lands on the chart. The press waits for that size and the layout
+        // after it, and a miss says where it landed
         const win = frame.Window.window
         const size = [win.width, win.height]
         win.width = page.width
         win.height = page.height
+        tryVerify(() => win.width >= page.width && win.height >= page.height, 5000,
+                  "the window grown: " + win.width + "x" + win.height)
+        verify(waitForPolish(win), "the grown window laid out")
         const x = frame.width / 2, y = frame.height / 2
+        const at = frame.mapToItem(null, x, y)
+        verify(x > 200 && at.x < win.width && at.y < win.height,
+               "the press lands on the chart: " + frame.width + "x" + frame.height
+               + " at " + at.x + "," + at.y + " in " + win.width + "x" + win.height)
+        // Whether the drag went active tells a press that missed from a
+        // drag that moved nothing
+        const pan = find(frame, "chartPan")
+        let panned = false
+        const seen = () => { if (pan.active) panned = true }
+        pan.activeChanged.connect(seen)
         mousePress(frame, x, y)
         for (let dx = 10; dx <= 200; dx += 10)
-            mouseMove(frame, x - dx, y)
+            mouseMove(frame, x - dx, y, 10)
         mouseRelease(frame, x - 200, y)
-        verify(page.viewT0 > 0, "dragged later: " + page.viewT0)
+        pan.activeChanged.disconnect(seen)
+        verify(page.viewT0 > 0, "dragged later: " + page.viewT0
+               + (panned ? ", the drag went active" : ", the drag never went active"))
         verify(!page.hasCursor, "a drag places no cursor")
         mouseClick(frame, x, y)
         verify(page.cursorMs > page.viewT0 && page.cursorMs < page.viewT1,
@@ -448,10 +469,28 @@ TestCase {
         tryCompare(rows, "count", plotted)
         bar.options.close()
 
-        mouseClick(find(page, "backToList"))
+        // What reached the button tells a press that went elsewhere from
+        // one whose grab was taken
+        const back = find(page, "backToList")
+        const seen = []
+        // (pressed is also a property, so its signal is heard as a change)
+        const heard = ["pressedChanged", "released", "clicked", "canceled"].map(
+                    s => [s, () => seen.push(s === "pressedChanged" ? "pressed " + back.pressed : s)])
+        for (const [s, h] of heard)
+            back[s].connect(h)
+        const at = back.mapToItem(null, back.width / 2, back.height / 2)
+        mouseClick(back)
+        for (const [s, h] of heard)
+            back[s].disconnect(h)
+        verify(!page.viewing, "the click on All recordings went back to the list: "
+               + (seen.length ? seen.join(", ") : "nothing from the button")
+               + ", at " + at.x + "," + at.y + ", the popup "
+               + (bar.options.visible ? "visible" : "hidden"))
         page.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens again")
-        compare(find(page, "signalRows").count, all, "back to the list cleared the filter")
+        compare(find(page, "signalRows").count, all, "back to the list cleared the filter: text '"
+                + bar.filter.text + "', plotted only " + bar.filter.plottedOnly
+                + ", groups [" + bar.filter.groups + "]")
     }
 
     function test_aRefusedFolderSaysWhyAndBackGoesToTheList() {
