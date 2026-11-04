@@ -34,6 +34,9 @@ QtObject {
     // control heights then shrink, so a page shows more of itself at
     // 100 %: the test phone's run of v0.4.0 read best at 75 %.
     property bool dense: false
+    // Shorter than 480 px: a phone on its side, where Live's and the
+    // viewer's charts start maximized (Main.qml sets it with dense)
+    property bool shortLayout: false
     readonly property int spacing:          dense ? 6 : 8
     readonly property int pageMargin:       dense ? 10 : 16
     readonly property int controlHeight:    dense ? 32 : 36

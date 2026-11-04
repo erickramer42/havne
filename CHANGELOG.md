@@ -18,6 +18,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Added
 
 - In developer mode, a corner badge counts the frames the window draws each second.
+- Live's chart and the Recordings viewer's take the page at a press of **Chart**, a double-click or `F`, and give it back the same way; on a phone on its side they start that way. The viewer then shows the values at the cursor beside its chart. A handle below Live's list, and one below the viewer's chart, sets how much of the page each takes, kept between runs.
+
+### Fixed
+
+- Live's chart no longer shimmers as it scrolls: a noisy trace's peaks stay where they are instead of shifting at every update.
 
 ## [0.4.0] - 2026-11-04
 

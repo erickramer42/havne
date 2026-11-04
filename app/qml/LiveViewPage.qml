@@ -9,7 +9,10 @@
 //          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
 //          ChartLayout, drawn by StripChart.qml; every item inside 320 px alone and inside the
-//          app's window at the test phone's size (tests/qml/tst_phone.qml);
+//          app's window at the test phone's size (tests/qml/tst_phone.qml),
+//          the chart maximized by shape and on request and the splitter's
+//          share there too (the drag itself, the double-click and F are
+//          manual smoke: run-havne at 384 x 832 and 832 x 384);
 //          the drawing itself, sharp under zoom, is verified manually
 //          (docs/testing.md).
 
@@ -39,6 +42,31 @@ Page {
         id: liveSettings
         category: "live"
         property int chartWindowS: 30
+        // The splitter's place: the list's share of the page's height,
+        // or -1 for the list sized to its rows (the default)
+        property real listShare: -1
+    }
+
+    // The chart maximized: it takes the page but for the link banner and
+    // the window row. Kept apart for a short layout (a phone on its side,
+    // where it starts maximized) and a tall one, so turning the phone
+    // never undoes a choice made the other way up. Not kept between runs
+    // The splitter's share, as the page's own
+    property alias listShare: liveSettings.listShare
+    property bool maximizedTall: false
+    property bool maximizedShort: true
+    readonly property bool chartMaximized: Theme.shortLayout ? maximizedShort : maximizedTall
+    function toggleMaximized() {
+        if (Theme.shortLayout)
+            maximizedShort = !maximizedShort
+        else
+            maximizedTall = !maximizedTall
+    }
+    // F on a keyboard; a text field takes its own letters first
+    Shortcut {
+        sequence: "F"
+        enabled: root.visible && !Theme.mobile
+        onActivated: root.toggleMaximized()
     }
 
     readonly property int rowHeight: Theme.rowHeight
@@ -112,6 +140,7 @@ Page {
         spacing: 12
 
         PageHeader {
+            visible: !root.chartMaximized
             title: qsTr("Live signals")
 
             // Finding a signal among many (ADR-0050): the list's own
@@ -148,6 +177,7 @@ Page {
 
         // Status line; disconnected, the empty state with a way to connect
         RowLayout {
+            visible: !root.chartMaximized
             Layout.fillWidth: true
             spacing: Theme.spacing
 
@@ -174,6 +204,7 @@ Page {
         ListView {
             id: signalList
             objectName: "signalList"
+            visible: !root.chartMaximized
             readonly property bool overflows: contentHeight > height
             readonly property real oneRow: Math.min(count, 1) * root.rowHeight
             // Below the list: the hidden note when shown, the window row,
@@ -182,12 +213,17 @@ Page {
                                               - (hiddenNote.visible ? hiddenNote.height + column.spacing : 0)
                                               - windowRow.height - column.spacing
                                               - root.chartMinHeight
+            // The splitter's height, once dragged: within one row and
+            // what the chart leaves, and never past the rows themselves
+            readonly property real dragged: liveSettings.listShare < 0 ? -1
+                : Math.max(oneRow, Math.min(liveSettings.listShare * column.height, roomAbove,
+                                            count * root.rowHeight))
 
             Layout.fillWidth: true
-            Layout.preferredHeight: count * root.rowHeight
-            Layout.maximumHeight: Math.max(oneRow, Math.min(Math.max(3 * root.rowHeight,
-                                                                     column.height * 0.55),
-                                                            roomAbove))
+            Layout.preferredHeight: dragged >= 0 ? dragged : count * root.rowHeight
+            Layout.maximumHeight: dragged >= 0 ? dragged
+                : Math.max(oneRow, Math.min(Math.max(3 * root.rowHeight, column.height * 0.55),
+                                            roomAbove))
             Layout.minimumHeight: oneRow
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -300,7 +336,7 @@ Page {
         Label {
             id: hiddenNote
             objectName: "hiddenNote"
-            visible: Bridge.signalModel.hiddenCount > 0
+            visible: Bridge.signalModel.hiddenCount > 0 && !root.chartMaximized
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -337,6 +373,15 @@ Page {
                 }
             }
             Item { Layout.fillWidth: true }
+            ThemedButton {
+                objectName: "maximizeChart"
+                text: root.chartMaximized ? qsTr("List") : qsTr("Chart")
+                Layout.minimumWidth: 52
+                Layout.maximumWidth: 72
+                Accessible.name: root.chartMaximized ? qsTr("Show the list again")
+                                                     : qsTr("Give the chart the page")
+                onClicked: root.toggleMaximized()
+            }
         }
 
         // ---- Strip chart: per-signal rolling history, one repaint per
@@ -380,6 +425,44 @@ Page {
                     function onConnectedChanged() { chart.requestPaint() }
                 }
             }
+            // A double-click or double-tap maximizes it, or gives the list
+            // back
+            TapHandler { onDoubleTapped: root.toggleMaximized() }
         }
+    }
+
+    // The splitter: drag it to give the list or the chart more of the
+    // page, kept between runs; a double-tap sizes the list to its rows
+    // again. It sits in the column's gap below the list, outside the
+    // layout, so a short page loses no height to it
+    Item {
+        id: splitter
+        objectName: "listSplitter"
+        visible: signalList.visible && signalList.count > 0
+        x: column.x + signalList.x
+        y: column.y + signalList.y + signalList.height + (column.spacing - height) / 2
+        width: signalList.width
+        height: column.spacing
+        Rectangle {
+            anchors.centerIn: parent
+            width: 40
+            height: 4
+            radius: 2
+            color: splitDrag.active || splitHover.hovered ? Theme.textDim : Theme.outline
+        }
+        HoverHandler { id: splitHover; cursorShape: Qt.SizeVerCursor }
+        DragHandler {
+            id: splitDrag
+            target: null
+            xAxis.enabled: false
+            property real startHeight: 0
+            onActiveChanged: if (active) startHeight = signalList.height
+            onActiveTranslationChanged: {
+                if (active && column.height > 0)
+                    liveSettings.listShare = Math.max(0, (startHeight + activeTranslation.y)
+                                                         / column.height)
+            }
+        }
+        TapHandler { onDoubleTapped: liveSettings.listShare = -1 }
     }
 }

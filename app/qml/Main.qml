@@ -75,6 +75,7 @@ ApplicationWindow {
     // A phone on its side, or a window as short
     readonly property bool isShort: zoomRoot.height < 480
     Binding { target: Theme; property: "dense"; value: root.isCompact || root.isShort }
+    Binding { target: Theme; property: "shortLayout"; value: root.isShort }
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar

@@ -148,7 +148,17 @@ TestCase {
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
-        tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        // On its side the chart starts with the page and the cursor's
+        // values beside it; the page's own layout is a press away
+        compare(page.chartMaximized, data.h < 480, "maximized on its side only")
+        if (page.chartMaximized) {
+            verify(!find(page, "signalRows").visible, "the rows give way")
+            verify(find(page, "cursorStrip").visible, "the values beside the chart")
+            find(page, "maximizeChart").clicked()
+        }
+        tryVerify(() => find(page, "signalRows").visible, 2000, "the rows are back")
         verify(waitForPolish(main), "laid out")
         const chart = find(page, "chartFrame")
         verify(chart.height >= 200, "the chart is " + chart.height + " px")
@@ -172,8 +182,6 @@ TestCase {
         bar.options.close()
     }
 
-    // While a session records, the header's Mark marks it from any page,
-    // counting its marks, and the header still fits a phone
     // A phone's density: upright (narrower than 720) and on its side
     // (shorter than 480), and not in a desktop's window
     function test_densityFollowsThePhonesShape_data() {
@@ -190,6 +198,66 @@ TestCase {
         compare(Theme.pageMargin, data.dense ? 10 : 16)
         const live = find(main.contentItem, "livePage")
         compare(live.rowHeight, data.dense ? 36 : 44, "Live's rows follow it")
+    }
+
+    // The chart maximized: on its side by default, upright on request,
+    // each shape keeping its own choice; Live keeps its window row and
+    // its link banner, and its list gives way
+    function test_liveMaximizesItsChartByShape() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        const list = find(live, "signalList")
+        main.width = 832
+        main.height = 384
+        tryVerify(() => Theme.shortLayout, 2000, "on its side")
+        verify(live.chartMaximized, "on its side the chart has the page")
+        verify(!list.visible, "the list gives way")
+        verify(find(live, "chartWindowRow").visible, "the window row stays")
+        find(live, "maximizeChart").clicked()
+        verify(!live.chartMaximized && list.visible, "the list is back")
+
+        main.width = 384
+        main.height = 832
+        tryVerify(() => !Theme.shortLayout, 2000, "upright")
+        verify(!live.chartMaximized, "upright it starts with the list")
+        find(live, "maximizeChart").clicked()
+        verify(live.chartMaximized, "maximized upright on request")
+        main.width = 832
+        main.height = 384
+        tryVerify(() => Theme.shortLayout, 2000, "on its side again")
+        verify(!live.chartMaximized, "on its side, the choice made on its side holds")
+        main.width = 384
+        main.height = 832
+        tryVerify(() => !Theme.shortLayout, 2000, "upright again")
+        verify(live.chartMaximized, "and upright, the one made upright")
+        find(live, "maximizeChart").clicked()
+    }
+
+    // Live's splitter: a share of the page for the list, within the rows
+    // it has; -1 sizes it to them again
+    function test_liveSplitterSetsTheListsHeight() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        const list = find(live, "signalList")
+        tryVerify(() => list.count > 3, 5000, "rows")
+        verify(find(live, "listSplitter").visible, "the splitter shows")
+        const kept = live.listShare
+        live.listShare = 0.1
+        verify(waitForPolish(main), "laid out")
+        fuzzyCompare(list.height, Math.max(live.rowHeight, 0.1 * list.parent.height), 1,
+                     "a tenth of the page")
+        live.listShare = -1
+        verify(waitForPolish(main), "laid out")
+        verify(list.height > 0.1 * list.parent.height + 1, "sized to its rows again")
+        live.listShare = kept
     }
 
     // Developer mode's corner badge: hidden otherwise, and counting the
@@ -213,6 +281,8 @@ TestCase {
         compare(main.framesPerSecond, 0, "the count starts over next time")
     }
 
+    // While a session records, the header's Mark marks it from any page,
+    // counting its marks, and the header still fits a phone
     function test_theHeadersMarkMarksTheRecording() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
