@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-03, **Version:** v0.3.6,
+**Updated:** 2026-11-04, **Version:** v0.4.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,12 +14,12 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.4.0, in progress.** v0.3.6 is out: every car run
-the adapters on hand allow (several PIDs per request through the VX,
-two ECUs, DID scans, the first clears); trouble-code titles, VIN
-decode and inspection readiness; clearing with the engine running;
-the simulated ECU as `havne-cli sim`; the phone as a relay; and
-Windows' 1 ms timer for J2534. Changes since then go under
+**Current phase: v0.5.0, in progress.** v0.4.0 is out: recordings in
+core, written on a thread of their own by the app and `havne-cli`
+alike; the Recordings page's viewer, which overlays two runs, and
+`havne-cli view` and `info` offline; a check of a recording's frames;
+finding a signal among many; and SocketCAN through a real controller,
+which has listened on a desk bus and on the test car. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -34,9 +34,9 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.4.0 brings recordings in core with a log viewer,
-and SocketCAN through a real controller, which has listened on a desk
-bus and on the test car ([roadmap](#roadmap)).
+background too. v0.5.0 brings your own signals: PIDs and DIDs defined
+or imported in bulk, and computed signals such as boost
+([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -323,8 +323,8 @@ bus and on the test car ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 996 ctest cases on Windows (both trees rebuilt,
-  2026-11-03), all passing but two env-gated skips (the cross-arch
+- **Tests:** 998 ctest cases on Windows (both trees rebuilt,
+  2026-11-04), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (87/87); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
@@ -433,8 +433,9 @@ an issue is resolved it is removed, and its number is not reused.
 | Version | Scope | Status |
 |---|---|---|
 | v0.3.6 | Proven and finished: every car run the adapters on hand allow (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Released |
-| v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | In progress |
-| v0.5.0-v0.9.0 | v0.5.0, your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier. v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
+| v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
+| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier | In progress |
+| v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -583,7 +584,8 @@ less, **M** a few days, **L** a week or more or an ADR first.
   (deg F with km/h); whole-UI units are built
   ([ADR-0022](docs/adr/0022-display-units.md)).
 - **A phone's density (M):** control heights, spacing and the default
-  zoom on a phone; the test phone's run of the viewer read best at 75 %.
+  zoom on a phone; the test phone's run of the viewer read best at 75 %,
+  and on its side the viewer's controls fill the screen above the chart.
 - **Low-glare and night themes (M):** Theme roles for the analog gauge
   first; warning and danger told apart by more than hue.
 - **User-configurable dashboards (L):** pages built from the gauge

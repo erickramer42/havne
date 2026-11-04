@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-04
+
 ### Added
 
 - The Recordings page: the recordings sessions saved, newest first, each opening in a viewer. It shows the recording's signals and a chart of the part in view: drag it sideways, zoom with the wheel or a pinch, and tap for the values at that moment; on a phone the page scrolls, upright or on its side. Its markers and what a check of its frames found are on the chart's time axis, and each finding listed shows its place. Replay still puts a recording's `replay://` URI in Settings' field.
@@ -614,7 +616,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.6...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/erickramer42/havne/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/erickramer42/havne/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/erickramer42/havne/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/erickramer42/havne/compare/v0.3.3...v0.3.4

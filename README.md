@@ -243,15 +243,15 @@ troubleshooting.
 
 ## Status
 
-v0.3.6 (trouble codes by name, VIN decode and inspection readiness,
-clearing with the engine running, the simulated ECU, the phone as a
-relay, and car runs through both adapters on hand) is the latest
-release. Next:
+v0.4.0 (recordings in core, a viewer that overlays runs in the app
+and `havne-cli`, a check of a recording's frames, finding a signal
+among many, and SocketCAN through a real controller, listening on a
+desk bus and on the test car) is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.4.0 | Recordings in core and a log viewer that overlays runs, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller |
-| v0.5.0-v0.9.0 | Your own PIDs and DIDs, imported in bulk, and computed signals such as boost; manufacturer data through plugins; exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
+| v0.5.0 | Your own PIDs and DIDs, imported in bulk, computed signals such as boost, and manufacturer data through plugins |
+| v0.6.0-v0.9.0 | Exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
