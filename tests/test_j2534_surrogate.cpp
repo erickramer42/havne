@@ -15,9 +15,10 @@
 //          device and channel ID 0 handled as real IDs, malformed
 //          requests refused by the client before sending and by the
 //          child on arrival, a surrogate exe that exits before the
-//          handshake, and a close that fails for a child that exited on
+//          handshake, a close that fails for a child that exited on
 //          its own or was killed (so every close == OK asserts the
-//          child survived what came before).
+//          child survived what came before), and replies skewed past
+//          the wire's limits (the child's ECUIO_SUR_TEST_SKEW).
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -1066,6 +1067,98 @@ TEST(J2534SurrogateTest, RequestIdMismatchMakesTheChildUnresponsive)
     EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
     EXPECT_EQ(log.find("OP_WRITE:"), std::string::npos)
         << "a write reached the child after the mismatch\n" << log;
+}
+
+/* A child built against other wire limits (ECUIO_SUR_TEST_SKEW stands in
+ * for one) can claim more than the client has room for. The client
+ * refuses the reply before reading past it: a READ claiming more frames
+ * than a batch holds, or frames on a reply that takes none, leaves the
+ * pipe out of step, so the handle turns unresponsive and close kills the
+ * child; an ioctl reply whose data_len is past the wire's limit is
+ * refused alone, the pipe still in step. */
+static ecuio_j2534_sur_handle_t* open_skewed(uint32_t opcode)
+{
+    char op[8];
+    snprintf(op, sizeof(op), "%u", static_cast<unsigned>(opcode));
+    EnvArm arm("ECUIO_SUR_TEST_SKEW", op);
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    return h;
+}
+
+TEST(J2534SurrogateTest, AReadClaimingMoreFramesThanABatchHoldsEndsTheHandle)
+{
+    ecuio_j2534_sur_handle_t* h = open_skewed(ECUIO_SUR_OP_READ);
+    ASSERT_NE(h, nullptr);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    ecuio_pt_rx_t f = {};
+    bool got = true;
+    EXPECT_EQ(ecuio_j2534_sur_read_msg(h, channel, &f, 50, &got),
+              ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_FALSE(got);
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_ERR_SURROGATE_FAILED)
+        << "the pipe is out of step: no later call reaches the child";
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("17 frame(s) on the reply to op=5 (skew?); child "
+                       "unresponsive"),
+              std::string::npos)
+        << log;
+}
+
+TEST(J2534SurrogateTest, FramesOnAReplyThatTakesNoneEndTheHandle)
+{
+    ecuio_j2534_sur_handle_t* h = open_skewed(ECUIO_SUR_OP_CONNECT);
+    ASSERT_NE(h, nullptr);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("1 frame(s) on the reply to op=2 (skew?); child "
+                       "unresponsive"),
+              std::string::npos)
+        << log;
+}
+
+TEST(J2534SurrogateTest, AnIoctlReplyPastTheWireLimitIsRefusedAlone)
+{
+    ecuio_j2534_sur_handle_t* h = open_skewed(ECUIO_SUR_OP_IOCTL);
+    ASSERT_NE(h, nullptr);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    unsigned char out[8] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
+    uint32_t out_len = 1234;
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(out_len, 0u) << "a refused reply reports no length";
+    EXPECT_EQ(out[0], 0xAA) << "a refused reply copies nothing";
+
+    /* Only the one reply was skewed, and the pipe is in step: the next
+     * ioctl is the fake's 13.8 V, and the child shuts down cleanly */
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("ioctl: data_len=65 exceeds the wire limit (skew?)"),
+              std::string::npos)
+        << log;
 }
 
 /* A read the child answers past its deadline: the late reply, which

@@ -323,10 +323,10 @@ or imported in bulk, and computed signals such as boost
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 1000 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 1003 ctest cases on Windows (both trees rebuilt,
   2026-11-04), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (88/88); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (91/91); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer

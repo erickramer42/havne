@@ -88,6 +88,16 @@ static uint32_t g_fingerprint = ECUIO_SUR_FINGERPRINT;
  * reply carries frames. 0 (the default) is off. */
 static uint32_t g_reply_twice = 0;
 
+/* ECUIO_SUR_TEST_SKEW=<opcode> skews the first reply to that opcode
+ * past the wire's limits, standing in for a child built against other
+ * limits, so a test reaches the client's checks: an OP_READ claims one
+ * frame more than a batch holds, an OP_IOCTL a data_len past
+ * ECUIO_SUR_IOCTL_DATA_MAX, and any other opcode a frame on a reply that
+ * takes none. The frames claimed are never sent: the client must refuse
+ * the reply before reading them. Never OP_OPEN or OP_SHUTDOWN. 0 (the
+ * default) is off. */
+static uint32_t g_skew = 0;
+
 static void stage(const char* fmt, ...)
 {
     /* Local wall-clock time, the same stamp the client puts on its
@@ -518,6 +528,17 @@ int wmain(int argc, wchar_t* argv[])
         stage("the first reply to opcode %u goes twice "
               "(ECUIO_SUR_TEST_REPLY_TWICE)", static_cast<unsigned>(g_reply_twice));
     }
+    char test_skew[16] = {};
+    if (GetEnvironmentVariableA("ECUIO_SUR_TEST_SKEW", test_skew,
+                                sizeof(test_skew)) > 0) {
+        g_skew = static_cast<uint32_t>(strtoul(test_skew, nullptr, 0));
+        if (g_skew == ECUIO_SUR_OP_OPEN || g_skew == ECUIO_SUR_OP_SHUTDOWN) {
+            g_skew = 0;
+        }
+        stage("the first reply to opcode %u is skewed past the wire's "
+              "limits (ECUIO_SUR_TEST_SKEW)",
+              static_cast<unsigned>(g_skew));
+    }
 
     g_module = LoadLibraryExW(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (g_module == nullptr) {
@@ -741,10 +762,25 @@ int wmain(int argc, wchar_t* argv[])
          * refused ioctls, failed writes and unknown opcodes, and the
          * client maps each status. Only a broken pipe or OP_SHUTDOWN
          * ends the loop. A READ's frames follow its response. */
+        bool skewed = false;
+        if (g_skew != 0 && req.opcode == g_skew) {
+            g_skew = 0;
+            skewed = true;
+            if (req.opcode == ECUIO_SUR_OP_READ) {
+                resp.num_frames = ECUIO_SUR_MAX_FRAMES_PER_READ + 1;
+            } else if (req.opcode == ECUIO_SUR_OP_IOCTL) {
+                resp.data_len = ECUIO_SUR_IOCTL_DATA_MAX + 1;
+            } else {
+                resp.num_frames = 1;
+            }
+        }
         DWORD wr = 0;
         if (!WriteFile(g_pipe, &resp, sizeof(resp), &wr, nullptr) ||
             wr != sizeof(resp)) {
             break;
+        }
+        if (skewed) {
+            continue; /* the frames it claims are never sent */
         }
         if (g_reply_twice != 0 && req.opcode == g_reply_twice) {
             g_reply_twice = 0;

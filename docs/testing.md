@@ -586,6 +586,7 @@ round trip each, negligible at the transport's read cap
 | Payload logging: with `ECUIO_SUR_LOG_FRAMES=1` at spawn, the child logs every written and read message verbatim (status, TxFlags or RxStatus, vendor timestamp, bytes); without it, no frame lines | `J2534SurrogateTest.FrameLoggingRecordsPayloadsVerbatimWhenEnabled`, also cross-arch (2026-10-21, 20/20); end to end in the app through the x86 surrogate, 2026-10-21 |
 | A child that misses two deadlines in a row is marked unresponsive: later transactions fail at once and close kills it without waiting | `J2534SurrogateTest.UnresponsiveChildFailsFastAfterTwoMissedDeadlines`, also cross-arch (2026-10-21, 21/21) |
 | A reply to another request (the child answers `OP_CONNECT` twice, `ECUIO_SUR_TEST_REPLY_TWICE`) marks the child unresponsive: the next call fails on the mismatch, and a write after it fails at once without reaching the child | `J2534SurrogateTest.RequestIdMismatchMakesTheChildUnresponsive`, also cross-arch. Against a client that only failed the call (checked 2026-10-24), the write reached the child and nothing was marked |
+| A reply skewed past the wire's limits (the child's `ECUIO_SUR_TEST_SKEW`): a read claiming more frames than a batch holds, or a frame on a reply that takes none, is refused before the client reads past it and turns the handle unresponsive (later calls fail at once, close kills the child); an ioctl reply whose `data_len` is past `ECUIO_SUR_IOCTL_DATA_MAX` is refused alone, nothing copied, and the next ioctl and the close succeed | `J2534SurrogateTest.AReadClaimingMoreFramesThanABatchHoldsEndsTheHandle`, `.FramesOnAReplyThatTakesNoneEndTheHandle`, `.AnIoctlReplyPastTheWireLimitIsRefusedAlone`, also cross-arch. Mutation-checked 2026-11-04: without the batch bound the read waits out 17 frames that never come (its own test fails on the log line); without the ioctl bound the reply is taken |
 | A relative DLL path is refused at create (`BAD_URI`), before any load; drive paths with either separator still reach the loader | `J2534QueryParamTest.RelativeDllPathsAreRefused`. Before the check (2026-10-24), `j2534://fake_j2534.dll` opened a session: the bare name loaded the fake through the DLL search order |
 | The loader refuses a relative `dll_path` (`LOAD_FAILED`, a bare name, `.\` and a drive-less root) before anything opens it, with the fake in the current directory the child inherits; discovery leaves out a relative `FUNCTIONLIBRARY` | `J2534ConnectTest.ARelativeDllPathIsRefusedBeforeAnyLoad`, also cross-arch. Without the check (2026-10-25) both backends of the time loaded and opened the fake from the current directory. Discovery's skip: `J2534DiscoveryTest.DiscoveryReturnsValidVendorNames` against `win-coverage`'s relative entry |
 | A child that exits during `OP_OPEN` (failed DLL load) is reported by its exit code, not as a blocked vendor | Session logs read by hand, 2026-10-20 (`DeadDllFailsFastAtOpen`, `BlockedVendorOpenFailsAtHandshakeTimeout`) |
@@ -893,10 +894,6 @@ requests and quiet states
 - **The fake never segments a reply.** Every reply is one message,
   so a `START_OF_MESSAGE` indication appears only where a test queues
   one by hand (`IndicationsAheadOfAReplyAreSkipped`).
-- **The client's skew paths aren't exercised.** No test child sends a
-  `num_frames` or ioctl `data_len` past the wire limit. Reaching
-  either needs a misbehaving child, such as a fault-injection knob in
-  the surrogate.
 - **Vendor conformance to J2534-1 v04.04 is known for one vendor.**
   The shared types header is verified against public references, and
   the VX's replies decode, so its struct layout matches. It departs
