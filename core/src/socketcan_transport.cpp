@@ -762,104 +762,18 @@ const ecuio_transport_ops_t kSocketCanTransportOps = {socketcan_start,
 /* The detail for an interface attach won't listen on */
 void refuse(const socketcan_link& l, socketcan_verdict v, uint32_t want_baud)
 {
-    switch (v) {
-    case socketcan_verdict::not_can:
-        if (l.kind[0] != '\0') {
-            ecuio_detail_set("%s isn't a CAN interface (its kind is %s)",
-                             l.name, l.kind);
-        } else {
-            ecuio_detail_set("%s isn't a CAN interface", l.name);
-        }
-        break;
-    case socketcan_verdict::down:
-        if (l.is_vcan()) {
-            ecuio_detail_set("%s is down: sudo ip link set %s up", l.name,
-                             l.name);
-        } else {
-            ecuio_detail_set("%s is down: sudo ip link set %s up type can "
-                             "bitrate <the bus's rate> listen-only on",
-                             l.name, l.name);
-        }
-        break;
-    case socketcan_verdict::not_listen_only:
-        ecuio_detail_set(
-            "%s isn't listen-only, so it could transmit on the bus: sudo "
-            "ip link set %s down, then sudo ip link set %s up type can "
-            "bitrate %u listen-only on",
-            l.name, l.name, l.name, l.has_bitrate ? l.bitrate : 500000u);
-        break;
-    case socketcan_verdict::wrong_rate:
-        ecuio_detail_set("%s runs at %u bit/s, not the %u ?baud= asks for",
-                         l.name, l.bitrate, want_baud);
-        break;
-    case socketcan_verdict::ok:
-    default:
-        break;
-    }
+    char why[512];
+    socketcan_refusal(l, v, want_baud, why, sizeof why);
+    ecuio_detail_set("%s", why);
 }
 
-/* The detail for an interface a requesting session won't send through
- * (ADR-0040 section 2), with the commands that make it one it would */
+/* The detail for an interface a requesting session won't send through */
 void refuse_sender(const socketcan_link& l, socketcan_send_verdict v,
                    uint32_t want_baud)
 {
-    const unsigned rate =
-        want_baud != 0 ? want_baud : (l.has_bitrate ? l.bitrate : 500000u);
-    const char* one_shot = SOCKETCAN_SEND_NEEDS_ONE_SHOT ? " one-shot on" : "";
-    switch (v) {
-    case socketcan_send_verdict::not_can:
-        refuse(l, socketcan_verdict::not_can, want_baud);
-        break;
-    case socketcan_send_verdict::down:
-        if (l.is_vcan()) {
-            ecuio_detail_set("%s is down: sudo ip link set %s up", l.name,
-                             l.name);
-        } else {
-            ecuio_detail_set("%s is down: sudo ip link set %s up type can "
-                             "bitrate <the bus's rate> restart-ms 0%s",
-                             l.name, l.name, one_shot);
-        }
-        break;
-    case socketcan_send_verdict::listen_only:
-        ecuio_detail_set("%s is listen-only, and this profile sends requests: "
-                         "sudo ip link set %s down, then sudo ip link set %s "
-                         "up type can bitrate %u restart-ms 0%s",
-                         l.name, l.name, l.name, rate, one_shot);
-        break;
-    case socketcan_send_verdict::no_rate:
-        ecuio_detail_set("a profile that sends needs ?baud= with the rate the "
-                         "car's bus runs at (%s is up at %u bit/s): stated, "
-                         "never assumed",
-                         l.name, l.has_bitrate ? l.bitrate : 0u);
-        break;
-    case socketcan_send_verdict::wrong_rate:
-        refuse(l, socketcan_verdict::wrong_rate, want_baud);
-        break;
-    case socketcan_send_verdict::restarts_itself:
-        ecuio_detail_set("%s restarts itself after a bus-off, so a wrong rate "
-                         "would go on disturbing the bus: sudo ip link set %s "
-                         "down, then sudo ip link set %s up type can bitrate "
-                         "%u restart-ms 0%s",
-                         l.name, l.name, l.name, rate, one_shot);
-        break;
-    case socketcan_send_verdict::no_one_shot:
-        ecuio_detail_set("%s isn't in one-shot mode, so a frame that fails "
-                         "would be sent again by the controller: sudo ip link "
-                         "set %s down, then sudo ip link set %s up type can "
-                         "bitrate %u restart-ms 0 one-shot on (where its "
-                         "driver offers it)",
-                         l.name, l.name, l.name, rate);
-        break;
-    case socketcan_send_verdict::not_error_active:
-        ecuio_detail_set("%s already reports bus errors (it isn't "
-                         "error-active), so nothing was sent: check the rate "
-                         "and the cable, then take it down and up again",
-                         l.name);
-        break;
-    case socketcan_send_verdict::ok:
-    default:
-        break;
-    }
+    char why[512];
+    socketcan_send_refusal(l, v, want_baud, why, sizeof why);
+    ecuio_detail_set("%s", why);
 }
 
 } // namespace
