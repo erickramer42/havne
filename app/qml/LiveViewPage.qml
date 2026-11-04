@@ -10,8 +10,9 @@
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
 //          ChartLayout, drawn by StripChart.qml; every item inside 320 px alone and inside the
 //          app's window at the test phone's size (tests/qml/tst_phone.qml),
-//          the chart maximized by shape and on request and the splitter's
-//          share there too (the drag itself, the double-click and F are
+//          the chart maximized by shape and on request, the splitter's
+//          share and the window's steps (stepWindow, which a pinch and
+//          the wheel call) there too (the drag itself, the double-click and F are
 //          manual smoke: run-havne at 384 x 832 and 832 x 384);
 //          the drawing itself, sharp under zoom, is verified manually
 //          (docs/testing.md).
@@ -38,6 +39,14 @@ Page {
     readonly property int chartWindowS: chartWindows.includes(liveSettings.chartWindowS)
                                         ? liveSettings.chartWindowS : 30
     onChartWindowSChanged: chart.requestPaint()
+    // One window along: direction > 0 a longer one, < 0 a shorter one,
+    // stopping at either end. A pinch and the wheel step through them,
+    // since Live's chart always ends at now
+    function stepWindow(direction) {
+        const i = chartWindows.indexOf(chartWindowS)
+        const next = Math.max(0, Math.min(chartWindows.length - 1, i + (direction > 0 ? 1 : -1)))
+        liveSettings.chartWindowS = chartWindows[next]
+    }
     Settings {
         id: liveSettings
         category: "live"
@@ -428,6 +437,36 @@ Page {
             // A double-click or double-tap maximizes it, or gives the list
             // back
             TapHandler { onDoubleTapped: root.toggleMaximized() }
+            // Fingers spreading show a shorter window, closing a longer
+            // one: a step each time the scale moves by kPinchStep since the
+            // last step, so one pinch can cross several windows
+            PinchHandler {
+                id: windowPinch
+                objectName: "chartPinch"
+                target: null
+                readonly property real kPinchStep: 1.35
+                property real fromScale: 1
+                onActiveChanged: fromScale = 1
+                onActiveScaleChanged: {
+                    if (!active || activeScale <= 0)
+                        return
+                    if (activeScale / fromScale >= kPinchStep) {
+                        root.stepWindow(-1)
+                        fromScale = activeScale
+                    } else if (fromScale / activeScale >= kPinchStep) {
+                        root.stepWindow(1)
+                        fromScale = activeScale
+                    }
+                }
+            }
+            // The wheel the same way: up a shorter window, down a longer one
+            WheelHandler {
+                target: null
+                onWheel: event => {
+                    if (event.angleDelta.y !== 0)
+                        root.stepWindow(event.angleDelta.y > 0 ? -1 : 1)
+                }
+            }
         }
     }
 

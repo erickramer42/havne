@@ -14,10 +14,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Changed
 
 - On a phone, upright or on its side, and in a window as small, pages are denser: smaller margins, spacing, buttons, toolbar and sidebar, and shorter rows on Live, so more of each page fits at 100 %.
+- On a phone upright, the Dashboard's tachometer and speedometer sit side by side, so the whole Dashboard fits the screen; they stack only on a narrower page.
 
 ### Added
 
 - In developer mode, a corner badge counts the frames the window draws each second.
+- A pinch on Live's chart, or the mouse wheel over it, steps its window: fingers spreading show less time, closing show more.
 - Live's chart and the Recordings viewer's take the page at a press of **Chart**, a double-click or `F`, and give it back the same way; on a phone on its side they start that way. The viewer then shows the values at the cursor beside its chart. A handle below Live's list, and one below the viewer's chart, sets how much of the page each takes, kept between runs.
 
 ### Fixed

@@ -1,7 +1,8 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke: mock://demo drives every gauge; resize across
-//          760 px content width (4 <-> 2 grid columns) and 600 px (compact
-//          gaps), and to 1280 x 650 (the wide arrangement fits without
+//          760 px content width (4 <-> 2 grid columns), 600 px (compact
+//          gaps) and 320 px (the two dials side by side above it, stacked
+//          below; tests/qml/tst_phone.qml), and to 1280 x 650 (the wide arrangement fits without
 //          scrolling); gauges sweep once per session. test_qml
 //          (tests/qml/tst_dashboard.qml) covers each Tap's lookup by
 //          def ID (a set naming its defs otherwise too) and note, the gauges' imperial units, scales and zones, the
@@ -62,6 +63,9 @@ Page {
         readonly property real w: column.width
         readonly property real g: root.gap
         readonly property bool narrow: w < 760
+        // Narrower still, the two dials stack; above it they share the
+        // row, so a phone upright (about 360 px) sees both at once
+        readonly property bool oneDial: w < 320
         readonly property real shiftHeight: root.compact ? 40 : 48
         readonly property real barHeight: 96
         // Everything but the dials and tiles: the page margins, the
@@ -83,7 +87,7 @@ Page {
         readonly property real tileHeight: wide
             ? Math.max(120, Math.min(tileCell * 1.05, 220, (flick.height - fixedHeight - g) / 2))
             : Math.min(tileCell * 1.05, 220)
-        readonly property real dialWidth: wide ? (w - 2 * g) / 3 : narrow ? w : (w - g) / 2
+        readonly property real dialWidth: wide ? (w - 2 * g) / 3 : oneDial ? w : (w - g) / 2
         // At most what the page shows, so a phone on its side sees a
         // whole dial; below the floor the page scrolls instead
         readonly property real dialHeight: wide ? 2 * tileHeight + g
@@ -209,8 +213,9 @@ Page {
 
             GridLayout {
                 id: dials
+                objectName: "dialGrid"
                 Layout.fillWidth: true
-                columns: fit.wide ? 3 : fit.narrow ? 1 : 2
+                columns: fit.wide ? 3 : fit.oneDial ? 1 : 2
                 columnSpacing: root.gap
                 rowSpacing: root.gap
                 uniformCellWidths: true

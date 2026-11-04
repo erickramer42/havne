@@ -260,6 +260,76 @@ TestCase {
         live.listShare = kept
     }
 
+    // The Dashboard's two dials share a row on a phone upright, and stack
+    // only on a narrower page
+    function test_theDashboardsDialsShareARowUpright_data() {
+        return [{ tag: "a phone upright", w: 384, columns: 2 },
+                { tag: "narrower", w: 300, columns: 1 }]
+    }
+    function test_theDashboardsDialsShareARowUpright(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        tryCompare(find(dash, "dialGrid"), "columns", data.columns, 3000)
+    }
+
+    // Live's window by a pinch or the wheel: a step at a time through
+    // its windows, stopping at either end; fingers spreading show less
+    // time, as the viewer's pinch zooms in
+    function test_livesPinchAndWheelStepItsWindow() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        const kept = live.chartWindowS
+        const frame = find(live, "chartFrame")
+        // Laid out at the phone's size before a finger touches it
+        tryVerify(() => frame.width > 300 && frame.height > 200, 3000, "the chart at its size")
+        waitForRendering(main.contentItem)
+
+        live.stepWindow(-1); live.stepWindow(-1); live.stepWindow(-1)
+        compare(live.chartWindowS, 10, "the shortest, and no further")
+        live.stepWindow(1)
+        compare(live.chartWindowS, 30)
+        live.stepWindow(1); live.stepWindow(1); live.stepWindow(1)
+        compare(live.chartWindowS, 120, "the longest, and no further")
+
+        mouseWheel(frame, frame.width / 2, frame.height / 2, 0, 120)
+        compare(live.chartWindowS, 60, "the wheel up: less time")
+        mouseWheel(frame, frame.width / 2, frame.height / 2, 0, -120)
+        compare(live.chartWindowS, 120, "the wheel down: more")
+
+        // Two fingers spreading from 40 px apart to 160, then closing
+        // again. The handler takes its scale from where it starts, past
+        // its drag threshold, so how many steps a pinch makes is the
+        // gesture's; which way it steps is the rule
+        const cx = frame.width / 2
+        const cy = frame.height / 2
+        const pinch = (from, to) => {
+            const seq = touchEvent(frame)
+            seq.press(0, frame, cx - from, cy).press(1, frame, cx + from, cy).commit()
+            const step = from < to ? 4 : -4
+            for (let d = from + step; from < to ? d <= to : d >= to; d += step)
+                seq.move(0, frame, cx - d, cy).move(1, frame, cx + d, cy).commit()
+            seq.release(0, frame, cx - to, cy).release(1, frame, cx + to, cy).commit()
+        }
+        pinch(20, 80)
+        verify(live.chartWindowS < 120, "spreading shows less time: " + live.chartWindowS + " s")
+        const spread = live.chartWindowS
+        pinch(80, 20)
+        verify(live.chartWindowS > spread, "closing shows more: " + live.chartWindowS + " s")
+
+        live.stepWindow(1)
+        while (live.chartWindowS !== kept && live.chartWindowS !== 120)
+            live.stepWindow(1)
+    }
+
     // Developer mode's corner badge: hidden otherwise, and counting the
     // frames the window draws while a session moves the page
     function test_theFrameRateBadgeCountsInDeveloperMode() {
