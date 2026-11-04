@@ -24,7 +24,7 @@ endif()
 
 set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
-    fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording)
+    fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -81,4 +81,9 @@ else()
         "ECUIO_BUILD_FUZZERS=ON needs Clang (clang/clang++) or MSVC; found "
         "${CMAKE_CXX_COMPILER_ID}. AppleClang ships no libFuzzer, and "
         "clang-cl links through link.exe. See fuzz/README.md.")
+endif()
+
+# fuzz_request_bus answers as the fakes' ECU (tests/fake_ecu.h, header-only)
+if(TARGET fuzz_request_bus)
+    target_include_directories(fuzz_request_bus PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 endif()
