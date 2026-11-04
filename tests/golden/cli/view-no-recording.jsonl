@@ -1,2 +1,2 @@
 {"schema": 1, "type": "start"}
-{"code": 7, "detail": "the folder has no signals.csv", "message": "couldn't load what the URI names", "type": "error"}
+{"code": 7, "detail": "the folder has no signals.csv", "message": "couldn't open what was named", "type": "error"}

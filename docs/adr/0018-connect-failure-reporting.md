@@ -187,3 +187,10 @@ puts the status before the detail, so a replay refused for an empty
 `frames.csv` read "failed to load transport library: ...". The detail
 after the colon still says which: the DLL and the loader's words, or
 the recording's line.
+
+*Amended 2026-11-03:* it reads "couldn't open what was named". The
+code had come to cover more than a URI names: a SocketCAN link judged
+unfit ("can0's driver offers no one-shot mode, ...", the car run's
+refusal) and a recording `havne-cli view` and `info` open, which no
+URI names at all. "Open" fits each: a DLL, a port, an interface, a
+recording; the detail still says which.
