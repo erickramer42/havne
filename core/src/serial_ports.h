@@ -131,7 +131,9 @@ inline void serial_ports_finish(std::vector<ecuio_serial_port_t>& found,
                 found.end());
     *count = static_cast<uint32_t>(found.size());
     const size_t n = std::min<size_t>(found.size(), capacity);
-    if (n > 0) { /* ports may be NULL at capacity 0: no memmove to NULL */
+    /* ports may be NULL at capacity 0: no memmove to NULL. Both tests,
+     * since GCC 13 still sees one through n > 0 alone (-Wnonnull) */
+    if (ports != nullptr && n > 0) {
         std::copy(found.begin(), found.begin() + static_cast<std::ptrdiff_t>(n),
                   ports);
     }
