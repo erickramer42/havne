@@ -1,7 +1,8 @@
 # ADR-0046: The simulated ECU as a product: `havne-cli sim` answers as the mock's engine ECU or a recording's on a virtual CAN bus, through core's ISO-TP, with periodic faults
 
-- **Status:** Accepted. Built: the mock's car (sections 1 to 6) and a
-  recording as the ECU (section 7).
+- **Status:** Accepted. Built: the mock's car (sections 1 to 6), a
+  recording as the ECU (section 7) and the desk bus (the appendix of
+  2026-11-03).
 - **Date:** 2026-11-01.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) and
   [ADR-0040](0040-socketcan-requests-isotp.md) (SocketCAN, requests
@@ -45,7 +46,8 @@ is `ECUIO_ERR_NO_TRANSPORT`, as a `socketcan://` session is.
 The interface must be a `vcan` link and up (`LOAD_FAILED` otherwise,
 with the reason). An ECU that answers 0x7DF and 0x7E0 on a car's bus
 would talk over the car's own engine ECU, so a real controller is
-refused, whatever its state.
+refused, whatever its state, unless the caller says the bus is a
+desk's with no car on it (the appendix "the desk bus").
 
 ### 3. The URI
 
@@ -191,3 +193,57 @@ product has no need to keep.
   - A new public header and its ABI for a testing tool.
   - Linux only: Windows and macOS have no virtual CAN bus a session can
     open.
+
+## Appendix: 2026-11-03, the desk bus
+
+A tester reading the simulated ECU over real wire, the VX through
+J2534 on the desk bus of
+[2026-11-02-socketcan-desk](../bench-sessions/2026-11-02-socketcan-desk.md),
+needs the sim on a real controller, which section 2 refuses. The one
+on hand, the Innomaker USB2CAN, offers no one-shot mode.
+
+- **An option, said by the caller.**
+  `ecuio_sim_create_with(uri, ifname, options, out)` takes
+  `ECUIO_SIM_ALLOW_DESK_BUS`, and `havne-cli sim --desk-bus` passes it;
+  `ecuio_sim_create` is the same call with no options, so section 2
+  holds unless a caller says the bus is a desk's with no car on it. An
+  option bit not defined is `INVALID_ARGUMENT`. The `sim` line carries
+  `desk_bus`.
+- **What a desk bus's controller must be:** up, able to transmit (not
+  listen-only, and reporting its mode) and error-active, each refusal
+  `LOAD_FAILED` with the `ip link` commands that change it
+  (`socketcan_judge_sim`, `socketcan_sim_refusal` in
+  `core/src/socketcan_wire.h`, pure). The sim answers at the rate the
+  controller is up at, since it only ever replies, and with or without
+  one-shot mode: without it, a reply nobody acknowledges is sent again
+  until the interface goes down (ADR-0040's appendix of 2026-11-02),
+  which on a desk bus disturbs nothing but the desk, and in the run
+  this is for, the VX acknowledges every reply. `restart-ms` isn't
+  checked, for the same reason.
+- **Silent once another node answers.** On any bus the sim also hears
+  0x7E8, its reply ID. A frame there from another node means an ECU
+  answers already, so the sim sets `ECUIO_SIM_YIELDED` and from then on
+  sends nothing, no reply and no Flow Control, until it is destroyed;
+  it still counts the requests. A CAN_RAW socket isn't sent its own
+  frames, so its replies never count. `havne-cli sim` ends with
+  `yielded`, exit 1, and the stats and end lines carry `yielded`. This
+  limits a mistake, not prevents one: on a car's bus, the sim answers
+  until the car's ECU first does. The option is the guard.
+- **Testing:** the verdicts and every refusal's words on every platform
+  (`SimTest.ARealControllerAnswersOnlyOnADeskBusReadyToSend`,
+  `.ADeskBusRefusalSaysWhatToChange`,
+  `.AnOptionThatIsntOneIsRefusedBeforeTheUri`), the yield on `vcan0`
+  (`SimBusTest.AnotherNodeOnTheReplyIdSilencesItForGood`). A real
+  controller runs only at the desk, by its owner: the desk run sheet's
+  Phase 3, BENCH prep #33.
+
+Alternatives considered:
+
+- **A URI key (`?desk=1`):** the URI says what answers (the mock's car
+  or a recording), not where; a key would let a saved URI carry the
+  permission to a car's bus.
+- **One-shot mode required, as a requesting session has it:** the
+  controller on hand lacks it, so the desk run couldn't happen, and on
+  a desk bus a resent reply harms nothing.
+- **Silent for a while, then answering again:** an ECU on the bus
+  doesn't leave; a sim that resumes would talk over it again.

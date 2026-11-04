@@ -181,7 +181,13 @@ bitmaps, values, identification and codes; `?loop=1` goes round the
 recording, `?from=` and `?to=` answer from a stretch of it alone, in
 the seconds `havne-cli view` shows, `?vin=` replaces its VIN; a clear
 is refused). It answers
-only on a `vcan` interface, never on a car's bus.
+only on a `vcan` interface, never on a car's bus, unless
+`--desk-bus` says the bus is a desk's with no car on it: then a
+real controller answers too, if it is up, not listen-only and
+error-active, one-shot mode or not (each refusal gives the `ip link`
+commands). On any bus it goes silent for good, and `havne-cli sim`
+ends with `yielded`, once another node sends on 0x7E8: an ECU
+answers there already.
 
 ## Where Havne keeps things
 

@@ -207,6 +207,11 @@ bus ([roadmap](#roadmap)).
       stays in step under every fault; against the test car's engine
       start, it walks the car's bitmaps, keeps exactly the recorded
       PIDs, packs, and decodes only engine speeds the car sent.
+      `--desk-bus` lets it answer on a real controller too, one-shot
+      mode or not, on a desk bus with no car (ADR-0046's appendix
+      "the desk bus"); on any bus it goes silent for good once
+      another node sends on 0x7E8. Verified on `vcan0`; a real
+      controller read by the VX is BENCH prep #33.
     - **Requests:** `obd2` and `uds-generic` run through ISO-TP in core
       (`core/src/isotp.h`, the reassembly ELM327 uses too), with the
       request keys of the other two transports. A real controller must
@@ -509,11 +514,12 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
   controller state and supported modes, so a refusal is explained
   before a run: built (ADR-0040's appendix "the desk bus", amended
   2026-11-03); the supported modes need Linux 6.0.
-- The simulated ECU on the desk bus, behind an explicit flag, silent if
-  anything else answers on its reply ID, so the VX reads it through
-  J2534 over real wire; whether that flag lets a controller without
-  one-shot mode answer (a desk bus has no car to harm) is decided in
-  ADR-0046's appendix.
+- The simulated ECU on the desk bus, behind an explicit flag, silent
+  once anything else answers on its reply ID: built
+  (`havne-cli sim --desk-bus`, ADR-0046's appendix "the desk bus": a
+  controller without one-shot mode answers too, a desk bus having
+  no car to harm). The VX reading it through J2534 over real wire
+  is the desk run's Phase 3 (BENCH prep #33).
 - Stateful fuzzing of ISO-TP and UDS, before the car.
 - SocketCAN on the test car, listen-only (BENCH prep #26), with a
   `havne-cli` script reading the car at a documented rate; requests
