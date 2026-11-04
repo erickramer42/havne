@@ -84,7 +84,8 @@ directly. The USB2CAN transmits, onto this two-node bus only.
       acknowledges it, and the VX's session hears 0x7E8
 - [ ] With the VX's session closed (no active node): whether the frame
       is echoed before the first `no-acknowledgement-on-tx` error frame
-      (record both stamps; Known Issue #40), and how often it's sent
+      (record both stamps: the rate's proof waits for a reply, or for
+      N_As with no error frame, after the echo), and how often it's sent
       again: without one-shot mode, forever at error-passive, never
       bus-off (2026-11-02); with it, once
 - [ ] An adapter that offers one-shot mode (`one-shot on`): the same,
@@ -100,8 +101,9 @@ directly. The USB2CAN transmits, onto this two-node bus only.
 sent again until the interface goes down, so ADR-0040 section 2 keeps
 one-shot mode required (its appendix of 2026-11-02). The open question
 is section 3's: whether an adapter with one-shot mode echoes only after
-an acknowledgement. If not, the proof waits for an error frame or the
-reply (Known Issue #40).
+an acknowledgement. The proof doesn't rely on it: it waits for the
+reply, or for N_As with no error frame, after the echo (ADR-0040's
+appendix of 2026-11-02).
 
 ## Phase 3: the simulated ECU (BENCH prep #33)
 
