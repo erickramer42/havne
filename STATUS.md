@@ -166,13 +166,19 @@ or imported in bulk, and computed signals such as boost
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
     findings, two runs overlaid and aligned, and a Mark while
     recording), one signal filter on Live and the viewer (words, plotted
-    only, the part of the car), and Settings composing the URI; developer mode (off until switched on:
-    the `mock://` preset and the Log page's raw frame table with its
-    bridge counters), zoom, metric or imperial units
+    only, the part of the car), and Settings composing the URI. Live's
+    and the viewer's chart can take the whole page (a button, a
+    double-click or `F`; on a phone on its side by default), a splitter
+    sets the list's share, and a pinch or the wheel steps Live's
+    window; pages are denser on a phone's width or height. Developer
+    mode (off until switched on): the `mock://` preset, a frame-rate
+    badge, and the Log page's raw frame table with its bridge counters,
+    whose selected rows copy to the clipboard. Kept between runs: zoom,
+    metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
-    connected, the Record sessions switch and each device's versions as
-    last seen at a connect (shown on its row in Settings, since the list
-    opens no adapter), kept between runs.
+    connected, the Record sessions switch, the splitters' shares and
+    each device's versions as last seen at a connect (shown on its row
+    in Settings, since the list opens no adapter).
   - **`havne-cli`** ([ADR-0031](docs/adr/0031-command-line-client.md)),
     on every desktop platform: a session's frames, and with `--values`
     its decoded values, as JSON lines on standard output, through the
@@ -323,7 +329,7 @@ or imported in bulk, and computed signals such as boost
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 1003 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 1005 ctest cases on Windows (both trees rebuilt,
   2026-11-04), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (91/91); 0 MSVC warnings, and a GCC or Clang
@@ -584,14 +590,6 @@ less, **M** a few days, **L** a week or more or an ADR first.
 - **Per-signal unit overrides (S):** one quantity in the other system
   (deg F with km/h); whole-UI units are built
   ([ADR-0022](docs/adr/0022-display-units.md)).
-- **A phone's density (M):** control heights, spacing and the default
-  zoom on a phone; the test phone's run of the viewer read best at 75 %,
-  and on its side the viewer's controls fill the screen above the chart.
-- **The strip chart maximized (S):** a toggle (a button, a double-click,
-  `F`) that gives Live's and the viewer's chart the whole page, the
-  cursor's values in a strip beside it, and a splitter between the
-  signal list and the chart, remembered per page. On a phone on its
-  side the chart takes the page by itself.
 - **Chart panes, two cursors and the span's statistics (L, an ADR
   first):** traces in stacked panes on one time axis, each pane with a
   y-axis in its units and its own vertical zoom; a second cursor, with
@@ -620,8 +618,6 @@ less, **M** a few days, **L** a week or more or an ADR first.
 
 - **Full signal sets at full rate (L):** left is the bridge's 4 KB copy
   per frame ([docs/testing.md](docs/testing.md#performance)).
-- **A frame-rate readout in developer mode (S):** the window's drawn
-  frames per second, beside the benchmark's frame and value rates.
 
 ### Toolchain
 
