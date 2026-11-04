@@ -69,12 +69,16 @@ TestCase {
         title: "2026-11-03 10:01:30 · Late", uri: "replay://y?profile=obd2",
         folder: Harness.recordingFixtures + "/pull-late", source: "", profile: "obd2" })
 
+    // A recording that opens moves the page's items at the layout's next
+    // polish, a frame later; a case whose checks all pass at once would
+    // otherwise press where an item was before it opened
     // Opens pull-early with pull-late listed beside it
     function openEarly() {
         const page = createPage()
         page.recordings = [lateRow, earlyRow]
         page.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
         return page
     }
 
@@ -88,6 +92,7 @@ TestCase {
         verify(page.viewing, "the viewer replaces the list")
         verify(!list.visible)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
         return page
     }
 
