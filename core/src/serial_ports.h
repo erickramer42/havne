@@ -131,8 +131,10 @@ inline void serial_ports_finish(std::vector<ecuio_serial_port_t>& found,
                 found.end());
     *count = static_cast<uint32_t>(found.size());
     const size_t n = std::min<size_t>(found.size(), capacity);
-    std::copy(found.begin(), found.begin() + static_cast<std::ptrdiff_t>(n),
-              ports);
+    if (n > 0) { /* ports may be NULL at capacity 0: no memmove to NULL */
+        std::copy(found.begin(), found.begin() + static_cast<std::ptrdiff_t>(n),
+                  ports);
+    }
 }
 
 #endif /* ECUIO_SERIAL_PORTS_H */

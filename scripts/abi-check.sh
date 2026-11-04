@@ -15,15 +15,20 @@
 #     an enum value renumbered.
 #   - An addition passes and is reported: a new function, an enum value
 #     appended, a field taking a reserved one's place at the same size.
+# scripts/api_check.py then compares the installed headers themselves,
+# for what keeps the layout and so never reaches libabigail: a field
+# renamed or retyped at the same size (uint32_t to int32_t), a #define's
+# value, a parameter's type. Either one failing fails the check.
 # A deliberate break (before 1.0 a minor version may make one,
-# CHANGELOG.md) goes in abi/suppressions.abignore with its reason, until
-# the next release becomes the base.
+# CHANGELOG.md) goes in abi/suppressions.abignore or abi/api_changes.txt
+# with its reason, until the next release becomes the base.
 #
 # Usage: scripts/abi-check.sh [base]
 #   base  a tag or commit (default: the newest vX.Y.Z tag, rc tags
 #         left out), or a directory holding that tree's sources
-# Output in build-abi/: base.abi, head.abi, report.txt. Exit 0 on no
-# change or additions only, 1 on an incompatible change, 2 on an error.
+# Output in build-abi/: base.abi, head.abi, report.txt, api.txt. Exit 0
+# on no change or additions only, 1 on an incompatible change, 2 on an
+# error.
 
 set -euo pipefail
 
@@ -32,7 +37,7 @@ OUT=$ROOT/build-abi
 SUPPRESSIONS=$ROOT/abi/suppressions.abignore
 
 die() { echo "abi-check: $*" >&2; exit 2; }
-for t in abidw abidiff cmake ninja; do
+for t in abidw abidiff cmake ninja python3; do
     command -v "$t" > /dev/null || die "no $t (Ubuntu: sudo apt install abigail-tools cmake ninja-build)"
 done
 
@@ -97,6 +102,24 @@ dump() {
     echo "dumped $name: $(grep -c "<elf-symbol name='ecuio_[^']*' type='func-type'.*is-defined='yes'" "$OUT/$name.abi") exported functions"
 }
 
+# The headers first: no build needed, and its verdict joins abidiff's
+set +e
+python3 "$ROOT/scripts/api_check.py" "$base_src" "$ROOT" > "$OUT/api.txt" 2>&1
+api=$?
+set -e
+(( api == 2 )) && { cat "$OUT/api.txt"; die "api_check.py failed"; }
+if (( api == 1 )); then
+    cat "$OUT/api.txt"
+    echo "FAIL  a public declaration changed since $base_name, keeping its layout (report: build-abi/api.txt)"
+else
+    echo "ok    the public declarations since $base_name: nothing renamed, retyped or gone"
+fi
+# The last word: abidiff's verdict, failing anyway when the headers did
+finish() {
+    (( api == 1 )) && exit 1
+    exit "$1"
+}
+
 dump "$base_src" base
 dump "$ROOT" head
 
@@ -124,13 +147,13 @@ broken=$(grep -E 'changes summary:' "$OUT/report.txt" \
 if [ -n "$broken" ] && ! (( status & 8 )) && python3 "$ROOT/scripts/abi_report.py" "$OUT/report.txt" > "$OUT/growth.txt"; then
     cat "$OUT/report.txt" "$OUT/growth.txt"
     echo "ok    the C ABI grew since $base_name, into reserved room"
-    exit 0
+    finish 0
 fi
 if (( status & 8 )) || [ -n "$broken" ]; then
     [ -s "$OUT/growth.txt" ] && cat "$OUT/growth.txt"
     cat "$OUT/report.txt"
     echo "FAIL  an incompatible C ABI change since $base_name (report: build-abi/report.txt)"
-    exit 1
+    finish 1
 fi
 if (( status & 4 )); then
     cat "$OUT/report.txt"
@@ -138,3 +161,4 @@ if (( status & 4 )); then
 else
     echo "ok    the C ABI is unchanged since $base_name"
 fi
+finish 0

@@ -44,50 +44,65 @@ inline void* counted(std::size_t size) noexcept
 }
 } // namespace new_counter
 
-void* operator new(std::size_t size)
+/* GCC inlines a replacement into the binary's callers and then sees free
+ * meet a pointer from operator new, or operator delete one from malloc
+ * (-Wmismatched-new-delete), though both sides are this file's malloc and
+ * free. Kept out of line, every caller pairs operator new with operator
+ * delete, which is right. */
+#ifdef __GNUC__
+#define NEW_COUNTER_NOINLINE __attribute__((noinline))
+#else
+#define NEW_COUNTER_NOINLINE
+#endif
+
+NEW_COUNTER_NOINLINE void* operator new(std::size_t size)
 {
     if (void* p = new_counter::counted(size)) {
         return p;
     }
     throw std::bad_alloc();
 }
-void* operator new[](std::size_t size)
+NEW_COUNTER_NOINLINE void* operator new[](std::size_t size)
 {
     if (void* p = new_counter::counted(size)) {
         return p;
     }
     throw std::bad_alloc();
 }
-void* operator new(std::size_t size, const std::nothrow_t&) noexcept
+NEW_COUNTER_NOINLINE void* operator new(std::size_t size,
+                                        const std::nothrow_t&) noexcept
 {
     return new_counter::counted(size);
 }
-void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+NEW_COUNTER_NOINLINE void* operator new[](std::size_t size,
+                                          const std::nothrow_t&) noexcept
 {
     return new_counter::counted(size);
 }
 
-void operator delete(void* p) noexcept
+NEW_COUNTER_NOINLINE void operator delete(void* p) noexcept
 {
     std::free(p);
 }
-void operator delete(void* p, std::size_t) noexcept
+NEW_COUNTER_NOINLINE void operator delete(void* p, std::size_t) noexcept
 {
     std::free(p);
 }
-void operator delete(void* p, const std::nothrow_t&) noexcept
+NEW_COUNTER_NOINLINE void operator delete(void* p,
+                                          const std::nothrow_t&) noexcept
 {
     std::free(p);
 }
-void operator delete[](void* p) noexcept
+NEW_COUNTER_NOINLINE void operator delete[](void* p) noexcept
 {
     std::free(p);
 }
-void operator delete[](void* p, std::size_t) noexcept
+NEW_COUNTER_NOINLINE void operator delete[](void* p, std::size_t) noexcept
 {
     std::free(p);
 }
-void operator delete[](void* p, const std::nothrow_t&) noexcept
+NEW_COUNTER_NOINLINE void operator delete[](void* p,
+                                            const std::nothrow_t&) noexcept
 {
     std::free(p);
 }

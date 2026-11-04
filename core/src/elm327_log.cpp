@@ -277,7 +277,8 @@ void elm327_log_open(elm327_log& log)
         snprintf(stamp, sizeof(stamp), "%04u%02u%02u-%02u%02u%02u-%03u", t.year,
                  t.month, t.day, t.hour, t.minute, t.second, t.ms);
         for (int n = 1; n <= 9 && !elm327_log_is_open(log); ++n) {
-            char suffix[8] = "";
+            /* Room for any int: GCC can't see n's bound */
+            char suffix[16] = "";
             if (n > 1) {
                 snprintf(suffix, sizeof(suffix), "-%d", n);
             }

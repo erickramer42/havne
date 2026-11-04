@@ -75,9 +75,17 @@ if(MSVC)
 endif()
 
 # Compiler warnings for every first-party target: core, the surrogate,
-# the app, the tests and the fake DLLs. They don't fail the build (no /WX
-# or -Werror): CI compiles with GCC, MSVC and AppleClang, and one
-# compiler's new warning shouldn't break the others' builds.
+# the app, the tests and the fake DLLs. HAVNE_WARNINGS_AS_ERRORS makes a
+# GCC or Clang warning fail the build (-Werror on these targets only, so
+# GoogleTest and Qt's own code never can). It's off by default: a
+# compiler newer than CI's may warn where CI's doesn't, and a local build
+# shouldn't stop for it. CI's workflow sets the environment variable, so
+# every GCC and Clang job fails on a warning; a runner image's new
+# compiler that warns gets the code fixed, or a pragma at the one line
+# with the reason. MSVC builds at /W4 with no warnings and isn't gated.
+option(HAVNE_WARNINGS_AS_ERRORS
+    "Fail the build on a GCC or Clang warning in first-party code"
+    "$ENV{HAVNE_WARNINGS_AS_ERRORS}")
 function(app_enable_warnings target)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /guard:cf)
@@ -85,6 +93,9 @@ function(app_enable_warnings target)
     else()
         target_compile_options(${target} PRIVATE
             -Wall -Wextra -fstack-protector-strong)
+        if(HAVNE_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
         # _FORTIFY_SOURCE only works with optimization; ASan builds
         # skip it (redundant with the sanitizer and warns at -O0)
         get_target_property(_app_san ${target} CXX_COMPILE_OPTIONS)

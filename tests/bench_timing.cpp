@@ -162,14 +162,13 @@ bool run(const char* label, const std::string& uri, int seconds,
     return true;
 }
 
+#ifdef _WIN32
+/* Only the J2534 rows set a knob, and those are Windows only */
 void set_env(const char* name, const char* value)
 {
-#ifdef _WIN32
     _putenv_s(name, value);
-#else
-    setenv(name, value, 1);
-#endif
 }
+#endif
 
 } // namespace
 

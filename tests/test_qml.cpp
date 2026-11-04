@@ -95,9 +95,11 @@ public:
             const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
             defs.assign(mock->defs, mock->defs + mock->count);
             for (ecuio_signal_def_t& d : defs) {
-                char name[sizeof d.name];
+                /* Room for the whole text, then cut to the field */
+                char name[sizeof d.name + 8];
                 std::snprintf(name, sizeof name, "Renamed %s", d.name);
-                std::memcpy(d.name, name, sizeof name);
+                std::memcpy(d.name, name, sizeof d.name - 1);
+                d.name[sizeof d.name - 1] = '\0';
             }
             set = *mock;
             set.defs = defs.data();
