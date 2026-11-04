@@ -6,7 +6,8 @@
 //          signal, the default plotted, the chart's series over the view,
 //          the frames check's findings), the cursor's readout, the view
 //          kept inside the recording through setView, zoom, a drag and the
-//          wheel, the chart without antialiasing while the view moves and
+//          wheel, the columns kept on their grid through a pan by part of
+//          one, the chart without antialiasing while the view moves and
 //          with it at rest, a second recording overlaid (dashed beside the
 //          first's rows, sharing their scales) and aligned on the starts, a
 //          rise, a marker and the UTC starts as havne-cli view aligns them
@@ -175,6 +176,33 @@ TestCase {
 
     // The ticks start at the recording's default: its ranked numbers, never
     // a text signal (pull-early: RPM, Throttle and Coolant, then the VIN)
+    // A pan keeps each column's samples together: the columns lie on a
+    // grid from time 0, so after a pan by part of a column the columns
+    // both views share hold the same lowest and highest
+    function test_aPanKeepsTheColumnsOnTheirGrid() {
+        const page = openFindings()
+        page.viewT0 = 2000
+        page.viewT1 = 12000
+        const before = page.series(400)[0].columns
+        const colMs = (before.t1 - before.t0) / before.lows.length
+        verify(colMs > 0 && Math.abs(before.t0 / colMs - Math.round(before.t0 / colMs)) < 1e-6,
+               "the grid starts on a whole column: " + before.t0)
+        page.viewT0 += colMs * 0.4
+        page.viewT1 += colMs * 0.4
+        const after = page.series(400)[0].columns
+        const shift = Math.round((after.t0 - before.t0) / colMs)
+        let shared = 0, differ = 0
+        for (let c = 0; c + shift < before.lows.length && c < after.lows.length; ++c) {
+            if (!isFinite(after.lows[c]) && !isFinite(before.lows[c + shift]))
+                continue
+            ++shared
+            if (after.lows[c] !== before.lows[c + shift] || after.highs[c] !== before.highs[c + shift])
+                ++differ
+        }
+        verify(shared > 10, "columns to compare: " + shared)
+        compare(differ, 0, "columns regrouped by the pan")
+    }
+
     function test_theTicksStartAtTheDefault() {
         const page = createPage()
         page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })

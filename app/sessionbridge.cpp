@@ -60,6 +60,7 @@
 #include "ecuio/socketcan.h"
 #include "ecuio/vin.h"
 
+#include <cmath>
 #include <QMetaObject>
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -182,6 +183,7 @@ QVariant FrameListModel::data(const QModelIndex& index, int role) const
                                         static_cast<qsizetype>(r.length))
                     .toHex(' ').toUpper());
         case ArbitrationIdRole: return QVariant::fromValue<quint32>(r.arbId);
+        case SelectedRole:      return m_selected.count(r.seq) != 0;
         default:                return QVariant();
     }
 }
@@ -193,7 +195,8 @@ QHash<int, QByteArray> FrameListModel::roleNames() const
         {DlcRole,           "dlc"},
         {ExtendedRole,      "extended"},
         {PayloadRole,       "payloadHex"},
-        {ArbitrationIdRole, "arbId"}
+        {ArbitrationIdRole, "arbId"},
+        {SelectedRole,      "selected"}
     };
 }
 
@@ -204,10 +207,15 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
         // Full: the oldest row leaves first, from the end that shows it,
         // and its slot takes the new frame
         const int row = m_newestFirst ? m_count - 1 : 0;
+        const quint64 leaving = m_ring[m_oldest].seq;
         beginRemoveRows(QModelIndex(), row, row);
         m_oldest = (m_oldest + 1) % m_ring.size();
         --m_count;
         endRemoveRows();
+        if (!m_selected.empty() && *m_selected.begin() == leaving) {
+            m_selected.erase(m_selected.begin());
+            emit selectionChanged();
+        }
     }
     const int row = m_newestFirst ? 0 : m_count;
     beginInsertRows(QModelIndex(), row, row);
@@ -215,6 +223,7 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
         m_ring.emplace_back();   // every slot holds a row: one more, below the cap
     }
     Row& r = m_ring[(m_oldest + static_cast<size_t>(m_count)) % m_ring.size()];
+    r.seq = m_nextSeq++;
     r.timestampUs = frame.timestamp_us;
     r.arbId = frame.arbitration_id;
     r.extended = (frame.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
@@ -241,8 +250,14 @@ void FrameListModel::clear()
     }
     m_oldest = 0;
     m_count = 0;
+    const bool hadSelection = !m_selected.empty();
+    m_selected.clear();
+    m_hasAnchor = false;
     endResetModel();
     emit countChanged(0);
+    if (hadSelection) {
+        emit selectionChanged();
+    }
 }
 
 size_t FrameListModel::spilledBytesForTesting() const
@@ -262,6 +277,80 @@ void FrameListModel::setNewestFirst(bool newestFirst)
     m_newestFirst = newestFirst;
     endResetModel();
     emit newestFirstChanged();
+}
+
+// The ring holds the newest m_count arrivals, numbered consecutively
+int FrameListModel::rowOfSeq(quint64 seq) const
+{
+    const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
+    if (m_count == 0 || seq < oldestSeq || seq >= m_nextSeq) {
+        return -1;
+    }
+    const int age = static_cast<int>(seq - oldestSeq);   // 0 = oldest
+    return m_newestFirst ? m_count - 1 - age : age;
+}
+
+void FrameListModel::notifySelected(int first, int last)
+{
+    emit dataChanged(index(first, 0), index(last, 0), {SelectedRole});
+    emit selectionChanged();
+}
+
+void FrameListModel::toggleSelected(int row)
+{
+    if (row < 0 || row >= m_count) return;
+    const quint64 seq = rowAt(row).seq;
+    if (m_selected.erase(seq) == 0) {
+        m_selected.insert(seq);
+    }
+    m_anchorSeq = seq;
+    m_hasAnchor = true;
+    notifySelected(row, row);
+}
+
+void FrameListModel::selectThrough(int row)
+{
+    if (row < 0 || row >= m_count) return;
+    const int anchor = m_hasAnchor ? rowOfSeq(m_anchorSeq) : -1;
+    if (anchor < 0) {
+        toggleSelected(row);
+        return;
+    }
+    const int first = std::min(anchor, row);
+    const int last = std::max(anchor, row);
+    for (int r = first; r <= last; ++r) {
+        m_selected.insert(rowAt(r).seq);
+    }
+    notifySelected(first, last);
+}
+
+void FrameListModel::clearSelection()
+{
+    m_hasAnchor = false;
+    if (m_selected.empty()) return;
+    m_selected.clear();
+    notifySelected(0, m_count - 1);
+}
+
+QString FrameListModel::selectedText() const
+{
+    if (m_selected.empty()) return {};
+    QString text = QStringLiteral("time_s\tdlc\text\tid\tdata\n");
+    for (int row = 0; row < m_count; ++row) {
+        const Row& r = rowAt(row);
+        if (m_selected.count(r.seq) == 0) continue;
+        text += QString::number(static_cast<double>(r.timestampUs) / 1e6, 'f', 6)
+              + QLatin1Char('\t') + QString::number(r.length)
+              + QLatin1Char('\t') + (r.extended ? QLatin1Char('E') : QLatin1Char('-'))
+              + QStringLiteral("\t0x") + QString::number(r.arbId, 16).toUpper()
+              + QLatin1Char('\t')
+              + QString::fromLatin1(
+                    QByteArray::fromRawData(reinterpret_cast<const char*>(r.data()),
+                                            static_cast<qsizetype>(r.length))
+                        .toHex(' ').toUpper())
+              + QLatin1Char('\n');
+    }
+    return text;
 }
 
 // ---------------- SignalListModel ----------------
@@ -579,7 +668,12 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
                 put(s);
                 continue;
             }
-            const qint64 k = static_cast<qint64>(static_cast<double>(s.timestampMs - from) / sliceMs);
+            // Slices counted from time 0, not from the window's start:
+            // the window slides with every update, and slices measured
+            // from it would put the same samples in other slices each
+            // time, so a noisy trace's peaks crawl as it scrolls
+            const qint64 k = static_cast<qint64>(
+                std::floor(static_cast<double>(s.timestampMs) / sliceMs));
             if (k != slice) {
                 flush();
                 slice = k;
