@@ -478,7 +478,9 @@ jobs:
         shell: bash
         run: |
           bash scripts/abi-check.sh | tee abi.txt
-          { echo '### C ABI'; echo; echo '```'; tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # The headers' verdict first: abidiff's report can run past 40 lines
+          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt
+            tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
   # Ubuntu it supports: an AppImage runs where glibc is at least its

@@ -803,7 +803,11 @@ into a shared object that exports only the public `ecuio_` names, as an
 FFI consumer would load it (none that `internal.h` declares: core
 uses those across its own files and never installs them); `abidw`
 dumps the functions and the types the public headers declare, and
-`abidiff` compares the two. Output goes to `build-abi/` (`report.txt`).
+`abidiff` compares the two. Before the builds, `scripts/api_check.py`
+compares the installed headers themselves (core/CMakeLists.txt's
+install list), as declarations: comments and formatting never count.
+Output goes to `build-abi/` (`report.txt`, and `api.txt` for the
+headers); either half failing fails the check.
 
 - **Fails:** a function removed or its signature changed; a struct
   field moved, resized or retyped; a struct's size changed; an enum
@@ -814,15 +818,21 @@ dumps the functions and the types the public headers declare, and
   `scripts/abi_report.py` tells that growth from a break by reading the
   report, since a libabigail suppression of the type would hide every
   other change to the struct with it.
-- **Not seen:** a change that keeps the layout, such as a field's name,
-  or `uint32_t` becoming `int32_t`. Neither changes the binary, but
-  both change what a consumer's source means.
+- **Fails in the headers, keeping the layout:** a struct member renamed
+  or retyped at the same size (`uint32_t` becoming `int32_t`) or gone,
+  outside the reserved room; a `#define` or an enumerator gone or with
+  another value; a function's, a callback's or a typedef's types
+  changed, or one gone; an installed header gone. None changes the
+  binary, so libabigail sees none, but each changes what a consumer's
+  source means. A parameter renamed passes.
 
 A deliberate break (before 1.0, a minor version may make one) goes in
-`abi/suppressions.abignore` with its reason and its release, and comes
-out once that release is tagged and becomes the base. The rules were
-checked against mutants of the headers (2026-10-29): every break above
-fails, and the passes pass.
+`abi/suppressions.abignore` (libabigail's) or `abi/api_changes.txt`
+(the headers', one name a line) with its reason and its release, and
+comes out once that release is tagged and becomes the base. The rules
+were checked against mutants of the headers (2026-10-29; the headers'
+half 2026-11-04, `ApiCheckTest.SelfTest` pins its rules): every break
+above fails, and the passes pass.
 
 ### Linux: the AppImage
 
