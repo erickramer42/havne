@@ -106,6 +106,8 @@ typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];
 typedef char abi_can_flags_check[(offsetof(ecuio_can_interface_t, flags) == 32) ? 1 : -1];
+typedef char abi_can_state_check[(offsetof(ecuio_can_interface_t, state) == 40) ? 1 : -1];
+typedef char abi_can_modes_check[(offsetof(ecuio_can_interface_t, modes_supported) == 48) ? 1 : -1];
 typedef char abi_stream_flags_check[(offsetof(ecuio_stream_callbacks_t, flags) == 4 * sizeof(void*)) ? 1 : -1];
 typedef char abi_stream_size_check[(sizeof(void*) != 8 || sizeof(ecuio_stream_callbacks_t) == 56) ? 1 : -1];
 
@@ -250,7 +252,9 @@ int main(void)
         ecuio_serial_ports(NULL, 1, &serial_count) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
-    if (ecuio_can_interfaces(NULL, 1, &can_count) != ECUIO_ERR_NULL_ARGUMENT) {
+    if (ecuio_can_interfaces(NULL, 1, &can_count) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_can_state_name(ECUIO_CAN_STATE_BUS_OFF)[0] == 0 ||
+        ecuio_can_mode_name(ECUIO_CAN_MODE_ONE_SHOT)[0] == 0) {
         return 1;
     }
     if (ecuio_dtc_parse(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||

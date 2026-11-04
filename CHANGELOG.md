@@ -15,6 +15,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - The Recordings page: the recordings sessions saved, newest first, each opening in a viewer. It shows the recording's signals and a chart of the part in view: drag it, zoom with the wheel or a pinch, and tap for the values at that moment. Its markers and what a check of its frames found are on the chart's time axis, and each finding listed shows its place. Replay still puts a recording's `replay://` URI in Settings' field.
 - A stretch of a recording replayed: `replay://<recording>?from=<s>&to=<s>` plays the part between those seconds, read off the viewer, `havne-cli view` or `havne-cli info`, as a session of its own, and `havne-cli sim` answers from that part alone. The viewer's **Replay view** puts the part in view in Settings' field.
+- `havne-cli devices` and Settings show each CAN interface's controller state, the modes it's in and, from Linux 6.0, the modes its driver offers, in `ip link`'s words; `ecuio_can_interface_t` carries them, named by `ecuio_can_state_name` and `ecuio_can_mode_name`.
 - Two recordings overlaid on the Recordings page: another recording's signals drawn dashed beside the first's, on the same scales, lined up on their starts, their wall-clock starts, a marker, or a signal rising or falling through a level typed in the units on screen.
 - Finding a signal among many: Live's list and the Recordings page's signals filter by words in the name or unit, by **Plotted only**, and by the part of the car each signal reads (Engine, Air, Fuel, Oxygen sensors, Emissions, Vehicle, Electrical, Diagnostics). The filter sits beside Live's title and above the viewer's signals.
 - Each signal says which part of the car it reads: a `group` in `ecuio_signal_def_t` with `ecuio_signal_group_name`, the last field of a recording's `signal` lines, and `group` in `havne-cli`'s `signals` and `signal` lines.
@@ -28,6 +29,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Changed
 
+- A SocketCAN connect through a controller whose driver offers no one-shot mode (or, to listen, no listen-only mode) is refused saying so, instead of suggesting an `ip link` command that can't work; a refusal names a mode's command only where the driver offers it, and the one for a listen-only controller says `listen-only off`, which `ip link` needs.
 - The recent recordings moved from Settings to the Recordings page, whose tab reads Recs on a phone.
 - The app's recordings are written by core, on a thread of their own, as `havne-cli`'s are: a recording holds every frame the session read, also the ones the Log page skips under load, and its last note says how many it skipped. A write that fails, a full disk among them, stops the recording with `Recording stopped: <reason>` while the session runs on.
 - A recording's `events.log` has a new layout: a format line, the app's details under `caller` lines, a kind word on every line (`note`, `link`, `asleep`, `drop`, `end`), and a summary of anything the recording dropped.

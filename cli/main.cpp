@@ -34,6 +34,7 @@
 //
 // Public headers only: what any program linking core can do.
 
+#include "can_line.h"
 #include "diagnostics_line.h"
 #include "info_lines.h"
 #include "timing_line.h"
@@ -1890,23 +1891,7 @@ int run_devices()
     for (const ecuio_can_interface_t& c : can_interfaces()) {
         char buf[512];
         cli::Line l(buf, sizeof buf);
-        l.raw("{\"type\":\"can\"");
-        l.key("name");
-        l.string(c.name, sizeof c.name);
-        l.key("kind");
-        l.string(c.kind, sizeof c.kind);
-        l.key("up");
-        l.raw((c.flags & ECUIO_CAN_UP) ? "true" : "false");
-        l.key("listen_only");
-        l.raw((c.flags & ECUIO_CAN_LISTEN_ONLY) ? "true" : "false");
-        l.key("fd");
-        l.raw((c.flags & ECUIO_CAN_FD) ? "true" : "false");
-        l.key("bitrate");
-        l.u64(c.bitrate);
-        l.key("uri");
-        const std::string uri = std::string("socketcan://") + c.name;
-        l.string(uri.c_str(), SIZE_MAX);
-        l.ch('}');
+        cli::can_line(l, c);
         write_line(out, l);
     }
     out.flush();

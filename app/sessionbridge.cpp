@@ -989,6 +989,21 @@ QVariantList SessionBridge::discoverSerialPorts() const
     return out;
 }
 
+namespace {
+/* A CAN mode mask in core's words (ip link's), the named bits alone */
+QStringList canModeWords(uint32_t modes)
+{
+    QStringList words;
+    for (uint32_t bit = 1; bit != 0; bit <<= 1) {
+        const char* word = (modes & bit) != 0 ? ecuio_can_mode_name(bit) : "";
+        if (*word != '\0') {
+            words.append(QString::fromLatin1(word));
+        }
+    }
+    return words;
+}
+} // namespace
+
 QVariantList SessionBridge::discoverCanInterfaces() const
 {
     QVariantList out;
@@ -1011,6 +1026,10 @@ QVariantList SessionBridge::discoverCanInterfaces() const
         m["listenOnly"] = (list[i].flags & ECUIO_CAN_LISTEN_ONLY) != 0;
         m["fd"] = (list[i].flags & ECUIO_CAN_FD) != 0;
         m["bitrate"] = list[i].bitrate;
+        m["state"] = QString::fromLatin1(ecuio_can_state_name(list[i].state));
+        m["modes"] = canModeWords(list[i].modes);
+        m["modesKnown"] = (list[i].flags & ECUIO_CAN_MODES_KNOWN) != 0;
+        m["modesSupported"] = canModeWords(list[i].modes_supported);
         out.append(m);
     }
     return out;
