@@ -464,8 +464,23 @@ TestCase {
         tryCompare(rows, "count", plotted)
         bar.options.close()
 
-        mouseClick(find(page, "backToList"))
-        verify(!page.viewing, "the click on All recordings went back to the list")
+        // What reached the button tells a press that went elsewhere from
+        // one whose grab was taken
+        const back = find(page, "backToList")
+        const seen = []
+        // (pressed is also a property, so its signal is heard as a change)
+        const heard = ["pressedChanged", "released", "clicked", "canceled"].map(
+                    s => [s, () => seen.push(s === "pressedChanged" ? "pressed " + back.pressed : s)])
+        for (const [s, h] of heard)
+            back[s].connect(h)
+        const at = back.mapToItem(null, back.width / 2, back.height / 2)
+        mouseClick(back)
+        for (const [s, h] of heard)
+            back[s].disconnect(h)
+        verify(!page.viewing, "the click on All recordings went back to the list: "
+               + (seen.length ? seen.join(", ") : "nothing from the button")
+               + ", at " + at.x + "," + at.y + ", the popup "
+               + (bar.options.visible ? "visible" : "hidden"))
         page.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens again")
         compare(find(page, "signalRows").count, all, "back to the list cleared the filter: text '"
