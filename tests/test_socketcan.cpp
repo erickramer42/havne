@@ -4,8 +4,9 @@
 //          verdict on it, a kernel frame to an ecuio_frame_t, the
 //          clock), the URI's refusals through ecuio_session_create, and
 //          ecuio_can_interfaces' arguments; the simulated ECU's contract
-//          (SimTest, ADR-0046). The transport on a bus is VcanTest's
-//          (Linux), the simulated ECU on one SimBusTest's
+//          (SimTest, ADR-0046: its options, and the link it answers on,
+//          a desk bus's controller too). The transport on a bus is
+//          VcanTest's (Linux), the simulated ECU on one SimBusTest's
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -975,6 +976,131 @@ TEST(SimTest, TheArgumentsAndTheUriAreCheckedFirst)
 #endif
 }
 
+// The options: NULLs first, then a bit that isn't one, before the URI
+TEST(SimTest, AnOptionThatIsntOneIsRefusedBeforeTheUri)
+{
+    ecuio_sim_t* sim = reinterpret_cast<ecuio_sim_t*>(1);
+    EXPECT_EQ(
+        ecuio_sim_create_with(nullptr, "vcan0", ECUIO_SIM_ALLOW_DESK_BUS, &sim),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_sim_create_with("mock://sim", "vcan0", 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_sim_create_with("socketcan://vcan0", "nosuchcan9",
+                                    ECUIO_SIM_ALLOW_DESK_BUS << 1, &sim),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(sim, nullptr);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("0x2"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_sim_create_with("socketcan://vcan0", "nosuchcan9",
+                                    ECUIO_SIM_ALLOW_DESK_BUS, &sim),
+              ECUIO_ERR_BAD_URI)
+        << "the option itself is taken";
+}
+
+/* vcan always, once up; a real controller only on a desk bus said by the
+ * caller, and then only up, able to transmit and error-active: any rate,
+ * no one-shot mode needed, restarting itself or not */
+TEST(SimTest, ARealControllerAnswersOnlyOnADeskBusReadyToSend)
+{
+    using V = socketcan_sim_verdict;
+    LinkSpec vcan;
+    vcan.name = "vcan0";
+    vcan.kind = "vcan";
+    EXPECT_EQ(socketcan_judge_sim(parsed(vcan), false), V::ok);
+    EXPECT_EQ(socketcan_judge_sim(parsed(vcan), true), V::ok);
+    vcan.up = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(vcan), false), V::down);
+
+    LinkSpec eth;
+    eth.name = "eth0";
+    eth.kind = nullptr;
+    EXPECT_EQ(socketcan_judge_sim(parsed(eth), true), V::not_can);
+
+    LinkSpec desk = usb2can(); /* normal mode, no one-shot offered */
+    EXPECT_EQ(socketcan_judge_sim(parsed(desk), false), V::real_controller);
+    EXPECT_EQ(socketcan_judge_sim(parsed(desk), true), V::ok);
+    desk.rate = 250000;
+    desk.restart_ms = 100;
+    EXPECT_EQ(socketcan_judge_sim(parsed(desk), true), V::ok)
+        << "the rate it is up at; a restart does no harm on a desk";
+
+    LinkSpec down = usb2can();
+    down.up = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(down), false), V::real_controller)
+        << "no desk bus said: refused whatever its state";
+    EXPECT_EQ(socketcan_judge_sim(parsed(down), true), V::down);
+
+    LinkSpec listening = usb2can();
+    listening.modes = SOCKETCAN_CTRLMODE_LISTENONLY;
+    EXPECT_EQ(socketcan_judge_sim(parsed(listening), true), V::listen_only);
+    LinkSpec unsaid = usb2can();
+    unsaid.ctrlmode = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(unsaid), true), V::listen_only)
+        << "no mode reported: not known to transmit";
+
+    LinkSpec passive = usb2can();
+    passive.can_state = 2; /* CAN_STATE_ERROR_PASSIVE */
+    EXPECT_EQ(socketcan_judge_sim(parsed(passive), true), V::not_error_active);
+    LinkSpec stateless = usb2can();
+    stateless.state = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(stateless), true),
+              V::not_error_active);
+}
+
+// Each refusal names the interface and the ip link commands that change it
+TEST(SimTest, ADeskBusRefusalSaysWhatToChange)
+{
+    using V = socketcan_sim_verdict;
+    char out[512];
+    const auto refusal = [&](const LinkSpec& s, V v) {
+        socketcan_sim_refusal(parsed(s), v, out, sizeof out);
+        return std::string(out);
+    };
+    LinkSpec eth;
+    eth.name = "eth0";
+    eth.kind = nullptr;
+    EXPECT_EQ(refusal(eth, V::not_can),
+              "eth0 is a non-CAN link, not vcan: the simulated ECU answers "
+              "only on a virtual bus, never for a car's own ECU");
+    const LinkSpec desk = usb2can();
+    std::string r = refusal(desk, V::real_controller);
+    EXPECT_NE(r.find("can0 is a CAN controller, not vcan"), std::string::npos)
+        << r;
+    EXPECT_NE(r.find("a desk bus with no car"), std::string::npos) << r;
+    EXPECT_EQ(refusal(desk, V::down),
+              "can0 is down: sudo ip link set can0 up type can bitrate "
+              "500000 listen-only off");
+    LinkSpec vcan;
+    vcan.name = "vcan0";
+    vcan.kind = "vcan";
+    EXPECT_EQ(refusal(vcan, V::down),
+              "vcan0 is down (sudo ip link set vcan0 up)");
+    EXPECT_EQ(refusal(desk, V::listen_only),
+              "can0 is listen-only, so the simulated ECU couldn't answer: "
+              "sudo ip link set can0 down, then sudo ip link set can0 up "
+              "type can bitrate 500000 listen-only off");
+    LinkSpec rateless = usb2can();
+    rateless.bitrate = false;
+    r = refusal(rateless, V::listen_only);
+    EXPECT_NE(r.find("bitrate <the bus's rate> listen-only off"),
+              std::string::npos)
+        << r;
+    LinkSpec passive = usb2can();
+    passive.can_state = 2;
+    r = refusal(passive, V::not_error_active);
+    EXPECT_NE(r.find("can0 is error-passive, so the bus already counts "
+                     "errors"),
+              std::string::npos)
+        << r;
+    LinkSpec stateless = usb2can();
+    stateless.state = false;
+    r = refusal(stateless, V::not_error_active);
+    EXPECT_NE(r.find("can0 reports no controller state"), std::string::npos)
+        << r;
+    EXPECT_EQ(refusal(desk, V::ok), "");
+}
+
 #if ECUIO_HAVE_SOCKETCAN
 // Only a virtual bus: never a car's, whatever its state
 TEST(SimTest, OnlyAVcanInterfaceIsTaken)
@@ -988,6 +1114,14 @@ TEST(SimTest, OnlyAVcanInterfaceIsTaken)
     EXPECT_NE(c.detail.find("not vcan"), std::string::npos) << c.detail;
     c = sim_create("mock://sim", "bad name!");
     EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    // A desk bus said changes nothing for a link that isn't CAN
+    ecuio_sim_t* sim = nullptr;
+    EXPECT_EQ(ecuio_sim_create_with("mock://sim", "lo",
+                                    ECUIO_SIM_ALLOW_DESK_BUS, &sim),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(sim, nullptr);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("not vcan"),
+              std::string::npos);
 }
 
 // A recording is read before the interface is judged: its own refusal

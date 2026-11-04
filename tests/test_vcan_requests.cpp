@@ -9,7 +9,8 @@
 //          answering as the ECU (vcan_recording_ecu.h, ADR-0041 section
 //          4), whole and with replies broken at the ISO-TP level.
 //          SimBusTest: the simulated ECU (ADR-0046, core's ISO-TP sender)
-//          answering an obd2 session, a clear and every fault. The
+//          answering an obd2 session, a clear and every fault, and
+//          going silent once another node sends on its reply ID. The
 //          rate's proof after the first echo (ADR-0040 section 3 and its
 //          appendix of 2026-11-02) on vcan0 started unproven. Each
 //          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
@@ -31,6 +32,7 @@
 #include <pthread.h>
 #include <sched.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -810,10 +812,10 @@ TEST_F(SocketCanFaultTest, SilenceAndLateRepliesLeaveTheSessionInStep)
 class Sim
 {
 public:
-    explicit Sim(const std::string& uri)
+    explicit Sim(const std::string& uri, uint32_t options = 0)
     {
-        status_ =
-            ecuio_sim_create(uri.c_str(), vcan_bus::interface_name(), &sim_);
+        status_ = ecuio_sim_create_with(uri.c_str(), vcan_bus::interface_name(),
+                                        options, &sim_);
         detail_ = ecuio_last_error_detail();
     }
     ~Sim() { ecuio_sim_destroy(sim_); }
@@ -1169,4 +1171,62 @@ TEST_F(SimBusTest, ARecordingAnswersAsTheTestCar)
     uint32_t n = 0;
     ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
     EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* Another node on 0x7E8, the reply ID, means an ECU answers there
+ * already (a car's, on a bus taken for a desk's): from then on the sim
+ * sends nothing, no reply and no Flow Control, and says so. Its own
+ * replies never count. Under the desk bus's option, which vcan takes as
+ * it is. */
+TEST_F(SimBusTest, AnotherNodeOnTheReplyIdSilencesItForGood)
+{
+    vcan_bus::Fd bus = vcan_bus::open_raw();
+    ASSERT_TRUE(bus.ok());
+    Sim sim("mock://sim", ECUIO_SIM_ALLOW_DESK_BUS);
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    const auto send = [&](uint32_t id, std::initializer_list<uint8_t> data) {
+        struct can_frame f;
+        std::memset(&f, 0, sizeof f);
+        f.can_id = id;
+        f.can_dlc = 8;
+        std::copy(data.begin(), data.end(), f.data);
+        ASSERT_EQ(::write(bus.get(), &f, sizeof f),
+                  static_cast<ssize_t>(sizeof f));
+    };
+    /* Whether a frame on 0x7E8 comes within ms (the bus socket isn't
+     * sent its own writes, so it is the sim's) */
+    const auto heard_reply = [&](int ms) {
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        for (;;) {
+            const auto left =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    end - std::chrono::steady_clock::now());
+            if (left.count() <= 0) {
+                return false;
+            }
+            struct can_frame f;
+            if (vcan_bus::read_for(bus.get(), &f, sizeof f,
+                                   static_cast<int>(left.count())) ==
+                    static_cast<long>(sizeof f) &&
+                (f.can_id & CAN_SFF_MASK) == 0x7E8u) {
+                return true;
+            }
+        }
+    };
+    send(0x7E0, {0x02, 0x01, 0x00});
+    ASSERT_TRUE(heard_reply(1000)) << "the sim answers";
+    std::this_thread::sleep_for(100ms);
+    EXPECT_EQ(sim.stats().flags, 0u) << "its own reply isn't another node";
+
+    send(0x7E8, {0x06, 0x41, 0x00, 0xBE, 0x1F, 0xA8, 0x13});
+    ASSERT_TRUE(wait_for(
+        [&] { return (sim.stats().flags & ECUIO_SIM_YIELDED) != 0; }, 2000ms));
+    send(0x7E0, {0x02, 0x01, 0x00});
+    send(0x7E0, {0x10, 0x0A, 0x22, 0xF1, 0x90, 0x00, 0x00, 0x00});
+    EXPECT_FALSE(heard_reply(500)) << "no reply, no Flow Control";
+    const ecuio_sim_stats_t st = sim.stats();
+    EXPECT_EQ(st.requests, 2u) << "the request after it is still counted";
+    EXPECT_EQ(st.replies, 1u);
+    EXPECT_EQ(st.flags, ECUIO_SIM_YIELDED);
 }

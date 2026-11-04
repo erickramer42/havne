@@ -270,8 +270,11 @@ int main(void)
         return 1;
     }
     if (ecuio_sim_create(NULL, "vcan0", &sim) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_create_with(NULL, "vcan0", ECUIO_SIM_ALLOW_DESK_BUS, &sim) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_sim_get_stats(NULL, &sim_stats) != ECUIO_ERR_NULL_ARGUMENT ||
-        sim != NULL || ECUIO_SIM_FAILED != 1u) {
+        sim != NULL || ECUIO_SIM_FAILED != 1u || ECUIO_SIM_YIELDED != 2u ||
+        ECUIO_SIM_ALLOW_DESK_BUS != 1u) {
         return 1;
     }
     ecuio_sim_destroy(NULL);

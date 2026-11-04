@@ -791,7 +791,8 @@ void usage(FILE* to)
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
-        "       havne-cli sim <uri> --on <vcan> [--seconds S]\n"
+        "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
+        "[--seconds S]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
@@ -827,7 +828,10 @@ void usage(FILE* to)
         "recording's,\n"
         "         replay://<absolute path>[?loop=1][&from=S][&to=S]\n"
         "         [&vin=<VIN>][&faults=...]; from and to in view's seconds.\n"
-        "         Ends at Ctrl+C or after S seconds.\n"
+        "         --desk-bus answers on a real CAN controller too (up, not\n"
+        "         listen-only), only on a desk bus with no car. Ends at\n"
+        "         Ctrl+C, after S seconds, or once another node sends on\n"
+        "         0x7E8.\n"
         "view     reads recordings offline (the folders stream --record and\n"
         "         the app write): what each holds, then each signal's lowest,\n"
         "         highest and count in N columns (100) from --from to --to\n"
@@ -1359,10 +1363,13 @@ struct SimArgs {
     const char* uri = nullptr;
     const char* on = nullptr;
     uint64_t seconds = 0;
+    bool desk_bus = false; /* --desk-bus: a real controller too */
 };
 
-// The simulated ECU (ADR-0046) answering on a virtual bus until Ctrl+C,
-// --seconds or the bus failing: start, sim, a sim_stats line every 10 s
+// The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
+// bus's controller with --desk-bus, until Ctrl+C, --seconds, the bus
+// failing or another node sending on 0x7E8: start, sim, a sim_stats
+// line every 10 s
 // while the counts change, end with them
 int run_sim(const SimArgs& args)
 {
@@ -1370,7 +1377,8 @@ int run_sim(const SimArgs& args)
     Output out;
     write_start(out);
     ecuio_sim_t* sim = nullptr;
-    const ecuio_status_t st = ecuio_sim_create(args.uri, args.on, &sim);
+    const ecuio_status_t st = ecuio_sim_create_with(
+        args.uri, args.on, args.desk_bus ? ECUIO_SIM_ALLOW_DESK_BUS : 0u, &sim);
     if (st != ECUIO_OK) {
         write_error(out, st);
         out.flush();
@@ -1379,7 +1387,7 @@ int run_sim(const SimArgs& args)
     {
         char buf[1024];
         cli::Line l(buf, sizeof buf);
-        cli::sim_line(l, args.uri, args.on);
+        cli::sim_line(l, args.uri, args.on, args.desk_bus);
         write_line(out, l);
     }
     out.flush();
@@ -1396,6 +1404,8 @@ int run_sim(const SimArgs& args)
             reason = "interrupted";
         } else if (s.flags & ECUIO_SIM_FAILED) {
             reason = "bus-failed";
+        } else if (s.flags & ECUIO_SIM_YIELDED) {
+            reason = "yielded";
         } else if (args.seconds && now - started >= args.seconds * 1000000u) {
             reason = "seconds";
         } else if (now >= next_stats) {
@@ -1426,6 +1436,14 @@ int run_sim(const SimArgs& args)
         std::fprintf(stderr,
                      "havne-cli: the simulated ECU's bus failed (%s "
                      "went down or away)\n",
+                     args.on);
+        return kExitFailed;
+    }
+    if (std::strcmp(reason, "yielded") == 0) {
+        std::fprintf(stderr,
+                     "havne-cli: another node sent on 0x7E8 on %s, so "
+                     "an ECU answers there: the simulated ECU went "
+                     "silent\n",
                      args.on);
         return kExitFailed;
     }
@@ -2391,6 +2409,8 @@ int run(int argc, char** argv)
             const std::string a = argv[i];
             if (a == "--on" && i + 1 < argc) {
                 sim.on = argv[++i];
+            } else if (a == "--desk-bus") {
+                sim.desk_bus = true;
             } else if (a == "--seconds" && i + 1 < argc) {
                 if (!parse_count(argv[++i], sim.seconds)) {
                     std::fprintf(

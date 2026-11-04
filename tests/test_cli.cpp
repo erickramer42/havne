@@ -841,10 +841,15 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
 {
     char buf[1024];
     cli::Line l(buf, sizeof buf);
-    cli::sim_line(l, "mock://sim?values=canned", "vcan0");
+    cli::sim_line(l, "mock://sim?values=canned", "vcan0", false);
     EXPECT_EQ(std::string(l.data(), l.size()),
               "{\"type\":\"sim\",\"uri\":\"mock://sim?values=canned\","
-              "\"on\":\"vcan0\"}");
+              "\"on\":\"vcan0\",\"desk_bus\":false}");
+    cli::Line d(buf, sizeof buf);
+    cli::sim_line(d, "mock://sim", "can0", true);
+    EXPECT_EQ(std::string(d.data(), d.size()),
+              "{\"type\":\"sim\",\"uri\":\"mock://sim\","
+              "\"on\":\"can0\",\"desk_bus\":true}");
     ecuio_sim_stats_t s{};
     s.requests = 10;
     s.replies = 7;
@@ -862,13 +867,19 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
     cli::sim_stats_line(st, s);
     EXPECT_EQ(std::string(st.data(), st.size()),
               std::string("{\"type\":\"sim_stats\",") + counts +
-                  "\"failed\":false}");
+                  "\"failed\":false,\"yielded\":false}");
     s.flags = ECUIO_SIM_FAILED;
     cli::Line e(buf, sizeof buf);
     cli::sim_end_line(e, "bus-failed", s);
     EXPECT_EQ(std::string(e.data(), e.size()),
               std::string("{\"type\":\"end\",\"reason\":\"bus-failed\",") +
-                  counts + "\"failed\":true}");
+                  counts + "\"failed\":true,\"yielded\":false}");
+    s.flags = ECUIO_SIM_YIELDED;
+    cli::Line y(buf, sizeof buf);
+    cli::sim_end_line(y, "yielded", s);
+    EXPECT_EQ(std::string(y.data(), y.size()),
+              std::string("{\"type\":\"end\",\"reason\":\"yielded\",") +
+                  counts + "\"failed\":false,\"yielded\":true}");
 }
 
 TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)

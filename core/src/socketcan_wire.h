@@ -645,6 +645,115 @@ inline void socketcan_send_refusal(const socketcan_link& l,
     }
 }
 
+/* ---- The simulated ECU's bus (ADR-0046 section 2, its appendix "the
+ * desk bus") ---- */
+
+/* Whether the simulated ECU may answer on the link, in the order the
+ * refusals are checked */
+enum class socketcan_sim_verdict {
+    ok,
+    not_can,         /* neither a CAN controller nor vcan */
+    real_controller, /* a controller, and no desk bus said */
+    down,
+    listen_only,      /* a controller that can't transmit, or no mode */
+    not_error_active, /* the controller already counts errors */
+};
+
+/* vcan always, once up. A controller only on a desk bus, said by the
+ * caller: up, able to transmit and error-active, at any rate and with or
+ * without one-shot mode, since a desk bus has no car to harm */
+inline socketcan_sim_verdict socketcan_judge_sim(const socketcan_link& l,
+                                                 bool desk_bus)
+{
+    if (!l.is_can() && !l.is_vcan()) {
+        return socketcan_sim_verdict::not_can;
+    }
+    if (l.is_can() && !desk_bus) {
+        return socketcan_sim_verdict::real_controller;
+    }
+    if (!l.up) {
+        return socketcan_sim_verdict::down;
+    }
+    if (l.is_vcan()) {
+        return socketcan_sim_verdict::ok;
+    }
+    if (!l.has_ctrlmode || l.listen_only()) {
+        return socketcan_sim_verdict::listen_only;
+    }
+    if (!l.has_state || l.state != SOCKETCAN_STATE_ERROR_ACTIVE) {
+        return socketcan_sim_verdict::not_error_active;
+    }
+    return socketcan_sim_verdict::ok;
+}
+
+/* Why the simulated ECU won't answer on the link, with the commands that
+ * would change that, into out; "" for ok */
+inline void socketcan_sim_refusal(const socketcan_link& l,
+                                  socketcan_sim_verdict v, char* out,
+                                  size_t cap)
+{
+    out[0] = '\0';
+    char rate[32];
+    if (l.has_bitrate && l.bitrate != 0) {
+        snprintf(rate, sizeof rate, "%u", l.bitrate);
+    } else {
+        snprintf(rate, sizeof rate, "<the bus's rate>");
+    }
+    switch (v) {
+    case socketcan_sim_verdict::not_can:
+        snprintf(out, cap,
+                 "%s is a %s link, not vcan: the simulated ECU answers "
+                 "only on a virtual bus, never for a car's own ECU",
+                 l.name, l.kind[0] != '\0' ? l.kind : "non-CAN");
+        break;
+    case socketcan_sim_verdict::real_controller:
+        snprintf(out, cap,
+                 "%s is a CAN controller, not vcan: the simulated ECU "
+                 "answers only on a virtual bus, never for a car's own "
+                 "ECU, unless the caller says it's a desk bus with no car",
+                 l.name);
+        break;
+    case socketcan_sim_verdict::down:
+        if (l.is_vcan()) {
+            snprintf(out, cap, "%s is down (sudo ip link set %s up)", l.name,
+                     l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s is down: sudo ip link set %s up type can bitrate "
+                     "%s listen-only off",
+                     l.name, l.name, rate);
+        }
+        break;
+    case socketcan_sim_verdict::listen_only:
+        snprintf(out, cap,
+                 "%s is listen-only, so the simulated ECU couldn't answer: "
+                 "sudo ip link set %s down, then sudo ip link set %s up "
+                 "type can bitrate %s listen-only off",
+                 l.name, l.name, l.name, rate);
+        break;
+    case socketcan_sim_verdict::not_error_active: {
+        /* the kernel's enum can_state, one below the public one */
+        const char* word = l.has_state ? socketcan_state_word(l.state + 1) : "";
+        if (word[0] != '\0') {
+            snprintf(out, cap,
+                     "%s is %s, so the bus already counts errors: check the "
+                     "rate and the cable, then sudo ip link set %s down and "
+                     "up again",
+                     l.name, word, l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s reports no controller state, so it isn't known to "
+                     "be error-active: sudo ip link set %s down and up again",
+                     l.name, l.name);
+        }
+        break;
+    }
+    case socketcan_sim_verdict::ok:
+    default:
+        break;
+    }
+}
+
 /* ---- The first request proves the rate (ADR-0040 section 3) ---- */
 
 /* Requests that went out unseen (no echo, no error within N_As) before a

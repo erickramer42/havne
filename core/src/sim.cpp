@@ -199,13 +199,29 @@ bool pump(ecuio_sim* s, sending& r, int64_t now)
     return true;
 }
 
+bool yielded(const ecuio_sim* s)
+{
+    return (s->flags.load(std::memory_order_relaxed) & ECUIO_SIM_YIELDED) != 0;
+}
+
+/* Another node sent on the reply ID: an ECU answers there already, so
+ * the sim goes silent for good, a reply under way or waiting dropped */
+void yield(ecuio_sim* s, sending& r)
+{
+    s->flags.fetch_or(ECUIO_SIM_YIELDED, std::memory_order_release);
+    r.waiting = false;
+    r.active = false;
+    s->tx.state = isotp_tx_state::idle;
+}
+
 /* A whole request: answered, its fate decided, its send started or
  * put off. False when the bus failed. */
 bool take(ecuio_sim* s, sending& r, const isotp_message& m, int64_t now)
 {
     s->requests.fetch_add(1, std::memory_order_relaxed);
-    if (r.active || r.waiting) {
-        return true; /* busy with a reply: a tester sends one at a time */
+    if (yielded(s) || r.active || r.waiting) {
+        /* silent, or busy with a reply: a tester sends one at a time */
+        return true;
     }
     r.len = ecuio_sim_answer(s->ecu, m.data, m.len,
                              m.id == ECUIO_SIM_FUNCTIONAL_ID, r.data);
@@ -254,6 +270,11 @@ bool drain(ecuio_sim* s, sending& r)
         f.id = c.can_id & CAN_SFF_MASK;
         f.len = c.can_dlc <= 8 ? c.can_dlc : 8;
         std::memcpy(f.data, c.data, f.len);
+        if (f.id == ECUIO_SIM_REPLY_ID) {
+            /* never its own: a CAN_RAW socket isn't sent what it wrote */
+            yield(s, r);
+            continue;
+        }
         if (isotp_kind(f) == isotp_pci::flow) {
             if (f.id == ECUIO_SIM_REQUEST_ID) {
                 const isotp_flow_result fr = isotp_tx_flow(s->tx, f, now);
@@ -267,6 +288,9 @@ bool drain(ecuio_sim* s, sending& r)
         isotp_message m;
         switch (isotp_take(s->rx, f, now, &m)) {
         case isotp_result::first:
+            if (yielded(s)) {
+                break; /* silent: no Flow Control either */
+            }
             if (!put(s->fd, isotp_flow_control(ECUIO_SIM_REPLY_ID))) {
                 return false;
             }
@@ -331,8 +355,9 @@ void run(ecuio_sim* s)
     s->flags.fetch_or(ECUIO_SIM_FAILED, std::memory_order_release);
 }
 
-/* A CAN_RAW socket on ifindex hearing the two request IDs, 11-bit only,
- * non-blocking; -1 with errno */
+/* A CAN_RAW socket on ifindex hearing the two request IDs and the reply
+ * ID (another node answering), 11-bit data frames only, non-blocking; -1
+ * with errno */
 int open_socket(int32_t ifindex)
 {
     const int fd =
@@ -340,10 +365,12 @@ int open_socket(int32_t ifindex)
     if (fd < 0) {
         return -1;
     }
-    struct can_filter f[2];
+    struct can_filter f[3];
     f[0].can_id = ECUIO_SIM_FUNCTIONAL_ID;
     f[1].can_id = ECUIO_SIM_REQUEST_ID;
-    f[0].can_mask = f[1].can_mask = CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
+    f[2].can_id = ECUIO_SIM_REPLY_ID;
+    f[0].can_mask = f[1].can_mask = f[2].can_mask =
+        CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
     struct sockaddr_can addr;
     std::memset(&addr, 0, sizeof addr);
     addr.can_family = AF_CAN;
@@ -451,11 +478,22 @@ extern "C" {
 ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
                                 ecuio_sim_t** out)
 {
+    return ecuio_sim_create_with(uri, ifname, 0, out);
+}
+
+ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
+                                     uint32_t options, ecuio_sim_t** out)
+{
     ecuio_detail_clear();
     if (uri == nullptr || ifname == nullptr || out == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out = nullptr;
+    if ((options & ~ECUIO_SIM_ALLOW_DESK_BUS) != 0) {
+        ecuio_detail_set("option bits 0x%x aren't the simulated ECU's",
+                         options & ~ECUIO_SIM_ALLOW_DESK_BUS);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
     ecuio_sim_config config;
     char why[256] = {};
     if (ecuio_sim_parse_uri(uri, &config, why, sizeof why) !=
@@ -512,15 +550,12 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
                          ifname, ifname);
         return ECUIO_ERR_LOAD_FAILED;
     }
-    if (!link.is_vcan()) {
-        ecuio_detail_set("%s is a %s link, not vcan: the simulated ECU "
-                         "answers only on a virtual bus, never for a car's "
-                         "own ECU",
-                         ifname, link.kind[0] != '\0' ? link.kind : "non-CAN");
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    if (!link.up) {
-        ecuio_detail_set("%s is down (sudo ip link set %s up)", ifname, ifname);
+    const socketcan_sim_verdict v =
+        socketcan_judge_sim(link, (options & ECUIO_SIM_ALLOW_DESK_BUS) != 0);
+    if (v != socketcan_sim_verdict::ok) {
+        char refusal[512];
+        socketcan_sim_refusal(link, v, refusal, sizeof refusal);
+        ecuio_detail_set("%s", refusal);
         return ECUIO_ERR_LOAD_FAILED;
     }
     s->ecu.config = config;
