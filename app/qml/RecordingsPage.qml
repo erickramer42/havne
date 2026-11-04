@@ -3,7 +3,8 @@
 //          Bridge.recentRecordings, a recording that ends joining it, Replay
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
-//          readout, pan and zoom kept inside the recording, a second
+//          readout, pan and zoom kept inside the recording, the columns
+//          on their grid from time 0 through a pan, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
 //          fall), a finding's row centering the view, the signal rows'
 //          filter (SignalFilterBar.qml, ADR-0050), Replay view handing on
@@ -321,10 +322,20 @@ Page {
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
         const inView = cursorMs >= viewT0 && cursorMs <= viewT1
         const labelOf = at => inView && at && at.text !== "" ? Number(at.text) : NaN
-        const out = recording.columns(indexes, viewT0, viewT1, n).map(c => {
+        // The columns lie on a grid from time 0, not from the view's
+        // start, so a pan carries each column's samples along with it
+        // rather than regrouping them, and a noisy trace's peaks hold
+        // still (Live's slices do the same). One more column covers the
+        // view's ends; the chart cuts it to the view
+        const colMs = (viewT1 - viewT0) / n
+        const g0 = Math.floor(viewT0 / colMs) * colMs
+        const gn = Math.max(1, Math.ceil((viewT1 - g0) / colMs - 1e-9))
+        const g1 = g0 + gn * colMs
+        const out = recording.columns(indexes, g0, g1, gn).map(c => {
             const s = sigs[c.index]
-            return { columns: { lows: c.lows, highs: c.highs }, row: c.index, scaleKey: c.index,
-                     decimals: s.decimals, unit: s.unit, labelValue: labelOf(root.readout[c.index]) }
+            return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
+                     scaleKey: c.index, decimals: s.decimals, unit: s.unit,
+                     labelValue: labelOf(root.readout[c.index]) }
         })
         if (!compareAligned)
             return out
@@ -333,12 +344,13 @@ Page {
                              .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText)
         if (pairs.length === 0)
             return out
-        const cols = compare.columns(pairs.map(p => p.theirs), viewT0 - compareOffsetMs,
-                                     viewT1 - compareOffsetMs, n)
+        const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,
+                                     g1 - compareOffsetMs, gn)
         for (let k = 0; k < cols.length; ++k) {
             const mine = pairs[k].mine
             const s = theirs[pairs[k].theirs]
-            out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs }, row: mine,
+            out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
+                       row: mine,
                        scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
                        unit: s.unit, labelValue: labelOf(root.compareReadout[mine]) })
         }
@@ -989,18 +1001,22 @@ Page {
                   .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
         }
 
+        // Compact on a phone: at their desktop widths the buttons, Frame
+        // test among them, outgrow its width
         RowLayout {
             visible: recording.state === RecordingView.Open
             Layout.fillWidth: true
             spacing: 6
             ThemedButton {
                 objectName: "zoomAll"
+                compact: Theme.dense
                 text: qsTr("All")
                 Layout.maximumWidth: 72
                 onClicked: root.showAll()
             }
             ThemedButton {
                 objectName: "zoomOut"
+                compact: Theme.dense
                 text: "−"
                 Layout.maximumWidth: 48
                 Accessible.name: qsTr("Zoom out")
@@ -1008,6 +1024,7 @@ Page {
             }
             ThemedButton {
                 objectName: "zoomIn"
+                compact: Theme.dense
                 text: "+"
                 Layout.maximumWidth: 48
                 Accessible.name: qsTr("Zoom in")
@@ -1015,6 +1032,7 @@ Page {
             }
             ThemedButton {
                 objectName: "frameTest"
+                compact: Theme.dense
                 visible: Theme.developerMode
                 enabled: !root.frameTesting
                 text: qsTr("Frame test")
@@ -1033,6 +1051,7 @@ Page {
             ThemedButton {
                 objectName: "maximizeChart"
                 text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
+                compact: Theme.dense
                 Layout.minimumWidth: 52
                 Layout.maximumWidth: 84
                 Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
@@ -1058,9 +1077,12 @@ Page {
             border.width: 1
 
             // Maximized, the cursor's values in a strip at the right, as
-            // the signal rows show them otherwise
-            readonly property real stripWidth: root.chartMaximized
-                ? Math.min(200, Math.round(width * 0.35)) : 0
+            // the signal rows show them otherwise; only while the cursor is
+            // in view, so until a tap the chart has the width to itself
+            readonly property bool cursorInView: root.hasCursor && root.cursorMs >= root.viewT0
+                                                 && root.cursorMs <= root.viewT1
+            readonly property real stripWidth: root.chartMaximized && cursorInView
+                ? Math.min(170, Math.round(width * 0.25)) : 0
 
             StripChart {
                 id: chart

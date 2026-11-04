@@ -6,7 +6,8 @@
 //          labels nudged apart inside the plot, a crowded trace's band;
 //          a recording's columns over a fixed span (a line through calm
 //          columns, a band where one swings past its neighbors' lean, a
-//          steep ramp a line, a gap past gapMs a break) and absolute ticks,
+//          steep ramp a line, a gap past gapMs a break), columns over a
+//          span of their own cut to the axis, and absolute ticks,
 //          before zero too; a scaleKey's shared range and lane, a series'
 //          dash. No bridge, no session.
 
@@ -454,6 +455,26 @@ TestCase {
         near(pts[pts.length - 1].x, l.plotW - 1, 0.01, "to its end")
         verify(pts[0].y > pts[pts.length - 1].y, "rising")
         compare(tr.label, "50", "the last column's highest")
+    }
+
+    // Columns on a span of their own, wider than the axis, are placed by
+    // their own times and cut to the axis: a pan's grid
+    function test_columnsOnTheirOwnSpanAreCutToTheAxis() {
+        const lows = [], highs = []
+        for (let c = 0; c < 11; ++c) {
+            lows.push(40 + c)
+            highs.push(41 + c)
+        }
+        const s = columns(0, lows, highs)
+        s.columns.t0 = -50
+        s.columns.t1 = 1050
+        const l = layout([s], { span: { t0: 0, t1: 1000 } })
+        const pts = linesOf(l.traces[0])[0].points
+        const xOf = t => t / 1000 * (l.plotW - 1)
+        compare(pts[0].x, 0, "the first column cut at the axis's start")
+        near(pts[1].x, xOf(25), 0.01, "its middle inside the axis")
+        near(pts[2].x, xOf(100), 0.01, "the next column's middle at its own time")
+        near(pts[pts.length - 1].x, l.plotW - 1, 0.01, "the last cut at the axis's end")
     }
 
     // Without a span a column series has no axis: nothing to draw

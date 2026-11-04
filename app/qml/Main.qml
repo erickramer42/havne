@@ -9,7 +9,8 @@
 //          URI in Settings' field, and seven tabs inside 384 px (2026-11-03);
 //          the header's Mark while recording, inside a phone's width:
 //          tests/qml/tst_phone.qml. The frame-rate badge in developer
-//          mode: tests/qml/tst_phone.qml (shown, counting), the rates
+//          mode: tests/qml/tst_phone.qml (shown, counting, above the
+//          tab bar), the rates
 //          on the phone in its run.
 //          The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
@@ -367,6 +368,8 @@ ApplicationWindow {
             }
 
             TabBar {
+                id: tabBar
+                objectName: "tabBar"
                 visible: root.isCompact
                 Layout.fillWidth: true
                 currentIndex: stack.currentIndex
@@ -472,7 +475,8 @@ ApplicationWindow {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 8 + zoomRoot.safe.right
-        anchors.bottomMargin: 8 + zoomRoot.safe.bottom
+        // Above the tab bar on a phone, so it covers none of the tabs
+        anchors.bottomMargin: 8 + zoomRoot.safe.bottom + (tabBar.visible ? tabBar.height : 0)
         width: frameRateLabel.implicitWidth + 12
         height: frameRateLabel.implicitHeight + 6
         radius: 4

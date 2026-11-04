@@ -2,7 +2,9 @@
 // Testing: every page in the app's own window (Main) at a phone's size,
 //          connected to mock://demo with developer mode on: each page's
 //          items lie inside the window's width, the Log page in its
-//          Frames view too. The pages' own tests run them at 320 px
+//          Frames view and the viewer as it opens (its hint showing) too,
+//          and Live's window buttons each on one line. The pages' own
+//          tests run them at 320 px
 //          alone; this one runs them as the window holds them, the
 //          relay's line beside its button, the header's Mark while
 //          recording, and developer mode's frame-rate badge. How they
@@ -78,22 +80,26 @@ TestCase {
     function test_everyPageFitsAPhonesWidth_data() {
         return [{ tag: "homePage" }, { tag: "dashboardPage" }, { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
-                { tag: "recordingsPage" }, { tag: "recordingsViewer" }, { tag: "recordingsCompare" },
-                { tag: "settingsPage" }]
+                { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
+                { tag: "recordingsCompare" }, { tag: "settingsPage" }]
     }
 
     function test_everyPageFitsAPhonesWidth(data) {
-        Theme.developerMode = true
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
+        // After the load, which restores the mode kept between runs: its
+        // controls (the viewer's Frame test, the badge) are measured too
+        Theme.developerMode = true
         main.width = 384
         main.height = 800
         // Android's 14 sp text at the test phone's font scale, 1.15
         main.font.pixelSize = 16
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        // recordingsOpened: the viewer as it opens, its toolbar's hint
+        // still showing; recordingsViewer: a cursor placed
+        const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare"].includes(data.tag)
         const name = data.tag === "logFrames" ? "logPage"
-                   : data.tag === "recordingsViewer" || data.tag === "recordingsCompare"
-                   ? "recordingsPage" : data.tag
+                   : viewer ? "recordingsPage" : data.tag
         const page = find(main.contentItem, name)
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         verify(page.visible, name + " is on screen")
@@ -106,10 +112,11 @@ TestCase {
                       source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C", profile: "raw" }
         if (name === "recordingsPage")
             page.recordings = [row]
-        if (data.tag === "recordingsViewer" || data.tag === "recordingsCompare") {
+        if (viewer) {
             page.open(row)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
-            page.setCursor(5000)
+            if (data.tag !== "recordingsOpened")
+                page.setCursor(5000)
         }
         // Compared with itself, aligned on a rise: every field shown
         if (data.tag === "recordingsCompare") {
@@ -126,6 +133,14 @@ TestCase {
         waitForRendering(main.contentItem)
         const out = pastTheEdge(page, main.contentItem, [])
         compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        // Live's window buttons keep their text on one line: a wrapped
+        // "120 s" fits the width but reads as two
+        if (data.tag === "livePage") {
+            for (const s of page.chartWindows) {
+                const label = find(page, "chartWindow_" + s).contentItem
+                compare(label.lineCount, 1, s + " s on " + label.lineCount + " lines")
+            }
+        }
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
     }
@@ -155,7 +170,11 @@ TestCase {
         compare(page.chartMaximized, data.h < 480, "maximized on its side only")
         if (page.chartMaximized) {
             verify(!find(page, "signalRows").visible, "the rows give way")
-            verify(find(page, "cursorStrip").visible, "the values beside the chart")
+            const strip = find(page, "cursorStrip")
+            verify(!strip.visible, "no cursor yet: the chart has the width")
+            page.setCursor(5000)
+            tryVerify(() => strip.visible, 2000, "a cursor: its values beside the chart")
+            page.setCursor(NaN)
             find(page, "maximizeChart").clicked()
         }
         tryVerify(() => find(page, "signalRows").visible, 2000, "the rows are back")
@@ -342,6 +361,12 @@ TestCase {
         compare(main.framesPerSecond, 0)
         Theme.developerMode = true
         verify(badge.visible, "shown in developer mode")
+        // Above a phone's tab bar, covering none of its tabs
+        const tabs = find(main.contentItem, "tabBar")
+        tryVerify(() => tabs.visible && tabs.height > 0, 2000, "the tab bar shows")
+        const badgeBottom = badge.mapToItem(main.contentItem, 0, badge.height).y
+        const tabsTop = tabs.mapToItem(main.contentItem, 0, 0).y
+        verify(badgeBottom <= tabsTop, "the badge ends at " + badgeBottom + ", the tabs start at " + tabsTop)
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const live = find(main.contentItem, "livePage")
         main.gotoPage(Array.from(live.parent.children).indexOf(live))

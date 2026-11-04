@@ -474,6 +474,10 @@ Pane {
 
                         RowLayout {
                             anchors.fill: parent
+                            // Under the column headers: theirs is 12 px in,
+                            // the list's 4
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
                             spacing: 8
 
                             // Roles from FrameListModel::roleNames(): the model

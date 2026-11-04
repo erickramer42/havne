@@ -374,6 +374,9 @@ Page {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 44
                     Layout.maximumWidth: 120
+                    // A phone's quarter of the row holds "120 s" on one
+                    // line only with the sides kept narrow
+                    horizontalPadding: Theme.dense ? 4 : 8
                     objectName: "chartWindow_" + modelData
                     text: qsTr("%1 s").arg(modelData)
                     highlighted: root.chartWindowS === modelData
