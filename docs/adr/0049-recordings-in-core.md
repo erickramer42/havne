@@ -1,6 +1,7 @@
 # ADR-0049: Recordings in core: a shared writer and an indexed reader
 
-- **Status:** Accepted.
+- **Status:** Accepted. Built: section 10's steps 1 to 5 (2026-11-02
+  and 2026-11-03); step 6, the export, comes with v0.6.0's sharing.
 - **Date:** 2026-11-02.
 - **Builds on:** [ADR-0017](0017-session-recording.md) (the recording
   folder and its files, whose "recorder in core" alternative this

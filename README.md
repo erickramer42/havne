@@ -6,13 +6,13 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
 Havne is an OBD-II scan tool and data logger: live gauges, a strip
-chart, the trouble codes and readiness monitors, and a log of
-every frame, recorded and replayed on request. It runs on Windows,
-Linux and Android, builds and passes its tests on macOS, and runs on
-the iOS Simulator. It reaches the car through J2534 Pass-Thru adapters
-on Windows and ELM327-compatible adapters over USB, Bluetooth or WiFi
-everywhere; SocketCAN on Linux has listened through a real controller
-on a desk bus and on a car, and asked only on a virtual bus so far. A
+chart, the trouble codes and readiness monitors, and every frame
+recorded, to open again, overlay on another run, check for gaps and
+replay. It runs on Windows, Linux and Android, builds and passes its
+tests on macOS, and runs on the iOS Simulator. It reaches the car
+through J2534 Pass-Thru adapters on Windows, ELM327-compatible
+adapters over USB, Bluetooth or WiFi everywhere, and SocketCAN on
+Linux (listening on a real bus; asking, so far, on a virtual one). A
 simulated vehicle runs every page with no hardware.
 
 Underneath is a Qt-free C++17 core that does all the vehicle I/O and
@@ -21,7 +21,7 @@ over it; `havne-cli`, which streams any session as JSON lines, is a
 second, written against the public headers alone.
 
 > [!WARNING]
-> **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first; it has cleared one car with none stored, with the engine stopped and running, and has erased a stored code only on its fakes and simulated vehicle. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
+> **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone, and listened to it through a third; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first; it has cleared one car with none stored, with the engine stopped and running, and has erased a stored code only on its fakes and simulated vehicle. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
 ![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 deg F, where the fan cuts in, and the oil from 221 to 235 deg F, before the driver lifts](docs/images/dashboard.gif)
 
@@ -42,13 +42,24 @@ a quarter mile off launch control on a warm loop.*
   70 times a full classic CAN bus, and CI re-runs that load test on
   every push ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
   [docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
-- **Measured on a real car.** Through both adapters on hand, a J2534
-  Pass-Thru on a laptop and an ELM327 on a phone over Bluetooth, the
-  test car's two ECUs answered; asking up to six PIDs per request
-  brought 2.7 times as many replies a minute, and holding Windows'
-  1 ms timer 28 % more. Each session is written up with its scrubbed
-  logs ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
-  [2026-11-02](docs/bench-sessions/2026-11-02-vehicle.md)).
+- **Recording never holds the session up.** The worker copies each
+  frame into a single-producer ring, and a writer thread of the
+  recorder's own writes the files, so a slow disk costs counted
+  records, never a stalled read: 31 to 47 ns a frame on the worker.
+  From an index built in one pass, the reader opens an hour of 50
+  signals at 10 Hz, 1.8 million rows, in under 0.2 s on a laptop,
+  and the viewer draws it at over 60 frames a second on a phone
+  ([ADR-0049](docs/adr/0049-recordings-in-core.md)).
+- **Measured on a real car.** Through a J2534 Pass-Thru on a laptop
+  and an ELM327 on a phone over Bluetooth, the test car's two ECUs
+  answered; asking up to six PIDs per request brought 2.7 times as
+  many replies a minute, and holding Windows' 1 ms timer 28 % more.
+  A second controller listening on the same bus timed the Pass-Thru:
+  a segmented reply is whole on the wire 14 ms after its request, and
+  the adapter delivers it about 52 ms after that. Each session is
+  written up with its scrubbed logs
+  ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
+  [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md)).
 - **Requests follow the replies.** One request per ECU at a time; the
   supported-PID probe drops only what the ECU says it lacks, never on
   silence. A clear asks first, saves the report, and asks once more
@@ -64,7 +75,9 @@ a quarter mile off launch control on a warm loop.*
 - **Pure parsers, fuzzed.** The ELM327 wire layer and ISO-TP have no
   I/O, clock or allocation, so every rule is a unit test over canned
   bytes; they and the other parsers run under libFuzzer with ASan and
-  UBSan in CI ([fuzz/README.md](fuzz/README.md)).
+  UBSan in CI, and a stateful harness drives the request engine and
+  ISO-TP against a simulated ECU, every reply's fate fuzzed
+  ([fuzz/README.md](fuzz/README.md)).
 - **A stable C ABI.** Opaque handles, flat functions, POD structs with
   reserved room; CI compiles every public header as strict C, compares
   the ABI with the last release's and builds the core with no Qt
@@ -85,13 +98,14 @@ a quarter mile off launch control on a warm loop.*
 ## What it does
 
 - **The pages:** a Dashboard of gauges with shift lights and peak
-  hold; Live, the values and a strip chart; Diagnostics; and a Log of
-  every connect and link change, with the raw frames in developer mode.
+  hold; Live, the values and a strip chart; Diagnostics; Recordings, a
+  viewer for saved sessions; and a Log of every connect and link
+  change, with the raw frames in developer mode.
 - **Three kinds of adapter:** J2534 on Windows; ELM327 over a serial
   port, Bluetooth or WiFi, on the desktop and on Android, where
   sessions keep running in the background; SocketCAN on Linux,
-  listening (a real controller on a desk bus too) or making requests
-  (so far on a virtual bus)
+  listening (through a real controller on a desk bus and a car too)
+  or making requests (so far on a virtual bus)
   ([docs/j2534.md](docs/j2534.md),
   [docs/elm327.md](docs/elm327.md), [docs/linux.md](docs/linux.md)).
 - **Trouble codes:** each ECU's check-engine light, its stored, pending
@@ -111,16 +125,19 @@ a quarter mile off launch control on a warm loop.*
   [ADR-0042](docs/adr/0042-reply-timing.md),
   [ADR-0043](docs/adr/0043-vin-decode.md)).
 - **`havne-cli`:** any session's frames, values and link health as JSON
-  lines; on Linux, the simulated car or a recording answering requests
+  lines; recordings read and checked offline (`view`, `info`); on Linux, the simulated car or a recording answering requests
   on a virtual CAN bus as the car's engine ECU
   ([ADR-0031](docs/adr/0031-command-line-client.md),
   [ADR-0046](docs/adr/0046-simulated-ecu.md)). An Android phone can
   relay its paired Bluetooth adapter to a computer's `havne-cli` over
   USB ([ADR-0047](docs/adr/0047-adapter-relay.md)).
-- **Recording and replay:** every frame, value and event of a connect;
-  the Recordings page views one, two runs overlaid and aligned, and
-  `replay://` plays it back at its own pace or faster, through the same
-  decoding, with faults injected on request
+- **Recording and replay:** every frame, value and event of a connect.
+  The Recordings page pans and zooms through one, reads every value at
+  a cursor, marks what a check of its frames found (gaps, rate drops,
+  broken ISO-TP) and overlays a second run, aligned on a marker or a
+  signal crossing a level; `replay://` plays it, or a stretch of it,
+  back at its own pace or faster, through the same decoding, with
+  faults injected on request
   ([ADR-0023](docs/adr/0023-replay-transport.md),
   [ADR-0049](docs/adr/0049-recordings-in-core.md)).
 - **A simulated vehicle:** a modeled car (gearing, airflow, tire slip,
@@ -144,16 +161,22 @@ the last clear.*
 *The Log page on the simulated vehicle (`mock://demo`), in developer
 mode: each session as it happened, then the frames as they arrive.*
 
+![The Recordings page: a recording of the simulated vehicle's third loop, warmed up, open in the viewer with its first loop, a cold start, overlaid dashed and aligned on a marker typed before each 2nd-gear pull; the list is filtered to the four plotted signals, RPM, coolant, vehicle speed and oil; RPM and speed climb to the fuel-cut limiter together in both runs while the warm run's coolant reads 201 deg F and oil 192 deg F at the cursor against the cold run's 99 and 82; under the chart the frames check found nothing in 6,501 frames](docs/images/recordings.png)
+
+*The Recordings page: a warm loop's 2nd-gear pull with the cold
+start's overlaid dashed, aligned on a marker typed while recording,
+the cursor reading both runs at the limiter.*
+
 ## Architecture
 
 ```
- QML pages: Home · Dashboard · Live · Diagnostics · Log · Settings
+ QML pages: Home · Dashboard · Live · Diagnostics · Log · Recordings · Settings
    ▼  properties and list models, GUI thread only
  SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health
    │   havne-cli (cli/)        a second front end: a session as JSON lines
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h · sim.h
- ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h · sim.h · recording.h
+ ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding, recordings
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
    ├── elm327://  a serial port, a WiFi socket, or a link the app opens
@@ -179,6 +202,7 @@ it, a frame's path from transport to screen included.
 | [`core/src/isotp.h`](core/src/isotp.h) | ISO-TP on classic CAN, shared by ELM327 and SocketCAN: reassembly, Flow Control, the timers, with no I/O and no clock; fuzzed |
 | [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading and frame parsing; fuzzed |
 | [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
+| [`core/src/recorder.cpp`](core/src/recorder.cpp), [`core/src/recording_reader.cpp`](core/src/recording_reader.cpp) | Recordings in core: the worker's single-producer ring to a writer thread that never holds the session, and a reader that answers the viewer from one pass's index; the reader fuzzed |
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
 | [`cli/main.cpp`](cli/main.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |
@@ -198,7 +222,8 @@ later), download the AppImage, make it executable and run it;
 [docs/linux.md](docs/linux.md) covers what it needs, the core packages
 for `havne-cli` and your own programs, serial permissions and
 SocketCAN. In Settings, tick **Developer mode** under Display, then
-press the `mock://demo` preset and **Connect**.
+press the `mock://demo` preset and **Connect**; with **Record
+sessions** on, each run opens afterward on the Recordings page.
 
 To build from source you need CMake 3.21+, Qt 6.12 and a C++17
 compiler:
