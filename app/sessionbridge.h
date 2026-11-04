@@ -576,8 +576,11 @@ public:
     Q_INVOKABLE QVariantList discoverSerialPorts() const;
     // The machine's CAN interfaces, for socketcan:// (ADR-0032 section 7), Linux
     // only: one map per interface, { name, kind, up, listenOnly, fd,
-    // bitrate }, kind "can" or "vcan", bitrate in bit/s (0 for vcan). A
-    // netlink read; nothing is opened. Empty elsewhere.
+    // bitrate, state, modes, modesKnown, modesSupported }, kind "can" or
+    // "vcan", bitrate in bit/s (0 for vcan), state and the modes in ip
+    // link's words (core's; state "" when none is reported), the driver's
+    // modes only with modesKnown (a kernel from 6.0). A netlink read;
+    // nothing is opened. Empty elsewhere.
     Q_INVOKABLE QVariantList discoverCanInterfaces() const;
     // The newest recordings first, at most limit, for the Recordings page
     // to open or replay by a tap: one map per folder holding a frames.csv,
