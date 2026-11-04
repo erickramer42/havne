@@ -130,6 +130,48 @@ TestCase {
             find(page, "clearCancel").clicked()
     }
 
+    // On a phone upright and on its side, the viewer's page scrolls to all
+    // of it: the chart a readable height, the frames check's line inside
+    // the page once scrolled to its end, and the filter's options inside
+    // the window
+    function test_theViewerReachesAllOfItselfOnAPhone_data() {
+        return [{ tag: "upright", w: 384, h: 800 }, { tag: "on its side", w: 800, h: 384 }]
+    }
+
+    function test_theViewerReachesAllOfItselfOnAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = data.h
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const chart = find(page, "chartFrame")
+        verify(chart.height >= 200, "the chart is " + chart.height + " px")
+
+        const scroll = find(page, "recordingsScroll")
+        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
+        verify(waitForPolish(main), "scrolled")
+        const check = find(page, "checkSummary")
+        const bottom = check.mapToItem(scroll, 0, check.height).y
+        verify(check.visible && bottom <= scroll.height + 0.5,
+               "the frames check's line ends at " + bottom + " of " + scroll.height)
+
+        const bar = find(page, "recordingFilter")
+        find(bar, "filterButton").clicked()
+        tryVerify(() => bar.options.opened, 2000, "the filter's options open")
+        verify(waitForPolish(main), "the options laid out")
+        const box = bar.options.contentItem
+        const right = box.mapToItem(main.contentItem, box.width, 0).x
+        verify(right <= main.contentItem.width + 0.5,
+               "the filter's options end at " + right + " of " + main.contentItem.width)
+        bar.options.close()
+    }
+
     // While a session records, the header's Mark marks it from any page,
     // counting its marks, and the header still fits a phone
     function test_theHeadersMarkMarksTheRecording() {
