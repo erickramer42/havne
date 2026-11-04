@@ -521,7 +521,11 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
   controller without one-shot mode answers too, a desk bus having
   no car to harm). The VX read it through J2534 over real wire
   ([2026-11-03-socketcan-desk-sim](docs/bench-sessions/2026-11-03-socketcan-desk-sim.md)).
-- Stateful fuzzing of ISO-TP and UDS, before the car.
+- Stateful fuzzing of ISO-TP and UDS, before the car: built
+  (`fuzz_request_bus`, [fuzz/README.md](fuzz/README.md)): a requesting
+  session's engine and ISO-TP against the fakes' ECU on a simulated
+  bus, each reply broken as the input says, then honest replies that
+  must bring every channel's one-shots to an end.
 - SocketCAN on the test car, listen-only (BENCH prep #26), with a
   `havne-cli` script reading the car at a documented rate; requests
   only through an adapter whose driver offers one-shot mode, on the
@@ -533,7 +537,8 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
 
 **Done when:** two recordings of the mock's pulls, recorded by
 `havne-cli`, overlay aligned on the pull's start in the app and in
-`havne-cli view`; an hour-long recording opens and scrubs within a
+`havne-cli view` (met: [testing.md](docs/testing.md)'s overlay row);
+an hour-long recording opens and scrubs within a
 stated memory bound; the SocketCAN car run is filed.
 
 ### Waiting on a tester: an iPhone download
