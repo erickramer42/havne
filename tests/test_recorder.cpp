@@ -1131,11 +1131,16 @@ TEST(RecorderTest, AnIdleWriterWakesTenTimesASecond)
     ASSERT_NE(rec.recorder, nullptr);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     const uint64_t idle_from = ecuio_recorder_test_wakes(rec.recorder);
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-    const uint64_t idle = ecuio_recorder_test_wakes(rec.recorder) - idle_from;
-    ::testing::Test::RecordProperty("idle_wakes", std::to_string(idle));
-    EXPECT_GE(idle, 5u);
-    EXPECT_LE(idle, 20u) << "an idle writer wakes every 100 ms";
+    /* Two seconds: a writer that waits a second wakes 3 times at most in
+     * them, and the macOS runner, whose timers fire late, counted 4 a
+     * second */
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    const uint64_t idle_2s =
+        ecuio_recorder_test_wakes(rec.recorder) - idle_from;
+    ::testing::Test::RecordProperty("idle_wakes_2s", std::to_string(idle_2s));
+    EXPECT_GE(idle_2s, 5u);
+    EXPECT_LE(idle_2s, 40u) << "an idle writer wakes every 100 ms";
+    const uint64_t idle = idle_2s / 2;
 
     const uint64_t busy_from = ecuio_recorder_test_wakes(rec.recorder);
     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(1);
