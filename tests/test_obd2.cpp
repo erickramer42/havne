@@ -5168,10 +5168,19 @@ TEST(SimEcuTest, TheUrisKeysAndRefusals)
     EXPECT_TRUE(c.vin_given);
     EXPECT_STREQ(c.vin, "1FAFAKE10M0000001");
     EXPECT_EQ(c.faults.late, 7u);
+    EXPECT_FALSE(c.stretch.given());
+    const std::string stretched = replay + "?from=12.5&to=40";
+    ASSERT_EQ(ecuio_sim_parse_uri(stretched.c_str(), &c, why, sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_EQ(c.stretch.from_us, 12500000u);
+    EXPECT_EQ(c.stretch.to_us, 40000000u);
     for (const std::string& bad :
          {std::string("replay://"), std::string("replay://?loop=1"),
           std::string("replay://recordings/run"), replay + "?values=canned",
-          replay + "?loop=2", replay + "?speed=2"}) {
+          replay + "?loop=2", replay + "?speed=2", replay + "?from=x",
+          replay + "?to=1.2345", replay + "?from=5&to=5",
+          std::string("mock://sim?from=1")}) {
         why[0] = '\0';
         EXPECT_EQ(ecuio_sim_parse_uri(bad.c_str(), &c, why, sizeof why),
                   ecuio_sim_uri_result::bad)
@@ -5457,6 +5466,47 @@ TEST(SimRecordingTest, ATornLastRowIsLeftOut)
     ASSERT_EQ(ecuio_sim_load_recording(csv.path, &r), ECUIO_OK)
         << ecuio_last_error_detail();
     EXPECT_EQ(r.replies.size(), 1u) << "only 41 0C's reply";
+}
+
+// A stretch (from and to, by host_us) answers from its own rows, its
+// first at the ECU's start: before it, after it, or a stretch of a reply
+// the engine ECU never sent, nothing of it is kept
+TEST(SimRecordingTest, AStretchAnswersFromItsOwnRows)
+{
+    ScratchCsv csv("sim-stretch", "host_us,timestamp_us,id,flags,data\n"
+                                  "0,500,0x7E8,0x0,41 0D 0A\n"
+                                  "1000000,1000500,0x7E8,0x0,41 0D 14\n"
+                                  "2000000,1500500,0x7E8,0x0,41 0D 1E\n"
+                                  "3000000,2000500,0x7E9,0x0,41 0D 28\n"
+                                  "4000000,2500500,0x7E8,0x0,41 0D 32\n");
+    ecuio_stretch::stretch s;
+    s.from_us = 900000;
+    s.to_us = 2000000;
+    ecuio_sim_recording r;
+    ASSERT_EQ(ecuio_sim_load_recording(csv.path, &r, s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(rask(r, 0, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 0x14}))
+        << "the stretch's first row at 0";
+    EXPECT_EQ(rask(r, 499999, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 0x14}));
+    EXPECT_EQ(rask(r, 500000, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 0x1E}))
+        << "its next by the session time between them";
+    EXPECT_EQ(r.span_us, 500000);
+    EXPECT_EQ(rask(r, 10 * kSecond, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 0x1E}))
+        << "held past its end: row 5 isn't in it";
+
+    s.from_us = 2500000;
+    s.to_us = 3500000;
+    EXPECT_EQ(ecuio_sim_load_recording(csv.path, &r, s), ECUIO_ERR_LOAD_FAILED)
+        << "0x7E9's row alone";
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the stretch holds no reply from the engine ECU (0x7E8) to "
+                 "answer with");
+    s.from_us = 5000000;
+    s.to_us = ecuio_stretch::kOpen;
+    EXPECT_EQ(ecuio_sim_load_recording(csv.path, &r, s), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the recording holds no frames from 5 s on: its frames run "
+                 "from 0 s to 4 s");
 }
 
 TEST(SimRecordingTest, TheLoadersRefusals)

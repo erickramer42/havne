@@ -4,8 +4,9 @@
 //          verdict on it, a kernel frame to an ecuio_frame_t, the
 //          clock), the URI's refusals through ecuio_session_create, and
 //          ecuio_can_interfaces' arguments; the simulated ECU's contract
-//          (SimTest, ADR-0046). The transport on a bus is VcanTest's
-//          (Linux), the simulated ECU on one SimBusTest's
+//          (SimTest, ADR-0046: its options, and the link it answers on,
+//          a desk bus's controller too). The transport on a bus is
+//          VcanTest's (Linux), the simulated ECU on one SimBusTest's
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -87,7 +88,23 @@ struct LinkSpec {
     uint32_t can_state = SOCKETCAN_STATE_ERROR_ACTIVE;
     bool restart = true;
     uint32_t restart_ms = 0;
+    bool ext = false; /* IFLA_CAN_CTRLMODE_EXT, a kernel from 6.0 */
+    uint32_t supported = 0;
 };
+
+/* The Innomaker USB2CAN on the desk bus (BENCH prep #26): gs_usb from
+ * Linux 6.0 says which modes its firmware offers, and one-shot isn't
+ * among them (WSL's 6.18 kernel, 2026-11-03: loopback, listen-only,
+ * cc-len8-dlc) */
+LinkSpec usb2can()
+{
+    LinkSpec s;
+    s.modes = 0;
+    s.ext = true;
+    s.supported = 0x01u /* loopback */ | SOCKETCAN_CTRLMODE_LISTENONLY |
+                  0x100u /* cc-len8-dlc */;
+    return s;
+}
 
 /* A controller a session may send through (ADR-0040 section 2) */
 LinkSpec sender()
@@ -127,6 +144,11 @@ std::vector<uint8_t> link_msg(const LinkSpec& s)
         if (s.restart) {
             data = cat({data, attr(SOCKETCAN_IFLA_CAN_RESTART_MS,
                                    u32s({s.restart_ms}))});
+        }
+        if (s.ext) {
+            data = cat({data, attr(SOCKETCAN_IFLA_CAN_CTRLMODE_EXT | kNested,
+                                   attr(SOCKETCAN_IFLA_CAN_CTRLMODE_SUPPORTED,
+                                        u32s({s.supported})))});
         }
         auto info = attr(SOCKETCAN_IFLA_INFO_KIND, str(s.kind));
         if (!data.empty()) {
@@ -387,6 +409,190 @@ TEST(SocketCanTest, OnlyAControllerThatCanStopAtOnceMaySend)
               socketcan_verdict::not_listen_only);
 }
 
+/* A kernel from 6.0 says which modes a controller's driver offers
+ * (IFLA_CAN_CTRLMODE_EXT); an older one says nothing, and nothing is
+ * ruled out */
+TEST(SocketCanTest, TheModesADriverOffersAreRead)
+{
+    const socketcan_link known = parsed(usb2can());
+    EXPECT_TRUE(known.has_supported);
+    EXPECT_EQ(known.supported, usb2can().supported);
+    EXPECT_TRUE(known.lacks(SOCKETCAN_CTRLMODE_ONE_SHOT));
+    EXPECT_FALSE(known.lacks(SOCKETCAN_CTRLMODE_LISTENONLY));
+
+    const socketcan_link older = parsed(sender());
+    EXPECT_FALSE(older.has_supported);
+    EXPECT_FALSE(older.lacks(SOCKETCAN_CTRLMODE_ONE_SHOT));
+    EXPECT_FALSE(older.lacks(SOCKETCAN_CTRLMODE_LISTENONLY));
+
+    LinkSpec v;
+    v.kind = "vcan";
+    v.ext = true; /* a vcan has no modes to lack */
+    EXPECT_FALSE(parsed(v).lacks(SOCKETCAN_CTRLMODE_ONE_SHOT));
+
+    LinkSpec cut = usb2can();
+    cut.supported = 0;
+    auto m = link_msg(cut);
+    m.resize(m.size() - 2); /* the nest's last attribute runs past the end */
+    socketcan_link l;
+    EXPECT_FALSE(socketcan_parse_link(m.data(), m.size(), &l));
+}
+
+/* A driver without the mode a session needs is refused before anything
+ * else, since no ip link command would help: one-shot for a requesting
+ * session (the USB2CAN, down, listen-only, at another rate or restarting
+ * itself alike), listen-only for a listening one */
+TEST(SocketCanTest, ADriverWithoutTheModeANeedsIsRefusedFirst)
+{
+    LinkSpec s = usb2can();
+    if (SOCKETCAN_SEND_NEEDS_ONE_SHOT) {
+        EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+                  socketcan_send_verdict::one_shot_unoffered);
+        s.up = false;
+        EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+                  socketcan_send_verdict::one_shot_unoffered);
+        s = usb2can();
+        s.modes = SOCKETCAN_CTRLMODE_LISTENONLY;
+        EXPECT_EQ(socketcan_judge_sender(parsed(s), 250000),
+                  socketcan_send_verdict::one_shot_unoffered);
+        s.restart_ms = 100;
+        EXPECT_EQ(socketcan_judge_sender(parsed(s), 0),
+                  socketcan_send_verdict::one_shot_unoffered);
+    }
+    s = usb2can();
+    s.modes = SOCKETCAN_CTRLMODE_LISTENONLY;
+    EXPECT_EQ(socketcan_judge(parsed(s), 500000), socketcan_verdict::ok)
+        << "it listens";
+
+    LinkSpec offered = sender();
+    offered.ext = true;
+    offered.supported =
+        SOCKETCAN_CTRLMODE_ONE_SHOT | SOCKETCAN_CTRLMODE_LISTENONLY;
+    EXPECT_EQ(socketcan_judge_sender(parsed(offered), 500000),
+              socketcan_send_verdict::ok);
+    offered.modes = 0;
+    EXPECT_EQ(socketcan_judge_sender(parsed(offered), 500000),
+              SOCKETCAN_SEND_NEEDS_ONE_SHOT
+                  ? socketcan_send_verdict::no_one_shot
+                  : socketcan_send_verdict::ok)
+        << "offered, not on: ip link turns it on";
+
+    LinkSpec deaf = sender();
+    deaf.ext = true;
+    deaf.supported = SOCKETCAN_CTRLMODE_ONE_SHOT;
+    EXPECT_EQ(socketcan_judge(parsed(deaf), 0),
+              socketcan_verdict::listen_only_unoffered);
+    deaf.up = false;
+    EXPECT_EQ(socketcan_judge(parsed(deaf), 0),
+              socketcan_verdict::listen_only_unoffered);
+    EXPECT_EQ(socketcan_judge_sender(parsed(sender()), 500000),
+              socketcan_send_verdict::ok);
+}
+
+/* Every refusal's words name only the modes the controller's driver
+ * offers: a driver without one-shot is told it can only listen, never
+ * to turn one-shot on; one with it is told how, without "where its driver
+ * offers it"; an older kernel's gets the command with that caveat */
+TEST(SocketCanTest, ARefusalNamesOnlyTheModesTheDriverOffers)
+{
+    char why[512];
+    const auto send_text = [&](const LinkSpec& s, uint32_t baud) {
+        const socketcan_link l = parsed(s);
+        socketcan_send_refusal(l, socketcan_judge_sender(l, baud), baud, why,
+                               sizeof why);
+        return std::string(why);
+    };
+    const auto listen_text = [&](const LinkSpec& s, uint32_t baud) {
+        const socketcan_link l = parsed(s);
+        socketcan_refusal(l, socketcan_judge(l, baud), baud, why, sizeof why);
+        return std::string(why);
+    };
+
+    LinkSpec s = usb2can();
+    for (int variant = 0; variant < 4; ++variant) {
+        s = usb2can();
+        s.up = variant != 1;
+        s.modes = variant == 2 ? SOCKETCAN_CTRLMODE_LISTENONLY : 0u;
+        s.restart_ms = variant == 3 ? 100u : 0u;
+        const std::string t = send_text(s, 500000);
+        EXPECT_EQ(t, "can0's driver offers no one-shot mode, so a frame that "
+                     "fails would be sent again by the controller: this "
+                     "profile sends requests, so nothing was sent; through "
+                     "can0, use a profile that only listens, with can0 up "
+                     "listen-only")
+            << variant;
+        EXPECT_EQ(t.find("one-shot on"), std::string::npos) << variant;
+    }
+    s = usb2can();
+    s.supported = 0x10u; /* berr reporting alone: it can't listen either */
+    EXPECT_EQ(send_text(s, 500000),
+              "can0's driver offers no one-shot mode, so a frame that fails "
+              "would be sent again by the controller: this profile sends "
+              "requests, so nothing was sent");
+
+    LinkSpec offered = sender();
+    offered.modes = 0;
+    offered.ext = true;
+    offered.supported = SOCKETCAN_CTRLMODE_ONE_SHOT;
+    EXPECT_EQ(send_text(offered, 500000),
+              "can0 isn't in one-shot mode, so a frame that fails would be "
+              "sent again by the controller: sudo ip link set can0 down, then "
+              "sudo ip link set can0 up type can bitrate 500000 restart-ms 0 "
+              "one-shot on");
+    offered.ext = false; /* a kernel before 6.0 */
+    EXPECT_EQ(send_text(offered, 500000),
+              "can0 isn't in one-shot mode, so a frame that fails would be "
+              "sent again by the controller: sudo ip link set can0 down, then "
+              "sudo ip link set can0 up type can bitrate 500000 restart-ms 0 "
+              "one-shot on (where its driver offers it)");
+
+    /* ip link keeps a mode it isn't told to drop: going from listening
+     * to asking says listen-only off */
+    LinkSpec listening;
+    EXPECT_EQ(send_text(listening, 500000),
+              "can0 is listen-only, and this profile sends requests: sudo ip "
+              "link set can0 down, then sudo ip link set can0 up type can "
+              "bitrate 500000 listen-only off restart-ms 0 one-shot on");
+
+    LinkSpec deaf = sender();
+    deaf.ext = true;
+    deaf.supported = SOCKETCAN_CTRLMODE_ONE_SHOT;
+    const std::string t = listen_text(deaf, 0);
+    EXPECT_EQ(t, "can0's driver offers no listen-only mode, so a session "
+                 "listening through it could transmit on the bus: listen "
+                 "through an adapter whose driver offers one");
+    EXPECT_EQ(t.find("listen-only on"), std::string::npos);
+    LinkSpec normal;
+    normal.modes = 0;
+    EXPECT_NE(listen_text(normal, 0).find("listen-only on"), std::string::npos)
+        << "nothing said: the command";
+    EXPECT_EQ(listen_text(LinkSpec{}, 500000), "") << "ok says nothing";
+    EXPECT_EQ(send_text(sender(), 500000), "");
+}
+
+/* What discovery and havne-cli devices print: ip link's words */
+TEST(SocketCanTest, StatesAndModesHaveIpLinksNames)
+{
+    const char* const states[] = {
+        "",        "error-active", "error-warning", "error-passive",
+        "bus-off", "stopped",      "sleeping"};
+    for (uint32_t i = 0; i < 7; ++i) {
+        EXPECT_STREQ(ecuio_can_state_name(i), states[i]) << i;
+    }
+    EXPECT_STREQ(ecuio_can_state_name(7), "");
+    EXPECT_STREQ(ecuio_can_state_name(UINT32_MAX), "");
+    const char* const modes[] = {
+        "loopback",    "listen-only",    "triple-sampling",
+        "one-shot",    "berr-reporting", "fd",
+        "presume-ack", "fd-non-iso",     "cc-len8-dlc"};
+    for (uint32_t bit = 0; bit < 9; ++bit) {
+        EXPECT_STREQ(ecuio_can_mode_name(1u << bit), modes[bit]) << bit;
+    }
+    EXPECT_STREQ(ecuio_can_mode_name(0), "");
+    EXPECT_STREQ(ecuio_can_mode_name(0x200), "") << "unnamed: TDC";
+    EXPECT_STREQ(ecuio_can_mode_name(0x0A), "") << "two bits";
+}
+
 /* The first request proves the rate (ADR-0040 section 3): its echo, then
  * a reply or N_As with no error frame, proves it (the desk bus's
  * adapter echoed before reporting the missing ACK); before that, an
@@ -484,9 +690,27 @@ TEST(SocketCanTest, DiscoveryListsControllersAndVcanOnly)
     EXPECT_STREQ(item.kind, "can");
     EXPECT_EQ(item.flags, ECUIO_CAN_UP | ECUIO_CAN_LISTEN_ONLY);
     EXPECT_EQ(item.bitrate, 500000u);
+    EXPECT_EQ(item.state, ECUIO_CAN_STATE_ERROR_ACTIVE);
+    EXPECT_EQ(item.modes, ECUIO_CAN_MODE_LISTEN_ONLY);
+    EXPECT_EQ(item.modes_supported, 0u) << "an older kernel says nothing";
     for (uint32_t r : item.reserved) {
         EXPECT_EQ(r, 0u);
     }
+
+    LinkSpec usb = usb2can();
+    usb.can_state = 3; /* CAN_STATE_BUS_OFF */
+    ASSERT_TRUE(socketcan_interface_from(parsed(usb), &item));
+    EXPECT_EQ(item.flags, ECUIO_CAN_UP | ECUIO_CAN_MODES_KNOWN);
+    EXPECT_EQ(item.state, ECUIO_CAN_STATE_BUS_OFF);
+    EXPECT_EQ(item.modes, 0u) << "normal mode";
+    EXPECT_EQ(item.modes_supported, usb2can().supported);
+    usb.state = false;
+    ASSERT_TRUE(socketcan_interface_from(parsed(usb), &item));
+    EXPECT_EQ(item.state, ECUIO_CAN_STATE_UNKNOWN) << "none reported";
+    usb.state = true;
+    usb.can_state = 6; /* CAN_STATE_MAX */
+    ASSERT_TRUE(socketcan_interface_from(parsed(usb), &item));
+    EXPECT_EQ(item.state, ECUIO_CAN_STATE_UNKNOWN) << "a state past the list";
 
     LinkSpec v;
     v.name = "vcan0";
@@ -494,9 +718,13 @@ TEST(SocketCanTest, DiscoveryListsControllersAndVcanOnly)
     v.mtu = 72;
     v.up = false;
     v.bitrate = v.ctrlmode = false;
+    v.ext = true;
+    v.supported = SOCKETCAN_CTRLMODE_ONE_SHOT;
     ASSERT_TRUE(socketcan_interface_from(parsed(v), &item));
-    EXPECT_EQ(item.flags, ECUIO_CAN_FD);
+    EXPECT_EQ(item.flags, ECUIO_CAN_FD) << "a vcan has no modes to know";
     EXPECT_EQ(item.bitrate, 0u);
+    EXPECT_EQ(item.state, ECUIO_CAN_STATE_UNKNOWN);
+    EXPECT_EQ(item.modes | item.modes_supported, 0u);
 
     LinkSpec eth;
     eth.kind = nullptr;
@@ -748,6 +976,131 @@ TEST(SimTest, TheArgumentsAndTheUriAreCheckedFirst)
 #endif
 }
 
+// The options: NULLs first, then a bit that isn't one, before the URI
+TEST(SimTest, AnOptionThatIsntOneIsRefusedBeforeTheUri)
+{
+    ecuio_sim_t* sim = reinterpret_cast<ecuio_sim_t*>(1);
+    EXPECT_EQ(
+        ecuio_sim_create_with(nullptr, "vcan0", ECUIO_SIM_ALLOW_DESK_BUS, &sim),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_sim_create_with("mock://sim", "vcan0", 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_sim_create_with("socketcan://vcan0", "nosuchcan9",
+                                    ECUIO_SIM_ALLOW_DESK_BUS << 1, &sim),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(sim, nullptr);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("0x2"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_sim_create_with("socketcan://vcan0", "nosuchcan9",
+                                    ECUIO_SIM_ALLOW_DESK_BUS, &sim),
+              ECUIO_ERR_BAD_URI)
+        << "the option itself is taken";
+}
+
+/* vcan always, once up; a real controller only on a desk bus said by the
+ * caller, and then only up, able to transmit and error-active: any rate,
+ * no one-shot mode needed, restarting itself or not */
+TEST(SimTest, ARealControllerAnswersOnlyOnADeskBusReadyToSend)
+{
+    using V = socketcan_sim_verdict;
+    LinkSpec vcan;
+    vcan.name = "vcan0";
+    vcan.kind = "vcan";
+    EXPECT_EQ(socketcan_judge_sim(parsed(vcan), false), V::ok);
+    EXPECT_EQ(socketcan_judge_sim(parsed(vcan), true), V::ok);
+    vcan.up = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(vcan), false), V::down);
+
+    LinkSpec eth;
+    eth.name = "eth0";
+    eth.kind = nullptr;
+    EXPECT_EQ(socketcan_judge_sim(parsed(eth), true), V::not_can);
+
+    LinkSpec desk = usb2can(); /* normal mode, no one-shot offered */
+    EXPECT_EQ(socketcan_judge_sim(parsed(desk), false), V::real_controller);
+    EXPECT_EQ(socketcan_judge_sim(parsed(desk), true), V::ok);
+    desk.rate = 250000;
+    desk.restart_ms = 100;
+    EXPECT_EQ(socketcan_judge_sim(parsed(desk), true), V::ok)
+        << "the rate it is up at; a restart does no harm on a desk";
+
+    LinkSpec down = usb2can();
+    down.up = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(down), false), V::real_controller)
+        << "no desk bus said: refused whatever its state";
+    EXPECT_EQ(socketcan_judge_sim(parsed(down), true), V::down);
+
+    LinkSpec listening = usb2can();
+    listening.modes = SOCKETCAN_CTRLMODE_LISTENONLY;
+    EXPECT_EQ(socketcan_judge_sim(parsed(listening), true), V::listen_only);
+    LinkSpec unsaid = usb2can();
+    unsaid.ctrlmode = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(unsaid), true), V::listen_only)
+        << "no mode reported: not known to transmit";
+
+    LinkSpec passive = usb2can();
+    passive.can_state = 2; /* CAN_STATE_ERROR_PASSIVE */
+    EXPECT_EQ(socketcan_judge_sim(parsed(passive), true), V::not_error_active);
+    LinkSpec stateless = usb2can();
+    stateless.state = false;
+    EXPECT_EQ(socketcan_judge_sim(parsed(stateless), true),
+              V::not_error_active);
+}
+
+// Each refusal names the interface and the ip link commands that change it
+TEST(SimTest, ADeskBusRefusalSaysWhatToChange)
+{
+    using V = socketcan_sim_verdict;
+    char out[512];
+    const auto refusal = [&](const LinkSpec& s, V v) {
+        socketcan_sim_refusal(parsed(s), v, out, sizeof out);
+        return std::string(out);
+    };
+    LinkSpec eth;
+    eth.name = "eth0";
+    eth.kind = nullptr;
+    EXPECT_EQ(refusal(eth, V::not_can),
+              "eth0 is a non-CAN link, not vcan: the simulated ECU answers "
+              "only on a virtual bus, never for a car's own ECU");
+    const LinkSpec desk = usb2can();
+    std::string r = refusal(desk, V::real_controller);
+    EXPECT_NE(r.find("can0 is a CAN controller, not vcan"), std::string::npos)
+        << r;
+    EXPECT_NE(r.find("a desk bus with no car"), std::string::npos) << r;
+    EXPECT_EQ(refusal(desk, V::down),
+              "can0 is down: sudo ip link set can0 up type can bitrate "
+              "500000 listen-only off");
+    LinkSpec vcan;
+    vcan.name = "vcan0";
+    vcan.kind = "vcan";
+    EXPECT_EQ(refusal(vcan, V::down),
+              "vcan0 is down (sudo ip link set vcan0 up)");
+    EXPECT_EQ(refusal(desk, V::listen_only),
+              "can0 is listen-only, so the simulated ECU couldn't answer: "
+              "sudo ip link set can0 down, then sudo ip link set can0 up "
+              "type can bitrate 500000 listen-only off");
+    LinkSpec rateless = usb2can();
+    rateless.bitrate = false;
+    r = refusal(rateless, V::listen_only);
+    EXPECT_NE(r.find("bitrate <the bus's rate> listen-only off"),
+              std::string::npos)
+        << r;
+    LinkSpec passive = usb2can();
+    passive.can_state = 2;
+    r = refusal(passive, V::not_error_active);
+    EXPECT_NE(r.find("can0 is error-passive, so the bus already counts "
+                     "errors"),
+              std::string::npos)
+        << r;
+    LinkSpec stateless = usb2can();
+    stateless.state = false;
+    r = refusal(stateless, V::not_error_active);
+    EXPECT_NE(r.find("can0 reports no controller state"), std::string::npos)
+        << r;
+    EXPECT_EQ(refusal(desk, V::ok), "");
+}
+
 #if ECUIO_HAVE_SOCKETCAN
 // Only a virtual bus: never a car's, whatever its state
 TEST(SimTest, OnlyAVcanInterfaceIsTaken)
@@ -761,6 +1114,14 @@ TEST(SimTest, OnlyAVcanInterfaceIsTaken)
     EXPECT_NE(c.detail.find("not vcan"), std::string::npos) << c.detail;
     c = sim_create("mock://sim", "bad name!");
     EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    // A desk bus said changes nothing for a link that isn't CAN
+    ecuio_sim_t* sim = nullptr;
+    EXPECT_EQ(ecuio_sim_create_with("mock://sim", "lo",
+                                    ECUIO_SIM_ALLOW_DESK_BUS, &sim),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(sim, nullptr);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("not vcan"),
+              std::string::npos);
 }
 
 // A recording is read before the interface is judged: its own refusal
@@ -779,5 +1140,14 @@ TEST(SimTest, ARecordingIsReadBeforeTheInterface)
         << c.detail;
     c = sim_create((fixture + "?loop=1").c_str(), "nosuchcan9");
     EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED) << "it spans time";
+    // The URI's stretch reaches the loader: one past the recording's end
+    // is the recording's refusal, one inside it the interface's
+    c = sim_create((fixture + "?from=1000").c_str(), "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("no frames from 1000 s on"), std::string::npos)
+        << c.detail;
+    c = sim_create((fixture + "?from=10&to=40").c_str(), "nosuchcan9");
+    EXPECT_NE(c.detail.find("no interface nosuchcan9"), std::string::npos)
+        << c.detail;
 }
 #endif

@@ -13,6 +13,7 @@
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
+#include "can_line.h"
 #include "diagnostics_line.h"
 #include "info_lines.h"
 #include "jsonl.h"
@@ -627,6 +628,55 @@ TEST(CliScanTest, UntilScannedWaitsForEveryChannelThatScans)
     EXPECT_TRUE(cli::scans_complete(s, 3)) << "the second has no scan";
 }
 
+/* devices' can line (ADR-0040 section 2): what a connect is judged on,
+ * in ip link's words; the driver's modes null when the kernel doesn't
+ * say; a vcan's state null and its modes empty */
+TEST(CliCanTest, ALineSaysWhatAConnectIsJudgedOn)
+{
+    ecuio_can_interface_t c{};
+    std::memcpy(c.name, "can0", 5);
+    std::memcpy(c.kind, "can", 4);
+    c.flags = ECUIO_CAN_UP | ECUIO_CAN_MODES_KNOWN;
+    c.bitrate = 500000;
+    c.state = ECUIO_CAN_STATE_ERROR_PASSIVE;
+    c.modes = ECUIO_CAN_MODE_BERR_REPORTING;
+    c.modes_supported = ECUIO_CAN_MODE_LOOPBACK | ECUIO_CAN_MODE_LISTEN_ONLY |
+                        ECUIO_CAN_MODE_BERR_REPORTING | 0x2000u;
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::can_line(l, c);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"can\",\"name\":\"can0\",\"kind\":\"can\","
+              "\"up\":true,\"listen_only\":false,\"fd\":false,"
+              "\"bitrate\":500000,\"state\":\"error-passive\","
+              "\"modes\":[\"berr-reporting\"],\"modes_supported\":"
+              "[\"loopback\",\"listen-only\",\"berr-reporting\",\"0x2000\"],"
+              "\"uri\":\"socketcan://can0\"}");
+
+    c.flags = ECUIO_CAN_UP | ECUIO_CAN_LISTEN_ONLY; /* a kernel before 6.0 */
+    c.modes = ECUIO_CAN_MODE_LISTEN_ONLY;
+    c.modes_supported = 0;
+    cli::Line o(buf, sizeof buf);
+    cli::can_line(o, c);
+    const std::string older(o.data(), o.size());
+    EXPECT_NE(
+        older.find("\"modes\":[\"listen-only\"],\"modes_supported\":null"),
+        std::string::npos)
+        << older;
+
+    ecuio_can_interface_t v{};
+    std::memcpy(v.name, "vcan0", 6);
+    std::memcpy(v.kind, "vcan", 5);
+    v.flags = ECUIO_CAN_UP | ECUIO_CAN_FD;
+    cli::Line w(buf, sizeof buf);
+    cli::can_line(w, v);
+    EXPECT_EQ(std::string(w.data(), w.size()),
+              "{\"type\":\"can\",\"name\":\"vcan0\",\"kind\":\"vcan\","
+              "\"up\":true,\"listen_only\":false,\"fd\":true,\"bitrate\":0,"
+              "\"state\":null,\"modes\":[],\"modes_supported\":null,"
+              "\"uri\":\"socketcan://vcan0\"}");
+}
+
 /* ADR-0043: a VIN's decode, field by field (the VINs made up around FAKE,
  * their check digits by 49 CFR 565.15) */
 TEST(CliVinTest, ADecodeCarriesEachField)
@@ -791,10 +841,15 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
 {
     char buf[1024];
     cli::Line l(buf, sizeof buf);
-    cli::sim_line(l, "mock://sim?values=canned", "vcan0");
+    cli::sim_line(l, "mock://sim?values=canned", "vcan0", false);
     EXPECT_EQ(std::string(l.data(), l.size()),
               "{\"type\":\"sim\",\"uri\":\"mock://sim?values=canned\","
-              "\"on\":\"vcan0\"}");
+              "\"on\":\"vcan0\",\"desk_bus\":false}");
+    cli::Line d(buf, sizeof buf);
+    cli::sim_line(d, "mock://sim", "can0", true);
+    EXPECT_EQ(std::string(d.data(), d.size()),
+              "{\"type\":\"sim\",\"uri\":\"mock://sim\","
+              "\"on\":\"can0\",\"desk_bus\":true}");
     ecuio_sim_stats_t s{};
     s.requests = 10;
     s.replies = 7;
@@ -812,13 +867,19 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
     cli::sim_stats_line(st, s);
     EXPECT_EQ(std::string(st.data(), st.size()),
               std::string("{\"type\":\"sim_stats\",") + counts +
-                  "\"failed\":false}");
+                  "\"failed\":false,\"yielded\":false}");
     s.flags = ECUIO_SIM_FAILED;
     cli::Line e(buf, sizeof buf);
     cli::sim_end_line(e, "bus-failed", s);
     EXPECT_EQ(std::string(e.data(), e.size()),
               std::string("{\"type\":\"end\",\"reason\":\"bus-failed\",") +
-                  counts + "\"failed\":true}");
+                  counts + "\"failed\":true,\"yielded\":false}");
+    s.flags = ECUIO_SIM_YIELDED;
+    cli::Line y(buf, sizeof buf);
+    cli::sim_end_line(y, "yielded", s);
+    EXPECT_EQ(std::string(y.data(), y.size()),
+              std::string("{\"type\":\"end\",\"reason\":\"yielded\",") +
+                  counts + "\"failed\":false,\"yielded\":true}");
 }
 
 TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)

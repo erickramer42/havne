@@ -4,8 +4,9 @@
 // here (and checked against <linux/can.h> and <linux/rtnetlink.h> where
 // those exist), so every rule below is a unit test on every platform.
 // Testing: UNIT: SocketCanTest.* (test_socketcan): the interface name,
-//     the filters, a link's netlink attributes and the verdict on them,
-//     a kernel frame to an ecuio_frame_t, the clock;
+//     the filters, a link's netlink attributes (the driver's modes among
+//     them) and the verdict on them, each refusal's words (only the modes
+//     a driver offers), a kernel frame to an ecuio_frame_t, the clock;
 //     the clock's host_steps: SocketCanRequestTest.Timing* (ADR-0042)
 //
 // SocketCAN listening (ADR-0032): what a session reads from the kernel,
@@ -19,6 +20,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ---- The kernel's values (linux/can.h, linux/can/error.h,
@@ -52,6 +54,8 @@ constexpr uint16_t SOCKETCAN_IFLA_CAN_BITTIMING = 1;
 constexpr uint16_t SOCKETCAN_IFLA_CAN_STATE = 4;
 constexpr uint16_t SOCKETCAN_IFLA_CAN_CTRLMODE = 5;
 constexpr uint16_t SOCKETCAN_IFLA_CAN_RESTART_MS = 6;
+constexpr uint16_t SOCKETCAN_IFLA_CAN_CTRLMODE_EXT = 17;      /* Linux 6.0 on */
+constexpr uint16_t SOCKETCAN_IFLA_CAN_CTRLMODE_SUPPORTED = 1; /* in _EXT */
 constexpr uint16_t SOCKETCAN_NLA_TYPE_MASK =
     0x3FFF; /* without NESTED, BYTEORDER */
 constexpr uint32_t SOCKETCAN_IFF_UP = 0x1;
@@ -193,8 +197,16 @@ struct socketcan_link {
     uint32_t state = 0; /* IFLA_CAN_STATE: enum can_state */
     bool has_restart_ms = false;
     uint32_t restart_ms = 0; /* IFLA_CAN_RESTART_MS: 0 = never by itself */
+    bool has_supported = false;
+    uint32_t supported = 0; /* IFLA_CAN_CTRLMODE_SUPPORTED: the driver's */
 
     bool is_can() const { return strcmp(kind, "can") == 0; }
+    /* A controller whose driver says it can't take the mode; a kernel
+     * before 6.0 says nothing, and nothing is ruled out */
+    bool lacks(uint32_t mode) const
+    {
+        return is_can() && has_supported && (supported & mode) == 0;
+    }
     bool is_vcan() const { return strcmp(kind, "vcan") == 0; }
     bool listen_only() const
     {
@@ -269,6 +281,13 @@ inline bool socketcan_parse_link(const uint8_t* msg, size_t len,
     out->index = index;
     out->up = (u32(msg + 8) & SOCKETCAN_IFF_UP) != 0;
     bool ok = true;
+    /* IFLA_CAN_CTRLMODE_EXT's nest: the modes the driver supports */
+    const auto take_ext = [out](uint16_t t, const uint8_t* q, size_t m) {
+        if (t == SOCKETCAN_IFLA_CAN_CTRLMODE_SUPPORTED && m >= 4) {
+            out->has_supported = true;
+            out->supported = u32(q);
+        }
+    };
     const bool attrs = each_attr(
         msg + SOCKETCAN_IFINFOMSG_LEN, len - SOCKETCAN_IFINFOMSG_LEN,
         [&](uint16_t type, const uint8_t* p, size_t n) {
@@ -310,6 +329,11 @@ inline bool socketcan_parse_link(const uint8_t* msg, size_t len,
                                             k >= 4) {
                                             out->has_restart_ms = true;
                                             out->restart_ms = u32(r);
+                                        } else if (
+                                            u ==
+                                            SOCKETCAN_IFLA_CAN_CTRLMODE_EXT) {
+                                            ok =
+                                                ok && each_attr(r, k, take_ext);
                                         }
                                     });
                         }
@@ -334,14 +358,60 @@ inline bool socketcan_interface_from(const socketcan_link& l,
                  (l.listen_only() ? ECUIO_CAN_LISTEN_ONLY : 0u) |
                  (l.mtu >= SOCKETCAN_FD_MTU ? ECUIO_CAN_FD : 0u);
     out->bitrate = l.is_can() && l.has_bitrate ? l.bitrate : 0;
+    if (l.is_can()) {
+        out->state = l.has_state && l.state < 6 ? l.state + 1 /* enum
+                                                    can_state's, from 1 */
+                                                : ECUIO_CAN_STATE_UNKNOWN;
+        out->modes = l.has_ctrlmode ? l.ctrlmode : 0;
+        if (l.has_supported) {
+            out->flags |= ECUIO_CAN_MODES_KNOWN;
+            out->modes_supported = l.supported;
+        }
+    }
     return true;
+}
+
+/* ecuio_can_state_name's and ecuio_can_mode_name's words, ip link's */
+inline const char* socketcan_state_word(uint32_t state)
+{
+    static const char* const kWords[] = {
+        "",        "error-active", "error-warning", "error-passive",
+        "bus-off", "stopped",      "sleeping"};
+    return state < sizeof kWords / sizeof kWords[0] ? kWords[state] : "";
+}
+
+inline const char* socketcan_mode_word(uint32_t mode)
+{
+    switch (mode) {
+    case ECUIO_CAN_MODE_LOOPBACK:
+        return "loopback";
+    case ECUIO_CAN_MODE_LISTEN_ONLY:
+        return "listen-only";
+    case ECUIO_CAN_MODE_TRIPLE_SAMPLING:
+        return "triple-sampling";
+    case ECUIO_CAN_MODE_ONE_SHOT:
+        return "one-shot";
+    case ECUIO_CAN_MODE_BERR_REPORTING:
+        return "berr-reporting";
+    case ECUIO_CAN_MODE_FD:
+        return "fd";
+    case ECUIO_CAN_MODE_PRESUME_ACK:
+        return "presume-ack";
+    case ECUIO_CAN_MODE_FD_NON_ISO:
+        return "fd-non-iso";
+    case ECUIO_CAN_MODE_CC_LEN8_DLC:
+        return "cc-len8-dlc";
+    default:
+        return "";
+    }
 }
 
 /* Whether a session may listen on the link (ADR-0032 section 2), in the order
  * the refusals are checked */
 enum class socketcan_verdict {
     ok,
-    not_can, /* neither a CAN controller nor vcan */
+    not_can,               /* neither a CAN controller nor vcan */
+    listen_only_unoffered, /* its driver has no listen-only mode */
     down,
     not_listen_only, /* a controller that could transmit */
     wrong_rate,      /* up at another rate than ?baud= asks */
@@ -353,6 +423,9 @@ inline socketcan_verdict socketcan_judge(const socketcan_link& l,
 {
     if (!l.is_can() && !l.is_vcan()) {
         return socketcan_verdict::not_can;
+    }
+    if (l.lacks(SOCKETCAN_CTRLMODE_LISTENONLY)) {
+        return socketcan_verdict::listen_only_unoffered;
     }
     if (!l.up) {
         return socketcan_verdict::down;
@@ -376,7 +449,9 @@ constexpr bool SOCKETCAN_SEND_NEEDS_ONE_SHOT = true;
  * section 2), in the order the refusals are checked */
 enum class socketcan_send_verdict {
     ok,
-    not_can, /* neither a CAN controller nor vcan */
+    not_can,            /* neither a CAN controller nor vcan */
+    one_shot_unoffered, /* SOCKETCAN_SEND_NEEDS_ONE_SHOT and its driver
+                           has no one-shot mode */
     down,
     listen_only,      /* a controller that can't transmit */
     no_rate,          /* a controller and no ?baud= to check it against */
@@ -393,6 +468,9 @@ inline socketcan_send_verdict socketcan_judge_sender(const socketcan_link& l,
 {
     if (!l.is_can() && !l.is_vcan()) {
         return socketcan_send_verdict::not_can;
+    }
+    if (SOCKETCAN_SEND_NEEDS_ONE_SHOT && l.lacks(SOCKETCAN_CTRLMODE_ONE_SHOT)) {
+        return socketcan_send_verdict::one_shot_unoffered;
     }
     if (!l.up) {
         return socketcan_send_verdict::down;
@@ -420,6 +498,260 @@ inline socketcan_send_verdict socketcan_judge_sender(const socketcan_link& l,
         return socketcan_send_verdict::not_error_active;
     }
     return socketcan_send_verdict::ok;
+}
+
+/* Why a session won't listen on the link (ADR-0032 section 2), with the
+ * commands that make it one it would, into out; "" for ok. Only the modes
+ * its driver offers are named, when the kernel says which. */
+inline void socketcan_refusal(const socketcan_link& l, socketcan_verdict v,
+                              uint32_t want_baud, char* out, size_t cap)
+{
+    out[0] = '\0';
+    switch (v) {
+    case socketcan_verdict::not_can:
+        if (l.kind[0] != '\0') {
+            snprintf(out, cap, "%s isn't a CAN interface (its kind is %s)",
+                     l.name, l.kind);
+        } else {
+            snprintf(out, cap, "%s isn't a CAN interface", l.name);
+        }
+        break;
+    case socketcan_verdict::listen_only_unoffered:
+        snprintf(out, cap,
+                 "%s's driver offers no listen-only mode, so a session "
+                 "listening through it could transmit on the bus: "
+                 "listen through an adapter whose driver offers one",
+                 l.name);
+        break;
+    case socketcan_verdict::down:
+        if (l.is_vcan()) {
+            snprintf(out, cap, "%s is down: sudo ip link set %s up", l.name,
+                     l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s is down: sudo ip link set %s up type can "
+                     "bitrate <the bus's rate> listen-only on",
+                     l.name, l.name);
+        }
+        break;
+    case socketcan_verdict::not_listen_only:
+        snprintf(out, cap,
+                 "%s isn't listen-only, so it could transmit on the bus: sudo "
+                 "ip link set %s down, then sudo ip link set %s up type can "
+                 "bitrate %u listen-only on",
+                 l.name, l.name, l.name, l.has_bitrate ? l.bitrate : 500000u);
+        break;
+    case socketcan_verdict::wrong_rate:
+        snprintf(out, cap, "%s runs at %u bit/s, not the %u ?baud= asks for",
+                 l.name, l.bitrate, want_baud);
+        break;
+    case socketcan_verdict::ok:
+    default:
+        break;
+    }
+}
+
+/* Why a requesting session won't send through the link (ADR-0040
+ * section 2), with the commands that make it one it would, into out;
+ * "" for ok. Only the modes its driver offers are named, when the
+ * kernel says which. */
+inline void socketcan_send_refusal(const socketcan_link& l,
+                                   socketcan_send_verdict v, uint32_t want_baud,
+                                   char* out, size_t cap)
+{
+    out[0] = '\0';
+    const unsigned rate =
+        want_baud != 0 ? want_baud : (l.has_bitrate ? l.bitrate : 500000u);
+    const char* one_shot = SOCKETCAN_SEND_NEEDS_ONE_SHOT ? " one-shot on" : "";
+    switch (v) {
+    case socketcan_send_verdict::not_can:
+        socketcan_refusal(l, socketcan_verdict::not_can, want_baud, out, cap);
+        break;
+    case socketcan_send_verdict::one_shot_unoffered:
+        if (l.lacks(SOCKETCAN_CTRLMODE_LISTENONLY)) {
+            snprintf(out, cap,
+                     "%s's driver offers no one-shot mode, so a frame "
+                     "that fails would be sent again by the "
+                     "controller: this profile sends requests, so "
+                     "nothing was sent",
+                     l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s's driver offers no one-shot mode, so a frame "
+                     "that fails would be sent again by the "
+                     "controller: this profile sends requests, so "
+                     "nothing was sent; through %s, use a profile "
+                     "that only listens, with %s up listen-only",
+                     l.name, l.name, l.name);
+        }
+        break;
+    case socketcan_send_verdict::down:
+        if (l.is_vcan()) {
+            snprintf(out, cap, "%s is down: sudo ip link set %s up", l.name,
+                     l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s is down: sudo ip link set %s up type can "
+                     "bitrate <the bus's rate> restart-ms 0%s",
+                     l.name, l.name, one_shot);
+        }
+        break;
+    case socketcan_send_verdict::listen_only:
+        snprintf(out, cap,
+                 "%s is listen-only, and this profile sends requests: "
+                 "sudo ip link set %s down, then sudo ip link set %s "
+                 "up type can bitrate %u listen-only off restart-ms 0%s",
+                 l.name, l.name, l.name, rate, one_shot);
+        break;
+    case socketcan_send_verdict::no_rate:
+        snprintf(out, cap,
+                 "a profile that sends needs ?baud= with the rate the "
+                 "car's bus runs at (%s is up at %u bit/s): stated, "
+                 "never assumed",
+                 l.name, l.has_bitrate ? l.bitrate : 0u);
+        break;
+    case socketcan_send_verdict::wrong_rate:
+        socketcan_refusal(l, socketcan_verdict::wrong_rate, want_baud, out,
+                          cap);
+        break;
+    case socketcan_send_verdict::restarts_itself:
+        snprintf(out, cap,
+                 "%s restarts itself after a bus-off, so a wrong rate "
+                 "would go on disturbing the bus: sudo ip link set %s "
+                 "down, then sudo ip link set %s up type can bitrate "
+                 "%u restart-ms 0%s",
+                 l.name, l.name, l.name, rate, one_shot);
+        break;
+    case socketcan_send_verdict::no_one_shot:
+        /* Its driver offers it, or the kernel (before 6.0) doesn't say */
+        snprintf(out, cap,
+                 "%s isn't in one-shot mode, so a frame that fails "
+                 "would be sent again by the controller: sudo ip link "
+                 "set %s down, then sudo ip link set %s up type can "
+                 "bitrate %u restart-ms 0 one-shot on%s",
+                 l.name, l.name, l.name, rate,
+                 l.has_supported ? "" : " (where its driver offers it)");
+        break;
+    case socketcan_send_verdict::not_error_active:
+        snprintf(out, cap,
+                 "%s already reports bus errors (it isn't "
+                 "error-active), so nothing was sent: check the rate "
+                 "and the cable, then take it down and up again",
+                 l.name);
+        break;
+    case socketcan_send_verdict::ok:
+    default:
+        break;
+    }
+}
+
+/* ---- The simulated ECU's bus (ADR-0046 section 2, its appendix "the
+ * desk bus") ---- */
+
+/* Whether the simulated ECU may answer on the link, in the order the
+ * refusals are checked */
+enum class socketcan_sim_verdict {
+    ok,
+    not_can,         /* neither a CAN controller nor vcan */
+    real_controller, /* a controller, and no desk bus said */
+    down,
+    listen_only,      /* a controller that can't transmit, or no mode */
+    not_error_active, /* the controller already counts errors */
+};
+
+/* vcan always, once up. A controller only on a desk bus, said by the
+ * caller: up, able to transmit and error-active, at any rate and with or
+ * without one-shot mode, since a desk bus has no car to harm */
+inline socketcan_sim_verdict socketcan_judge_sim(const socketcan_link& l,
+                                                 bool desk_bus)
+{
+    if (!l.is_can() && !l.is_vcan()) {
+        return socketcan_sim_verdict::not_can;
+    }
+    if (l.is_can() && !desk_bus) {
+        return socketcan_sim_verdict::real_controller;
+    }
+    if (!l.up) {
+        return socketcan_sim_verdict::down;
+    }
+    if (l.is_vcan()) {
+        return socketcan_sim_verdict::ok;
+    }
+    if (!l.has_ctrlmode || l.listen_only()) {
+        return socketcan_sim_verdict::listen_only;
+    }
+    if (!l.has_state || l.state != SOCKETCAN_STATE_ERROR_ACTIVE) {
+        return socketcan_sim_verdict::not_error_active;
+    }
+    return socketcan_sim_verdict::ok;
+}
+
+/* Why the simulated ECU won't answer on the link, with the commands that
+ * would change that, into out; "" for ok */
+inline void socketcan_sim_refusal(const socketcan_link& l,
+                                  socketcan_sim_verdict v, char* out,
+                                  size_t cap)
+{
+    out[0] = '\0';
+    char rate[32];
+    if (l.has_bitrate && l.bitrate != 0) {
+        snprintf(rate, sizeof rate, "%u", l.bitrate);
+    } else {
+        snprintf(rate, sizeof rate, "<the bus's rate>");
+    }
+    switch (v) {
+    case socketcan_sim_verdict::not_can:
+        snprintf(out, cap,
+                 "%s is a %s link, not vcan: the simulated ECU answers "
+                 "only on a virtual bus, never for a car's own ECU",
+                 l.name, l.kind[0] != '\0' ? l.kind : "non-CAN");
+        break;
+    case socketcan_sim_verdict::real_controller:
+        snprintf(out, cap,
+                 "%s is a CAN controller, not vcan: the simulated ECU "
+                 "answers only on a virtual bus, never for a car's own "
+                 "ECU, unless the caller says it's a desk bus with no car",
+                 l.name);
+        break;
+    case socketcan_sim_verdict::down:
+        if (l.is_vcan()) {
+            snprintf(out, cap, "%s is down (sudo ip link set %s up)", l.name,
+                     l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s is down: sudo ip link set %s up type can bitrate "
+                     "%s listen-only off",
+                     l.name, l.name, rate);
+        }
+        break;
+    case socketcan_sim_verdict::listen_only:
+        snprintf(out, cap,
+                 "%s is listen-only, so the simulated ECU couldn't answer: "
+                 "sudo ip link set %s down, then sudo ip link set %s up "
+                 "type can bitrate %s listen-only off",
+                 l.name, l.name, l.name, rate);
+        break;
+    case socketcan_sim_verdict::not_error_active: {
+        /* the kernel's enum can_state, one below the public one */
+        const char* word = l.has_state ? socketcan_state_word(l.state + 1) : "";
+        if (word[0] != '\0') {
+            snprintf(out, cap,
+                     "%s is %s, so the bus already counts errors: check the "
+                     "rate and the cable, then sudo ip link set %s down and "
+                     "up again",
+                     l.name, word, l.name);
+        } else {
+            snprintf(out, cap,
+                     "%s reports no controller state, so it isn't known to "
+                     "be error-active: sudo ip link set %s down and up again",
+                     l.name, l.name);
+        }
+        break;
+    }
+    case socketcan_sim_verdict::ok:
+    default:
+        break;
+    }
 }
 
 /* ---- The first request proves the rate (ADR-0040 section 3) ---- */

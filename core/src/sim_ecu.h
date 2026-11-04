@@ -27,6 +27,7 @@
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"
 #include "sim_canned.h"
+#include "recording_stretch.h"
 #include "sim_recording.h"
 #include "uri_query.h"
 
@@ -95,6 +96,7 @@ struct ecuio_sim_config {
     const char* path = nullptr;
     size_t path_len = 0;
     bool loop = false;
+    ecuio_stretch::stretch stretch; /* replay: from=, to= */
 };
 
 struct ecuio_sim_ecu {
@@ -511,7 +513,7 @@ enum class ecuio_sim_uri_result : uint8_t { ok, bad };
 
 /* The simulated ECU's URI into *out:
  *   mock://<label>[?values][&vin][&faults]
- *   replay://<absolute path>[?loop][&vin][&faults]
+ *   replay://<absolute path>[?loop][&from][&to][&vin][&faults]
  * (ADR-0046 sections 3 and 7). why says what's wrong (a line). */
 inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                                                 ecuio_sim_config* out,
@@ -560,7 +562,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {"values", "vin", "faults", nullptr};
-    static const char* const kReplayKeys[] = {"loop", "vin", "faults", nullptr};
+    static const char* const kReplayKeys[] = {"loop", "from",   "to",
+                                              "vin",  "faults", nullptr};
     if (const ecuio_uri::param* p =
             ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys)) {
         std::snprintf(why, why_cap,
@@ -568,7 +571,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       "only %s, vin and faults",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
-                      replay ? "loop" : "values");
+                      replay ? "loop, from, to" : "values");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {
@@ -606,12 +609,24 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                 return ecuio_sim_uri_result::bad;
             }
             out->loop = value_is("1");
+        } else if (p.is("from") || p.is("to")) {
+            if (!ecuio_stretch::take(p, &out->stretch)) {
+                std::snprintf(why, why_cap,
+                              "from and to: the recording's seconds, as the "
+                              "viewer and havne-cli view show them, with at "
+                              "most three decimals");
+                return ecuio_sim_uri_result::bad;
+            }
         } else if (p.is("faults")) {
             if (!ecuio_sim_parse_faults(p.val, p.val_len, &out->faults, why,
                                         why_cap)) {
                 return ecuio_sim_uri_result::bad;
             }
         }
+    }
+    if (!ecuio_stretch::ordered(out->stretch)) {
+        std::snprintf(why, why_cap, "to must come after from");
+        return ecuio_sim_uri_result::bad;
     }
     return ecuio_sim_uri_result::ok;
 }

@@ -6,8 +6,8 @@
 //          readout, pan and zoom kept inside the recording, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
 //          fall), a finding's row centering the view, the signal rows'
-//          filter (SignalFilterBar.qml, ADR-0050), a refused folder's
-//          error, back to the list;
+//          filter (SignalFilterBar.qml, ADR-0050), Replay view handing on
+//          the stretch in view, a refused folder's error, back to the list;
 //          every item inside a phone's width (tst_phone.qml). RecordingView
 //          itself: test_bridge (RecordingViewTest); the chart's layout:
 //          tst_chartlayout.qml; the drawing is manual smoke (docs/testing.md).
@@ -20,7 +20,8 @@ import App
 pragma ComponentBehavior: Bound
 
 // The recordings a session saved (ADR-0049), newest first: Open shows one
-// in the viewer, Replay puts its replay:// URI in Settings' field. The
+// in the viewer, Replay puts its replay:// URI in Settings' field, and the
+// viewer's Replay view the part in view's (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
@@ -38,6 +39,7 @@ Page {
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
     property string openedTitle: ""
+    property string openedUri: ""
     readonly property bool viewing: recording.state !== RecordingView.Closed
 
     // The part of the axis in view, in ms since the recording started
@@ -163,7 +165,25 @@ Page {
 
     function open(row) {
         openedTitle = row.title
+        openedUri = row.uri !== undefined ? row.uri : ""
         recording.open(row.folder)
+    }
+
+    // Seconds to the ms with no trailing zeros, as core's replay takes them
+    function secondsText(ms) {
+        return String(Number((ms / 1000).toFixed(3)))
+    }
+
+    // The opened recording's replay:// URI for the part in view
+    // (ADR-0023's appendix "a stretch replayed"): from and to in the
+    // recording's own seconds, none while the whole recording is in view
+    function stretchUri() {
+        const from = Math.max(0, Math.floor(viewT0))
+        const to = Math.min(durationMs(), Math.ceil(viewT1))
+        if (from <= 0 && to >= durationMs())
+            return openedUri
+        return openedUri + (openedUri.indexOf("?") >= 0 ? "&" : "?")
+               + "from=" + secondsText(from) + "&to=" + secondsText(to)
     }
 
     function backToList() {
@@ -176,6 +196,7 @@ Page {
         alignLevel = NaN
         alignHysteresis = 0
         openedTitle = ""
+        openedUri = ""
         signalFilter.clear()
         refresh()
     }
@@ -565,10 +586,32 @@ Page {
         }
     }
 
+    // The page scrolls when its column needs more height than it has: a
+    // phone upright, or any screen turned on its side. Up and down only, and
+    // never while the chart pans or pinches, so those stay the chart's
+    Flickable {
+        id: scroller
+        objectName: "recordingsScroll"
+        anchors.fill: parent
+        clip: true
+        contentWidth: width
+        contentHeight: Math.max(height, column.implicitHeight + 2 * Theme.pageMargin)
+        flickableDirection: Flickable.VerticalFlick
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height && !pan.active && !pinch.active
+        ScrollBar.vertical: ScrollBar {
+            policy: scroller.contentHeight > scroller.height ? ScrollBar.AlwaysOn
+                                                             : ScrollBar.AsNeeded
+        }
+    }
+
     ColumnLayout {
         id: column
-        anchors.fill: parent
-        anchors.margins: Theme.pageMargin
+        parent: scroller.contentItem
+        x: Theme.pageMargin
+        y: Theme.pageMargin
+        width: scroller.width - 2 * Theme.pageMargin
+        height: scroller.contentHeight - 2 * Theme.pageMargin
         spacing: 10
 
         PageHeader { title: qsTr("Recordings") }
@@ -677,6 +720,15 @@ Page {
                 color: Theme.text
                 elide: Text.ElideRight
                 Layout.fillWidth: true
+            }
+            // The part in view replayed as a session, Settings' field
+            // filled as the list's Replay fills it
+            ThemedButton {
+                objectName: "replayView"
+                visible: recording.state === RecordingView.Open
+                text: qsTr("Replay view")
+                Accessible.name: qsTr("Replay the part in view as a session")
+                onClicked: root.replayRequested(root.stretchUri())
             }
         }
 
@@ -891,6 +943,19 @@ Page {
         }
 
         // Zoom, and where the cursor is
+        // While the filter narrows the rows, how many it shows and how many
+        // the chart draws: the chart keeps every ticked signal (ADR-0050)
+        Label {
+            objectName: "filterCount"
+            visible: recording.state === RecordingView.Open && signalFilter.active
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: qsTr("Showing %1 of %2 signals · plotting %3")
+                  .arg(root.shownSignals.length).arg(recording.signalList.length)
+                  .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
+        }
+
         RowLayout {
             visible: recording.state === RecordingView.Open
             Layout.fillWidth: true
@@ -940,7 +1005,8 @@ Page {
             visible: recording.state === RecordingView.Open
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.minimumHeight: 140
+            // Tall enough to read on a phone; the page scrolls to it
+            Layout.minimumHeight: 200
             color: Theme.surface
             radius: 4
             border.color: Theme.textDim
@@ -998,23 +1064,40 @@ Page {
             }
 
             // Drag pans, the wheel and a pinch zoom about the pointer, a
-            // tap places the cursor
+            // tap places the cursor. A drag is sideways only, so the page
+            // scrolls up and down; one that starts while a pinch is on or
+            // just after is the pinch's last finger, and moves nothing
             DragHandler {
                 id: pan
+                objectName: "chartPan"
                 target: null
+                yAxis.enabled: false
                 property real startT0: 0
-                onActiveChanged: if (active) startT0 = root.viewT0
+                property bool fromPinch: false
+                onActiveChanged: {
+                    if (!active)
+                        return
+                    startT0 = root.viewT0
+                    fromPinch = pinch.active || Date.now() - pinch.endedAt < 300
+                }
                 onActiveTranslationChanged: {
-                    if (!active) return
+                    if (!active || fromPinch) return
                     const span = root.viewT1 - root.viewT0
                     const t0 = startT0 - activeTranslation.x / Math.max(1, root.plotWidth() - 1) * span
                     root.setView(t0, t0 + span)
                 }
             }
             PinchHandler {
+                id: pinch
+                objectName: "chartPinch"
                 target: null
                 property real lastScale: 1
-                onActiveChanged: lastScale = 1
+                property double endedAt: 0
+                onActiveChanged: {
+                    lastScale = 1
+                    if (!active)
+                        endedAt = Date.now()
+                }
                 onActiveScaleChanged: {
                     if (!active || activeScale <= 0) return
                     root.zoomAt(root.timeAt(centroid.position.x), lastScale / activeScale)

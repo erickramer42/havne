@@ -2,9 +2,9 @@
 //             (SocketCAN), a refusal elsewhere
 // Testing: UNIT: SimTest (test_socketcan): the arguments and the URI's
 //          refusals on every platform, NO_TRANSPORT off Linux, a
-//          recording read before the interface; SimRecordingTest
-//          (test_obd2): the loader on the committed fixture and its
-//          refusals; HARNESS: SimBusTest (test_vcan, Linux): a requesting
+//          recording read before the interface, its stretch with it;
+//          SimRecordingTest (test_obd2): the loader on the committed
+//          fixture, a stretch's rows, and its refusals; HARNESS: SimBusTest (test_vcan, Linux): a requesting
 //          socketcan:// session against it on vcan0 reads the drive
 //          cycle's values, the diagnostics and the VIN, clears, and stays
 //          in step under every fault, and reads a recording as its car
@@ -15,7 +15,8 @@
 // sender as 0x7E8, broken as the faults say. One worker thread ticks the
 // ECU's clock (and the mock's drive cycle) every 50 ms, reads, answers
 // and sends; it allocates nothing. A replay:// recording is read whole at
-// create (ecuio_sim_load_recording, every platform) and only read after.
+// create (ecuio_sim_load_recording, every platform; a stretch of it alone
+// under from= and to=, recording_stretch.h) and only read after.
 
 #include "ecuio/sim.h"
 
@@ -198,13 +199,29 @@ bool pump(ecuio_sim* s, sending& r, int64_t now)
     return true;
 }
 
+bool yielded(const ecuio_sim* s)
+{
+    return (s->flags.load(std::memory_order_relaxed) & ECUIO_SIM_YIELDED) != 0;
+}
+
+/* Another node sent on the reply ID: an ECU answers there already, so
+ * the sim goes silent for good, a reply under way or waiting dropped */
+void yield(ecuio_sim* s, sending& r)
+{
+    s->flags.fetch_or(ECUIO_SIM_YIELDED, std::memory_order_release);
+    r.waiting = false;
+    r.active = false;
+    s->tx.state = isotp_tx_state::idle;
+}
+
 /* A whole request: answered, its fate decided, its send started or
  * put off. False when the bus failed. */
 bool take(ecuio_sim* s, sending& r, const isotp_message& m, int64_t now)
 {
     s->requests.fetch_add(1, std::memory_order_relaxed);
-    if (r.active || r.waiting) {
-        return true; /* busy with a reply: a tester sends one at a time */
+    if (yielded(s) || r.active || r.waiting) {
+        /* silent, or busy with a reply: a tester sends one at a time */
+        return true;
     }
     r.len = ecuio_sim_answer(s->ecu, m.data, m.len,
                              m.id == ECUIO_SIM_FUNCTIONAL_ID, r.data);
@@ -253,6 +270,11 @@ bool drain(ecuio_sim* s, sending& r)
         f.id = c.can_id & CAN_SFF_MASK;
         f.len = c.can_dlc <= 8 ? c.can_dlc : 8;
         std::memcpy(f.data, c.data, f.len);
+        if (f.id == ECUIO_SIM_REPLY_ID) {
+            /* never its own: a CAN_RAW socket isn't sent what it wrote */
+            yield(s, r);
+            continue;
+        }
         if (isotp_kind(f) == isotp_pci::flow) {
             if (f.id == ECUIO_SIM_REQUEST_ID) {
                 const isotp_flow_result fr = isotp_tx_flow(s->tx, f, now);
@@ -266,6 +288,9 @@ bool drain(ecuio_sim* s, sending& r)
         isotp_message m;
         switch (isotp_take(s->rx, f, now, &m)) {
         case isotp_result::first:
+            if (yielded(s)) {
+                break; /* silent: no Flow Control either */
+            }
             if (!put(s->fd, isotp_flow_control(ECUIO_SIM_REPLY_ID))) {
                 return false;
             }
@@ -330,8 +355,9 @@ void run(ecuio_sim* s)
     s->flags.fetch_or(ECUIO_SIM_FAILED, std::memory_order_release);
 }
 
-/* A CAN_RAW socket on ifindex hearing the two request IDs, 11-bit only,
- * non-blocking; -1 with errno */
+/* A CAN_RAW socket on ifindex hearing the two request IDs and the reply
+ * ID (another node answering), 11-bit data frames only, non-blocking; -1
+ * with errno */
 int open_socket(int32_t ifindex)
 {
     const int fd =
@@ -339,10 +365,12 @@ int open_socket(int32_t ifindex)
     if (fd < 0) {
         return -1;
     }
-    struct can_filter f[2];
+    struct can_filter f[3];
     f[0].can_id = ECUIO_SIM_FUNCTIONAL_ID;
     f[1].can_id = ECUIO_SIM_REQUEST_ID;
-    f[0].can_mask = f[1].can_mask = CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
+    f[2].can_id = ECUIO_SIM_REPLY_ID;
+    f[0].can_mask = f[1].can_mask = f[2].can_mask =
+        CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
     struct sockaddr_can addr;
     std::memset(&addr, 0, sizeof addr);
     addr.can_family = AF_CAN;
@@ -362,7 +390,8 @@ int open_socket(int32_t ifindex)
 #endif /* ECUIO_HAVE_SOCKETCAN */
 
 ecuio_status_t ecuio_sim_load_recording(const std::string& path,
-                                        ecuio_sim_recording* out)
+                                        ecuio_sim_recording* out,
+                                        const ecuio_stretch::stretch& stretch)
 {
     using namespace ecuio_frames_csv;
     try {
@@ -386,9 +415,11 @@ ecuio_status_t ecuio_sim_load_recording(const std::string& path,
         }
         ecuio_sim_recording rec;
         row prev, cur;
-        uint64_t at_us = 0, rows = 0, line_no = 1;
+        uint64_t at_us = 0, rows = 0, played = 0, line_no = 1;
+        uint64_t first_us = 0, last_us = 0;
         bool too_long = false;
         bool torn = false;
+        ecuio_stretch::cursor in(stretch);
         while (read_line(f.get(), line, &too_long, &torn)) {
             ++line_no;
             if (torn) {
@@ -405,16 +436,34 @@ ecuio_status_t ecuio_sim_load_recording(const std::string& path,
                                  static_cast<unsigned long long>(line_no), why);
                 return ECUIO_ERR_LOAD_FAILED;
             }
-            if (rows > 0) {
+            if (rows == 0) {
+                first_us = cur.host_us;
+            }
+            last_us = cur.host_us;
+            ++rows;
+            if (!in.plays(cur.host_us)) {
+                continue;
+            }
+            if (played > 0) {
                 at_us += step_us(prev, cur);
             }
             prev = cur;
-            ++rows;
+            ++played;
             ecuio_sim_recording_take(rec, static_cast<int64_t>(at_us), *frame);
         }
+        if (rows > 0 && played == 0) {
+            char why[192];
+            ecuio_stretch::describe_empty(stretch, first_us, last_us, why,
+                                          sizeof why);
+            ecuio_detail_set("%s", why);
+            return ECUIO_ERR_LOAD_FAILED;
+        }
         if (rec.replies.empty()) {
-            ecuio_detail_set("the recording holds no reply from the engine "
-                             "ECU (0x7E8) to answer with");
+            ecuio_detail_set(stretch.given()
+                                 ? "the stretch holds no reply from the "
+                                   "engine ECU (0x7E8) to answer with"
+                                 : "the recording holds no reply from the "
+                                   "engine ECU (0x7E8) to answer with");
             return ECUIO_ERR_LOAD_FAILED;
         }
         *out = std::move(rec);
@@ -429,11 +478,22 @@ extern "C" {
 ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
                                 ecuio_sim_t** out)
 {
+    return ecuio_sim_create_with(uri, ifname, 0, out);
+}
+
+ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
+                                     uint32_t options, ecuio_sim_t** out)
+{
     ecuio_detail_clear();
     if (uri == nullptr || ifname == nullptr || out == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out = nullptr;
+    if ((options & ~ECUIO_SIM_ALLOW_DESK_BUS) != 0) {
+        ecuio_detail_set("option bits 0x%x aren't the simulated ECU's",
+                         options & ~ECUIO_SIM_ALLOW_DESK_BUS);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
     ecuio_sim_config config;
     char why[256] = {};
     if (ecuio_sim_parse_uri(uri, &config, why, sizeof why) !=
@@ -454,7 +514,8 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
         ecuio_status_t loaded = ECUIO_ERR_OUT_OF_MEMORY;
         try {
             loaded = ecuio_sim_load_recording(
-                std::string(config.path, config.path_len), &s->recording);
+                std::string(config.path, config.path_len), &s->recording,
+                config.stretch);
         } catch (const std::bad_alloc&) {
         }
         if (loaded != ECUIO_OK) {
@@ -462,8 +523,11 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
         }
         /* A loop with no span would answer one instant forever */
         if (config.loop && s->recording.span_us == 0) {
-            ecuio_detail_set("loop=1 needs a recording that spans time; "
-                             "its replies all share one time");
+            ecuio_detail_set(config.stretch.given()
+                                 ? "loop=1 needs a stretch that spans time; "
+                                   "its replies all share one time"
+                                 : "loop=1 needs a recording that spans "
+                                   "time; its replies all share one time");
             return ECUIO_ERR_BAD_URI;
         }
         s->recording.loop = config.loop;
@@ -486,15 +550,12 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
                          ifname, ifname);
         return ECUIO_ERR_LOAD_FAILED;
     }
-    if (!link.is_vcan()) {
-        ecuio_detail_set("%s is a %s link, not vcan: the simulated ECU "
-                         "answers only on a virtual bus, never for a car's "
-                         "own ECU",
-                         ifname, link.kind[0] != '\0' ? link.kind : "non-CAN");
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    if (!link.up) {
-        ecuio_detail_set("%s is down (sudo ip link set %s up)", ifname, ifname);
+    const socketcan_sim_verdict v =
+        socketcan_judge_sim(link, (options & ECUIO_SIM_ALLOW_DESK_BUS) != 0);
+    if (v != socketcan_sim_verdict::ok) {
+        char refusal[512];
+        socketcan_sim_refusal(link, v, refusal, sizeof refusal);
+        ecuio_detail_set("%s", refusal);
         return ECUIO_ERR_LOAD_FAILED;
     }
     s->ecu.config = config;

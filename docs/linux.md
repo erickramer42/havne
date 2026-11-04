@@ -106,7 +106,10 @@ Linux desktop a Classic adapter goes through `rfcomm` as above.
 ### SocketCAN
 
 `socketcan://` uses a CAN interface you have brought up; Havne never
-configures one. Settings and `havne-cli devices` list them.
+configures one. Settings and `havne-cli devices` list them, each with
+its bit rate, the controller's state, the modes it's in and, from Linux
+6.0, the modes its driver offers, so a connect's refusal is explained
+before you try it.
 
 **Listening** (`raw`, the default, or `mock`) sends nothing and needs a
 controller that can't transmit, so bring it up in listen-only mode at
@@ -133,10 +136,11 @@ sudo ip link set can0 up type can bitrate 500000 restart-ms 0 one-shot on
 havne-cli stream "socketcan://can0?profile=obd2&baud=500000" --values
 ```
 
-Not every adapter's driver offers one-shot mode
-(`ip -details link show can0` lists what it supports); one without it
-can listen but not ask: without it, a frame nobody acknowledges is
-sent again until the interface goes down
+Not every adapter's driver offers one-shot mode (`havne-cli devices`
+and `ip -details link show can0` list what it supports); one without
+it can listen but not ask, and Havne refuses it for asking: without
+it, a frame nobody acknowledges is sent again until the interface goes
+down
 ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)).
 When an interface goes from listening to asking, say `listen-only off`:
 `ip link set` keeps the mode it last had. No real controller has sent
@@ -174,8 +178,16 @@ every Nth reply. `replay:///path/to/recording` answers as the car in
 a recording did instead: each request gets the reply the recording
 holds for it at the sim's time since it started (the car's own
 bitmaps, values, identification and codes; `?loop=1` goes round the
-recording, `?vin=` replaces its VIN; a clear is refused). It answers
-only on a `vcan` interface, never on a car's bus.
+recording, `?from=` and `?to=` answer from a stretch of it alone, in
+the seconds `havne-cli view` shows, `?vin=` replaces its VIN; a clear
+is refused). It answers
+only on a `vcan` interface, never on a car's bus, unless
+`--desk-bus` says the bus is a desk's with no car on it: then a
+real controller answers too, if it is up, not listen-only and
+error-active, one-shot mode or not (each refusal gives the `ip link`
+commands). On any bus it goes silent for good, and `havne-cli sim`
+ends with `yielded`, once another node sends on 0x7E8: an ECU
+answers there already.
 
 ## Where Havne keeps things
 
@@ -218,7 +230,9 @@ counts the frames per CAN ID.
   `vcan0`, and on a real controller (an Innomaker USB2CAN through
   `usbipd-win`) on a desk bus beside the OBDX Pro VX: listening, with
   sending tried through `can-utils`
-  ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)).
+  ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)),
+  and listening on the test car beside the VX
+  ([2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md)).
 - **A Linux desktop:** v0.3.4's AppImage on Xubuntu 26.10 (Xfce, an X11
   session) on a 2011 desktop with a second-generation Core i7 and 8 GB
   (2026-10-30). Made executable and started as it came, with no FUSE
@@ -228,5 +242,5 @@ counts the frames per CAN ID.
   above were installed.
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
-  on a pseudo-terminal), a real CAN controller sending through Havne,
-  and a car through SocketCAN. [testing.md](testing.md) keeps the details.
+  on a pseudo-terminal), and a real CAN controller sending through
+  Havne. [testing.md](testing.md) keeps the details.

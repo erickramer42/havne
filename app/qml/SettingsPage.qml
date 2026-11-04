@@ -74,9 +74,10 @@ Pane {
     property var serialPorts: []
 
     // The machine's CAN interfaces, for socketcan:// (ADR-0032 section 7): [{
-    // name, kind, up, listenOnly, fd, bitrate }, ...]. Empty off Linux.
-    // Listed whatever their mode; core refuses a controller that isn't
-    // listen-only, and the row says so first
+    // name, kind, up, listenOnly, fd, bitrate, state, modes, modesKnown,
+    // modesSupported }, ...]. Empty off Linux. Listed whatever their mode;
+    // core refuses a controller in neither listen-only nor one-shot mode,
+    // and the row says so first
     property var canInterfaces: []
 
     // The phone's Bluetooth adapters (ADR-0028 section 2): [{ name, address,
@@ -111,17 +112,35 @@ Pane {
             base: "elm327://" + a.kind + ":" + a.address
         })))
 
-    // A CAN interface's row: what it is, and why a connect would be
-    // refused before one is tried
+    // A CAN interface's row: what it is, its state past error-active, and
+    // why a connect would be refused before one is tried: listen-only to
+    // listen, one-shot to send requests (ADR-0040 section 2), naming only
+    // the modes its driver offers when the kernel says which
     function canDetail(c) {
         if (c.kind === "vcan")
             return c.up ? qsTr("Virtual CAN bus, for socketcan://")
                         : qsTr("Virtual CAN bus, down: sudo ip link set %1 up").arg(c.name)
-        if (!c.up)
-            return qsTr("CAN interface, down: bring it up listen-only with ip link")
-        if (!c.listenOnly)
-            return qsTr("CAN interface, not listen-only: socketcan:// refuses it until it is")
-        return qsTr("CAN interface, listen-only at %1 bit/s, for socketcan://").arg(c.bitrate)
+        const modes = c.modes || []
+        const offers = m => !c.modesKnown || (c.modesSupported || []).indexOf(m) >= 0
+        const listens = offers("listen-only")
+        const sends = offers("one-shot")
+        if (!listens && !sends)
+            return qsTr("CAN interface: its driver offers neither listen-only nor one-shot mode, which socketcan:// needs")
+        if (!c.up) {
+            if (!sends)
+                return qsTr("CAN interface, down: bring it up listen-only with ip link (its driver offers no one-shot mode, so it only listens)")
+            if (!listens)
+                return qsTr("CAN interface, down: bring it up one-shot with ip link (its driver offers no listen-only mode, so it only sends requests)")
+            return qsTr("CAN interface, down: bring it up with ip link, listen-only to listen or one-shot to send requests")
+        }
+        const state = c.state && c.state !== "error-active" ? qsTr(", %1").arg(c.state) : ""
+        if (modes.indexOf("listen-only") >= 0)
+            return qsTr("CAN interface, listen-only at %1 bit/s%2, for listening").arg(c.bitrate).arg(state)
+        if (modes.indexOf("one-shot") >= 0)
+            return qsTr("CAN interface, one-shot at %1 bit/s%2, for requests").arg(c.bitrate).arg(state)
+        if (!sends)
+            return qsTr("CAN interface at %1 bit/s%2, not listen-only: its driver offers no one-shot mode, so bring it up listen-only to listen").arg(c.bitrate).arg(state)
+        return qsTr("CAN interface at %1 bit/s%2, neither listen-only nor one-shot: socketcan:// refuses it until it is one").arg(c.bitrate).arg(state)
     }
 
     // A byte count in words: 512 B, 3.4 KB, 1.2 MB

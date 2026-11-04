@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"code": 7, "detail": "the folder has no signals.csv", "message": "couldn't load what the URI names", "recording": 0, "type": "open_failed"}
+{"code": 7, "detail": "the folder has no signals.csv", "message": "couldn't open what was named", "recording": 0, "type": "open_failed"}
 {"at_us": 181973480, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 564877, "type": "finding"}
 {"at_us": 189066799, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 556256, "type": "finding"}
 {"at_us": 190388506, "count": 1, "extended": false, "id": "0x7E8", "kind": "rate-drop", "length_us": 390281, "type": "finding"}

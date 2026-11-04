@@ -1,8 +1,9 @@
 // File/layer: core/src/socketcan_interfaces.cpp | C++17, Qt-free; netlink on
 //             Linux, an empty list elsewhere
 // Testing: UNIT: SocketCanTest.Interfaces* (the arguments' contract on
-//          every platform); HARNESS: VcanTest.InterfacesListVcan0 (Linux);
-//          the attributes' parsing is socketcan_wire.h's, UNIT
+//          every platform), .StatesAndModesHaveIpLinksNames; HARNESS:
+//          VcanTest.InterfacesListVcan0 (Linux); the attributes' parsing
+//          is socketcan_wire.h's, UNIT
 //
 // CAN-interface discovery (ecuio/socketcan.h, ADR-0032 section 7) and the link
 // lookup the SocketCAN transport checks an interface with
@@ -25,6 +26,7 @@
 #include <linux/can/error.h>
 #include <linux/can/netlink.h>
 #include <linux/if_link.h>
+#include <linux/version.h>
 #include <net/if.h>
 
 /* socketcan_wire.h mirrors these so its rules test on every platform */
@@ -64,7 +66,49 @@ static_assert(SOCKETCAN_NLA_TYPE_MASK == static_cast<uint16_t>(NLA_TYPE_MASK),
 static_assert(SOCKETCAN_IFF_UP == IFF_UP, "IFF_UP");
 static_assert(SOCKETCAN_IFINFOMSG_LEN == sizeof(struct ifinfomsg), "ifinfomsg");
 static_assert(SOCKETCAN_IFNAME_MAX + 1 == IFNAMSIZ, "IFNAMSIZ");
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
+static_assert(SOCKETCAN_IFLA_CAN_CTRLMODE_EXT == IFLA_CAN_CTRLMODE_EXT,
+              "IFLA_CAN_CTRLMODE_EXT");
+static_assert(SOCKETCAN_IFLA_CAN_CTRLMODE_SUPPORTED ==
+                  IFLA_CAN_CTRLMODE_SUPPORTED,
+              "IFLA_CAN_CTRLMODE_SUPPORTED");
 #endif
+/* the public header passes the kernel's mode bits and states on */
+static_assert(ECUIO_CAN_MODE_LOOPBACK == CAN_CTRLMODE_LOOPBACK, "LOOPBACK");
+static_assert(ECUIO_CAN_MODE_LISTEN_ONLY == CAN_CTRLMODE_LISTENONLY,
+              "LISTENONLY");
+static_assert(ECUIO_CAN_MODE_TRIPLE_SAMPLING == CAN_CTRLMODE_3_SAMPLES,
+              "3_SAMPLES");
+static_assert(ECUIO_CAN_MODE_ONE_SHOT == CAN_CTRLMODE_ONE_SHOT, "ONE_SHOT");
+static_assert(ECUIO_CAN_MODE_BERR_REPORTING == CAN_CTRLMODE_BERR_REPORTING,
+              "BERR_REPORTING");
+static_assert(ECUIO_CAN_MODE_FD == CAN_CTRLMODE_FD, "FD");
+static_assert(ECUIO_CAN_MODE_PRESUME_ACK == CAN_CTRLMODE_PRESUME_ACK,
+              "PRESUME_ACK");
+static_assert(ECUIO_CAN_MODE_FD_NON_ISO == CAN_CTRLMODE_FD_NON_ISO,
+              "FD_NON_ISO");
+static_assert(ECUIO_CAN_MODE_CC_LEN8_DLC == CAN_CTRLMODE_CC_LEN8_DLC,
+              "CC_LEN8_DLC");
+static_assert(ECUIO_CAN_STATE_ERROR_ACTIVE == CAN_STATE_ERROR_ACTIVE + 1 &&
+                  ECUIO_CAN_STATE_ERROR_WARNING ==
+                      CAN_STATE_ERROR_WARNING + 1 &&
+                  ECUIO_CAN_STATE_ERROR_PASSIVE ==
+                      CAN_STATE_ERROR_PASSIVE + 1 &&
+                  ECUIO_CAN_STATE_BUS_OFF == CAN_STATE_BUS_OFF + 1 &&
+                  ECUIO_CAN_STATE_STOPPED == CAN_STATE_STOPPED + 1 &&
+                  ECUIO_CAN_STATE_SLEEPING == CAN_STATE_SLEEPING + 1,
+              "enum can_state, from 1");
+#endif
+
+extern "C" const char* ecuio_can_state_name(uint32_t state)
+{
+    return socketcan_state_word(state);
+}
+
+extern "C" const char* ecuio_can_mode_name(uint32_t mode)
+{
+    return socketcan_mode_word(mode);
+}
 
 bool socketcan_read_links(void (*visit)(const socketcan_link& link, void* user),
                           void* user)

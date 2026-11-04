@@ -128,6 +128,14 @@ Dates are commit dates.
 | 2026-11-01 | The phone as a relay ([ADR-0047](adr/0047-adapter-relay.md)) and a faster DID scan (`?scan=first`): on the test car through the MX+, a sweep of the engine ECU's DIDs with the screen off, and the first clears on a car | `6327b1c`, `4c3c556`, `46cdd99` |
 | 2026-11-01 | The car runs through the VX: several PIDs per request, more than one ECU, the timer A/B, a key cycle while packing and a DID scan; three faults found and fixed after it (packing after a key cycle, a scanned DID's late reply, a functional request's Flow Control) | `692de9d`, `66b370a`, `4dfd017`, `16af8d2` |
 | 2026-11-02 | v0.3.6's review passes and their fixes; the VX re-runs on the test car: the three fixes hold, and the VX answers status 34 while another program has it open | `186d37d`, `f62a2df`, `714d953` |
+| 2026-11-02 | v0.3.6 released: car runs through both adapters, trouble-code titles, VIN decode, inspection readiness, the simulated ECU, the phone as a relay, clearing with the engine running | `23a5285` |
+| 2026-11-02 | The SocketCAN desk run: a real controller (the Innomaker USB2CAN) listens beside the VX, and a frame no node acknowledges is sent again forever, error-passive and never bus-off, so a requesting session still needs one-shot mode ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)) | `75a9f9c`, `8aabf65` |
+| 2026-11-02 | Recordings in core ([ADR-0049](adr/0049-recordings-in-core.md), steps 1 and 2): the worker feeds a writer thread through a ring and never blocks; `havne-cli stream --record`; the app records through it, the frames the Log page drops included | `07c6bb8`, `f766b92`, `fe945b0` |
+| 2026-11-03 | The recording reader and `havne-cli view` (step 3): one pass on open builds a sparse index and each signal's per-second summaries, so an hour opens in milliseconds; the frames check and `havne-cli info` (step 4) | `1216a7b`, `e2d6077`, `9a20eeb`, `fcf5d10` |
+| 2026-11-03 | The Recordings page (step 5): pan, zoom, a cursor, the check's findings, a second run overlaid and aligned, and Mark while recording; one strip chart for Live and the viewer | `60c48aa`, `f6ce7aa`, `4cc80c6`, `347bdb2`, `a309794` |
+| 2026-11-03 | Finding a signal among many ([ADR-0050](adr/0050-finding-a-signal.md)): a group per def, one filter for Live and the viewer | `84fa69a`, `6c1b943` |
+| 2026-11-03 | A stretch of a recording replayed, the CAN modes shown, the simulated ECU on a desk bus (read by the VX over real wire, [2026-11-03-socketcan-desk-sim](bench-sessions/2026-11-03-socketcan-desk-sim.md)), and stateful fuzzing of the request engine and ISO-TP on a simulated bus | `f7380ec`, `6151c99`, `a78e44e`, `5e7bb12` |
+| 2026-11-03 | SocketCAN on the test car, listen-only beside the VX: nothing sent, nothing dropped; the ECU resent an unacknowledged reply until the VX connected, and a segmented reply reaches the worker about 52 ms after its last frame ([2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md)) | `9f89786` |
 
 ## Lessons learned
 
@@ -1178,3 +1186,19 @@ that replayed with faults at `speed=max` and required no frame dropped
 at the bridge's gate passed because decoding kept the worker slow; with
 the index the worker outran the GUI thread. It runs at 100x, where the
 rows it checks don't depend on which thread is faster.
+
+**2026-11-03: recordings in core and the SocketCAN runs:** **a
+counter is the adapter's history, not the run's.** The kernel's CAN
+error counters count from the adapter's attach, so a run's errors are
+the difference between the reads before and after; a desk run's
+sheet said every counter read 0, and error-pass read 30, left by the
+run the day before. And **a command that reads standard input reads
+whatever it's given.** `havne-cli stream --record` takes each line on
+standard input as a marker, and the car run's script fed its own
+commands on standard input: the listener took the script's last
+lines as markers, and they never ran. A script gives such a command
+`/dev/null`. And **a count of timer wakes is a property of the
+machine.** The recorder's busy wakes, about 57 on the dev machine
+against a floor of 30, read 18 on the macOS runner, whose timers fire
+late; bounded against the same run's idle wakes, the test holds on
+both.

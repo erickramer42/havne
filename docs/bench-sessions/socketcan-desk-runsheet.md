@@ -2,8 +2,9 @@
 
 A real CAN controller under Linux's SocketCAN, on a desk bus with the
 OBDX Pro VX as the other node: no car. It settles BENCH prep #26
-(listening) and #32 (sending), and with #32 whether ADR-0040 section 2
-keeps its one-shot rule. Results go into a dated session sheet,
+(listening) and #32 (sending), with #32 whether ADR-0040 section 2
+keeps its one-shot rule, and #33 (the simulated ECU read over real
+wire). Results go into a dated session sheet,
 `docs/bench-sessions/<date>-socketcan-desk.md`.
 
 ## The bus
@@ -83,7 +84,8 @@ directly. The USB2CAN transmits, onto this two-node bus only.
       acknowledges it, and the VX's session hears 0x7E8
 - [ ] With the VX's session closed (no active node): whether the frame
       is echoed before the first `no-acknowledgement-on-tx` error frame
-      (record both stamps; Known Issue #40), and how often it's sent
+      (record both stamps: the rate's proof waits for a reply, or for
+      N_As with no error frame, after the echo), and how often it's sent
       again: without one-shot mode, forever at error-passive, never
       bus-off (2026-11-02); with it, once
 - [ ] An adapter that offers one-shot mode (`one-shot on`): the same,
@@ -99,8 +101,42 @@ directly. The USB2CAN transmits, onto this two-node bus only.
 sent again until the interface goes down, so ADR-0040 section 2 keeps
 one-shot mode required (its appendix of 2026-11-02). The open question
 is section 3's: whether an adapter with one-shot mode echoes only after
-an acknowledgement. If not, the proof waits for an error frame or the
-reply (Known Issue #40).
+an acknowledgement. The proof doesn't rely on it: it waits for the
+reply, or for N_As with no error frame, after the echo (ADR-0040's
+appendix of 2026-11-02).
+
+## Phase 3: the simulated ECU (BENCH prep #33)
+
+`havne-cli sim --desk-bus` answers as the simulated car's engine ECU
+on `can0` ([ADR-0046](../adr/0046-simulated-ecu.md)'s appendix "the
+desk bus"), and the VX reads it through J2534, as it reads a car.
+The USB2CAN transmits only in reply, onto this two-node bus only.
+
+1. `sudo ip link set can0 down`, then
+   `sudo ip link set can0 up type can bitrate 500000 restart-ms 0 listen-only off`
+2. In WSL: `candump -t A -e can0` and
+   `havne-cli sim mock://sim --on can0 --desk-bus --seconds 120`
+3. On Windows: `havne-cli stream "j2534://OBDX Pro - VX" --values --seconds 60`
+   (`obd2`), then the app on the same URI: Live, Dashboard and
+   Diagnostics.
+
+- [ ] Without `--desk-bus`, `sim` is refused: `can0 is a CAN
+      controller, not vcan`; with it and `can0` listen-only, refused
+      with `listen-only off`
+- [ ] The VX's session walks the sim's bitmaps, reads its VIN
+      (`ZZZFAKE11M0000001`), its diagnostics and the inspection line,
+      and RPM goes from 0 to idle 15 s after `sim` starts
+- [ ] Every reply is acknowledged: `can0` stays error-active, its
+      error counters unchanged (they count since the adapter was
+      attached: compare before and after), and `sim`'s `unflowed`
+      stays 0 (the VX's Flow Control reaches it)
+- [ ] With the VX's session closed, `sim` sends nothing (it only
+      replies): the TX count holds
+- [ ] Another node on 0x7E8: in a second WSL shell,
+      `cansend can0 7E8#0641000000000000`; `sim` ends with `yielded`,
+      exit 1, and the VX's next requests go unanswered
+- [ ] *Optional:* `replay://` with a car recording instead of
+      `mock://sim`: the VX walks the car's own bitmaps
 
 ## After the run
 

@@ -52,8 +52,10 @@ RowLayout {
             id: options
             objectName: "filterOptions"
             y: filterButton.height + 4
-            // Right-aligned under the button, inside the window
+            // Right-aligned under the button, and kept inside the window:
+            // without margins a Popup may run past its edge (a phone)
             x: Math.min(0, filterButton.width - width)
+            margins: Theme.spacing
             padding: 12
 
             ColumnLayout {

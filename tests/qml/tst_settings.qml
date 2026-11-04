@@ -446,9 +446,12 @@ TestCase {
         page.j2534Devices = []
         page.serialPorts = []
         page.canInterfaces = [
-            { name: "vcan0", kind: "vcan", up: true, listenOnly: false, fd: true, bitrate: 0 },
-            { name: "can0", kind: "can", up: true, listenOnly: false, fd: false, bitrate: 500000 },
-            { name: "can1", kind: "can", up: true, listenOnly: true, fd: false, bitrate: 500000 }]
+            { name: "vcan0", kind: "vcan", up: true, listenOnly: false, fd: true, bitrate: 0,
+              state: "", modes: [], modesKnown: false, modesSupported: [] },
+            { name: "can0", kind: "can", up: true, listenOnly: false, fd: false, bitrate: 500000,
+              state: "error-active", modes: [], modesKnown: false, modesSupported: [] },
+            { name: "can1", kind: "can", up: true, listenOnly: true, fd: false, bitrate: 500000,
+              state: "error-active", modes: ["listen-only"], modesKnown: false, modesSupported: [] }]
         compare(list.count, 3)
         verify(count.text.indexOf("CAN interfaces: 3") >= 0, count.text)
         tryVerify(() => list.itemAtIndex(2) !== null, 2000, "the rows have delegates")
@@ -456,13 +459,34 @@ TestCase {
         compare(find(list.itemAtIndex(0), "deviceDetail").text,
                 "Virtual CAN bus, for socketcan://")
         compare(find(list.itemAtIndex(1), "deviceDetail").text,
-                "CAN interface, not listen-only: socketcan:// refuses it until it is")
+                "CAN interface at 500000 bit/s, neither listen-only nor one-shot: socketcan:// refuses it until it is one")
         compare(find(list.itemAtIndex(2), "deviceDetail").text,
-                "CAN interface, listen-only at 500000 bit/s, for socketcan://")
+                "CAN interface, listen-only at 500000 bit/s, for listening")
         compare(page.canDetail({ name: "vcan1", kind: "vcan", up: false }),
                 "Virtual CAN bus, down: sudo ip link set vcan1 up")
         compare(page.canDetail({ name: "can2", kind: "can", up: false }),
-                "CAN interface, down: bring it up listen-only with ip link")
+                "CAN interface, down: bring it up with ip link, listen-only to listen or one-shot to send requests")
+
+        // Only the modes the driver offers are named, when the kernel says
+        // (the USB2CAN offers no one-shot); the state past error-active
+        const usb2can = { name: "can3", kind: "can", up: true, bitrate: 500000, state: "error-passive",
+                          modes: [], modesKnown: true,
+                          modesSupported: ["loopback", "listen-only", "cc-len8-dlc"] }
+        compare(page.canDetail(usb2can),
+                "CAN interface at 500000 bit/s, error-passive, not listen-only: its driver offers no one-shot mode, so bring it up listen-only to listen")
+        usb2can.up = false
+        compare(page.canDetail(usb2can),
+                "CAN interface, down: bring it up listen-only with ip link (its driver offers no one-shot mode, so it only listens)")
+        compare(page.canDetail({ name: "can4", kind: "can", up: false, modesKnown: true,
+                                 modesSupported: ["one-shot"] }),
+                "CAN interface, down: bring it up one-shot with ip link (its driver offers no listen-only mode, so it only sends requests)")
+        compare(page.canDetail({ name: "can5", kind: "can", up: true, modesKnown: true,
+                                 modesSupported: ["berr-reporting"] }),
+                "CAN interface: its driver offers neither listen-only nor one-shot mode, which socketcan:// needs")
+        compare(page.canDetail({ name: "can6", kind: "can", up: true, bitrate: 250000, state: "bus-off",
+                                 modes: ["one-shot"], modesKnown: true,
+                                 modesSupported: ["listen-only", "one-shot"] }),
+                "CAN interface, one-shot at 250000 bit/s, bus-off, for requests")
 
         // SocketCAN only listens: uds-generic gives way to the default
         uri.text = "j2534://?profile=uds-generic&did=1E1C:u16"

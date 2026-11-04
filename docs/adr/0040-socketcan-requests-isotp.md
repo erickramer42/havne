@@ -396,3 +396,28 @@ the proof runs on `vcan0`.
 `SocketCanRequestTest.AnUnprovenSessionIsProvenByTheEcusReply`,
 `.AnUnprovenSessionIsProvenByQuietAfterItsEcho`,
 `.AnErrorFrameAfterTheFirstEchoHalts`.
+
+*Amended 2026-11-03 (the modes a driver offers):* from Linux 6.0 the
+kernel reports the modes a controller's driver supports
+(`IFLA_CAN_CTRLMODE_EXT`'s `IFLA_CAN_CTRLMODE_SUPPORTED`), and core reads
+them. A requesting session through a controller whose driver lacks
+one-shot mode is refused before any other check (`one_shot_unoffered`),
+since no `ip link` command would help, and the refusal says so and
+points to listening instead; a listening session through one that lacks
+listen-only mode likewise (`listen_only_unoffered`). A refusal names a
+mode's command only where the driver offers it, with "(where its driver
+offers it)" only when an older kernel doesn't say, and the refusal for a
+listen-only controller now says `listen-only off`, which `ip link`
+needs. Discovery (`ecuio_can_interface_t`, ADR-0032 section 7) carries
+the controller's state, its modes and its driver's from three of its
+reserved words, with `ecuio_can_state_name` and `ecuio_can_mode_name`
+in `ip link`'s words; `havne-cli devices`' `can` lines and Settings'
+rows show them, so a refusal is explained before a run. The refusals'
+words moved into `core/src/socketcan_wire.h` (`socketcan_refusal`,
+`socketcan_send_refusal`), so each is a unit test on every platform.
+`SocketCanTest.TheModesADriverOffersAreRead`,
+`.ADriverWithoutTheModeANeedsIsRefusedFirst`,
+`.ARefusalNamesOnlyTheModesTheDriverOffers`,
+`.StatesAndModesHaveIpLinksNames`, `.DiscoveryListsControllersAndVcanOnly`;
+`CliCanTest.ALineSaysWhatAConnectIsJudgedOn`; `QmlTest.settings`'
+`test_canRowsFillASocketcanUri`.
