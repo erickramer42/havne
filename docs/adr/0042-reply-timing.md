@@ -4,7 +4,8 @@
   transport against the fakes (J2534 through the surrogate, ELM327,
   SocketCAN on `vcan0`), and on the test car through the VX and the
   MX+ ([2026-11-01-vehicle](../bench-sessions/2026-11-01-vehicle.md),
-  [2026-11-01-android](../bench-sessions/2026-11-01-android.md)).
+  [2026-11-01-android](../bench-sessions/2026-11-01-android.md)), and
+  beside a listener on the bus (the appendix of 2026-11-03).
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request engine:
   one request outstanding per channel, its wait);
@@ -229,3 +230,24 @@ the median request's P50 18.4 ms against 15.4, the slowest's 30.7 to
 32.8 ms against 20.5, RPM every 721 ms against 590. The bench's
 11.3 ms doesn't carry: the car's ECU answers slower than the fake's
 4 ms, and its time is in each figure.
+
+## Appendix: the bus beside the host's clock (2026-11-03)
+
+On the test car, a listen-only SocketCAN controller beside the VX timed
+the VX's requests on the wire, on the kernel's receive stamps
+([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md)):
+the request to its reply's first frame, a median of 3.46 ms, and to its
+last, 13.9 ms, nearly every request a six-PID pack whose reply is
+segmented. The VX's Flow Control followed each First Frame by 0.17 ms
+(block size 0, STmin 0), and the ECU paced its Consecutive Frames about
+5 ms apart. The VX's session put each packed PID's latency, on the
+host's clock, at 65.5 to 73.7 ms (2026-11-01's run: 73.7 packed, 14.3
+for a single PID). A segmented reply therefore reaches the worker about
+52 ms after its last frame crossed the bus, through the adapter, its
+USB link and its driver; the worker's read slice is 10 ms.
+
+The host's figure stays what section 1 says it is: what a session gets.
+The listener's is the bus's, and the gap is the adapter's: a latency on
+the adapter's clock (the alternative above) would still leave out what
+it measures here, the delivery after the last frame. Neither changes
+what's built.

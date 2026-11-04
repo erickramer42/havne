@@ -12,7 +12,7 @@ Linux and Android, builds and passes its tests on macOS, and runs on
 the iOS Simulator. It reaches the car through J2534 Pass-Thru adapters
 on Windows and ELM327-compatible adapters over USB, Bluetooth or WiFi
 everywhere; SocketCAN on Linux has listened through a real controller
-on a desk bus, and asked only on a virtual bus so far. A
+on a desk bus and on a car, and asked only on a virtual bus so far. A
 simulated vehicle runs every page with no hardware.
 
 Underneath is a Qt-free C++17 core that does all the vehicle I/O and

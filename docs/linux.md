@@ -230,7 +230,9 @@ counts the frames per CAN ID.
   `vcan0`, and on a real controller (an Innomaker USB2CAN through
   `usbipd-win`) on a desk bus beside the OBDX Pro VX: listening, with
   sending tried through `can-utils`
-  ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)).
+  ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)),
+  and listening on the test car beside the VX
+  ([2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md)).
 - **A Linux desktop:** v0.3.4's AppImage on Xubuntu 26.10 (Xfce, an X11
   session) on a 2011 desktop with a second-generation Core i7 and 8 GB
   (2026-10-30). Made executable and started as it came, with no FUSE
@@ -240,5 +242,5 @@ counts the frames per CAN ID.
   above were installed.
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
-  on a pseudo-terminal), a real CAN controller sending through Havne,
-  and a car through SocketCAN. [testing.md](testing.md) keeps the details.
+  on a pseudo-terminal), and a real CAN controller sending through
+  Havne. [testing.md](testing.md) keeps the details.

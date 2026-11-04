@@ -226,7 +226,8 @@ bus ([roadmap](#roadmap)).
       ISO-TP held to the kernel's as well. A real controller, an
       Innomaker USB2CAN, has listened on a desk bus beside the VX
       (BENCH prep #26: every frame the kernel counted, nothing sent, a
-      wrong rate's errors, an unplug and its recovery); it offers no
+      wrong rate's errors, an unplug and its recovery) and on the test
+      car beside it ([2026-11-03-socketcan-car](docs/bench-sessions/2026-11-03-socketcan-car.md)); it offers no
       one-shot mode, so it can't ask, and on that bus `cansend` showed
       why one-shot stays required: a frame nobody acknowledges is sent
       again forever, error-passive, never bus-off (BENCH prep #32,
@@ -526,20 +527,24 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
   session's engine and ISO-TP against the fakes' ECU on a simulated
   bus, each reply broken as the input says, then honest replies that
   must bring every channel's one-shots to an end.
-- SocketCAN on the test car, listen-only (BENCH prep #26), with a
-  `havne-cli` script reading the car at a documented rate; requests
-  only through an adapter whose driver offers one-shot mode, on the
-  desk bus first (BENCH prep #32).
-- *If the desk sessions allow:* a reply's latency on the adapter's
-  clock ([ADR-0042](docs/adr/0042-reply-timing.md)'s alternative),
-  checked against an independent listener on the desk bus; a J2534
-  read that ends at its reply.
+- SocketCAN on the test car, listen-only (BENCH prep #26): done
+  ([2026-11-03-socketcan-car](docs/bench-sessions/2026-11-03-socketcan-car.md)),
+  beside the VX reading the car. Requests only through an adapter
+  whose driver offers one-shot mode, on the desk bus first (BENCH
+  prep #32).
+- A reply's time on the bus against the host's clock: measured beside
+  the VX on the car (ADR-0042's appendix of 2026-11-03): about 52 ms
+  of a segmented reply's time is the adapter's delivery after the
+  last frame. A latency on the adapter's clock and a J2534 read that
+  ends at its reply wait for a reason to build them.
 
 **Done when:** two recordings of the mock's pulls, recorded by
 `havne-cli`, overlay aligned on the pull's start in the app and in
 `havne-cli view` (met: [testing.md](docs/testing.md)'s overlay row);
-an hour-long recording opens and scrubs within a
-stated memory bound; the SocketCAN car run is filed.
+an hour-long recording opens and scrubs within a stated memory bound
+(met: [testing.md](docs/testing.md)'s "Reading a recording" and
+"Drawing a recording"); the SocketCAN car run is filed (met:
+[2026-11-03-socketcan-car](docs/bench-sessions/2026-11-03-socketcan-car.md)).
 
 ### Waiting on a tester: an iPhone download
 
