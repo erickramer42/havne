@@ -234,8 +234,8 @@ on hand, the Innomaker USB2CAN, offers no one-shot mode.
   `.ADeskBusRefusalSaysWhatToChange`,
   `.AnOptionThatIsntOneIsRefusedBeforeTheUri`), the yield on `vcan0`
   (`SimBusTest.AnotherNodeOnTheReplyIdSilencesItForGood`). A real
-  controller runs only at the desk, by its owner: the desk run sheet's
-  Phase 3, BENCH prep #33.
+  controller runs only at the desk: the desk run sheet's Phase 3,
+  BENCH prep #33.
 
 Alternatives considered:
 
@@ -247,3 +247,13 @@ Alternatives considered:
   a desk bus a resent reply harms nothing.
 - **Silent for a while, then answering again:** an ECU on the bus
   doesn't leave; a sim that resumes would talk over it again.
+
+*Amended 2026-11-03 (the desk run):* on the desk bus
+([2026-11-03-socketcan-desk-sim](../bench-sessions/2026-11-03-socketcan-desk-sim.md)),
+the Innomaker USB2CAN, without one-shot mode, was refused without the
+option and while listen-only, then answered the VX's `obd2` session
+over J2534 in normal mode: identification (the VIN a segmented reply),
+the diagnostics, the inspection line and the drive cycle's values,
+packed, every reply acknowledged and none unflowed, `can0` error-active
+with every error counter 0. One frame on 0x7E8 from another socket
+ended it `yielded`. BENCH prep #33 is confirmed for that controller.
