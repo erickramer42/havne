@@ -38,6 +38,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -68,11 +69,15 @@ struct HostClock {
 // hex is formatted only for the rows a view asks for. Row order is
 // arrival, never the frame's timestamp, which comes from the producer's
 // clock (on J2534, the adapter's deltas after the first frame).
+// Rows can be selected for copying: the selection holds frames, not row
+// numbers, so it stays on them as rows arrive, the order flips or the
+// ring wraps, and a frame leaving the ring leaves the selection.
 class FrameListModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(bool newestFirst READ newestFirst WRITE setNewestFirst NOTIFY newestFirstChanged)
+    Q_PROPERTY(int selectedCount READ selectedCount NOTIFY selectionChanged)
 
 public:
     explicit FrameListModel(QObject* parent = nullptr);
@@ -83,7 +88,8 @@ public:
         DlcRole,
         ExtendedRole,
         PayloadRole,
-        ArbitrationIdRole   /* appended, so existing role numbers are unchanged */
+        ArbitrationIdRole,  /* appended, so existing role numbers are unchanged */
+        SelectedRole
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -96,6 +102,19 @@ public:
     bool newestFirst() const { return m_newestFirst; }
     void setNewestFirst(bool newestFirst);
 
+    // The selection, by view row. A tap toggles a row and makes it the
+    // anchor; a shift-click selects every row from the anchor to its own
+    // (a toggle when the anchor has left the ring)
+    int selectedCount() const { return static_cast<int>(m_selected.size()); }
+    Q_INVOKABLE void toggleSelected(int row);
+    Q_INVOKABLE void selectThrough(int row);
+    Q_INVOKABLE void clearSelection();
+    // The selected rows in view order, a header line first, one line
+    // each, tab-separated: time in seconds to the microsecond, DLC, "E"
+    // for an extended ID or "-", the ID in hex and the payload. Empty
+    // with nothing selected. The page puts it on the clipboard
+    Q_INVOKABLE QString selectedText() const;
+
     // A payload up to this many bytes lives in its row: every reply the
     // first vehicle gave (27 bytes at most) and every mock frame
     static constexpr int InlinePayload = 64;
@@ -107,9 +126,11 @@ public:
 signals:
     void countChanged(int newCount);
     void newestFirstChanged();
+    void selectionChanged();
 
 private:
     struct Row {
+        quint64 seq = 0;   // arrival number: the ring's rows run consecutively
         quint64 timestampUs = 0;
         quint32 arbId = 0;
         quint16 length = 0;
@@ -125,6 +146,9 @@ private:
     };
 
     const Row& rowAt(int row) const;
+    // The view row of the frame that arrived seq-th; -1 when it's gone
+    int rowOfSeq(quint64 seq) const;
+    void notifySelected(int first, int last);
 
     // Grows to MaxFrames and keeps its slots across clear(), so the ring
     // stops allocating once it has gone round
@@ -132,6 +156,11 @@ private:
     size_t m_oldest = 0;       // the oldest row's slot
     int m_count = 0;           // rows shown, at most m_ring.size()
     bool m_newestFirst = true;
+    quint64 m_nextSeq = 0;     // the next frame's arrival number
+    std::set<quint64> m_selected;   // arrival numbers; ordered, so a
+                                    // frame leaving the ring is the first
+    quint64 m_anchorSeq = 0;
+    bool m_hasAnchor = false;
 };
 
 // QElapsedTimer's restart() and elapsed() on core's clock (ecuio_clock_us),

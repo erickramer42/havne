@@ -6,7 +6,11 @@
 //          when it goes off; the switch in the same place in either
 //          view; either order button, and Latest, at the newest
 //          row from a scrolled view (the top newest-first, the end
-//          oldest-first); the link lines in each link state
+//          oldest-first); a row selected by a tap and a range by a
+//          shift-click, copied by Copy (test_selectedFramesAreCopied;
+//          the model's side, BridgeTest.FrameLogSelectionFollowsItsFrames;
+//          Ctrl+C manual smoke); the paused status with and without a
+//          recording under way (test_pausedSaysWhereNewFramesGo); the link lines in each link state
 //          (tests/qml/tst_linkhealth.qml). The frame table: render
 //          verified manually; the arbId column by the smoke
 //          recipe's "Frames + arbId column" row (docs/testing.md). The
@@ -67,6 +71,15 @@ Pane {
     Connections {
         target: Bridge
         function onLogMessage(message) { page.appendLog(message) }
+    }
+
+    // The Frames view's selected rows to the clipboard, a header line
+    // first and one tab-separated line each (FrameListModel::selectedText)
+    function copySelectedFrames() {
+        clipboardBuffer.text = Bridge.model.selectedText()
+        clipboardBuffer.selectAll()
+        clipboardBuffer.copy()
+        clipboardBuffer.text = ""
     }
 
     // One option of a two-option toggle. Both options stay visible and
@@ -151,6 +164,20 @@ Pane {
             }
         }
 
+        // QML has no clipboard of its own: the rows go through a text
+        // field that never shows
+        TextEdit {
+            id: clipboardBuffer
+            visible: false
+            Layout.preferredWidth: 0
+            Layout.preferredHeight: 0
+        }
+        Shortcut {
+            sequences: [StandardKey.Copy]
+            enabled: page.visible && page.showingFrames && Bridge.model.selectedCount > 0
+            onActivated: page.copySelectedFrames()
+        }
+
         // ---- The activity log: every connect, link change, ECU and
         // session line the bridge logs ----
         ScrollView {
@@ -206,6 +233,20 @@ Pane {
                     enabled: Bridge.frameCount > 0
                     onClicked: Bridge.clearFrames()
                 }
+                // The selected rows to the clipboard; a tap on a row
+                // selects it
+                ThemedButton {
+                    objectName: "copyFrames"
+                    enabled: Bridge.model.selectedCount > 0
+                    text: qsTr("Copy")
+                    onClicked: page.copySelectedFrames()
+                }
+                ThemedButton {
+                    objectName: "selectNone"
+                    enabled: Bridge.model.selectedCount > 0   // kept in place, so nothing shifts
+                    text: qsTr("Select none")
+                    onClicked: Bridge.model.clearSelection()
+                }
                 Rectangle {
                     implicitWidth: order.implicitWidth + 4
                     implicitHeight: order.implicitHeight + 4
@@ -247,12 +288,19 @@ Pane {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
+                // Paused, the table alone holds still: what a new frame
+                // still reaches is said, so a pause never reads as frames
+                // lost from the recording, nor kept when nothing records
                 Label {
+                    objectName: "frameStatus"
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
                     text: !Bridge.connected ? qsTr("Idle")
+                        : Bridge.logPaused && Bridge.recordingActive
+                          ? qsTr("Paused: %1 frames received. The table holds still; the recording keeps every frame")
+                                .arg(Bridge.frameCount)
                         : Bridge.logPaused
-                          ? qsTr("Paused: %1 frames received; new frames aren't logged")
+                          ? qsTr("Paused: %1 frames received. The table holds still and leaves new frames out")
                                 .arg(Bridge.frameCount)
                         : qsTr("Logging: %1 frames").arg(Bridge.frameCount)
                     color: !Bridge.connected ? Theme.textDim
@@ -281,6 +329,16 @@ Pane {
                     color: Theme.warning
                     font.pixelSize: 13
                     visible: Bridge.overflowFrames > 0
+                }
+
+                Label {
+                    objectName: "selectedLabel"
+                    width: Math.min(implicitWidth, parent.width)
+                    wrapMode: Text.Wrap
+                    text: qsTr("%1 selected").arg(Bridge.model.selectedCount)
+                    color: Theme.info
+                    font.pixelSize: 13
+                    visible: Bridge.model.selectedCount > 0
                 }
 
                 // Bridge diagnostics: frames delivered to the GUI thread (one
@@ -386,7 +444,7 @@ Pane {
                         onPressedChanged: frameList.follow = !pressed && frameList.atYEnd
                     }
 
-                    delegate: RowLayout {
+                    delegate: Rectangle {
                         id: frameRow
                         // The page's narrowTable, read through the view
                         readonly property bool narrow: ListView.view !== null
@@ -394,54 +452,74 @@ Pane {
                         width: ListView.view !== null ? ListView.view.width : 0
                         // Narrow, a long payload wraps onto more lines
                         height: narrow ? Math.max(26, payloadLabel.implicitHeight + 8) : 26
-                        spacing: 8
+                        radius: 4
+                        color: frameRow.model.selected ? Qt.alpha(Theme.info, 0.22) : "transparent"
 
                         required property var model    // role access
                         required property int  index
 
-                        // Roles from FrameListModel::roleNames(): the model
-                        // registers "arbId": bind exactly that name. A
-                        // misspelled role is undefined at runtime, not a
-                        // build error: the column would render empty and
-                        // throw per delegate.
-                        Label {
-                            // Session-relative us, shown as s.mmm
-                            text: (frameRow.model.timestampUs / 1e6).toFixed(3)
-                            color: Theme.textDim
-                            font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: frameRow.narrow ? 64 : 96
-                            elide: Text.ElideRight
+                        // A tap selects the row or lets it go; a
+                        // shift-click selects from the last row tapped to
+                        // this one. A drag still scrolls
+                        MouseArea {
+                            objectName: "frameRowArea"
+                            anchors.fill: parent
+                            onClicked: mouse => {
+                                if (mouse.modifiers & Qt.ShiftModifier)
+                                    Bridge.model.selectThrough(frameRow.index)
+                                else
+                                    Bridge.model.toggleSelected(frameRow.index)
+                            }
                         }
-                        Label {
-                            text: frameRow.model.dlc
-                            visible: !frameRow.narrow
-                            color: Theme.text
-                            font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: 36
-                        }
-                        Label {
-                            text: frameRow.model.extended ? "E" : "-"
-                            color: frameRow.model.extended ? Theme.success : Theme.textDim
-                            font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: frameRow.narrow ? 20 : 36
-                        }
-                        Label {
-                            // Role name is "arbId" (a quint32): hex-format
-                            // it for display.
-                            text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
-                            color: Theme.textDim
-                            font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: frameRow.narrow ? 80 : 96
-                            elide: Text.ElideRight
-                        }
-                        Label {
-                            id: payloadLabel
-                            text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
-                            color: Theme.text
-                            font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.fillWidth: true
-                            wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
-                            elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
+
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 8
+
+                            // Roles from FrameListModel::roleNames(): the model
+                            // registers "arbId": bind exactly that name. A
+                            // misspelled role is undefined at runtime, not a
+                            // build error: the column would render empty and
+                            // throw per delegate.
+                            Label {
+                                // Session-relative us, shown as s.mmm
+                                text: (frameRow.model.timestampUs / 1e6).toFixed(3)
+                                color: Theme.textDim
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: frameRow.narrow ? 64 : 96
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: frameRow.model.dlc
+                                visible: !frameRow.narrow
+                                color: Theme.text
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: 36
+                            }
+                            Label {
+                                text: frameRow.model.extended ? "E" : "-"
+                                color: frameRow.model.extended ? Theme.success : Theme.textDim
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: frameRow.narrow ? 20 : 36
+                            }
+                            Label {
+                                // Role name is "arbId" (a quint32): hex-format
+                                // it for display.
+                                text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
+                                color: Theme.textDim
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: frameRow.narrow ? 80 : 96
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                id: payloadLabel
+                                text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
+                                color: Theme.text
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.fillWidth: true
+                                wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
+                                elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
+                            }
                         }
                     }
 

@@ -1569,6 +1569,94 @@ TEST(BridgeTest, FrameLogHoldsLongPayloadsOnlyWhileShown)
     }
 }
 
+/* The Log page's selection holds frames, not row numbers: it stays on
+ * them as rows arrive, through a flip of the order, and a frame leaves
+ * it as it leaves the ring. A shift-click selects from the anchor; the
+ * copied text is the selected rows in view order, under a header line. */
+TEST(BridgeTest, FrameLogSelectionFollowsItsFrames)
+{
+    FrameListModel model;
+    auto frame = std::make_unique<ecuio_frame_t>();
+    *frame = ecuio_frame_t{};
+    quint64 stamp = 0;
+    auto append = [&]() {
+        frame->timestamp_us = ++stamp * 1000;
+        frame->arbitration_id = 0x7E8;
+        frame->data[0] = static_cast<uint8_t>(stamp);
+        frame->data[1] = 0x0C;
+        model.appendFrame(*frame, 2);
+    };
+    auto selectedAt = [&](int row) {
+        return model.data(model.index(row, 0), FrameListModel::SelectedRole).toBool();
+    };
+    auto stampAt = [&](int row) {
+        return model.data(model.index(row, 0), FrameListModel::TimestampRole)
+            .toULongLong();
+    };
+    int selectionSignals = 0;
+    QObject::connect(&model, &FrameListModel::selectionChanged,
+                     [&selectionSignals]() { ++selectionSignals; });
+
+    for (int i = 0; i < 5; ++i)
+        append();
+    EXPECT_EQ(model.selectedText(), QString());
+    model.toggleSelected(1);   // newest first: the 4th frame
+    ASSERT_EQ(model.selectedCount(), 1);
+    EXPECT_TRUE(selectedAt(1));
+    EXPECT_EQ(selectionSignals, 1);
+
+    // A new frame pushes the row down; the selection goes with it
+    append();
+    EXPECT_FALSE(selectedAt(1));
+    EXPECT_TRUE(selectedAt(2));
+    EXPECT_EQ(stampAt(2), 4000u);
+
+    // Shift-click from the anchor (row 2) to row 4: frames 4, 3 and 2
+    model.selectThrough(4);
+    EXPECT_EQ(model.selectedCount(), 3);
+    EXPECT_EQ(model.selectedText(),
+              QStringLiteral("time_s\tdlc\text\tid\tdata\n"
+                             "0.004000\t2\t-\t0x7E8\t04 0C\n"
+                             "0.003000\t2\t-\t0x7E8\t03 0C\n"
+                             "0.002000\t2\t-\t0x7E8\t02 0C\n"));
+
+    // Oldest first, the same frames, in the view's new order
+    model.setNewestFirst(false);
+    EXPECT_EQ(model.selectedCount(), 3);
+    EXPECT_TRUE(selectedAt(1) && selectedAt(2) && selectedAt(3));
+    EXPECT_FALSE(selectedAt(0) || selectedAt(4) || selectedAt(5));
+    EXPECT_TRUE(model.selectedText().startsWith(
+        QStringLiteral("time_s\tdlc\text\tid\tdata\n0.002000\t")));
+
+    // A tap on a selected row lets it go
+    model.toggleSelected(1);
+    EXPECT_EQ(model.selectedCount(), 2);
+    EXPECT_FALSE(selectedAt(1));
+
+    // The ring wraps: the selected frames leave it with their rows
+    const int before = selectionSignals;
+    for (int i = 0; i < FrameListModel::MaxFrames; ++i)
+        append();
+    EXPECT_EQ(model.selectedCount(), 0);
+    EXPECT_EQ(model.selectedText(), QString());
+    EXPECT_EQ(selectionSignals, before + 2) << "once for each frame that left";
+
+    // The anchor left too: a shift-click selects just its own row
+    model.selectThrough(7);
+    EXPECT_EQ(model.selectedCount(), 1);
+    EXPECT_TRUE(selectedAt(7));
+
+    // Clear and Select none empty it
+    model.clearSelection();
+    EXPECT_EQ(model.selectedCount(), 0);
+    EXPECT_FALSE(selectedAt(7));
+    model.toggleSelected(0);
+    model.clear();
+    EXPECT_EQ(model.selectedCount(), 0);
+    append();
+    EXPECT_FALSE(selectedAt(0));
+}
+
 /* frameCount and guiNotifyCount reach QML on the 100 ms tick, not once
  * per frame: a burst of 400 frames changes each a handful of times. The
  * disconnect reports the last of them, so what QML last saw is exact. */
@@ -1741,6 +1829,7 @@ TEST(BridgeTest, FrameRoleNamesMatchLogPageBindings)
     EXPECT_EQ(roles.value(FrameListModel::ExtendedRole), QByteArray("extended"));
     EXPECT_EQ(roles.value(FrameListModel::PayloadRole), QByteArray("payloadHex"));
     EXPECT_EQ(roles.value(FrameListModel::ArbitrationIdRole), QByteArray("arbId"));
+    EXPECT_EQ(roles.value(FrameListModel::SelectedRole), QByteArray("selected"));
 }
 
 TEST(BridgeTest, LogPauseStopsFrameLogNotDecode)

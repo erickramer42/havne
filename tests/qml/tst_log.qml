@@ -7,7 +7,10 @@
 //          back to the activity log. Settings'
 //          developer box sets Theme.developerMode and the mock:// preset
 //          follows it. Copy puts the whole log on the clipboard and
-//          leaves nothing selected. The Frames view lies inside 320 px.
+//          leaves nothing selected. In the Frames view a tap selects a
+//          row, a shift-click a range, and Copy puts the selected rows
+//          on the clipboard. Paused, the status says whether a recording
+//          still keeps new frames. The Frames view lies inside 320 px.
 //          How the page looks is manual smoke.
 
 import QtQuick
@@ -37,8 +40,11 @@ TestCase {
     function cleanup() {
         Theme.developerMode = false
         Bridge.model.newestFirst = true
+        Bridge.model.clearSelection()
+        Bridge.logPaused = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.recording = false   // only between sessions
     }
 
     function find(within, name) {
@@ -197,6 +203,72 @@ TestCase {
         Theme.developerMode = false   // as a restore at launch would
         verify(!box.checked, "the box follows the mode")
         verify(!mock.visible)
+    }
+
+    // Paused, the status says what still takes new frames: the recording
+    // when one is under way, nothing else on this page
+    function test_pausedSaysWhereNewFramesGo() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const status = find(page, "frameStatus")
+        for (const recording of [false, true]) {
+            Bridge.recording = recording
+            compare(Bridge.connectSession("mock://pause-" + recording), "")
+            tryVerify(() => Bridge.recordingActive === recording, 5000, "recording " + recording)
+            Bridge.logPaused = true
+            verify(status.text.indexOf(recording ? "the recording keeps every frame"
+                                                 : "leaves new frames out") > 0, status.text)
+            Bridge.logPaused = false
+            verify(status.text.indexOf("Logging:") === 0, status.text)
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        }
+        Bridge.recording = false
+    }
+
+    // The Frames view's rows: a tap selects one, a shift-click the rows
+    // from it to another, and Copy puts them on the clipboard, a header
+    // line first; Select none lets them go
+    function test_selectedFramesAreCopied() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        const copy = find(page, "copyFrames")
+        verify(copy.visible && !copy.enabled, "Copy waits for a selection")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count >= 4 && list.itemAtIndex(3) !== null, 5000, "rows show")
+        Bridge.logPaused = true   // holds the rows still under the taps
+
+        const row0 = list.itemAtIndex(0)
+        mouseClick(row0, row0.width / 2, row0.height / 2)
+        compare(Bridge.model.selectedCount, 1, "a tap selects the row")
+        verify(Qt.colorEqual(row0.color, Qt.alpha(Theme.info, 0.22)), "and marks it")
+        verify(copy.enabled)
+        verify(find(page, "selectedLabel").visible)
+
+        const row2 = list.itemAtIndex(2)
+        mouseClick(row2, row2.width / 2, row2.height / 2, Qt.LeftButton, Qt.ShiftModifier)
+        compare(Bridge.model.selectedCount, 3, "a shift-click selects through it")
+
+        const row1 = list.itemAtIndex(1)
+        mouseClick(row1, row1.width / 2, row1.height / 2)
+        compare(Bridge.model.selectedCount, 2, "a tap on a selected row lets it go")
+
+        copy.clicked()
+        const pasted = createTemporaryQmlObject("import QtQuick; TextEdit {}", testCase)
+        pasted.paste()
+        const lines = pasted.text.split("\n").filter(l => l.length > 0)
+        compare(lines.length, 3, "a header and two rows: " + pasted.text)
+        compare(lines[0], "time_s\tdlc\text\tid\tdata")
+        verify(/^\d+\.\d{6}\t\d+\t[-E]\t0x[0-9A-F]+\t[0-9A-F ]*$/.test(lines[1]),
+               "a row's columns: " + lines[1])
+
+        const none = find(page, "selectNone")
+        none.clicked()
+        compare(Bridge.model.selectedCount, 0)
+        verify(!copy.enabled && !none.enabled)
     }
 
     // A phone can't select the log's text: Copy puts all of it on the
