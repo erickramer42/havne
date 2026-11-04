@@ -1,6 +1,6 @@
 # ADR-0050: Finding a signal among many: a group per def, one filter
 
-- **Status:** Accepted.
+- **Status:** Accepted. Built on 2026-11-03.
 - **Date:** 2026-11-03.
 - **Builds on:** [ADR-0016](0016-signal-definition-layout.md) (the
   def's layout and its reserved room);
