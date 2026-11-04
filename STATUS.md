@@ -582,6 +582,8 @@ less, **M** a few days, **L** a week or more or an ADR first.
 - **Per-signal unit overrides (S):** one quantity in the other system
   (deg F with km/h); whole-UI units are built
   ([ADR-0022](docs/adr/0022-display-units.md)).
+- **A phone's density (M):** control heights, spacing and the default
+  zoom on a phone; the test phone's run of the viewer read best at 75 %.
 - **Low-glare and night themes (M):** Theme roles for the analog gauge
   first; warning and danger told apart by more than hue.
 - **User-configurable dashboards (L):** pages built from the gauge
