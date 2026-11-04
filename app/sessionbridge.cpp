@@ -1433,7 +1433,6 @@ void SessionBridge::disconnectSession()
         // them
         ecuio_session_close(session);
         ecuio_session_timing_t timing{};
-        ecuio_session_info_t info{};
         std::vector<ecuio_request_timing_t> rows;
         uint32_t count = 0;
         if (ecuio_session_get_timing(session, &timing, nullptr, 0, &count) ==
@@ -1446,12 +1445,11 @@ void SessionBridge::disconnectSession()
             }
             rows.resize(std::min<size_t>(count, rows.size()));
         }
-        (void)ecuio_session_get_info(session, &info);
         ecuio_session_destroy(session);
 
         QMetaObject::invokeMethod(
             this,
-            [this, uri, timing, info, rows]() {
+            [this, uri, timing, rows]() {
                 // JOIN FIRST, then clear the flag, then emit, as the
                 // connect completion does: a QML handler inside
                 // disconnectingChanged may start the next connect.

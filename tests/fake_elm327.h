@@ -462,7 +462,13 @@ private:
     void record(const char* cmd)
     {
         if (commands < kRecordDepth) {
-            snprintf(recorded[commands], sizeof(recorded[commands]), "%s", cmd);
+            /* Cut to the slot: a longer command is kept by its start */
+            char* out = recorded[commands];
+            size_t i = 0;
+            for (; cmd[i] != '\0' && i + 1 < sizeof(recorded[commands]); ++i) {
+                out[i] = cmd[i];
+            }
+            out[i] = '\0';
         }
         ++commands;
     }

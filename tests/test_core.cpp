@@ -3509,7 +3509,7 @@ TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
     }
 
     std::string long_data, too_long;
-    for (int i = 0; i < ECUIO_FRAME_DATA_MAX; ++i)
+    for (unsigned i = 0; i < ECUIO_FRAME_DATA_MAX; ++i)
         long_data += (i ? " " : "") + std::string("A5");
     too_long = long_data + " A5";
     {

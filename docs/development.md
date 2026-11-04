@@ -632,9 +632,15 @@ delegate. Check for new warnings in the files you touched.
 **Compiler warnings:** every first-party target builds with `/W4`
 (MSVC) or `-Wall -Wextra` (GCC, Clang) through
 `app_enable_warnings()` in the root `CMakeLists.txt`; `test_c_abi`
-adds `-pedantic` with compiler extensions off. Warnings don't fail the
-build. `scripts/verify.sh` prints the count per build step; keep it at
-0 on MSVC.
+adds `-pedantic` with compiler extensions off. CI's workflow sets
+`HAVNE_WARNINGS_AS_ERRORS=ON` in the environment, the CMake option's
+default, so a GCC or Clang warning in first-party code fails the job
+(`-Werror` on those targets only; GoogleTest and Qt never). Locally it's
+off unless the variable is set (`export HAVNE_WARNINGS_AS_ERRORS=ON`
+before the first configure, or `-DHAVNE_WARNINGS_AS_ERRORS=ON`). A
+warning that is wrong for one line gets a pragma there with the reason,
+never a flag for the whole tree. MSVC isn't gated: `scripts/verify.sh`
+prints the count per build step; keep it at 0.
 
 **Formatting:** `.clang-format` (clang-format 13 or later) describes
 the house style. The tree wasn't reformatted when it was added, so

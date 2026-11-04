@@ -800,9 +800,14 @@ requests and quiet states
   Each surrogate links the C runtime statically, and `stage.ps1`
   checks that every DLL `havne.exe` imports ships in the zip or is
   part of Windows, but both checks run on the dev machine.
-- **GCC and Clang warnings are seen only in CI logs.** Every target
-  builds with warnings on, and the local MSVC count is 0, but no GCC
-  or Clang build runs on the dev machine and warnings don't fail CI.
+- **GCC and Clang warnings fail only CI's compilers.** CI sets
+  `HAVNE_WARNINGS_AS_ERRORS`, so a warning in first-party code fails
+  the GCC or Clang job that sees it, but each compiler warns about
+  different things: a runner image's newer compiler can fail a commit
+  that passed before, and the linux skill's WSL tree (a newer GCC and
+  Clang than CI's) warns without failing unless the variable is set.
+  MSVC's warnings never fail a build; `scripts/verify.sh` counts them
+  (0).
 
 - **The x64 surrogate has no real-hardware coverage.** The one J2534
   adapter on hand, the OBDX Pro VX, ships an x86 DLL, so real vendor
