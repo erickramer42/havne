@@ -4,7 +4,8 @@
 //          and check off the GUI thread, a cancel, a refusal, the
 //          signals in display units and the default plotted ones,
 //          columns (a window from before the start too), the values at a
-//          time, markers and findings, the alignment finds
+//          time and the sample nearest one, markers and findings,
+//          the alignment finds
 
 #pragma once
 
@@ -118,6 +119,12 @@ public:
     // before the first sample) }
     Q_INVOKABLE QVariantList valuesAt(const QVariantList& signalIndexes,
                                       double tMs);
+    // The time of the signal's sample nearest tMs, the earlier of two
+    // as near, so a tapped cursor lands where the line has a sample and
+    // the value it reads is the one drawn there: its first sample for a
+    // time before it, its last after it. -1 for a signal with no
+    // samples, a bad index, or a recording not open.
+    Q_INVOKABLE double nearestSampleMs(int signal, double tMs);
 
 signals:
     void stateChanged();

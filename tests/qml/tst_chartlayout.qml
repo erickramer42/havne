@@ -533,6 +533,19 @@ TestCase {
         compare(layout([s], { span: { t0: 0, t1: 1000 } }).traces[0].label, "12.3")
     }
 
+    // A series' labelMs, its value's sample time, reaches its trace, from
+    // columns and from samples alike; none leaves it undefined
+    function test_aSeriesLabelMsReachesItsTrace() {
+        const c = columns(0, [10, 20], [10, 20], 1)
+        c.labelValue = 12
+        c.labelMs = 250
+        compare(layout([c], { span: { t0: 0, t1: 1000 } }).traces[0].labelMs, 250)
+        compare(layout([{ samples: [0, 1, 500, 2], row: 0, decimals: 1, unit: "",
+                          labelMs: 500 }], {}).traces[0].labelMs, 500)
+        verify(!isFinite(layout([columns(0, [10, 20], [10, 20], 1)],
+                                { span: { t0: 0, t1: 1000 } }).traces[0].labelMs))
+    }
+
     // Absolute ticks fall on whole steps of the time itself, in time order,
     // each caption centered and kept inside the plot
     function test_absoluteTicksFallOnWholeSteps() {

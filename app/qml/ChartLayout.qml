@@ -11,7 +11,7 @@
 //          fixed span (calm ones a line, a swing past the neighbors' lean
 //          a band, a steep ramp a line, a break past gapMs) and over a
 //          span of their own, cut to the axis, a label's
-//          given value, absolute ticks. StripChart.qml draws what it
+//          given value and its sample time, absolute ticks. StripChart.qml draws what it
 //          returns; the drawing itself is manual smoke (docs/testing.md).
 
 pragma Singleton
@@ -289,7 +289,8 @@ QtObject {
     //         without them; wider is drawn only inside it), a column with
     //         no sample NaN;
     //         either may carry labelValue, the label's value (else the
-    //         newest sample's, or the last column's highest), scaleKey
+    //         newest sample's, or the last column's highest), labelMs
+    //         (that value's sample time, handed on to its trace), scaleKey
     //         (series with the same one share a value range: one signal
     //         in two recordings) and dash (its trace's stroke, else its
     //         row's)
@@ -309,7 +310,7 @@ QtObject {
     //   or in time order when absolute,
     //   traces: [{ row, dash, segments: [[{x, y}]], pieces (what's
     //              drawn, each a segment's line or, crowded, bandPieces'),
-    //              endY, label, labeled, labelY }]
+    //              endY, label, labeled, labelY, labelMs }]
     //   in label order top down, labelX }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)
@@ -367,7 +368,7 @@ QtObject {
             labelW = Math.max(labelW, opts.measure(label))
             traces.push({ sp: sp, cols: cols, row: s.row, vMin: range.vMin, vMax: range.vMax,
                           flat: range.flat, label: label, value: value, decimals: s.decimals,
-                          scaleKey: s.scaleKey, dash: s.dash })
+                          scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs })
         }
         if (traces.length === 0)
             return null
@@ -475,7 +476,8 @@ QtObject {
                            segments: [],
                            pieces: columnPieces(sampled, Math.floor(opts.gapMs / colMs), swing),
                            endY: traceY(tr.value),
-                           label: tr.label })
+                           label: tr.label,
+                           labelMs: tr.labelMs })
                 continue
             }
             // Its points' mean spacing across the time they cover
@@ -494,7 +496,8 @@ QtObject {
                        segments: segs,
                        pieces: pieces,
                        endY: traceY(tr.sp[tr.sp.length - 1]),
-                       label: tr.label })
+                       label: tr.label,
+                       labelMs: tr.labelMs })
         }
 
         return { plotW: plotW, plotH: plotH, top: top, hGrid: hGrid, ticks: ticks,

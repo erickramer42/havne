@@ -6,7 +6,8 @@
 //          signal, the default plotted, the chart's series over the view,
 //          the frames check's findings), the cursor's readout (maximized,
 //          its strip beside the chart or below it on a tall page, folding
-//          away and back), the view
+//          away and back; a tap snapped to the first plotted signal's
+//          nearest sample, each trace's dot at its value's sample), the view
 //          kept inside the recording through setView, zoom, a drag and the
 //          wheel (a notch in parts zooming as one, a sideways scroll not at
 //          all), the columns kept on their grid through a pan by part of
@@ -237,6 +238,31 @@ TestCase {
         compare(page.series(400)[0].labelValue, Number(at.text), "the label shows it too")
     }
 
+    // A tap lands on the first plotted signal's sample nearest it, so its
+    // value is the one the line has there; each trace's label carries its
+    // value's sample time, where the chart puts a dot. With nothing
+    // plotted a tap stays where it fell
+    function test_aTapSnapsToTheNearestSample() {
+        const page = openEarly()
+        const sigs = find(page, "signalRows").model
+        const rpm = sigs.find(s => s.name === "RPM").index
+        const throttle = sigs.find(s => s.name === "Throttle").index
+        page.plotted = ({ [rpm]: true, [throttle]: true })
+        // RPM every 100 ms from 100 ms, Throttle 1 ms after each
+        compare(page.snapped(1140), 1100)
+        compare(page.snapped(1160), 1200)
+        page.setView(0, 4000)
+        page.setCursor(page.snapped(1160))
+        compare(page.readout[rpm].atMs, 1200)
+        const labelMs = row => page.series(400).find(s => s.row === row).labelMs
+        compare(labelMs(rpm), 1200, "RPM's dot on its sample, at the cursor")
+        compare(labelMs(throttle), 1101, "Throttle's on its own, 99 ms behind")
+        page.setView(2000, 4000)
+        verify(isNaN(labelMs(rpm)), "no dot for a cursor out of view")
+        page.plotted = ({})
+        compare(page.snapped(1160), 1160)
+    }
+
     // Maximized on a wide page, the cursor's values sit in a strip beside
     // the chart; its button folds it to a tab, giving the plot the width,
     // and opens it again, and the choice is kept
@@ -356,6 +382,9 @@ TestCase {
         mouseClick(frame, x, y)
         verify(page.cursorMs > page.viewT0 && page.cursorMs < page.viewT1,
                "a tap places the cursor in view: " + page.cursorMs)
+        const first = find(page, "signalRows").model.find(s => !s.isText && page.plotted[s.index] === true)
+        compare(page.readout[first.index].atMs, page.cursorMs,
+                "the tap lands on a sample of the first signal plotted")
         compare(page.viewT1 - page.viewT0, 4000)
         mouseWheel(frame, x, y, 0, 120)
         verify(page.viewT1 - page.viewT0 < 4000, "zoomed in: " + (page.viewT1 - page.viewT0))

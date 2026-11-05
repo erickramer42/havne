@@ -420,6 +420,56 @@ TEST(RecordingViewTest, ValuesAtAreTheValuesInForce)
               QStringLiteral("ZZZFAKE11M0000001"));
 }
 
+// A tapped cursor lands on the sample nearest it, before or after, the
+// earlier of two as near; before the first sample on the first, past the
+// last on the last; a signal with no samples or a bad index gives -1
+TEST(RecordingViewTest, TheNearestSampleIsEitherSide)
+{
+    RecordingView v;
+    EXPECT_EQ(v.nearestSampleMs(0, 100), -1.0); // not open
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const QVariantMap rpm = signalNamed(v, "RPM");
+    const int i = rpm.value(QStringLiteral("index")).toInt();
+
+    // RPM is sampled every 100 ms from 100 ms
+    EXPECT_EQ(v.nearestSampleMs(i, 1140), 1100.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 1160), 1200.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 1199.9), 1200.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 1150), 1100.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 1200), 1200.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 0), 100.0);
+    const double last = rpm.value(QStringLiteral("lastMs")).toDouble();
+    EXPECT_EQ(v.nearestSampleMs(i, last + 5000), last);
+    EXPECT_EQ(v.nearestSampleMs(-1, 1140), -1.0);
+    EXPECT_EQ(v.nearestSampleMs(v.signalList().size(), 1140), -1.0);
+}
+
+// With samples bunched after the cursor, the first one after it is the
+// one weighed, not the last in reach
+TEST(RecordingViewTest, TheNearestSampleAfterIsTheFirstAfter)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    writeRecording(dir.path(), {{"RPM", 0}});
+    QFile rows(dir.filePath(QStringLiteral("signals.csv")));
+    ASSERT_TRUE(rows.open(QIODevice::Append));
+    // 100 ms (written above), then 300, 310, 320 ms
+    rows.write(
+        "300000,RPM,2000,rpm\n310000,RPM,3000,rpm\n320000,RPM,4000,rpm\n");
+    rows.close();
+    RecordingView v;
+    v.open(dir.path());
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open);
+    const int i = signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    // 100 ms back, 20 ms on: the bunch's first, not its last in reach
+    EXPECT_EQ(v.nearestSampleMs(i, 280), 300.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 305), 300.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 306), 310.0);
+    EXPECT_EQ(v.nearestSampleMs(i, 199), 100.0);
+}
+
 // Imperial units convert the ranges, the columns and the readout, and
 // the list says so
 TEST(RecordingViewTest, ImperialUnitsConvertEverything)

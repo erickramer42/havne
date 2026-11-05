@@ -671,3 +671,56 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
     }
     return out;
 }
+
+double RecordingView::nearestSampleMs(int signal, double tMs)
+{
+    uint32_t i = 0;
+    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i)) {
+        return -1.0;
+    }
+    const Signal& s = m_signals[i];
+    if (s.pub.first_us == ECUIO_RECORDING_NONE) {
+        return -1.0;
+    }
+    const uint64_t t = fromMs(tMs);
+    if (t <= s.pub.first_us) {
+        return toMs(s.pub.first_us);
+    }
+    if (t >= s.pub.last_us) {
+        return toMs(s.pub.last_us);
+    }
+    char text[kTextCapacity];
+    // The sample at or before t (the reader's "in force")
+    const auto sampleAtOrBefore = [&](uint64_t when, uint64_t* at) {
+        const ecuio_status_t rc =
+            ecuio_recording_text_at(m_reader, i, when, text, sizeof(text), at);
+        if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+            markStale();
+        }
+        return rc == ECUIO_OK;
+    };
+    uint64_t before = ECUIO_RECORDING_NONE;
+    if (!sampleAtOrBefore(t, &before) || before == ECUIO_RECORDING_NONE) {
+        return -1.0;
+    }
+    // The first sample after t, looked for only as far past t as the one
+    // before it is behind: the reader answers "at or before", so each
+    // look past t that finds a sample there looks again just short of it
+    constexpr int kMaxLooks = 16;
+    uint64_t after = ECUIO_RECORDING_NONE;
+    uint64_t reach = t + (t - before);
+    for (int look = 0; look < kMaxLooks && reach > t; ++look) {
+        uint64_t at = ECUIO_RECORDING_NONE;
+        if (!sampleAtOrBefore(reach, &at)) {
+            return -1.0;
+        }
+        if (at == ECUIO_RECORDING_NONE || at <= t) {
+            break;
+        }
+        after = at;
+        reach = at - 1;
+    }
+    return toMs(after != ECUIO_RECORDING_NONE && after - t < t - before
+                    ? after
+                    : before);
+}

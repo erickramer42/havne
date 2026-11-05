@@ -34,6 +34,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Through a J2534 adapter, a read that fails right after frames were lost reports the failure at once, not one read later, and messages a driver returns beyond those asked for count as lost, so the next frame carries the overflow flag.
 - The Recordings viewer's chart zooms a notch's worth per notch of a high-resolution mouse wheel or a touchpad, which send a notch in parts, instead of a notch per part, and a sideways scroll no longer zooms it out.
 - On a phone, a double-tap on Live's or the viewer's chart no longer misses when the two taps land a little apart, nor when the viewer's chart has the page and takes a moment to draw.
+- A tap on the Recordings viewer's chart places the cursor on the nearest sample of the first signal plotted, and a dot on each trace marks the sample its value comes from, so the value read always matches the line. Between two samples it used to read the earlier sample's value where the line had moved on.
 
 ## [0.4.0] - 2026-11-04
 

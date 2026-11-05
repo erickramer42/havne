@@ -4,7 +4,8 @@
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
 //          readout (maximized, its strip beside the chart or below it on a
-//          tall page, folding away and back), pan and zoom kept inside the recording, the wheel's
+//          tall page, folding away and back; a tap snapped to the nearest
+//          sample), pan and zoom kept inside the recording, the wheel's
 //          zoom by its share of a notch and none sideways, the columns
 //          on their grid from time 0 through a pan, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
@@ -109,6 +110,8 @@ Page {
     // Signal index -> { text, unit } at the cursor
     property var readout: ({})
     readonly property real minSpanMs: 200
+    // The dot marking the cursor's sample on each trace
+    readonly property real cursorDotR: 3.5
     readonly property int rowHeight: Theme.dense ? 36 : 40
     // A column narrower than a second reads the recording's raw rows of
     // every signal in it (ADR-0049 section 5); a second or wider, the
@@ -286,6 +289,16 @@ Page {
         setView(t - half, t + half)
     }
 
+    // A tapped time moved to the nearest sample of the first signal
+    // plotted, so the cursor stands where the line has a sample and reads
+    // the value drawn there; as it is with nothing plotted
+    function snapped(t) {
+        const first = recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
+        if (!first)
+            return t
+        const at = recording.nearestSampleMs(first.index, t)
+        return at >= 0 ? at : t
+    }
     function setCursor(t) {
         cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
         const values = {}
@@ -331,6 +344,9 @@ Page {
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
         const inView = cursorMs >= viewT0 && cursorMs <= viewT1
         const labelOf = at => inView && at && at.text !== "" ? Number(at.text) : NaN
+        // Where that value's sample lies on the axis: a dot marks it
+        const labelMsOf = (at, offset) => inView && at && at.text !== "" && at.atMs >= 0
+                                          ? at.atMs + offset : NaN
         // The columns lie on a grid from time 0, not from the view's
         // start, so a pan carries each column's samples along with it
         // rather than regrouping them, and a noisy trace's peaks hold
@@ -344,7 +360,8 @@ Page {
             const s = sigs[c.index]
             return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
                      scaleKey: c.index, decimals: s.decimals, unit: s.unit,
-                     labelValue: labelOf(root.readout[c.index]) }
+                     labelValue: labelOf(root.readout[c.index]),
+                     labelMs: labelMsOf(root.readout[c.index], 0) }
         })
         if (!compareAligned)
             return out
@@ -361,7 +378,8 @@ Page {
             out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
                        row: mine,
                        scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]) })
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]),
+                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs) })
         }
         return out
     }
@@ -1157,6 +1175,18 @@ Page {
                         ctx.lineTo(xOf(root.cursorMs), l.top + l.plotH)
                         ctx.stroke()
                     }
+                    // A dot on each trace at the sample its value comes from
+                    for (const tr of l.traces) {
+                        if (!isFinite(tr.labelMs))
+                            continue
+                        const x = xOf(tr.labelMs)
+                        if (x < 0 || x > l.plotW)
+                            continue
+                        ctx.fillStyle = Theme.seriesColor(tr.row)
+                        ctx.beginPath()
+                        ctx.arc(x, tr.endY, root.cursorDotR, 0, 2 * Math.PI)
+                        ctx.fill()
+                    }
                 }
             }
 
@@ -1213,7 +1243,7 @@ Page {
                 }
             }
             DoubleTapHandler {
-                onTapped: (eventPoint, button) => root.setCursor(root.timeAt(eventPoint.position.x))
+                onTapped: (eventPoint, button) => root.setCursor(root.snapped(root.timeAt(eventPoint.position.x)))
                 // A double-click or double-tap maximizes it, or gives the
                 // signals back; the two taps of a thumb may land a little apart
                 onDoubleTap: root.toggleMaximized()
