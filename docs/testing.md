@@ -854,9 +854,11 @@ requests and quiet states
   only.** The MX+'s `AT MA` beside the VX on a Y-splitter passed the
   engine ECU's replies, each matching the VX's in order and bytes, but
   printed a multi-frame reply's First Frame and none of its
-  Consecutive Frames under the setup's `AT CAF1` and `AT CFC1`
+  Consecutive Frames under the setup's `AT CFC1`
   ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md),
-  BENCH prep #19). The fake ELM327's monitor prints every frame.
+  BENCH prep #19). A passive session's setup sends `AT CFC0`, and the
+  fake ELM327 models the STN's monitor (`monitor_cfc_eats_cfs`); that
+  `AT CFC0` brings the Consecutive Frames back is for the car to show.
 - **Identification has met one ECU.** On the car every item settled
   (four Service 09 items and two DIDs answered, seven DIDs refused),
   and its replies of up to 27 bytes arrived whole. An ECU with several
