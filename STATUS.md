@@ -484,44 +484,47 @@ releases are in [CHANGELOG.md](CHANGELOG.md). The planned releases are
 in order and hold about three features each; a release's detail comes
 in here when its work starts.
 
-### v0.4.1: the pages on a phone, and what v0.4.0 left unrun
+### v0.5.0: your own signals, and the plugin framework's data tier
 
-A patch ([ADR-0048](docs/adr/0048-semantic-versioning.md)): no new ADR
-and no ABI change.
-- **The UI on a phone**, built and run on the test phone: denser
-  pages, the chart taking the page, a pinch stepping Live's window,
-  the Dashboard's dials side by side upright, a frame-rate readout in
-  developer mode, charts that hold still, Log rows copied. The double
-  tap allows a thumb's drift and is timed by the taps' own stamps, so
-  a slow frame between them (the maximized viewer's chart, about
-  370 ms a paint on the test phone) doesn't split it; tested in QML,
-  and the phone's check (`ui check doubletap`) passes 10 of 10.
-- **Two recordings on the wall clock:** the same bus recorded twice on
-  one machine lines up to about 0.3 ms
-  (`SocketCanBusTest.TwoRecordingsOfOneBusLineUpOnTheirUtcStarts`), and
-  the VX against `candump` on the desk bus to 10.4 ms
-  ([2026-11-04-socketcan-desk-utc](docs/bench-sessions/2026-11-04-socketcan-desk-utc.md)).
-- **The car run** ([2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md)):
-  both ECUs in one session through the VX and through the MX+, the
-  recorders in the laptop's app, the phone's and `havne-cli`, each
-  recording's check clean; the MX+ and the USB2CAN listening beside the
-  VX.
-- **From it:**
-  - a session that only listens through the MX+ hears Single Frame
-    replies only (Known Issue #41, BENCH prep #19: the re-run,
-    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md),
-    tried `AT CFC0` and six more setups); a listening session needs
-    no flow control, so its setup turns it off (`AT CFC0`);
-  - the VX's replies after the surrogate's first read waited about
-    50 ms in a read asked with no time left: no read asks the vendor
-    to wait 0 ms, and a read ends at its reply instead of its slice
-    (ADR-0042's note of 2026-11-04). On the re-run no reply came 50 ms
-    late (packed, the P50 per request 24.6 ms against 65.5-73.7), and
-    the VX held the call for the rest of a batch about 10 ms, so no
-    read makes that call (ADR-0042's note of 2026-11-05); timed again
-    without it, 16.4 ms packed and 4.6 ms unpacked.
+A minor release ([ADR-0048](docs/adr/0048-semantic-versioning.md)),
+which breaks the C ABI on purpose where ADR-0051 says.
+- **Signal files** ([ADR-0051](docs/adr/0051-signal-files.md)): a
+  user's own signals as data, JSON read by a strict parser in core from
+  bytes, for the app on every platform and `havne-cli` alike: Service
+  01 PIDs and Service 22 DIDs on up to four modules, numbers, text,
+  enumerations and computed signals; everything a file gets wrong
+  refused at load, one ID width included. Core's limits move with it:
+  256 requests, the set's layout version 4, recording format 3.
+- **The plugin framework** (ADR-0052, to come): one package and
+  manifest, the three tiers, the registry and selection by the VIN's
+  maker code and model year, designed whole; v0.5.0 builds the data
+  tier, which is the signal-file format.
+- **Your own signals, per vehicle:** a form under Settings' Vehicle
+  section, with **Read once** showing the raw reply beside the decoded
+  value; `havne-cli stream --signals <file>` and `signals check`.
+- **Bulk import:** an OBDb signal set, a file the user picks (CC BY-SA
+  4.0, its attribution kept in the converted file's `source` block),
+  converted on import and reported field by field where it differs.
+- **Computed signals in core:** boost from `obd2`'s MAP and baro, and
+  from a user's own signals, each input judged by its own age bound.
+- **The simulated ECU answers a plugin's DIDs** from the same file, so
+  an example plugin for the simulated car runs in CI with no car;
+  `havne-cli plugins list` and `plugins check`.
+- **Linux downloads for 64-bit ARM** (a Raspberry Pi on Raspberry Pi OS
+  13 or Ubuntu 24.04 and newer): built, with the x86_64 downloads'
+  checks, on CI's ARM runners, and the release checks run on a
+  Raspberry Pi 3 ([docs/linux.md](docs/linux.md)); first published with
+  v0.5.0.
+- **Groundwork, built:** the fakes' module DIDs, and the simulated
+  ECU's second module and `pending` fault.
 
-**Done when:** released; every item above has run where it says.
+**Done when:** `havne-cli` loads the example plugin, the simulated car
+answers its DIDs on `vcan0`, the values decode with its scaling and
+enumerations, and its CI examples pass; a user's own DID, defined in
+the app and imported from a synthetic OBDb file, reads from the
+simulated car on a second module; boost shows on Live from the mock's
+MAP and baro; the arm64 deb's `havne-cli` and the aarch64 AppImage run
+on the Raspberry Pi from the release's own files.
 
 ### Waiting on a tester: an iPhone download
 

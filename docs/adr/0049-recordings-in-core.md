@@ -1273,3 +1273,11 @@ chart shared as `app/qml/StripChart.qml`.
 > `ecuio_recording_signal_t` from it (the first of its two reserved
 > bytes, offset 54). A line of five fields, a recording from before
 > groups, opens with every signal under Other.
+
+## Appendix: recording format 3 (2026-11-05)
+
+[ADR-0051](0051-signal-files.md), to be built in v0.5.0, moves
+recordings to format 3: an enum signal's raw number in `signals.csv`,
+its labels in `events.log`, and a session decoded by a signal file
+holds a copy of it (`signals.json`) with its SHA-256 on an `events.log`
+header line. The reader keeps reading formats 1 and 2.
