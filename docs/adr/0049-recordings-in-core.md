@@ -519,7 +519,12 @@ How it works:
   viewer and `havne-cli view --align-on` share it. Two recordings also
   line up on their UTC starts (section 2): to about a millisecond when
   one machine's clock stamped both, and to the machines' clock
-  agreement (tens of milliseconds under NTP) when two did.
+  agreement (tens of milliseconds under NTP) when two did. A frame's
+  time is when its adapter delivered it to core, so two recordings
+  through different adapters differ by their delivery delays as well:
+  a VX's segmented reply reaches the worker about 52 ms after it
+  crossed the bus
+  ([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md)).
 - **Untrusted input:** a recording comes from anywhere. Every row is
   bounds-checked, a bad row is refused with its line number (ADR-0023's
   rule), never its path, and every parser of a recording gets a fuzz
