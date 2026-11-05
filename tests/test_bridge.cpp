@@ -739,9 +739,16 @@ TEST(BridgeTest, RelayStopEndsEverything)
     EXPECT_EQ(f.s->closes, 1);
     EXPECT_EQ(f.s->live, nullptr) << "the adapter goes with the relay";
     EXPECT_TRUE(closedFromTheFarSide(*c));
+    // On loopback the kernel can give the client the old port as its own
+    // source port, and the connect then reaches itself (TCP's
+    // simultaneous open): that too says nothing listens
     QTcpSocket late;
     late.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(port));
-    EXPECT_FALSE(late.waitForConnected(500)) << "nothing listens";
+    if (late.waitForConnected(500)) {
+        EXPECT_EQ(late.localPort(), late.peerPort())
+            << "something listens on " << port << " (connected from "
+            << late.localPort() << ")";
+    }
 }
 
 // What it relays: a paired classic adapter's URI, in a build that can
