@@ -11,7 +11,10 @@
 //          quiet bus whose empty reads are ERR_BUFFER_EMPTY after their
 //          timeout, answered requests, and the no-ACK bus. TX and
 //          first-frame indications are skipped without ending a read,
-//          so a reply comes back before the next request. The request
+//          so a reply comes back before the next request; a read ends
+//          at its reply, takes the rest of a batch in one more call,
+//          never asks the vendor to wait 0 ms, and carries a loss seen
+//          after its last frame to the next. The request
 //          engine's pacing (ADR-0015): the floor, the wait, negative
 //          and pending replies, two channels at once; and the drain in
 //          passive mode. Frames carry session time, not the vendor's
@@ -656,7 +659,8 @@ TEST_F(J2534HealthTest, BackoffRestartsWhenHardReadsResume)
  * short batch with STATUS_NOERROR, an empty read with ERR_BUFFER_EMPTY,
  * a TX indication after each write and the reply 4 ms later, as the
  * OBDX Pro VX measured (docs/bench-sessions/2026-10-22.md and the
- * vehicle sheet).
+ * vehicle sheet), and a read asked to wait 0 ms held 50 ms
+ * (docs/bench-sessions/2026-11-04-two-ecu-car.md).
  * ==================================================================== */
 
 /* A quiet bus on the VX: every passive read waits out its 100 ms and
@@ -807,9 +811,10 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
     }
 }
 
-/* The surrogate holds a 1 ms timer: the fake as the VX holds each read
- * for its timeout (one 10 ms slice), and a reply 4 ms after its write
- * is seen when that slice ends. With Windows' default 15.6 ms timer
+/* The surrogate holds a 1 ms timer: the fake as the VX holds each call
+ * for its timeout unless its batch fills, and after the reply the child
+ * takes the rest of the batch with a 1 ms call, which the default timer
+ * stretches to 15.6 ms. With Windows' default 15.6 ms timer
  * every request's median read 15.4 to 16.4 ms (bench_timing,
  * 2026-11-01); with 1 ms, 11.3 ms. 14 ms sits between, for the median
  * of the requests' medians: a slow-class PID has few replies in the
@@ -889,7 +894,7 @@ TEST_F(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
 
 /* Beneath the worker, at the loader seam: a read that meets an
  * indication reads on, so the reply queued behind it comes back from the
- * same call (the child reads a batch at a time). A read that stopped at the
+ * same read (the child calls the vendor again). A read that stopped at the
  * indication would cost the reply a read slice, which no session-level
  * case can see. */
 TEST_F(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
@@ -962,11 +967,10 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
     EXPECT_EQ(ec, 0u);
 }
 
-/* On the VX a read holds its whole timeout unless the batch fills, and
- * the surrogate asks for 16 messages, so a reply 4 ms after its request
- * is seen only when the read ends. Reads capped at the 10 ms slice keep
- * requests near the floor's pace; a read held for the 100 ms wait
- * would leave about ten a second. */
+/* On the VX a call holds its whole timeout unless its batch fills.
+ * Reads capped at the 10 ms slice keep requests near the floor's pace
+ * whatever the vendor holds; a read held for the 100 ms wait would leave
+ * about ten a second. */
 TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -977,6 +981,73 @@ TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
         << "replies waited for the read to end";
     EXPECT_EQ(delivered.after_next_write.load(), 0)
         << "replies landed after the next request";
+}
+
+namespace {
+
+/* One request, polled at the floor's pace */
+const char kPollRpm[] = "?profile=raw&filter=0x7E8&poll=0x0C";
+
+/* The one polled request's median reply latency (write to reply, the
+ * host's clock, ADR-0042) once `want` replies are timed; 0 if they
+ * never were */
+uint32_t median_reply_latency_us(ecuio_session_t* session, uint64_t want)
+{
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    uint64_t answered = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (ecuio_session_get_timing(session, &t, rows.data(),
+                                     static_cast<uint32_t>(rows.size()),
+                                     &count) != ECUIO_OK) {
+            return 0;
+        }
+        answered = 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            answered += rows[i].answered;
+        }
+        if (answered >= want) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return (count == 1 && answered >= want) ? rows[0].latency_p50_us : 0;
+}
+
+} // namespace
+
+/* A reply later than the 10 ms slice (15 ms, as the test car's took
+ * through the VX): the first read ends with the TX indication alone,
+ * and the read after it must wait at least 1 ms. A VX read asked to
+ * wait 0 ms holds 50 ms, which put such a reply about 50 ms late */
+TEST_F(J2534HealthTest, VxAReplyPastTheSliceIsNotHeldByAZeroTimeoutRead)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "15"));
+    ASSERT_NO_FATAL_FAILURE(start_session(kPollRpm));
+    const uint32_t p50 = median_reply_latency_us(session, 50);
+    RecordProperty("reply_p50_us", static_cast<int>(p50));
+    ASSERT_GT(p50, 0u) << "replies timed";
+    EXPECT_GE(p50, 15000u) << "the fake's reply delay";
+    EXPECT_LT(p50, 25000u) << "a read waited 0 ms and the VX held it";
+}
+
+/* The first read asks for one message, so the VX's read ends when the
+ * reply arrives, 4 ms after its request, instead of holding the 10 ms
+ * slice for a batch of 16: 6.7 to 7.2 ms here, 11.3 ms held to the
+ * slice; the rest of a batch is taken with 1 ms more */
+TEST_F(J2534HealthTest, VxAReplyEndsTheReadThatWaitsForIt)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session(kPollRpm));
+    const uint32_t p50 = median_reply_latency_us(session, 50);
+    RecordProperty("reply_p50_us", static_cast<int>(p50));
+    ASSERT_GT(p50, 0u) << "replies timed";
+    EXPECT_GE(p50, 4000u) << "the fake's reply delay";
+    EXPECT_LT(p50, 10000u) << "the read held its slice past the reply";
 }
 
 /* PID 0x5F is one the fake's ECU doesn't support, and it answers
@@ -1311,6 +1382,108 @@ TEST_F(J2534HealthTest, AnOverflowBitWithNothingAfterItWaitsForTheNextMessage)
     ASSERT_NO_FATAL_FAILURE(close_session());
     EXPECT_EQ(delivered.payloads[0][2], 2u);
     EXPECT_NE(delivered.flags[0] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+}
+
+/* A handle on the fake through the surrogate, its channel connected */
+struct SeamHandle {
+    ecuio_j2534_handle_t* h = nullptr;
+    unsigned long ch = 0;
+    ~SeamHandle() { (void)ecuio_j2534_close(h); }
+};
+
+/* At the loader seam, the fake as the VX: messages already queued come
+ * back in the read that takes the first of them. The first call asks
+ * for one, then one more call takes the rest of the batch, so the reads
+ * after it come from the client's cache: the fake fails every vendor
+ * read from then on, and they still succeed */
+TEST_F(J2534HealthTest, VxQueuedMessagesComeBackInOneRead)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    for (uint8_t i = 1; i <= 4; ++i) {
+        ASSERT_TRUE(post_reply(page, i));
+    }
+
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 1u);
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    for (uint8_t i = 2; i <= 4; ++i) {
+        got = false;
+        ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK)
+            << "message " << int{i} << " was left for another vendor read";
+        ASSERT_TRUE(got);
+        EXPECT_EQ(f.data[6], i);
+    }
+}
+
+/* A call that brings only an indication after the read's deadline (the
+ * fake's first read stalls 30 ms, the read asks for 10) is followed by
+ * one more, which waits 1 ms: the VX holds a call asked to wait 0 ms
+ * for 50 ms, so the read would take about 80 */
+TEST_F(J2534HealthTest, VxTheReadAfterAnIndicationPastTheDeadlineStillWaits)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_DELAY_MS", "30"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    const uint8_t tx_done[4] = {0x00, 0x00, 0x07, 0xE0};
+    ASSERT_TRUE(
+        fake_control::post(page, tx_done, sizeof(tx_done), 100,
+                           ECUIO_PT_TX_MSG_TYPE | ECUIO_PT_TX_INDICATION));
+
+    ecuio_pt_rx_t f = {};
+    bool got = true;
+    const auto from = std::chrono::steady_clock::now();
+    EXPECT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 10, &got), ECUIO_OK);
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - from)
+                          .count();
+    EXPECT_FALSE(got) << "the indication is no frame";
+    EXPECT_GE(took, 30) << "the fake's stall";
+    EXPECT_LT(took, 55) << "a call asked to wait 0 ms";
+}
+
+/* A loss the call for the rest of a batch reports after the read's
+ * frames (an indication with BUFFER_OVERFLOW behind the reply) flags
+ * the next read's frame: the response's status rides home with frames,
+ * where the client doesn't judge it */
+TEST_F(J2534HealthTest, VxALossAfterAReadsLastFrameFlagsTheNextRead)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    ASSERT_TRUE(post_reply(page, 1));
+    ASSERT_TRUE(
+        post_reply(page, 2, ECUIO_PT_TX_INDICATION | ECUIO_PT_BUFFER_OVERFLOW));
+
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 1u);
+    EXPECT_EQ(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u);
+
+    ASSERT_TRUE(post_reply(page, 3));
+    got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 3u);
+    EXPECT_NE(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u)
+        << "the loss after the first read's frame was dropped";
 }
 
 /* ERR_BUFFER_OVERFLOW with nothing read: no failure, and the next

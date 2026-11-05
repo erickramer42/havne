@@ -483,7 +483,9 @@ and no ABI change.
     `AT CFC1`, and a listening session's setup sends `AT CFC0` (BENCH
     prep #19);
   - the VX's replies after the surrogate's first read waited about
-    50 ms in a read asked with no time left: in progress.
+    50 ms in a read asked with no time left: no read asks the vendor
+    to wait 0 ms, and a read ends at its reply instead of its slice
+    (ADR-0042's note of 2026-11-04).
 
 **Done when:** the car confirms both fixes (the run sheet's Phase 4
 again, and the VX's latency per request near its time on the bus) and
@@ -579,15 +581,16 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
   whose driver offers one-shot mode, on the desk bus first (BENCH
   prep #32).
 - A reply's time on the bus against the host's clock: measured beside
-  the VX on the car (ADR-0042's appendix of 2026-11-03): most
-  segmented replies reach the worker about 52 ms after their last
-  frame. The surrogate's read holds them, not the adapter: a vendor
-  read that brings only the request's TX indication is read again
-  with none of its timeout left, and the VX holds a read with no
-  timeout about 50 ms; a reply inside the first read comes about
-  10 ms after its last frame
+  the VX on the car (ADR-0042's appendix of 2026-11-03 and its note of
+  2026-11-04): most segmented replies reached the worker about 52 ms
+  after their last frame, held by the surrogate's read, not the
+  adapter: a vendor read that brought only the request's TX
+  indication was read again with none of its timeout left, and the VX
+  holds a read with no timeout about 50 ms
   ([2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md)).
-  A latency on the adapter's clock waits for a reason to build it.
+  From v0.4.1 a J2534 read ends at its reply, and the car measures
+  what remains. A latency on the adapter's clock waits for a reason to
+  build it.
 
 **Done when:** two recordings of the mock's pulls, recorded by
 `havne-cli`, overlay aligned on the pull's start in the app and in

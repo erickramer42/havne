@@ -29,6 +29,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Live's chart no longer shimmers as it scrolls, nor the Recordings viewer's as you pan it: a noisy trace's peaks stay where they are instead of shifting at every update.
 - On a phone upright, Live's **120 s** button no longer wraps onto two lines.
 - An ELM327 session that only listens (`?profile=raw`) now hears multi-frame replies through an OBDLink. With the adapter's flow control on, its monitor printed each reply's first frame and none of the rest; a listening session's setup turns it off.
+- Through a J2534 adapter, replies reach the session as they arrive: a reply that took longer than 10 ms no longer comes about 50 ms late on the OBDX Pro VX, and the others no longer wait out the rest of a 10 ms read, so requests go out sooner.
 - The Recordings viewer's chart zooms a notch's worth per notch of a high-resolution mouse wheel or a touchpad, which send a notch in parts, instead of a notch per part, and a sideways scroll no longer zooms it out.
 - On a phone, a double-tap on Live's or the viewer's chart no longer misses when the two taps land a little apart.
 

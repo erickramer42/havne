@@ -93,8 +93,9 @@
 //    reads held for their timeout, a short batch with STATUS_NOERROR
 //    and an empty read with ERR_BUFFER_EMPTY; after each accepted
 //    write a TX indication (RxStatus 0x09, the 4-byte CAN ID), and the
-//    reply 4 ms later. ECUIO_FAKE_NO_ACK=1 adds the bus with no other
-//    node: three writes accepted per connect, then each blocks about
+//    reply 4 ms later; a read with a timeout of 0 held 50 ms, as a
+//    50 ms timeout would (the car, 2026-11-04). ECUIO_FAKE_NO_ACK=1
+//    adds the bus with no other node: three writes accepted per connect, then each blocks about
 //    500 ms and fails ERR_FAILED, echoed with RxStatus 0x201.
 //  * A queued message has an arrival time; reads see only those that
 //    have arrived, in arrival order.
@@ -151,6 +152,11 @@ unsigned long g_queue_len = 0;
  * acknowledge, it accepted three writes per connect, then blocked
  * each later one 500-515 ms and failed it. */
 constexpr unsigned long kVxReplyDelayMs = 4;
+/* A VX read with a timeout of 0 holds about 50 ms, whenever its reply
+ * arrives: in the test car's frame log of 2026-11-04 every such read
+ * took 50 to 65 ms (median 53) with the reply on the adapter's clock 4
+ * to 15 ms after its request (docs/bench-sessions/2026-11-04-two-ecu-car.md) */
+constexpr unsigned long kVxZeroTimeoutHoldMs = 50;
 constexpr unsigned long kVxUnackedDepth = 3;
 constexpr DWORD kVxRefusedWriteMs = 500;
 constexpr unsigned long kVxIndication = ECUIO_PT_TX_MSG_TYPE |
@@ -617,14 +623,17 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * in statuses. J2534-1 pairs a short batch with ERR_TIMEOUT when
      * Timeout is nonzero, and answers an empty timeout-0 read with
      * ERR_BUFFER_EMPTY. The VX returns a short batch with
-     * STATUS_NOERROR and any empty read with ERR_BUFFER_EMPTY. Filter
+     * STATUS_NOERROR and any empty read with ERR_BUFFER_EMPTY, and holds
+     * a timeout-0 read kVxZeroTimeoutHoldMs. Filter
      * gating isn't modeled here. Off by default: the exact-count
      * stream tests pin the single-message delivery below. */
     const bool vx = fake_j2534::knob_on("ECUIO_FAKE_VX");
     if (vx || fake_j2534::knob_on("ECUIO_FAKE_SPEC_READ_SEMANTICS")) {
         const unsigned long requested = *pNumMsgs;
-        const long long deadline = fake_j2534::now_us() +
-                                   1000LL * static_cast<long long>(Timeout);
+        const unsigned long hold_ms =
+            (vx && Timeout == 0) ? fake_j2534::kVxZeroTimeoutHoldMs : Timeout;
+        const long long deadline =
+            fake_j2534::now_us() + 1000LL * static_cast<long long>(hold_ms);
         unsigned long avail = 0;
         for (;;) {
             const long long now = fake_j2534::now_us();

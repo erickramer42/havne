@@ -1,7 +1,12 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
 // Testing: HARNESS: test_j2534_surrogate, plus the cross-arch routing
 //          case against the Win32-tree build (ADR-0014); the 1 ms timer
-//          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep
+//          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep;
+//          a read's calls (one message first, then the rest of the
+//          batch, never a 0 ms wait, a loss after the last frame) by
+//          J2534HealthTest.VxAReply*, .VxQueuedMessagesComeBackInOneRead,
+//          .VxTheReadAfterAnIndicationPastTheDeadlineStillWaits and
+//          .VxALossAfterAReadsLastFrameFlagsTheNextRead
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -68,6 +73,11 @@ static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
 /* The messages a READ's reply carries after the response, as the wire
  * sends them (surrogate_protocol.h). Static for the same reason. */
 static ecuio_pt_rx_t s_read_frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
+/* A loss seen after a read's last frame: the next frame carries it */
+static bool s_lost_carry = false;
+/* How long the call for the rest of a batch waits: the least nonzero
+ * wait, never 0 (handle_op_read) */
+constexpr uint32_t kDrainMs = 1;
 
 /* ECUIO_SUR_LOG_FRAMES=1 logs every message the vendor returns and
  * every one written, bytes verbatim, with RxStatus or TxFlags and the
@@ -235,27 +245,52 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
         return static_cast<int>(ECUIO_PT_STATUS_NOERROR);
     }
 
-    /* A batch that held only indications (ecuio_pt_is_indication) is
-     * read again with what's left of the timeout, and at least once
-     * more, so an indication never ends a read: a reply queued behind
-     * it comes back in this response.
+    /* How a read calls ReadMsgs:
+     *   - Never with a timeout of 0. J2534-1 reads that as "return at
+     *     once", but the OBDX Pro VX holds such a read about 50 ms
+     *     (docs/bench-sessions/2026-11-04-two-ecu-car.md), so every
+     *     call waits at least 1 ms.
+     *   - The first call asks for one message, so a vendor that ends a
+     *     read at its count (J2534-1 does, and the VX) returns when the
+     *     reply arrives, not when the timeout ends a batch that never
+     *     fills. Whatever else has arrived then comes in one more call
+     *     for the rest of the batch, held kDrainMs, so a busy bus still
+     *     moves a batch a read.
+     *   - An indication (ecuio_pt_is_indication) never ends a read: a
+     *     call that brought only indications is followed by another
+     *     with what's left of the timeout, and one more once it has run
+     *     out, so a reply queued behind them comes back in this
+     *     response.
      *
      * Frames were lost (ERR_BUFFER_OVERFLOW, or a message with
      * BUFFER_OVERFLOW set, indications too): the first frame delivered
      * from there on carries the bit, the v05.00 form, whatever the
-     * vendor's version. With none delivered after it, the response's
-     * status says ERR_BUFFER_OVERFLOW, and the client marks the next. */
+     * vendor's version. With none delivered after it in this read, a
+     * read that delivers nothing says ERR_BUFFER_OVERFLOW, and the
+     * client marks the next; one that delivered frames before it leaves
+     * the bit to this child's next frame. */
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeout_ms);
-    uint32_t wait_ms = timeout_ms;
+    const auto wait_left = [&deadline]() -> uint32_t {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return 1;
+        }
+        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                            deadline - now)
+                            .count();
+        return static_cast<uint32_t>((us + 999) / 1000);
+    };
     uint32_t skipped = 0;
     uint32_t n = 0;
-    bool lost = false;
-    long rc = ECUIO_PT_STATUS_NOERROR;
-    for (;;) {
-        unsigned long num = ECUIO_SUR_MAX_FRAMES_PER_READ;
-        rc = g_read_msgs(g_channel, s_read_batch, &num, wait_ms);
+    bool lost = s_lost_carry;
+    s_lost_carry = false;
 
+    /* One call's messages into s_read_frames: asked is what the call
+     * asked for, so a count above it can't replay a previous read's
+     * messages left in s_read_batch. Returns the messages taken. */
+    const auto take = [&](long call_rc, unsigned long num,
+                          unsigned long asked) -> unsigned long {
         /* Trust the count only under the status allowlist
            (ecuio_trusted_count). A vendor may leave pNumMsgs untouched
            on error; the VX reports "status 7, written 1" on a failed
@@ -263,8 +298,11 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
            doubly dangerous here: s_read_batch is static and never
            cleared, so it would replay the PREVIOUS read's frames as
            phantoms. */
-        num = ecuio_trusted_count(rc, num);
-        lost = lost || rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
+        num = ecuio_trusted_count(call_rc, num);
+        if (num > asked) {
+            num = asked;
+        }
+        lost = lost || call_rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
 
         /* Frames are collected under either trusted status,
          * ERR_TIMEOUT included: per J2534-1 a read that asks for N
@@ -272,16 +310,15 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
          * with however many arrived, so on a conforming vendor the
          * ECU's answer usually arrives with a nonzero status. The
          * status still rides home verbatim in resp->status. */
-        const unsigned long lim = (num < ECUIO_SUR_MAX_FRAMES_PER_READ)
-                                  ? num : ECUIO_SUR_MAX_FRAMES_PER_READ;
-        for (unsigned long i = 0; i < lim; ++i) {
+        for (unsigned long i = 0; i < num; ++i) {
             const PASSTHRU_MSG& m = s_read_batch[i];
             const bool indication = ecuio_pt_is_indication(m.RxStatus) != 0;
             if (g_log_frames) {
                 char hex[3 * ECUIO_SUR_MSG_MAX + 16];
                 format_hex(hex, sizeof(hex), m.Data, m.DataSize);
-                stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: %s%s",
-                      rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
+                stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: "
+                      "%s%s",
+                      call_rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
                       indication ? " (indication, not delivered)" : "");
             }
             lost = lost || (m.RxStatus & ECUIO_PT_BUFFER_OVERFLOW) != 0;
@@ -296,19 +333,36 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
             }
             ++n;
         }
-        if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ) {
+        return num;
+    };
+
+    long rc = ECUIO_PT_STATUS_NOERROR;
+    bool last = false;
+    for (;;) {
+        unsigned long num = 1;
+        rc = g_read_msgs(g_channel, s_read_batch, &num, wait_left());
+        num = take(rc, num, 1);
+        if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ ||
+            last) {
             break;
         }
-        const auto now = std::chrono::steady_clock::now();
-        wait_ms = (now < deadline)
-            ? static_cast<uint32_t>(
-                  std::chrono::duration_cast<std::chrono::milliseconds>(
-                      deadline - now).count())
-            : 0;
+        last = std::chrono::steady_clock::now() >= deadline;
+    }
+    if (n > 0 && n < ECUIO_SUR_MAX_FRAMES_PER_READ) {
+        /* The rest of the batch. Its status goes no further than a loss:
+         * the frames already taken answer this read, and a failing
+         * adapter fails the next one */
+        const unsigned long asked = ECUIO_SUR_MAX_FRAMES_PER_READ - n;
+        unsigned long num = asked;
+        const long drain_rc =
+            g_read_msgs(g_channel, s_read_batch, &num, kDrainMs);
+        (void)take(drain_rc, num, asked);
     }
     resp->num_frames = n;
-    if (lost) {
+    if (lost && n == 0) {
         rc = ECUIO_PT_STATUS_BUFFER_OVERFLOW; /* the client marks the next */
+    } else if (lost) {
+        s_lost_carry = true; /* this child's next frame carries it */
     }
 
     /* Trace frames and status changes only: between requests the
@@ -492,8 +546,9 @@ int wmain(int argc, wchar_t* argv[])
 
     /* Windows times a wait in its timer's steps, 15.6 ms by default,
      * and a vendor holds a read for its timeout unless the batch fills
-     * (the VX does; the client asks for one 10 ms slice), so a reply
-     * 4 ms after its request was seen 15.6 ms after it. A surrogate
+     * (the VX does), so the 1 ms call for the rest of a batch
+     * (handle_op_read) would hold 15.6 ms, and a reply 4 ms after its
+     * request would be seen at least that late. A surrogate
      * serves one session, so it asks for 1 ms for its whole life,
      * before the vendor DLL loads. Since Windows 10 2004 the global
      * timer is left alone (processes that don't ask keep the default),

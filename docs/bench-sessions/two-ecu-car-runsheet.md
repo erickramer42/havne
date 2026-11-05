@@ -145,6 +145,34 @@ recording. The phone first, then the laptop for 90 s.
       2026-11-04). Note the counts; the setup moves to `AT CAF0`, and
       this phase runs again on that build
 
+## Phase 4b, again: the VX's reply latency (the read that ends at its reply)
+
+[2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md) put the VX's
+packed `obd2` latency at 73.7 ms per PID. Its frame log showed that a
+reply arriving after the first read's 10 ms waited about 50 more for
+the surrogate's 0 ms re-read, which the VX holds
+([ADR-0042](../adr/0042-reply-timing.md)'s note of 2026-11-04). The
+laptop on a build with the fix, the VX alone on the car, engine
+idling, Record sessions on (so the surrogate's frame log is on):
+
+    havne-cli stream "j2534://OBDX Pro - VX" --seconds 90 < /dev/null > vx-latency.jsonl
+    havne-cli stream "j2534://OBDX Pro - VX?pack=0" --seconds 60 < /dev/null > vx-latency-nopack.jsonl
+
+- [ ] Each run's final timing lines: per-PID latency P50, packed
+      against 73.7 ms and unpacked against 14.3. **Pass:** packed about
+      the bus time to the reply's last frame (13.9 ms on 2026-11-03)
+      plus 1-2 ms, unpacked about 5-7 ms
+- [ ] The frame log (`ecuio-surrogate.*.log`, counts and times only):
+      no reply line about 50 ms after its TX indication; write to read
+      near the bus time
+- [ ] More requests answered a second than the 2026-11-04 run, no
+      health line, no timeouts
+- [ ] If packed stays near 20-25 ms with no 50 ms class, the VX ends a
+      read at its count but not at once: note the median gap from the
+      last frame to the read. If the 50 ms class remains, the build
+      isn't the fix: check that `havne-cli`'s surrogate (the Win32
+      tree's) was rebuilt and warmed up
+
 ## Phase 5 (optional): a listener on the laptop's own clock
 
 The MX+ out, the USB2CAN on the Y-splitter, **its terminator out**.

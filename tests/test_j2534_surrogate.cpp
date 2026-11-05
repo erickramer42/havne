@@ -1299,11 +1299,12 @@ TEST(J2534SurrogateTest, EarlierSessionLogIsKept)
 
 /* Per J2534-1, a read asking for more messages than arrived, with a
  * nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH those messages.
- * The spec-mode fake emulates exactly that; the client must deliver
- * the batch and only judge the status when the batch is empty. A
- * client that judged the status first would discard the batch and
- * render a talking bus invisible. Knob armed BEFORE
- * open: the child snapshots the environment at spawn (same
+ * The spec-mode fake emulates exactly that. The child's first call
+ * asks for one message, so it returns as soon as one has arrived, and
+ * its call for the rest of the batch is such a short read: the second
+ * message comes back under ERR_TIMEOUT and must be delivered, from the
+ * same response. An empty read holds its timeout and is quiet. Knob
+ * armed BEFORE open: the child snapshots the environment at spawn (same
  * discipline as ECUIO_FAKE_IOCTL_DELAY_MS). */
 TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
 {
@@ -1314,10 +1315,11 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
     const unsigned char f0[8] = {0x41, 0x0C, 0x1F, 0x40, 0, 0, 0, 0};
+    const unsigned char f0b[8] = {0x41, 0x0D, 0x20, 0, 0, 0, 0, 0};
     ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, f0, 8, 4242, 0),
               ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, f0b, 8, 4243, 0), ECUIO_OK);
 
-    /* A conforming vendor holds a short read for its timeout. */
     const auto ms_since = [](std::chrono::steady_clock::time_point t) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t).count();
@@ -1329,29 +1331,39 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
         ecuio_j2534_sur_read_msg(h, 0, &f1, 50, &got1);
     const auto held1 = ms_since(t);
 
+    /* The rest of the batch, from the client's cache */
     ecuio_pt_rx_t f2 = {};
     bool got2 = false;
-    t = std::chrono::steady_clock::now();
     const ecuio_status_t st2 =
         ecuio_j2534_sur_read_msg(h, 0, &f2, 50, &got2);
-    const auto held2 = ms_since(t);
+
+    ecuio_pt_rx_t f3 = {};
+    bool got3 = false;
+    t = std::chrono::steady_clock::now();
+    const ecuio_status_t st3 = ecuio_j2534_sur_read_msg(h, 0, &f3, 50, &got3);
+    const auto held3 = ms_since(t);
 
     /* Restore BEFORE assertions (knob-leak discipline) */
     SetEnvironmentVariableA("ECUIO_FAKE_SPEC_READ_SEMANTICS", nullptr);
 
-    /* Child asks for 16 with a 50 ms timeout; one queued -> spec mode
-     * returns 1 message WITH ERR_TIMEOUT. The client must deliver it. */
     EXPECT_EQ(st1, ECUIO_OK);
     EXPECT_TRUE(got1);
     EXPECT_EQ(memcmp(f1.data, f0, 8), 0);
     EXPECT_EQ(f1.data_size, 8u);
     EXPECT_EQ(f1.timestamp, 4242u);
-    EXPECT_GE(held1, 45) << "the short batch came back before its timeout";
+    EXPECT_LT(held1, 45) << "the read held its timeout past its message";
+
+    /* The child's second call asked for 15 with 1 ms; one queued: spec
+     * mode returned it WITH ERR_TIMEOUT, and it was delivered */
+    EXPECT_EQ(st2, ECUIO_OK);
+    EXPECT_TRUE(got2) << "the short batch's message was dropped";
+    EXPECT_EQ(memcmp(f2.data, f0b, 8), 0);
+    EXPECT_EQ(f2.timestamp, 4243u);
 
     /* Empty queue, nonzero timeout: quiet, not delivered, not hard. */
-    EXPECT_EQ(st2, ECUIO_ERR_VEHICLE_TIMEOUT);
-    EXPECT_FALSE(got2);
-    EXPECT_GE(held2, 45) << "the empty read came back before its timeout";
+    EXPECT_EQ(st3, ECUIO_ERR_VEHICLE_TIMEOUT);
+    EXPECT_FALSE(got3);
+    EXPECT_GE(held3, 45) << "the empty read came back before its timeout";
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
