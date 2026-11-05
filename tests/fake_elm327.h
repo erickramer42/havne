@@ -6,7 +6,7 @@
 //          pseudo-terminal; pending_counted is the other reading of the
 //          count digit (Elm327SessionTest.AScannedDidHeldPending...);
 //          cut_gap_ms an ECU sending a cut reply's rest
-//          (Elm327SessionTest.ACutDid*); monitor_cfc_eats_cfs an STN's
+//          (Elm327SessionTest.ACutDid*); monitor_eats_cfs the MX+'s
 //          monitor (Elm327SessionTest.ListeningTurnsFlowControlOff*)
 //
 // An ELM327 as its datasheet and the OBDLink manual describe it, bytes
@@ -58,10 +58,11 @@
 //                request until it's sent (NO DATA): an ECU the adapter
 //                sent flow control (the test car's engine ECU, 8 ms;
 //                docs/bench-sessions/2026-11-01-android.md); 0 none
-//   monitor_cfc_eats_cfs  while monitoring with AT CFC1 (the default),
-//                a message's First Frame prints and its Consecutive
-//                Frames don't, as the MX+'s STN2255 does
-//                (docs/bench-sessions/2026-11-04-two-ecu-car.md)
+//   monitor_eats_cfs  while monitoring, a message's First Frame prints
+//                and its Consecutive Frames don't, under AT CFC1 or
+//                CFC0, as the MX+'s STN2255 does
+//                (docs/bench-sessions/2026-11-04-two-ecu-car.md,
+//                docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)
 //   longer_pid   a Service 01 PID (-1 none) whose positive reply the ECU
 //                pads with zeros to 13 data bytes, a First Frame and two
 //                Consecutive Frames: an ECU answering longer than J1979's
@@ -111,7 +112,7 @@ struct knobs {
     bool full_ends_monitor = false;
     bool stale_banner = false;
     uint32_t cut_gap_ms = 0;
-    bool monitor_cfc_eats_cfs = false;
+    bool monitor_eats_cfs = false;
     int longer_pid = -1;
 };
 
@@ -171,7 +172,7 @@ public:
     void bus(uint32_t id, const uint8_t* m, size_t len, int64_t now_us)
     {
         if (monitoring_ && !k.hung && passes(id)) {
-            message(id, m, len, now_us, k.monitor_cfc_eats_cfs && cfc_);
+            message(id, m, len, now_us, k.monitor_eats_cfs);
         }
     }
 

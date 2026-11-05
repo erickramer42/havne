@@ -267,3 +267,11 @@ one more 1 ms call ([j2534.md](../j2534.md#requests)). The fake as the
 VX holds a 0 ms read for 50 ms, and `J2534HealthTest.VxAReply*` time
 both cases. The adapter's own delivery after the last frame is what
 remains of the gap; the car measures it again.
+
+**Note, 2026-11-05: no call for the rest of a batch.** The re-run on the
+test car ([2026-11-05-two-ecu-car-rerun](../bench-sessions/2026-11-05-two-ecu-car-rerun.md))
+had no reply 50 ms late, but the VX held the 1 ms call for the rest of
+a batch a median 9.8 ms, and only 12 of 3,337 such calls brought a
+message: packed requests read a median 24.6 ms against the bus's
+15. The child now answers a read with its first message, and the
+fake as the VX holds a call asked to wait under 10 ms for 10 ms.

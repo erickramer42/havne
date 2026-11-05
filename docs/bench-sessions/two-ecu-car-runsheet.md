@@ -168,19 +168,17 @@ app's own sessions):
 - [ ] The frame log (`ecuio-surrogate.*.log`, counts and times only):
       no reply line about 50 ms after its TX indication; write to read
       near the bus time
-- [ ] The frame log's `OP_READ call` lines: how long the VX held the
-      first call (asked 1) that brought a reply, and the call for the
-      rest of the batch (`the rest`, asked up to 15, timeout 1 ms),
-      median and slowest. **Pass:** the rest held about 1-2 ms
+- [ ] The frame log's `OP_READ call` lines: how long the VX held each
+      call (asked 1) that brought a reply, median and slowest.
+      **Pass:** the median under 1 ms
 - [ ] More requests answered a second than the 2026-11-04 run, no
       health line, no timeouts
 - [ ] If packed stays near 20-25 ms with no 50 ms class, the VX ends a
       read at its count but not at once: note the median gap from the
       last frame to the read. If the 50 ms class remains, read the
-      `OP_READ call` lines first: **the rest held near 50 ms** means the
-      VX holds any short read that long, not only one asked to wait
-      0 ms, and the call for the rest of a batch costs every reply that
-      time (note it: the fix needs another shape); **no `OP_READ call`
+      `OP_READ call` lines first: **a call held near 50 ms** after its
+      reply means the VX holds a read past its count (note it: the fix
+      needs another shape); **no `OP_READ call`
       lines at all** means the build isn't the fix: check that
       `havne-cli`'s surrogate (the Win32 tree's) was rebuilt and warmed
       up

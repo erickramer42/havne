@@ -2,9 +2,9 @@
 // Testing: HARNESS: test_j2534_surrogate, plus the cross-arch routing
 //          case against the Win32-tree build (ADR-0014); the 1 ms timer
 //          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep;
-//          a read's calls (one message first, then the rest of the
-//          batch, never a 0 ms wait, a loss after the last frame) by
-//          J2534HealthTest.VxAReply*, .VxQueuedMessagesComeBackInOneRead,
+//          a read's calls (one message, answered at once, never a 0 ms
+//          wait, a loss after the last frame) by
+//          J2534HealthTest.VxAReply*, .VxQueuedMessagesComeBackWithoutAHold,
 //          .VxTheReadAfterAnIndicationPastTheDeadline*,
 //          .VxALossAfterAReadsLastFrameFlagsTheNextRead,
 //          .ALossCarriedIntoAFailedReadLetsTheFailureThrough,
@@ -80,9 +80,6 @@ static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
 static ecuio_pt_rx_t s_read_frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
 /* A loss seen after a read's last frame: the next frame carries it */
 static bool s_lost_carry = false;
-/* How long the call for the rest of a batch waits: the least nonzero
- * wait, never 0 (handle_op_read) */
-constexpr uint32_t kDrainMs = 1;
 
 /* ECUIO_SUR_LOG_FRAMES=1 logs every message the vendor returns and
  * every one written, bytes verbatim, with RxStatus or TxFlags and the
@@ -257,12 +254,15 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
      *     once", but the OBDX Pro VX holds such a read about 50 ms
      *     (docs/bench-sessions/2026-11-04-two-ecu-car.md), so every
      *     call waits at least 1 ms.
-     *   - The first call asks for one message, so a vendor that ends a
-     *     read at its count (J2534-1 does, and the VX) returns when the
-     *     reply arrives, not when the timeout ends a batch that never
-     *     fills. Whatever else has arrived then comes in one more call
-     *     for the rest of the batch, held kDrainMs, so a busy bus still
-     *     moves a batch a read.
+     *   - A call asks for one message, so a vendor that ends a read at
+     *     its count (J2534-1 does, and the VX) returns when the reply
+     *     arrives, not when the timeout ends a batch that never fills,
+     *     and the read answers with it at once. No call follows for the
+     *     rest of a batch: the VX holds any call asked to wait under
+     *     10 ms about 10 ms, and nearly always with nothing in it
+     *     (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md), so each
+     *     reply would wait that long. Messages already queued come back
+     *     in the next reads, each call returning at once.
      *   - An indication (ecuio_pt_is_indication) never ends a read: a
      *     call that brought only indications is followed by another
      *     with what's left of the timeout, and one more once it has run
@@ -357,25 +357,22 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     };
 
     /* One vendor call. With ECUIO_SUR_LOG_FRAMES=1, a call that brought
-     * messages, and every call for the rest of a batch, leaves a line
-     * with how long the vendor held it: the evidence of how an adapter
-     * holds a short read (an empty first call is left out, since the
-     * worker makes one every slice between requests) */
-    const auto call = [&](unsigned long* num, uint32_t wait_ms,
-                          bool drain) -> long {
+     * messages leaves a line with how long the vendor held it: the
+     * evidence of how an adapter holds a read (an empty call is left
+     * out, since the worker makes one every slice between requests) */
+    const auto call = [&](unsigned long* num, uint32_t wait_ms) -> long {
         const unsigned long asked = *num;
         const auto from = std::chrono::steady_clock::now();
         const long call_rc = g_read_msgs(g_channel, s_read_batch, num, wait_ms);
-        if (g_log_frames && (drain || ecuio_trusted_count(call_rc, *num) > 0)) {
+        if (g_log_frames && ecuio_trusted_count(call_rc, *num) > 0) {
             const long long us =
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - from)
                     .count();
-            stage("OP_READ call: %s, timeout %u ms, asked %lu, got %lu, "
+            stage("OP_READ call: timeout %u ms, asked %lu, got %lu, "
                   "status %ld, held %lld.%03lld ms",
-                  drain ? "the rest" : "first", wait_ms, asked,
-                  ecuio_trusted_count(call_rc, *num), call_rc, us / 1000,
-                  us % 1000);
+                  wait_ms, asked, ecuio_trusted_count(call_rc, *num), call_rc,
+                  us / 1000, us % 1000);
         }
         return call_rc;
     };
@@ -384,22 +381,13 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     bool last = false;
     for (;;) {
         unsigned long num = 1;
-        rc = call(&num, wait_left(), false);
+        rc = call(&num, wait_left());
         num = take(rc, num, 1);
         if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ ||
             last) {
             break;
         }
         last = std::chrono::steady_clock::now() >= deadline;
-    }
-    if (n > 0 && n < ECUIO_SUR_MAX_FRAMES_PER_READ) {
-        /* The rest of the batch. Its status goes no further than a loss:
-         * the frames already taken answer this read, and a failing
-         * adapter fails the next one */
-        const unsigned long asked = ECUIO_SUR_MAX_FRAMES_PER_READ - n;
-        unsigned long num = asked;
-        const long drain_rc = call(&num, kDrainMs, true);
-        (void)take(drain_rc, num, asked);
     }
     resp->num_frames = n;
     /* A loss with no frame after it: an empty read that was quiet says
@@ -596,10 +584,9 @@ int wmain(int argc, wchar_t* argv[])
     stage("pipe connected");
 
     /* Windows times a wait in its timer's steps, 15.6 ms by default,
-     * and a vendor holds a read for its timeout unless the batch fills
-     * (the VX does), so the 1 ms call for the rest of a batch
-     * (handle_op_read) would hold 15.6 ms, and a reply 4 ms after its
-     * request would be seen at least that late. A surrogate
+     * and a vendor's read waits for its message in this process, so a
+     * reply 4 ms after its request would be seen at the next step,
+     * 15.6 ms after the read began. A surrogate
      * serves one session, so it asks for 1 ms for its whole life,
      * before the vendor DLL loads. Since Windows 10 2004 the global
      * timer is left alone (processes that don't ask keep the default),
