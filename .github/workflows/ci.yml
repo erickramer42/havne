@@ -477,10 +477,17 @@ jobs:
       - name: Compare the C ABI with the newest release
         shell: bash
         run: |
-          bash scripts/abi-check.sh | tee abi.txt
-          # The headers' verdict first: abidiff's report can run past 40 lines
-          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt
+          # The summary is written whatever the verdict, and the check's
+          # own status then ends the step: a failure is when it's read
+          set +e
+          bash scripts/abi-check.sh 2>&1 | tee abi.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          # The headers' verdict first: abidiff's report can run past 40
+          # lines. An error before the headers' check leaves no verdict line
+          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt || true
             tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
   # Ubuntu it supports: an AppImage runs where glibc is at least its
