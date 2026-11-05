@@ -489,9 +489,11 @@ and no ABI change.
 - **The UI on a phone**, built and run on the test phone: denser
   pages, the chart taking the page, a pinch stepping Live's window,
   the Dashboard's dials side by side upright, a frame-rate readout in
-  developer mode, charts that hold still, Log rows copied. The
-  double-tap's allowance for a thumb's drift is tested in QML; the
-  phone's re-run is with the car run below.
+  developer mode, charts that hold still, Log rows copied. The double
+  tap allows a thumb's drift and is timed by the taps' own stamps, so
+  a slow frame between them (the maximized viewer's chart, about
+  370 ms a paint on the test phone) doesn't split it; tested in QML,
+  and the phone's check (`ui check doubletap`) passes 10 of 10.
 - **Two recordings on the wall clock:** the same bus recorded twice on
   one machine lines up to about 0.3 ms
   (`SocketCanBusTest.TwoRecordingsOfOneBusLineUpOnTheirUtcStarts`), and
@@ -517,11 +519,7 @@ and no ABI change.
     read makes that call (ADR-0042's note of 2026-11-05); timed again
     without it, 16.4 ms packed and 4.6 ms unpacked.
 
-**Done when:** the double-tap on the test phone (2026-11-05, the phone skill's
-`ui check doubletap`, 9 of 10): Live's chart both ways and the
-viewer's into its maximized chart pass; the viewer's way back with a
-drifting double tap missed in both checks and in 2 of 9 tries by hand,
-to fix or to record as a known issue.
+**Done when:** released; every item above has run where it says.
 
 ### Waiting on a tester: an iPhone download
 
