@@ -8,8 +8,10 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 Havne is an OBD-II scan tool and data logger: live gauges, a strip
 chart, the trouble codes and readiness monitors, and every frame
 recorded, to open again, overlay on another run, check for gaps and
-replay. It runs on Windows, Linux and Android, builds and passes its
-tests on macOS, and runs on the iOS Simulator. It reaches the car
+replay. It runs on Windows, Linux and Android; on Linux its tests and
+simulated bus pass on an x86_64 desktop and, for the core and
+`havne-cli`, on a Raspberry Pi (ARM64). It builds and passes its tests
+on macOS, and runs on the iOS Simulator. It reaches the car
 through J2534 Pass-Thru adapters on Windows, ELM327-compatible
 adapters over USB, Bluetooth or WiFi everywhere, and SocketCAN on
 Linux (listening on a real bus; asking, so far, on a virtual one). A

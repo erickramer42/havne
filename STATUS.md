@@ -261,8 +261,10 @@ or imported in bulk, and computed signals such as boost
     one commit match. The AppImage ran with a window under WSLg on
     Ubuntu 26.04, Arch and Kali, and v0.3.4's on a Linux machine's own
     desktop (Xubuntu 26.10, X11, `mock://demo` with recording). The
-    app's suite has run on that machine, and the core's on a Raspberry
-    Pi 3 (aarch64), with no warnings (2026-11-05,
+    app's suite passes on that machine, and the core's on a Raspberry
+    Pi 3 (aarch64), with no warnings; on both, the simulated bus's
+    cases and `havne-cli` end to end over `vcan0` (the simulated ECU
+    answering through ISO-TP, recorded and checked) (2026-11-05,
     [docs/linux.md](docs/linux.md#what-has-run-where)); not yet with an
     adapter on Linux.
   - **Reply timing** ([ADR-0042](docs/adr/0042-reply-timing.md)): every

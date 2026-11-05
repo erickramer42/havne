@@ -239,18 +239,26 @@ counts the frames per CAN ID.
   workaround; `mock://demo` ran smoothly, and its recording landed in
   `~/Documents/Havne/recordings/`. With Live showing, the app took
   about 12 % of the CPU, and 9-10 % once the OpenGL and font packages
-  above were installed. On the same desktop, the tree built with GCC
-  15.3 and Qt 6.12.0 (from `aqtinstall`, in the home folder) and its
-  suites ran: the core alone, 728 cases, and the whole app, 877, all
-  passing but the cases that need `vcan0` or the kernel's ISO-TP, the
-  locale case and the real-car recordings' diff, with no warnings
-  (2026-11-05).
+  above were installed. On the same desktop, the tree builds with GCC
+  15.3 and Qt 6.12.0 (from `aqtinstall`, in the home folder) with no
+  warnings, and its suites pass: the core alone, 728 cases, and the
+  whole app, 877, but for the locale case and the real-car recordings'
+  diff. With `vcan0` up and the kernel's ISO-TP loaded, the simulated
+  bus's 63 cases pass too, but for the one that takes the interface
+  down, which needs root; and `havne-cli`, end to end: a replay of the
+  committed fixture (7,074 frames, none dropped), the mock car played
+  onto `vcan0` and heard by a listening session, and the simulated ECU
+  answering an `obd2` session through ISO-TP while it recorded (4,259
+  replies, no timeout), the recording then passing `info` and `view`
+  (2026-11-05, `dev` at 8d996cc).
 - **A Raspberry Pi 3** (aarch64, Kali Linux, GCC 15.2, 906 MB of memory
-  and a 2 GB swap file): the core and `havne-cli` built (about 27
-  minutes at `-j2`, into the swap but never out of memory) and the
-  core's suite passed, 728 cases with the same skips, with no warnings
-  (2026-11-05). It is the only ARM Linux that has run Havne; CI's Linux
-  jobs build x86_64 only.
+  and a 2 GB swap file): the core and `havne-cli` build (about 27
+  minutes at `-j2`, into the swap but never out of memory) with no
+  warnings, and the core's suite passes, 728 cases; with `vcan0` and
+  ISO-TP, the simulated bus's 63 and the same `havne-cli` run as the
+  desktop's, with the same counts (2026-11-05, `dev` at 8d996cc). It is
+  the only ARM Linux that has run Havne; CI's Linux jobs build x86_64
+  only.
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), and a real CAN controller sending through
