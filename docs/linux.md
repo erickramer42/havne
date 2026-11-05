@@ -60,6 +60,10 @@ sudo apt install ./havne-core_X.Y.Z_amd64.deb    # havne-core_X.Y.Z_arm64.deb on
 havne-cli stream mock://demo --values --count 20
 ```
 
+Signals of your own, a maker's DID or one computed from others, go in a
+signal file ([signal-files.md](signal-files.md)), which `havne-cli` and
+the app read alike.
+
 The deb installs `/usr/bin/havne-cli`, the static library
 `/usr/lib/libecuio-core.a`, the public headers in `/usr/include/ecuio/`,
 a CMake package and a pkg-config file:

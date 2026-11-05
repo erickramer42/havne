@@ -493,6 +493,7 @@ Detail and gaps: [testing.md](testing.md).
 | How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |
 | How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
 | How to run Havne on Linux: the downloads, adapters and permissions, SocketCAN, tracing | [linux.md](linux.md) |
+| How to write a file of your own signals: DIDs and PIDs, enumerations, computed signals | [signal-files.md](signal-files.md) |
 | How to install Havne on an iPhone for testing, and what works there | [ios.md](ios.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
 | What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |
