@@ -145,6 +145,8 @@ Dates are commit dates.
 | 2026-11-05 | A J2534 read asks for one message first, ends at its reply and never asks the vendor to wait 0 ms; the review's read fixes after it, and each vendor call's held time in the frame log | `d05e6e1`, `b98240d` |
 | 2026-11-05 | The two-ECU car re-run: the VX's 50 ms class gone, the latency per request from 65.5-73.7 ms to 24.6 ms, the 1 ms call for the rest of a batch held about 10 ms; the MX+'s monitor misses every frame within about 1 ms of another, under every setup tried ([2026-11-05-two-ecu-car-rerun](bench-sessions/2026-11-05-two-ecu-car-rerun.md)) | `cb70cf9` |
 | 2026-11-05 | A J2534 read answers with its first message, with no call for the rest of a batch; the fake VX holds a short read 10 ms, and the fake MX+ drops the Consecutive Frames under either flow-control setting | `61aa643` |
+| 2026-11-05 | On the test car without that call: the latency per request 16.4 ms packed (about 2.5 ms past the bus) and 4.6 ms unpacked, both ECUs about a third of their 2026-11-04 latency, and the app the same ([2026-11-05-two-ecu-car-rerun](bench-sessions/2026-11-05-two-ecu-car-rerun.md), A2-A4) | `fbeb6c9` |
+| 2026-11-05 | On the Recordings viewer's maximized chart, the cursor's values fold to a tab, so the plot takes the width | `fb70aae` |
 
 ## Lessons learned
 
