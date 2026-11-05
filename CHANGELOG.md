@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-05
+
 ### Added
 
 - In developer mode, a corner badge counts the frames the window draws each second.
@@ -641,7 +643,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/erickramer42/havne/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/erickramer42/havne/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/erickramer42/havne/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/erickramer42/havne/compare/v0.3.4...v0.3.5

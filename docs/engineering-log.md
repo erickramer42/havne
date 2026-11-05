@@ -150,6 +150,7 @@ Dates are commit dates.
 | 2026-11-05 | The viewer's double tap timed by the taps' own stamps, so a second tap that reaches the chart behind its paint (about 370 ms on the test phone) still counts; 10 of 10 on the test phone | `44f1b8e` |
 | 2026-11-05 | Linux test platforms: on an x86_64 desktop, the app's suite; on a Raspberry Pi 3 (ARM64), the core's; on both, the simulated bus over `vcan0` and `havne-cli` end to end ([linux.md](linux.md#what-has-run-where)) | `d0d47d6` |
 | 2026-11-05 | On a tall page, the viewer's cursor values go in a band below the chart, so the plot keeps the page's width | `4f3b7a5` |
+| 2026-11-05 | The viewer's cursor lands on the nearest sample of the first signal plotted, and a dot marks each value's sample: between samples it read the earlier one while the line had moved on, found on the test phone | `5e98a3d` |
 
 ## Lessons learned
 

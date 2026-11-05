@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-05, **Version:** v0.4.0,
+**Updated:** 2026-11-05, **Version:** v0.4.1,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,19 +14,19 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.4.1, a patch, in progress; v0.5.0 after it.**
-v0.4.0 is out: recordings in
-core, written on a thread of their own by the app and `havne-cli`
-alike; the Recordings page's viewer, which overlays two runs, and
-`havne-cli view` and `info` offline; a check of a recording's frames;
-finding a signal among many; and SocketCAN through a real controller,
-which has listened on a desk bus and on the test car. Changes since then go under
+**Current phase: v0.5.0, in progress.** v0.4.1 is out, a patch: the
+pages on a phone; both of the test car's ECUs in one session, recorded
+by the app, the phone and `havne-cli`; a J2534 read that ends at its
+reply, which brought the VX's latency per request on the test car to
+16.4 ms packed and 4.6 ms unpacked; and a listening ELM327 session
+that leaves the other tester's flow control alone, through an OBDLink
+MX+ hearing Single Frame replies only. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
 bench bus and on one car, from
 [2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md) to
-[2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md): the values
+[2026-11-05](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md): the values
 decoded and tracked the cluster, and the request engine, the probe,
 identification, `uds-generic`, the trouble codes, several PIDs per
 request, more than one ECU and a DID scan ran there. The [ELM327 transport](docs/elm327.md)
@@ -349,7 +349,7 @@ or imported in bulk, and computed signals such as boost
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1016 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 1018 ctest cases on Windows (both trees rebuilt,
   2026-11-05), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (101/101); 0 MSVC warnings, and a GCC or Clang
@@ -472,8 +472,8 @@ an issue is resolved it is removed, and its number is not reused.
 | Version | Scope | Status |
 |---|---|---|
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
-| v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | In progress |
-| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier | Planned |
+| v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | Released |
+| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | In progress |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
