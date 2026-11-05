@@ -28,6 +28,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - Live's chart no longer shimmers as it scrolls, nor the Recordings viewer's as you pan it: a noisy trace's peaks stay where they are instead of shifting at every update.
 - On a phone upright, Live's **120 s** button no longer wraps onto two lines.
+- The Recordings viewer's chart zooms a notch's worth per notch of a high-resolution mouse wheel or a touchpad, which send a notch in parts, instead of a notch per part, and a sideways scroll no longer zooms it out.
+- On a phone, a double-tap on Live's or the viewer's chart no longer misses when the two taps land a little apart.
 
 ## [0.4.0] - 2026-11-04
 

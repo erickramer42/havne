@@ -7,9 +7,9 @@
 //          view; either order button, and Latest, at the newest
 //          row from a scrolled view (the top newest-first, the end
 //          oldest-first); a row selected by a tap and a range by a
-//          shift-click, copied by Copy (test_selectedFramesAreCopied;
-//          the model's side, BridgeTest.FrameLogSelectionFollowsItsFrames;
-//          Ctrl+C manual smoke); the paused status with and without a
+//          shift-click, copied by Copy (test_selectedFramesAreCopied)
+//          and by Ctrl+C (test_ctrlCCopiesTheSelectedFrames); the model's
+//          side, BridgeTest.FrameLogSelectionFollowsItsFrames; the paused status with and without a
 //          recording under way (test_pausedSaysWhereNewFramesGo); the link lines in each link state
 //          (tests/qml/tst_linkhealth.qml). The frame table: render
 //          verified manually; the arbId column by the smoke

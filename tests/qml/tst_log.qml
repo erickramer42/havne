@@ -8,8 +8,8 @@
 //          developer box sets Theme.developerMode and the mock:// preset
 //          follows it. Copy puts the whole log on the clipboard and
 //          leaves nothing selected. In the Frames view a tap selects a
-//          row, a shift-click a range, and Copy puts the selected rows
-//          on the clipboard. Paused, the status says whether a recording
+//          row, a shift-click a range, and Copy or Ctrl+C puts the
+//          selected rows on the clipboard. Paused, the status says whether a recording
 //          still keeps new frames. The Frames view lies inside 320 px.
 //          How the page looks is manual smoke.
 
@@ -269,6 +269,33 @@ TestCase {
         none.clicked()
         compare(Bridge.model.selectedCount, 0)
         verify(!copy.enabled && !none.enabled)
+    }
+
+    // Ctrl+C (Cmd+C on a Mac) copies the selected rows as Copy does
+    function test_ctrlCCopiesTheSelectedFrames() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.model.count >= 3, 5000, "rows arrive")
+        Bridge.logPaused = true
+        Bridge.model.toggleSelected(0)
+        compare(Bridge.model.selectedCount, 1)
+        // Something else on the clipboard first, so a key that copies
+        // nothing can't pass on an earlier test's rows
+        const pasted = createTemporaryQmlObject("import QtQuick; TextEdit {}", testCase)
+        pasted.text = "not the rows"
+        pasted.selectAll()
+        pasted.copy()
+        pasted.text = ""
+        page.forceActiveFocus()
+        keySequence(StandardKey.Copy)
+        pasted.paste()
+        const lines = pasted.text.split("\n").filter(l => l.length > 0)
+        compare(lines.length, 2, "a header and the row: " + pasted.text)
+        compare(lines[0], "time_s\tdlc\text\tid\tdata")
+        verify(/^\d+\.\d{6}\t\d+\t[-E]\t0x[0-9A-F]+\t[0-9A-F ]*$/.test(lines[1]),
+               "a row's columns: " + lines[1])
     }
 
     // A phone can't select the log's text: Copy puts all of it on the

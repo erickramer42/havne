@@ -7,7 +7,9 @@
 //          tests run them at 320 px
 //          alone; this one runs them as the window holds them, the
 //          relay's line beside its button, the header's Mark while
-//          recording, and developer mode's frame-rate badge. How they
+//          recording, developer mode's frame-rate badge, and a thumb's
+//          double tap, two taps a little apart (DoubleTapHandler.qml), on
+//          Live's and the viewer's chart and splitters. How they
 //          look on a phone is the phone's run.
 
 import QtQuick
@@ -255,6 +257,91 @@ TestCase {
         find(live, "maximizeChart").clicked()
     }
 
+    // One finger's tap, pressed and lifted in place
+    function tap(item, x, y) {
+        const seq = touchEvent(item)
+        seq.press(0, item, x, y).commit()
+        seq.release(0, item, x, y).commit()
+    }
+
+    // A double tap on Live's chart allows a thumb's drift
+    // (DoubleTapHandler): two taps a little apart within the double-click
+    // interval toggle it, two far apart or past the interval don't; a
+    // mouse's two clicks the same way
+    function test_aDoubleTapOnLivesChartAllowsAThumbsDrift_data() {
+        return [{ tag: "taps 30 px apart", gap: 30, late: false, mouse: false, toggles: true },
+                { tag: "taps 100 px apart", gap: 100, late: false, mouse: false, toggles: false },
+                { tag: "taps past the interval", gap: 0, late: true, mouse: false, toggles: false },
+                { tag: "clicks 30 px apart", gap: 30, late: false, mouse: true, toggles: true }]
+    }
+    function test_aDoubleTapOnLivesChartAllowsAThumbsDrift(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        const frame = find(live, "chartFrame")
+        tryVerify(() => frame.width > 300 && frame.height > 200, 3000, "the chart at its size")
+        verify(waitForPolish(main), "laid out")
+        const before = live.chartMaximized
+        const x = frame.width / 2 - data.gap / 2
+        const y = frame.height / 2
+        const press = data.mouse ? (px => mouseClick(frame, px, y)) : (px => tap(frame, px, y))
+        press(x)
+        if (data.late)
+            wait(Qt.styleHints.mouseDoubleClickInterval + 150)
+        press(x + data.gap)
+        compare(live.chartMaximized, data.toggles ? !before : before)
+    }
+
+    // The viewer's chart and splitter, and Live's splitter, take the same
+    // double tap
+    function test_theViewersChartAndBothSplittersAllowAThumbsDrift() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const chart = find(page, "chartFrame")
+        tryVerify(() => chart.visible && chart.width > 300, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const keptHeight = page.chartHeight
+        page.chartHeight = 300
+        const chartSplitter = find(page, "chartSplitter")
+        tryVerify(() => chartSplitter.visible, 2000, "the viewer's splitter shows")
+        verify(waitForPolish(main), "laid out")
+        tap(chartSplitter, chartSplitter.width / 2 - 15, chartSplitter.height / 2)
+        tap(chartSplitter, chartSplitter.width / 2 + 15, chartSplitter.height / 2)
+        compare(page.chartHeight, -1, "the viewer's splitter: taps 30 px apart give the page its own height")
+        page.chartHeight = keptHeight
+        verify(waitForPolish(main), "laid out")
+
+        const before = page.chartMaximized
+        tap(chart, chart.width / 2 - 15, chart.height / 2)
+        tap(chart, chart.width / 2 + 15, chart.height / 2)
+        compare(page.chartMaximized, !before, "the viewer's chart: taps 30 px apart")
+
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        const list = find(live, "signalList")
+        tryVerify(() => list.count > 3, 5000, "rows")
+        const splitter = find(live, "listSplitter")
+        tryVerify(() => splitter.visible, 2000, "the splitter shows")
+        const kept = live.listShare
+        live.listShare = 0.1
+        verify(waitForPolish(main), "laid out")
+        tap(splitter, splitter.width / 2 - 15, splitter.height / 2)
+        tap(splitter, splitter.width / 2 + 15, splitter.height / 2)
+        compare(live.listShare, -1, "Live's splitter: taps 30 px apart size the list to its rows")
+        live.listShare = kept
+    }
+
     // Live's splitter: a share of the page for the list, within the rows
     // it has; -1 sizes it to them again
     function test_liveSplitterSetsTheListsHeight() {
@@ -323,6 +410,17 @@ TestCase {
         compare(live.chartWindowS, 60, "the wheel up: less time")
         mouseWheel(frame, frame.width / 2, frame.height / 2, 0, -120)
         compare(live.chartWindowS, 120, "the wheel down: more")
+        // A high-resolution wheel's or a touchpad's notch in parts: one
+        // step once they add up to 120, not one per part
+        for (let i = 0; i < 3; ++i)
+            mouseWheel(frame, frame.width / 2, frame.height / 2, 0, 30)
+        compare(live.chartWindowS, 120, "three quarters of a notch: no step yet")
+        mouseWheel(frame, frame.width / 2, frame.height / 2, 0, 30)
+        compare(live.chartWindowS, 60, "four quarters: one step")
+        mouseWheel(frame, frame.width / 2, frame.height / 2, 120, 0)
+        compare(live.chartWindowS, 60, "a sideways scroll leaves the window")
+        mouseWheel(frame, frame.width / 2, frame.height / 2, 0, -120)
+        compare(live.chartWindowS, 120)
 
         // Two fingers spreading from 40 px apart to 160, then closing
         // again. The handler takes its scale from where it starts, past

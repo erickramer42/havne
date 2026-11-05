@@ -3,7 +3,8 @@
 //          Bridge.recentRecordings, a recording that ends joining it, Replay
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
-//          readout, pan and zoom kept inside the recording, the columns
+//          readout, pan and zoom kept inside the recording, the wheel's
+//          zoom by its share of a notch and none sideways, the columns
 //          on their grid from time 0 through a pan, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
 //          fall), a finding's row centering the view, the signal rows'
@@ -11,8 +12,10 @@
 //          the stretch in view, a refused folder's error, back to the list;
 //          every item inside a phone's width (tst_phone.qml), maximized
 //          on its side with the cursor's strip, then restored and scrolled
-//          to its end (tst_phone.qml; the splitter's drag, the
-//          double-click and F are manual smoke, and the phone's run).
+//          to its end, and a double tap on the chart or its splitter
+//          (DoubleTapHandler.qml: taps a little apart within the interval)
+//          (tst_phone.qml; the splitter's drag and F are manual smoke, and
+//          the phone's run).
 //          RecordingView
 //          itself: test_bridge (RecordingViewTest); the chart's layout:
 //          tst_chartlayout.qml; the drawing is manual smoke (docs/testing.md).
@@ -75,6 +78,7 @@ Page {
         category: "recordings"
         property real chartHeight: -1
     }
+    property alias chartHeight: viewerSettings.chartHeight
 
     // The part of the axis in view, in ms since the recording started
     // (before it too, with a compared recording that starts earlier), and
@@ -1176,15 +1180,22 @@ Page {
                     lastScale = activeScale
                 }
             }
+            // A notch (120) in shows 0.8 of the span, out 1.25; a
+            // high-resolution wheel's or a touchpad's parts of a notch zoom
+            // by their share of it, and a sideways scroll doesn't zoom
             WheelHandler {
                 target: null
-                onWheel: event => root.zoomAt(root.timeAt(event.x), event.angleDelta.y > 0 ? 0.8 : 1.25)
+                onWheel: event => {
+                    const dy = event.angleDelta.y
+                    if (dy !== 0)
+                        root.zoomAt(root.timeAt(event.x), Math.pow(0.8, dy / 120))
+                }
             }
-            TapHandler {
+            DoubleTapHandler {
                 onTapped: (eventPoint, button) => root.setCursor(root.timeAt(eventPoint.position.x))
                 // A double-click or double-tap maximizes it, or gives the
-                // signals back
-                onDoubleTapped: root.toggleMaximized()
+                // signals back; the two taps of a thumb may land a little apart
+                onDoubleTap: root.toggleMaximized()
             }
 
             ListView {
@@ -1264,7 +1275,7 @@ Page {
                         viewerSettings.chartHeight = Math.max(200, startHeight + activeTranslation.y)
                 }
             }
-            TapHandler { onDoubleTapped: viewerSettings.chartHeight = -1 }
+            DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
         }
 
         Label {

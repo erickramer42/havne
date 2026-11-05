@@ -12,8 +12,13 @@
 //          app's window at the test phone's size (tests/qml/tst_phone.qml),
 //          the chart maximized by shape and on request, the splitter's
 //          share and the window's steps (stepWindow, which a pinch and
-//          the wheel call) there too (the drag itself, the double-click and F are
-//          manual smoke: run-havne at 384 x 832 and 832 x 384);
+//          the wheel call; the wheel a step per notch, a notch's parts
+//          added up, a sideways scroll none) there too, and a double tap
+//          on the chart or the splitter (DoubleTapHandler.qml: taps or
+//          clicks a little apart within the interval) as well; F toggling
+//          the chart, and typed into the filter staying a letter of it, by
+//          tst_liveview.qml (the drag itself is manual smoke: run-havne at
+//          384 x 832 and 832 x 384);
 //          the drawing itself, sharp under zoom, is verified manually
 //          (docs/testing.md).
 
@@ -438,8 +443,8 @@ Page {
                 }
             }
             // A double-click or double-tap maximizes it, or gives the list
-            // back
-            TapHandler { onDoubleTapped: root.toggleMaximized() }
+            // back; the two taps of a thumb may land a little apart
+            DoubleTapHandler { objectName: "chartDoubleTap"; onDoubleTap: root.toggleMaximized() }
             // Fingers spreading show a shorter window, closing a longer
             // one: a step each time the scale moves by kPinchStep since the
             // last step, so one pinch can cross several windows
@@ -462,12 +467,26 @@ Page {
                     }
                 }
             }
-            // The wheel the same way: up a shorter window, down a longer one
+            // The wheel the same way, a step per notch: up a shorter
+            // window, down a longer one. A high-resolution wheel or a
+            // touchpad sends a notch's 120 in parts, so they add up here,
+            // the remainder kept for the next event; turning the other way
+            // starts afresh, and a sideways scroll steps nothing
             WheelHandler {
                 target: null
+                property int pending: 0
                 onWheel: event => {
-                    if (event.angleDelta.y !== 0)
-                        root.stepWindow(event.angleDelta.y > 0 ? -1 : 1)
+                    const dy = event.angleDelta.y
+                    if (dy === 0)
+                        return
+                    if ((pending > 0) !== (dy > 0))
+                        pending = 0
+                    pending += dy
+                    while (Math.abs(pending) >= 120) {
+                        const up = pending > 0
+                        root.stepWindow(up ? -1 : 1)
+                        pending -= up ? 120 : -120
+                    }
                 }
             }
         }
@@ -505,6 +524,6 @@ Page {
                                                          / column.height)
             }
         }
-        TapHandler { onDoubleTapped: liveSettings.listShare = -1 }
+        DoubleTapHandler { onDoubleTap: liveSettings.listShare = -1 }
     }
 }
