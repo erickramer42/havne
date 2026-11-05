@@ -3,6 +3,7 @@ add_library(ecuio-core STATIC
     src/core.cpp
     src/dtc_titles.cpp
     src/host_clock.cpp
+    src/json.cpp
     src/profile_registry.cpp
     src/recorder.cpp
     src/recording_check.cpp
