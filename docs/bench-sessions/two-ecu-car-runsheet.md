@@ -154,7 +154,8 @@ the surrogate's 0 ms re-read, which the VX holds
 ([ADR-0042](../adr/0042-reply-timing.md)'s note of 2026-11-04). The
 laptop on a build with the fix, the VX alone on the car, engine
 idling, the surrogate's frame log on (`ECUIO_SUR_LOG_FRAMES=1` in
-`havne-cli`'s environment; the Record switch doesn't turn it on):
+`havne-cli`'s environment; the app's Record switch sets it only for the
+app's own sessions):
 
     export ECUIO_SUR_LOG_FRAMES=1
     havne-cli stream "j2534://OBDX Pro - VX" --seconds 90 < /dev/null > vx-latency.jsonl
@@ -167,13 +168,22 @@ idling, the surrogate's frame log on (`ECUIO_SUR_LOG_FRAMES=1` in
 - [ ] The frame log (`ecuio-surrogate.*.log`, counts and times only):
       no reply line about 50 ms after its TX indication; write to read
       near the bus time
+- [ ] The frame log's `OP_READ call` lines: how long the VX held the
+      first call (asked 1) that brought a reply, and the call for the
+      rest of the batch (`the rest`, asked up to 15, timeout 1 ms),
+      median and slowest. **Pass:** the rest held about 1-2 ms
 - [ ] More requests answered a second than the 2026-11-04 run, no
       health line, no timeouts
 - [ ] If packed stays near 20-25 ms with no 50 ms class, the VX ends a
       read at its count but not at once: note the median gap from the
-      last frame to the read. If the 50 ms class remains, the build
-      isn't the fix: check that `havne-cli`'s surrogate (the Win32
-      tree's) was rebuilt and warmed up
+      last frame to the read. If the 50 ms class remains, read the
+      `OP_READ call` lines first: **the rest held near 50 ms** means the
+      VX holds any short read that long, not only one asked to wait
+      0 ms, and the call for the rest of a batch costs every reply that
+      time (note it: the fix needs another shape); **no `OP_READ call`
+      lines at all** means the build isn't the fix: check that
+      `havne-cli`'s surrogate (the Win32 tree's) was rebuilt and warmed
+      up
 
 ## Phase 5 (optional): a listener on the laptop's own clock
 

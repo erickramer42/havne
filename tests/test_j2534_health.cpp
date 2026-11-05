@@ -1037,8 +1037,10 @@ TEST_F(J2534HealthTest, VxAReplyPastTheSliceIsNotHeldByAZeroTimeoutRead)
 
 /* The first read asks for one message, so the VX's read ends when the
  * reply arrives, 4 ms after its request, instead of holding the 10 ms
- * slice for a batch of 16: 6.7 to 7.2 ms here, 11.3 ms held to the
- * slice; the rest of a batch is taken with 1 ms more */
+ * slice for a batch of 16; the rest of a batch is taken with 1 ms more.
+ * Measured 2026-11-05 (the median is a test property): 6.7 to 7.2 ms
+ * through either surrogate; held to the slice, 11.3 ms (x64) and
+ * 13.3 ms (x86, this case failing). The 10 ms bound sits between */
 TEST_F(J2534HealthTest, VxAReplyEndsTheReadThatWaitsForIt)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -1484,6 +1486,155 @@ TEST_F(J2534HealthTest, VxALossAfterAReadsLastFrameFlagsTheNextRead)
     EXPECT_EQ(f.data[6], 3u);
     EXPECT_NE(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u)
         << "the loss after the first read's frame was dropped";
+}
+
+/* A read whose call brought only an indication past the deadline still
+ * makes its last call, so the reply right behind the indication comes
+ * back in this read */
+TEST_F(J2534HealthTest,
+       VxTheReadAfterAnIndicationPastTheDeadlineTakesTheReplyBehindIt)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_DELAY_MS", "30"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    const uint8_t tx_done[4] = {0x00, 0x00, 0x07, 0xE0};
+    ASSERT_TRUE(
+        fake_control::post(page, tx_done, sizeof(tx_done), 100,
+                           ECUIO_PT_TX_MSG_TYPE | ECUIO_PT_TX_INDICATION));
+    ASSERT_TRUE(post_reply(page, 1));
+
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    const auto from = std::chrono::steady_clock::now();
+    EXPECT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 10, &got), ECUIO_OK);
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - from)
+                          .count();
+    ASSERT_TRUE(got) << "the read stopped at its deadline before its last call";
+    EXPECT_EQ(f.data[6], 1u);
+    EXPECT_GE(took, 30) << "the fake's stall";
+    EXPECT_LT(took, 55) << "a call asked to wait 0 ms";
+}
+
+/* A loss carried from the read before into a read that fails: the
+ * failure is reported at once, and the loss waits for the next frame */
+TEST_F(J2534HealthTest, ALossCarriedIntoAFailedReadLetsTheFailureThrough)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    ASSERT_TRUE(post_reply(page, 1));
+    ASSERT_TRUE(
+        post_reply(page, 2, ECUIO_PT_TX_INDICATION | ECUIO_PT_BUFFER_OVERFLOW));
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 1u);
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    got = false;
+    EXPECT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 10, &got),
+              ECUIO_ERR_TRANSPORT_HARD_FAILURE)
+        << "the carried loss hid the failure as an overflow";
+    EXPECT_FALSE(got);
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", nullptr));
+    ASSERT_TRUE(post_reply(page, 3));
+    got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 3u);
+    EXPECT_NE(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u)
+        << "the loss was dropped with the failed read";
+}
+
+/* A loss carried when a channel disconnects isn't the next channel's */
+TEST_F(J2534HealthTest, AReconnectedChannelStartsWithNoLoss)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    ASSERT_TRUE(post_reply(page, 1));
+    ASSERT_TRUE(
+        post_reply(page, 2, ECUIO_PT_TX_INDICATION | ECUIO_PT_BUFFER_OVERFLOW));
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+
+    ASSERT_EQ(ecuio_j2534_disconnect_channel(s.h, s.ch), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    ASSERT_TRUE(post_reply(page, 3));
+    got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 3u);
+    EXPECT_EQ(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u)
+        << "the last channel's loss flagged the new channel's first frame";
+}
+
+/* A vendor that hands a call one message more than it asked: the extra
+ * one is lost, and the frame after the call's carries the loss */
+TEST_F(J2534HealthTest, AVendorThatReturnsMoreThanAskedFlagsTheLoss)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_OVER_REPORT", "1"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    for (uint8_t i = 1; i <= 3; ++i) {
+        ASSERT_TRUE(post_reply(page, i));
+    }
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 1u);
+    EXPECT_EQ(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u);
+    got = false;
+    ASSERT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got);
+    EXPECT_EQ(f.data[6], 3u) << "the message past the first call's count";
+    EXPECT_NE(f.rx_status & ECUIO_PT_BUFFER_OVERFLOW, 0u)
+        << "the message the clamp dropped went unflagged";
+}
+
+/* A vendor that answers a read that filled its count with ERR_TIMEOUT
+ * (J2534-1's status for a timed read): its message is delivered, and
+ * only an empty batch is judged by the status */
+TEST_F(J2534HealthTest, FramesUnderErrTimeoutAreDelivered)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_SPEC_READ_SEMANTICS", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_TIMED_READ_TIMEOUT", "1"));
+    SeamHandle s;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &s.h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_connect_channel(s.h, 0, 0, &s.ch), ECUIO_OK);
+    ASSERT_TRUE(post_reply(page, 1));
+    ecuio_pt_rx_t f = {};
+    bool got = false;
+    EXPECT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 50, &got), ECUIO_OK);
+    ASSERT_TRUE(got) << "a message under ERR_TIMEOUT was judged by the status";
+    EXPECT_EQ(f.data[6], 1u);
+    got = true;
+    EXPECT_EQ(ecuio_j2534_read_msg(s.h, s.ch, &f, 20, &got),
+              ECUIO_ERR_VEHICLE_TIMEOUT)
+        << "an empty batch under ERR_TIMEOUT";
+    EXPECT_FALSE(got);
 }
 
 /* ERR_BUFFER_OVERFLOW with nothing read: no failure, and the next

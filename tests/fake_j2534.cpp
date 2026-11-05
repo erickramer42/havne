@@ -82,7 +82,13 @@
 //    status with no messages; ECUIO_FAKE_UNTOUCHED_COUNT_STATUS
 //    forces a status with the caller's count and buffer left as
 //    passed (a sloppy vendor; see ecuio_trusted_count);
-//    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batches.
+//    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batches;
+//    there ECUIO_FAKE_TIMED_READ_TIMEOUT=1 answers every read with a
+//    timeout ERR_TIMEOUT, even one that filled its count (a vendor that
+//    reports nearly every response that way). ECUIO_FAKE_OVER_REPORT=1,
+//    in a batch mode, hands a call one message more than it asked when
+//    one more has arrived (J2534-1 forbids it; only into the surrogate's
+//    16-message batch, so the asked count is under 16).
 //    ECUIO_FAKE_READ_OVERFLOW=1 answers each delivered message with
 //    ERR_BUFFER_OVERFLOW (v04.04's form of frames lost).
 //    ECUIO_FAKE_READ_DELAY_MS stalls the first read after load, once.
@@ -153,9 +159,10 @@ unsigned long g_queue_len = 0;
  * each later one 500-515 ms and failed it. */
 constexpr unsigned long kVxReplyDelayMs = 4;
 /* A VX read with a timeout of 0 holds about 50 ms, whenever its reply
- * arrives: in the test car's frame log of 2026-11-04 every such read
- * took 50 to 65 ms (median 53) with the reply on the adapter's clock 4
- * to 15 ms after its request (docs/bench-sessions/2026-11-04-two-ecu-car.md) */
+ * arrives: in the test car's frame log of 2026-11-04 a reply read that
+ * way reached the host a median 63 ms after its write, with the reply
+ * on the adapter's clock a median 11.1 ms after its request's TX
+ * indication (docs/bench-sessions/2026-11-04-two-ecu-car.md) */
 constexpr unsigned long kVxZeroTimeoutHoldMs = 50;
 constexpr unsigned long kVxUnackedDepth = 3;
 constexpr DWORD kVxRefusedWriteMs = 500;
@@ -656,7 +663,17 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
                 lk, std::chrono::microseconds(wake - now));
             fake_j2534::take_posted_locked();
         }
-        if (avail > requested) avail = requested;
+        /* ECUIO_FAKE_OVER_REPORT=1: one message past the count, when one
+         * more has arrived. The caller must have room for it: only the
+         * surrogate's 16-message batch is read this way, and its calls
+         * ask for 15 at most */
+        const unsigned long cap =
+            (fake_j2534::knob_on("ECUIO_FAKE_OVER_REPORT") && requested < 16)
+                ? requested + 1
+                : requested;
+        if (avail > cap) {
+            avail = cap;
+        }
         for (unsigned long i = 0; i < avail; ++i) {
             const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[i];
             memcpy(pMsg[i].Data, slot.data, slot.size);
@@ -672,7 +689,9 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
             return (avail == 0) ? ECUIO_PT_STATUS_BUFFER_EMPTY
                                 : STATUS_NOERROR;
         }
-        if (avail < requested && Timeout > 0) {
+        if (Timeout > 0 &&
+            (avail < requested ||
+             fake_j2534::knob_on("ECUIO_FAKE_TIMED_READ_TIMEOUT"))) {
             return ECUIO_PT_STATUS_TIMEOUT;
         }
         if (avail == 0 && Timeout == 0) {

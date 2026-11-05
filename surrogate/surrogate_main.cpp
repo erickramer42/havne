@@ -5,8 +5,13 @@
 //          a read's calls (one message first, then the rest of the
 //          batch, never a 0 ms wait, a loss after the last frame) by
 //          J2534HealthTest.VxAReply*, .VxQueuedMessagesComeBackInOneRead,
-//          .VxTheReadAfterAnIndicationPastTheDeadlineStillWaits and
-//          .VxALossAfterAReadsLastFrameFlagsTheNextRead
+//          .VxTheReadAfterAnIndicationPastTheDeadline*,
+//          .VxALossAfterAReadsLastFrameFlagsTheNextRead,
+//          .ALossCarriedIntoAFailedReadLetsTheFailureThrough,
+//          .AReconnectedChannelStartsWithNoLoss,
+//          .AVendorThatReturnsMoreThanAskedFlagsTheLoss and
+//          .FramesUnderErrTimeoutAreDelivered; the call lines in the
+//          frame log by hand (a run of the latency step against the fake)
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -220,6 +225,8 @@ static int handle_op_connect(uint32_t protocol_id, uint32_t flags, uint32_t baud
     if (rc == ECUIO_PT_STATUS_NOERROR) {
         g_channel = ch;
         g_have_channel = true;
+        /* A loss carried from the last channel isn't this one's */
+        s_lost_carry = false;
     }
     if (out_ch != nullptr) *out_ch = static_cast<uint32_t>(ch);
     return static_cast<int>(rc);
@@ -267,8 +274,9 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
      * from there on carries the bit, the v05.00 form, whatever the
      * vendor's version. With none delivered after it in this read, a
      * read that delivers nothing says ERR_BUFFER_OVERFLOW, and the
-     * client marks the next; one that delivered frames before it leaves
-     * the bit to this child's next frame. */
+     * client marks the next; one that delivered frames before it, or
+     * that failed, leaves the bit to this child's next frame. A call
+     * that returns more messages than it asked loses the rest. */
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeout_ms);
     const auto wait_left = [&deadline]() -> uint32_t {
@@ -299,7 +307,18 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
            cleared, so it would replay the PREVIOUS read's frames as
            phantoms. */
         num = ecuio_trusted_count(call_rc, num);
-        if (num > asked) {
+        /* More than the call asked (J2534-1 forbids it): the messages
+         * past the count left the vendor's queue and are lost, so the
+         * frame after this call's carries the loss */
+        const bool over = num > asked;
+        if (over) {
+            static bool s_over_logged = false;
+            if (!s_over_logged) {
+                stage("OP_READ: the vendor returned %lu messages to a call "
+                      "for %lu; the rest are counted lost",
+                      num, asked);
+                s_over_logged = true;
+            }
             num = asked;
         }
         lost = lost || call_rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
@@ -333,14 +352,39 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
             }
             ++n;
         }
+        lost = lost || over;
         return num;
+    };
+
+    /* One vendor call. With ECUIO_SUR_LOG_FRAMES=1, a call that brought
+     * messages, and every call for the rest of a batch, leaves a line
+     * with how long the vendor held it: the evidence of how an adapter
+     * holds a short read (an empty first call is left out, since the
+     * worker makes one every slice between requests) */
+    const auto call = [&](unsigned long* num, uint32_t wait_ms,
+                          bool drain) -> long {
+        const unsigned long asked = *num;
+        const auto from = std::chrono::steady_clock::now();
+        const long call_rc = g_read_msgs(g_channel, s_read_batch, num, wait_ms);
+        if (g_log_frames && (drain || ecuio_trusted_count(call_rc, *num) > 0)) {
+            const long long us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - from)
+                    .count();
+            stage("OP_READ call: %s, timeout %u ms, asked %lu, got %lu, "
+                  "status %ld, held %lld.%03lld ms",
+                  drain ? "the rest" : "first", wait_ms, asked,
+                  ecuio_trusted_count(call_rc, *num), call_rc, us / 1000,
+                  us % 1000);
+        }
+        return call_rc;
     };
 
     long rc = ECUIO_PT_STATUS_NOERROR;
     bool last = false;
     for (;;) {
         unsigned long num = 1;
-        rc = g_read_msgs(g_channel, s_read_batch, &num, wait_left());
+        rc = call(&num, wait_left(), false);
         num = take(rc, num, 1);
         if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ ||
             last) {
@@ -354,12 +398,19 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
          * adapter fails the next one */
         const unsigned long asked = ECUIO_SUR_MAX_FRAMES_PER_READ - n;
         unsigned long num = asked;
-        const long drain_rc =
-            g_read_msgs(g_channel, s_read_batch, &num, kDrainMs);
+        const long drain_rc = call(&num, kDrainMs, true);
         (void)take(drain_rc, num, asked);
     }
     resp->num_frames = n;
-    if (lost && n == 0) {
+    /* A loss with no frame after it: an empty read that was quiet says
+     * ERR_BUFFER_OVERFLOW, and the client marks the next frame. A read
+     * that failed keeps its status, so the failure is seen now, and the
+     * loss waits for this child's next frame, as after frames */
+    const bool quiet = rc == ECUIO_PT_STATUS_NOERROR ||
+                       rc == ECUIO_PT_STATUS_TIMEOUT ||
+                       rc == ECUIO_PT_STATUS_BUFFER_EMPTY ||
+                       rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
+    if (lost && n == 0 && quiet) {
         rc = ECUIO_PT_STATUS_BUFFER_OVERFLOW; /* the client marks the next */
     } else if (lost) {
         s_lost_carry = true; /* this child's next frame carries it */
