@@ -5,7 +5,8 @@
 //          reaching the viewer on tests/fixtures/recording/findings (its
 //          signal, the default plotted, the chart's series over the view,
 //          the frames check's findings), the cursor's readout (maximized,
-//          its strip folding to a tab and back), the view
+//          its strip beside the chart or below it on a tall page, folding
+//          away and back), the view
 //          kept inside the recording through setView, zoom, a drag and the
 //          wheel (a notch in parts zooming as one, a sideways scroll not at
 //          all), the columns kept on their grid through a pan by part of
@@ -236,11 +237,12 @@ TestCase {
         compare(page.series(400)[0].labelValue, Number(at.text), "the label shows it too")
     }
 
-    // Maximized, the cursor's values sit in a strip beside the chart; its
-    // button folds it to a tab, giving the plot the width, and opens it
-    // again, and the choice is kept
+    // Maximized on a wide page, the cursor's values sit in a strip beside
+    // the chart; its button folds it to a tab, giving the plot the width,
+    // and opens it again, and the choice is kept
     function test_theCursorsStripFoldsAwayAndBack() {
         const page = openFindings()
+        page.height = 600
         page.stripFolded = false
         page.toggleMaximized()
         verify(page.chartMaximized, "maximized")
@@ -265,6 +267,39 @@ TestCase {
         verify(!page.stripFolded)
         tryVerify(() => strip.visible && chart.shownW === open, 2000, "the strip is back")
         page.toggleMaximized()
+        page.height = 900
+    }
+
+    // On a tall page (a phone upright) the values go below the chart in a
+    // band, so the plot keeps the width; the fold gives the height back
+    function test_theCursorsStripGoesBelowTheChartOnATallPage() {
+        const page = openFindings()
+        page.width = 400
+        page.stripFolded = false
+        page.toggleMaximized()
+        page.setCursor(5000)
+        const frame = find(page, "chartFrame")
+        const strip = find(page, "cursorStrip")
+        const fold = find(page, "stripFold")
+        const chart = find(page, "chart")
+        tryVerify(() => strip.visible && frame.height > frame.width, 2000, "a tall frame, its values shown")
+        verify(waitForPolish(page.Window.window), "laid out")
+        compare(chart.shownW, frame.width - 8, "the plot keeps the width")
+        verify(strip.y >= chart.y + chart.shownH, "the values below the chart: strip " + strip.y + " h " + strip.height + ", chart " + chart.y + " shownH " + chart.shownH + " h " + chart.height + ", frame " + frame.width + "x" + frame.height + ", grid " + frame.stripHeight)
+        verify(strip.width > frame.width / 2, "a band across the frame: " + strip.width)
+        const open = chart.shownH
+
+        mouseClick(fold)
+        verify(!strip.visible, "folded")
+        // One plotted signal here: a band of one row, folded to the button's
+        tryVerify(() => frame.stripHeight === fold.height + 8, 2000, "folded to the button")
+        compare(chart.shownH, frame.height - 8 - frame.stripHeight, "the plot has the rest")
+        verify(chart.shownH > open, "the plot has the height: " + chart.shownH + " against " + open)
+        compare(chart.shownW, frame.width - 8)
+        mouseClick(fold)
+        tryVerify(() => strip.visible && chart.shownH === open, 2000, "the band is back")
+        page.toggleMaximized()
+        page.width = 900
     }
 
     // The view stays inside the recording, no narrower than minSpanMs,

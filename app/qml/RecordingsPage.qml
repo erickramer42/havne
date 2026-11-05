@@ -3,7 +3,8 @@
 //          Bridge.recentRecordings, a recording that ends joining it, Replay
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
-//          readout (maximized, its strip folding to a tab and back), pan and zoom kept inside the recording, the wheel's
+//          readout (maximized, its strip beside the chart or below it on a
+//          tall page, folding away and back), pan and zoom kept inside the recording, the wheel's
 //          zoom by its share of a notch and none sideways, the columns
 //          on their grid from time 0 through a pan, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
@@ -1084,16 +1085,29 @@ Page {
             border.color: Theme.textDim
             border.width: 1
 
-            // Maximized, the cursor's values in a strip at the right, as
-            // the signal rows show them otherwise; only while the cursor is
-            // in view, so until a tap the chart has the width to itself.
+            // Maximized, the cursor's values in a strip beside the chart (below
+            // it on a tall frame), as the signal rows show them otherwise; only
+            // while the cursor is in view, so until a tap the chart has the page.
             // Its button folds it to a tab and opens it again
             readonly property bool cursorInView: root.hasCursor && root.cursorMs >= root.viewT0
                                                  && root.cursorMs <= root.viewT1
             readonly property bool stripShown: root.chartMaximized && cursorInView
-            readonly property real stripWidth: !stripShown ? 0
+            // Taller than wide (a phone upright) the values go below the
+            // chart, a band of cells, since height is what's to spare;
+            // wider than tall, beside it in a column
+            readonly property bool stripBelow: height > width
+            readonly property var stripModel: stripShown
+                ? recording.signalList.filter(s => root.plotted[s.index] === true) : []
+            readonly property int stripColumns:
+                Math.max(1, Math.floor((width - stripFold.width - 16) / 140))
+            readonly property real stripWidth: !stripShown || stripBelow ? 0
                 : viewerSettings.stripFolded ? stripFold.width + 8
                 : Math.max(stripFold.width + 8, Math.min(170, Math.round(width * 0.25)))
+            readonly property real stripHeight: !stripShown || !stripBelow ? 0
+                : viewerSettings.stripFolded ? stripFold.height + 8
+                : Math.max(stripFold.height + 8,
+                           Math.min(Math.ceil(stripModel.length / stripColumns) * 40 + 8,
+                                    Math.round(height * 0.4)))
 
             StripChart {
                 id: chart
@@ -1101,7 +1115,7 @@ Page {
                 x: 4
                 y: 4
                 shownW: parent.width - 8 - chartFrame.stripWidth
-                shownH: parent.height - 8
+                shownH: parent.height - 8 - chartFrame.stripHeight
                 emptyText: qsTr("No signals plotted; tick a row to plot it")
                 fetch: function(widthPx) { return root.series(widthPx) }
                 layoutOpts: ({
@@ -1210,31 +1224,35 @@ Page {
                 objectName: "stripFold"
                 visible: chartFrame.stripShown
                 compact: true
-                anchors.top: parent.top
-                anchors.right: parent.right
-                anchors.margins: 4
-                text: viewerSettings.stripFolded ? "<" : ">"
+                // Placed, not anchored: an anchor switched off keeps the
+                // size it gave, so the strip's two shapes set x and y
+                x: parent.width - 4 - width
+                y: chartFrame.stripBelow ? parent.height - 4 - height : 4
+                text: chartFrame.stripBelow ? (viewerSettings.stripFolded ? "^" : "v")
+                                            : (viewerSettings.stripFolded ? "<" : ">")
                 Accessible.name: viewerSettings.stripFolded ? qsTr("Show the values at the cursor")
                                                             : qsTr("Hide the values at the cursor")
                 onClicked: viewerSettings.stripFolded = !viewerSettings.stripFolded
             }
 
-            ListView {
+            GridView {
                 objectName: "cursorStrip"
                 visible: chartFrame.stripShown && !viewerSettings.stripFolded
-                anchors.top: stripFold.bottom
-                anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                anchors.margins: 4
-                width: chartFrame.stripWidth - 4
+                x: chartFrame.stripBelow ? 4 : parent.width - chartFrame.stripWidth
+                y: chartFrame.stripBelow ? parent.height - chartFrame.stripHeight + 4
+                                         : stripFold.y + stripFold.height + 4
+                width: chartFrame.stripBelow ? stripFold.x - 8 : chartFrame.stripWidth - 4
+                height: chartFrame.stripBelow ? chartFrame.stripHeight - 8 : parent.height - 4 - y
+                cellWidth: chartFrame.stripBelow ? Math.floor(width / chartFrame.stripColumns) : width
+                cellHeight: 40
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                model: visible ? recording.signalList.filter(s => root.plotted[s.index] === true) : []
+                model: visible ? chartFrame.stripModel : []
                 delegate: Item {
                     id: stripRow
                     required property var modelData
                     readonly property var at: root.readout[modelData.index]
-                    width: ListView.view.width
+                    width: GridView.view.cellWidth
                     height: 40
                     Rectangle {
                         x: 0
