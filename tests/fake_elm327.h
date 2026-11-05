@@ -766,8 +766,8 @@ private:
         const uint32_t rx = fake_ecu::reply_id(tx);
         size_t answer_len = 0;
         if (k.no_data || rx == 0 || !passes(rx) ||
-            !fake_ecu::answer(req, len, k.unsupported_nrc, answer_,
-                              &answer_len) ||
+            !fake_ecu::answer_for(rx, req, len, k.unsupported_nrc, answer_,
+                                  &answer_len) ||
             answer_len > 4095) {
             reply("NO DATA", at);
             return;

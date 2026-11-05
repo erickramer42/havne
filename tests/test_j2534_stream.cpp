@@ -1911,6 +1911,53 @@ TEST_F(J2534AdoptionTest, UdsGenericEcuPrefixAsksThatEcu)
     ecuio_session_destroy(session);
 }
 
+/* Two ECUs in one session answer each its own: the engine ECU's DID
+ * 1E1C on 0x7E8, and a module's (ECUIO_FAKE_MODULE_DIDS) D801 on 0x7E9,
+ * which refuses the engine's DID; each reply carries its ECU's ID */
+TEST_F(J2534AdoptionTest, TwoEcusInOneSessionAnswerEachItsOwn)
+{
+    KnobGuard module("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12");
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://"
+             "%s?profile=uds-generic&did=1E1C,7E9:D801&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 4, 200);
+
+    bool engine = false, module_ok = false;
+    const int seen = cap.count.load();
+    const int n = seen < 8 ? seen : 8; /* the capture keeps the first 8 */
+    for (int i = 0; i < n; ++i) {
+        const unsigned short len = cap.payload_lens[i];
+        if (cap.arbitration_ids[i] == 0x7E8u) {
+            const unsigned char want[5] = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+            EXPECT_EQ(len, 5u) << "frame " << i;
+            engine =
+                engine || (len == 5 && memcmp(cap.payloads[i], want, 5) == 0);
+        } else if (cap.arbitration_ids[i] == 0x7E9u) {
+            const unsigned char want[5] = {0x62, 0xD8, 0x01, 0x00, 0x12};
+            EXPECT_EQ(len, 5u) << "frame " << i;
+            module_ok = module_ok ||
+                        (len == 5 && memcmp(cap.payloads[i], want, 5) == 0);
+        } else {
+            ADD_FAILURE() << "a reply on 0x" << std::hex
+                          << cap.arbitration_ids[i];
+        }
+    }
+    EXPECT_TRUE(engine) << "the engine ECU's 1E1C on 0x7E8";
+    EXPECT_TRUE(module_ok) << "the module's D801 on 0x7E9";
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
 /* A range is scanned once, in order: of 1E18 to 1E20 the fake's ECU
  * knows only 1E1C, which the scan finds and then polls, taking turns
  * with the rest of the scan, while the eight it refuses (7F 22 31) are

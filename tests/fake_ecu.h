@@ -3,7 +3,9 @@
 // Testing: the HARNESS fakes' one ECU: the fake J2534 DLL
 //          (fake_j2534.cpp) and the fake ELM327 (fake_elm327.h) answer
 //          every request from here, so the J2534 and ELM327 suites see the
-//          same vehicle
+//          same vehicle. Its module table's rules: FakeEcuTest (UNIT,
+//          test_obd2); two ECUs in one session through each fake:
+//          *.TwoEcusInOneSessionAnswerEachItsOwn
 //
 // What the fakes' engine ECU answers, from the service byte on: the
 // adapter's framing (J2534's 4-byte CAN ID, the ELM327's lines and PCI
@@ -714,6 +716,160 @@ inline bool answer(const unsigned char* req, size_t req_len,
         break;
     }
     }
+    return true;
+}
+
+/* ---- Modules of the fake's own: a second ECU that answers otherwise ----
+ * By default every ECU answers as the engine ECU above, so a session that
+ * asks two of them gets the same replies from both. A module is an ECU
+ * the table below names by its reply ID: it answers Service 0x22 from
+ * its own rows alone (7F 22 31 for any other DID) and refuses every
+ * other service (7F <service> 11, serviceNotSupported), so a session
+ * asking the engine ECU and a module tells their replies apart, as one
+ * reading a user's signal on a second module must. One table per
+ * process, empty by default: the fake DLL fills it from
+ * ECUIO_FAKE_MODULE_DIDS on each write, the in-process fakes' tests with
+ * set_module_dids() before a session starts (a reader may run on a
+ * session's worker, so it isn't changed while one runs). */
+constexpr uint32_t kModuleRowsMax = 16;
+constexpr uint32_t kModuleDataMax = 16;
+
+struct ModuleRow {
+    uint32_t rx;
+    uint16_t did;
+    uint8_t len;
+    uint8_t data[kModuleDataMax];
+};
+
+struct ModuleTable {
+    std::atomic<uint32_t> count{0};
+    ModuleRow rows[kModuleRowsMax] = {};
+};
+
+inline ModuleTable& module_table()
+{
+    static ModuleTable table;
+    return table;
+}
+
+inline int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    return -1;
+}
+
+/* The table from a spec of rows "<reply ID>:<DID>=<bytes>", all hex, the
+ * bytes spaced or not, rows apart by ';': "7E9:D801=00 12;7E9:D802=01".
+ * It replaces the table; NULL or "" empties it. False, and the table
+ * empty, for a malformed row, more than kModuleRowsMax rows or a row of
+ * no bytes or more than kModuleDataMax. */
+inline bool set_module_dids(const char* spec)
+{
+    ModuleTable& t = module_table();
+    t.count.store(0, std::memory_order_release);
+    if (spec == nullptr) {
+        return true;
+    }
+    uint32_t n = 0;
+    const char* s = spec;
+    for (;;) {
+        while (*s == ';' || *s == ' ') {
+            ++s;
+        }
+        if (*s == '\0') {
+            break;
+        }
+        if (n == kModuleRowsMax) {
+            return false;
+        }
+        ModuleRow r{};
+        int digits = 0;
+        for (; hex_digit(*s) >= 0; ++s) {
+            if (++digits > 8)
+                return false;
+            r.rx = (r.rx << 4) | static_cast<uint32_t>(hex_digit(*s));
+        }
+        if (digits == 0 || *s != ':')
+            return false;
+        ++s;
+        uint32_t did = 0;
+        digits = 0;
+        for (; hex_digit(*s) >= 0; ++s) {
+            if (++digits > 4)
+                return false;
+            did = (did << 4) | static_cast<uint32_t>(hex_digit(*s));
+        }
+        if (digits == 0 || *s != '=')
+            return false;
+        ++s;
+        r.did = static_cast<uint16_t>(did);
+        for (;;) {
+            while (*s == ' ') {
+                ++s;
+            }
+            if (*s == '\0' || *s == ';') {
+                break;
+            }
+            const int hi = hex_digit(s[0]);
+            const int lo =
+                hex_digit(s[1]); /* s[0] isn't NUL, so s[1] is in bounds */
+            if (hi < 0 || lo < 0 || r.len == kModuleDataMax)
+                return false;
+            r.data[r.len++] = static_cast<uint8_t>((hi << 4) | lo);
+            s += 2;
+        }
+        if (r.len == 0)
+            return false;
+        t.rows[n++] = r;
+    }
+    t.count.store(n, std::memory_order_release);
+    return true;
+}
+
+/* The answer of the ECU replying on rx: a module's from its rows, any
+ * other ECU's from answer() above. unsupported_nrc as answer()'s: -1
+ * keeps a module's codes (31 for a DID, 11 for a service), 0 answers
+ * nothing, any other value is the code. False when nothing answers. */
+inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
+                       long unsupported_nrc, unsigned char* out,
+                       size_t* out_len)
+{
+    const ModuleTable& t = module_table();
+    const uint32_t n = t.count.load(std::memory_order_acquire);
+    bool module = false;
+    for (uint32_t i = 0; i < n; ++i) {
+        const ModuleRow& r = t.rows[i];
+        if (r.rx != rx) {
+            continue;
+        }
+        module = true;
+        if (req_len == 3 && req[0] == 0x22 &&
+            r.did == static_cast<uint16_t>((req[1] << 8) | req[2])) {
+            out[0] = 0x62;
+            out[1] = req[1];
+            out[2] = req[2];
+            memcpy(out + 3, r.data, r.len);
+            *out_len = 3u + r.len;
+            return true;
+        }
+    }
+    if (!module) {
+        return answer(req, req_len, unsupported_nrc, out, out_len);
+    }
+    if (req_len == 0 || unsupported_nrc == 0) {
+        return false;
+    }
+    out[0] = 0x7F;
+    out[1] = req[0];
+    out[2] = unsupported_nrc > 0 ? static_cast<unsigned char>(unsupported_nrc)
+             : req[0] == 0x22    ? 0x31
+                                 : 0x11;
+    *out_len = 3;
     return true;
 }
 

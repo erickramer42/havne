@@ -2766,6 +2766,66 @@ protected:
 
 } // namespace
 
+/* A module answers Service 0x22 from its own rows and refuses the rest;
+ * an ECU the table doesn't name answers as the engine ECU; a malformed
+ * spec leaves the table empty */
+TEST_F(FakeEcuTest, AModuleAnswersItsOwnDidsAndRefusesTheRest)
+{
+    struct Empty {
+        ~Empty() { fake_ecu::set_module_dids(nullptr); }
+    } empty;
+    const auto ask = [](uint32_t rx, Bytes req, long nrc = -1) {
+        uint8_t out[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        if (!fake_ecu::answer_for(rx, req.data(), req.size(), nrc, out, &n)) {
+            return Bytes{};
+        }
+        return Bytes(out, out + n);
+    };
+    ASSERT_TRUE(fake_ecu::set_module_dids(
+        "7E9:D801=00 12; 7e9:d802=ABCDEF;18DAF1E9:0102=01"));
+    EXPECT_EQ(fake_ecu::module_table().count.load(), 3u);
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x01}),
+              (Bytes{0x62, 0xD8, 0x01, 0x00, 0x12}));
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x02}),
+              (Bytes{0x62, 0xD8, 0x02, 0xAB, 0xCD, 0xEF}))
+        << "lower case reads the same";
+    EXPECT_EQ(ask(0x18DAF1E9, {0x22, 0x01, 0x02}),
+              (Bytes{0x62, 0x01, 0x02, 0x01}))
+        << "a 29-bit reply ID";
+    EXPECT_EQ(ask(0x7E9, {0x22, 0x1E, 0x1C}), (Bytes{0x7F, 0x22, 0x31}))
+        << "the engine ECU's DID isn't the module's";
+    EXPECT_EQ(ask(0x7E9, {0x01, 0x00}), (Bytes{0x7F, 0x01, 0x11}))
+        << "a module serves only 0x22";
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x03}, 0), Bytes{})
+        << "silence asked for";
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x03}, 0x33), (Bytes{0x7F, 0x22, 0x33}));
+    EXPECT_EQ(ask(0x7E8, {0x22, 0x1E, 0x1C}),
+              (Bytes{0x62, 0x1E, 0x1C, 0x12, 0x34}))
+        << "an ECU the table doesn't name answers as the engine ECU";
+    EXPECT_EQ(ask(0x7E8, {0x22, 0xD8, 0x01}), (Bytes{0x7F, 0x22, 0x31}));
+
+    for (const char* bad :
+         {"7E9", "7E9:D801", "7E9:D801=", "7E9:D801=1", "7E9:D801=0G",
+          ":D801=00", "7E9:=00", "7E9:1D8010=00", "123456789:D801=00",
+          "7E9:D801=00112233445566778899AABBCCDDEEFF00"}) {
+        SCOPED_TRACE(bad);
+        EXPECT_FALSE(fake_ecu::set_module_dids(bad));
+        EXPECT_EQ(fake_ecu::module_table().count.load(), 0u)
+            << "a bad spec empties it";
+    }
+    std::string many;
+    for (int i = 0; i < 17; ++i) {
+        many += "7E9:D8" + std::string(i < 16 ? "0" : "1") +
+                "0123456789ABCDEF"[i % 16] + "=01;";
+    }
+    EXPECT_FALSE(fake_ecu::set_module_dids(many.c_str())) << "17 rows";
+    ASSERT_TRUE(fake_ecu::set_module_dids(""));
+    EXPECT_EQ(ask(0x7E9, {0x22, 0x1E, 0x1C}),
+              (Bytes{0x62, 0x1E, 0x1C, 0x12, 0x34}))
+        << "with the table empty every ECU is the engine ECU";
+}
+
 /* The lists cover all four categories; three stored DTCs make an
  * 8-byte reply, past a Single Frame */
 TEST_F(FakeEcuTest, TheDtcListsAndTheMilBeforeAClear)

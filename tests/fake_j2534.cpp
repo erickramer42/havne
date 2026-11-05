@@ -401,8 +401,11 @@ bool build_obd2_response(const unsigned char* req, unsigned long req_len,
     static_assert(4 + fake_ecu::kReplyMax <= ECUIO_PT_MSG_DATA_SIZE,
                   "the longest answer fills PASSTHRU_MSG.Data");
     size_t n = 0;
-    if (!fake_ecu::answer(req + 4, req_len - 4, unsupported_nrc, resp + 4,
-                          &n)) {
+    const uint32_t tx = (uint32_t{req[0]} << 24) | (uint32_t{req[1]} << 16) |
+                        (uint32_t{req[2]} << 8) | uint32_t{req[3]};
+    /* A module of ECUIO_FAKE_MODULE_DIDS answers from its own rows */
+    if (!fake_ecu::answer_for(fake_ecu::reply_id(tx), req + 4, req_len - 4,
+                              unsupported_nrc, resp + 4, &n)) {
         return false;
     }
     reply_header(req, resp);
@@ -848,6 +851,16 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         }
         for (unsigned i = 0; i < 8; ++i) {
             fake_ecu::withheld_pids()[i] = words[i];
+        }
+    }
+    {
+        /* Modules of the fake's own: "7E9:D801=00 12;..." (fake_ecu.h's
+         * set_module_dids); unset or malformed, none */
+        char spec[512] = {};
+        if (!fake_j2534::read_knob("ECUIO_FAKE_MODULE_DIDS", spec,
+                                   sizeof(spec)) ||
+            !fake_ecu::set_module_dids(spec)) {
+            fake_ecu::set_module_dids(nullptr);
         }
     }
 
