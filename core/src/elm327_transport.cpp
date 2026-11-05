@@ -569,9 +569,10 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
     char sp[ELM327_CMD_MAX];
     snprintf(sp, sizeof(sp), "ATSP%c\r", t->protocol);
     /* A session that asks nothing only monitors, and needs no flow
-     * control: with CFC1 an STN's monitor prints a First Frame and none
-     * of its Consecutive Frames (the MX+'s STN2255,
-     * docs/bench-sessions/2026-11-04-two-ecu-car.md) */
+     * control, so it is off. Under either setting the MX+'s STN2255
+     * monitor prints a First Frame and none of its Consecutive Frames
+     * (docs/bench-sessions/2026-11-04-two-ecu-car.md,
+     * docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md) */
     const char* const cfc = asks_nothing(t) ? "ATCFC0\r" : "ATCFC1\r";
     const char* const steps[] = {
         "ATE0\r", /* no echo, no linefeeds, no spaces: fewer bytes */

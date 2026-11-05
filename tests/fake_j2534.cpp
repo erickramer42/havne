@@ -100,7 +100,8 @@
 //    and an empty read with ERR_BUFFER_EMPTY; after each accepted
 //    write a TX indication (RxStatus 0x09, the 4-byte CAN ID), and the
 //    reply 4 ms later; a read with a timeout of 0 held 50 ms, as a
-//    50 ms timeout would (the car, 2026-11-04). ECUIO_FAKE_NO_ACK=1
+//    50 ms timeout would (the car, 2026-11-04), and one asked to wait
+//    less than 10 ms held 10 ms (the car, 2026-11-05). ECUIO_FAKE_NO_ACK=1
 //    adds the bus with no other node: three writes accepted per connect, then each blocks about
 //    500 ms and fails ERR_FAILED, echoed with RxStatus 0x201.
 //  * A queued message has an arrival time; reads see only those that
@@ -164,6 +165,11 @@ constexpr unsigned long kVxReplyDelayMs = 4;
  * on the adapter's clock a median 11.1 ms after its request's TX
  * indication (docs/bench-sessions/2026-11-04-two-ecu-car.md) */
 constexpr unsigned long kVxZeroTimeoutHoldMs = 50;
+/* A VX read asked to wait less than 10 ms holds about 10 ms unless its
+ * count is met first: on the test car a call asked to wait 1 ms for the
+ * rest of a batch held a median 9.8 ms, 90 % under 10.4, and nearly
+ * always returned nothing (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md) */
+constexpr unsigned long kVxShortReadHoldMs = 10;
 constexpr unsigned long kVxUnackedDepth = 3;
 constexpr DWORD kVxRefusedWriteMs = 500;
 constexpr unsigned long kVxIndication = ECUIO_PT_TX_MSG_TYPE |
@@ -630,15 +636,20 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * in statuses. J2534-1 pairs a short batch with ERR_TIMEOUT when
      * Timeout is nonzero, and answers an empty timeout-0 read with
      * ERR_BUFFER_EMPTY. The VX returns a short batch with
-     * STATUS_NOERROR and any empty read with ERR_BUFFER_EMPTY, and holds
-     * a timeout-0 read kVxZeroTimeoutHoldMs. Filter
+     * STATUS_NOERROR and any empty read with ERR_BUFFER_EMPTY, holds
+     * a timeout-0 read kVxZeroTimeoutHoldMs, and one asked to wait
+     * less than kVxShortReadHoldMs that long. Filter
      * gating isn't modeled here. Off by default: the exact-count
      * stream tests pin the single-message delivery below. */
     const bool vx = fake_j2534::knob_on("ECUIO_FAKE_VX");
     if (vx || fake_j2534::knob_on("ECUIO_FAKE_SPEC_READ_SEMANTICS")) {
         const unsigned long requested = *pNumMsgs;
-        const unsigned long hold_ms =
-            (vx && Timeout == 0) ? fake_j2534::kVxZeroTimeoutHoldMs : Timeout;
+        unsigned long hold_ms = Timeout;
+        if (vx && Timeout == 0) {
+            hold_ms = fake_j2534::kVxZeroTimeoutHoldMs;
+        } else if (vx && Timeout < fake_j2534::kVxShortReadHoldMs) {
+            hold_ms = fake_j2534::kVxShortReadHoldMs;
+        }
         const long long deadline =
             fake_j2534::now_us() + 1000LL * static_cast<long long>(hold_ms);
         unsigned long avail = 0;
@@ -666,7 +677,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         /* ECUIO_FAKE_OVER_REPORT=1: one message past the count, when one
          * more has arrived. The caller must have room for it: only the
          * surrogate's 16-message batch is read this way, and its calls
-         * ask for 15 at most */
+         * ask for one */
         const unsigned long cap =
             (fake_j2534::knob_on("ECUIO_FAKE_OVER_REPORT") && requested < 16)
                 ? requested + 1

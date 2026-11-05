@@ -1368,12 +1368,12 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
 
-/* A read's reply carries its messages whole, however long: sixteen of
+/* A read's reply carries its message whole, however long: sixteen of
  * the fake's 0xF1A1 replies, each ISO 15765-2's longest message with
- * its CAN ID in front (4099 bytes), come back from one OP_READ (the
- * fake's spec mode batches; by default it returns one per read), about
- * 66 KB across the pipe, every byte as the vendor gave it. */
-TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
+ * its CAN ID in front (4099 bytes), queued at once (the fake's spec mode
+ * batches), come back one a read, every byte as the vendor gave it: the
+ * child answers a read with its first message. */
+TEST(J2534SurrogateTest, LongMessagesCrossThePipeWholeOneARead)
 {
     EnvArm spec("ECUIO_FAKE_SPEC_READ_SEMANTICS", "1");
     ecuio_j2534_sur_handle_t* h = nullptr;
@@ -1413,8 +1413,19 @@ TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
     EXPECT_EQ(whole, ECUIO_SUR_MAX_FRAMES_PER_READ);
     ASSERT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);   /* child exits: log complete */
     const std::string log = read_session_log(path);
-    EXPECT_NE(log.find("OP_READ: status 0, frames 16"), std::string::npos)
-        << "the sixteen didn't come back in one read:\n" << log;
+    size_t reads = 0;
+    for (size_t at = log.find("OP_READ: status 0, frames ");
+         at != std::string::npos;
+         at = log.find("OP_READ: status 0, frames ", at + 1)) {
+        ++reads;
+        const size_t n = at + strlen("OP_READ: status 0, frames ");
+        EXPECT_EQ(log.compare(n, 2, "1\r") == 0 ||
+                      log.compare(n, 2, "1\n") == 0,
+                  true)
+            << "a read carried more than one message:\n"
+            << log;
+    }
+    EXPECT_EQ(reads, static_cast<size_t>(ECUIO_SUR_MAX_FRAMES_PER_READ));
 }
 
 /* A request to 0x7E0 on a channel filtered for 0x7E8, and the reply
