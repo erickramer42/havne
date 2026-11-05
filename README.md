@@ -8,8 +8,10 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 Havne is an OBD-II scan tool and data logger: live gauges, a strip
 chart, the trouble codes and readiness monitors, and every frame
 recorded, to open again, overlay on another run, check for gaps and
-replay. It runs on Windows, Linux and Android, builds and passes its
-tests on macOS, and runs on the iOS Simulator. It reaches the car
+replay. It runs on Windows, Linux and Android; on Linux its tests and
+simulated bus pass on an x86_64 desktop and, for the core and
+`havne-cli`, on a Raspberry Pi (ARM64). It builds and passes its tests
+on macOS, and runs on the iOS Simulator. It reaches the car
 through J2534 Pass-Thru adapters on Windows, ELM327-compatible
 adapters over USB, Bluetooth or WiFi everywhere, and SocketCAN on
 Linux (listening on a real bus; asking, so far, on a virtual one). A
@@ -56,10 +58,15 @@ a quarter mile off launch control on a warm loop.*
   many replies a minute, and holding Windows' 1 ms timer 28 % more.
   A second controller listening on the same bus timed the Pass-Thru:
   a segmented reply is whole on the wire 14 ms after its request, and
-  the adapter delivers it about 52 ms after that. Each session is
-  written up with its scrubbed logs
+  Havne's own read of the adapter, not the adapter, held most about
+  52 ms more. With the read fixed, the latency per request fell from
+  65.5-73.7 ms to 16.4 ms, about 2.5 ms past the bus's time. Each
+  session is written up
+  with its scrubbed logs
   ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
-  [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md)).
+  [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md),
+  [2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md),
+  [2026-11-05](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Requests follow the replies.** One request per ECU at a time; the
   supported-PID probe drops only what the ECU says it lacks, never on
   silence. A clear asks first, saves the report, and asks once more
@@ -250,6 +257,7 @@ desk bus and on the test car) is the latest release. Next:
 
 | Version | Plan |
 |---|---|
+| v0.4.1 | A patch: the pages on a phone, both of a car's ECUs in one session, listening beside another tester, and the VX's replies delivered without the surrogate's wait |
 | v0.5.0 | Your own PIDs and DIDs, imported in bulk, computed signals such as boost, and manufacturer data through plugins |
 | v0.6.0-v0.9.0 | Exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |

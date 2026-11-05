@@ -3,15 +3,26 @@
 //          Bridge.recentRecordings, a recording that ends joining it, Replay
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
-//          readout, pan and zoom kept inside the recording, a second
+//          readout (maximized, its strip beside the chart or below it on a
+//          tall page, folding away and back; a tap snapped to the nearest
+//          sample), pan and zoom kept inside the recording, the wheel's
+//          zoom by its share of a notch and none sideways, the columns
+//          on their grid from time 0 through a pan, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
 //          fall), a finding's row centering the view, the signal rows'
 //          filter (SignalFilterBar.qml, ADR-0050), Replay view handing on
 //          the stretch in view, a refused folder's error, back to the list;
-//          every item inside a phone's width (tst_phone.qml). RecordingView
+//          every item inside a phone's width (tst_phone.qml), maximized
+//          on its side with the cursor's strip, then restored and scrolled
+//          to its end, and a double tap on the chart or its splitter
+//          (DoubleTapHandler.qml: taps a little apart within the interval)
+//          (tst_phone.qml; the splitter's drag and F are manual smoke, and
+//          the phone's run).
+//          RecordingView
 //          itself: test_bridge (RecordingViewTest); the chart's layout:
 //          tst_chartlayout.qml; the drawing is manual smoke (docs/testing.md).
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -42,6 +53,39 @@ Page {
     property string openedUri: ""
     readonly property bool viewing: recording.state !== RecordingView.Closed
 
+    // The chart maximized: it takes the page but for the zoom row, and the
+    // cursor's values move to a strip beside it. Kept apart for a short
+    // layout (a phone on its side, where it starts maximized) and a tall
+    // one, as Live keeps them. Only while a recording is open
+    property bool maximizedTall: false
+    property bool maximizedShort: true
+    readonly property bool chartMaximized: recording.state === RecordingView.Open
+                                           && (Theme.shortLayout ? maximizedShort : maximizedTall)
+    function toggleMaximized() {
+        if (Theme.shortLayout)
+            maximizedShort = !maximizedShort
+        else
+            maximizedTall = !maximizedTall
+    }
+    // F on a keyboard; a text field takes its own letters first
+    Shortcut {
+        sequence: "F"
+        enabled: root.visible && recording.state === RecordingView.Open && !Theme.mobile
+        onActivated: root.toggleMaximized()
+    }
+    // The splitter below the chart: its height once dragged, -1 for the
+    // page's own (the default), kept between runs
+    Settings {
+        id: viewerSettings
+        category: "recordings"
+        property real chartHeight: -1
+        // The maximized chart's strip of the cursor's values folded to a
+        // tab, so the plot has the width
+        property bool stripFolded: false
+    }
+    property alias chartHeight: viewerSettings.chartHeight
+    property alias stripFolded: viewerSettings.stripFolded
+
     // The part of the axis in view, in ms since the recording started
     // (before it too, with a compared recording that starts earlier), and
     // the cursor's time (NaN for none)
@@ -66,7 +110,9 @@ Page {
     // Signal index -> { text, unit } at the cursor
     property var readout: ({})
     readonly property real minSpanMs: 200
-    readonly property int rowHeight: 40
+    // The dot marking the cursor's sample on each trace
+    readonly property real cursorDotR: 3.5
+    readonly property int rowHeight: Theme.dense ? 36 : 40
     // A column narrower than a second reads the recording's raw rows of
     // every signal in it (ADR-0049 section 5); a second or wider, the
     // reader's per-second summaries. Past this many rows in view, columns
@@ -243,6 +289,16 @@ Page {
         setView(t - half, t + half)
     }
 
+    // A tapped time moved to the nearest sample of the first signal
+    // plotted, so the cursor stands where the line has a sample and reads
+    // the value drawn there; as it is with nothing plotted
+    function snapped(t) {
+        const first = recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
+        if (!first)
+            return t
+        const at = recording.nearestSampleMs(first.index, t)
+        return at >= 0 ? at : t
+    }
     function setCursor(t) {
         cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
         const values = {}
@@ -288,10 +344,24 @@ Page {
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
         const inView = cursorMs >= viewT0 && cursorMs <= viewT1
         const labelOf = at => inView && at && at.text !== "" ? Number(at.text) : NaN
-        const out = recording.columns(indexes, viewT0, viewT1, n).map(c => {
+        // Where that value's sample lies on the axis: a dot marks it
+        const labelMsOf = (at, offset) => inView && at && at.text !== "" && at.atMs >= 0
+                                          ? at.atMs + offset : NaN
+        // The columns lie on a grid from time 0, not from the view's
+        // start, so a pan carries each column's samples along with it
+        // rather than regrouping them, and a noisy trace's peaks hold
+        // still (Live's slices do the same). One more column covers the
+        // view's ends; the chart cuts it to the view
+        const colMs = (viewT1 - viewT0) / n
+        const g0 = Math.floor(viewT0 / colMs) * colMs
+        const gn = Math.max(1, Math.ceil((viewT1 - g0) / colMs - 1e-9))
+        const g1 = g0 + gn * colMs
+        const out = recording.columns(indexes, g0, g1, gn).map(c => {
             const s = sigs[c.index]
-            return { columns: { lows: c.lows, highs: c.highs }, row: c.index, scaleKey: c.index,
-                     decimals: s.decimals, unit: s.unit, labelValue: labelOf(root.readout[c.index]) }
+            return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
+                     scaleKey: c.index, decimals: s.decimals, unit: s.unit,
+                     labelValue: labelOf(root.readout[c.index]),
+                     labelMs: labelMsOf(root.readout[c.index], 0) }
         })
         if (!compareAligned)
             return out
@@ -300,14 +370,16 @@ Page {
                              .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText)
         if (pairs.length === 0)
             return out
-        const cols = compare.columns(pairs.map(p => p.theirs), viewT0 - compareOffsetMs,
-                                     viewT1 - compareOffsetMs, n)
+        const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,
+                                     g1 - compareOffsetMs, gn)
         for (let k = 0; k < cols.length; ++k) {
             const mine = pairs[k].mine
             const s = theirs[pairs[k].theirs]
-            out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs }, row: mine,
+            out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
+                       row: mine,
                        scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]) })
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]),
+                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs) })
         }
         return out
     }
@@ -614,7 +686,7 @@ Page {
         height: scroller.contentHeight - 2 * Theme.pageMargin
         spacing: 10
 
-        PageHeader { title: qsTr("Recordings") }
+        PageHeader { title: qsTr("Recordings"); visible: !root.chartMaximized }
 
         // ---- The list ----
         Label {
@@ -706,7 +778,7 @@ Page {
 
         // ---- The viewer ----
         RowLayout {
-            visible: root.viewing
+            visible: root.viewing && !root.chartMaximized
             Layout.fillWidth: true
             spacing: Theme.spacing
             ThemedButton {
@@ -758,7 +830,7 @@ Page {
 
         Label {
             objectName: "recordingInfo"
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -767,7 +839,7 @@ Page {
 
         // Another recording to overlay, and how the two line up
         RowLayout {
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             spacing: Theme.spacing
             ComboBox {
@@ -794,7 +866,7 @@ Page {
             }
         }
         Flow {
-            visible: root.comparing && recording.state === RecordingView.Open
+            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             spacing: 6
             ComboBox {
@@ -846,7 +918,7 @@ Page {
         }
         Label {
             objectName: "compareStatus"
-            visible: root.comparing && recording.state === RecordingView.Open
+            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -855,7 +927,7 @@ Page {
 
         SignalFilterBar {
             objectName: "recordingFilter"
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             filter: signalFilter
             codes: recording.signalList.map(s => s.group)
@@ -866,7 +938,7 @@ Page {
         ListView {
             id: signalRows
             objectName: "signalRows"
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             Layout.preferredHeight: count * root.rowHeight
             Layout.maximumHeight: Math.max(root.rowHeight, column.height * 0.3)
@@ -947,7 +1019,7 @@ Page {
         // the chart draws: the chart keeps every ticked signal (ADR-0050)
         Label {
             objectName: "filterCount"
-            visible: recording.state === RecordingView.Open && signalFilter.active
+            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -956,18 +1028,22 @@ Page {
                   .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
         }
 
+        // Compact on a phone: at their desktop widths the buttons, Frame
+        // test among them, outgrow its width
         RowLayout {
             visible: recording.state === RecordingView.Open
             Layout.fillWidth: true
             spacing: 6
             ThemedButton {
                 objectName: "zoomAll"
+                compact: Theme.dense
                 text: qsTr("All")
                 Layout.maximumWidth: 72
                 onClicked: root.showAll()
             }
             ThemedButton {
                 objectName: "zoomOut"
+                compact: Theme.dense
                 text: "−"
                 Layout.maximumWidth: 48
                 Accessible.name: qsTr("Zoom out")
@@ -975,6 +1051,7 @@ Page {
             }
             ThemedButton {
                 objectName: "zoomIn"
+                compact: Theme.dense
                 text: "+"
                 Layout.maximumWidth: 48
                 Accessible.name: qsTr("Zoom in")
@@ -982,6 +1059,7 @@ Page {
             }
             ThemedButton {
                 objectName: "frameTest"
+                compact: Theme.dense
                 visible: Theme.developerMode
                 enabled: !root.frameTesting
                 text: qsTr("Frame test")
@@ -997,6 +1075,16 @@ Page {
                 text: !root.hasCursor ? qsTr("Tap the chart to read the values at a time")
                                       : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
             }
+            ThemedButton {
+                objectName: "maximizeChart"
+                text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
+                compact: Theme.dense
+                Layout.minimumWidth: 52
+                Layout.maximumWidth: 84
+                Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
+                                                     : qsTr("Give the chart the page")
+                onClicked: root.toggleMaximized()
+            }
         }
 
         Rectangle {
@@ -1004,21 +1092,48 @@ Page {
             objectName: "chartFrame"
             visible: recording.state === RecordingView.Open
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            // Tall enough to read on a phone; the page scrolls to it
-            Layout.minimumHeight: 200
+            // Tall enough to read on a phone; the page scrolls to it. The
+            // splitter below sets it once dragged (not while maximized)
+            readonly property bool sized: viewerSettings.chartHeight > 0 && !root.chartMaximized
+            Layout.minimumHeight: sized ? Math.max(200, viewerSettings.chartHeight) : 200
+            Layout.preferredHeight: sized ? Math.max(200, viewerSettings.chartHeight) : -1
+            Layout.fillHeight: !sized
             color: Theme.surface
             radius: 4
             border.color: Theme.textDim
             border.width: 1
+
+            // Maximized, the cursor's values in a strip beside the chart (below
+            // it on a tall frame), as the signal rows show them otherwise; only
+            // while the cursor is in view, so until a tap the chart has the page.
+            // Its button folds it to a tab and opens it again
+            readonly property bool cursorInView: root.hasCursor && root.cursorMs >= root.viewT0
+                                                 && root.cursorMs <= root.viewT1
+            readonly property bool stripShown: root.chartMaximized && cursorInView
+            // Taller than wide (a phone upright) the values go below the
+            // chart, a band of cells, since height is what's to spare;
+            // wider than tall, beside it in a column
+            readonly property bool stripBelow: height > width
+            readonly property var stripModel: stripShown
+                ? recording.signalList.filter(s => root.plotted[s.index] === true) : []
+            readonly property int stripColumns:
+                Math.max(1, Math.floor((width - stripFold.width - 16) / 140))
+            readonly property real stripWidth: !stripShown || stripBelow ? 0
+                : viewerSettings.stripFolded ? stripFold.width + 8
+                : Math.max(stripFold.width + 8, Math.min(170, Math.round(width * 0.25)))
+            readonly property real stripHeight: !stripShown || !stripBelow ? 0
+                : viewerSettings.stripFolded ? stripFold.height + 8
+                : Math.max(stripFold.height + 8,
+                           Math.min(Math.ceil(stripModel.length / stripColumns) * 40 + 8,
+                                    Math.round(height * 0.4)))
 
             StripChart {
                 id: chart
                 objectName: "chart"
                 x: 4
                 y: 4
-                shownW: parent.width - 8
-                shownH: parent.height - 8
+                shownW: parent.width - 8 - chartFrame.stripWidth
+                shownH: parent.height - 8 - chartFrame.stripHeight
                 emptyText: qsTr("No signals plotted; tick a row to plot it")
                 fetch: function(widthPx) { return root.series(widthPx) }
                 layoutOpts: ({
@@ -1059,6 +1174,18 @@ Page {
                         ctx.moveTo(xOf(root.cursorMs), l.top)
                         ctx.lineTo(xOf(root.cursorMs), l.top + l.plotH)
                         ctx.stroke()
+                    }
+                    // A dot on each trace at the sample its value comes from
+                    for (const tr of l.traces) {
+                        if (!isFinite(tr.labelMs))
+                            continue
+                        const x = xOf(tr.labelMs)
+                        if (x < 0 || x > l.plotW)
+                            continue
+                        ctx.fillStyle = Theme.seriesColor(tr.row)
+                        ctx.beginPath()
+                        ctx.arc(x, tr.endY, root.cursorDotR, 0, 2 * Math.PI)
+                        ctx.fill()
                     }
                 }
             }
@@ -1104,18 +1231,125 @@ Page {
                     lastScale = activeScale
                 }
             }
+            // A notch (120) in shows 0.8 of the span, out 1.25; a
+            // high-resolution wheel's or a touchpad's parts of a notch zoom
+            // by their share of it, and a sideways scroll doesn't zoom
             WheelHandler {
                 target: null
-                onWheel: event => root.zoomAt(root.timeAt(event.x), event.angleDelta.y > 0 ? 0.8 : 1.25)
+                onWheel: event => {
+                    const dy = event.angleDelta.y
+                    if (dy !== 0)
+                        root.zoomAt(root.timeAt(event.x), Math.pow(0.8, dy / 120))
+                }
             }
-            TapHandler {
-                onTapped: (eventPoint, button) => root.setCursor(root.timeAt(eventPoint.position.x))
+            DoubleTapHandler {
+                onTapped: (eventPoint, button) => root.setCursor(root.snapped(root.timeAt(eventPoint.position.x)))
+                // A double-click or double-tap maximizes it, or gives the
+                // signals back; the two taps of a thumb may land a little apart
+                onDoubleTap: root.toggleMaximized()
             }
+
+            ThemedButton {
+                id: stripFold
+                objectName: "stripFold"
+                visible: chartFrame.stripShown
+                compact: true
+                // Placed, not anchored: an anchor switched off keeps the
+                // size it gave, so the strip's two shapes set x and y
+                x: parent.width - 4 - width
+                y: chartFrame.stripBelow ? parent.height - 4 - height : 4
+                text: chartFrame.stripBelow ? (viewerSettings.stripFolded ? "^" : "v")
+                                            : (viewerSettings.stripFolded ? "<" : ">")
+                Accessible.name: viewerSettings.stripFolded ? qsTr("Show the values at the cursor")
+                                                            : qsTr("Hide the values at the cursor")
+                onClicked: viewerSettings.stripFolded = !viewerSettings.stripFolded
+            }
+
+            GridView {
+                objectName: "cursorStrip"
+                visible: chartFrame.stripShown && !viewerSettings.stripFolded
+                x: chartFrame.stripBelow ? 4 : parent.width - chartFrame.stripWidth
+                y: chartFrame.stripBelow ? parent.height - chartFrame.stripHeight + 4
+                                         : stripFold.y + stripFold.height + 4
+                width: chartFrame.stripBelow ? stripFold.x - 8 : chartFrame.stripWidth - 4
+                height: chartFrame.stripBelow ? chartFrame.stripHeight - 8 : parent.height - 4 - y
+                cellWidth: chartFrame.stripBelow ? Math.floor(width / chartFrame.stripColumns) : width
+                cellHeight: 40
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                model: visible ? chartFrame.stripModel : []
+                delegate: Item {
+                    id: stripRow
+                    required property var modelData
+                    readonly property var at: root.readout[modelData.index]
+                    width: GridView.view.cellWidth
+                    height: 40
+                    Rectangle {
+                        x: 0
+                        y: 6
+                        width: 8
+                        height: 8
+                        radius: 2
+                        color: Theme.seriesColor(stripRow.modelData.index)
+                    }
+                    Label {
+                        objectName: "stripName"
+                        x: 12
+                        width: parent.width - 12
+                        text: stripRow.modelData.name
+                        color: Theme.textDim
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        objectName: "stripValue"
+                        x: 12
+                        y: 16
+                        width: parent.width - 12
+                        text: !stripRow.at || stripRow.at.atMs < 0 ? qsTr("—")
+                              : stripRow.modelData.isText ? stripRow.at.text
+                              : root.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
+                                               stripRow.at.unit)
+                        color: Theme.text
+                        font.family: Theme.monoFamily
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+        }
+
+        // The splitter: drag it to make the chart taller or shorter, kept
+        // between runs; a double-tap gives the chart the page's own height
+        Item {
+            objectName: "chartSplitter"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            implicitHeight: 12
+            Rectangle {
+                anchors.centerIn: parent
+                width: 40
+                height: 4
+                radius: 2
+                color: chartDrag.active || chartSplitHover.hovered ? Theme.textDim : Theme.outline
+            }
+            HoverHandler { id: chartSplitHover; cursorShape: Qt.SizeVerCursor }
+            DragHandler {
+                id: chartDrag
+                target: null
+                xAxis.enabled: false
+                property real startHeight: 0
+                onActiveChanged: if (active) startHeight = chartFrame.height
+                onActiveTranslationChanged: {
+                    if (active)
+                        viewerSettings.chartHeight = Math.max(200, startHeight + activeTranslation.y)
+                }
+            }
+            DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
         }
 
         Label {
             objectName: "frameTestResult"
-            visible: Theme.developerMode && root.frameTestResult !== ""
+            visible: Theme.developerMode && root.frameTestResult !== "" && !root.chartMaximized
                      && recording.state === RecordingView.Open
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
@@ -1127,7 +1361,7 @@ Page {
         // its finding
         Label {
             objectName: "checkSummary"
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -1136,7 +1370,7 @@ Page {
         ListView {
             id: findingList
             objectName: "findingList"
-            visible: recording.state === RecordingView.Open && count > 0
+            visible: recording.state === RecordingView.Open && count > 0 && !root.chartMaximized
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(count, 3) * 32
             clip: true

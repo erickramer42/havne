@@ -6,7 +6,8 @@
 //          labels nudged apart inside the plot, a crowded trace's band;
 //          a recording's columns over a fixed span (a line through calm
 //          columns, a band where one swings past its neighbors' lean, a
-//          steep ramp a line, a gap past gapMs a break) and absolute ticks,
+//          steep ramp a line, a gap past gapMs a break), columns over a
+//          span of their own cut to the axis, and absolute ticks,
 //          before zero too; a scaleKey's shared range and lane, a series'
 //          dash. No bridge, no session.
 
@@ -456,6 +457,26 @@ TestCase {
         compare(tr.label, "50", "the last column's highest")
     }
 
+    // Columns on a span of their own, wider than the axis, are placed by
+    // their own times and cut to the axis: a pan's grid
+    function test_columnsOnTheirOwnSpanAreCutToTheAxis() {
+        const lows = [], highs = []
+        for (let c = 0; c < 11; ++c) {
+            lows.push(40 + c)
+            highs.push(41 + c)
+        }
+        const s = columns(0, lows, highs)
+        s.columns.t0 = -50
+        s.columns.t1 = 1050
+        const l = layout([s], { span: { t0: 0, t1: 1000 } })
+        const pts = linesOf(l.traces[0])[0].points
+        const xOf = t => t / 1000 * (l.plotW - 1)
+        compare(pts[0].x, 0, "the first column cut at the axis's start")
+        near(pts[1].x, xOf(25), 0.01, "its middle inside the axis")
+        near(pts[2].x, xOf(100), 0.01, "the next column's middle at its own time")
+        near(pts[pts.length - 1].x, l.plotW - 1, 0.01, "the last cut at the axis's end")
+    }
+
     // Without a span a column series has no axis: nothing to draw
     function test_columnsNeedASpan() {
         compare(layout([columns(0, [1, 2], [1, 2])]), null)
@@ -510,6 +531,19 @@ TestCase {
         const s = columns(0, [10, 20], [10, 20], 1)
         s.labelValue = 12.34
         compare(layout([s], { span: { t0: 0, t1: 1000 } }).traces[0].label, "12.3")
+    }
+
+    // A series' labelMs, its value's sample time, reaches its trace, from
+    // columns and from samples alike; none leaves it undefined
+    function test_aSeriesLabelMsReachesItsTrace() {
+        const c = columns(0, [10, 20], [10, 20], 1)
+        c.labelValue = 12
+        c.labelMs = 250
+        compare(layout([c], { span: { t0: 0, t1: 1000 } }).traces[0].labelMs, 250)
+        compare(layout([{ samples: [0, 1, 500, 2], row: 0, decimals: 1, unit: "",
+                          labelMs: 500 }], {}).traces[0].labelMs, 500)
+        verify(!isFinite(layout([columns(0, [10, 20], [10, 20], 1)],
+                                { span: { t0: 0, t1: 1000 } }).traces[0].labelMs))
     }
 
     // Absolute ticks fall on whole steps of the time itself, in time order,

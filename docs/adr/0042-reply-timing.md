@@ -251,3 +251,29 @@ The listener's is the bus's, and the gap is the adapter's: a latency on
 the adapter's clock (the alternative above) would still leave out what
 it measures here, the delivery after the last frame. Neither changes
 what's built.
+
+**Note, 2026-11-04: the 52 ms was the surrogate's.** The VX's frame log
+on the test car ([2026-11-04-two-ecu-car](../bench-sessions/2026-11-04-two-ecu-car.md))
+puts the cause in the surrogate, not the adapter. A reply that came
+after the first read's 10 ms reached the worker about 50 ms after it
+arrived, with no empty read between. The child, finding only the TX
+indication in its first call, called `ReadMsgs` again with what was
+left of the timeout, which was 0, and the VX holds a read asked to wait
+0 ms for about 50 ms (50 to 65 ms in that log, median 53). A reply
+inside the first call came back when that call's slice ended. The
+child's calls now wait at least 1 ms, and the first asks for one
+message, so a read ends at its reply and takes the rest of a batch in
+one more 1 ms call ([j2534.md](../j2534.md#requests)). The fake as the
+VX holds a 0 ms read for 50 ms, and `J2534HealthTest.VxAReply*` time
+both cases. The adapter's own delivery after the last frame is what
+remains of the gap; the car measures it again.
+
+**Note, 2026-11-05: no call for the rest of a batch.** The re-run on the
+test car ([2026-11-05-two-ecu-car-rerun](../bench-sessions/2026-11-05-two-ecu-car-rerun.md))
+had no reply 50 ms late, but the VX held the 1 ms call for the rest of
+a batch a median 9.8 ms, and only 12 of 3,337 such calls brought a
+message: packed requests read a median 24.6 ms against the bus's
+15. The child now answers a read with its first message, and the
+fake as the VX holds a call asked to wait under 10 ms for 10 ms. Timed
+on the car the same day (that sheet's A2): packed 16.4 ms, unpacked
+4.6, each call held a median under 1 ms.

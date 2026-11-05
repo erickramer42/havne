@@ -1800,6 +1800,26 @@ TEST_F(Elm327SessionTest, ListeningHearsTheFiltersId)
     EXPECT_EQ(s.cap.count("41 0C"), 0u);
 }
 
+/* A session that asks nothing turns the adapter's flow control off
+ * (AT CFC0), since it never asks; a requesting session keeps CFC1
+ * (SetupRunsTheContractThenTheReadings). The MX+'s monitor prints a
+ * First Frame and none of its Consecutive Frames under either setting,
+ * so through it only single-frame replies arrive, and a cut message is
+ * never delivered in part (ListeningDeliversTheChannelsMessages: an
+ * adapter that prints every frame hands it over whole) */
+TEST_F(Elm327SessionTest, ListeningTurnsFlowControlOffAndDeliversNoCutMessage)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.monitor_eats_cfs = true; });
+    Session s;
+    listen_on(s);
+    EXPECT_EQ(fake_count("ATCFC0"), 1u);
+    EXPECT_EQ(fake_count("ATCFC1"), 0u);
+    on_bus(0x7E8, kVinReply);
+    on_bus(0x7E8, {0x41, 0x05, 0x7B});
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 05") == 1; }, 3000));
+    EXPECT_EQ(s.cap.count("49 02"), 0u) << "a First Frame delivered alone";
+}
+
 /* No message for ten 100 ms windows is quiet, with no episode; a message
  * is OK again */
 TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)

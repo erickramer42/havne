@@ -14,8 +14,11 @@
 //          a child from other shared headers refused at OP_OPEN,
 //          device and channel ID 0 handled as real IDs, malformed
 //          requests refused by the client before sending and by the
-//          child on arrival, and a surrogate exe that exits before the
-//          handshake.
+//          child on arrival, a surrogate exe that exits before the
+//          handshake, a close that fails for a child that exited on
+//          its own or was killed (so every close == OK asserts the
+//          child survived what came before), and replies skewed past
+//          the wire's limits (the child's ECUIO_SUR_TEST_SKEW).
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -947,13 +950,55 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
 
-    /* Close kills the child instead of waiting 1.5 s twice. */
+    /* Close kills the child instead of waiting 1.5 s twice, and says
+     * it didn't shut down cleanly */
     t0 = clock::now();
-    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(1000));
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+    EXPECT_NE(log.find("close: the child didn't shut down cleanly "
+                       "(unresponsive, killed)"),
+              std::string::npos)
+        << log;
+}
+
+/* A child that exits on its own (a crash, or a child loop that ends on
+ * a vendor status, which ADR-0014 forbids) fails the close: every test
+ * that ends with sur_close == ECUIO_OK thereby asserts its child lived
+ * through the refusals before it. The child is killed from outside,
+ * found by the PID the fake records at PassThruOpen. */
+TEST(J2534SurrogateTest, ACloseFailsWhenTheChildExitedOnItsOwn)
+{
+    fake_control::Page* page = fake_control::create_for_this_process();
+    ASSERT_NE(page, nullptr);
+    fake_control::reset(page);
+    struct PageReset {
+        fake_control::Page* p;
+        ~PageReset() { fake_control::reset(p); }
+    } page_reset{page};
+
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    const DWORD pid = fake_control::opener_pid(page);
+    ASSERT_NE(pid, 0u) << "the fake's PassThruOpen didn't record its process";
+    ASSERT_NE(pid, GetCurrentProcessId())
+        << "the fake ran in the test, not the child";
+
+    HANDLE child = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(TerminateProcess(child, 9));
+    EXPECT_EQ(WaitForSingleObject(child, 5000), WAIT_OBJECT_0);
+    CloseHandle(child);
+
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("close: the child had already exited (code 9)"),
+              std::string::npos)
+        << log;
 }
 
 /* A reply the client never asked for (the child answers OP_CONNECT
@@ -1014,13 +1059,106 @@ TEST(J2534SurrogateTest, RequestIdMismatchMakesTheChildUnresponsive)
     EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(h, msg, sizeof(msg), 0, 0),
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
-    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED)
+        << "a child out of step is killed, not shut down";
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("DESYNC"), std::string::npos) << log;
     EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
     EXPECT_EQ(log.find("OP_WRITE:"), std::string::npos)
         << "a write reached the child after the mismatch\n" << log;
+}
+
+/* A child built against other wire limits (ECUIO_SUR_TEST_SKEW stands in
+ * for one) can claim more than the client has room for. The client
+ * refuses the reply before reading past it: a READ claiming more frames
+ * than a batch holds, or frames on a reply that takes none, leaves the
+ * pipe out of step, so the handle turns unresponsive and close kills the
+ * child; an ioctl reply whose data_len is past the wire's limit is
+ * refused alone, the pipe still in step. */
+static ecuio_j2534_sur_handle_t* open_skewed(uint32_t opcode)
+{
+    char op[8];
+    snprintf(op, sizeof(op), "%u", static_cast<unsigned>(opcode));
+    EnvArm arm("ECUIO_SUR_TEST_SKEW", op);
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    return h;
+}
+
+TEST(J2534SurrogateTest, AReadClaimingMoreFramesThanABatchHoldsEndsTheHandle)
+{
+    ecuio_j2534_sur_handle_t* h = open_skewed(ECUIO_SUR_OP_READ);
+    ASSERT_NE(h, nullptr);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    ecuio_pt_rx_t f = {};
+    bool got = true;
+    EXPECT_EQ(ecuio_j2534_sur_read_msg(h, channel, &f, 50, &got),
+              ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_FALSE(got);
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_ERR_SURROGATE_FAILED)
+        << "the pipe is out of step: no later call reaches the child";
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("17 frame(s) on the reply to op=5 (skew?); child "
+                       "unresponsive"),
+              std::string::npos)
+        << log;
+}
+
+TEST(J2534SurrogateTest, FramesOnAReplyThatTakesNoneEndTheHandle)
+{
+    ecuio_j2534_sur_handle_t* h = open_skewed(ECUIO_SUR_OP_CONNECT);
+    ASSERT_NE(h, nullptr);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("1 frame(s) on the reply to op=2 (skew?); child "
+                       "unresponsive"),
+              std::string::npos)
+        << log;
+}
+
+TEST(J2534SurrogateTest, AnIoctlReplyPastTheWireLimitIsRefusedAlone)
+{
+    ecuio_j2534_sur_handle_t* h = open_skewed(ECUIO_SUR_OP_IOCTL);
+    ASSERT_NE(h, nullptr);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    unsigned char out[8] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
+    uint32_t out_len = 1234;
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(out_len, 0u) << "a refused reply reports no length";
+    EXPECT_EQ(out[0], 0xAA) << "a refused reply copies nothing";
+
+    /* Only the one reply was skewed, and the pipe is in step: the next
+     * ioctl is the fake's 13.8 V, and the child shuts down cleanly */
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("ioctl: data_len=65 exceeds the wire limit (skew?)"),
+              std::string::npos)
+        << log;
 }
 
 /* A read the child answers past its deadline: the late reply, which
@@ -1161,11 +1299,12 @@ TEST(J2534SurrogateTest, EarlierSessionLogIsKept)
 
 /* Per J2534-1, a read asking for more messages than arrived, with a
  * nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH those messages.
- * The spec-mode fake emulates exactly that; the client must deliver
- * the batch and only judge the status when the batch is empty. A
- * client that judged the status first would discard the batch and
- * render a talking bus invisible. Knob armed BEFORE
- * open: the child snapshots the environment at spawn (same
+ * The spec-mode fake emulates exactly that. The child's first call
+ * asks for one message, so it returns as soon as one has arrived, and
+ * its call for the rest of the batch is such a short read: the second
+ * message comes back under ERR_TIMEOUT and must be delivered, from the
+ * same response. An empty read holds its timeout and is quiet. Knob
+ * armed BEFORE open: the child snapshots the environment at spawn (same
  * discipline as ECUIO_FAKE_IOCTL_DELAY_MS). */
 TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
 {
@@ -1176,10 +1315,11 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
     const unsigned char f0[8] = {0x41, 0x0C, 0x1F, 0x40, 0, 0, 0, 0};
+    const unsigned char f0b[8] = {0x41, 0x0D, 0x20, 0, 0, 0, 0, 0};
     ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, f0, 8, 4242, 0),
               ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, f0b, 8, 4243, 0), ECUIO_OK);
 
-    /* A conforming vendor holds a short read for its timeout. */
     const auto ms_since = [](std::chrono::steady_clock::time_point t) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t).count();
@@ -1191,39 +1331,49 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
         ecuio_j2534_sur_read_msg(h, 0, &f1, 50, &got1);
     const auto held1 = ms_since(t);
 
+    /* The rest of the batch, from the client's cache */
     ecuio_pt_rx_t f2 = {};
     bool got2 = false;
-    t = std::chrono::steady_clock::now();
     const ecuio_status_t st2 =
         ecuio_j2534_sur_read_msg(h, 0, &f2, 50, &got2);
-    const auto held2 = ms_since(t);
+
+    ecuio_pt_rx_t f3 = {};
+    bool got3 = false;
+    t = std::chrono::steady_clock::now();
+    const ecuio_status_t st3 = ecuio_j2534_sur_read_msg(h, 0, &f3, 50, &got3);
+    const auto held3 = ms_since(t);
 
     /* Restore BEFORE assertions (knob-leak discipline) */
     SetEnvironmentVariableA("ECUIO_FAKE_SPEC_READ_SEMANTICS", nullptr);
 
-    /* Child asks for 16 with a 50 ms timeout; one queued -> spec mode
-     * returns 1 message WITH ERR_TIMEOUT. The client must deliver it. */
     EXPECT_EQ(st1, ECUIO_OK);
     EXPECT_TRUE(got1);
     EXPECT_EQ(memcmp(f1.data, f0, 8), 0);
     EXPECT_EQ(f1.data_size, 8u);
     EXPECT_EQ(f1.timestamp, 4242u);
-    EXPECT_GE(held1, 45) << "the short batch came back before its timeout";
+    EXPECT_LT(held1, 45) << "the read held its timeout past its message";
+
+    /* The child's second call asked for 15 with 1 ms; one queued: spec
+     * mode returned it WITH ERR_TIMEOUT, and it was delivered */
+    EXPECT_EQ(st2, ECUIO_OK);
+    EXPECT_TRUE(got2) << "the short batch's message was dropped";
+    EXPECT_EQ(memcmp(f2.data, f0b, 8), 0);
+    EXPECT_EQ(f2.timestamp, 4243u);
 
     /* Empty queue, nonzero timeout: quiet, not delivered, not hard. */
-    EXPECT_EQ(st2, ECUIO_ERR_VEHICLE_TIMEOUT);
-    EXPECT_FALSE(got2);
-    EXPECT_GE(held2, 45) << "the empty read came back before its timeout";
+    EXPECT_EQ(st3, ECUIO_ERR_VEHICLE_TIMEOUT);
+    EXPECT_FALSE(got3);
+    EXPECT_GE(held3, 45) << "the empty read came back before its timeout";
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
 
-/* A read's reply carries its messages whole, however long: sixteen of
+/* A read's reply carries its message whole, however long: sixteen of
  * the fake's 0xF1A1 replies, each ISO 15765-2's longest message with
- * its CAN ID in front (4099 bytes), come back from one OP_READ (the
- * fake's spec mode batches; by default it returns one per read), about
- * 66 KB across the pipe, every byte as the vendor gave it. */
-TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
+ * its CAN ID in front (4099 bytes), queued at once (the fake's spec mode
+ * batches), come back one a read, every byte as the vendor gave it: the
+ * child answers a read with its first message. */
+TEST(J2534SurrogateTest, LongMessagesCrossThePipeWholeOneARead)
 {
     EnvArm spec("ECUIO_FAKE_SPEC_READ_SEMANTICS", "1");
     ecuio_j2534_sur_handle_t* h = nullptr;
@@ -1263,8 +1413,19 @@ TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
     EXPECT_EQ(whole, ECUIO_SUR_MAX_FRAMES_PER_READ);
     ASSERT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);   /* child exits: log complete */
     const std::string log = read_session_log(path);
-    EXPECT_NE(log.find("OP_READ: status 0, frames 16"), std::string::npos)
-        << "the sixteen didn't come back in one read:\n" << log;
+    size_t reads = 0;
+    for (size_t at = log.find("OP_READ: status 0, frames ");
+         at != std::string::npos;
+         at = log.find("OP_READ: status 0, frames ", at + 1)) {
+        ++reads;
+        const size_t n = at + strlen("OP_READ: status 0, frames ");
+        EXPECT_EQ(log.compare(n, 2, "1\r") == 0 ||
+                      log.compare(n, 2, "1\n") == 0,
+                  true)
+            << "a read carried more than one message:\n"
+            << log;
+    }
+    EXPECT_EQ(reads, static_cast<size_t>(ECUIO_SUR_MAX_FRAMES_PER_READ));
 }
 
 /* A request to 0x7E0 on a channel filtered for 0x7E8, and the reply

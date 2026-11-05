@@ -8,7 +8,10 @@
 //          unfolded (2026-10-28); the Recordings page's Replay putting its
 //          URI in Settings' field, and seven tabs inside 384 px (2026-11-03);
 //          the header's Mark while recording, inside a phone's width:
-//          tests/qml/tst_phone.qml.
+//          tests/qml/tst_phone.qml. The frame-rate badge in developer
+//          mode: tests/qml/tst_phone.qml (shown, counting, above the
+//          tab bar), the rates
+//          on the phone in its run.
 //          The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
 //          and the "Display:" line a phone logs in developer mode:
@@ -70,6 +73,10 @@ ApplicationWindow {
 
     // The layout width, after the zoom
     readonly property bool isCompact: zoomRoot.width < 720
+    // A phone on its side, or a window as short
+    readonly property bool isShort: zoomRoot.height < 480
+    Binding { target: Theme; property: "dense"; value: root.isCompact || root.isShort }
+    Binding { target: Theme; property: "shortLayout"; value: root.isShort }
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
@@ -181,7 +188,7 @@ ApplicationWindow {
 
             ToolBar {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 48
+                Layout.preferredHeight: Theme.toolBarHeight
                 background: Rectangle {
                     color: Theme.surface
                     Rectangle { // 2px accent underline
@@ -292,7 +299,7 @@ ApplicationWindow {
                 Rectangle {
                     visible: !root.isCompact
                     Layout.fillHeight: true
-                    Layout.preferredWidth: 220
+                    Layout.preferredWidth: Theme.sidebarWidth
                     color: Theme.surface
 
                     Rectangle {   // hairline against the page
@@ -361,6 +368,8 @@ ApplicationWindow {
             }
 
             TabBar {
+                id: tabBar
+                objectName: "tabBar"
                 visible: root.isCompact
                 Layout.fillWidth: true
                 currentIndex: stack.currentIndex
@@ -432,5 +441,54 @@ ApplicationWindow {
             color: Theme.text
         }
         Timer { id: zoomBadgeTimer; interval: 1200; onTriggered: zoomBadge.opacity = 0 }
+    }
+
+    // ---- Developer mode: the window's drawn frames per second, in a
+    // corner badge that takes no input. Qt draws only when something
+    // changed, so an idle page reads 0 (the badge's own change is a frame
+    // at most each second) and a chart being panned or pinched reads its
+    // rate: the phone run's measure of the charts and the gauges.
+    // frameSwapped comes from the render thread, queued to this one.
+    property int framesThisSecond: 0
+    property int framesPerSecond: 0
+    Connections {
+        target: root
+        enabled: Theme.developerMode
+        function onFrameSwapped() { root.framesThisSecond += 1 }
+    }
+    Timer {
+        interval: 1000
+        repeat: true
+        running: Theme.developerMode
+        onTriggered: {
+            root.framesPerSecond = root.framesThisSecond
+            root.framesThisSecond = 0
+        }
+        onRunningChanged: {
+            root.framesThisSecond = 0
+            root.framesPerSecond = 0
+        }
+    }
+    Rectangle {
+        objectName: "frameRate"
+        visible: Theme.developerMode
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: 8 + zoomRoot.safe.right
+        // Above the tab bar on a phone, so it covers none of the tabs
+        anchors.bottomMargin: 8 + zoomRoot.safe.bottom + (tabBar.visible ? tabBar.height : 0)
+        width: frameRateLabel.implicitWidth + 12
+        height: frameRateLabel.implicitHeight + 6
+        radius: 4
+        color: Theme.elevatedLight
+        border.color: Theme.outline
+        opacity: 0.85
+        Label {
+            id: frameRateLabel
+            anchors.centerIn: parent
+            text: qsTr("%1 frames/s").arg(root.framesPerSecond)
+            font.pixelSize: 11
+            color: Theme.textDim
+        }
     }
 }

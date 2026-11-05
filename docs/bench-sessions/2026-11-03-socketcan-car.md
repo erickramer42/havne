@@ -91,7 +91,14 @@ it (ADR-0042):
 So a segmented reply reaches Havne's worker about 52 ms after its last
 frame crossed the bus. The VX acts fast on the bus; the time is between
 its receiving the message and the worker's read of it: the adapter, its
-USB link and its driver. Havne's read slice is 10 ms, and a single-frame
+USB link and its driver.
+
+Note (2026-11-04): the surrogate's frame log on the next car run puts
+the time in the surrogate's read instead. A vendor read that brought
+only the request's TX indication was read again with none of its
+timeout left, and the VX held that read about 50 ms; the VX's own
+stamps put the reply about 11 ms after its request left
+([2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md)). Havne's read slice is 10 ms, and a single-frame
 reply through the VX on this laptop took 14.3 ms in all
 ([2026-11-01-vehicle](2026-11-01-vehicle.md)). The VX's figure for a
 pack there, 73.7 ms, agrees with this run's.

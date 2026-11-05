@@ -211,12 +211,14 @@ struct list_state {
 void list_visit(const socketcan_link& link, void* user)
 {
     list_state* s = static_cast<list_state*>(user);
-    ecuio_can_interface_t item;
-    if (!socketcan_interface_from(link, &item)) {
+    /* Straight into the caller's slot while there's room; a link past
+     * the capacity is still counted. No local copied into the list:
+     * GCC 13 took that copy for a dangling pointer */
+    ecuio_can_interface_t spare;
+    ecuio_can_interface_t* out =
+        s->count < s->capacity ? &s->list[s->count] : &spare;
+    if (!socketcan_interface_from(link, out)) {
         return;
-    }
-    if (s->count < s->capacity) {
-        s->list[s->count] = item;
     }
     ++s->count;
 }

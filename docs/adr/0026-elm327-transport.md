@@ -232,7 +232,7 @@ present", and the field stays empty.
 | `AT E0`, `AT L0`, `AT S0` | contract | no echo, no linefeeds, no spaces: fewer bytes per reply |
 | `AT H1` | contract | the CAN ID and the PCI byte on every line, so core reassembles and correlates |
 | `AT D0` | contract | no data length digit between the ID and the data. An STN prints one when its parameter 29 is on, which another app could have set; the OBDX takes `AT D0` as a compatibility command and answers OK |
-| `AT CAF1`, `AT CFC1` | contract | the adapter adds the PCI bytes when sending and sends the flow control after a First Frame. Both are defaults, set anyway: the framing rests on them, and a clone's defaults aren't trusted |
+| `AT CAF1`, `AT CFC1` | contract | the adapter adds the PCI bytes when sending and sends the flow control after a First Frame. Both are defaults, set anyway: the framing rests on them, and a clone's defaults aren't trusted. A session that only listens sends `AT CFC0` instead (the appendix "passive listening") |
 | `AT SP 6`, `7`, `8` or `9` | contract | ISO 15765-4 at the mode and rate of section 2, never an automatic search |
 | `AT SH <tx>` | contract | the first channel's request ID |
 | `AT CF`/`AT CM`, or `AT CRA <rx>` for one channel | contract | receive only the channels' reply IDs |
@@ -777,6 +777,38 @@ each `BUFFER FULL` and each liveness check. Frame lines go in only with
 printed nothing; each 5 s check's space got `STOPPED` and the prompt
 within 0.3 ms, and the monitor started again with the link quiet and no
 failure. The stop at close went the same way.
+
+**Note, 2026-11-04: flow control off for a monitor.** On the test car,
+the MX+ (an STN2255) listened while the VX asked
+(docs/bench-sessions/2026-11-04-two-ecu-car.md). Its `AT MA` printed
+every First Frame and none of their Consecutive Frames, packed or not,
+so no multi-frame message arrived. The setup had sent `AT CFC1`. The
+FRPM's section 12 says that with flow control on, a valid First Frame
+starts the adapter's own flow control, and `AT MA` passes every frame to
+that check. A session that asks nothing never needs a flow control, so
+its setup sends `AT CFC0` in place of `AT CFC1`; a requesting session's
+setup is unchanged. `AT CFC0` also makes sure the listener sends no
+flow control of its own beside the other tester's, where "The monitor is
+silent" above rests on the manuals alone. `AT CAF0` was the other candidate and is the fallback: it
+changes the printing, not the flow control, and it would drop the
+monitor's `FC:` and `<DATA ERROR` marks that keep those lines out of
+the reassembly. The fake ELM327 models the adapter
+(`monitor_cfc_eats_cfs`); the car run confirms it.
+
+**Note, 2026-11-05: `AT CFC0` doesn't bring the Consecutive Frames
+back.** The car run again (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md):
+with `AT CFC0` the MX+'s monitor printed 3,167 First Frames and no
+Consecutive Frame, and through the phone's relay neither `AT CAF0`,
+dropping `AT CRA`, `STMA` nor `STCSEGR1` changed that. With no receive
+filter it heard every request and First Frame but not the VX's Flow
+Control either: it misses every frame that follows another within
+about 1 ms. The bus carried them (a SocketCAN listener on the same
+splitter, 2026-11-04) and the adapter counted no CAN error. So the FRPM
+reading above isn't the cause, and the fake's model (Consecutive Frames
+dropped under `AT CFC1` only) was wrong for this adapter: the fake's
+`monitor_eats_cfs` drops them under either setting. A listening session
+needs no flow control, so its setup keeps `AT CFC0`; through the MX+ it
+hears Single Frame replies only (STATUS.md's Known Issue #41).
 
 ## Appendix: 2026-10-27, WiFi over TCP
 

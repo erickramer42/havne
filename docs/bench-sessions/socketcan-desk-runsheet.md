@@ -3,8 +3,9 @@
 A real CAN controller under Linux's SocketCAN, on a desk bus with the
 OBDX Pro VX as the other node: no car. It settles BENCH prep #26
 (listening) and #32 (sending), with #32 whether ADR-0040 section 2
-keeps its one-shot rule, and #33 (the simulated ECU read over real
-wire). Results go into a dated session sheet,
+keeps its one-shot rule, #33 (the simulated ECU read over real
+wire), and one reply's time on two clocks (ADR-0049 section 5). Results
+go into a dated session sheet,
 `docs/bench-sessions/<date>-socketcan-desk.md`.
 
 ## The bus
@@ -137,6 +138,38 @@ The USB2CAN transmits only in reply, onto this two-node bus only.
       exit 1, and the VX's next requests go unanswered
 - [ ] *Optional:* `replay://` with a car recording instead of
       `mock://sim`: the VX walks the car's own bitmaps
+
+## Phase 4: one reply on two clocks (ADR-0049 section 5)
+
+How far apart the same reply lands in the VX's recording, aligned on
+its UTC start, and on the bus as WSL's kernel stamps it. One machine's
+clock against itself is `SocketCanBusTest.TwoRecordingsOfOneBusLineUpOnTheirUtcStarts`
+(under a millisecond); this phase adds the VX's delivery and the
+offset between Windows' clock and WSL's. A Havne listener can't share
+`can0` with `sim` (a listening session needs the controller
+listen-only), so `candump` is the bus's side.
+
+1. `can0` as in Phase 3, `sim` answering:
+   `havne-cli sim mock://sim --on can0 --desk-bus --seconds 120`
+2. In WSL: `candump -t a -L can0 > desk-bus.log` (each frame's absolute
+   time from the kernel)
+3. WSL's clock against Windows', before and after the run, in WSL:
+   `date +%s.%N; powershell.exe -NoProfile -c "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()" < /dev/null; date +%s.%N`
+   (the Windows reading falls between the two WSL ones; PowerShell
+   reads standard input, so in a script it gets `/dev/null`)
+4. On Windows: `havne-cli stream "j2534://OBDX Pro - VX" --record <folder> --seconds 60 < NUL`
+   (`obd2`)
+
+- [ ] Pair each `0x7E8` reply in the recording's `frames.csv` with its
+      line in `desk-bus.log`, by order and bytes; the difference of
+      their times (the recording's UTC start plus the row's `host_us`,
+      against candump's) for single-frame and segmented replies apart:
+      median and spread
+- [ ] The clocks' offset from step 3, and how much of the difference it
+      explains; what is left is the delivery through the VX and the
+      surrogate's reads (about 10 ms for a reply inside the first read,
+      about 52 ms for one after it,
+      [2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md))
 
 ## After the run
 

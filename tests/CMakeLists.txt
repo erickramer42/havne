@@ -177,6 +177,9 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/recording_compare.py selftest)
     add_test(NAME AbiReportTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
+    # scripts/api_check.py, the ABI check's source half: the declarations
+    add_test(NAME ApiCheckTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/api_check.py selftest)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)

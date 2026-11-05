@@ -8,7 +8,7 @@ AbstractButton {
     property string label: ""
     property bool active: false
 
-    implicitHeight: 44
+    implicitHeight: Theme.dense ? 38 : 44
     hoverEnabled: true
     Accessible.name: control.label
 

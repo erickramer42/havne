@@ -75,6 +75,7 @@ qt_add_qml_module(app_ui
         qml/BarGauge.qml
         qml/ShiftLightBar.qml
         qml/SignalFilterBar.qml
+        qml/DoubleTapHandler.qml
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

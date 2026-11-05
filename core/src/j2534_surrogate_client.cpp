@@ -1366,27 +1366,50 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
 ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
 {
     if (h == nullptr) return ECUIO_OK;
-    if (h->pipe_connected && h->pipe != INVALID_HANDLE_VALUE &&
-        h->process != nullptr &&
-        WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
+    /* OK only for a child that lived to the end: still running here,
+     * answering OP_SHUTDOWN, then exiting 0. Anything else (it exited
+     * on its own, wedged, or answered and exited otherwise) is
+     * SURROGATE_FAILED, so a test's close asserts that the child
+     * survived every refusal before it (ADR-0014). */
+    bool clean = false;
+    const bool alive = h->process != nullptr &&
+                       WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0;
+    if (h->pipe_connected && h->pipe != INVALID_HANDLE_VALUE && alive) {
         ecuio_sur_request_t req = {};
         req.request_id = h->next_request_id++;
         req.opcode = ECUIO_SUR_OP_SHUTDOWN;
         ecuio_sur_response_t resp = {};
-        (void)transact(h, req, &resp, 1500);   /* fails at once if unresponsive */
+        /* fails at once if unresponsive */
+        clean = transact(h, req, &resp, 1500) &&
+                resp.status == ECUIO_PT_STATUS_NOERROR;
     }
     /* An unresponsive child won't exit on its own: closing the job
      * below kills it, so don't wait for it first. */
-    if (h->process != nullptr && !h->unresponsive) {
-        WaitForSingleObject(h->process, 1500);
+    DWORD code = STILL_ACTIVE;
+    if (h->process != nullptr && !h->unresponsive &&
+        WaitForSingleObject(h->process, 1500) == WAIT_OBJECT_0) {
+        (void)GetExitCodeProcess(h->process, &code);
+    }
+    clean = clean && code == 0;
+    if (h->process != nullptr && !clean) {
+        if (!alive) {
+            sur_log(h, "close: the child had already exited (code %lu)",
+                    static_cast<unsigned long>(code));
+        } else {
+            sur_log(h, "close: the child didn't shut down cleanly (%s)",
+                    h->unresponsive        ? "unresponsive, killed"
+                    : code == STILL_ACTIVE ? "still running, killed"
+                                           : "another exit code");
+        }
     }
     if (h->pipe != INVALID_HANDLE_VALUE) CloseHandle(h->pipe);
     if (h->io_event != nullptr) CloseHandle(h->io_event);
     if (h->process != nullptr) CloseHandle(h->process);
     if (h->job != nullptr) CloseHandle(h->job);
     if (h->log != INVALID_HANDLE_VALUE) CloseHandle(h->log);
+    const bool had_child = h->process != nullptr;
     delete h;
-    return ECUIO_OK;
+    return clean || !had_child ? ECUIO_OK : ECUIO_ERR_SURROGATE_FAILED;
 }
 
 const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t* h)

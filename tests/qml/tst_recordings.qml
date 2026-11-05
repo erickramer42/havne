@@ -4,9 +4,14 @@
 //          recording that ends joining it, Replay handing its URI on, Open
 //          reaching the viewer on tests/fixtures/recording/findings (its
 //          signal, the default plotted, the chart's series over the view,
-//          the frames check's findings), the cursor's readout, the view
+//          the frames check's findings), the cursor's readout (maximized,
+//          its strip beside the chart or below it on a tall page, folding
+//          away and back; a tap snapped to the first plotted signal's
+//          nearest sample, each trace's dot at its value's sample), the view
 //          kept inside the recording through setView, zoom, a drag and the
-//          wheel, the chart without antialiasing while the view moves and
+//          wheel (a notch in parts zooming as one, a sideways scroll not at
+//          all), the columns kept on their grid through a pan by part of
+//          one, the chart without antialiasing while the view moves and
 //          with it at rest, a second recording overlaid (dashed beside the
 //          first's rows, sharing their scales) and aligned on the starts, a
 //          rise, a marker and the UTC starts as havne-cli view aligns them
@@ -175,6 +180,33 @@ TestCase {
 
     // The ticks start at the recording's default: its ranked numbers, never
     // a text signal (pull-early: RPM, Throttle and Coolant, then the VIN)
+    // A pan keeps each column's samples together: the columns lie on a
+    // grid from time 0, so after a pan by part of a column the columns
+    // both views share hold the same lowest and highest
+    function test_aPanKeepsTheColumnsOnTheirGrid() {
+        const page = openFindings()
+        page.viewT0 = 2000
+        page.viewT1 = 12000
+        const before = page.series(400)[0].columns
+        const colMs = (before.t1 - before.t0) / before.lows.length
+        verify(colMs > 0 && Math.abs(before.t0 / colMs - Math.round(before.t0 / colMs)) < 1e-6,
+               "the grid starts on a whole column: " + before.t0)
+        page.viewT0 += colMs * 0.4
+        page.viewT1 += colMs * 0.4
+        const after = page.series(400)[0].columns
+        const shift = Math.round((after.t0 - before.t0) / colMs)
+        let shared = 0, differ = 0
+        for (let c = 0; c + shift < before.lows.length && c < after.lows.length; ++c) {
+            if (!isFinite(after.lows[c]) && !isFinite(before.lows[c + shift]))
+                continue
+            ++shared
+            if (after.lows[c] !== before.lows[c + shift] || after.highs[c] !== before.highs[c + shift])
+                ++differ
+        }
+        verify(shared > 10, "columns to compare: " + shared)
+        compare(differ, 0, "columns regrouped by the pan")
+    }
+
     function test_theTicksStartAtTheDefault() {
         const page = createPage()
         page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
@@ -204,6 +236,96 @@ TestCase {
         verify(at.atMs >= 0 && at.atMs <= 5000, "the sample in force: " + at.atMs)
         compare(find(row, "cursorValue").text, page.valueText(Number(at.text), 0, "rpm"))
         compare(page.series(400)[0].labelValue, Number(at.text), "the label shows it too")
+    }
+
+    // A tap lands on the first plotted signal's sample nearest it, so its
+    // value is the one the line has there; each trace's label carries its
+    // value's sample time, where the chart puts a dot. With nothing
+    // plotted a tap stays where it fell
+    function test_aTapSnapsToTheNearestSample() {
+        const page = openEarly()
+        const sigs = find(page, "signalRows").model
+        const rpm = sigs.find(s => s.name === "RPM").index
+        const throttle = sigs.find(s => s.name === "Throttle").index
+        page.plotted = ({ [rpm]: true, [throttle]: true })
+        // RPM every 100 ms from 100 ms, Throttle 1 ms after each
+        compare(page.snapped(1140), 1100)
+        compare(page.snapped(1160), 1200)
+        page.setView(0, 4000)
+        page.setCursor(page.snapped(1160))
+        compare(page.readout[rpm].atMs, 1200)
+        const labelMs = row => page.series(400).find(s => s.row === row).labelMs
+        compare(labelMs(rpm), 1200, "RPM's dot on its sample, at the cursor")
+        compare(labelMs(throttle), 1101, "Throttle's on its own, 99 ms behind")
+        page.setView(2000, 4000)
+        verify(isNaN(labelMs(rpm)), "no dot for a cursor out of view")
+        page.plotted = ({})
+        compare(page.snapped(1160), 1160)
+    }
+
+    // Maximized on a wide page, the cursor's values sit in a strip beside
+    // the chart; its button folds it to a tab, giving the plot the width,
+    // and opens it again, and the choice is kept
+    function test_theCursorsStripFoldsAwayAndBack() {
+        const page = openFindings()
+        page.height = 600
+        page.stripFolded = false
+        page.toggleMaximized()
+        verify(page.chartMaximized, "maximized")
+        page.setCursor(5000)
+        const strip = find(page, "cursorStrip")
+        const fold = find(page, "stripFold")
+        const chart = find(page, "chart")
+        tryVerify(() => strip.visible && fold.visible, 2000, "a cursor: its values beside the chart")
+        verify(waitForPolish(page.Window.window), "laid out")
+        const open = chart.shownW
+        compare(fold.Accessible.name, "Hide the values at the cursor")
+
+        mouseClick(fold)
+        verify(page.stripFolded, "folded, and kept")
+        verify(!strip.visible, "the strip gives way")
+        verify(fold.visible, "its tab stays to open it again")
+        tryVerify(() => chart.shownW > open + 60, 2000,
+                  "the plot has the width: " + chart.shownW + " against " + open)
+        compare(fold.Accessible.name, "Show the values at the cursor")
+
+        mouseClick(fold)
+        verify(!page.stripFolded)
+        tryVerify(() => strip.visible && chart.shownW === open, 2000, "the strip is back")
+        page.toggleMaximized()
+        page.height = 900
+    }
+
+    // On a tall page (a phone upright) the values go below the chart in a
+    // band, so the plot keeps the width; the fold gives the height back
+    function test_theCursorsStripGoesBelowTheChartOnATallPage() {
+        const page = openFindings()
+        page.width = 400
+        page.stripFolded = false
+        page.toggleMaximized()
+        page.setCursor(5000)
+        const frame = find(page, "chartFrame")
+        const strip = find(page, "cursorStrip")
+        const fold = find(page, "stripFold")
+        const chart = find(page, "chart")
+        tryVerify(() => strip.visible && frame.height > frame.width, 2000, "a tall frame, its values shown")
+        verify(waitForPolish(page.Window.window), "laid out")
+        compare(chart.shownW, frame.width - 8, "the plot keeps the width")
+        verify(strip.y >= chart.y + chart.shownH, "the values below the chart: strip " + strip.y + " h " + strip.height + ", chart " + chart.y + " shownH " + chart.shownH + " h " + chart.height + ", frame " + frame.width + "x" + frame.height + ", grid " + frame.stripHeight)
+        verify(strip.width > frame.width / 2, "a band across the frame: " + strip.width)
+        const open = chart.shownH
+
+        mouseClick(fold)
+        verify(!strip.visible, "folded")
+        // One plotted signal here: a band of one row, folded to the button's
+        tryVerify(() => frame.stripHeight === fold.height + 8, 2000, "folded to the button")
+        compare(chart.shownH, frame.height - 8 - frame.stripHeight, "the plot has the rest")
+        verify(chart.shownH > open, "the plot has the height: " + chart.shownH + " against " + open)
+        compare(chart.shownW, frame.width - 8)
+        mouseClick(fold)
+        tryVerify(() => strip.visible && chart.shownH === open, 2000, "the band is back")
+        page.toggleMaximized()
+        page.width = 900
     }
 
     // The view stays inside the recording, no narrower than minSpanMs,
@@ -260,11 +382,23 @@ TestCase {
         mouseClick(frame, x, y)
         verify(page.cursorMs > page.viewT0 && page.cursorMs < page.viewT1,
                "a tap places the cursor in view: " + page.cursorMs)
+        const first = find(page, "signalRows").model.find(s => !s.isText && page.plotted[s.index] === true)
+        compare(page.readout[first.index].atMs, page.cursorMs,
+                "the tap lands on a sample of the first signal plotted")
         compare(page.viewT1 - page.viewT0, 4000)
         mouseWheel(frame, x, y, 0, 120)
         verify(page.viewT1 - page.viewT0 < 4000, "zoomed in: " + (page.viewT1 - page.viewT0))
         mouseClick(find(page, "zoomAll"))
         compare(page.viewT1 - page.viewT0, 20000)
+        // A sideways scroll doesn't zoom, and a notch in four parts, as a
+        // high-resolution wheel or a touchpad sends it, zooms as one does
+        page.setView(4000, 8000)
+        mouseWheel(frame, x, y, 120, 0)
+        compare(page.viewT0, 4000, "a sideways scroll leaves the view")
+        compare(page.viewT1, 8000)
+        for (let i = 0; i < 4; ++i)
+            mouseWheel(frame, x, y, 0, 30)
+        fuzzyCompare(page.viewT1 - page.viewT0, 4000 * 0.8, 1, "four quarters of a notch: one notch's zoom")
         win.width = size[0]
         win.height = size[1]
     }

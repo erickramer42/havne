@@ -1,7 +1,17 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
 // Testing: HARNESS: test_j2534_surrogate, plus the cross-arch routing
 //          case against the Win32-tree build (ADR-0014); the 1 ms timer
-//          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep
+//          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep;
+//          a read's calls (one message, answered at once, never a 0 ms
+//          wait, a loss after the last frame) by
+//          J2534HealthTest.VxAReply*, .VxQueuedMessagesComeBackWithoutAHold,
+//          .VxTheReadAfterAnIndicationPastTheDeadline*,
+//          .VxALossAfterAReadsLastFrameFlagsTheNextRead,
+//          .ALossCarriedIntoAFailedReadLetsTheFailureThrough,
+//          .AReconnectedChannelStartsWithNoLoss,
+//          .AVendorThatReturnsMoreThanAskedFlagsTheLoss and
+//          .FramesUnderErrTimeoutAreDelivered; the call lines in the
+//          frame log by hand (a run of the latency step against the fake)
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -68,6 +78,8 @@ static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
 /* The messages a READ's reply carries after the response, as the wire
  * sends them (surrogate_protocol.h). Static for the same reason. */
 static ecuio_pt_rx_t s_read_frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
+/* A loss seen after a read's last frame: the next frame carries it */
+static bool s_lost_carry = false;
 
 /* ECUIO_SUR_LOG_FRAMES=1 logs every message the vendor returns and
  * every one written, bytes verbatim, with RxStatus or TxFlags and the
@@ -87,6 +99,16 @@ static uint32_t g_fingerprint = ECUIO_SUR_FINGERPRINT;
  * sent, so a test can put the pipe out of step. Never OP_READ, whose
  * reply carries frames. 0 (the default) is off. */
 static uint32_t g_reply_twice = 0;
+
+/* ECUIO_SUR_TEST_SKEW=<opcode> skews the first reply to that opcode
+ * past the wire's limits, standing in for a child built against other
+ * limits, so a test reaches the client's checks: an OP_READ claims one
+ * frame more than a batch holds, an OP_IOCTL a data_len past
+ * ECUIO_SUR_IOCTL_DATA_MAX, and any other opcode a frame on a reply that
+ * takes none. The frames claimed are never sent: the client must refuse
+ * the reply before reading them. Never OP_OPEN or OP_SHUTDOWN. 0 (the
+ * default) is off. */
+static uint32_t g_skew = 0;
 
 static void stage(const char* fmt, ...)
 {
@@ -200,6 +222,8 @@ static int handle_op_connect(uint32_t protocol_id, uint32_t flags, uint32_t baud
     if (rc == ECUIO_PT_STATUS_NOERROR) {
         g_channel = ch;
         g_have_channel = true;
+        /* A loss carried from the last channel isn't this one's */
+        s_lost_carry = false;
     }
     if (out_ch != nullptr) *out_ch = static_cast<uint32_t>(ch);
     return static_cast<int>(rc);
@@ -225,27 +249,56 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
         return static_cast<int>(ECUIO_PT_STATUS_NOERROR);
     }
 
-    /* A batch that held only indications (ecuio_pt_is_indication) is
-     * read again with what's left of the timeout, and at least once
-     * more, so an indication never ends a read: a reply queued behind
-     * it comes back in this response.
+    /* How a read calls ReadMsgs:
+     *   - Never with a timeout of 0. J2534-1 reads that as "return at
+     *     once", but the OBDX Pro VX holds such a read about 50 ms
+     *     (docs/bench-sessions/2026-11-04-two-ecu-car.md), so every
+     *     call waits at least 1 ms.
+     *   - A call asks for one message, so a vendor that ends a read at
+     *     its count (J2534-1 does, and the VX) returns when the reply
+     *     arrives, not when the timeout ends a batch that never fills,
+     *     and the read answers with it at once. No call follows for the
+     *     rest of a batch: the VX holds any call asked to wait under
+     *     10 ms about 10 ms, and nearly always with nothing in it
+     *     (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md), so each
+     *     reply would wait that long. Messages already queued come back
+     *     in the next reads, each call returning at once.
+     *   - An indication (ecuio_pt_is_indication) never ends a read: a
+     *     call that brought only indications is followed by another
+     *     with what's left of the timeout, and one more once it has run
+     *     out, so a reply queued behind them comes back in this
+     *     response.
      *
      * Frames were lost (ERR_BUFFER_OVERFLOW, or a message with
      * BUFFER_OVERFLOW set, indications too): the first frame delivered
      * from there on carries the bit, the v05.00 form, whatever the
-     * vendor's version. With none delivered after it, the response's
-     * status says ERR_BUFFER_OVERFLOW, and the client marks the next. */
+     * vendor's version. With none delivered after it in this read, a
+     * read that delivers nothing says ERR_BUFFER_OVERFLOW, and the
+     * client marks the next; one that delivered frames before it, or
+     * that failed, leaves the bit to this child's next frame. A call
+     * that returns more messages than it asked loses the rest. */
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeout_ms);
-    uint32_t wait_ms = timeout_ms;
+    const auto wait_left = [&deadline]() -> uint32_t {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return 1;
+        }
+        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                            deadline - now)
+                            .count();
+        return static_cast<uint32_t>((us + 999) / 1000);
+    };
     uint32_t skipped = 0;
     uint32_t n = 0;
-    bool lost = false;
-    long rc = ECUIO_PT_STATUS_NOERROR;
-    for (;;) {
-        unsigned long num = ECUIO_SUR_MAX_FRAMES_PER_READ;
-        rc = g_read_msgs(g_channel, s_read_batch, &num, wait_ms);
+    bool lost = s_lost_carry;
+    s_lost_carry = false;
 
+    /* One call's messages into s_read_frames: asked is what the call
+     * asked for, so a count above it can't replay a previous read's
+     * messages left in s_read_batch. Returns the messages taken. */
+    const auto take = [&](long call_rc, unsigned long num,
+                          unsigned long asked) -> unsigned long {
         /* Trust the count only under the status allowlist
            (ecuio_trusted_count). A vendor may leave pNumMsgs untouched
            on error; the VX reports "status 7, written 1" on a failed
@@ -253,8 +306,22 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
            doubly dangerous here: s_read_batch is static and never
            cleared, so it would replay the PREVIOUS read's frames as
            phantoms. */
-        num = ecuio_trusted_count(rc, num);
-        lost = lost || rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
+        num = ecuio_trusted_count(call_rc, num);
+        /* More than the call asked (J2534-1 forbids it): the messages
+         * past the count left the vendor's queue and are lost, so the
+         * frame after this call's carries the loss */
+        const bool over = num > asked;
+        if (over) {
+            static bool s_over_logged = false;
+            if (!s_over_logged) {
+                stage("OP_READ: the vendor returned %lu messages to a call "
+                      "for %lu; the rest are counted lost",
+                      num, asked);
+                s_over_logged = true;
+            }
+            num = asked;
+        }
+        lost = lost || call_rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
 
         /* Frames are collected under either trusted status,
          * ERR_TIMEOUT included: per J2534-1 a read that asks for N
@@ -262,16 +329,15 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
          * with however many arrived, so on a conforming vendor the
          * ECU's answer usually arrives with a nonzero status. The
          * status still rides home verbatim in resp->status. */
-        const unsigned long lim = (num < ECUIO_SUR_MAX_FRAMES_PER_READ)
-                                  ? num : ECUIO_SUR_MAX_FRAMES_PER_READ;
-        for (unsigned long i = 0; i < lim; ++i) {
+        for (unsigned long i = 0; i < num; ++i) {
             const PASSTHRU_MSG& m = s_read_batch[i];
             const bool indication = ecuio_pt_is_indication(m.RxStatus) != 0;
             if (g_log_frames) {
                 char hex[3 * ECUIO_SUR_MSG_MAX + 16];
                 format_hex(hex, sizeof(hex), m.Data, m.DataSize);
-                stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: %s%s",
-                      rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
+                stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: "
+                      "%s%s",
+                      call_rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
                       indication ? " (indication, not delivered)" : "");
             }
             lost = lost || (m.RxStatus & ECUIO_PT_BUFFER_OVERFLOW) != 0;
@@ -286,19 +352,56 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
             }
             ++n;
         }
-        if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ) {
+        lost = lost || over;
+        return num;
+    };
+
+    /* One vendor call. With ECUIO_SUR_LOG_FRAMES=1, a call that brought
+     * messages leaves a line with how long the vendor held it: the
+     * evidence of how an adapter holds a read (an empty call is left
+     * out, since the worker makes one every slice between requests) */
+    const auto call = [&](unsigned long* num, uint32_t wait_ms) -> long {
+        const unsigned long asked = *num;
+        const auto from = std::chrono::steady_clock::now();
+        const long call_rc = g_read_msgs(g_channel, s_read_batch, num, wait_ms);
+        if (g_log_frames && ecuio_trusted_count(call_rc, *num) > 0) {
+            const long long us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - from)
+                    .count();
+            stage("OP_READ call: timeout %u ms, asked %lu, got %lu, "
+                  "status %ld, held %lld.%03lld ms",
+                  wait_ms, asked, ecuio_trusted_count(call_rc, *num), call_rc,
+                  us / 1000, us % 1000);
+        }
+        return call_rc;
+    };
+
+    long rc = ECUIO_PT_STATUS_NOERROR;
+    bool last = false;
+    for (;;) {
+        unsigned long num = 1;
+        rc = call(&num, wait_left());
+        num = take(rc, num, 1);
+        if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ ||
+            last) {
             break;
         }
-        const auto now = std::chrono::steady_clock::now();
-        wait_ms = (now < deadline)
-            ? static_cast<uint32_t>(
-                  std::chrono::duration_cast<std::chrono::milliseconds>(
-                      deadline - now).count())
-            : 0;
+        last = std::chrono::steady_clock::now() >= deadline;
     }
     resp->num_frames = n;
-    if (lost) {
+    /* A loss with no frame after it: an empty read that was quiet says
+     * ERR_BUFFER_OVERFLOW, and the client marks the next frame. A read
+     * that failed keeps its status, so the failure is seen now, and the
+     * loss waits for this child's next frame, as after frames */
+    const bool quiet = rc == ECUIO_PT_STATUS_NOERROR ||
+                       rc == ECUIO_PT_STATUS_TIMEOUT ||
+                       rc == ECUIO_PT_STATUS_BUFFER_EMPTY ||
+                       rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
+    if (lost && n == 0 && quiet) {
         rc = ECUIO_PT_STATUS_BUFFER_OVERFLOW; /* the client marks the next */
+    } else if (lost) {
+        s_lost_carry = true; /* this child's next frame carries it */
     }
 
     /* Trace frames and status changes only: between requests the
@@ -481,9 +584,9 @@ int wmain(int argc, wchar_t* argv[])
     stage("pipe connected");
 
     /* Windows times a wait in its timer's steps, 15.6 ms by default,
-     * and a vendor holds a read for its timeout unless the batch fills
-     * (the VX does; the client asks for one 10 ms slice), so a reply
-     * 4 ms after its request was seen 15.6 ms after it. A surrogate
+     * and a vendor's read waits for its message in this process, so a
+     * reply 4 ms after its request would be seen at the next step,
+     * 15.6 ms after the read began. A surrogate
      * serves one session, so it asks for 1 ms for its whole life,
      * before the vendor DLL loads. Since Windows 10 2004 the global
      * timer is left alone (processes that don't ask keep the default),
@@ -517,6 +620,17 @@ int wmain(int argc, wchar_t* argv[])
         if (g_reply_twice == ECUIO_SUR_OP_READ) g_reply_twice = 0;
         stage("the first reply to opcode %u goes twice "
               "(ECUIO_SUR_TEST_REPLY_TWICE)", static_cast<unsigned>(g_reply_twice));
+    }
+    char test_skew[16] = {};
+    if (GetEnvironmentVariableA("ECUIO_SUR_TEST_SKEW", test_skew,
+                                sizeof(test_skew)) > 0) {
+        g_skew = static_cast<uint32_t>(strtoul(test_skew, nullptr, 0));
+        if (g_skew == ECUIO_SUR_OP_OPEN || g_skew == ECUIO_SUR_OP_SHUTDOWN) {
+            g_skew = 0;
+        }
+        stage("the first reply to opcode %u is skewed past the wire's "
+              "limits (ECUIO_SUR_TEST_SKEW)",
+              static_cast<unsigned>(g_skew));
     }
 
     g_module = LoadLibraryExW(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -741,10 +855,25 @@ int wmain(int argc, wchar_t* argv[])
          * refused ioctls, failed writes and unknown opcodes, and the
          * client maps each status. Only a broken pipe or OP_SHUTDOWN
          * ends the loop. A READ's frames follow its response. */
+        bool skewed = false;
+        if (g_skew != 0 && req.opcode == g_skew) {
+            g_skew = 0;
+            skewed = true;
+            if (req.opcode == ECUIO_SUR_OP_READ) {
+                resp.num_frames = ECUIO_SUR_MAX_FRAMES_PER_READ + 1;
+            } else if (req.opcode == ECUIO_SUR_OP_IOCTL) {
+                resp.data_len = ECUIO_SUR_IOCTL_DATA_MAX + 1;
+            } else {
+                resp.num_frames = 1;
+            }
+        }
         DWORD wr = 0;
         if (!WriteFile(g_pipe, &resp, sizeof(resp), &wr, nullptr) ||
             wr != sizeof(resp)) {
             break;
+        }
+        if (skewed) {
+            continue; /* the frames it claims are never sent */
         }
         if (g_reply_twice != 0 && req.opcode == g_reply_twice) {
             g_reply_twice = 0;

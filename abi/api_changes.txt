@@ -1,0 +1,11 @@
+# Deliberate changes to the public declarations for scripts/api_check.py
+# (run by scripts/abi-check.sh, the CI abi job): a name here may be
+# renamed, retyped, renumbered or removed since the base release. Before
+# 1.0 a minor version may break the C API (CHANGELOG.md). One line each:
+# the name as the check's finding gives it (a struct, a member's struct,
+# a #define, an enum's typedef, a function), then its reason and the
+# release it ships in. The line goes once that release is tagged. Growth
+# into a struct's reserved room needs no line.
+#
+# For example:
+# ECUIO_PROFILE_MAX_REQUESTS  vX.Y.0 raises the cap (CHANGELOG.md)

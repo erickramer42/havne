@@ -6,7 +6,8 @@
 //          pseudo-terminal; pending_counted is the other reading of the
 //          count digit (Elm327SessionTest.AScannedDidHeldPending...);
 //          cut_gap_ms an ECU sending a cut reply's rest
-//          (Elm327SessionTest.ACutDid*)
+//          (Elm327SessionTest.ACutDid*); monitor_eats_cfs the MX+'s
+//          monitor (Elm327SessionTest.ListeningTurnsFlowControlOff*)
 //
 // An ELM327 as its datasheet and the OBDLink manual describe it, bytes
 // in and bytes out: the AT settings it keeps (echo, linefeeds, spaces,
@@ -57,6 +58,11 @@
 //                request until it's sent (NO DATA): an ECU the adapter
 //                sent flow control (the test car's engine ECU, 8 ms;
 //                docs/bench-sessions/2026-11-01-android.md); 0 none
+//   monitor_eats_cfs  while monitoring, a message's First Frame prints
+//                and its Consecutive Frames don't, under AT CFC1 or
+//                CFC0, as the MX+'s STN2255 does
+//                (docs/bench-sessions/2026-11-04-two-ecu-car.md,
+//                docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)
 //   longer_pid   a Service 01 PID (-1 none) whose positive reply the ECU
 //                pads with zeros to 13 data bytes, a First Frame and two
 //                Consecutive Frames: an ECU answering longer than J1979's
@@ -106,6 +112,7 @@ struct knobs {
     bool full_ends_monitor = false;
     bool stale_banner = false;
     uint32_t cut_gap_ms = 0;
+    bool monitor_eats_cfs = false;
     int longer_pid = -1;
 };
 
@@ -165,7 +172,7 @@ public:
     void bus(uint32_t id, const uint8_t* m, size_t len, int64_t now_us)
     {
         if (monitoring_ && !k.hung && passes(id)) {
-            message(id, m, len, now_us);
+            message(id, m, len, now_us, k.monitor_eats_cfs);
         }
     }
 
@@ -332,6 +339,7 @@ private:
     bool spaces_ = true;
     bool headers_ = false;
     bool dlc_ = false;
+    bool cfc_ = true; /* AT CFC: flow control after a First Frame */
     char protocol_ = '0';
     uint32_t sh_ = 0x7DF; /* AT SH: 11-bit, or a 29-bit ID's low 24 */
     uint8_t cp_ = 0x18;   /* AT CP: a 29-bit ID's top five bits */
@@ -370,6 +378,7 @@ private:
         spaces_ = true;
         headers_ = false;
         dlc_ = false;
+        cfc_ = true;
         sh_ = 0x7DF;
         cp_ = 0x18;
         cra_set_ = cfm_set_ = false;
@@ -462,7 +471,13 @@ private:
     void record(const char* cmd)
     {
         if (commands < kRecordDepth) {
-            snprintf(recorded[commands], sizeof(recorded[commands]), "%s", cmd);
+            /* Cut to the slot: a longer command is kept by its start */
+            char* out = recorded[commands];
+            size_t i = 0;
+            for (; cmd[i] != '\0' && i + 1 < sizeof(recorded[commands]); ++i) {
+                out[i] = cmd[i];
+            }
+            out[i] = '\0';
         }
         ++commands;
     }
@@ -556,7 +571,7 @@ private:
         } else if (flag("E", &echo_) || flag("L", &linefeeds_) ||
                    flag("S", &spaces_) || flag("H", &headers_) ||
                    flag("D", &dlc_) || flag("CAF", &ignored) ||
-                   flag("CFC", &ignored)) {
+                   flag("CFC", &cfc_)) {
             reply("OK", now);
         } else if (n == 3 && strncmp(c, "AT", 2) == 0 && c[2] >= '0' &&
                    c[2] <= '2') {
@@ -643,8 +658,10 @@ private:
     /* A message as an ISO 15765-2 ECU sends it: a Single Frame, or a
      * First Frame and Consecutive Frames, padded to eight bytes. With
      * headers off the adapter strips the PCI bytes (the datasheet's
-     * multi-line form for a long message). */
-    void message(uint32_t id, const uint8_t* m, size_t len, int64_t at)
+     * multi-line form for a long message). first_only prints a long
+     * message's First Frame alone. */
+    void message(uint32_t id, const uint8_t* m, size_t len, int64_t at,
+                 bool first_only = false)
     {
         uint8_t f[8];
         if (!headers_) {
@@ -678,6 +695,9 @@ private:
                     return;
                 }
                 text_line(line, at);
+                if (first_only) {
+                    return;
+                }
             }
             return;
         }
@@ -697,6 +717,9 @@ private:
             return;
         }
         frame_line(id, f, at);
+        if (first_only) {
+            return;
+        }
         size_t i = 6;
         for (uint8_t seq = 1; i < len;
              seq = static_cast<uint8_t>((seq + 1) & 0x0F)) {

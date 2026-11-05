@@ -12,11 +12,20 @@ Button {
     property color pressedColor: control.highlighted ? Qt.darker(Theme.primary, 1.2)
                                                      : Theme.surface
 
+    // Compact, for a phone's crowded rows: as wide as its text with
+    // narrow sides (40 px at least), not the 120 px a button otherwise
+    // starts from
+    property bool compact: false
+    horizontalPadding: compact ? 6 : 8
+    implicitWidth: compact ? Math.max(40, implicitContentWidth + leftPadding + rightPadding)
+                           : Math.max(implicitBackgroundWidth + leftInset + rightInset,
+                                      implicitContentWidth + leftPadding + rightPadding)
+
     opacity: enabled ? 1.0 : 0.45
 
     background: Rectangle {
         implicitWidth: 120
-        implicitHeight: 36
+        implicitHeight: Theme.controlHeight
         radius: Theme.radius
         color: control.down    ? control.pressedColor
              : control.hovered ? control.hoverColor

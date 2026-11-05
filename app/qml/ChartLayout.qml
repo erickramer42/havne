@@ -9,8 +9,9 @@
 //          range, a swing on a column edge too), a ramp, a small wiggle and
 //          a spike's peak as its line; a recording's columns over a
 //          fixed span (calm ones a line, a swing past the neighbors' lean
-//          a band, a steep ramp a line, a break past gapMs), a label's
-//          given value, absolute ticks. StripChart.qml draws what it
+//          a band, a steep ramp a line, a break past gapMs) and over a
+//          span of their own, cut to the axis, a label's
+//          given value and its sample time, absolute ticks. StripChart.qml draws what it
 //          returns; the drawing itself is manual smoke (docs/testing.md).
 
 pragma Singleton
@@ -283,10 +284,13 @@ QtObject {
     }
 
     // series: [{ samples: [t0, v0, t1, v1, ...] in ms, row, decimals, unit }],
-    //         or a recording's { columns: { lows: [...], highs: [...] }, row,
-    //         decimals, unit } over opts.span, a column with no sample NaN;
+    //         or a recording's { columns: { lows: [...], highs: [...], t0,
+    //         t1 }, row, decimals, unit } over t0 to t1 in ms (opts.span
+    //         without them; wider is drawn only inside it), a column with
+    //         no sample NaN;
     //         either may carry labelValue, the label's value (else the
-    //         newest sample's, or the last column's highest), scaleKey
+    //         newest sample's, or the last column's highest), labelMs
+    //         (that value's sample time, handed on to its trace), scaleKey
     //         (series with the same one share a value range: one signal
     //         in two recordings) and dash (its trace's stroke, else its
     //         row's)
@@ -306,7 +310,7 @@ QtObject {
     //   or in time order when absolute,
     //   traces: [{ row, dash, segments: [[{x, y}]], pieces (what's
     //              drawn, each a segment's line or, crowded, bandPieces'),
-    //              endY, label, labeled, labelY }]
+    //              endY, label, labeled, labelY, labelMs }]
     //   in label order top down, labelX }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)
@@ -364,7 +368,7 @@ QtObject {
             labelW = Math.max(labelW, opts.measure(label))
             traces.push({ sp: sp, cols: cols, row: s.row, vMin: range.vMin, vMax: range.vMax,
                           flat: range.flat, label: label, value: value, decimals: s.decimals,
-                          scaleKey: s.scaleKey, dash: s.dash })
+                          scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs })
         }
         if (traces.length === 0)
             return null
@@ -450,12 +454,20 @@ QtObject {
                                    : v => yOf((v - tr.vMin) / (tr.vMax - tr.vMin))
             if (tr.cols) {
                 const n = tr.cols.lows.length
-                const colMs = (tMax - tMin) / n
+                const c0 = tr.cols.t0 !== undefined ? tr.cols.t0 : tMin
+                const c1 = tr.cols.t1 !== undefined ? tr.cols.t1 : tMax
+                const colMs = (c1 - c0) / n
+                // Columns past the axis's ends are cut to it
+                const left = xOf(tMin), right = xOf(tMax)
                 const sampled = []
                 for (let c = 0; c < n; ++c) {
                     if (!isFinite(tr.cols.lows[c]))
                         continue
-                    sampled.push({ c: c, x0: xOf(tMin + c * colMs), x1: xOf(tMin + (c + 1) * colMs),
+                    const x0 = Math.max(left, xOf(c0 + c * colMs))
+                    const x1 = Math.min(right, xOf(c0 + (c + 1) * colMs))
+                    if (x1 <= x0)
+                        continue
+                    sampled.push({ c: c, x0: x0, x1: x1,
                                    top: traceY(tr.cols.highs[c]),
                                    bottom: traceY(tr.cols.lows[c]) })
                 }
@@ -464,7 +476,8 @@ QtObject {
                            segments: [],
                            pieces: columnPieces(sampled, Math.floor(opts.gapMs / colMs), swing),
                            endY: traceY(tr.value),
-                           label: tr.label })
+                           label: tr.label,
+                           labelMs: tr.labelMs })
                 continue
             }
             // Its points' mean spacing across the time they cover
@@ -483,7 +496,8 @@ QtObject {
                        segments: segs,
                        pieces: pieces,
                        endY: traceY(tr.sp[tr.sp.length - 1]),
-                       label: tr.label })
+                       label: tr.label,
+                       labelMs: tr.labelMs })
         }
 
         return { plotW: plotW, plotH: plotH, top: top, hGrid: hGrid, ticks: ticks,
