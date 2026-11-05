@@ -7,6 +7,7 @@
 //          on a short page, the rows the fake ECU withholds from its
 //          bitmaps left out with a line saying how many (Windows: the
 //          fake J2534 DLL), the link banner's message for every state,
+//          F toggling the chart but typed into the filter as a letter,
 //          and every item inside a phone's 320 px.
 //          The banner on screen in each state is tst_linkhealth.qml's.
 
@@ -58,6 +59,32 @@ TestCase {
     Component {
         id: sizedPageComponent
         LiveViewPage {}
+    }
+
+    // F on a desktop's keyboard maximizes the chart and gives the list
+    // back; typed into Find a signal it's a letter of the filter and
+    // leaves the chart as it was. In the test's window, which the keys go to
+    function test_fTogglesTheChartButNotInTheFilter() {
+        if (Theme.mobile)
+            skip("F is a desktop's key")
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        connectMock(page)
+        const field = findChild(page, "filterText")
+        verify(field && field.visible, "the filter shows while connected")
+        field.forceActiveFocus()
+        verify(field.activeFocus, "the filter has the focus")
+        const before = page.chartMaximized
+        keyClick("f")
+        compare(field.text, "f", "F goes into the filter")
+        compare(page.chartMaximized, before, "and leaves the chart")
+        Bridge.liveSignalModel.filter.clear()
+        field.focus = false
+        page.forceActiveFocus()
+        verify(!field.activeFocus, "the page has the focus")
+        keyClick("f")
+        compare(page.chartMaximized, !before, "F on the page toggles the chart")
+        keyClick("f")
+        compare(page.chartMaximized, before, "and back")
     }
 
     // Finding a signal among many (ADR-0050): typed words narrow the

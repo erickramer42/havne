@@ -6,7 +6,8 @@
 //          signal, the default plotted, the chart's series over the view,
 //          the frames check's findings), the cursor's readout, the view
 //          kept inside the recording through setView, zoom, a drag and the
-//          wheel, the columns kept on their grid through a pan by part of
+//          wheel (a notch in parts zooming as one, a sideways scroll not at
+//          all), the columns kept on their grid through a pan by part of
 //          one, the chart without antialiasing while the view moves and
 //          with it at rest, a second recording overlaid (dashed beside the
 //          first's rows, sharing their scales) and aligned on the starts, a
@@ -293,6 +294,15 @@ TestCase {
         verify(page.viewT1 - page.viewT0 < 4000, "zoomed in: " + (page.viewT1 - page.viewT0))
         mouseClick(find(page, "zoomAll"))
         compare(page.viewT1 - page.viewT0, 20000)
+        // A sideways scroll doesn't zoom, and a notch in four parts, as a
+        // high-resolution wheel or a touchpad sends it, zooms as one does
+        page.setView(4000, 8000)
+        mouseWheel(frame, x, y, 120, 0)
+        compare(page.viewT0, 4000, "a sideways scroll leaves the view")
+        compare(page.viewT1, 8000)
+        for (let i = 0; i < 4; ++i)
+            mouseWheel(frame, x, y, 0, 30)
+        fuzzyCompare(page.viewT1 - page.viewT0, 4000 * 0.8, 1, "four quarters of a notch: one notch's zoom")
         win.width = size[0]
         win.height = size[1]
     }
