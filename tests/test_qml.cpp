@@ -1,13 +1,16 @@
 // File/layer: tests/test_qml.cpp | Qt Quick Test, QML tier
 // Testing: runs tests/qml/tst_*.qml against the app's App module
 //          and a real bridge, the one its Bridge singleton serves,
-//          and a relay whose adapter opens at once (Relay).
+//          and a relay whose adapter opens at once (Relay); clicks
+//          with stamps of their own (Harness.clickStamped).
 //          ctest runs each file in its own process (QmlTest.<name>).
 
 #include <QCoreApplication>
 #include <QObject>
 #include <QQmlEngine>
 #include <QQmlExtensionPlugin>
+#include <QQuickItem>
+#include <QQuickWindow>
 #include <QQuickStyle>
 #include <QSettings>
 #include <QStringList>
@@ -38,6 +41,17 @@
 #endif
 
 Q_IMPORT_QML_PLUGIN(AppPlugin)
+
+QT_BEGIN_NAMESPACE
+// QtGui's hook for a test's mouse event with a timestamp of its own, the
+// one QTest's clicks go through (qtestmouse.h)
+Q_GUI_EXPORT void qt_handleMouseEvent(QWindow* window, const QPointF& local,
+                                      const QPointF& global,
+                                      Qt::MouseButtons state,
+                                      Qt::MouseButton button, QEvent::Type type,
+                                      Qt::KeyboardModifiers mods,
+                                      int timestamp);
+QT_END_NAMESPACE
 
 namespace {
 
@@ -107,6 +121,26 @@ public:
         return ecuio_profile_register("renamed-mock", &set, nullptr) == ECUIO_OK
                    ? QStringLiteral("renamed-mock")
                    : QString();
+    }
+
+    // A left click on item at (x, y), its press stamped stampMs and its
+    // release a millisecond later, delivered at once. Qt Quick Test's own
+    // clicks add the double-click interval to their stamps after each
+    // release; with these, two clicks stamped close can arrive a slow
+    // frame apart, as a phone's taps do behind one
+    Q_INVOKABLE void clickStamped(QQuickItem* item, qreal x, qreal y,
+                                  int stampMs)
+    {
+        QQuickWindow* window = item ? item->window() : nullptr;
+        if (!window)
+            return;
+        const QPointF at = item->mapToScene(QPointF(x, y));
+        const QPointF global = window->mapToGlobal(at);
+        qt_handleMouseEvent(window, at, global, Qt::LeftButton, Qt::LeftButton,
+                            QEvent::MouseButtonPress, Qt::NoModifier, stampMs);
+        qt_handleMouseEvent(window, at, global, Qt::NoButton, Qt::LeftButton,
+                            QEvent::MouseButtonRelease, Qt::NoModifier,
+                            stampMs + 1);
     }
 
     Q_INVOKABLE void clearFakeKnobs()

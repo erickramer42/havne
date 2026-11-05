@@ -9,8 +9,8 @@
 //          relay's line beside its button, the header's Mark while
 //          recording, developer mode's frame-rate badge, and a thumb's
 //          double tap, two taps a little apart (DoubleTapHandler.qml), on
-//          Live's and the viewer's chart and splitters. How they
-//          look on a phone is the phone's run.
+//          Live's and the viewer's chart and splitters, timed by the
+//          taps' own stamps. How they look on a phone is the phone's run.
 
 import QtQuick
 import QtTest
@@ -257,6 +257,10 @@ TestCase {
         find(live, "maximizeChart").clicked()
     }
 
+    // Harness.clickStamped's stamps start here (ms), past any of Qt Quick
+    // Test's own: a test's clicks are each its own window's first
+    readonly property int kStampBase: 100000000
+
     // One finger's tap, pressed and lifted in place
     function tap(item, x, y) {
         const seq = touchEvent(item)
@@ -288,11 +292,14 @@ TestCase {
         const before = live.chartMaximized
         const x = frame.width / 2 - data.gap / 2
         const y = frame.height / 2
-        const press = data.mouse ? (px => mouseClick(frame, px, y)) : (px => tap(frame, px, y))
-        press(x)
+        // Clicks stamped 100 ms apart: Qt Quick Test's own add the
+        // double-click interval to their stamps after each release
+        const press = data.mouse ? ((px, i) => Harness.clickStamped(frame, px, y, kStampBase + 100 * i))
+                                 : ((px, i) => tap(frame, px, y))
+        press(x, 0)
         if (data.late)
             wait(Qt.styleHints.mouseDoubleClickInterval + 150)
-        press(x + data.gap)
+        press(x + data.gap, 1)
         compare(live.chartMaximized, data.toggles ? !before : before)
     }
 
@@ -340,6 +347,34 @@ TestCase {
         tap(splitter, splitter.width / 2 + 15, splitter.height / 2)
         compare(live.listShare, -1, "Live's splitter: taps 30 px apart size the list to its rows")
         live.listShare = kept
+    }
+
+    // The maximized viewer's chart is rasterized on the GUI thread (about
+    // 370 ms a paint on the test phone), so the second of two taps lifted
+    // 30 ms apart is handled a frame later. The gap is the events' own
+    // stamps: a real wait between two clicks stamped 30 ms apart stands in
+    // for that frame (the touch case past the interval, stamped as it
+    // happens, checks the other way)
+    function test_theViewersWayBackCountsTheTapsOwnTimes() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const chart = find(page, "chartFrame")
+        tryVerify(() => chart.visible && chart.width > 300, 10000, "the recording opens")
+        if (!page.chartMaximized)
+            page.toggleMaximized()
+        verify(page.chartMaximized, "the chart has the page")
+        verify(waitForPolish(main), "laid out")
+        const y = chart.height / 2
+        Harness.clickStamped(chart, 110, y, kStampBase)
+        wait(Qt.styleHints.mouseDoubleClickInterval + 150)
+        Harness.clickStamped(chart, 126, y + 8, kStampBase + 30)
+        verify(!page.chartMaximized, "two clicks stamped close give the signals back")
     }
 
     // Live's splitter: a share of the page for the list, within the rows
