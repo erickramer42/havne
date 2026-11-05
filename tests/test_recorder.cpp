@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <clocale>
@@ -1142,27 +1143,37 @@ TEST(RecorderTest, AnIdleWriterWakesTenTimesASecond)
     EXPECT_LE(idle_2s, 40u) << "an idle writer wakes every 100 ms";
     const uint64_t idle = idle_2s / 2;
 
-    const uint64_t busy_from = ecuio_recorder_test_wakes(rec.recorder);
-    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     /* One frame waiting at every wake: the next goes in as soon as the
      * writer has written the last, so no wake finds the ring empty and
      * none spends its time on a full one */
     uint64_t sent = 0;
-    while (std::chrono::steady_clock::now() < end) {
-        ecuio_recorder_state_t st{};
-        ecuio_recorder_get_state(rec.recorder, &st);
-        if (st.frame_rows == sent) {
-            dispatch(rec.session, kNumberId, std::string("\x02", 1));
-            ++sent;
+    const auto busy_second = [&] {
+        const uint64_t from = ecuio_recorder_test_wakes(rec.recorder);
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (std::chrono::steady_clock::now() < end) {
+            ecuio_recorder_state_t st{};
+            ecuio_recorder_get_state(rec.recorder, &st);
+            if (st.frame_rows == sent) {
+                dispatch(rec.session, kNumberId, std::string("\x02", 1));
+                ++sent;
+            }
+            std::this_thread::yield();
         }
-        std::this_thread::yield();
-    }
-    const uint64_t busy = ecuio_recorder_test_wakes(rec.recorder) - busy_from;
-    ::testing::Test::RecordProperty("busy_wakes", std::to_string(busy));
+        return ecuio_recorder_test_wakes(rec.recorder) - from;
+    };
     /* Against the idle second just measured, not a count: a desktop
      * wakes about 57 times (Windows' 15.6 ms timer), the macOS runner 18
      * (its timers fire late), and a busy wake no shorter than the idle
-     * one wakes as often as idle */
+     * one wakes as often as idle. Up to three seconds, the best kept: a
+     * runner busy with other tests has left the writer no turn for a
+     * whole second (0 wakes on CI's Windows), while a writer waking at
+     * the idle pace falls short in every one */
+    uint64_t busy = 0;
+    for (int attempt = 0; attempt < 3 && busy < idle + 5; ++attempt) {
+        busy = std::max(busy, busy_second());
+    }
+    ::testing::Test::RecordProperty("busy_wakes", std::to_string(busy));
     EXPECT_GE(busy, idle + 5) << "a busy writer wakes every 10 ms";
 }
 
