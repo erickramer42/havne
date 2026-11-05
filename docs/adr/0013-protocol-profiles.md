@@ -3,6 +3,8 @@
 - **Status:** Accepted. [ADR-0015](0015-request-engine.md) supersedes
   section 1's placement of request correlation in the profile and section 5's
   callback table as the plugin seam, and amends section 3's probe semantics.
+  [ADR-0052](0052-plugin-framework.md) section 6 replaces section 5's table
+  as the plugin seam (the appendix of 2026-11-05).
 - **Date:** 2026-10-17
 - **Supersedes:** none. Extends [ADR-0012](0012-j2534-transport-adoption.md) (moves the request loop out of the transport) and begins closing Known Issues #15/#21 in STATUS.md.
 
@@ -452,3 +454,18 @@ no `filter` key).
   path through a passive custom profile
   (`J2534StreamTest.DirectLoadUriDeliversInjectedFramesExactly`), and
   `QmlTest.settings`' `test_noSchemesKeysAddedOrTaken`.
+
+## Appendix: 2026-11-05, the plugin seam
+
+[ADR-0052](0052-plugin-framework.md) section 6 supersedes section 5's
+callback table. The plugin seam is ADR-0052's conversation table
+(`ecuio_plugin_conversation_ops`: `begin`, `next_request`, `accept`,
+`end`), called on the worker only, its code in a WebAssembly sandbox
+and every request it asks for checked against its manifest's services
+and core's ceiling. Section 5's division of ownership holds: core owns
+the threads, the filters from the channel list, teardown and the
+transport, and a plugin sees requests and replies only. A plugin's
+signals still come from a signal set: its data tier is ADR-0051's
+format, each variant registered as a profile `plugin.<id>.<variant>`.
+Section 6's curated maker profiles become plugins kept by their
+authors, outside this repository (ADR-0052 section 10).

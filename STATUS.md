@@ -495,7 +495,7 @@ which breaks the C ABI on purpose where ADR-0051 says.
   enumerations and computed signals; everything a file gets wrong
   refused at load, one ID width included. Core's limits move with it:
   256 requests, the set's layout version 4, recording format 3.
-- **The plugin framework** (ADR-0052, to come): one package and
+- **The plugin framework** ([ADR-0052](docs/adr/0052-plugin-framework.md)): one package and
   manifest, the three tiers, the registry and selection by the VIN's
   maker code and model year, designed whole; v0.5.0 builds the data
   tier, which is the signal-file format.
