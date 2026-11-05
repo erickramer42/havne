@@ -274,6 +274,7 @@ int main(void)
         ecuio_sim_create_with(NULL, "vcan0", ECUIO_SIM_ALLOW_DESK_BUS, &sim) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_sim_get_stats(NULL, &sim_stats) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_set_value(NULL, 1, 0.0) != ECUIO_ERR_NULL_ARGUMENT ||
         sim != NULL || ECUIO_SIM_FAILED != 1u || ECUIO_SIM_YIELDED != 2u ||
         ECUIO_SIM_ALLOW_DESK_BUS != 1u) {
         return 1;

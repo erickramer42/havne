@@ -4,18 +4,22 @@
 //          verdict on it, a kernel frame to an ecuio_frame_t, the
 //          clock), the URI's refusals through ecuio_session_create, and
 //          ecuio_can_interfaces' arguments; the simulated ECU's contract
-//          (SimTest, ADR-0046: its options, and the link it answers on,
-//          a desk bus's controller too). The transport on a bus is
+//          (SimTest, ADR-0046: its options, profile='s lookup and
+//          refusals, and the link it answers on, a desk bus's
+//          controller too). The transport on a bus is
 //          VcanTest's (Linux), the simulated ECU on one SimBusTest's
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "ecuio/profile.h"
+#include "ecuio/signals.h"
 #include "ecuio/socketcan.h"
 #include "ecuio/sim.h"
 #include "socketcan_wire.h"
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -955,9 +959,9 @@ TEST(SimTest, TheArgumentsAndTheUriAreCheckedFirst)
     EXPECT_EQ(ecuio_sim_get_stats(nullptr, &stats), ECUIO_ERR_NULL_ARGUMENT);
     ecuio_sim_destroy(nullptr);
     // the URI's refusals, on every platform, before any interface
-    SimCreated c = sim_create("mock://sim?profile=obd2", "nosuchcan9");
+    SimCreated c = sim_create("mock://sim?did=1E1C", "nosuchcan9");
     EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
-    EXPECT_NE(c.detail.find("no query key 'profile'"), std::string::npos)
+    EXPECT_NE(c.detail.find("no query key 'did'"), std::string::npos)
         << c.detail;
     c = sim_create("socketcan://vcan0", "nosuchcan9");
     EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
@@ -974,6 +978,51 @@ TEST(SimTest, TheArgumentsAndTheUriAreCheckedFirst)
     EXPECT_EQ(c.status, ECUIO_ERR_NO_TRANSPORT);
     EXPECT_NE(c.detail.find("needs Linux"), std::string::npos) << c.detail;
 #endif
+}
+
+// profile=: looked up after the URI and before the platform and the
+// interface, on every platform: a name not registered, then a set the
+// simulated ECU can't stand in for (a 29-bit module); then a set it
+// can, which goes on to the interface. ecuio_sim_set_value's NULL
+TEST(SimTest, TheProfileIsLookedUpBeforeTheInterface)
+{
+    SimCreated c = sim_create("mock://sim?profile=sim-test-none", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_NE(c.detail.find("sim-test-none"), std::string::npos) << c.detail;
+
+    /* The registry keeps the pointers: static storage */
+    static ecuio_signal_def_t wide_def{};
+    wide_def.id = 1;
+    wide_def.message_id = 0x18DAF110u;
+    wide_def.mux_length = 3;
+    wide_def.mux_key = 0x621234u;
+    wide_def.kind = ECUIO_VALUE_UINT;
+    wide_def.byte_order = ECUIO_BYTE_ORDER_BE;
+    wide_def.start_byte = 3;
+    wide_def.bit_length = 8;
+    wide_def.scale = 1.0;
+    std::snprintf(wide_def.name, sizeof wide_def.name, "Wide");
+    static const ecuio_channel_decl_t wide_channel = {0x18DAF110u, 0x18DA10F1u};
+    static ecuio_signal_set_t wide{};
+    wide.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    wide.count = 1;
+    wide.defs = &wide_def;
+    wide.channel_count = 1;
+    wide.channels = &wide_channel;
+    ASSERT_EQ(ecuio_profile_register("sim-test-wide", &wide, nullptr),
+              ECUIO_OK);
+    c = sim_create("mock://sim?profile=sim-test-wide", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(c.detail.find("11-bit"), std::string::npos) << c.detail;
+    EXPECT_EQ(ecuio_profile_unregister("sim-test-wide"), ECUIO_OK);
+
+    c = sim_create("mock://sim?profile=obd2", "nosuchcan9");
+#if ECUIO_HAVE_SOCKETCAN
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED) << "on to the interface";
+#else
+    EXPECT_EQ(c.status, ECUIO_ERR_NO_TRANSPORT);
+#endif
+    EXPECT_EQ(ecuio_sim_set_value(nullptr, 1, 0.0), ECUIO_ERR_NULL_ARGUMENT);
 }
 
 // The options: NULLs first, then a bit that isn't one, before the URI

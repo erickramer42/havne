@@ -5,7 +5,8 @@
 //          each mode answers, the canned values against the fakes', the
 //          diagnostics against the mock's, a clear, identification, the
 //          refusals and their silence to a functional request, a pack,
-//          the URI's keys and refusals (replay:// too), the faults'
+//          the URI's keys and refusals (replay:// too; profile= and
+//          its refusals), the faults'
 //          grammar and their periods (pending's per module); the second
 //          module's DIDs and refusals; SimRecordingTest (test_obd2): the
 //          ECU answering from a recording at its ticks' time
@@ -26,6 +27,7 @@
 #define ECUIO_SIM_ECU_H
 
 #include "ecuio/core.h"
+#include "ecuio/profile.h" /* ECUIO_PROFILE_NAME_MAX */
 #include "ecuio/vin.h"
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"
@@ -119,6 +121,11 @@ struct ecuio_sim_config {
     bool vin_given = false; /* replay: 09 02 answers it, not the car's */
     ecuio_sim_faults faults;
     bool second_module = false; /* mock: modules=2 */
+    /* mock: profile=, a registered profile whose set's DIDs the ECUs
+     * answer (sim_dids.h), a view into the URI parsed (valid while it
+     * is); empty for none */
+    const char* profile = nullptr;
+    size_t profile_len = 0;
     /* replay: the recording's path, a view into the URI parsed (valid
      * while it is), and whether its time goes round its span */
     const char* path = nullptr;
@@ -588,7 +595,7 @@ inline bool ecuio_sim_parse_faults(const char* text, size_t len,
 enum class ecuio_sim_uri_result : uint8_t { ok, bad };
 
 /* The simulated ECU's URI into *out:
- *   mock://<label>[?values][&modules][&vin][&faults]
+ *   mock://<label>[?values][&modules][&profile][&vin][&faults]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults]
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
  * says what's wrong (a line). */
@@ -638,8 +645,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
         return ecuio_sim_uri_result::bad;
     }
     const bool replay = out->source == ecuio_sim_source::replay;
-    static const char* const kMockKeys[] = {"values", "modules", "vin",
-                                            "faults", nullptr};
+    static const char* const kMockKeys[] = {"values", "modules", "profile",
+                                            "vin",    "faults",  nullptr};
     static const char* const kReplayKeys[] = {"loop", "from",   "to",
                                               "vin",  "faults", nullptr};
     if (const ecuio_uri::param* p =
@@ -649,7 +656,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       "only %s, vin and faults",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
-                      replay ? "loop, from, to" : "values, modules");
+                      replay ? "loop, from, to" : "values, modules, profile");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {
@@ -675,6 +682,23 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                 return ecuio_sim_uri_result::bad;
             }
             out->second_module = value_is("2");
+        } else if (p.is("profile")) {
+            /* The registry's grammar (profile.h): 1-63 of [a-z0-9._-] */
+            bool ok = p.val_len >= 1 && p.val_len <= ECUIO_PROFILE_NAME_MAX;
+            for (size_t k = 0; ok && k < p.val_len; ++k) {
+                const char c = p.val[k];
+                ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                     c == '.' || c == '_' || c == '-';
+            }
+            if (!ok) {
+                std::snprintf(why, why_cap,
+                              "profile: a registered profile's name, 1 to "
+                              "%d of a-z, 0-9, '.', '_' and '-'",
+                              ECUIO_PROFILE_NAME_MAX);
+                return ecuio_sim_uri_result::bad;
+            }
+            out->profile = p.val;
+            out->profile_len = p.val_len;
         } else if (p.is("vin")) {
             char vin[ECUIO_VIN_LEN + 1] = {};
             ecuio_vin_info_t info;
@@ -709,6 +733,12 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                 return ecuio_sim_uri_result::bad;
             }
         }
+    }
+    if (out->profile_len != 0 && out->second_module) {
+        std::snprintf(why, why_cap,
+                      "profile and modules=2 both name a second module: the "
+                      "profile's channels are the modules");
+        return ecuio_sim_uri_result::bad;
     }
     if (!ecuio_stretch::ordered(out->stretch)) {
         std::snprintf(why, why_cap, "to must come after from");

@@ -36,7 +36,8 @@ extern "C" {
  * Lifetime: the registry keeps the pointer, not a copy, and each
  * session keeps the set it was created with. The set, its defs and
  * its channels must stay valid and unchanged while the name is
- * registered and until every session created with it is destroyed;
+ * registered and until every session created with it is destroyed
+ * (and every simulated ECU answering it, sim.h's profile=);
  * static storage is the simple way. Replacing or unregistering a name
  * leaves existing sessions on their set.
  *

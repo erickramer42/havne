@@ -11,8 +11,9 @@
 //          SimBusTest: the simulated ECU (ADR-0046, core's ISO-TP sender)
 //          answering an obd2 session, a clear and every fault, a
 //          response pending waited for, a uds-generic session asking
-//          both of modules=2's ECUs, and going silent once another node
-//          sends on its reply ID. The
+//          both of modules=2's ECUs, a profile's DIDs read at the values
+//          the simulated ECU was given, and going silent once another
+//          node sends on its reply ID. The
 //          rate's proof after the first echo (ADR-0040 section 3 and its
 //          appendix of 2026-11-02) on vcan0 started unproven. Each
 //          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
@@ -37,6 +38,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -879,6 +882,7 @@ public:
     Sim& operator=(const Sim&) = delete;
     ecuio_status_t status() const { return status_; }
     const std::string& detail() const { return detail_; }
+    ecuio_sim_t* get() const { return sim_; }
     ecuio_sim_stats_t stats() const
     {
         ecuio_sim_stats_t s{};
@@ -1459,4 +1463,120 @@ TEST_F(SimBusTest, TheSecondModulesPendingRepliesArrive)
     ecuio_channel_support_t module{};
     ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 0, &module), ECUIO_OK);
     EXPECT_EQ(module.dropped, 0u) << "a 78 is no refusal";
+}
+
+/* ---- DIDs from a signal set (ADR-0046's appendix) ---- */
+
+namespace {
+
+ecuio_signal_def_t vcan_did(uint16_t id, uint32_t rx, uint16_t did,
+                            uint8_t kind, uint8_t order, uint16_t start,
+                            uint8_t bits, double scale, double offset,
+                            const char* name)
+{
+    ecuio_signal_def_t d{};
+    d.id = id;
+    d.message_id = rx;
+    d.mux_length = 3;
+    d.mux_key = 0x620000u | did;
+    d.kind = kind;
+    d.byte_order = order;
+    d.start_byte = start;
+    d.bit_length = bits;
+    d.scale = scale;
+    d.offset = offset;
+    std::snprintf(d.name, sizeof d.name, "%s", name);
+    return d;
+}
+
+/* A profile of the engine ECU's DID and a module's own (0x7E2 to
+ * 0x7EA): a word, a signed word and a flag in one reply, a text in a
+ * segmented one. The registry keeps the pointers: static storage */
+const char* register_did_profile()
+{
+    static const ecuio_signal_def_t defs[] = {
+        vcan_did(1, 0x7E8, 0x1E1C, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 16,
+                 0.1, -40.0, "Oil Temp"),
+        vcan_did(2, 0x7EA, 0xD200, ECUIO_VALUE_INT, ECUIO_BYTE_ORDER_BE, 3, 16,
+                 0.01, 0.0, "Trim"),
+        vcan_did(3, 0x7EA, 0xD200, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_LE, 5, 1,
+                 1.0, 0.0, "Lockup"),
+        vcan_did(4, 0x7EA, 0xD201, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0,
+                 1.0, 0.0, "MODULE-HavneSim"),
+    };
+    static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0},
+                                                    {0x7EA, 0x7E2}};
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 4;
+    set.defs = defs;
+    set.channel_count = 2;
+    set.channels = channels;
+    ecuio_validation_t why{};
+    EXPECT_EQ(ecuio_profile_register("sim-dids", &set, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    return "sim-dids";
+}
+
+} // namespace
+
+/* profile=: a session on the same profile reads, on the engine ECU and
+ * on the profile's own module, the values the simulated ECU was given,
+ * each field inverted from its def and decoded back, and a value given
+ * mid-session; the text field's segmented reply arrives whole */
+TEST_F(SimBusTest, ASessionReadsTheValuesTheProfilesDidsWereGiven)
+{
+    const std::string profile = register_did_profile();
+    Sim sim("mock://sim?profile=" + profile);
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    ASSERT_EQ(ecuio_sim_set_value(sim.get(), 1, 92.3), ECUIO_OK);
+    ASSERT_EQ(ecuio_sim_set_value(sim.get(), 2, -12.5), ECUIO_OK);
+    ASSERT_EQ(ecuio_sim_set_value(sim.get(), 3, 1.0), ECUIO_OK);
+    EXPECT_EQ(ecuio_sim_set_value(sim.get(), 2, 400.0),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "past a signed word at 0.01";
+    EXPECT_EQ(ecuio_sim_set_value(sim.get(), 4, 1.0),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a text answers its name";
+    EXPECT_EQ(ecuio_sim_set_value(sim.get(), 99, 1.0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    Values values;
+    Session s("?profile=" + profile);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    values.listen(s.get());
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return values.has(1) && values.has(2) && values.has(3) &&
+                   values.has(4);
+        },
+        5000ms))
+        << "requests " << sim.stats().requests << ", replies "
+        << sim.stats().replies << ", unflowed " << sim.stats().unflowed;
+    EXPECT_NEAR(values.number_of(1), 92.3, 1e-9);
+    EXPECT_NEAR(values.number_of(2), -12.5, 1e-9);
+    EXPECT_EQ(values.number_of(3), 1.0);
+    EXPECT_EQ(values.text_of(4), "MODULE-HavneSim");
+    ASSERT_EQ(ecuio_sim_set_value(sim.get(), 1, 104.0), ECUIO_OK);
+    EXPECT_TRUE(wait_for(
+        [&] { return std::fabs(values.number_of(1) - 104.0) < 1e-9; }, 5000ms))
+        << "now " << values.number_of(1);
+    const ecuio_sim_stats_t st = sim.stats();
+    EXPECT_EQ(st.unflowed, 0u);
+    EXPECT_EQ(st.flags, 0u);
+    int32_t e = 0;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+    EXPECT_EQ(ecuio_profile_unregister(profile.c_str()), ECUIO_OK);
+}
+
+/* Without profile= a sim answers no set's DIDs, and takes no value */
+TEST_F(SimBusTest, ASimWithNoProfileTakesNoValue)
+{
+    Sim sim("mock://sim");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    EXPECT_EQ(ecuio_sim_set_value(sim.get(), 1, 0.0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("profile"),
+              std::string::npos);
 }

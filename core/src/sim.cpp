@@ -9,10 +9,13 @@
 //          cycle's values, the diagnostics and the VIN, clears, and stays
 //          in step under every fault, waits out a response pending, and
 //          reads a recording as its car; a uds-generic session asks both
-//          of modules=2's ECUs
+//          of modules=2's ECUs; a session on a profile reads the DIDs the
+//          simulated ECU answers from that profile's set, on the engine
+//          ECU and a module of the set's own, at the values it was given
 //
 // The simulated ECU on a virtual bus (ADR-0046): a CAN_RAW socket on a
-// vcan interface hearing 0x7DF and 0x7E0 (and with modules=2 0x7E1),
+// vcan interface hearing 0x7DF and 0x7E0 (and with modules=2 0x7E1, or
+// with profile= each of the profile's channels' request IDs),
 // requests through each ECU's own ISO-TP receiver, each answered by
 // sim_ecu.h and sent through that ECU's ISO-TP sender as 0x7E8 (or
 // 0x7E9), broken as the faults say. One worker thread ticks the
@@ -26,7 +29,10 @@
 #include "ecuio/internal.h" /* ECUIO_HAVE_SOCKETCAN */
 #include "error_detail.h"
 #include "frames_csv.h"
+#include "sim_dids.h"
 #include "sim_ecu.h"
+
+#include "ecuio/profile.h"
 
 #include <atomic>
 #include <cstdio>
@@ -72,7 +78,12 @@ struct sim_sending {
 struct sim_node {
     uint32_t request_id = ECUIO_SIM_REQUEST_ID;
     uint32_t reply_id = ECUIO_SIM_REPLY_ID;
-    int module = 0; /* 0 the engine ECU, 1 the second module */
+    /* 0 the engine ECU, 1 another module (its faults counted with every
+     * other module's) */
+    int module = 0;
+    /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
+     * ECU, everything on another module */
+    bool from_set = false;
     isotp_rx rx;
     isotp_tx tx;
     sim_sending r;
@@ -92,12 +103,18 @@ struct ecuio_sim {
     std::atomic<uint64_t> clears{0};
     std::atomic<uint64_t> pending{0};
     std::atomic<uint32_t> flags{0};
+    /* profile=: the set whose DIDs the ECUs answer (the registry's
+     * pointer, valid while the sim is), and each def's physical value,
+     * set from any thread (ecuio_sim_set_value) and read by the worker */
+    const ecuio_signal_set_t* set = nullptr;
+    std::unique_ptr<std::atomic<double>[]> values;
 #if ECUIO_HAVE_SOCKETCAN
     ecuio_sim_recording recording; /* replay://: the ECU's replies */
     ecuio_sim_ecu ecu;
     int fd = -1;
     int stop_fd = -1;
-    sim_node nodes[2]; /* the engine ECU, then modules=2's module */
+    /* the engine ECU, then modules=2's module or the profile's */
+    sim_node nodes[1 + ECUIO_MAX_CHANNELS];
     int node_count = 1;
     std::thread worker;
 #endif
@@ -248,9 +265,19 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
         return true;
     }
     const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
-    r.len = n.module == 0
-                ? ecuio_sim_answer(s->ecu, m.data, m.len, functional, r.data)
-                : ecuio_sim_module_answer(m.data, m.len, functional, r.data);
+    if (n.from_set && (n.module != 0 || (m.len > 0 && m.data[0] == 0x22))) {
+        const ecuio_sim* self = s;
+        r.len = ecuio_sim_did_answer(
+            *s->set, n.reply_id, m.data, m.len, functional,
+            [self](uint32_t i) {
+                return self->values[i].load(std::memory_order_relaxed);
+            },
+            r.data, ECUIO_SIM_REPLY_MAX);
+    } else if (n.module == 0) {
+        r.len = ecuio_sim_answer(s->ecu, m.data, m.len, functional, r.data);
+    } else {
+        r.len = ecuio_sim_module_answer(m.data, m.len, functional, r.data);
+    }
     if (r.len == 0) {
         return true;
     }
@@ -429,7 +456,7 @@ int open_socket(int32_t ifindex, const sim_node* nodes, int count)
     if (fd < 0) {
         return -1;
     }
-    struct can_filter f[1 + 2 * 2];
+    struct can_filter f[1 + 2 * (1 + ECUIO_MAX_CHANNELS)];
     int k = 0;
     f[k++].can_id = ECUIO_SIM_FUNCTIONAL_ID;
     for (int i = 0; i < count; ++i) {
@@ -570,6 +597,23 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
         ecuio_detail_set("%s", why);
         return ECUIO_ERR_BAD_URI;
     }
+    const ecuio_signal_set_t* set = nullptr;
+    ecuio_sim_module_plan plan;
+    if (config.profile_len != 0) {
+        const std::string name(config.profile, config.profile_len);
+        if (ecuio_profile_lookup(name.c_str(), &set) != ECUIO_OK) {
+            ecuio_detail_set("profile: no profile '%s' is registered",
+                             name.c_str());
+            return ECUIO_ERR_UNKNOWN_PROFILE;
+        }
+        if (set != nullptr &&
+            !ecuio_sim_plan_modules(*set, &plan, why, sizeof why)) {
+            ecuio_detail_set("profile '%s': %s", name.c_str(), why);
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    config.profile = nullptr; /* the URI's, gone after create */
+    config.profile_len = 0;
 #if !ECUIO_HAVE_SOCKETCAN
     ecuio_detail_set("the simulated ECU needs Linux, whose vcan is a "
                      "virtual CAN bus");
@@ -578,6 +622,17 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
     std::unique_ptr<ecuio_sim> s(new (std::nothrow) ecuio_sim);
     if (s == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (set != nullptr) {
+        s->set = set;
+        s->values.reset(new (std::nothrow) std::atomic<double>[set->count]);
+        if (set->count > 0 && s->values == nullptr) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        /* Until it's given one, each field holds raw 0 */
+        for (uint32_t i = 0; i < set->count; ++i) {
+            s->values[i].store(set->defs[i].offset, std::memory_order_relaxed);
+        }
     }
     if (config.source == ecuio_sim_source::replay) {
         ecuio_status_t loaded = ECUIO_ERR_OUT_OF_MEMORY;
@@ -637,6 +692,18 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
         m.rx.timed = true;
         s->node_count = 2;
     }
+    if (set != nullptr) {
+        s->nodes[0].from_set = plan.engine;
+        for (uint32_t i = 0; i < plan.count; ++i) {
+            sim_node& m = s->nodes[1 + i];
+            m.request_id = plan.tx[i];
+            m.reply_id = plan.rx[i];
+            m.module = 1;
+            m.from_set = true;
+            m.rx.timed = true;
+        }
+        s->node_count = 1 + static_cast<int>(plan.count);
+    }
     s->fd = open_socket(link.index, s->nodes, s->node_count);
     s->stop_fd = s->fd >= 0 ? eventfd(0, EFD_CLOEXEC) : -1;
     if (s->fd < 0 || s->stop_fd < 0) {
@@ -678,6 +745,39 @@ ecuio_status_t ecuio_sim_get_stats(const ecuio_sim_t* sim,
     out->pending = sim->pending.load(std::memory_order_relaxed);
     out->flags = sim->flags.load(std::memory_order_acquire);
     return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_sim_set_value(ecuio_sim_t* sim, uint16_t signal_id,
+                                   double value)
+{
+    ecuio_detail_clear();
+    if (sim == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (sim->set == nullptr) {
+        ecuio_detail_set("the simulated ECU answers no profile's DIDs "
+                         "(no profile= in its URI)");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < sim->set->count; ++i) {
+        const ecuio_signal_def_t& d = sim->set->defs[i];
+        if (d.id != signal_id || !ecuio_sim_did_def(d)) {
+            continue;
+        }
+        uint32_t raw = 0;
+        if (!ecuio_sim_raw_for(d, value, &raw)) {
+            ecuio_detail_set(ecuio_sim_text_def(d)
+                                 ? "signal %u is text: it answers its name"
+                                 : "signal %u's field can't hold that value",
+                             static_cast<unsigned>(signal_id));
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        sim->values[i].store(value, std::memory_order_relaxed);
+        return ECUIO_OK;
+    }
+    ecuio_detail_set("signal %u isn't a Service 22 DID's field of the profile",
+                     static_cast<unsigned>(signal_id));
+    return ECUIO_ERR_INVALID_ARGUMENT;
 }
 
 void ecuio_sim_destroy(ecuio_sim_t* sim)
