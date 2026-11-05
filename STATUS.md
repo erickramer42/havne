@@ -59,8 +59,11 @@ or imported in bulk, and computed signals such as boost
     Settings lists the serial ports. Verified against a fake ELM327, on the bench with the OBDX VX, and
     on a car through the OBDLink MX+ (Bluetooth) and the VX in ELM mode
     (2026-10-27). A session that asks nothing listens with `AT MA` on
-    its channels (on the VX's bench; a car with a second tester is to
-    come). How it works: [docs/elm327.md](docs/elm327.md).
+    its channels: on the VX's bench, and on the test car through the
+    MX+ beside the VX asking, where it hears Single Frame replies only
+    (Known Issue #41;
+    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
+    How it works: [docs/elm327.md](docs/elm327.md).
   - **Android** ([ADR-0028](docs/adr/0028-app-fed-streams.md),
     [ADR-0029](docs/adr/0029-android-background-sessions.md)): the app
     on Android 12 and later reaches a Bluetooth adapter through the
@@ -382,8 +385,6 @@ Open, all needing hardware not on hand:
 - **Response pending** (BENCH prep #17): whether an adapter waits past
   `7F xx 78`, and whether it counts that line toward the
   response-count digit. The car never sent one.
-- **Listening to another tester** (#19): `AT MA` on a car, through an
-  OBD Y-splitter.
 - **A BLE adapter** (#25): the service the app picks, on a real one.
 - Later, with records of their own: Bluetooth LE on iOS and the
   desktop (ADR-0028 step 5), and listening to the whole bus (raw
@@ -397,9 +398,8 @@ can confirm, each with its evidence, are in
 every session walks it. Every item is settled for the adapters on
 hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
 the VX clock's zero (#5), the VX's serial port on a machine without
-OBDX's software (#11), response pending (#17), listening to another
-tester (#19), the VX's WiFi while its USB port is held (#20, in
-part), a BLE adapter (#25), a real CAN controller that sends with
+OBDX's software (#11), response pending (#17), the VX's WiFi while
+its USB port is held (#20, in part), a BLE adapter (#25), a real CAN controller that sends with
 one-shot mode (#32), and a sleep on a Linux
 machine (#27). Any other adapter starts the list again.
 
@@ -445,13 +445,28 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+- **#41. Through the OBDLink MX+, a listening session hears Single
+    Frame replies only.** The MX+'s monitor misses every frame that
+    follows another within about 1 ms: another tester's Flow Control
+    and the ECU's Consecutive Frames after a First Frame. A multi-frame
+    reply never completes, so it is dropped and nothing is delivered for
+    it. No setup tried changes that (`AT CAF0` or `CAF1`, `AT CFC0`, with
+    or without `AT CRA`, `AT MA` or `STMA`, `STCSEGR1`), and the frames
+    are on the bus: a SocketCAN listener on the same splitter hears
+    them (BENCH prep #19,
+    [2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md),
+    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
+    A listening session's setup still sends `AT CFC0`, so it never
+    answers another tester's First Frame. Untried: `STCMM`'s other modes
+    (some acknowledge on the bus) and `STM`'s filters. To listen to
+    multi-frame replies, use a SocketCAN controller in listen-only mode.
 
 ## Roadmap
 
 | Version | Scope | Status |
 |---|---|---|
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
-| v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; an OBDLink's monitor and the VX's reply delivery fixed | In progress |
+| v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | In progress |
 | v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier | Planned |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
@@ -483,11 +498,12 @@ and no ABI change.
   recorders in the laptop's app, the phone's and `havne-cli`, each
   recording's check clean; the MX+ and the USB2CAN listening beside the
   VX.
-- **Fixed from it:**
-  - a session that only listens through an OBDLink heard no
-    multi-frame reply: its monitor printed no Consecutive Frames under
-    `AT CFC1`, and a listening session's setup sends `AT CFC0` (BENCH
-    prep #19);
+- **From it:**
+  - a session that only listens through the MX+ hears Single Frame
+    replies only (Known Issue #41, BENCH prep #19: the re-run,
+    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md),
+    tried `AT CFC0` and six more setups); a listening session's setup
+    sends `AT CFC0`, so it never answers another tester's First Frame;
   - the VX's replies after the surrogate's first read waited about
     50 ms in a read asked with no time left: no read asks the vendor
     to wait 0 ms, and a read ends at its reply instead of its slice

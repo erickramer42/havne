@@ -252,7 +252,7 @@ desk bus and on the test car) is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.4.1 | A patch: the pages on a phone, both of a car's ECUs in one session, listening beside another tester through an OBDLink, and the VX's replies delivered without the surrogate's wait |
+| v0.4.1 | A patch: the pages on a phone, both of a car's ECUs in one session, listening beside another tester, and the VX's replies delivered without the surrogate's wait |
 | v0.5.0 | Your own PIDs and DIDs, imported in bulk, computed signals such as boost, and manufacturer data through plugins |
 | v0.6.0-v0.9.0 | Exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |

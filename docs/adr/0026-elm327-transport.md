@@ -795,6 +795,21 @@ monitor's `FC:` and `<DATA ERROR` marks that keep those lines out of
 the reassembly. The fake ELM327 models the adapter
 (`monitor_cfc_eats_cfs`); the car run confirms it.
 
+**Note, 2026-11-05: `AT CFC0` doesn't bring the Consecutive Frames
+back.** The car run again (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md):
+with `AT CFC0` the MX+'s monitor printed 3,167 First Frames and no
+Consecutive Frame, and through the phone's relay neither `AT CAF0`,
+dropping `AT CRA`, `STMA` nor `STCSEGR1` changed that. With no receive
+filter it heard every request and First Frame but not the VX's Flow
+Control either: it misses every frame that follows another within
+about 1 ms. The bus carried them (a SocketCAN listener on the same
+splitter, 2026-11-04) and the adapter counted no CAN error. So the FRPM
+reading above isn't the cause, and the fake's model (Consecutive Frames
+dropped under `AT CFC1` only) is wrong for this adapter. A listening
+session's setup keeps `AT CFC0`, so the listener never answers another
+tester's First Frame; through the MX+ it hears Single Frame replies
+only (STATUS.md's Known Issue #41).
+
 ## Appendix: 2026-10-27, WiFi over TCP
 
 Section 9's item 6 names a TCP socket as a second kind of port. A WiFi

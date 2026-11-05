@@ -141,7 +141,7 @@ Dates are commit dates.
 | 2026-11-04 | The pages on a phone: denser pages, the chart taking the page, a pinch stepping Live's window, the Dashboard's dials side by side upright, a frame-rate readout, charts that hold still, Log rows copied; run on the test phone | `167af40`, `2ae2f58`, `c11b87e`, `9d2ce04`, `354a4da`, `674bbb2`, `11ed648` |
 | 2026-11-04 | One reply on two clocks: two recordings of one bus line up to about 0.3 ms, and the VX's against `candump` on the desk bus to 10.4 ms ([2026-11-04-socketcan-desk-utc](bench-sessions/2026-11-04-socketcan-desk-utc.md)) | `2aaa46a`, `9b883c8` |
 | 2026-11-04 | Both ECUs in one session on the test car, through the VX and the MX+, with the recorders in the app, on the phone and in `havne-cli`; it found the MX+'s monitor printing no Consecutive Frames under `AT CFC1`, and the VX's 52 ms in the surrogate's read ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md)) | `05e49ff`, `fb62532` |
-| 2026-11-04 | A listening ELM327 session sends `AT CFC0`, the fix for the MX+'s monitor, against a fake ELM327 that models it | `fdb5672` |
+| 2026-11-04 | A listening ELM327 session sends `AT CFC0`, meant to bring the MX+ monitor's Consecutive Frames back; the re-run refuted it | `fdb5672` |
 | 2026-11-05 | A J2534 read asks for one message first, ends at its reply and never asks the vendor to wait 0 ms; the review's read fixes after it, and each vendor call's held time in the frame log | `d05e6e1`, `b98240d` |
 
 ## Lessons learned
@@ -1221,3 +1221,12 @@ before calling a delay the adapter's. (2) **A fake that ignores a
 setting can't catch a bug the setting causes.** The fake ELM327 parsed
 `AT CFC` into an ignored variable, so no test could see an STN's
 monitor dropping Consecutive Frames under `AT CFC1`.
+
+**2026-11-05: the re-run.** **A fake built from a fix's premise passes
+the fix.** The fake ELM327 dropped the Consecutive Frames under
+`AT CFC1` only, because `AT CFC0` was the fix, so the fix passed its
+test and failed on the car; the fake VX held only a read asked to
+wait 0 ms, so the 1 ms call passed and held 10 ms on the car. A
+behavior the fake takes from the fix's own reasoning is a guess until
+the adapter shows it, and the run that checks the fix should measure
+the guess too: the frame log's held time per vendor call did.
