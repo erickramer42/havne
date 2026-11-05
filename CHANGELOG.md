@@ -15,7 +15,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - In developer mode, a corner badge counts the frames the window draws each second.
 - A pinch on Live's chart, or the mouse wheel over it, steps its window: fingers spreading show less time, closing show more.
-- Live's chart and the Recordings viewer's take the page at a press of **Chart**, a double-click or `F`, and give it back the same way; on a phone on its side they start that way. The viewer then shows the values at the cursor beside its chart once you tap one; until then the chart has the width. A handle below Live's list, and one below the viewer's chart, sets how much of the page each takes, kept between runs.
+- Live's chart and the Recordings viewer's take the page at a press of **Chart**, a double-click or `F`, and give it back the same way; on a phone on its side they start that way. The viewer then shows the values at the cursor beside its chart once you tap one; until then the chart has the width, and a button folds those values to a tab and opens them again, kept between runs. A handle below Live's list, and one below the viewer's chart, sets how much of the page each takes, kept between runs.
 - The Log page's frame table copies the rows you pick: a tap selects a row (a shift-click a run of them), and **Copy** or `Ctrl+C` (`Cmd+C` on a Mac) puts them on the clipboard as tab-separated lines with a header, ready for notes or a spreadsheet. The selection stays on its frames while new ones arrive.
 - With `ECUIO_SUR_LOG_FRAMES=1`, the J2534 session log gives each driver read that brought messages its own line: the timeout asked, the messages asked for and returned, the status, and how long the driver held it ([docs/j2534.md](docs/j2534.md)).
 

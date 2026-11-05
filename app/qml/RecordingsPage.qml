@@ -3,7 +3,7 @@
 //          Bridge.recentRecordings, a recording that ends joining it, Replay
 //          handing its URI on, Open reaching the viewer (signals, the
 //          default plotted, the chart's series over the view), the cursor's
-//          readout, pan and zoom kept inside the recording, the wheel's
+//          readout (maximized, its strip folding to a tab and back), pan and zoom kept inside the recording, the wheel's
 //          zoom by its share of a notch and none sideways, the columns
 //          on their grid from time 0 through a pan, a second
 //          recording overlaid and aligned (starts, UTC, a marker, a rise or
@@ -77,8 +77,12 @@ Page {
         id: viewerSettings
         category: "recordings"
         property real chartHeight: -1
+        // The maximized chart's strip of the cursor's values folded to a
+        // tab, so the plot has the width
+        property bool stripFolded: false
     }
     property alias chartHeight: viewerSettings.chartHeight
+    property alias stripFolded: viewerSettings.stripFolded
 
     // The part of the axis in view, in ms since the recording started
     // (before it too, with a compared recording that starts earlier), and
@@ -1082,11 +1086,14 @@ Page {
 
             // Maximized, the cursor's values in a strip at the right, as
             // the signal rows show them otherwise; only while the cursor is
-            // in view, so until a tap the chart has the width to itself
+            // in view, so until a tap the chart has the width to itself.
+            // Its button folds it to a tab and opens it again
             readonly property bool cursorInView: root.hasCursor && root.cursorMs >= root.viewT0
                                                  && root.cursorMs <= root.viewT1
-            readonly property real stripWidth: root.chartMaximized && cursorInView
-                ? Math.min(170, Math.round(width * 0.25)) : 0
+            readonly property bool stripShown: root.chartMaximized && cursorInView
+            readonly property real stripWidth: !stripShown ? 0
+                : viewerSettings.stripFolded ? stripFold.width + 8
+                : Math.max(stripFold.width + 8, Math.min(170, Math.round(width * 0.25)))
 
             StripChart {
                 id: chart
@@ -1198,10 +1205,24 @@ Page {
                 onDoubleTap: root.toggleMaximized()
             }
 
+            ThemedButton {
+                id: stripFold
+                objectName: "stripFold"
+                visible: chartFrame.stripShown
+                compact: true
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 4
+                text: viewerSettings.stripFolded ? "<" : ">"
+                Accessible.name: viewerSettings.stripFolded ? qsTr("Show the values at the cursor")
+                                                            : qsTr("Hide the values at the cursor")
+                onClicked: viewerSettings.stripFolded = !viewerSettings.stripFolded
+            }
+
             ListView {
                 objectName: "cursorStrip"
-                visible: chartFrame.stripWidth > 0
-                anchors.top: parent.top
+                visible: chartFrame.stripShown && !viewerSettings.stripFolded
+                anchors.top: stripFold.bottom
                 anchors.bottom: parent.bottom
                 anchors.right: parent.right
                 anchors.margins: 4

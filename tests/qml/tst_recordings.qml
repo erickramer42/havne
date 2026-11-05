@@ -4,7 +4,8 @@
 //          recording that ends joining it, Replay handing its URI on, Open
 //          reaching the viewer on tests/fixtures/recording/findings (its
 //          signal, the default plotted, the chart's series over the view,
-//          the frames check's findings), the cursor's readout, the view
+//          the frames check's findings), the cursor's readout (maximized,
+//          its strip folding to a tab and back), the view
 //          kept inside the recording through setView, zoom, a drag and the
 //          wheel (a notch in parts zooming as one, a sideways scroll not at
 //          all), the columns kept on their grid through a pan by part of
@@ -233,6 +234,37 @@ TestCase {
         verify(at.atMs >= 0 && at.atMs <= 5000, "the sample in force: " + at.atMs)
         compare(find(row, "cursorValue").text, page.valueText(Number(at.text), 0, "rpm"))
         compare(page.series(400)[0].labelValue, Number(at.text), "the label shows it too")
+    }
+
+    // Maximized, the cursor's values sit in a strip beside the chart; its
+    // button folds it to a tab, giving the plot the width, and opens it
+    // again, and the choice is kept
+    function test_theCursorsStripFoldsAwayAndBack() {
+        const page = openFindings()
+        page.stripFolded = false
+        page.toggleMaximized()
+        verify(page.chartMaximized, "maximized")
+        page.setCursor(5000)
+        const strip = find(page, "cursorStrip")
+        const fold = find(page, "stripFold")
+        const chart = find(page, "chart")
+        tryVerify(() => strip.visible && fold.visible, 2000, "a cursor: its values beside the chart")
+        verify(waitForPolish(page.Window.window), "laid out")
+        const open = chart.shownW
+        compare(fold.Accessible.name, "Hide the values at the cursor")
+
+        mouseClick(fold)
+        verify(page.stripFolded, "folded, and kept")
+        verify(!strip.visible, "the strip gives way")
+        verify(fold.visible, "its tab stays to open it again")
+        tryVerify(() => chart.shownW > open + 60, 2000,
+                  "the plot has the width: " + chart.shownW + " against " + open)
+        compare(fold.Accessible.name, "Show the values at the cursor")
+
+        mouseClick(fold)
+        verify(!page.stripFolded)
+        tryVerify(() => strip.visible && chart.shownW === open, 2000, "the strip is back")
+        page.toggleMaximized()
     }
 
     // The view stays inside the recording, no narrower than minSpanMs,
