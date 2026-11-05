@@ -275,11 +275,10 @@ or imported in bulk, and computed signals such as boost
     what the stack adds through each transport against the fakes
     ([docs/testing.md](docs/testing.md#reply-timing-against-the-fakes)).
     On the test car through the VX, the P50 per request (the median
-    across the rotation) was 24.6 ms packed and 14.3 ms one PID a
-    request, on a read that still made a call for the rest of a batch,
-    which held each reply about 10 ms more and is gone; its removal is
-    yet to be timed on the car
-    ([2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md));
+    across the rotation) is 16.4 ms packed, about 2.5 ms past a
+    six-PID pack's time on the bus, and 4.6 ms one PID a request
+    ([2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md),
+    A2);
     through the MX+ relayed by the test phone, `01 00` at P50 18 ms and
     P99 114 ms ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md)).
   - **Every release** carries the Windows zip and a zip of its PDBs,
@@ -515,12 +514,10 @@ and no ABI change.
     (ADR-0042's note of 2026-11-04). On the re-run no reply came 50 ms
     late (packed, the P50 per request 24.6 ms against 65.5-73.7), and
     the VX held the call for the rest of a batch about 10 ms, so no
-    read makes that call (ADR-0042's note of 2026-11-05).
+    read makes that call (ADR-0042's note of 2026-11-05); timed again
+    without it, 16.4 ms packed and 4.6 ms unpacked.
 
-**Done when:** before the tag, a short car check of the read without
-the call for the rest of a batch (the run sheet's Phase 4b: packed,
-the latency per request near 15 ms, and no such call in the frame
-log). The double-tap on the test phone (2026-11-05, the phone skill's
+**Done when:** the double-tap on the test phone (2026-11-05, the phone skill's
 `ui check doubletap`, 9 of 10): Live's chart both ways and the
 viewer's into its maximized chart pass; the viewer's way back with a
 drifting double tap missed in both checks and in 2 of 9 tries by hand,
