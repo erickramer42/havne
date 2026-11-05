@@ -2,7 +2,8 @@
 // Testing: UNIT: BE vs LE round-trip, mux acceptance/rejection, the frame
 //          gate (an error frame applies to no def), validator rules,
 //          display-unit conversion (SignalsTest.DisplayConvert*), the
-//          groups' names (SignalsTest.EachGroupHasAName)
+//          groups' names (SignalsTest.EachGroupHasAName), an enum's
+//          decode and label and a computed def's shape (SignalTablesTest)
 
 #include <ecuio/signals.h>
 #include <ecuio/internal.h>
@@ -72,11 +73,17 @@ static bool read_mux_key(const ecuio_signal_def_t* signal,
     return true;
 }
 
-/* The kinds ecuio_decode_signal decodes: numbers. */
+/* The kinds ecuio_decode_signal decodes: numbers, and an enum's raw
+ * number. */
 static bool is_decodable_kind(uint8_t kind)
 {
     return kind == ECUIO_VALUE_UINT || kind == ECUIO_VALUE_INT ||
-           kind == ECUIO_VALUE_FLOAT;
+           kind == ECUIO_VALUE_FLOAT || kind == ECUIO_VALUE_ENUM;
+}
+
+static bool is_computed(const ecuio_signal_def_t* signal)
+{
+    return (signal->flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
 }
 
 /* The kinds ecuio_decode_text decodes: byte fields shown as text. */
@@ -126,9 +133,10 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         return ECUIO_DECODE_ERR_NULL;
     }
 
-    /* Kind and byte order FIRST, before the bit parameters */
+    /* Kind and byte order FIRST, before the bit parameters. A computed
+     * def's value comes from other values, never a frame. */
     if (!is_decodable_kind(signal->kind) ||
-        !is_known_byte_order(signal->byte_order)) {
+        !is_known_byte_order(signal->byte_order) || is_computed(signal)) {
         return ECUIO_DECODE_ERR_UNSUPPORTED;
     }
 
@@ -180,6 +188,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 
     switch (signal->kind) {
     case ECUIO_VALUE_UINT:
+    case ECUIO_VALUE_ENUM:
         *out_value = static_cast<double>(raw) * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
 
@@ -285,6 +294,32 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
     return ECUIO_DECODE_OK;
 }
 
+const char* ecuio_enum_label(const ecuio_signal_set_t* set,
+                             const ecuio_signal_def_t* signal, uint32_t raw)
+{
+    if (!set || !signal || signal->kind != ECUIO_VALUE_ENUM ||
+        is_computed(signal) || !set->enums ||
+        uint32_t{signal->table_first} + signal->table_count > set->enum_count) {
+        return nullptr;
+    }
+    /* The validator keeps each def's raw values strictly ascending */
+    uint32_t lo = signal->table_first;
+    uint32_t hi = lo + signal->table_count;
+    while (lo < hi) {
+        const uint32_t mid = lo + (hi - lo) / 2;
+        const uint32_t at = set->enums[mid].raw;
+        if (at == raw) {
+            return set->enums[mid].label;
+        }
+        if (at < raw) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return nullptr;
+}
+
 int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
                                const ecuio_frame_t* frame)
 {
@@ -293,8 +328,9 @@ int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
     }
 
     /* An error report's ID is its error class (SocketCAN), not a
-     * message, and its bytes are the error's detail */
-    if (frame->flags & ECUIO_FRAME_FLAG_ERROR) {
+     * message, and its bytes are the error's detail. A computed def's
+     * message_id 0 names no frame. */
+    if ((frame->flags & ECUIO_FRAME_FLAG_ERROR) || is_computed(signal)) {
         return 0;
     }
 
@@ -338,56 +374,80 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_BYTE_ORDER;
     }
 
-    /* A text kind is a byte field: no bit parameters, and byte_length
-     * within a frame. A numeric kind is bits, and byte_length is the
-     * text kinds' alone. The shapes ecuio_decode_text and
-     * ecuio_decode_signal take. */
-    if (is_text_kind(signal->kind)) {
-        if (signal->bit_length != 0) {
-            return ECUIO_VALIDATE_ERR_BIT_LENGTH;
-        }
-        if (signal->bit_offset != 0) {
-            return ECUIO_VALIDATE_ERR_BIT_OFFSET;
-        }
-        if (signal->byte_length > ECUIO_FRAME_DATA_MAX) {
-            return ECUIO_VALIDATE_ERR_BYTE_LENGTH;
+    if (is_computed(signal)) {
+        /* No frame carries it: everything that would read one is zero,
+         * and the program in the set's table is the arithmetic. */
+        if (signal->kind != ECUIO_VALUE_UINT ||
+            signal->byte_order != ECUIO_BYTE_ORDER_LE ||
+            signal->message_id != 0 || signal->mux_offset != 0 ||
+            signal->mux_length != 0 || signal->mux_key != 0 ||
+            signal->start_byte != 0 || signal->bit_offset != 0 ||
+            signal->bit_length != 0 || signal->byte_length != 0 ||
+            signal->scale != 1.0 || signal->offset != 0.0 ||
+            signal->table_count != 0) {
+            return ECUIO_VALIDATE_ERR_COMPUTED;
         }
     } else {
-        if (signal->bit_length == 0 || signal->bit_length > 32) {
-            return ECUIO_VALIDATE_ERR_BIT_LENGTH;
+        /* A text kind is a byte field: no bit parameters, and byte_length
+         * within a frame. A numeric kind is bits, and byte_length is the
+         * text kinds' alone. The shapes ecuio_decode_text and
+         * ecuio_decode_signal take. */
+        if (is_text_kind(signal->kind)) {
+            if (signal->bit_length != 0) {
+                return ECUIO_VALIDATE_ERR_BIT_LENGTH;
+            }
+            if (signal->bit_offset != 0) {
+                return ECUIO_VALIDATE_ERR_BIT_OFFSET;
+            }
+            if (signal->byte_length > ECUIO_FRAME_DATA_MAX) {
+                return ECUIO_VALIDATE_ERR_BYTE_LENGTH;
+            }
+        } else {
+            if (signal->bit_length == 0 || signal->bit_length > 32) {
+                return ECUIO_VALIDATE_ERR_BIT_LENGTH;
+            }
+            if (signal->bit_offset > 7) {
+                return ECUIO_VALIDATE_ERR_BIT_OFFSET;
+            }
+            if (signal->byte_length != 0) {
+                return ECUIO_VALIDATE_ERR_BYTE_LENGTH;
+            }
         }
-        if (signal->bit_offset > 7) {
-            return ECUIO_VALIDATE_ERR_BIT_OFFSET;
-        }
-        if (signal->byte_length != 0) {
-            return ECUIO_VALIDATE_ERR_BYTE_LENGTH;
-        }
-    }
 
-    /* MUX validation. The key lives in the frame's payload, and any
-     * region a one-byte mux_offset can name fits ECUIO_FRAME_DATA_MAX,
-     * so only decode can find it past the end (payload_len). */
-    if (signal->mux_length > kMuxMaxBytes) {
-        return ECUIO_VALIDATE_ERR_MUX_LENGTH;
-    }
-    if (signal->mux_length > 0) {
-        /* 0xFF, 0xFFFF or 0xFFFFFF: the shift is at most 24 bits */
-        const uint32_t mux_max = (1u << (8u * signal->mux_length)) - 1u;
-        if (signal->mux_key > mux_max) {
-            return ECUIO_VALIDATE_ERR_MUX_KEY;
+        /* MUX validation. The key lives in the frame's payload, and any
+         * region a one-byte mux_offset can name fits ECUIO_FRAME_DATA_MAX,
+         * so only decode can find it past the end (payload_len). */
+        if (signal->mux_length > kMuxMaxBytes) {
+            return ECUIO_VALIDATE_ERR_MUX_LENGTH;
         }
-    }
+        if (signal->mux_length > 0) {
+            /* 0xFF, 0xFFFF or 0xFFFFFF: the shift is at most 24 bits */
+            const uint32_t mux_max = (1u << (8u * signal->mux_length)) - 1u;
+            if (signal->mux_key > mux_max) {
+                return ECUIO_VALIDATE_ERR_MUX_KEY;
+            }
+        }
 
-    /* The big-endian extractor reads whole bytes MSB-first, and the
-     * decoder refuses any other shape. */
-    if (signal->byte_order == ECUIO_BYTE_ORDER_BE && !is_whole_bytes(signal)) {
-        return ECUIO_VALIDATE_ERR_BIG_ENDIAN;
-    }
+        /* The big-endian extractor reads whole bytes MSB-first, and the
+         * decoder refuses any other shape. */
+        if (signal->byte_order == ECUIO_BYTE_ORDER_BE &&
+            !is_whole_bytes(signal)) {
+            return ECUIO_VALIDATE_ERR_BIG_ENDIAN;
+        }
 
-    /* A FLOAT is binary32: 32 bits at bit 0, in either byte order. */
-    if (signal->kind == ECUIO_VALUE_FLOAT &&
-        (signal->bit_length != 32 || signal->bit_offset != 0)) {
-        return ECUIO_VALIDATE_ERR_FLOAT32;
+        /* A FLOAT is binary32: 32 bits at bit 0, in either byte order. */
+        if (signal->kind == ECUIO_VALUE_FLOAT &&
+            (signal->bit_length != 32 || signal->bit_offset != 0)) {
+            return ECUIO_VALIDATE_ERR_FLOAT32;
+        }
+
+        /* An enum shows its raw number, so nothing scales it, and its
+         * labels fit one def's room in the table. */
+        if (signal->kind == ECUIO_VALUE_ENUM &&
+            (signal->scale != 1.0 || signal->offset != 0.0 ||
+             signal->table_count > ECUIO_ENUM_MAX_ENTRIES)) {
+            return ECUIO_VALIDATE_ERR_ENUM;
+        }
     }
 
     /* Last byte MUST be null: guarantees C-string fits in fixed buffer */
@@ -409,12 +469,16 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     }
 
     /* Zero, so a later field can take this room and existing sets
-     * still load. No flag is defined. plot_rank and group take any
-     * value. */
+     * still load. ECUIO_DEF_FLAG_COMPUTED is the one flag. plot_rank
+     * and group take any value; the table fields are an enum's or a
+     * computed def's alone. */
+    const bool tabled = signal->kind == ECUIO_VALUE_ENUM || is_computed(signal);
     if (signal->reserved0 != 0 ||
         !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||
         !all_zero(signal->display_reserved, sizeof signal->display_reserved) ||
-        signal->flags != 0 ||
+        (signal->flags & ~ECUIO_DEF_FLAG_COMPUTED) != 0 ||
+        signal->quantity_reserved != 0 ||
+        (!tabled && (signal->table_first != 0 || signal->table_count != 0)) ||
         !all_zero(signal->reserved, sizeof signal->reserved)) {
         return ECUIO_VALIDATE_ERR_RESERVED;
     }

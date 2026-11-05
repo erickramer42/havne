@@ -6,7 +6,9 @@
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
 //          callbacks first; the defs each frame is checked against:
-//          DefIndexTest), the absent signals
+//          DefIndexTest; enum labels and computed values with their
+//          ages: CoreTest.Computed*, .AComputedInputAtItsBoundStillCounts),
+//          the absent signals
 //          (CoreTest.AFieldPastEveryReplyIsAbsent), the identity
 //          report's VIN (CoreTest.TheVinIsService09sThenF190s), the
 //          unsupported signals
@@ -30,6 +32,7 @@
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "obd2_reply.h"      /* a packed Service 01 reply's records */
+#include "computed.h"        /* computed signals' programs */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "uri_query.h"
 #include "error_detail.h"
@@ -304,7 +307,54 @@ namespace {
                 if (rc != ECUIO_DECODE_OK) {
                     continue;
                 }
+                if (def.kind == ECUIO_VALUE_ENUM) {
+                    /* The raw number, and its label from the set's
+                     * table, which outlives the call */
+                    v.text = ecuio_enum_label(set, &def,
+                                              static_cast<uint32_t>(v.value));
+                    v.text_len = v.text != nullptr
+                                     ? static_cast<uint32_t>(strlen(v.text))
+                                     : 0u;
+                }
+                if (!session->latest.empty()) {
+                    session->latest[i] = {v.value, frame->timestamp_us,
+                                          session->decodes};
+                }
             }
+            session->values[n++] = v;
+        }
+    }
+
+    /* Appends each computed value one of the frame's values feeds
+     * (ADR-0051 section 5): from each input's newest value, when every
+     * input has one no older than its bound at the frame's time. A
+     * division by zero or a result that isn't finite gives none. */
+    void compute_values(ecuio_session_t* session, const ecuio_signal_set_t* set,
+                        const ecuio_frame_t* frame, uint32_t& n)
+    {
+        for (const ecuio_session_t::computed_plan& c : session->computed) {
+            const uint32_t inputs = c.program->input_count;
+            bool fed = false;
+            bool fresh = true;
+            double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
+            for (uint32_t k = 0; k < inputs; ++k) {
+                const ecuio_session_t::latest_value& l =
+                    session->latest[c.inputs[k]];
+                fed = fed || l.decode == session->decodes;
+                if (l.decode == 0 || l.time_us > frame->timestamp_us ||
+                    frame->timestamp_us - l.time_us > c.max_age_us[k]) {
+                    fresh = false;
+                }
+                in[k] = l.value;
+            }
+            ecuio_value_t v{};
+            if (!fed || !fresh ||
+                !ecuio_computed_run(*c.program, in, &v.value)) {
+                continue;
+            }
+            const ecuio_signal_def_t& def = set->defs[c.def];
+            v.signal_id = def.id;
+            v.kind = def.kind;
             session->values[n++] = v;
         }
     }
@@ -329,6 +379,7 @@ namespace {
                                  : static_cast<uint16_t>(sizeof(frame->data));
         uint32_t n = 0;
         uint32_t slot = 0;
+        ++session->decodes;
         const std::vector<uint32_t>& ids = session->service01_ids;
         if (session->record_frame &&
             (frame->flags & ECUIO_FRAME_FLAG_ERROR) == 0 &&
@@ -352,6 +403,7 @@ namespace {
                     r.data_length = static_cast<uint16_t>(2 + records[k].bytes);
                     decode_frame(session, set, &r, r.data_length, n, slot);
                 }
+                compute_values(session, set, frame, n);
                 return n;
             }
             if (reply == ecuio_obd2_reply::unsplit) {
@@ -359,7 +411,38 @@ namespace {
             }
         }
         decode_frame(session, set, frame, len, n, slot);
+        compute_values(session, set, frame, n);
         return n;
+    }
+
+    /* The computed defs' plans (ADR-0051 section 5), from a set the
+     * validator passed: each input's def index and age bound. Runs once,
+     * at create; throws bad_alloc, which create catches. */
+    void plan_computed(ecuio_session_t* s, const ecuio_signal_set_t* set)
+    {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+                continue;
+            }
+            ecuio_session_t::computed_plan c;
+            c.def = i;
+            c.program = &set->computed[d.table_first];
+            for (uint32_t k = 0; k < c.program->input_count; ++k) {
+                for (uint32_t j = 0; j < set->count; ++j) {
+                    if (set->defs[j].id == c.program->input_ids[k]) {
+                        c.inputs[k] = j;
+                        break;
+                    }
+                }
+                const uint32_t age = c.program->max_age_us[k];
+                c.max_age_us[k] = age != 0 ? age : ECUIO_VALUE_STALE_US;
+            }
+            s->computed.push_back(c);
+        }
+        if (!s->computed.empty()) {
+            s->latest.resize(set->count);
+        }
     }
 } // namespace
 
@@ -1035,6 +1118,7 @@ ecuio_status_t ecuio_session_create(
             if (!s->service01_ids.empty()) {
                 s->record_frame.reset(new ecuio_frame_t{});
             }
+            plan_computed(s.get(), profile_set);
         } catch (...) {
             return ECUIO_ERR_OUT_OF_MEMORY;
         }

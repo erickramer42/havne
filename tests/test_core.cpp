@@ -2264,15 +2264,20 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
 TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
     /* A set may derive at most ECUIO_PROFILE_MAX_REQUESTS requests
      * (ADR-0015 section 2), so a session never leaves one unasked with nothing
-     * to say why. Defs read from one reply count once: def 1 reads PID
-     * 0x00's reply, as def 0 does. One past the limit is refused, naming
-     * the first def that didn't fit, and leaves nothing registered. */
+     * to say why. Defs read from one reply count once: def 1 reads DID
+     * 0x1000's reply, as def 0 does. One past the limit is refused, naming
+     * the first def that didn't fit, and leaves nothing registered.
+     * Service 22 DIDs, since the limit is more than Service 01's PIDs. */
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
     static ecuio_signal_def_t defs[ECUIO_PROFILE_MAX_REQUESTS + 2];
     for (uint32_t i = 0; i < ECUIO_PROFILE_MAX_REQUESTS + 2; ++i) {
         defs[i] = obd2->defs[0];
         defs[i].id = static_cast<uint16_t>(100 + i);
-        defs[i].mux_key = 0x4100u | ((i == 1) ? 0u : i);
+        defs[i].byte_order = ECUIO_BYTE_ORDER_BE;
+        defs[i].start_byte = 3;
+        defs[i].bit_length = 8;
+        defs[i].mux_length = 3;
+        defs[i].mux_key = 0x620000u | (0x1000u + ((i == 1) ? 0u : i));
     }
     static ecuio_signal_set_t fits = {};
     fits.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
@@ -4359,6 +4364,264 @@ TEST(CoreTest, ValuesGiveEachTextValueASlotOfItsOwn)
     EXPECT_EQ(next[0].text_at, v[0].text_at) << "the slots start again";
     ecuio_session_destroy(session);
     EXPECT_EQ(ecuio_profile_unregister("test-text-slots"), ECUIO_OK);
+}
+
+namespace {
+
+/* MAP on 0x123's byte 0, a fuel-system enum on its byte 1 (1 and 2
+ * labeled), baro on 0x124's byte 0; then boost (MAP - baro, baro aged
+ * up to 30 s) and a ratio (MAP / baro, both the stale age) */
+struct ComputedSet {
+    ecuio_signal_def_t defs[5];
+    ecuio_enum_entry_t enums[2];
+    ecuio_computed_t computed[2];
+    ecuio_signal_set_t set{};
+
+    ComputedSet()
+    {
+        defs[0] = value_def(1, ECUIO_VALUE_UINT, 0x123);
+        defs[0].bit_length = 8;
+        defs[1] = value_def(2, ECUIO_VALUE_ENUM, 0x123);
+        defs[1].start_byte = 1;
+        defs[1].bit_length = 8;
+        defs[1].table_count = 2;
+        defs[2] = value_def(3, ECUIO_VALUE_UINT, 0x124);
+        defs[2].bit_length = 8;
+        for (uint16_t i = 3; i < 5; ++i) {
+            defs[i] = value_def(static_cast<uint16_t>(i + 1), ECUIO_VALUE_UINT, 0);
+            defs[i].flags = ECUIO_DEF_FLAG_COMPUTED;
+            defs[i].table_first = static_cast<uint16_t>(i - 3);
+        }
+        enums[0].raw = 1;
+        std::snprintf(enums[0].label, sizeof enums[0].label, "Open loop");
+        enums[1].raw = 2;
+        std::snprintf(enums[1].label, sizeof enums[1].label, "Closed loop");
+        for (uint32_t p = 0; p < 2; ++p) {
+            ecuio_computed_t& c = computed[p];
+            c = ecuio_computed_t{};
+            c.input_ids[0] = 1;
+            c.input_ids[1] = 3;
+            c.input_count = 2;
+            c.step_count = 3;
+            c.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+            c.steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+            c.steps[2] = p == 0 ? ECUIO_COMPUTED_SUBTRACT : ECUIO_COMPUTED_DIVIDE;
+        }
+        computed[0].max_age_us[1] = 30000000;
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 5;
+        set.defs = defs;
+        set.enum_count = 2;
+        set.enums = enums;
+        set.computed_count = 2;
+        set.computed = computed;
+    }
+};
+
+const SeenValue* value_of(const SeenBatch& b, uint16_t id)
+{
+    for (const SeenValue& v : b.values) {
+        if (v.id == id) {
+            return &v;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+/* A computed value follows a frame that decodes one of its inputs,
+ * from each input's newest value no older than its bound, after the
+ * frame's own values (ADR-0051 section 5); an enum's value is its raw
+ * number with its label, or none for a raw value with no entry */
+TEST(CoreTest, ComputedValuesFollowTheirInputsWithinTheirAges)
+{
+    static ComputedSet s;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-computed", &s.set, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://t?profile=test-computed", &session),
+              ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const auto send = [&](uint32_t id, std::initializer_list<uint8_t> bytes,
+                          double seconds) {
+        const ecuio_frame_t f =
+            value_frame(id, bytes, static_cast<uint64_t>(seconds * 1e6));
+        ecuio_session_dispatch_callbacks(session, &f);
+    };
+    send(0x123, {100, 1}, 0.0);    /* 0: MAP, no baro yet */
+    send(0x124, {95}, 1.0);        /* 1: baro, MAP 1 s old */
+    send(0x123, {110, 7}, 2.0);    /* 2: an unlabeled mode */
+    send(0x123, {120, 2}, 20.0);   /* 3: baro 19 s old: boost's 30 s, not the ratio's 3 s */
+    send(0x123, {130, 2}, 40.0);   /* 4: baro 39 s old: neither */
+    send(0x124, {0}, 41.0);        /* 5: a zero baro: no ratio */
+    send(0x125, {1}, 42.0);        /* 6: decodes nothing, feeds nothing */
+    ASSERT_EQ(cap.batches.size(), 6u);
+    const std::vector<SeenBatch>& b = cap.batches;
+
+    ASSERT_EQ(b[0].values.size(), 2u) << "MAP and the mode alone";
+    EXPECT_EQ(b[0].values[1].text, "Open loop");
+    EXPECT_EQ(b[0].values[1].value, 1.0);
+    EXPECT_EQ(b[0].values[1].kind, ECUIO_VALUE_ENUM);
+    EXPECT_EQ(b[0].values[1].text_len, 9u);
+
+    ASSERT_EQ(b[1].values.size(), 3u);
+    EXPECT_EQ(b[1].values[0].id, 3) << "the frame's own value first";
+    EXPECT_EQ(b[1].values[1].id, 4);
+    EXPECT_EQ(b[1].values[1].value, 5.0);
+    EXPECT_EQ(b[1].values[1].kind, ECUIO_VALUE_UINT);
+    EXPECT_EQ(b[1].values[1].text_at, nullptr);
+    EXPECT_EQ(b[1].values[2].id, 5);
+    EXPECT_DOUBLE_EQ(b[1].values[2].value, 100.0 / 95.0);
+    EXPECT_EQ(b[1].timestamp_us, 1000000u);
+
+    ASSERT_EQ(b[2].values.size(), 4u);
+    EXPECT_EQ(b[2].values[1].value, 7.0);
+    EXPECT_EQ(b[2].values[1].text_at, nullptr) << "no label: the number shows";
+    EXPECT_EQ(b[2].values[1].text_len, 0u);
+    EXPECT_EQ(value_of(b[2], 4)->value, 15.0);
+
+    ASSERT_NE(value_of(b[3], 4), nullptr) << "baro's own bound, 30 s";
+    EXPECT_EQ(value_of(b[3], 4)->value, 25.0);
+    EXPECT_EQ(value_of(b[3], 5), nullptr) << "the stale age, 3 s";
+    EXPECT_EQ(value_of(b[3], 2)->text, "Closed loop");
+
+    EXPECT_EQ(value_of(b[4], 4), nullptr) << "39 s is past 30";
+    EXPECT_EQ(b[4].values.size(), 2u);
+
+    ASSERT_NE(value_of(b[5], 4), nullptr) << "MAP 1 s old";
+    EXPECT_EQ(value_of(b[5], 4)->value, 130.0);
+    EXPECT_EQ(value_of(b[5], 5), nullptr) << "a division by zero";
+
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-computed"), ECUIO_OK);
+}
+
+/* A computed value's age bound is inclusive, and an input decoded
+ * later than the frame being computed (a clock that stepped back)
+ * gives no value */
+TEST(CoreTest, AComputedInputAtItsBoundStillCounts)
+{
+    static ComputedSet s;
+    ASSERT_EQ(ecuio_profile_register("test-computed-age", &s.set, nullptr),
+              ECUIO_OK);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://t?profile=test-computed-age", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t baro = value_frame(0x124, {100}, 10000000);
+    const ecuio_frame_t at = value_frame(0x123, {110, 1},
+                                         10000000 + ECUIO_VALUE_STALE_US);
+    const ecuio_frame_t past = value_frame(0x123, {111, 1},
+                                           10000001 + ECUIO_VALUE_STALE_US);
+    const ecuio_frame_t back = value_frame(0x124, {100}, 20000000);
+    const ecuio_frame_t earlier = value_frame(0x123, {112, 1}, 15000000);
+    for (const ecuio_frame_t* f : {&baro, &at, &past, &back, &earlier}) {
+        ecuio_session_dispatch_callbacks(session, f);
+    }
+    ASSERT_EQ(cap.batches.size(), 5u);
+    ASSERT_NE(value_of(cap.batches[1], 5), nullptr) << "exactly 3 s";
+    EXPECT_DOUBLE_EQ(value_of(cap.batches[1], 5)->value, 1.1);
+    EXPECT_EQ(value_of(cap.batches[2], 5), nullptr) << "1 us past it";
+    EXPECT_NE(value_of(cap.batches[2], 4), nullptr) << "boost's 30 s";
+    EXPECT_EQ(value_of(cap.batches[4], 4), nullptr) << "baro newer than the frame";
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-computed-age"), ECUIO_OK);
+}
+
+/* Computing allocates nothing on the worker, as decoding doesn't
+ * (CoreTest.WorkersAllocateNothingPerFrame's rule) */
+TEST(CoreTest, ComputingValuesAllocatesNothing)
+{
+    static ComputedSet s;
+    ASSERT_EQ(ecuio_profile_register("test-computed-new", &s.set, nullptr),
+              ECUIO_OK);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://t?profile=test-computed-new", &session),
+        ECUIO_OK);
+    int batches = 0;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_counting_cb, &batches),
+              ECUIO_OK);
+    const ecuio_frame_t map = value_frame(0x123, {120, 2}, 1000000);
+    const ecuio_frame_t baro = value_frame(0x124, {100}, 1100000);
+    ecuio_session_dispatch_callbacks(session, &map);
+    const unsigned long before = new_counter::on_this_thread();
+    ecuio_session_dispatch_callbacks(session, &baro);
+    ecuio_session_dispatch_callbacks(session, &map);
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0u);
+    EXPECT_EQ(batches, 3);
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-computed-new"), ECUIO_OK);
+}
+
+/* A packed Service 01 reply (ADR-0039 Appendix A) decodes record by
+ * record, and its computed values follow once, after every record: MAP
+ * (0x0B) and baro (0x33) in one reply give one boost, from that reply's
+ * baro, not one per record from the baro before it */
+TEST(CoreTest, AComputedValueFollowsAPackedReplyOnce)
+{
+    static ecuio_signal_def_t defs[3];
+    const uint8_t pids[2] = {0x0B, 0x33};
+    for (uint16_t i = 0; i < 2; ++i) {
+        defs[i] = value_def(static_cast<uint16_t>(i + 1), ECUIO_VALUE_UINT,
+                            ECUIO_OBD2_ECU_ARB_ID);
+        defs[i].byte_order = ECUIO_BYTE_ORDER_BE;
+        defs[i].start_byte = 2;
+        defs[i].bit_length = 8;
+        defs[i].mux_length = 2;
+        defs[i].mux_key = 0x4100u | pids[i];
+    }
+    defs[2] = value_def(3, ECUIO_VALUE_UINT, 0);
+    defs[2].flags = ECUIO_DEF_FLAG_COMPUTED;
+    static ecuio_computed_t boost{};
+    boost.input_ids[0] = 1;
+    boost.input_ids[1] = 2;
+    boost.input_count = 2;
+    boost.step_count = 3;
+    boost.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+    boost.steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+    boost.steps[2] = ECUIO_COMPUTED_SUBTRACT;
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 3;
+    set.defs = defs;
+    set.computed_count = 1;
+    set.computed = &boost;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-computed-packed", &set, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://t?profile=test-computed-packed",
+                                   &session),
+              ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t baro =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x33, 90}, 1000000);
+    const ecuio_frame_t packed = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0B, 100, 0x33, 95}, 2000000);
+    ecuio_session_dispatch_callbacks(session, &baro);
+    ecuio_session_dispatch_callbacks(session, &packed);
+    ASSERT_EQ(cap.batches.size(), 2u);
+    const std::vector<SeenValue>& v = cap.batches[1].values;
+    ASSERT_EQ(v.size(), 3u) << "MAP, baro, then one boost";
+    EXPECT_EQ(v[0].id, 1);
+    EXPECT_EQ(v[0].value, 100.0);
+    EXPECT_EQ(v[1].id, 2);
+    EXPECT_EQ(v[1].value, 95.0);
+    EXPECT_EQ(v[2].id, 3);
+    EXPECT_EQ(v[2].value, 5.0) << "from this reply's baro";
+    EXPECT_EQ(cap.batches[1].timestamp_us, 2000000u);
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-computed-packed"), ECUIO_OK);
 }
 
 /* Reply timing (ADR-0042): a session with no rotation has no rows and

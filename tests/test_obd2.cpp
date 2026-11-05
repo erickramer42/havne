@@ -2246,7 +2246,7 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
         EXPECT_EQ(std::string(ecuio_last_error_detail()), c.detail) << c.query;
     }
 
-    /* 129 DIDs to poll, one past the engine's table */
+    /* One DID to poll past the engine's table */
     std::string many = "did=";
     for (unsigned i = 0; i <= ECUIO_PROFILE_MAX_REQUESTS; ++i) {
         char one[8];
@@ -2255,9 +2255,12 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
     }
     ecuio_uds_session u;
     EXPECT_EQ(build_uds(many, &u), ECUIO_ERR_BAD_URI);
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "?did= lists 129 DIDs to poll, more than the 128 a session "
-                 "asks for; scan a range instead");
+    char detail[96];
+    snprintf(detail, sizeof detail,
+             "?did= lists %u DIDs to poll, more than the %u a session "
+             "asks for; scan a range instead",
+             ECUIO_PROFILE_MAX_REQUESTS + 1u, ECUIO_PROFILE_MAX_REQUESTS);
+    EXPECT_STREQ(ecuio_last_error_detail(), detail);
 
     /* At the limits, and other keys beside did=, it builds */
     many.erase(many.rfind(','));
