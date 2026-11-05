@@ -1984,7 +1984,9 @@ void SessionBridge::ValueStaging::stage(uint32_t def,
                                         uint64_t frameUs,
                                         const ecuio_value_t& v)
 {
-    const bool isText = v.text != nullptr;
+    // By kind: an enum's value carries its label as text too, and is
+    // still a number (ADR-0051)
+    const bool isText = v.kind == ECUIO_VALUE_TEXT || v.kind == ECUIO_VALUE_HEX;
     if (!isText) {
         if (!has[def] || v.value < lowest[def]) {
             lowest[def] = v.value;

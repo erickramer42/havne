@@ -121,8 +121,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     /* A def the validator accepts fails only on the payload, bounds or
      * the mux key, in the decoder for its kind, and the other decoder
      * refuses it (the ValidatorAcceptsExactlyWhatTheDecoderDecodes
-     * contract, over a space no hand-written grid covers) */
-    if (vrc == ECUIO_VALIDATE_OK) {
+     * contract, over a space no hand-written grid covers). A computed
+     * def, which no frame carries, both refuse. */
+    if (vrc == ECUIO_VALIDATE_OK && (def.flags & ECUIO_DEF_FLAG_COMPUTED)) {
+        if (rc1 != ECUIO_DECODE_ERR_UNSUPPORTED ||
+            tr1 != ECUIO_DECODE_ERR_UNSUPPORTED) {
+            abort();
+        }
+    } else if (vrc == ECUIO_VALIDATE_OK) {
         const bool text = def.kind == ECUIO_VALUE_TEXT ||
                           def.kind == ECUIO_VALUE_HEX;
         const int mine = text ? tr1 : rc1;

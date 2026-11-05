@@ -51,8 +51,23 @@ typedef char abi_def_name_check[(offsetof(ecuio_signal_def_t, name) == 40) ? 1 :
 typedef char abi_def_plot_rank_check[(offsetof(ecuio_signal_def_t, plot_rank) == 89) ? 1 : -1];
 typedef char abi_def_group_check[(offsetof(ecuio_signal_def_t, group) == 90) ? 1 : -1];
 typedef char abi_def_flags_check[(offsetof(ecuio_signal_def_t, flags) == 92) ? 1 : -1];
-typedef char abi_def_reserved_check[(offsetof(ecuio_signal_def_t, reserved) == 96) ? 1 : -1];
+typedef char abi_def_quantity_check[(offsetof(ecuio_signal_def_t, quantity_reserved) == 96) ? 1 : -1];
+typedef char abi_def_table_first_check[(offsetof(ecuio_signal_def_t, table_first) == 100) ? 1 : -1];
+typedef char abi_def_table_count_check[(offsetof(ecuio_signal_def_t, table_count) == 102) ? 1 : -1];
+typedef char abi_def_reserved_check[(offsetof(ecuio_signal_def_t, reserved) == 104) ? 1 : -1];
 typedef char abi_set_layout_check[(offsetof(ecuio_signal_set_t, layout_version) == 0) ? 1 : -1];
+/* The set's members sit at natural alignment on both widths (layout 4) */
+typedef char abi_set_enum_count_check[(offsetof(ecuio_signal_set_t, enum_count) == 2 * sizeof(void*) + 16) ? 1 : -1];
+typedef char abi_set_enums_check[(offsetof(ecuio_signal_set_t, enums) == 2 * sizeof(void*) + 24) ? 1 : -1];
+typedef char abi_set_reserved_check[(offsetof(ecuio_signal_set_t, reserved) == 4 * sizeof(void*) + 24) ? 1 : -1];
+typedef char abi_set_size_check[(sizeof(ecuio_signal_set_t) == 4 * sizeof(void*) + 40) ? 1 : -1];
+typedef char abi_enum_entry_size_check[(sizeof(ecuio_enum_entry_t) == 32) ? 1 : -1];
+typedef char abi_enum_label_check[(offsetof(ecuio_enum_entry_t, label) == 4) ? 1 : -1];
+typedef char abi_computed_size_check[(sizeof(ecuio_computed_t) == 208) ? 1 : -1];
+typedef char abi_computed_ages_check[(offsetof(ecuio_computed_t, max_age_us) == 8) ? 1 : -1];
+typedef char abi_computed_steps_check[(offsetof(ecuio_computed_t, steps) == 28) ? 1 : -1];
+typedef char abi_computed_constants_check[(offsetof(ecuio_computed_t, constants) == 64) ? 1 : -1];
+typedef char abi_computed_reserved_check[(offsetof(ecuio_computed_t, reserved) == 192) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];

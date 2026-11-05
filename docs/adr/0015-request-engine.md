@@ -501,3 +501,9 @@ had:
 - **Service 0x22** replies took about 80 ms on this ECU (median), four
   times Service 01's, so a DID-heavy rotation runs at about 13
   requests a second; the wait (100 ms) covers it with room.
+
+## Appendix: 256 requests (2026-11-05)
+
+[ADR-0051](0051-signal-files.md) raises `ECUIO_PROFILE_MAX_REQUESTS`
+from 128 to 256, so `obd2` and a user's own signals fit one session.
+The table above keeps the number as decided.

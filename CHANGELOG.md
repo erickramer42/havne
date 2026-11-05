@@ -16,6 +16,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Linux downloads for 64-bit ARM, such as a Raspberry Pi 3 or later on the 64-bit Raspberry Pi OS 13 or Ubuntu 24.04 and newer: the app as an AppImage, and `havne-cli` and the core as a deb and a tarball, beside the x86_64 ones, with their checksums, build provenance and SBOM entries ([docs/linux.md](docs/linux.md)).
 - `havne-cli sim "mock://sim?modules=2"` adds a second module on 0x7E1/0x7E9 with Service 22 DIDs of its own (D100, D101, D102, made up for the simulated car), so one session can ask two ECUs; the fault `pending:<n>` answers every Nth request `7F <service> 78` first and the reply 300 ms later, and the `sim_stats` and `end` lines count it as `pending` (`ecuio_sim_stats_t.pending`).
 - The simulated ECU answers the Service 22 DIDs of a registered profile (`mock://sim?profile=<name>`): each signal is a field of its DID's reply, written from the value `ecuio_sim_set_value` gives it by inverting its scale and offset, on the engine ECU or on a module of the profile's own channels, so a set of DIDs is checked against a session with no car.
+- Core decodes enumerations and computes signals from others ([ADR-0051](docs/adr/0051-signal-files.md)), the groundwork for signal files: an enum's value is its raw number with its label (`ECUIO_VALUE_ENUM`, `ecuio_enum_label`), which `havne-cli`'s values lines carry as `value` and `label`; a computed signal (`ECUIO_DEF_FLAG_COMPUTED`) is a bounded program over up to four other signals, each no older than its own age bound or `ECUIO_VALUE_STALE_US` (3 s), and a division by zero gives no value.
+
+### Changed
+
+- **C ABI break:** the signal set's layout is 4 (`ECUIO_SIGNAL_SET_LAYOUT`): the set gains its enum and computed tables, and a def's reserved room gives `table_first` and `table_count`; a set built against an earlier layout is refused until it's rebuilt. A set may derive up to 256 requests (`ECUIO_PROFILE_MAX_REQUESTS`, 128 before), and `uds-generic` polls up to 256 DIDs.
 
 ## [0.4.1] - 2026-11-05
 

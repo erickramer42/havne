@@ -763,7 +763,16 @@ void on_values(const ecuio_value_batch_t* batch, void* user)
         l.ch('{');
         l.key("id");
         l.u64(v.signal_id);
-        if (v.text) {
+        if (v.kind == ECUIO_VALUE_ENUM) {
+            // The raw number, and its label when the set has one
+            // (ADR-0051): the label is at most ECUIO_ENUM_LABEL_MAX bytes
+            l.key("value");
+            l.number(v.value);
+            if (v.text) {
+                l.key("label");
+                l.string(v.text, v.text_len, ECUIO_ENUM_LABEL_MAX);
+            }
+        } else if (v.text) {
             l.key("text");
             // Room for ,"cut":true}]}\n after a cut text
             const size_t limit = l.room() > 32 ? l.room() - 32 : 0;
