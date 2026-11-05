@@ -327,8 +327,11 @@ or imported in bulk, and computed signals such as boost
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md),
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md), the
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
-  [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
-  the [phone's](docs/bench-sessions/android-phone-runsheet.md).
+  [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, the
+  [phone's](docs/bench-sessions/android-phone-runsheet.md), the SocketCAN
+  [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
+  [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
+  (both ECUs in one session, the recorders on a car, a second listener).
 - **Tests:** 1005 ctest cases on Windows (both trees rebuilt,
   2026-11-04), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the

@@ -4,12 +4,14 @@
 //          the filter, the mock's drive cycle decoding off the bus, a
 //          quiet bus and back, an overflow, error frames (flagged, never
 //          decoded, bus-off a hard failure), no allocation per frame, and
-//          (as root) the interface going down and coming back. Each case
+//          (as root) the interface going down and coming back, and two
+//          recordings of the bus lining up on their UTC starts. Each case
 //          skips without the interface; ECUIO_VCAN_REQUIRED=1 makes that a
 //          failure. Holds the binary's new_counter.h.
 
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
+#include "ecuio/recording.h"
 #include "ecuio/socketcan.h"
 #include "new_counter.h"
 #include "vcan_bus.h"
@@ -18,14 +20,21 @@
 
 #include <linux/can/error.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <unistd.h>
 
 namespace {
 
@@ -525,4 +534,154 @@ TEST_F(SocketCanBusTest, TheInterfaceGoingDownIsAHardFailureThatRecovers)
     uint32_t episodes = 0;
     ecuio_session_get_error_state(s.get(), &e, &episodes);
     EXPECT_EQ(episodes, 1u);
+}
+
+namespace {
+
+/* One listener with a recorder, its steps apart by the waits given, so a
+ * zero or a UTC start taken at the wrong step shows as their difference */
+struct RecordedListener {
+    ecuio_session_t* session = nullptr;
+    ecuio_recorder_t* recorder = nullptr;
+    Collector c;
+
+    void open(const std::string& root, std::chrono::milliseconds open_to_attach,
+              std::chrono::milliseconds attach_to_start)
+    {
+        ecuio_record_options_t o{};
+        o.root_utf8 = root.c_str();
+        ASSERT_EQ(ecuio_recorder_open(&o, &recorder), ECUIO_OK)
+            << ecuio_last_error_detail();
+        std::this_thread::sleep_for(open_to_attach);
+        const std::string uri = std::string("socketcan://") +
+                                vcan_bus::interface_name() + "?filter=0x5AA";
+        ASSERT_EQ(ecuio_session_create(uri.c_str(), &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_register_frame_callback(session, Collector::on_frame, &c);
+        ASSERT_EQ(ecuio_session_record(session, recorder), ECUIO_OK);
+        std::this_thread::sleep_for(attach_to_start);
+        ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    }
+
+    /* The folder, once the files are closed */
+    std::string close()
+    {
+        char folder[1024] = {};
+        uint32_t len = 0;
+        if (recorder != nullptr) {
+            ecuio_recorder_get_folder(recorder, folder, sizeof folder, &len);
+        }
+        if (session != nullptr) {
+            ecuio_session_close(session);
+            ecuio_session_destroy(session);
+            session = nullptr;
+        }
+        ecuio_recorder_close(recorder, nullptr);
+        recorder = nullptr;
+        return folder;
+    }
+
+    ~RecordedListener() { close(); }
+};
+
+/* frames.csv's host_us by the frame's first byte */
+std::vector<int64_t> host_us_by_first_byte(const std::string& folder, size_t n)
+{
+    std::vector<int64_t> out(n, -1);
+    std::ifstream in(folder + "/frames.csv");
+    std::string line;
+    std::getline(in, line); /* the header */
+    while (std::getline(in, line)) {
+        /* host_us,timestamp_us,id,flags,data */
+        std::vector<std::string> cols;
+        std::stringstream ss(line);
+        for (std::string col; std::getline(ss, col, ',');) {
+            cols.push_back(col);
+        }
+        if (cols.size() != 5 || cols[4].size() < 2) {
+            continue;
+        }
+        const unsigned long byte =
+            std::stoul(cols[4].substr(0, 2), nullptr, 16);
+        if (byte < n) {
+            out[byte] = std::stoll(cols[0]);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+/* ADR-0049 section 5: two recordings stamped by one machine's clock line
+ * up on their UTC starts to about a millisecond. Two listeners record the
+ * same frames, started apart and each with its own waits between the
+ * recorder's open, the attach and the start; each frame's UTC time (the
+ * recording's UTC start plus the row's host_us) must agree between them */
+TEST_F(SocketCanBusTest, TwoRecordingsOfOneBusLineUpOnTheirUtcStarts)
+{
+    const char* tmp = std::getenv("TMPDIR");
+    const std::string root = std::string(tmp != nullptr ? tmp : "/tmp") +
+                             "/ecuio-vcan-utc-" + std::to_string(::getpid());
+    std::filesystem::remove_all(root);
+    constexpr size_t kFrames = 20;
+    std::string folders[2];
+    {
+        RecordedListener a, b;
+        a.open(root + "/a", 40ms, 60ms);
+        ASSERT_NE(a.session, nullptr);
+        std::this_thread::sleep_for(330ms);
+        b.open(root + "/b", 210ms, 270ms);
+        ASSERT_NE(b.session, nullptr);
+
+        vcan_bus::Fd w = writer();
+        ASSERT_TRUE(w.ok());
+        std::this_thread::sleep_for(50ms);
+        for (size_t i = 0; i < kFrames; ++i) {
+            ASSERT_TRUE(send(w.get(), 0x5AA, {static_cast<uint8_t>(i), 0x55}));
+            std::this_thread::sleep_for(10ms);
+        }
+        ASSERT_TRUE(wait_for([&] {
+            return a.c.count.load() >= static_cast<int>(kFrames) &&
+                   b.c.count.load() >= static_cast<int>(kFrames);
+        })) << a.c.count.load()
+            << " and " << b.c.count.load() << " frames";
+        folders[0] = a.close();
+        folders[1] = b.close();
+    }
+
+    uint64_t utc[2] = {};
+    std::vector<int64_t> host[2];
+    for (int k = 0; k < 2; ++k) {
+        ecuio_recording_t* r = nullptr;
+        ASSERT_EQ(
+            ecuio_recording_open(folders[k].c_str(), nullptr, nullptr, &r),
+            ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_recording_info_t info{};
+        ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
+        ecuio_recording_close(r);
+        utc[k] = info.utc_start_us;
+        ASSERT_GT(utc[k], 0u);
+        host[k] = host_us_by_first_byte(folders[k], kFrames);
+    }
+    EXPECT_GT(utc[1] - utc[0], 500000u) << "b started after a";
+
+    std::vector<int64_t> diff;
+    for (size_t i = 0; i < kFrames; ++i) {
+        ASSERT_GE(host[0][i], 0) << "frame " << i << " not in a's frames.csv";
+        ASSERT_GE(host[1][i], 0) << "frame " << i << " not in b's frames.csv";
+        diff.push_back((static_cast<int64_t>(utc[0]) + host[0][i]) -
+                       (static_cast<int64_t>(utc[1]) + host[1][i]));
+    }
+    std::sort(diff.begin(), diff.end());
+    const int64_t median = diff[kFrames / 2];
+    const int64_t worst =
+        std::max(std::abs(diff.front()), std::abs(diff.back()));
+    std::printf("[ utc ] a - b per frame: median %lld us, worst %lld us\n",
+                static_cast<long long>(median), static_cast<long long>(worst));
+    /* Each UTC start is kept to the millisecond, so the two differ by up
+     * to 1 ms from that alone; the rest is each worker's dispatch */
+    EXPECT_LE(std::abs(median), 1500) << "median " << median << " us";
+    EXPECT_LE(worst, 20000) << "worst " << worst << " us";
+    std::filesystem::remove_all(root);
 }
