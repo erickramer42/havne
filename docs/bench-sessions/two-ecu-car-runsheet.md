@@ -154,9 +154,10 @@ The MX+ out, the USB2CAN on the Y-splitter, **its terminator out**.
 3. On Windows: `havne-cli stream "j2534://OBDX Pro - VX" --record <folder> --seconds 60 < /dev/null`
 
 - [ ] The same pairing as Phase 4: here one machine's clocks (Windows
-      and WSL's) and the VX's delivery, which
-      [2026-11-03-socketcan-car](2026-11-03-socketcan-car.md) measured
-      at about 52 ms for a segmented reply
+      and WSL's) and the delivery through the VX and the surrogate's
+      reads: about 10 ms for a reply inside the first read and about
+      52 ms for one after it
+      ([2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md))
 - [ ] `can0`'s TX count stays 0
 
 ## Evidence and teardown

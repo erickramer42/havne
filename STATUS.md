@@ -14,7 +14,8 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.5.0, in progress.** v0.4.0 is out: recordings in
+**Current phase: v0.4.1, a patch, in progress; v0.5.0 after it.**
+v0.4.0 is out: recordings in
 core, written on a thread of their own by the app and `havne-cli`
 alike; the Recordings page's viewer, which overlays two runs, and
 `havne-cli view` and `info` offline; a check of a recording's frames;
@@ -444,7 +445,8 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.3.6 | Proven and finished: every car run the adapters on hand allow (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Released |
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
-| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier | In progress |
+| v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; an OBDLink's monitor and the VX's reply delivery fixed | In progress |
+| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier | Planned |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -454,6 +456,38 @@ release raises the minor number, fixes alone the patch number. Earlier
 releases are in [CHANGELOG.md](CHANGELOG.md). The planned releases are
 in order and hold about three features each; a release's detail comes
 in here when its work starts.
+
+### v0.4.1: the pages on a phone, and what v0.4.0 left unrun
+
+A patch ([ADR-0048](docs/adr/0048-semantic-versioning.md)): no new ADR
+and no ABI change.
+- **The UI on a phone**, built and run on the test phone: denser
+  pages, the chart taking the page, a pinch stepping Live's window,
+  the Dashboard's dials side by side upright, a frame-rate readout in
+  developer mode, charts that hold still, Log rows copied. The
+  double-tap's allowance for a thumb's drift is tested in QML; the
+  phone's re-run is with the car run below.
+- **Two recordings on the wall clock:** the same bus recorded twice on
+  one machine lines up to about 0.3 ms
+  (`SocketCanBusTest.TwoRecordingsOfOneBusLineUpOnTheirUtcStarts`), and
+  the VX against `candump` on the desk bus to 10.4 ms
+  ([2026-11-04-socketcan-desk-utc](docs/bench-sessions/2026-11-04-socketcan-desk-utc.md)).
+- **The car run** ([2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md)):
+  both ECUs in one session through the VX and through the MX+, the
+  recorders in the laptop's app, the phone's and `havne-cli`, each
+  recording's check clean; the MX+ and the USB2CAN listening beside the
+  VX.
+- **Fixed from it:**
+  - a session that only listens through an OBDLink heard no
+    multi-frame reply: its monitor printed no Consecutive Frames under
+    `AT CFC1`, and a listening session's setup sends `AT CFC0` (BENCH
+    prep #19);
+  - the VX's replies after the surrogate's first read waited about
+    50 ms in a read asked with no time left: in progress.
+
+**Done when:** the car confirms both fixes (the run sheet's Phase 4
+again, and the VX's latency per request near its time on the bus) and
+the double-tap on the test phone.
 
 ### v0.4.0: recordings in core, the log viewer, SocketCAN on a real controller
 
@@ -545,10 +579,15 @@ forever. The USB2CAN offers no one-shot mode, so it listens only.
   whose driver offers one-shot mode, on the desk bus first (BENCH
   prep #32).
 - A reply's time on the bus against the host's clock: measured beside
-  the VX on the car (ADR-0042's appendix of 2026-11-03): about 52 ms
-  of a segmented reply's time is the adapter's delivery after the
-  last frame. A latency on the adapter's clock and a J2534 read that
-  ends at its reply wait for a reason to build them.
+  the VX on the car (ADR-0042's appendix of 2026-11-03): most
+  segmented replies reach the worker about 52 ms after their last
+  frame. The surrogate's read holds them, not the adapter: a vendor
+  read that brings only the request's TX indication is read again
+  with none of its timeout left, and the VX holds a read with no
+  timeout about 50 ms; a reply inside the first read comes about
+  10 ms after its last frame
+  ([2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md)).
+  A latency on the adapter's clock waits for a reason to build it.
 
 **Done when:** two recordings of the mock's pulls, recorded by
 `havne-cli`, overlay aligned on the pull's start in the app and in

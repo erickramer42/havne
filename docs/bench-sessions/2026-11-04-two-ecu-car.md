@@ -188,16 +188,44 @@ paired:
 | Segmented | 860 | 51.20 ms | 40.92 | 52.69 | -5.88 | 61.28 |
 
 The single-frame median matches the desk bus's 10.4 ms
-([2026-11-04-socketcan-desk-utc](2026-11-04-socketcan-desk-utc.md)).
-The segmented median matches the VX's delivery of segmented replies on
-the bus, about 52 ms
-([2026-11-03-socketcan-car](2026-11-03-socketcan-car.md)).
+([2026-11-04-socketcan-desk-utc](2026-11-04-socketcan-desk-utc.md)),
+and the segmented median the 52 ms of
+[2026-11-03-socketcan-car](2026-11-03-socketcan-car.md). The 860
+segmented replies fall into two groups, 51 at about 10 ms and 809 at
+about 52 ms, with the same lengths, Consecutive Frames and pace on the
+bus. From a reply's last frame to the VX's next request on the bus is
+about 21 ms or about 52 ms, and the single-frame replies fall into the
+two groups too, less often: so the time is in the reply's delivery,
+and Havne asks again at once. The next section finds where.
 
 Each recording's index matched the other's from the first reply to the
 last, so the one negative difference isn't a mis-pair. The listener
 stamped that reply 76.6 ms after the one before it, where 70 is usual,
 and the next one on time. So the listener's own delivery was late by
 about 16 ms, once: its frames reach WSL over USB/IP.
+
+## Where the VX's 52 ms goes
+
+The app's Phase 2 session logged every vendor read (the surrogate's
+frame log): each request's TX indication with the VX's own timestamp,
+then the reply's, beside the host's time of each read.
+
+| Requests | n | Write to the reply's read, host | TX indication to the reply, the VX's clock |
+|---|---|---|---|
+| The indication and the reply in one vendor read | 35,514 | 16 ms median | 5.0 ms median |
+| The indication alone, about 11 ms after the write; the reply in the next read | 1,806 | 63 ms median | 11.1 ms median |
+
+The surrogate asks the vendor for a batch of 16 messages with the
+worker's timeout, at most 10 ms, and the VX holds such a read to its
+timeout unless the batch fills. A batch that holds only indications is
+read again with what is left of the timeout, by then none, and the VX
+held that read about 50 ms. In one case the indication was read 11 ms
+after the write, and the reply, which the VX stamped 14.3 ms after the
+indication, came back from the next read 57 ms after the first, with
+no empty read between them. A reply the ECU sends within the first
+read's 10 ms (every reply on the desk bus, 1.4 ms) never takes that
+path. On the test car the ECU answers a 0x22 request in about 5 ms and
+a six-PID pack in about 14, so packs mostly do.
 
 ## Findings
 
@@ -217,7 +245,10 @@ about 16 ms, once: its frames reach WSL over USB/IP.
 5. **The antivirus holds the first `havne-cli` connect after a
    rebuild,** whatever the app's warm-up did: a warm-up has to run
    `havne-cli` itself.
-6. **The USB2CAN's driver offers no one-shot mode** on the car either.
+6. **The VX's 52 ms is the surrogate's read, not the adapter:** a
+   reply after the first read's timeout waits in a vendor read asked
+   with no time left, which the VX holds about 50 ms.
+7. **The USB2CAN's driver offers no one-shot mode** on the car either.
    `ip -details -json link show can0` lists LOOPBACK, LISTEN-ONLY and
    CC-LEN8-DLC (read only, nothing sent).
 

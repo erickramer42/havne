@@ -56,10 +56,12 @@ a quarter mile off launch control on a warm loop.*
   many replies a minute, and holding Windows' 1 ms timer 28 % more.
   A second controller listening on the same bus timed the Pass-Thru:
   a segmented reply is whole on the wire 14 ms after its request, and
-  the adapter delivers it about 52 ms after that. Each session is
-  written up with its scrubbed logs
+  most reach Havne about 52 ms after that, held in Havne's own read of
+  the adapter, not by the adapter. Each session is written up with its
+  scrubbed logs
   ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
-  [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md)).
+  [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md),
+  [2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md)).
 - **Requests follow the replies.** One request per ECU at a time; the
   supported-PID probe drops only what the ECU says it lacks, never on
   silence. A clear asks first, saves the report, and asks once more
@@ -250,6 +252,7 @@ desk bus and on the test car) is the latest release. Next:
 
 | Version | Plan |
 |---|---|
+| v0.4.1 | A patch: the pages on a phone, both of a car's ECUs in one session, listening beside another tester through an OBDLink, and the VX's replies delivered without the surrogate's wait |
 | v0.5.0 | Your own PIDs and DIDs, imported in bulk, computed signals such as boost, and manufacturer data through plugins |
 | v0.6.0-v0.9.0 | Exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |

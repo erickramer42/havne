@@ -522,11 +522,14 @@ How it works:
   agreement (tens of milliseconds under NTP) when two did. A frame's
   time is when its adapter delivered it to core, so two recordings
   through different adapters differ by their delivery delays as well:
-  a VX's segmented reply reaches the worker about 52 ms after it
-  crossed the bus on the test car
-  ([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md))
-  and about 10 ms after on the desk bus
-  ([2026-11-04-socketcan-desk-utc](../bench-sessions/2026-11-04-socketcan-desk-utc.md)).
+  through the VX, a reply reaches the worker about 10 ms after it
+  crossed the bus when it comes within the surrogate's first read
+  (every reply on the desk bus,
+  [2026-11-04-socketcan-desk-utc](../bench-sessions/2026-11-04-socketcan-desk-utc.md)),
+  and about 52 ms after when it comes later, as most segmented replies
+  on the test car do
+  ([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md),
+  [2026-11-04-two-ecu-car](../bench-sessions/2026-11-04-two-ecu-car.md)).
 - **Untrusted input:** a recording comes from anywhere. Every row is
   bounds-checked, a bad row is refused with its line number (ADR-0023's
   rule), never its path, and every parser of a recording gets a fuzz

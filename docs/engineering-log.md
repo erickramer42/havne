@@ -1202,3 +1202,15 @@ machine.** The recorder's busy wakes, about 57 on the dev machine
 against a floor of 30, read 18 on the macOS runner, whose timers fire
 late; bounded against the same run's idle wakes, the test holds on
 both.
+
+**2026-11-04: the two-ECU car run.** (1) **A fake that answers inside
+the first read hides the slow path.** The VX's 52 ms was put down to
+the adapter for a day: the fake VX answers 4 ms after a write and the
+desk bus's simulated ECU in 1.4 ms, both within the surrogate's first
+read, so the re-read with no timeout left never ran off the car. The
+surrogate's frame log, with the vendor's own timestamps beside the
+host's, showed it in one pass: time an adapter by its own stamps
+before calling a delay the adapter's. (2) **A fake that ignores a
+setting can't catch a bug the setting causes.** The fake ELM327 parsed
+`AT CFC` into an ignored variable, so no test could see an STN's
+monitor dropping Consecutive Frames under `AT CFC1`.

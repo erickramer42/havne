@@ -166,9 +166,10 @@ listen-only), so `candump` is the bus's side.
       against candump's) for single-frame and segmented replies apart:
       median and spread
 - [ ] The clocks' offset from step 3, and how much of the difference it
-      explains; what is left is the VX's delivery (about 52 ms for a
-      segmented reply on the test car,
-      [2026-11-03-socketcan-car](2026-11-03-socketcan-car.md))
+      explains; what is left is the delivery through the VX and the
+      surrogate's reads (about 10 ms for a reply inside the first read,
+      about 52 ms for one after it,
+      [2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md))
 
 ## After the run
 

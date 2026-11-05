@@ -75,6 +75,12 @@ The durations, each on one clock:
    The car's ECU paces its Consecutive Frames at about 5 ms, so its
    replies take 13.9 ms on the bus against 1.4 ms here; why the VX
    then holds them longer is open.
+
+   Note (2026-11-04, later): the car run's surrogate frame log answers
+   it. A reply that comes after the surrogate's first read has ended
+   is read with no timeout left, which the VX holds about 50 ms; here
+   every reply came within the first read
+   ([2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md)).
 3. **With nothing answering, the VX's session reads the bus as
    quiet:** a first attempt ran while the simulated ECU wasn't
    running, and got no frames in 60 s and a health line, "vehicle not
