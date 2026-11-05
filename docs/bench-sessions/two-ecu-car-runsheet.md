@@ -92,8 +92,10 @@ The VX and the MX+ on the Y-splitter. The laptop's app on
 minute idling, then a few blips to 3,000 r/min; stop the laptop, then
 the phone.
 
-- [ ] The phone's Log hears the VX's `0x7E0` requests and the ECU's
-      `0x7E8` replies, Flow Control frames included
+- [ ] The phone's Log hears the ECU's `0x7E8` replies to the VX, each
+      reassembled. `AT MA` keeps the setup's receive filter, so the
+      VX's `0x7E0` requests and its Flow Control frames go unheard
+      ([elm327.md](../elm327.md#passive-listening))
 - [ ] `BUFFER FULL`, if it comes, flags the next frame
       `ECUIO_FRAME_FLAG_OVERFLOW` and the listening goes on
 - [ ] The VX's session as it runs alone: no health line, the same
