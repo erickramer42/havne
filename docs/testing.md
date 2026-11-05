@@ -171,10 +171,24 @@ running (ranges across the runs; milliseconds as median / p99):
   core's recorder attached ([ADR-0049](adr/0049-recordings-in-core.md)).
   The looping pair runs twice, unrecorded and recorded alternated, and
   the faster recorded run gates CI at 0.7 of the faster unrecorded one
-  (one pair read about 0.8 on shared Linux runners and 0.9 on Windows
-  ones; 0.96 on the dev machine, 471,840 frames a second against 493,534, and 1.01 under
-  WSL, 2026-11-03, no record dropped in either); the 100x one must
-  write all 7,074 frames and 7,061 values with no record dropped.
+  on Linux and 0.6 on Windows (0.96 on the dev machine, 471,840 frames
+  a second against 493,534, and 1.01 under WSL, 2026-11-03, no record
+  dropped in either); the 100x one must write all 7,074 frames and
+  7,061 values with no record dropped. On a shared runner the share
+  measures the runner as much as the recorder: the writer is a third
+  busy thread on two cores, and the bridge's worker rate follows the
+  GUI thread's through the in-flight gate (holding the worker to a core
+  of its own moved the share to 0.94-1.13 on two of the dev machine's
+  cores, so the bench doesn't). Over 63 CI runs each, 2026-11-03 to
+  2026-11-05, Linux read 0.79 to 0.95 (median 0.89) and Windows 0.68 to
+  0.95 (median 0.80), most of the spread runner to runner. So the gate
+  is for a gross regression: it fails a cost of about 1 us a frame on
+  Linux's runners and 1 to 2 us on Windows' (mutation-checked
+  2026-11-05: a busy-wait at `ecuio_recorder_put_frame`'s entry,
+  measured at about 3 and 4.5 us a frame on the dev machine, read 0.38
+  and 0.28). The recorder's own
+  nanoseconds a frame, and ADR-0049's 10%, are `--record`'s, pinned, on
+  the dev machine.
 - **The looping runs pass the staging's capacity:** at about 400,000
   frames a second the bridge counts most values past it, as
   [ADR-0024](adr/0024-decode-on-the-worker.md) bounds it; the model
