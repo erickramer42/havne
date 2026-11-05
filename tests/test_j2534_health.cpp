@@ -769,11 +769,20 @@ TEST_F(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
         << "replies landed after the next request";
 }
 
+/* A request's send is stamped once its write has come back across the
+ * surrogate's pipe, and the fake times its reply from the write itself,
+ * so a reply can read up to that round trip under the fake's delay: a
+ * floor on the latency is the delay less this. A read that answers at
+ * its message has nothing else to add (3.7 ms seen for a 4 ms reply
+ * through the x86 surrogate, 2026-11-05) */
+constexpr uint32_t kWriteReturnUs = 1000;
+
 /* Reply timing (ADR-0042) through the surrogate, the fake as the VX
  * (each reply 4 ms after its write, stamped by the fake's own clock):
- * a row per request, each answer at least the fake's delay after its
- * write on the host's clock, the intervals on the adapter's stamps,
- * none across a fallback, and no ISO-TP counts (the adapter reassembles) */
+ * a row per request, each answer the fake's delay after its write on
+ * the host's clock (less the write's return), the intervals on the
+ * adapter's stamps, none across a fallback, and no ISO-TP counts (the
+ * adapter reassembles) */
 TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -807,7 +816,8 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
             continue;
         }
         SCOPED_TRACE("PID " + std::to_string(r.request[1]));
-        EXPECT_GE(r.latency_p50_us, 4000u) << "the fake's reply delay";
+        EXPECT_GE(r.latency_p50_us, 4000u - kWriteReturnUs)
+            << "the fake's reply delay";
         EXPECT_EQ(r.intervals_mixed, 0u);
     }
 }
@@ -1031,7 +1041,7 @@ TEST_F(J2534HealthTest, VxAReplyPastTheSliceIsNotHeldByAZeroTimeoutRead)
     const uint32_t p50 = median_reply_latency_us(session, 50);
     RecordProperty("reply_p50_us", static_cast<int>(p50));
     ASSERT_GT(p50, 0u) << "replies timed";
-    EXPECT_GE(p50, 15000u) << "the fake's reply delay";
+    EXPECT_GE(p50, 15000u - kWriteReturnUs) << "the fake's reply delay";
     EXPECT_LT(p50, 25000u) << "a read waited 0 ms and the VX held it";
 }
 
@@ -1049,7 +1059,7 @@ TEST_F(J2534HealthTest, VxAReplyEndsTheReadThatWaitsForIt)
     const uint32_t p50 = median_reply_latency_us(session, 50);
     RecordProperty("reply_p50_us", static_cast<int>(p50));
     ASSERT_GT(p50, 0u) << "replies timed";
-    EXPECT_GE(p50, 4000u) << "the fake's reply delay";
+    EXPECT_GE(p50, 4000u - kWriteReturnUs) << "the fake's reply delay";
     EXPECT_LT(p50, 10000u) << "the read held its slice past the reply";
 }
 
