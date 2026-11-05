@@ -4,17 +4,27 @@
 //          defaults, New, Duplicate, Rename, Forget the VIN, Forget and
 //          Forget all, a connection and plotted signals remembered for
 //          adapter sessions only, and the VIN key settling the vehicle
-//          (each row of ADR-0027 section 4's table, with its log line).
+//          (each row of ADR-0027 section 4's table, with its log line);
+//          a vehicle's signal files kept through every change, copied by
+//          Duplicate, and a clashing profile refused (ADR-0051).
 //          SettingsPage.qml wires it (tests/qml/tst_settings.qml).
 
 pragma Singleton
 import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
-// { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted }] }:
+// { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted,
+// signals, own }] }:
 // plotted and unplotted are the rows ticked past Live's default and
 // unticked from it (ADR-0039 section 8); a stored entry without
 // plotted reads as none.
+// signals are the vehicle's signal files (ADR-0051), each
+// { sha256, name, profile }: the file kept by its content's SHA-256,
+// its name, and the profile it registers (user.<slug>); own is the
+// sha256 of the one the vehicle's form writes, "" for none, and one of
+// signals. An entry stored before them has none. Two files making one
+// profile are refused (profileProblem), so a profile names one file
+// wherever it's chosen; the same file in two vehicles is one file.
 // every function takes the document and returns a new one, never
 // changing what it was given, so SettingsPage stores what comes back
 // and the rules test without a page.
@@ -40,6 +50,9 @@ QtObject {
             return empty()
         }
         const isString = v => typeof v === "string"
+        const isFile = f => f !== null && typeof f === "object" && isSha(f.sha256)
+                         && isString(f.name) && f.name !== ""
+                         && isString(f.profile) && f.profile !== ""
         if (d === null || typeof d !== "object" || Array.isArray(d)
                 || !isString(d.salt) || !isString(d.picked) || !Array.isArray(d.list))
             return empty()
@@ -50,7 +63,10 @@ QtObject {
                     || !isString(v.vinKey) || !isString(v.uri)
                     || !Array.isArray(v.unplotted) || !v.unplotted.every(isString)
                     || (v.plotted !== undefined
-                        && (!Array.isArray(v.plotted) || !v.plotted.every(isString))))
+                        && (!Array.isArray(v.plotted) || !v.plotted.every(isString)))
+                    || (v.signals !== undefined
+                        && (!Array.isArray(v.signals) || !v.signals.every(isFile)))
+                    || (v.own !== undefined && !isString(v.own)))
                 return empty()
             ids[v.id] = true
         }
@@ -65,10 +81,20 @@ QtObject {
         return JSON.stringify(doc)
     }
 
+    // A SHA-256 as the store names a file: 64 lower-case hex digits
+    function isSha(s) {
+        return typeof s === "string" && /^[0-9a-f]{64}$/.test(s)
+    }
+
+    // Every field a stored entry has, so no change drops one; an own
+    // that names no file of the entry's is none
     function entry(v) {
+        const files = v.signals === undefined ? []
+                    : v.signals.map(f => ({ sha256: f.sha256, name: f.name, profile: f.profile }))
+        const own = v.own !== undefined && files.some(f => f.sha256 === v.own) ? v.own : ""
         return { id: v.id, label: v.label, vinKey: v.vinKey, uri: v.uri,
                  plotted: v.plotted === undefined ? [] : v.plotted.slice(),
-                 unplotted: v.unplotted.slice() }
+                 unplotted: v.unplotted.slice(), signals: files, own: own }
     }
 
     function copy(doc) {
@@ -143,12 +169,13 @@ QtObject {
         const d = copy(doc)
         const id = nextId(d)
         d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
-                      plotted: [], unplotted: [] })
+                      plotted: [], unplotted: [], signals: [], own: "" })
         d.picked = id
         return d
     }
 
-    // The picked vehicle's connection and plotted signals, not its VIN key
+    // The picked vehicle's connection, plotted signals and signal files
+    // (the same files, so the same profiles), not its VIN key
     function duplicate(doc, label) {
         const from = picked(doc)
         if (from === null)
@@ -158,6 +185,8 @@ QtObject {
         v.uri = from.uri
         v.plotted = from.plotted.slice()
         v.unplotted = from.unplotted.slice()
+        v.signals = entry(from).signals
+        v.own = from.own
         return d
     }
 
@@ -187,6 +216,66 @@ QtObject {
     // Every vehicle and the salt, as before the first was saved
     function forgetAll(doc) {
         return empty()
+    }
+
+    // "" when file ({ sha256, name, profile }) may join the picked
+    // vehicle, else why not: another file, in any vehicle, makes its
+    // profile. exceptSha is a file it replaces (the form's own, saved
+    // again), "" for none
+    function profileProblem(doc, file, exceptSha) {
+        for (const v of doc.list) {
+            const other = (v.signals || []).find(f => f.profile === file.profile
+                                         && f.sha256 !== file.sha256
+                                         && !(v.id === doc.picked && f.sha256 === exceptSha))
+            if (other)
+                return qsTr("%1 is made by another file already (%2, in %3)")
+                        .arg(file.profile, other.name, v.label)
+        }
+        return ""
+    }
+
+    // file into the picked vehicle's signal files; the document as it was
+    // when profileProblem refuses it or the vehicle has it
+    function addSignals(doc, file) {
+        const v = picked(doc)
+        if (v === null || profileProblem(doc, file, "") !== ""
+                || (v.signals || []).some(f => f.sha256 === file.sha256))
+            return doc
+        return change(doc, e => e.signals.push({ sha256: file.sha256, name: file.name,
+                                                 profile: file.profile }))
+    }
+
+    // The file by sha256 out of the picked vehicle's, own too if it was
+    function removeSignals(doc, sha256) {
+        return change(doc, v => {
+            v.signals = v.signals.filter(f => f.sha256 !== sha256)
+            if (v.own === sha256)
+                v.own = ""
+        })
+    }
+
+    // The form's file saved: file replaces the picked vehicle's own; the
+    // document as it was when profileProblem refuses it
+    function setOwn(doc, file) {
+        const v = picked(doc)
+        if (v === null || profileProblem(doc, file, v.own || "") !== "")
+            return doc
+        return change(doc, e => {
+            e.signals = e.signals.filter(f => f.sha256 !== e.own && f.sha256 !== file.sha256)
+            e.signals.push({ sha256: file.sha256, name: file.name, profile: file.profile })
+            e.own = file.sha256
+        })
+    }
+
+    // Every file some vehicle keeps, each once, sorted: the store keeps
+    // these and may delete the rest
+    function referencedFiles(doc) {
+        const all = {}
+        for (const v of doc.list) {
+            for (const f of (v.signals || []))
+                all[f.sha256] = true
+        }
+        return Object.keys(all).sort()
     }
 
     // A connect's URI, kept for an adapter session only (ADR-0027 section 1)

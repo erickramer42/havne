@@ -18,7 +18,10 @@
 //          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
 //          a typed code's title (ADR-0044, BridgeTest.ATypedCodeIsDescribed);
 //          the inspection line (ADR-0045,
-//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession)
+//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession);
+//          Read once (ADR-0051's form) against the fake DLL's ECU
+//          (BridgeTest.ReadOnce*) and the stale age from core
+//          (BridgeTest.TheStaleAgeIsCores)
 
 #pragma once
 
@@ -29,6 +32,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "readonce.h"
 #include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
@@ -443,6 +447,11 @@ class SessionBridge : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
+    // The age past which a value is stale (ECUIO_VALUE_STALE_US), in ms:
+    // Theme.staleMs, so the UI dims what core's computed signals refuse
+    Q_PROPERTY(int valueStaleMs READ valueStaleMs CONSTANT)
+    // A Read once is running (readOnce); no session connects meanwhile
+    Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
     // "speed", ...) to the def IDs core's sets give it (signal_sets.h),
     // the first one the session's set has wins. By ID, so a def core
@@ -525,6 +534,19 @@ public:
     ~SessionBridge() override;
 
     QString coreVersion() const;
+    static int valueStaleMs()
+    {
+        return static_cast<int>(ECUIO_VALUE_STALE_US / 1000u);
+    }
+    bool readingOnce() const { return m_readOnce.busy(); }
+    // Read once (ADR-0051's form, ReadOnce): signal and module as a
+    // signal file holds them, read on adapterUri's adapter in a short
+    // session of its own, only while no session is connected. Returns
+    // "" when the read started, its result coming in readOnceResult
+    // (ReadOnce::evaluate's map, plus "uri"); else why it didn't
+    Q_INVOKABLE QString readOnce(const QString& adapterUri,
+                                 const QVariantMap& signal,
+                                 const QVariantMap& module);
     QVariantMap gaugeSignals() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
@@ -763,6 +785,9 @@ public:
     // Test seam: the session's recorder, for core's internal.h seams
     // (a failed write); nullptr with none
     ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
+    // Test seam: how long Read once waits for its reply once the
+    // session starts (3 s)
+    void setReadOnceWaitForTesting(int ms) { m_readOnceWaitMs = ms; }
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
@@ -810,6 +835,8 @@ signals:
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
+    void readingOnceChanged();
+    void readOnceResult(const QVariantMap& result);
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
@@ -1025,4 +1052,6 @@ private:
     bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES
     std::function<QString(const QString&)>
         m_streamPreparer; // none: nothing to ready
+    ReadOnce m_readOnce;
+    int m_readOnceWaitMs = 3000;
 };

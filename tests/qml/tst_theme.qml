@@ -1,7 +1,7 @@
 // File/layer: tests/qml/tst_theme.qml | Qt Quick Test, QML tier
 // Testing: Theme's link-state color and label for every state the
-//          bridge publishes and an unknown one, and the chart trace
-//          palette. No session.
+//          bridge publishes and an unknown one, the chart trace
+//          palette, and the stale age as core's. No session.
 
 import QtQuick
 import QtTest
@@ -43,6 +43,12 @@ TestCase {
     }
     function test_linkLabel(data) {
         compare(Theme.linkLabel(data.state), data.label)
+    }
+
+    // The stale age is core's, through the bridge
+    function test_staleMsIsCores() {
+        compare(Theme.staleMs, Bridge.valueStaleMs)
+        verify(Theme.staleMs > 0)
     }
 
     function test_seriesColorsAreDistinct() {
