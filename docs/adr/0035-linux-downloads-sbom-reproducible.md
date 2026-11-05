@@ -251,3 +251,40 @@ the Linux Foundation's `spdx-tools` validate it. Either would serve.
     glibc 2.39 or later; it isn't in any distribution's archive or a
     PPA. Other distributions use the tarball.
   - The AppImage's reproducibility is reported, not promised.
+
+## Appendix: the aarch64 downloads (2026-11-05)
+
+A Raspberry Pi user gets a package, not a source build: from v0.5.0
+each of section 1's Linux files is built twice, for x86_64 on
+`ubuntu-24.04` and for 64-bit ARM on GitHub's `ubuntu-24.04-arm`
+runner, by the same scripts with the same checks (ci.yml's
+`linux-appimage` and `linux-packages` and release.yml's `linux` job,
+each a matrix over the two):
+
+| File | Holds |
+|---|---|
+| `havne-X.Y.Z-linux-aarch64.AppImage` | the app, packed by linuxdeploy's and its Qt plugin's aarch64 builds, pinned by SHA-256 as the x86_64 ones are, with Qt's `linux_gcc_arm64` kit |
+| `havne-core_X.Y.Z_arm64.deb`, `havne-core-X.Y.Z-linux-aarch64.tar.gz` | the same trees as the x86_64 ones |
+| `havne-core-dbgsym_X.Y.Z_arm64.deb`, `havne-core-X.Y.Z-linux-aarch64-debug.tar.gz` | `havne-cli`'s debug info |
+
+- **The names follow the build machine:** `make-appimage.sh` takes its
+  architecture from `uname -m`, `make-core-packages.sh` and
+  `tests/package_check.sh` from `dpkg --print-architecture`, and the
+  x86_64 files keep their names and bytes.
+- **The release carries them as it does the x86_64 files:**
+  `SHA256SUMS.txt`, the one provenance attestation, the SBOM (the
+  AppImage, the deb and the tarball, each with its own components, the
+  dependencies' purls naming `arch=arm64`) and its attestation. The
+  release lists sixteen files.
+- **The glibc floor stays 2.39:** built on Ubuntu 24.04 like the x86_64
+  files, they run on Raspberry Pi OS 13 (trixie) and Ubuntu 24.04 or
+  newer for ARM, not on Raspberry Pi OS 12 (bookworm, glibc 2.36). A
+  second base for one architecture (a Debian 12 container on the ARM
+  runner) would split the two builds' toolchains and packages, and a
+  bookworm user can upgrade the system or build from source.
+- **64-bit only:** 32-bit Raspberry Pi OS (armhf) has no Qt kit from
+  Qt's installer and no GitHub runner; it builds from source.
+- **The tests stay on x86_64:** `linux-build` and the sanitizer jobs run
+  there; the aarch64 jobs build, pack and check the files
+  (`package_check.sh`, the AppImage up 10 s offscreen). The suites run
+  on ARM on a Raspberry Pi 3 (docs/linux.md, "What has run where").

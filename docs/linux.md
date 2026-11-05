@@ -3,17 +3,22 @@
 Havne runs on Linux as an AppImage, and its core and command-line client
 (`havne-cli`) come as a deb and a tarball for scripts and other programs
 ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)); releases
-carry them from v0.3.4. Both are
-built on Ubuntu 24.04 and run on x86_64 distributions whose glibc is
-2.39 or later: Ubuntu 24.04 and newer, Debian 13, Fedora 40 and newer,
-Arch, Kali and their kin. Building from source is in
+carry them from v0.3.4, for x86_64, and from v0.5.0 for 64-bit ARM
+(aarch64) as well. Both are built on Ubuntu 24.04 and run on
+distributions whose glibc is 2.39 or later: Ubuntu 24.04 and newer,
+Debian 13, Fedora 40 and newer, Arch, Kali and their kin, and on a
+Raspberry Pi 3 or later, the 64-bit Raspberry Pi OS 13 (trixie) or
+Ubuntu 24.04 and newer. Raspberry Pi OS 12 (bookworm) has glibc 2.36,
+too old for them: upgrade it to 13, or build from source. 32-bit
+Raspberry Pi OS isn't built for. Building from source is in
 [development.md](development.md).
 
 ## The app: the AppImage
 
 Download `havne-X.Y.Z-linux-x86_64.AppImage` from the
-[latest release](https://github.com/erickramer42/havne/releases/latest),
-then:
+[latest release](https://github.com/erickramer42/havne/releases/latest)
+(`havne-X.Y.Z-linux-aarch64.AppImage` on 64-bit ARM; `uname -m` names
+the machine's), then:
 
 ```sh
 chmod +x havne-X.Y.Z-linux-x86_64.AppImage
@@ -51,7 +56,7 @@ For `havne-cli` and for programs of your own that link the core
 (`#include <ecuio/core.h>`):
 
 ```sh
-sudo apt install ./havne-core_X.Y.Z_amd64.deb
+sudo apt install ./havne-core_X.Y.Z_amd64.deb    # havne-core_X.Y.Z_arm64.deb on 64-bit ARM
 havne-cli stream mock://demo --values --count 20
 ```
 
@@ -69,8 +74,8 @@ cc -o myprogram myprogram.c $(pkg-config --cflags --libs ecuio)
 ```
 
 On a distribution without `apt`, the tarball
-`havne-core-X.Y.Z-linux-x86_64.tar.gz` holds the same tree under one
-folder: unpack it anywhere, and point CMake at it with
+`havne-core-X.Y.Z-linux-x86_64.tar.gz` (`-linux-aarch64.tar.gz` on
+64-bit ARM) holds the same tree under one folder: unpack it anywhere, and point CMake at it with
 `-DCMAKE_PREFIX_PATH=<folder>` or pkg-config with
 `PKG_CONFIG_PATH=<folder>/lib/pkgconfig`. Before 1.0 a minor version may
 change the C ABI, so the CMake package answers a version request only
@@ -257,8 +262,9 @@ counts the frames per CAN ID.
   warnings, and the core's suite passes, 728 cases; with `vcan0` and
   ISO-TP, the simulated bus's 63 and the same `havne-cli` run as the
   desktop's, with the same counts (2026-11-05, `dev` at 8d996cc). It is
-  the only ARM Linux that has run Havne; CI's Linux jobs build x86_64
-  only.
+  the only ARM Linux that has run Havne's tests: CI runs them on
+  x86_64, and on GitHub's ARM runner builds and checks the aarch64
+  AppImage and core packages only.
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), and a real CAN controller sending through

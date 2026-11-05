@@ -726,8 +726,8 @@ Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 | `win-coverage` | Windows, MSVC 2022 | Installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs `scripts/coverage.sh` and uploads the report to Codecov ([testing.md](testing.md#coverage)). |
 | `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
-| `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
-| `linux-packages` | Ubuntu 24.04, GCC | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
+| `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
+| `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
 | `android-build` | Ubuntu to Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) to iOS device (arm64) | Unsigned device build with the Xcode generator. Checks the bundle's Info.plist keys (`app/ios/Info.plist.in`) and that it holds no signature or provisioning profile, then uploads it as an unsigned `.ipa`, `havne-ios-arm64-unsigned` (kept 14 days), for sideloading ([ios.md](ios.md)). Build only, no tests. |
 | `ios-simulator-smoke` | macOS 15 Intel to iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
@@ -837,9 +837,11 @@ above fails, and the passes pass.
 ### Linux: the AppImage
 
 `packaging/linux/make-appimage.sh <version> [build dir] [out dir]`
-packs a Release tree into `dist/havne-<version>-linux-x86_64.AppImage`:
-linuxdeploy and its Qt plugin, pinned releases checked against their
-SHA-256 and kept in `~/.cache/havne-linuxdeploy`, gather the app, the
+packs a Release tree into `dist/havne-<version>-linux-<arch>.AppImage`,
+`<arch>` the build machine's (`x86_64` or `aarch64`, from `uname -m`):
+linuxdeploy and its Qt plugin, pinned releases for each architecture
+checked against their SHA-256 and kept in `~/.cache/havne-linuxdeploy`,
+gather the app, the
 Qt libraries, plugins and QML modules it loads (the plugin scans
 `app/qml`), the xcb platform plugin and the offscreen one, and
 `packaging/linux/havne.desktop` with the icon. It then fails a package
@@ -861,8 +863,8 @@ isn't still running 10 s after it starts on the offscreen platform.
   `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) QT_RCC_SOURCE_DATE_OVERRIDE=$SOURCE_DATE_EPOCH`.
 - **glibc:** an AppImage runs only where glibc is at least its build
   machine's, so the one to hand out is CI's (`linux-appimage`, Ubuntu
-  24.04, glibc 2.39). One built on a newer distribution is for checking
-  the packing.
+  24.04, glibc 2.39, on x86_64 and on the ARM runner). One built on a
+  newer distribution is for checking the packing.
 - **Some libraries come from the system:** linuxdeploy's exclude list
   leaves out what every desktop has. Those are OpenGL (libGL, libGLX
   and libEGL, which belong to the machine's graphics driver),
@@ -879,6 +881,9 @@ isn't still running 10 s after it starts on the offscreen platform.
 `packaging/linux/make-core-packages.sh <version> [build dir] [out dir]`
 builds core and `havne-cli` in a core-only tree of its own and packs
 them ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)):
+
+for the build machine's architecture (`dpkg --print-architecture`:
+`amd64` or `arm64`, the tarballs naming it `x86_64` or `aarch64`):
 
 | File | Holds |
 |---|---|
@@ -937,10 +942,11 @@ A version tag publishes these downloads through
 - **Android arm64-v8a,** an APK for Android 12 or later, signed with
   the release key ([ADR-0030](adr/0030-signed-android-releases.md)),
   so each release installs over the one before.
-- **Linux x86_64,** the AppImage ([Linux: the AppImage](#linux-the-appimage)),
-  and core alone as a deb and a tarball
-  ([Linux: the core packages](#linux-the-core-packages)), built on
-  Ubuntu 24.04, so they run where glibc is 2.39 or later.
+- **Linux x86_64 and 64-bit ARM (aarch64),** for each the AppImage
+  ([Linux: the AppImage](#linux-the-appimage)), and core alone as a deb
+  and a tarball ([Linux: the core packages](#linux-the-core-packages)),
+  built on Ubuntu 24.04, so they run where glibc is 2.39 or later
+  (on a Raspberry Pi, the 64-bit Raspberry Pi OS 13).
 
 Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
 SPDX SBOM of every download, `SHA256SUMS.txt`, and one build
@@ -1038,13 +1044,13 @@ provenance over every file.
   `HAVNE_CERT_SHA256` overrides the pin, so a throwaway key runs the
   same checks. A last step writes the APK's component list
   (`sbom.py apk`).
-- **`linux`: build and pack** (Ubuntu 24.04). Qt as `linux-appimage`,
-  the app built and packed by `make-appimage.sh`, dated by the commit,
-  then
+- **`linux`: build and pack** (Ubuntu 24.04, once on x86_64 and once on
+  the ARM runner). Qt as `linux-appimage`, the app built and packed by
+  `make-appimage.sh`, dated by the commit, then
   `make-core-packages.sh`: the same scripts and checks CI ran on the
   commit.
-- **`publish`: the SBOM.** `sbom.py build` over the zip, the APK, the
-  AppImage, the deb and the tarball (the symbols and debug files carry
+- **`publish`: the SBOM.** `sbom.py build` over the zip, the APK, and
+  each architecture's AppImage, deb and tarball (the symbols and debug files carry
   no component of their own), dated by the commit, then validated by
   `pyspdxtools` before anything is published.
 - **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
