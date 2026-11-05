@@ -531,6 +531,54 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
                           double value, uint32_t units,
                           ecuio_display_value_t* out);
 
+/* ---- Signal files (ADR-0051) ----
+ * A user's own signals as data: JSON (format 1, docs/signal-files.md),
+ * read from bytes, never a path, so a caller reads the file its own way
+ * (Android's content:// URIs, iOS's sandbox). Everything a file gets
+ * wrong is refused here, at load, not at the car. */
+
+/* A file's bounds */
+#define ECUIO_SIGNAL_FILE_MAX_BYTES   1048576u   /* 1 MiB */
+#define ECUIO_SIGNAL_FILE_MAX_SIGNALS 1024u
+/* The format this core reads: a file's "havne_signals" */
+#define ECUIO_SIGNAL_FILE_FORMAT      1u
+
+typedef struct ecuio_signal_file ecuio_signal_file_t;
+
+/* Reads a signal file from its bytes (UTF-8 JSON, length bytes, no BOM).
+ * ECUIO_OK with *out a file the caller frees with ecuio_signal_file_free;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL bytes (with a length) or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a file it refuses, with
+ * ecuio_last_error_detail() saying where and why ("line 12, column 9:
+ * unknown key 'scael'", never a path); ECUIO_ERR_OUT_OF_MEMORY. *out is
+ * NULL on any failure. The file owns its set, defs, channels and
+ * tables, and its set passes ecuio_validate_signal_set and fits
+ * ECUIO_PROFILE_MAX_REQUESTS. Thread-safe: each call is its own. */
+ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
+                                      ecuio_signal_file_t** out);
+
+/* The file's set, valid until ecuio_signal_file_free; NULL for NULL.
+ * A session using it, through the profile it registers under, keeps
+ * the file alive (profile.h: the registry keeps the set's pointer). */
+const ecuio_signal_set_t* ecuio_signal_file_set(const ecuio_signal_file_t* file);
+
+/* The file's "name", and the profile name it registers under:
+ * "user." and the name in lower case, every run of other characters a
+ * single '-' ("Daily driver extras" -> "user.daily-driver-extras").
+ * Valid until ecuio_signal_file_free; "" for NULL. */
+const char* ecuio_signal_file_name(const ecuio_signal_file_t* file);
+const char* ecuio_signal_file_profile(const ecuio_signal_file_t* file);
+
+/* A signal of the file by its "key": its def in the set, or NULL for a
+ * key the file doesn't hold or a NULL argument. A base set's signals
+ * (extends) have no key here. */
+const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file,
+                                                 const char* key);
+
+/* Frees a file; NULL is a no-op. Unregister its profile first: a
+ * session using the set must be destroyed before this. */
+void ecuio_signal_file_free(ecuio_signal_file_t* file);
+
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a
  * UI shows as Other (ADR-0050). */
