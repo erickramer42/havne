@@ -359,3 +359,26 @@ of that license against these plans, not legal advice:
   of one more required key for a hand-written file.
 - A computed signal's inputs can be judged by their own pace, at the
   cost of one optional key to understand.
+
+## Appendix: the loader as built (2026-11-05)
+
+The loader (`core/src/signal_file.cpp`, `ecuio_signal_file_load` and
+its kin in `signals.h`) settles what section 2 left open:
+
+- **`obd2`'s keys:** every field of every PID it reads, by the PID
+  (`pid_0b`, and `pid_14_1` for a PID's second field), and thirteen
+  names for the common ones (`map`, `baro`, `rpm` and the rest,
+  [docs/signal-files.md](../signal-files.md)). A name is kept once
+  published.
+- **A file with no `ecus`** reads from its base's first ECU; with no
+  base, a signal that reads a reply is refused.
+- **Keys and ECU ids** are 1 to 31 of `a`-`z`, `0`-`9` and `_`.
+- **Defaults:** a field is 8 bits, big-endian, unsigned; scale 1,
+  offset 0. A scale of 0 is refused.
+- **An expression** reads at least one signal; a unary minus is `0 - x`,
+  an operation. The limit of 16 operations is the program's 33 steps.
+- **The tables:** each holds at most `ECUIO_SET_MAX_TABLE` (65,536)
+  entries, what a def's `table_first` reaches, and the validator
+  refuses more.
+- **A refusal's words** are `line L, column C: ` and why, the value at
+  fault named and the file's path never.

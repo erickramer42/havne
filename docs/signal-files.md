@@ -8,11 +8,11 @@ design and the reasons behind each rule are
 [ADR-0051](adr/0051-signal-files.md); this page is the reference for
 writing one by hand.
 
-> **Status:** the format is decided (ADR-0051). The loader, `havne-cli
-> signals check`, `stream --signals` and the app's import are v0.5.0's
-> work and not in a release yet. A point the loader hasn't settled is
-> marked **Not settled** below; until then the loader's own words, as
-> `signals check` prints them, are the authority.
+> **Status:** the format is decided (ADR-0051) and core's loader reads
+> it (`ecuio_signal_file_load`, `signals.h`). `havne-cli signals check`,
+> `stream --signals` and the app's import are v0.5.0's work and not in a
+> release yet; what they haven't settled is marked **Not settled**
+> below.
 
 ## A first file
 
@@ -115,9 +115,9 @@ when the file extends one:
 
 A signal with no `ecu` is read from the first module listed.
 
-**Not settled:** what a file with no `ecus` reads from (the engine
-ECU's pair, `7E0` to `7E8`, as a session's default channel is, is
-the likely answer).
+A file with no `ecus` that extends `obd2` reads from `obd2`'s engine
+ECU (`7E8`, asked on `7E0`). One that extends nothing has no module to
+read from, and a signal that reads a reply is refused.
 
 ## Signals
 
@@ -149,8 +149,9 @@ Each entry of `signals` is one signal. A number read from a reply:
 | `group` | no | The part of the car it reads, which Live and the viewer group by: `engine`, `air`, `fuel`, `oxygen sensors`, `emissions`, `vehicle`, `electrical` or `diagnostics`; left out, Other |
 | `plot` | no | 0 to 255: 0 not plotted when a session starts, otherwise its place among the signals that are, 1 first |
 
-**Not settled:** the characters a `key` may hold, and the spelling of
-the `oxygen sensors` group in a file.
+A `key` is 1 to 31 of `a`-`z`, `0`-`9` and `_`, unique in the file,
+and an ECU's `id` the same. A group is spelled as the table lists it,
+`oxygen sensors` with its space.
 
 ### `read`
 
@@ -256,9 +257,22 @@ the recording and `havne-cli` all get the same final number:
 Division by zero, or a result that isn't a finite number, gives no
 value for that moment rather than a wrong one.
 
-**Not settled:** the list of `obd2`'s keys (`obd2.map`, `obd2.baro`
-and the rest) that a file may name. The loader publishes it; `signals
-check` names an input it doesn't know.
+`obd2`'s keys: every field of every PID it reads by the PID, `pid_0b`
+for a PID's first field and `pid_14_1` for its second (`_1` to `_7`),
+and these names for the common ones:
+
+| Key | PID | Key | PID |
+|---|---|---|---|
+| `load` | 04 | `throttle` | 11 |
+| `coolant` | 05 | `fuel_level` | 2F |
+| `map` | 0B | `baro` | 33 |
+| `rpm` | 0C | `module_voltage` | 42 |
+| `speed` | 0D | `ambient` | 46 |
+| `iat` | 0F | `oil_temp` | 5C |
+| `maf` | 10 | | |
+
+An expression reads at least one signal (a constant alone isn't one),
+and a unary minus counts as an operation (`-x` is `0 - x`).
 
 **Inputs' ages** (`max_age`): a computed value is worked out when one of
 its inputs gets a new value, from each input's newest, and only while
@@ -351,7 +365,13 @@ A file is refused for:
 - **Its size:** more signals than fit a session's 256 requests with the
   base set's.
 
-**Not settled:** the exact words of each refusal past the two above.
+Every refusal names the line and column of what it refuses, then why:
+
+```text
+line 12, column 9: unknown key 'scael' in signal 'tft'
+line 7, column 5: ecu 'bcm': rx 7B8 needs a tx
+line 21, column 15: expr 'map - baro' reads 'map', which no signal is (at character 1)
+```
 
 A unit outside the table above isn't refused: it loads and shows as
 written, and `signals check` says it won't convert.
