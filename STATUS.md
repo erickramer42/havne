@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-04, **Version:** v0.4.0,
+**Updated:** 2026-11-05, **Version:** v0.4.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -26,7 +26,7 @@ end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
 bench bus and on one car, from
 [2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md) to
-[2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md): the values
+[2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md): the values
 decoded and tracked the cluster, and the request engine, the probe,
 identification, `uds-generic`, the trouble codes, several PIDs per
 request, more than one ECU and a DID scan ran there. The [ELM327 transport](docs/elm327.md)
@@ -79,11 +79,16 @@ or imported in bulk, and computed signals such as boost
     [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)), and
     channels and filters derived from the profile, so a bare
     `j2534://` streams ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
-    The surrogate holds Windows' 1 ms timer, so a held read ends at
-    its slice: through the fake as the VX a 4 ms reply reads 11.3 ms
-    instead of 16.4, and on the test car 28 % more replies arrived in
-    the same time (ADR-0042's appendix of 2026-11-01,
-    [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
+    A read asks the vendor for one message first, so it ends at its
+    reply, never asks it to wait 0 ms (the VX holds such a read about
+    50 ms) and takes the rest of a batch in one more call; the
+    surrogate holds Windows' 1 ms timer, so that call's wait is 1 ms
+    and not 15.6. Through the fake as the VX a reply 4 ms after its
+    request reads in 6.7 to 7.2 ms
+    (`J2534HealthTest.VxAReplyEndsTheReadThatWaitsForIt`; ADR-0042's
+    note of 2026-11-04); with the timer, on the test car 28 % more
+    replies arrived in the same time (ADR-0042's appendix of
+    2026-11-01, [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
   - **Requests follow the replies**
     ([ADR-0015](docs/adr/0015-request-engine.md)): one out per channel,
     the next when the reply is in, a 100 ms wait and a 20 ms floor;
@@ -250,8 +255,11 @@ or imported in bulk, and computed signals such as boost
     them; the AppImage is built by the commit's time, and two builds of
     one commit match. The AppImage ran with a window under WSLg on
     Ubuntu 26.04, Arch and Kali, and v0.3.4's on a Linux machine's own
-    desktop (Xubuntu 26.10, X11, `mock://demo` with recording); not yet
-    with an adapter on Linux.
+    desktop (Xubuntu 26.10, X11, `mock://demo` with recording). The
+    app's suite has run on that machine, and the core's on a Raspberry
+    Pi 3 (aarch64), with no warnings (2026-11-05,
+    [docs/linux.md](docs/linux.md#what-has-run-where)); not yet with an
+    adapter on Linux.
   - **Reply timing** ([ADR-0042](docs/adr/0042-reply-timing.md)): every
     requesting session measures, per request in its rotation, its
     outcomes, its reply latency (host clock) and its refresh interval
@@ -322,8 +330,7 @@ or imported in bulk, and computed signals such as boost
     phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md);
     a Linux machine's suspend is left, BENCH prep #27).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
-  addressing, more than one ECU answering in one session, a real x64 driver,
-  and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
+  addressing, a real x64 driver, and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md),
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md), the
@@ -333,10 +340,10 @@ or imported in bulk, and computed signals such as boost
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1005 ctest cases on Windows (both trees rebuilt,
-  2026-11-04), all passing but two env-gated skips (the cross-arch
+- **Tests:** 1016 ctest cases on Windows (both trees rebuilt,
+  2026-11-05), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (91/91); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (101/101); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
@@ -360,7 +367,7 @@ or imported in bulk, and computed signals such as boost
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
 | Bridge and models | Worker to GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard, Live, Diagnostics, Log, Recordings, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
-| J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, through the surrogate, from 2026-10-22 to 2026-11-03 | [docs/j2534.md](docs/j2534.md) |
+| J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, through the surrogate, from 2026-10-22 to 2026-11-04 | [docs/j2534.md](docs/j2534.md) |
 | ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
 | Android app | Android 12 and later; Bluetooth through the phone, background sessions. On one phone and one car, with the MX+; built in CI, no tests run on the phone | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md) |
 
@@ -443,7 +450,6 @@ an issue is resolved it is removed, and its number is not reused.
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.3.6 | Proven and finished: every car run the adapters on hand allow (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Released |
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
 | v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; an OBDLink's monitor and the VX's reply delivery fixed | In progress |
 | v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier | Planned |
@@ -490,115 +496,6 @@ and no ABI change.
 **Done when:** the car confirms both fixes (the run sheet's Phase 4
 again, and the VX's latency per request near its time on the bus) and
 the double-tap on the test phone.
-
-### v0.4.0: recordings in core, the log viewer, SocketCAN on a real controller
-
-**Recordings in core, and the log viewer**
-([ADR-0049](docs/adr/0049-recordings-in-core.md), accepted; its
-section 10 orders the work).
-- **The writer** is in core, on a thread the worker feeds: frames the
-  app drops under load are recorded too, and a failed write or a full
-  disk is an error the recording reports. Built (steps 1 and 2): core's
-  recorder (`ecuio/recording.h`), `havne-cli stream --record <dir>`,
-  and the app recording through it. It costs core's own worker 30 to 50 ns a
-  frame, and the bridge's looping run keeps 0.96 of its rate, inside
-  the 10% budget (`bench_bridge --record`, the ADR's appendices of
-  2026-11-02 and 2026-11-03); CI's load test gates the recorded run at
-  0.7 of the unrecorded one, the faster of two runs each.
-- **The reader** opens a recording offline. One pass on open builds a
-  sparse index (`host_us` only increases) and each signal's lowest and
-  highest per second, so memory follows the recording's seconds, not
-  its size. A torn last row is dropped and counted, by the reader and
-  by `replay://`. It is built (step 3), with a fuzz target over every
-  parser and whole folders: the replay fixture's hour opens in about
-  9 ms on the laptop and 10 ms on the test phone, against bounds of
-  2 s and 10 s, and a dense hour of 50 signals at 10 Hz in about
-  0.2 s on either (`bench_recording`, the ADR's appendix of
-  2026-11-03).
-- **The viewer**, in the app and as `havne-cli view` (JSON lines,
-  goldens), both built (step 5): the Recordings page pans, zooms
-  (pinch on the phone) and reads the values at a cursor, with the
-  frames check's findings on the time axis, and overlays a second run
-  dashed, aligned as `havne-cli view --align-on` aligns two: on their
-  starts, their UTC starts, a marker, or a rise or fall through a
-  level. Live's strip chart is the shared chart, and draws a dense hour
-  at 62 charts a second on the test phone and 124 on the laptop, past
-  the 60 asked (the ADR's appendix "the viewer"). Marks are written
-  while recording: the header's Mark in the app, a line typed into
-  `havne-cli stream --record`.
-- **`havne-cli info <recording>`:** duration, each signal's count and
-  rate, the link events and sleeps, and what's wrong offline: gaps,
-  rate drops, an ID first seen late, overflow flags, broken ISO-TP
-  sequences. It is built (step 4), on core's frames check
-  (`ecuio_recording_check`), whose defaults are set against the car
-  recordings on hand: a rate drop at 10x an ID's median interval and
-  100 ms at least (on the wire, between its messages), a gap
-  of 1 s (the ADR's appendix of 2026-11-03). On the SocketCAN car
-  run's listener recording, the first car recording of wire frames, it
-  checked every ISO-TP sequence and found none broken
-  ([2026-11-03-socketcan-car](docs/bench-sessions/2026-11-03-socketcan-car.md)).
-- **A stretch replayed**, built: `replay://<recording>?from=<s>&to=<s>`
-  in the viewer's seconds, on Live or through `havne-cli sim` on a
-  virtual bus, and the viewer's Replay view hands on the part in view
-  ([ADR-0023](docs/adr/0023-replay-transport.md)'s appendix "a stretch
-  replayed").
-
-**Finding a signal among many**, built
-([ADR-0050](docs/adr/0050-finding-a-signal.md)). Each signal def
-carries a group, the part of the car it reads (Engine, Air, Fuel,
-Oxygen sensors, Emissions, Vehicle, Electrical, Diagnostics, else
-Other), which recordings and `havne-cli`'s lines carry too. Live's list
-and the Recordings page's rows share one filter, a row high: words
-over the name and the unit as shown, and a popup with Plotted only and
-a box per group the list holds. On Live it sits in the title's row, so
-a short page loses no height to it.
-
-**SocketCAN through a real controller.** The desk run
-([2026-11-02-socketcan-desk](docs/bench-sessions/2026-11-02-socketcan-desk.md))
-had the Innomaker USB2CAN listen (BENCH prep #26) and kept
-[ADR-0040](docs/adr/0040-socketcan-requests-isotp.md) section 2's
-one-shot rule: without it, a frame nobody acknowledges is sent again
-forever. The USB2CAN offers no one-shot mode, so it listens only.
-- The refusal names only modes the controller offers, and
-  `havne-cli devices` and Settings show each CAN interface's bit rate,
-  controller state and supported modes, so a refusal is explained
-  before a run: built (ADR-0040's appendix "the desk bus", amended
-  2026-11-03); the supported modes need Linux 6.0.
-- The simulated ECU on the desk bus, behind an explicit flag, silent
-  once anything else answers on its reply ID: built
-  (`havne-cli sim --desk-bus`, ADR-0046's appendix "the desk bus": a
-  controller without one-shot mode answers too, a desk bus having
-  no car to harm). The VX read it through J2534 over real wire
-  ([2026-11-03-socketcan-desk-sim](docs/bench-sessions/2026-11-03-socketcan-desk-sim.md)).
-- Stateful fuzzing of ISO-TP and UDS, before the car: built
-  (`fuzz_request_bus`, [fuzz/README.md](fuzz/README.md)): a requesting
-  session's engine and ISO-TP against the fakes' ECU on a simulated
-  bus, each reply broken as the input says, then honest replies that
-  must bring every channel's one-shots to an end.
-- SocketCAN on the test car, listen-only (BENCH prep #26): done
-  ([2026-11-03-socketcan-car](docs/bench-sessions/2026-11-03-socketcan-car.md)),
-  beside the VX reading the car. Requests only through an adapter
-  whose driver offers one-shot mode, on the desk bus first (BENCH
-  prep #32).
-- A reply's time on the bus against the host's clock: measured beside
-  the VX on the car (ADR-0042's appendix of 2026-11-03 and its note of
-  2026-11-04): most segmented replies reached the worker about 52 ms
-  after their last frame, held by the surrogate's read, not the
-  adapter: a vendor read that brought only the request's TX
-  indication was read again with none of its timeout left, and the VX
-  holds a read with no timeout about 50 ms
-  ([2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md)).
-  From v0.4.1 a J2534 read ends at its reply, and the car measures
-  what remains. A latency on the adapter's clock waits for a reason to
-  build it.
-
-**Done when:** two recordings of the mock's pulls, recorded by
-`havne-cli`, overlay aligned on the pull's start in the app and in
-`havne-cli view` (met: [testing.md](docs/testing.md)'s overlay row);
-an hour-long recording opens and scrubs within a stated memory bound
-(met: [testing.md](docs/testing.md)'s "Reading a recording" and
-"Drawing a recording"); the SocketCAN car run is filed (met:
-[2026-11-03-socketcan-car](docs/bench-sessions/2026-11-03-socketcan-car.md)).
 
 ### Waiting on a tester: an iPhone download
 

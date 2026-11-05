@@ -239,7 +239,18 @@ counts the frames per CAN ID.
   workaround; `mock://demo` ran smoothly, and its recording landed in
   `~/Documents/Havne/recordings/`. With Live showing, the app took
   about 12 % of the CPU, and 9-10 % once the OpenGL and font packages
-  above were installed.
+  above were installed. On the same desktop, the tree built with GCC
+  15.3 and Qt 6.12.0 (from `aqtinstall`, in the home folder) and its
+  suites ran: the core alone, 728 cases, and the whole app, 877, all
+  passing but the cases that need `vcan0` or the kernel's ISO-TP, the
+  locale case and the real-car recordings' diff, with no warnings
+  (2026-11-05).
+- **A Raspberry Pi 3** (aarch64, Kali Linux, GCC 15.2, 906 MB of memory
+  and a 2 GB swap file): the core and `havne-cli` built (about 27
+  minutes at `-j2`, into the swap but never out of memory) and the
+  core's suite passed, 728 cases with the same skips, with no warnings
+  (2026-11-05). It is the only ARM Linux that has run Havne; CI's Linux
+  jobs build x86_64 only.
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), and a real CAN controller sending through

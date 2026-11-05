@@ -136,6 +136,13 @@ Dates are commit dates.
 | 2026-11-03 | Finding a signal among many ([ADR-0050](adr/0050-finding-a-signal.md)): a group per def, one filter for Live and the viewer | `84fa69a`, `6c1b943` |
 | 2026-11-03 | A stretch of a recording replayed, the CAN modes shown, the simulated ECU on a desk bus (read by the VX over real wire, [2026-11-03-socketcan-desk-sim](bench-sessions/2026-11-03-socketcan-desk-sim.md)), and stateful fuzzing of the request engine and ISO-TP on a simulated bus | `f7380ec`, `6151c99`, `a78e44e`, `5e7bb12` |
 | 2026-11-03 | SocketCAN on the test car, listen-only beside the VX: nothing sent, nothing dropped; the ECU resent an unacknowledged reply until the VX connected, and a segmented reply reaches the worker about 52 ms after its last frame ([2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md)) | `9f89786` |
+| 2026-11-04 | v0.4.0 released: recordings in core, the viewer and `havne-cli view` and `info`, finding a signal among many, SocketCAN through a real controller | `706c474` |
+| 2026-11-04 | Checks v0.4.0 left: a GCC or Clang warning fails CI, the C ABI's headers checked against the release, a surrogate close that fails unless the child lived, the client's skewed replies | `daa6f5e`, `ade8197`, `ec585a4`, `2a47177` |
+| 2026-11-04 | The pages on a phone: denser pages, the chart taking the page, a pinch stepping Live's window, the Dashboard's dials side by side upright, a frame-rate readout, charts that hold still, Log rows copied; run on the test phone | `167af40`, `2ae2f58`, `c11b87e`, `9d2ce04`, `354a4da`, `674bbb2`, `11ed648` |
+| 2026-11-04 | One reply on two clocks: two recordings of one bus line up to about 0.3 ms, and the VX's against `candump` on the desk bus to 10.4 ms ([2026-11-04-socketcan-desk-utc](bench-sessions/2026-11-04-socketcan-desk-utc.md)) | `2aaa46a`, `9b883c8` |
+| 2026-11-04 | Both ECUs in one session on the test car, through the VX and the MX+, with the recorders in the app, on the phone and in `havne-cli`; it found the MX+'s monitor printing no Consecutive Frames under `AT CFC1`, and the VX's 52 ms in the surrogate's read ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md)) | `05e49ff`, `fb62532` |
+| 2026-11-04 | A listening ELM327 session sends `AT CFC0`, the fix for the MX+'s monitor, against a fake ELM327 that models it | `fdb5672` |
+| 2026-11-05 | A J2534 read asks for one message first, ends at its reply and never asks the vendor to wait 0 ms; the review's read fixes after it, and each vendor call's held time in the frame log | `d05e6e1`, `b98240d` |
 
 ## Lessons learned
 
