@@ -153,8 +153,10 @@ reply arriving after the first read's 10 ms waited about 50 more for
 the surrogate's 0 ms re-read, which the VX holds
 ([ADR-0042](../adr/0042-reply-timing.md)'s note of 2026-11-04). The
 laptop on a build with the fix, the VX alone on the car, engine
-idling, Record sessions on (so the surrogate's frame log is on):
+idling, the surrogate's frame log on (`ECUIO_SUR_LOG_FRAMES=1` in
+`havne-cli`'s environment; the Record switch doesn't turn it on):
 
+    export ECUIO_SUR_LOG_FRAMES=1
     havne-cli stream "j2534://OBDX Pro - VX" --seconds 90 < /dev/null > vx-latency.jsonl
     havne-cli stream "j2534://OBDX Pro - VX?pack=0" --seconds 60 < /dev/null > vx-latency-nopack.jsonl
 
@@ -183,9 +185,8 @@ The MX+ out, the USB2CAN on the Y-splitter, **its terminator out**.
 
 - [ ] The same pairing as Phase 4: here one machine's clocks (Windows
       and WSL's) and the delivery through the VX and the surrogate's
-      reads: about 10 ms for a reply inside the first read and about
-      52 ms for one after it
-      ([2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md))
+      reads, which end at the reply (Phase 4b, again, measures that
+      delivery alone)
 - [ ] `can0`'s TX count stays 0
 
 ## Evidence and teardown
