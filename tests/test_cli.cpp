@@ -860,9 +860,11 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
     s.stalled = 4;
     s.unflowed = 5;
     s.clears = 6;
+    s.pending = 8;
     const char* counts =
         "\"requests\":10,\"replies\":7,\"refused\":1,\"silent\":2,\"late\":1,"
-        "\"bad_sequence\":3,\"stalled\":4,\"unflowed\":5,\"clears\":6,";
+        "\"pending\":8,\"bad_sequence\":3,\"stalled\":4,\"unflowed\":5,"
+        "\"clears\":6,";
     cli::Line st(buf, sizeof buf);
     cli::sim_stats_line(st, s);
     EXPECT_EQ(std::string(st.data(), st.size()),

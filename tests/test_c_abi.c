@@ -102,6 +102,7 @@ typedef char abi_inspection_size_check[(sizeof(ecuio_inspection_t) == 24) ? 1 : 
 typedef char abi_inspection_flags_check[(offsetof(ecuio_inspection_t, diag_flags) == 8) ? 1 : -1];
 typedef char abi_sim_stats_size_check[(sizeof(ecuio_sim_stats_t) == 96) ? 1 : -1];
 typedef char abi_sim_stats_flags_check[(offsetof(ecuio_sim_stats_t, flags) == 72) ? 1 : -1];
+typedef char abi_sim_stats_pending_check[(offsetof(ecuio_sim_stats_t, pending) == 80) ? 1 : -1];
 typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];

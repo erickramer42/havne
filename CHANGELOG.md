@@ -11,6 +11,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- `havne-cli sim "mock://sim?modules=2"` adds a second module on 0x7E1/0x7E9 with Service 22 DIDs of its own (D100, D101, D102, made up for the simulated car), so one session can ask two ECUs; the fault `pending:<n>` answers every Nth request `7F <service> 78` first and the reply 300 ms later, and the `sim_stats` and `end` lines count it as `pending` (`ecuio_sim_stats_t.pending`).
+
 ## [0.4.1] - 2026-11-05
 
 ### Added

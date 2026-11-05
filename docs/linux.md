@@ -173,8 +173,18 @@ The app connects to `socketcan://vcan0?profile=obd2` the same way.
 `mock://sim` answers from the simulated car's drive cycle (the engine
 starts after 15 s with the key on); `?values=canned` answers every
 linear J1979 PID with one reading instead, `?vin=` sets the VIN it
-gives, and `?faults=silent:5,late:7,bad_sequence:5,stalled:7` breaks
-every Nth reply. `replay:///path/to/recording` answers as the car in
+gives, and `?faults=silent:5,late:7,pending:3,bad_sequence:5,stalled:7`
+breaks every Nth reply (`pending` answers `7F <service> 78` first and
+the reply 300 ms later). `?modules=2` adds a second module on
+0x7E1/0x7E9 with three made-up Service 22 DIDs, D100, D101 and D102,
+refusing everything else, so one session can ask two ECUs:
+
+```sh
+havne-cli sim "mock://sim?modules=2" --on vcan0 &
+havne-cli stream "socketcan://vcan0?profile=uds-generic&did=7E9:D100:u8,7E9:D102:text" --values
+```
+
+`replay:///path/to/recording` answers as the car in
 a recording did instead: each request gets the reply the recording
 holds for it at the sim's time since it started (the car's own
 bitmaps, values, identification and codes; `?loop=1` goes round the
@@ -186,8 +196,8 @@ only on a `vcan` interface, never on a car's bus, unless
 real controller answers too, if it is up, not listen-only and
 error-active, one-shot mode or not (each refusal gives the `ip link`
 commands). On any bus it goes silent for good, and `havne-cli sim`
-ends with `yielded`, once another node sends on 0x7E8: an ECU
-answers there already.
+ends with `yielded`, once another node sends on 0x7E8 (or 0x7E9 with
+`?modules=2`): an ECU answers there already.
 
 ## Where Havne keeps things
 

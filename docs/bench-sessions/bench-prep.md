@@ -121,7 +121,10 @@ which has no bench session):
   time counts from the first frame.
 - **#11, a machine without OBDX's INF:** whether the VX's port appears
   there.
-- **#17, response pending:** needs an ECU that answers `7F xx 78`.
+- **#17, response pending:** needs an ECU that answers `7F xx 78`: the
+  simulated ECU's `faults=pending:<n>` on the desk bus
+  (`havne-cli sim --desk-bus`, [ADR-0046](../adr/0046-simulated-ecu.md)'s
+  appendix of 2026-11-04), with the ELM327 adapter's session against it.
 - **#19, listening to another tester's multi-frame replies:** the MX+ on the Y-splitter again, with the monitor's setup changed.
 - **#25, a BLE adapter's service:** needs a BLE adapter.
 - **#32, a real CAN controller sending:** an adapter whose driver
