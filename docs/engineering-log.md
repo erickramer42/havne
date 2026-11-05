@@ -147,6 +147,9 @@ Dates are commit dates.
 | 2026-11-05 | A J2534 read answers with its first message, with no call for the rest of a batch; the fake VX holds a short read 10 ms, and the fake MX+ drops the Consecutive Frames under either flow-control setting | `61aa643` |
 | 2026-11-05 | On the test car without that call: the latency per request 16.4 ms packed (about 2.5 ms past the bus) and 4.6 ms unpacked, both ECUs about a third of their 2026-11-04 latency, and the app the same ([2026-11-05-two-ecu-car-rerun](bench-sessions/2026-11-05-two-ecu-car-rerun.md), A2-A4) | `fbeb6c9` |
 | 2026-11-05 | On the Recordings viewer's maximized chart, the cursor's values fold to a tab, so the plot takes the width | `fb70aae` |
+| 2026-11-05 | The viewer's double tap timed by the taps' own stamps, so a second tap that reaches the chart behind its paint (about 370 ms on the test phone) still counts; 10 of 10 on the test phone | `44f1b8e` |
+| 2026-11-05 | Linux test platforms: on an x86_64 desktop, the app's suite; on a Raspberry Pi 3 (ARM64), the core's; on both, the simulated bus over `vcan0` and `havne-cli` end to end ([linux.md](linux.md#what-has-run-where)) | `d0d47d6` |
+| 2026-11-05 | On a tall page, the viewer's cursor values go in a band below the chart, so the plot keeps the page's width | `4f3b7a5` |
 
 ## Lessons learned
 
