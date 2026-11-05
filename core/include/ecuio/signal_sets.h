@@ -55,6 +55,11 @@ extern "C" {
  * the mock and obd2 bands above. */
 #define ECUIO_UDS_GENERIC_SIG_ID_BASE  20000u
 
+/* ---- Signal files (ADR-0051) ----
+ * A file's signals take ids from this band, the base plus each one's
+ * place in the file, so they never meet the bands above. */
+#define ECUIO_USER_SIG_ID_BASE  30000u
+
 /* OBD-II ECU #1 physical response ID, paired with the tester request
  * ID 0x7E0. Shared by obd2_signal_sets.cpp (defs), test fixtures, and
  * the fake's canned response header so all three agree on the channel. */

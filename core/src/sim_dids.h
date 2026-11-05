@@ -107,7 +107,8 @@ inline bool ecuio_sim_raw_for(const ecuio_signal_def_t& d, double value,
         *raw = static_cast<uint32_t>(static_cast<uint64_t>(s) & mask);
         return true;
     }
-    if (d.kind != ECUIO_VALUE_UINT) {
+    /* An enum is answered by its raw number (ADR-0051) */
+    if (d.kind != ECUIO_VALUE_UINT && d.kind != ECUIO_VALUE_ENUM) {
         return false; /* a kind with no inverse here: unanswered */
     }
     const double hi = std::ldexp(1.0, static_cast<int>(bits)) - 1.0;

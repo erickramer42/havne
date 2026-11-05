@@ -56,7 +56,7 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signal_tables.cpp)
+add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_signal_file.cpp)
 
 # test_signal_tables.cpp checks computed.h, the programs' checker and
 # stack machine, which are internal
