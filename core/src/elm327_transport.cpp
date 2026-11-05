@@ -14,10 +14,11 @@
 //          replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
 //          reset), the pending reply, passive listening (Listening*:
-//          AT MA, the channels' messages, the quiet run, the liveness
-//          check, BUFFER FULL's overflow flag, the monitor's ends and the
-//          stop at detach), the wire log (TheWireLog*), and nothing
-//          allocated per frame, with the log's request lines on or off.
+//          AT MA with flow control off, the channels' messages, the
+//          quiet run, the liveness check, BUFFER FULL's overflow flag,
+//          the monitor's ends and the stop at detach), the wire log
+//          (TheWireLog*), and nothing allocated per frame, with the log's
+//          request lines on or off.
 //          Elm327PortTest (POSIX): a whole session over a
 //          pseudo-terminal through the OS's port. Elm327TcpTest (every
 //          platform): a session over a loopback socket, the far side's
@@ -527,6 +528,13 @@ setup_answer identify(transport* t, const char* cmd, char* version,
     return a;
 }
 
+/* Whether the session asks nothing at all: it listens with AT MA
+ * (ADR-0026's appendix "passive listening") */
+bool asks_nothing(const transport* t)
+{
+    return t->engine.count == 0 && t->engine.scan_count == 0;
+}
+
 /* The setup's contract commands (ADR-0026 section 3), each answered before the
  * next: a known state, then everything the framing rests on. Any
  * answer but OK refuses, so an adapter never runs half-configured. The
@@ -560,13 +568,18 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
 
     char sp[ELM327_CMD_MAX];
     snprintf(sp, sizeof(sp), "ATSP%c\r", t->protocol);
+    /* A session that asks nothing only monitors, and needs no flow
+     * control: with CFC1 an STN's monitor prints a First Frame and none
+     * of its Consecutive Frames (the MX+'s STN2255,
+     * docs/bench-sessions/2026-11-04-two-ecu-car.md) */
+    const char* const cfc = asks_nothing(t) ? "ATCFC0\r" : "ATCFC1\r";
     const char* const steps[] = {
         "ATE0\r", /* no echo, no linefeeds, no spaces: fewer bytes */
         "ATL0\r",   "ATS0\r",
         "ATH1\r",   /* the CAN ID and the PCI byte on every line */
         "ATD0\r",   /* no data length digit after the ID (an STN's PP 29) */
         "ATCAF1\r", /* the adapter adds the PCI bytes when sending */
-        "ATCFC1\r", /* and sends the flow control after a First Frame */
+        cfc,        /* and the flow control after a First Frame, or none */
         sp,         /* ISO 15765-4 at the mode and rate, never a search */
         "ATAT1\r",  /* adaptive timing */
         "ATST19\r", /* the first reply's timeout, the engine's 100 ms */
@@ -1177,7 +1190,7 @@ void elm327_worker(transport* t)
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     uint32_t next_chan = 0;
-    const bool passive = e.count == 0 && e.scan_count == 0;
+    const bool passive = asks_nothing(t);
     uint32_t relisten_ms = 0;
     int64_t timing_at = 0;
     if (t->probe) {
@@ -1464,8 +1477,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames
      * a serial link can't carry, a step of its own */
-    if (t->engine.count == 0 && t->engine.scan_count == 0 &&
-        t->chan_count == 0) {
+    if (asks_nothing(t.get()) && t->chan_count == 0) {
         ecuio_detail_set("elm327:// listens on its channels' IDs, and this "
                          "session has none: add ?filter=, or use a profile "
                          "that declares a channel");

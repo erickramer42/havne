@@ -1800,6 +1800,29 @@ TEST_F(Elm327SessionTest, ListeningHearsTheFiltersId)
     EXPECT_EQ(s.cap.count("41 0C"), 0u);
 }
 
+/* A session that asks nothing turns the adapter's flow control off
+ * (AT CFC0), since it never asks: an STN's monitor with CFC1 prints a
+ * First Frame and none of its Consecutive Frames, and a multi-frame
+ * reply to another tester would never arrive. A requesting session keeps
+ * CFC1 (SetupRunsTheContractThenTheReadings) */
+TEST_F(Elm327SessionTest,
+       ListeningTurnsFlowControlOffSoAnStnPrintsTheWholeMessage)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.monitor_cfc_eats_cfs = true; });
+    Session s;
+    listen_on(s);
+    EXPECT_EQ(fake_count("ATCFC0"), 1u);
+    EXPECT_EQ(fake_count("ATCFC1"), 0u);
+    on_bus(0x7E8, kVinReply);
+    on_bus(0x7E8, {0x41, 0x05, 0x7B});
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 05") == 1; }, 3000));
+    Capture::Frame vin{};
+    ASSERT_TRUE(s.cap.find("49 02 01", &vin))
+        << "the monitor printed the First Frame alone";
+    EXPECT_EQ(vin.data, kVinReply);
+    EXPECT_NE(vin.flags & ECUIO_FRAME_FLAG_REASSEMBLED, 0u);
+}
+
 /* No message for ten 100 ms windows is quiet, with no episode; a message
  * is OK again */
 TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)

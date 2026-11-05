@@ -31,6 +31,14 @@ request here is a read; nothing is cleared.
 
 - [ ] Both apps on the build above; **Record sessions** on in each
 - [ ] `vehicle.sh mark two-ecu` on the laptop
+- [ ] **Warm up `havne-cli`** after any rebuild, on the laptop: first
+      `havne-cli devices`, then a 5 s session,
+      `havne-cli stream "j2534://<path>/build-win32/tests/Release/fake_j2534.dll" --seconds 5 < /dev/null`
+      (or the VX's URI once it's plugged in). Antivirus can hold the
+      first connect of a newly built surrogate (exit 3, the pipe broken
+      at once). `havne-cli` starts the Win32 tree's surrogate, a
+      different file from the app's copy, so warming up the app doesn't
+      cover it
 - [ ] The phone paired with the MX+ (its `bt:` address comes from the
       phone; it is `<BT address>` in the sheet)
 - [ ] The engine ECU's DIDs to ask: one or two from the 2026-11-01 VX
@@ -65,13 +73,15 @@ Settings, the URI field:
 
 Connect, two minutes on Live, then Disconnect.
 
-- [ ] Live shows both DIDs updating; the activity log's ECU lines name
-      both `0x7E8` and `0x7E9`
+- [ ] Live's rows for both DIDs update with values (raw-byte DIDs show
+      as text, with no tick box to plot); the activity log's ECU lines
+      name both `0x7E8` and `0x7E9`
 - [ ] No health line; neither ECU's rate falls to the 100 ms wait (each
       waits only for its own reply)
-- [ ] Recordings: the new folder opens in the viewer with both signals;
-      `havne-cli info "<folder>"` lists no findings but what the run
-      explains; `frames.csv` holds rows from both `0x7E8` and `0x7E9`
+- [ ] Recordings: the new folder opens in the viewer, and its info
+      lists both DIDs' signals; `havne-cli info "<folder>"` lists no
+      findings but what the run explains; `frames.csv` holds rows from
+      both `0x7E8` and `0x7E9`
 
 ## Phase 3: both ECUs through the MX+, in the phone's app (engine idling)
 
@@ -107,6 +117,33 @@ the phone.
       difference of their UTC times (the recording's UTC start plus the
       row's `host_us`). Its median and spread are the two adapters'
       delivery delays and the two machines' clock agreement together
+
+## Phase 4, again: the monitor with flow control off (BENCH prep #19)
+
+Phase 4's MX+ printed every First Frame and none of their Consecutive
+Frames ([2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md)), so no
+multi-frame reply arrived. A session that only listens sets
+`AT CFC0` before `AT MA` ([elm327.md](../elm327.md#passive-listening)).
+The phone on a build with it; the rest as Phase 4: the VX on
+`j2534://OBDX Pro - VX` (`obd2`, packed: nearly every reply spans
+frames), the phone on `elm327://bt:<BT address>?profile=raw`, both
+recording. The phone first, then the laptop for 90 s.
+
+- [ ] The phone's wire log (`phone.sh pull`) shows `ATCFC0` answered
+      `OK` in the setup, before the first `AT MA`
+- [ ] The adapter's data lines by type, counted from the wire log
+      (counts only; it carries the `<BT address>`): First Frames,
+      Consecutive Frames and Single Frames, as the 2026-11-04 sheet's
+      table. **Pass:** every First Frame followed by its Consecutive
+      Frames, and the phone's delivered frames near the VX's count
+- [ ] The phone's Log shows multi-frame `0x7E8` replies, each
+      reassembled; no "vehicle not responding" while the VX asks
+- [ ] The VX's session as it runs alone: no health line, the same
+      request rate
+- [ ] **If the Consecutive Frames stay 0:** `AT CAF0` is the fallback
+      (ADR-0026's appendix "passive listening", its note of
+      2026-11-04). Note the counts; the setup moves to `AT CAF0`, and
+      this phase runs again on that build
 
 ## Phase 5 (optional): a listener on the laptop's own clock
 
