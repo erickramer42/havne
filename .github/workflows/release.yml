@@ -118,7 +118,11 @@ jobs:
       - name: Install aqtinstall (pinned master commit)
         run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
 
+      # A mirror that stops answering fails the step at 10 minutes (an
+      # install takes about half of one), not the job at 30, so a re-run
+      # of the failed job can follow soon after
       - name: Install Qt 6.12.0
+        timeout-minutes: 10
         run: |
           $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
           New-Item -ItemType Directory -Force -Path $prefix | Out-Null
@@ -179,10 +183,15 @@ jobs:
           ref: ${{ env.TAG }}
 
       # The same kit, NDK and JDK as ci.yml's android-build; see the notes
-      # there.
+      # there. cache: true restores the kit main's CI saved: the inputs are
+      # android-build's, so the key is the same, and a tag's run may read
+      # the default branch's caches. A miss installs it from the mirrors,
+      # bounded at 10 minutes (a restore takes one or two)
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        timeout-minutes: 10
         with:
+          cache: true
           version: '6.12.0'
           host: 'all_os'
           target: 'android'
@@ -272,9 +281,14 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
+      # cache: true as android's above: the inputs are ci.yml's
+      # linux-appimage's, leg for leg, so each arch restores the kit main's
+      # CI saved for it
       - name: Install Qt 6.12.0 desktop (${{ matrix.qt_arch }})
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        timeout-minutes: 10
         with:
+          cache: true
           version: '6.12.0'
           host: ${{ matrix.qt_host }}
           target: 'desktop'
