@@ -741,13 +741,17 @@ TEST(BridgeTest, RelayStopEndsEverything)
     EXPECT_TRUE(closedFromTheFarSide(*c));
     // On loopback the kernel can give the client the old port as its own
     // source port, and the connect then reaches itself (TCP's
-    // simultaneous open): that too says nothing listens
+    // simultaneous open): that too says nothing listens. A connect the
+    // kernel took for the listener as it closed is reset at once (macOS
+    // has read its far side's port as 0 by then); only one that stays
+    // connected means something still listens
     QTcpSocket late;
     late.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(port));
-    if (late.waitForConnected(500)) {
-        EXPECT_EQ(late.localPort(), late.peerPort())
-            << "something listens on " << port << " (connected from "
-            << late.localPort() << ")";
+    if (late.waitForConnected(500) && late.localPort() != late.peerPort()) {
+        const bool dropped = late.state() != QAbstractSocket::ConnectedState ||
+                             late.waitForDisconnected(1000);
+        EXPECT_TRUE(dropped) << "something listens on " << port
+                             << " (connected from " << late.localPort() << ")";
     }
 }
 
