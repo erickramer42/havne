@@ -58,7 +58,8 @@ a quarter mile off launch control on a warm loop.*
   a segmented reply is whole on the wire 14 ms after its request, and
   Havne's own read of the adapter, not the adapter, held most about
   52 ms more. With the read fixed, the latency per request fell from
-  65.5-73.7 ms to 24.6 ms on the next run. Each session is written up
+  65.5-73.7 ms to 16.4 ms, about 2.5 ms past the bus's time. Each
+  session is written up
   with its scrubbed logs
   ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
   [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md),
