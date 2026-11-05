@@ -13,6 +13,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- Linux downloads for 64-bit ARM, such as a Raspberry Pi 3 or later on the 64-bit Raspberry Pi OS 13 or Ubuntu 24.04 and newer: the app as an AppImage, and `havne-cli` and the core as a deb and a tarball, beside the x86_64 ones, with their checksums, build provenance and SBOM entries ([docs/linux.md](docs/linux.md)).
 - `havne-cli sim "mock://sim?modules=2"` adds a second module on 0x7E1/0x7E9 with Service 22 DIDs of its own (D100, D101, D102, made up for the simulated car), so one session can ask two ECUs; the fault `pending:<n>` answers every Nth request `7F <service> 78` first and the reply 300 ms later, and the `sim_stats` and `end` lines count it as `pending` (`ecuio_sim_stats_t.pending`).
 
 ## [0.4.1] - 2026-11-05

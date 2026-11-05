@@ -19,9 +19,17 @@ set -euo pipefail
 die() { echo "package_check: $*" >&2; exit 1; }
 [ $# -eq 2 ] || die "usage: package_check.sh <out dir> <version>"
 out=$(cd "$1" && pwd) version=$2
-deb=$out/havne-core_${version}_amd64.deb
-dbgdeb=$out/havne-core-dbgsym_${version}_amd64.deb
-tarball=$out/havne-core-$version-linux-x86_64.tar.gz
+# The build machine's architecture's packages, as make-core-packages.sh
+# names them
+debarch=$(dpkg --print-architecture)
+case $debarch in
+    amd64) arch=x86_64 ;;
+    arm64) arch=aarch64 ;;
+    *) die "no packages for $debarch" ;;
+esac
+deb=$out/havne-core_${version}_$debarch.deb
+dbgdeb=$out/havne-core-dbgsym_${version}_$debarch.deb
+tarball=$out/havne-core-$version-linux-$arch.tar.gz
 for f in "$deb" "$dbgdeb" "$tarball"; do [ -f "$f" ] || die "no $f"; done
 work=$(mktemp -d)
 trap 'sudo apt-get remove -y havne-core havne-core-dbgsym > /dev/null 2>&1 || true; rm -rf "$work"' EXIT
@@ -42,7 +50,7 @@ cc -std=c11 -o "$work/pc-consumer" tests/package/consumer.c $(pkg-config --cflag
 
 mkdir "$work/elsewhere"
 tar -xzf "$tarball" -C "$work/elsewhere"
-prefix=$work/elsewhere/havne-core-$version-linux-x86_64
+prefix=$work/elsewhere/havne-core-$version-linux-$arch
 sudo apt-get remove -y havne-core-dbgsym havne-core > /dev/null
 cmake -S tests/package -B "$work/tar" -DCMAKE_PREFIX_PATH="$prefix" > /dev/null
 grep -q "ecuio_DIR:PATH=$prefix/lib/cmake/ecuio" "$work/tar/CMakeCache.txt" \

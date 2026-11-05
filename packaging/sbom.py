@@ -255,8 +255,16 @@ def selftest():
             "download": deb.name, "purpose": "INSTALL",
             "depends": [{"name": "libc6", "version": ">= 2.39",
                          "purl": "pkg:deb/ubuntu/libc6?arch=amd64"}]}))
+        # The same package for another architecture, with the same
+        # dependency: each download keeps its own
+        deb_arm = d / "havne-core_1.2.3_arm64.deb"
+        deb_arm.write_bytes(b"deb arm64")
+        (d / (deb_arm.name + ".components.json")).write_text(json.dumps({
+            "download": deb_arm.name, "purpose": "INSTALL",
+            "depends": [{"name": "libc6", "version": ">= 2.39",
+                         "purl": "pkg:deb/ubuntu/libc6?arch=arm64"}]}))
 
-        doc = build("1.2.3", "v1.2.3", [zip_, deb], created=0)
+        doc = build("1.2.3", "v1.2.3", [zip_, deb, deb_arm], created=0)
         ids = [p["SPDXID"] for p in doc["packages"]]
         check(len(ids) == len(set(ids)), "element IDs are unique")
         check(all(re.fullmatch(r"SPDXRef-[A-Za-z0-9.-]+", i) for i in ids), "element IDs are SPDX's form")
@@ -271,13 +279,19 @@ def selftest():
         check(by_name["Microsoft Visual C++ runtime"]["comment"] == "app-local", "a comment is kept")
         rels = {(r["spdxElementId"], r["relationshipType"], r["relatedSpdxElement"])
                 for r in doc["relationships"]}
-        for dl in (zip_, deb):
+        for dl in (zip_, deb, deb_arm):
             i = spdx_id("download", dl.name)
             check(("SPDXRef-DOCUMENT", "DESCRIBES", i) in rels, f"the document describes {dl.name}")
             check((i, "CONTAINS", spdx_id("havne", "1.2.3")) in rels, f"{dl.name} contains Havne")
-        check((spdx_id("download", deb.name), "DEPENDS_ON", spdx_id(deb.name, "libc6", ">= 2.39")) in rels,
-              "a dependency is DEPENDS_ON")
-        check(build("1.2.3", "v1.2.3", [deb, zip_], created=0) == doc, "the order of the downloads doesn't matter")
+        for dl in (deb, deb_arm):
+            check((spdx_id("download", dl.name), "DEPENDS_ON", spdx_id(dl.name, "libc6", ">= 2.39")) in rels,
+                  f"{dl.name}'s dependency is DEPENDS_ON, its own")
+        libc = [p for p in doc["packages"] if p["name"] == "libc6"]
+        check(sorted(r["referenceLocator"] for p in libc for r in p.get("externalRefs", []))
+              == ["pkg:deb/ubuntu/libc6?arch=amd64", "pkg:deb/ubuntu/libc6?arch=arm64"],
+              "each architecture's dependency keeps its purl")
+        check(build("1.2.3", "v1.2.3", [deb_arm, deb, zip_], created=0) == doc,
+              "the order of the downloads doesn't matter")
 
         out = d / "a.spdx.json"
         write(doc, out)

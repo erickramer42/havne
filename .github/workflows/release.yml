@@ -3,8 +3,9 @@ name: Release
 # A version tag publishes a release with these downloads: a Windows x64
 # zip (the app, the x86 and x64 J2534 surrogates, the Qt runtime and the
 # Visual C++ runtime, running without Qt or Visual Studio), an Android
-# arm64-v8a APK signed with the release key (ADR-0030), a Linux x86_64
-# AppImage, and core alone for Linux as a deb and a tarball (ADR-0035);
+# arm64-v8a APK signed with the release key (ADR-0030), a Linux AppImage,
+# and core alone for Linux as a deb and a tarball (ADR-0035), each Linux
+# file for x86_64 and for aarch64 (arm64);
 # beside them the Windows executables' PDBs in a zip of their own
 # (ADR-0034) and havne-cli's Linux debug info as a -dbgsym deb and a
 # -debug tarball. Each comes with its SHA-256, and one signed build
@@ -248,10 +249,18 @@ jobs:
 
   # On 24.04, the oldest distribution supported: a binary runs where glibc
   # is at least its build machine's. The same builds as ci.yml's
-  # linux-appimage and linux-packages, which ran on the tagged commit.
+  # linux-appimage and linux-packages, which ran on the tagged commit,
+  # one per architecture: x86_64, and aarch64 on GitHub's ARM runner.
   linux:
     needs: gate
-    runs-on: ubuntu-24.04
+    name: linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04, qt_host: linux, qt_arch: linux_gcc_64 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, qt_host: linux_arm64, qt_arch: linux_gcc_arm64 }
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: bash   # -eo pipefail
@@ -263,13 +272,13 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Install Qt 6.12.0 desktop (linux_gcc_64)
+      - name: Install Qt 6.12.0 desktop (${{ matrix.qt_arch }})
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: '6.12.0'
-          host: 'linux'
+          host: ${{ matrix.qt_host }}
           target: 'desktop'
-          arch: 'linux_gcc_64'
+          arch: ${{ matrix.qt_arch }}
 
       # The xcb platform plugin's libraries, which linuxdeploy bundles;
       # the probes' header; the packages' tools
@@ -300,9 +309,9 @@ jobs:
       - name: Upload the Linux files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux
+          name: linux-${{ matrix.arch }}
           path: |
-            dist/havne-${{ env.VERSION }}-linux-x86_64.AppImage*
+            dist/havne-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage*
             dist/havne-core*
           if-no-files-found: error
           retention-days: 1
@@ -348,6 +357,11 @@ jobs:
             echo "DBGSYM=dist/havne-core-dbgsym_${VERSION}_amd64.deb"
             echo "TARBALL=dist/havne-core-$VERSION-linux-x86_64.tar.gz"
             echo "DEBUG_TARBALL=dist/havne-core-$VERSION-linux-x86_64-debug.tar.gz"
+            echo "APPIMAGE_ARM=dist/havne-$VERSION-linux-aarch64.AppImage"
+            echo "DEB_ARM=dist/havne-core_${VERSION}_arm64.deb"
+            echo "DBGSYM_ARM=dist/havne-core-dbgsym_${VERSION}_arm64.deb"
+            echo "TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64.tar.gz"
+            echo "DEBUG_TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64-debug.tar.gz"
             echo "SBOM=dist/havne-$VERSION.spdx.json"
           } >> "$GITHUB_ENV"
 
@@ -357,7 +371,8 @@ jobs:
       - name: The SBOM
         run: |
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python3 packaging/sbom.py build \
-            --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL"
+            --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL" \
+            "$APPIMAGE_ARM" "$DEB_ARM" "$TARBALL_ARM"
           python3 -m venv "$RUNNER_TEMP/spdx"
           "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
           "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$SBOM"
@@ -365,7 +380,9 @@ jobs:
       - name: Checksums
         run: |
           (cd dist && sha256sum "${ZIP#dist/}" "${SYMBOLS#dist/}" "${APK#dist/}" "${APPIMAGE#dist/}" \
-            "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" "${SBOM#dist/}" \
+            "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" \
+            "${APPIMAGE_ARM#dist/}" "${DEB_ARM#dist/}" "${DBGSYM_ARM#dist/}" "${TARBALL_ARM#dist/}" \
+            "${DEBUG_TARBALL_ARM#dist/}" "${SBOM#dist/}" \
             > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 
@@ -383,6 +400,11 @@ jobs:
             ${{ env.DBGSYM }}
             ${{ env.TARBALL }}
             ${{ env.DEBUG_TARBALL }}
+            ${{ env.APPIMAGE_ARM }}
+            ${{ env.DEB_ARM }}
+            ${{ env.DBGSYM_ARM }}
+            ${{ env.TARBALL_ARM }}
+            ${{ env.DEBUG_TARBALL_ARM }}
 
       # Checked with gh attestation verify <download> -R erickramer42/havne
       # --predicate-type https://spdx.dev/Document/v2.3
@@ -396,6 +418,9 @@ jobs:
             ${{ env.APPIMAGE }}
             ${{ env.DEB }}
             ${{ env.TARBALL }}
+            ${{ env.APPIMAGE_ARM }}
+            ${{ env.DEB_ARM }}
+            ${{ env.TARBALL_ARM }}
 
       # The same signed provenance (a Sigstore bundle) as one release
       # file. OpenSSF Scorecard's Signed-Releases check reads release
@@ -410,6 +435,7 @@ jobs:
       - name: Publish the release
         run: |
           files=("$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"
+            "$APPIMAGE_ARM" "$DEB_ARM" "$DBGSYM_ARM" "$TARBALL_ARM" "$DEBUG_TARBALL_ARM"
             "$SBOM" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
