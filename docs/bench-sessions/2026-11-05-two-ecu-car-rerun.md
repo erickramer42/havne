@@ -114,8 +114,8 @@ dropped (2,070 to 2,239 frames).
    receive filter (`CRA`), the monitor command (`AT MA`, `STMA`) or the
    segmentation setting (`STCSEGR`). Not the splitter, not the bus. A
    listening session through it hears Single Frame replies only. `AT
-   CFC0` stays a listener's setting, so the listener never answers
-   another tester's First Frame with a Flow Control of its own.
+   CFC0` stays a listener's setting: a session that asks nothing needs
+   no flow control.
 
 ## Against the BENCH prep list
 

@@ -17,14 +17,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A pinch on Live's chart, or the mouse wheel over it, steps its window: fingers spreading show less time, closing show more.
 - Live's chart and the Recordings viewer's take the page at a press of **Chart**, a double-click or `F`, and give it back the same way; on a phone on its side they start that way. The viewer then shows the values at the cursor beside its chart once you tap one; until then the chart has the width. A handle below Live's list, and one below the viewer's chart, sets how much of the page each takes, kept between runs.
 - The Log page's frame table copies the rows you pick: a tap selects a row (a shift-click a run of them), and **Copy** or `Ctrl+C` (`Cmd+C` on a Mac) puts them on the clipboard as tab-separated lines with a header, ready for notes or a spreadsheet. The selection stays on its frames while new ones arrive.
-- With `ECUIO_SUR_LOG_FRAMES=1`, the J2534 session log gives each driver read that brought messages, and each call for the rest of a batch, its own line: the timeout asked, the messages asked for and returned, the status, and how long the driver held it ([docs/j2534.md](docs/j2534.md)).
+- With `ECUIO_SUR_LOG_FRAMES=1`, the J2534 session log gives each driver read that brought messages its own line: the timeout asked, the messages asked for and returned, the status, and how long the driver held it ([docs/j2534.md](docs/j2534.md)).
 
 ### Changed
 
 - On a phone, upright or on its side, and in a window as small, pages are denser: smaller margins, spacing, buttons, toolbar and sidebar, and shorter rows on Live, so more of each page fits at 100 %.
 - On a phone upright, the Dashboard's tachometer and speedometer sit side by side, so the whole Dashboard fits the screen; they stack only on a narrower page.
 - Paused, the Log page's frame table says where new frames still go: the recording keeps every one when Record is on; otherwise the table leaves them out. Live and the Dashboard carry on either way.
-- An ELM327 session that only listens (`?profile=raw`) turns the adapter's flow control off (`AT CFC0`), so it never answers another tester's first frame with one of its own. Through an OBDLink MX+ it still hears only replies that fit in one frame: the adapter's monitor misses the rest of a longer one.
+- An ELM327 session that only listens (`?profile=raw`) needs no flow control, so it turns the adapter's off (`AT CFC0`). Through an OBDLink MX+ it still hears only replies that fit in one frame: the adapter's monitor misses the rest of a longer one.
 
 ### Fixed
 

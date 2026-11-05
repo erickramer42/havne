@@ -82,16 +82,18 @@ or imported in bulk, and computed signals such as boost
     [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)), and
     channels and filters derived from the profile, so a bare
     `j2534://` streams ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
-    A read asks the vendor for one message first, so it ends at its
-    reply, never asks it to wait 0 ms (the VX holds such a read about
-    50 ms) and takes the rest of a batch in one more call; the
-    surrogate holds Windows' 1 ms timer, so that call's wait is 1 ms
-    and not 15.6. Through the fake as the VX a reply 4 ms after its
-    request reads in 6.7 to 7.2 ms
+    A read asks the vendor for one message and answers with it, so it
+    ends at its reply; it never asks the vendor to wait 0 ms and makes
+    no call for the rest of a batch (the VX holds a call asked to wait
+    0 ms about 50 ms, and one asked to wait under 10 ms about 10 ms:
+    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
+    The surrogate holds Windows' 1 ms timer, since a vendor's wait for
+    its message is timed in the process's timer steps. Through the fake
+    as the VX a reply 4 ms after its request reads in 5.1 ms
     (`J2534HealthTest.VxAReplyEndsTheReadThatWaitsForIt`; ADR-0042's
-    note of 2026-11-04); with the timer, on the test car 28 % more
-    replies arrived in the same time (ADR-0042's appendix of
-    2026-11-01, [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
+    notes of 2026-11-04 and 2026-11-05); with the timer, on the test
+    car 28 % more replies arrived in the same time (ADR-0042's appendix
+    of 2026-11-01, [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
   - **Requests follow the replies**
     ([ADR-0015](docs/adr/0015-request-engine.md)): one out per channel,
     the next when the reply is in, a 100 ms wait and a 20 ms floor;
@@ -272,9 +274,12 @@ or imported in bulk, and computed signals such as boost
     activity log's summary at the disconnect; `bench_timing` measures
     what the stack adds through each transport against the fakes
     ([docs/testing.md](docs/testing.md#reply-timing-against-the-fakes)).
-    On the test car through the VX, a single PID's reply at P50
-    15.4 ms (the median across the rotation) and a pack of several at
-    73.7 ms ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md));
+    On the test car through the VX, the P50 per request (the median
+    across the rotation) was 24.6 ms packed and 14.3 ms one PID a
+    request, on a read that still made a call for the rest of a batch,
+    which held each reply about 10 ms more and is gone; its removal is
+    yet to be timed on the car
+    ([2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md));
     through the MX+ relayed by the test phone, `01 00` at P50 18 ms and
     P99 114 ms ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md)).
   - **Every release** carries the Windows zip and a zip of its PDBs,
@@ -456,8 +461,8 @@ an issue is resolved it is removed, and its number is not reused.
     them (BENCH prep #19,
     [2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md),
     [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
-    A listening session's setup still sends `AT CFC0`, so it never
-    answers another tester's First Frame. Untried: `STCMM`'s other modes
+    A listening session needs no flow control, so its setup still
+    turns it off (`AT CFC0`). Untried: `STCMM`'s other modes
     (some acknowledge on the bus) and `STM`'s filters. To listen to
     multi-frame replies, use a SocketCAN controller in listen-only mode.
 
@@ -502,16 +507,24 @@ and no ABI change.
   - a session that only listens through the MX+ hears Single Frame
     replies only (Known Issue #41, BENCH prep #19: the re-run,
     [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md),
-    tried `AT CFC0` and six more setups); a listening session's setup
-    sends `AT CFC0`, so it never answers another tester's First Frame;
+    tried `AT CFC0` and six more setups); a listening session needs
+    no flow control, so its setup turns it off (`AT CFC0`);
   - the VX's replies after the surrogate's first read waited about
     50 ms in a read asked with no time left: no read asks the vendor
     to wait 0 ms, and a read ends at its reply instead of its slice
-    (ADR-0042's note of 2026-11-04).
+    (ADR-0042's note of 2026-11-04). On the re-run no reply came 50 ms
+    late (packed, the P50 per request 24.6 ms against 65.5-73.7), and
+    the VX held the call for the rest of a batch about 10 ms, so no
+    read makes that call (ADR-0042's note of 2026-11-05).
 
-**Done when:** the car confirms both fixes (the run sheet's Phase 4
-again, and the VX's latency per request near its time on the bus) and
-the double-tap on the test phone.
+**Done when:** before the tag, a short car check of the read without
+the call for the rest of a batch (the run sheet's Phase 4b: packed,
+the latency per request near 15 ms, and no such call in the frame
+log). The double-tap on the test phone (2026-11-05, the phone skill's
+`ui check doubletap`, 9 of 10): Live's chart both ways and the
+viewer's into its maximized chart pass; the viewer's way back with a
+drifting double tap missed in both checks and in 2 of 9 tries by hand,
+to fix or to record as a known issue.
 
 ### Waiting on a tester: an iPhone download
 

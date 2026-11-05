@@ -56,12 +56,14 @@ a quarter mile off launch control on a warm loop.*
   many replies a minute, and holding Windows' 1 ms timer 28 % more.
   A second controller listening on the same bus timed the Pass-Thru:
   a segmented reply is whole on the wire 14 ms after its request, and
-  most reach Havne about 52 ms after that, held in Havne's own read of
-  the adapter, not by the adapter. Each session is written up with its
-  scrubbed logs
+  Havne's own read of the adapter, not the adapter, held most about
+  52 ms more. With the read fixed, the latency per request fell from
+  65.5-73.7 ms to 24.6 ms on the next run. Each session is written up
+  with its scrubbed logs
   ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
   [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md),
-  [2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md)).
+  [2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md),
+  [2026-11-05](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Requests follow the replies.** One request per ECU at a time; the
   supported-PID probe drops only what the ECU says it lacks, never on
   silence. A clear asks first, saves the report, and asks once more

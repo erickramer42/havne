@@ -805,10 +805,10 @@ Control either: it misses every frame that follows another within
 about 1 ms. The bus carried them (a SocketCAN listener on the same
 splitter, 2026-11-04) and the adapter counted no CAN error. So the FRPM
 reading above isn't the cause, and the fake's model (Consecutive Frames
-dropped under `AT CFC1` only) is wrong for this adapter. A listening
-session's setup keeps `AT CFC0`, so the listener never answers another
-tester's First Frame; through the MX+ it hears Single Frame replies
-only (STATUS.md's Known Issue #41).
+dropped under `AT CFC1` only) was wrong for this adapter: the fake's
+`monitor_eats_cfs` drops them under either setting. A listening session
+needs no flow control, so its setup keeps `AT CFC0`; through the MX+ it
+hears Single Frame replies only (STATUS.md's Known Issue #41).
 
 ## Appendix: 2026-10-27, WiFi over TCP
 
