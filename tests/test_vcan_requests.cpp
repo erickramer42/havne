@@ -38,6 +38,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <utility>
 #include <set>
 #include <string>
 #include <thread>
@@ -321,6 +322,58 @@ TEST_F(SocketCanRequestTest, IdentificationReadsTheVinAcrossFrames)
     EXPECT_EQ(id.list[0].request[1], 0x02);
     EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_ANSWERED);
     EXPECT_STREQ(id.list[0].text, fake_ecu::kVin);
+}
+
+/* Two ECUs on the bus in one session: the engine ECU's 1E1C from 0x7E8,
+ * and a module's D801 (fake_ecu's table) from a second ECU on
+ * 0x7E1/0x7E9, each through its own ISO-TP socket; each reply comes
+ * from its own ECU */
+TEST_F(SocketCanRequestTest, TwoEcusInOneSessionAnswerEachItsOwn)
+{
+    struct Module {
+        Module() { EXPECT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12")); }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    struct Replies {
+        std::mutex mutex;
+        std::vector<std::pair<uint32_t, std::vector<uint8_t>>> got;
+        static void cb(const ecuio_frame_t* f, void* user)
+        {
+            auto* r = static_cast<Replies*>(user);
+            std::lock_guard<std::mutex> lock(r->mutex);
+            r->got.emplace_back(
+                f->arbitration_id,
+                std::vector<uint8_t>(f->data, f->data + f->data_length));
+        }
+    } replies;
+    vcan_bus::Ecu engine;
+    vcan_bus::Ecu second(-1, vcan_bus::interface_name(), 0x7E1, 0x7E9);
+    ASSERT_TRUE(engine.ok() && second.ok());
+    Session s("?profile=uds-generic&did=1E1C,7E9:D801&identify=0&diagnose=0",
+              Replies::cb, &replies);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const std::vector<uint8_t> want_engine = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    const std::vector<uint8_t> want_module = {0x62, 0xD8, 0x01, 0x00, 0x12};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> lock(replies.mutex);
+            int a = 0;
+            int b = 0;
+            for (const auto& r : replies.got) {
+                a += r.first == 0x7E8u && r.second == want_engine;
+                b += r.first == 0x7E9u && r.second == want_module;
+            }
+            return a >= 3 && b >= 3;
+        },
+        5000ms))
+        << "three of each ECU's own replies";
+    std::lock_guard<std::mutex> lock(replies.mutex);
+    for (const auto& r : replies.got) {
+        EXPECT_TRUE((r.first == 0x7E8u && r.second == want_engine) ||
+                    (r.first == 0x7E9u && r.second == want_module))
+            << "a reply on 0x" << std::hex << r.first;
+    }
+    EXPECT_GT(second.answered(), 0u);
 }
 
 /* A frame of up to 8 bytes onto the bus from a raw socket */

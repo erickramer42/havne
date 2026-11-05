@@ -1,8 +1,9 @@
 // File/layer: tests/vcan_bus.h | test-only, C++17, Qt-free, Linux only
 //             (SocketCAN); header-only
 // Testing: HARNESS, the simulated bus for SocketCAN: fake_ecu.h's engine
-//          ECU answering on a virtual CAN interface through the kernel's
-//          ISO-TP, and a recording's replies played onto it.
+//          ECU (or a second one, a module of its table) answering on a
+//          virtual CAN interface through the kernel's ISO-TP, and a
+//          recording's replies played onto it.
 //          test_vcan.cpp checks it on its own
 //
 // The kernel does the ISO 15765-2 framing (the can-isotp module): Single
@@ -173,17 +174,22 @@ inline long read_for(int fd, void* buf, size_t cap, int timeout_ms)
     return static_cast<long>(::read(fd, buf, cap));
 }
 
-/* The engine ECU on the bus: fake_ecu::answer() behind an ISO-TP socket
- * for physical requests (0x7E0, replies on 0x7E8) and one for
- * functional ones (0x7DF). A functional request's reply goes out on the
- * functional socket, whose long replies take their flow control on
- * 0x7DF, as a Linux ISO-TP tester sending on 0x7DF gives it. */
+/* An ECU on the bus, the engine ECU by default: fake_ecu::answer_for()
+ * behind an ISO-TP socket for physical requests (0x7E0, replies on
+ * 0x7E8) and, for the engine ECU only, one for functional ones (0x7DF).
+ * A functional request's reply goes out on the functional socket, whose
+ * long replies take their flow control on 0x7DF, as a Linux ISO-TP
+ * tester sending on 0x7DF gives it. Another request and reply ID make a
+ * second ECU, a module when fake_ecu's table names its reply ID. */
 class Ecu {
 public:
-    explicit Ecu(long unsupported_nrc = -1, const char* ifname = interface_name())
-        : unsupported_nrc_(unsupported_nrc),
-          physical_(open_isotp(kReply, kRequest, ifname)),
-          functional_(open_isotp(kReply, kFunctional, ifname)),
+    explicit Ecu(long unsupported_nrc = -1,
+                 const char* ifname = interface_name(),
+                 uint32_t request = kRequest, uint32_t reply = kReply)
+        : unsupported_nrc_(unsupported_nrc), reply_(reply),
+          physical_(open_isotp(reply, request, ifname)),
+          functional_(reply == kReply ? open_isotp(reply, kFunctional, ifname)
+                                      : Fd()),
           stop_(::eventfd(0, EFD_CLOEXEC))
     {
         if (ok()) {
@@ -200,7 +206,11 @@ public:
             thread_.join();
         }
     }
-    bool ok() const { return physical_.ok() && functional_.ok() && stop_.ok(); }
+    bool ok() const
+    {
+        return physical_.ok() && (functional_.ok() || reply_ != kReply) &&
+               stop_.ok();
+    }
     /* Requests answered so far (a refusal counts; silence doesn't) */
     unsigned answered() const { return answered_.load(); }
 
@@ -229,9 +239,9 @@ private:
                 const int fd = p[i].fd;
                 const ssize_t n = ::read(fd, req.data(), req.size());
                 size_t out_len = 0;
-                if (n > 0
-                    && fake_ecu::answer(req.data(), static_cast<size_t>(n), unsupported_nrc_,
-                                        reply.data(), &out_len)) {
+                if (n > 0 && fake_ecu::answer_for(
+                                 reply_, req.data(), static_cast<size_t>(n),
+                                 unsupported_nrc_, reply.data(), &out_len)) {
                     if (::write(fd, reply.data(), out_len) == static_cast<ssize_t>(out_len)) {
                         answered_.fetch_add(1);
                     }
@@ -241,6 +251,7 @@ private:
     }
 
     long unsupported_nrc_;
+    uint32_t reply_;
     Fd physical_;
     Fd functional_;
     Fd stop_;

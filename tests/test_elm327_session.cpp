@@ -1131,6 +1131,46 @@ TEST_F(Elm327SessionTest, EachChannelIsAskedUnderItsOwnHeader)
     }
 }
 
+/* Two ECUs in one session answer each its own: the engine ECU's 1E1C
+ * on 0x7E8, a module's (fake_ecu's table) D801 on 0x7E9, through one
+ * adapter taking turns */
+TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
+{
+    struct Module {
+        Module() { EXPECT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12")); }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    Session s;
+    ASSERT_EQ(
+        s.create(uri(
+            "?profile=uds-generic&did=1E1C,7E9:D801&identify=0&diagnose=0")),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> engine = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    const std::vector<uint8_t> mod = {0x62, 0xD8, 0x01, 0x00, 0x12};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int a = 0;
+            int b = 0;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a += f.id == 0x7E8u && f.data == engine;
+                b += f.id == 0x7E9u && f.data == mod;
+            }
+            return a >= 3 && b >= 3;
+        },
+        5000))
+        << "three of each ECU's own replies";
+    std::lock_guard<std::mutex> g(s.cap.m);
+    for (const Capture::Frame& f : s.cap.frames) {
+        EXPECT_TRUE((f.id == 0x7E8u && f.data == engine) ||
+                    (f.id == 0x7E9u && f.data == mod))
+            << "a reply on 0x" << std::hex << f.id << " of " << std::dec
+            << f.data.size() << " bytes";
+    }
+}
+
 /* 29-bit channels: protocol 7, the priority and header in two commands,
  * the 29-bit receive filter, and frames flagged EXTENDED */
 TEST_F(Elm327SessionTest, TwentyNineBitChannelsUseTheirOwnProtocol)
