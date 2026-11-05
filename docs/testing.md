@@ -825,14 +825,16 @@ requests and quiet states
   unverified against real hardware: 29-bit addressing, a second car,
   and any other vendor's J2534 statuses (the VX never returned
   `ERR_TIMEOUT`).
-- **The request engine has met two ECUs, one per session.** On the car
-  (2026-10-25) it paced Service 01 at about 26 requests a second with
-  every reply but one in 7,196 in before the next request, and Service
-  0x22 at about 13; it asked each of the car's two ECUs in a session of
-  its own ([2026-11-01-vehicle](bench-sessions/2026-11-01-vehicle.md)).
-  Two channels at once, a "response pending" reply and a late negative
-  reply are tested against the fake only: each session asked one ECU,
-  and the car sent no `78` and refused only in step.
+- **The request engine has met two ECUs, together in one session.** On
+  the car (2026-10-25) it paced Service 01 at about 26 requests a second
+  with every reply but one in 7,196 in before the next request, and
+  Service 0x22 at about 13. Both of the car's ECUs in one session, a
+  DID each, ran through the VX (each ECU's requests waiting only for
+  their own replies, about 32 a second each) and through the MX+ (the
+  two taking turns, about 19 a second each)
+  ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md)).
+  A "response pending" reply and a late negative reply are tested
+  against the fake only: the car sent no `78` and refused only in step.
 - **The probe has met one car.** It walked six bitmaps there and
   dropped only `01 5C`, as the first session's bitmaps predicted, and
   a cold connect dropped nothing. A car that refuses the bitmap
@@ -843,9 +845,18 @@ requests and quiet states
   ([2026-11-02-vehicle](bench-sessions/2026-11-02-vehicle.md)) and a
   sweep of the engine ECU's 64,509 remaining DIDs through the MX+
   ([2026-11-01-android](bench-sessions/2026-11-01-android.md)) ran on
-  the car; every refusal was `7F 22 31`, and the second ECU refused
-  F190 the same way. Other refusal codes (`11`, `33`) and an `<ecu>:`
-  prefix on a second ECU's values are tested against the fake only.
+  the car; every refusal was `7F 22 31`. The second ECU refused F190
+  the same way, and its scan of `F180-F1FF` and `D800-DFFF` through the
+  VX found 16 DIDs, its values named by their `0x7E9` prefix
+  ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md)).
+  Other refusal codes (`11`, `33`) are tested against the fake only.
+- **Listening to another tester has met one adapter, for Single Frames
+  only.** The MX+'s `AT MA` beside the VX on a Y-splitter passed the
+  engine ECU's replies, each matching the VX's in order and bytes, but
+  printed a multi-frame reply's First Frame and none of its
+  Consecutive Frames under the setup's `AT CAF1` and `AT CFC1`
+  ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md),
+  BENCH prep #19). The fake ELM327's monitor prints every frame.
 - **Identification has met one ECU.** On the car every item settled
   (four Service 09 items and two DIDs answered, seven DIDs refused),
   and its replies of up to 27 bytes arrived whole. An ECU with several
