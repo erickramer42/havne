@@ -15,8 +15,8 @@
 //          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
 //          The trouble codes' titles and parse (DtcTitleTest, ADR-0044).
 //          The inspection verdict over reports (InspectionTest, ADR-0045).
-//          The simulated ECU's answers, URI and faults (SimEcuTest,
-//          ADR-0046).
+//          The simulated ECU's answers, URI and faults, its second
+//          module's too (SimEcuTest, ADR-0046).
 //          End-to-end pacing is HARNESS (stream and
 //          health tests) and BENCH (VX), not this file.
 
@@ -5216,6 +5216,116 @@ TEST(SimEcuTest, FaultsBreakEveryNthReplyOfItsKind)
     EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::silent);
     EXPECT_EQ(e.singles, 6u);
     EXPECT_EQ(e.segmented, 3u);
+}
+
+// pending: a fault like the others, every Nth reply of its kind, never a
+// bitmap; the second module's replies counted apart from the engine
+// ECU's, so its period is its own
+TEST(SimEcuTest, PendingIsEveryNthReplyAndEachModuleCountsItsOwn)
+{
+    ecuio_sim_config c;
+    char why[256] = {};
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?faults=pending:3,late:5", &c, why,
+                                  sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_EQ(c.faults.pending, 3u);
+    EXPECT_EQ(c.faults.late, 5u);
+    EXPECT_EQ(
+        ecuio_sim_parse_uri("mock://sim?faults=pending:0", &c, why, sizeof why),
+        ecuio_sim_uri_result::bad);
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    e.config.faults.pending = 3;
+    const uint8_t pid[2] = {0x01, 0x0C};
+    const uint8_t bitmap[2] = {0x01, 0x20};
+    const uint8_t did[3] = {0x22, 0xD1, 0x00};
+    std::vector<ecuio_sim_fate> engine, module;
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(ecuio_sim_next_fate(e, bitmap, 2, 6), ecuio_sim_fate::intact);
+        engine.push_back(ecuio_sim_next_fate(e, pid, 2, 4));
+    }
+    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    const std::vector<ecuio_sim_fate> third = {ecuio_sim_fate::intact,
+                                               ecuio_sim_fate::intact,
+                                               ecuio_sim_fate::pending};
+    EXPECT_EQ(engine, third);
+    EXPECT_EQ(module, third) << "the module's own third reply, not the "
+                                "engine ECU's sixth";
+    EXPECT_EQ(e.singles, 3u);
+    EXPECT_EQ(e.module_singles, 3u);
+}
+
+namespace {
+
+std::vector<uint8_t> module_ask(std::initializer_list<uint8_t> req,
+                                bool functional = false)
+{
+    const std::vector<uint8_t> q(req);
+    uint8_t out[ECUIO_SIM_REPLY_MAX];
+    const uint32_t n = ecuio_sim_module_answer(
+        q.data(), static_cast<uint32_t>(q.size()), functional, out);
+    return std::vector<uint8_t>(out, out + n);
+}
+
+} // namespace
+
+// modules=2's module: Service 22 from its own made-up DIDs, 7F 22 31 for
+// one it lacks, 7F <service> 11 for any other service, and a functional
+// request's refusals unsaid; only mock:// takes modules, 1 or 2
+TEST(SimEcuTest, TheSecondModuleAnswersItsOwnDidsAndRefusesTheRest)
+{
+    EXPECT_EQ(module_ask({0x22, 0xD1, 0x00}),
+              (std::vector<uint8_t>{0x62, 0xD1, 0x00, 0x82}));
+    EXPECT_EQ(module_ask({0x22, 0xD1, 0x01}),
+              (std::vector<uint8_t>{0x62, 0xD1, 0x01, 0x03}));
+    const std::vector<uint8_t> name = module_ask({0x22, 0xD1, 0x02});
+    ASSERT_EQ(name.size(), 15u) << "past a Single Frame";
+    EXPECT_EQ(std::string(name.begin() + 3, name.end()), "TCM-HavneSim");
+    EXPECT_EQ(module_ask({0x22, 0xF1, 0x90}),
+              (std::vector<uint8_t>{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(module_ask({0x22, 0xD1}),
+              (std::vector<uint8_t>{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(module_ask({0x01, 0x0C}),
+              (std::vector<uint8_t>{0x7F, 0x01, 0x11}));
+    EXPECT_EQ(module_ask({0x09, 0x02}),
+              (std::vector<uint8_t>{0x7F, 0x09, 0x11}));
+    EXPECT_EQ(module_ask({0x22, 0xD1, 0x00}, true),
+              (std::vector<uint8_t>{0x62, 0xD1, 0x00, 0x82}))
+        << "a positive reply to a functional request is said";
+    EXPECT_TRUE(module_ask({0x01, 0x0C}, true).empty());
+    EXPECT_TRUE(module_ask({0x22, 0xF1, 0x90}, true).empty());
+    EXPECT_TRUE(module_ask({}).empty());
+
+    ecuio_sim_config c;
+    char why[256] = {};
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim", &c, why, sizeof why),
+              ecuio_sim_uri_result::ok);
+    EXPECT_FALSE(c.second_module) << "one ECU by default";
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?modules=2&values=canned", &c, why,
+                                  sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_TRUE(c.second_module);
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?modules=1", &c, why, sizeof why),
+              ecuio_sim_uri_result::ok);
+    EXPECT_FALSE(c.second_module);
+#ifdef _WIN32
+    const std::string replay = "replay://C:/recordings/run?modules=2";
+#else
+    const std::string replay = "replay:///recordings/run?modules=2";
+#endif
+    for (const std::string& bad :
+         {std::string("mock://sim?modules=3"),
+          std::string("mock://sim?modules=0"),
+          std::string("mock://sim?modules="), replay}) {
+        why[0] = '\0';
+        EXPECT_EQ(ecuio_sim_parse_uri(bad.c_str(), &c, why, sizeof why),
+                  ecuio_sim_uri_result::bad)
+            << bad;
+        EXPECT_NE(why[0], '\0') << bad;
+    }
 }
 
 /* ---------- a recording as the simulated ECU (ADR-0046 section 7) ---------- */

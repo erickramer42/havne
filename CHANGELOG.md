@@ -23,6 +23,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A pinch on Live's chart, or the mouse wheel over it, steps its window: fingers spreading show less time, closing show more.
 - Live's chart and the Recordings viewer's take the page at a press of **Chart**, a double-click or `F`, and give it back the same way; on a phone on its side they start that way. The viewer then shows the values at the cursor beside its chart once you tap one; until then the chart has the width. A handle below Live's list, and one below the viewer's chart, sets how much of the page each takes, kept between runs.
 - The Log page's frame table copies the rows you pick: a tap selects a row (a shift-click a run of them), and **Copy** or `Ctrl+C` (`Cmd+C` on a Mac) puts them on the clipboard as tab-separated lines with a header, ready for notes or a spreadsheet. The selection stays on its frames while new ones arrive.
+- `havne-cli sim "mock://sim?modules=2"` adds a second module on 0x7E1/0x7E9 with Service 22 DIDs of its own (D100, D101, D102, made up for the simulated car), so one session can ask two ECUs; the fault `pending:<n>` answers every Nth request `7F <service> 78` first and the reply 300 ms later, and the `sim_stats` and `end` lines count it as `pending` (`ecuio_sim_stats_t.pending`).
 
 ### Fixed
 

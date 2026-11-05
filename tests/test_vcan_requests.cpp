@@ -9,8 +9,10 @@
 //          answering as the ECU (vcan_recording_ecu.h, ADR-0041 section
 //          4), whole and with replies broken at the ISO-TP level.
 //          SimBusTest: the simulated ECU (ADR-0046, core's ISO-TP sender)
-//          answering an obd2 session, a clear and every fault, and
-//          going silent once another node sends on its reply ID. The
+//          answering an obd2 session, a clear and every fault, a
+//          response pending waited for, a uds-generic session asking
+//          both of modules=2's ECUs, and going silent once another node
+//          sends on its reply ID. The
 //          rate's proof after the first echo (ADR-0040 section 3 and its
 //          appendix of 2026-11-02) on vcan0 started unproven. Each
 //          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
@@ -37,6 +39,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -1229,4 +1232,178 @@ TEST_F(SimBusTest, AnotherNodeOnTheReplyIdSilencesItForGood)
     EXPECT_EQ(st.requests, 2u) << "the request after it is still counted";
     EXPECT_EQ(st.replies, 1u);
     EXPECT_EQ(st.flags, ECUIO_SIM_YIELDED);
+}
+
+/* Each signal's newest value or text a session decoded, by def id */
+struct Values {
+    std::mutex mutex;
+    std::map<uint16_t, double> number;
+    std::map<uint16_t, std::string> text;
+    static void on_values(const ecuio_value_batch_t* b, void* user)
+    {
+        auto* self = static_cast<Values*>(user);
+        std::lock_guard<std::mutex> lock(self->mutex);
+        for (uint32_t i = 0; i < b->count; ++i) {
+            const ecuio_value_t& v = b->values[i];
+            if (v.text != nullptr) {
+                self->text[v.signal_id] = std::string(v.text, v.text_len);
+            } else {
+                self->number[v.signal_id] = v.value;
+            }
+        }
+    }
+    void listen(ecuio_session_t* s)
+    {
+        ASSERT_EQ(ecuio_register_values_callback(s, &Values::on_values, this),
+                  ECUIO_OK);
+    }
+    bool has(uint16_t id)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return number.count(id) != 0 || text.count(id) != 0;
+    }
+    double number_of(uint16_t id)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return number.count(id) != 0 ? number[id] : -1.0;
+    }
+    std::string text_of(uint16_t id)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return text.count(id) != 0 ? text[id] : std::string();
+    }
+};
+
+/* modules=2: one uds-generic session asks both ECUs. The engine ECU
+ * (0x7E8, channel 0) refuses F190, so it leaves the rotation; the second
+ * module (0x7E9, channel 1) answers its DIDs, the name a segmented reply
+ * whose Flow Control the tester sends on 0x7E1, the module's request ID */
+TEST_F(SimBusTest, OneSessionAsksBothModules)
+{
+    Sim sim("mock://sim?modules=2");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Values values;
+    Session s("?profile=uds-generic&did=F190:text,7E9:D100:u8,7E9:D101:u8,"
+              "7E9:D102:text");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    values.listen(s.get());
+    const uint16_t vin = ECUIO_UDS_GENERIC_SIG_ID_BASE;
+    const uint16_t fluid = vin + 1, gear = vin + 2, name = vin + 3;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return values.has(fluid) && values.has(gear) && values.has(name);
+        },
+        5000ms))
+        << "requests " << sim.stats().requests << ", replies "
+        << sim.stats().replies << ", unflowed " << sim.stats().unflowed;
+    EXPECT_EQ(values.number_of(fluid), 130.0) << "D100's byte, 0x82";
+    EXPECT_EQ(values.number_of(gear), 3.0);
+    EXPECT_EQ(values.text_of(name), "TCM-HavneSim");
+    EXPECT_FALSE(values.has(vin)) << "the engine ECU has no F190";
+    ecuio_channel_support_t engine{}, module{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &engine) ==
+                       ECUIO_OK &&
+                   engine.dropped == 1;
+        },
+        5000ms))
+        << "dropped " << engine.dropped;
+    EXPECT_EQ(engine.rx_id, 0x7E8u);
+    ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 1, &module), ECUIO_OK);
+    EXPECT_EQ(module.rx_id, 0x7E9u);
+    EXPECT_EQ(module.dropped, 0u);
+    const ecuio_sim_stats_t st = sim.stats();
+    EXPECT_EQ(st.unflowed, 0u);
+    EXPECT_EQ(st.flags, 0u);
+    int32_t e = 0;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* Without modules=2 nothing answers on 0x7E9: the default stays the
+ * engine ECU alone */
+TEST_F(SimBusTest, TheSecondModuleIsOptIn)
+{
+    Sim sim("mock://sim");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Values values;
+    Session s("?profile=uds-generic&did=7E9:D100:u8");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    values.listen(s.get());
+    std::this_thread::sleep_for(1500ms);
+    EXPECT_FALSE(values.has(ECUIO_UDS_GENERIC_SIG_ID_BASE));
+    EXPECT_EQ(sim.stats().replies, 0u);
+}
+
+/* pending: every third reply comes as 7F <service> 78 and then, 300 ms
+ * later, the answer. The request engine waits on (P2*), so no request
+ * times out, the rotation keeps answering, and the replies the 78 put
+ * off show in the session's reply timing as its slowest */
+TEST_F(SimBusTest, AResponsePendingIsWaitedFor)
+{
+    Sim sim("mock://sim?values=canned&faults=pending:3");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Rpms rpms;
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    rpms.listen(s.get());
+    ASSERT_TRUE(wait_for([&] { return sim.stats().pending >= 5; }, 15000ms))
+        << "pending " << sim.stats().pending;
+    const size_t before = rpms.seen().size();
+    EXPECT_TRUE(wait_for([&] { return rpms.seen().size() > before; }, 10000ms))
+        << "the rotation keeps answering";
+    /* the worker publishes timing at most once a second */
+    std::this_thread::sleep_for(1200ms);
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_timing(s.get(), &t, rows.data(),
+                                       static_cast<uint32_t>(rows.size()),
+                                       &count),
+              ECUIO_OK);
+    ASSERT_GT(count, 0u);
+    uint32_t timeouts = 0, answered = 0, slowest_us = 0;
+    for (uint32_t i = 0; i < count && i < rows.size(); ++i) {
+        timeouts += rows[i].timeouts;
+        answered += rows[i].answered;
+        slowest_us = (std::max)(slowest_us, rows[i].latency_max_us);
+    }
+    EXPECT_EQ(timeouts, 0u) << "a 78 extends the wait";
+    EXPECT_GT(answered, 0u);
+    EXPECT_GE(slowest_us, static_cast<uint32_t>(250000))
+        << "a pending reply's latency is the 300 ms after its 78";
+    const ecuio_sim_stats_t st = sim.stats();
+    EXPECT_EQ(st.silent + st.late + st.bad_sequence + st.stalled, 0u);
+    int32_t e = 0;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* pending on the second module: its own replies, counted apart, are put
+ * off and still arrive */
+TEST_F(SimBusTest, TheSecondModulesPendingRepliesArrive)
+{
+    Sim sim("mock://sim?modules=2&faults=pending:2");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Values values;
+    Session s("?profile=uds-generic&did=7E9:D100:u8,7E9:D102:text");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    values.listen(s.get());
+    const uint16_t fluid = ECUIO_UDS_GENERIC_SIG_ID_BASE;
+    const uint16_t name = fluid + 1;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return values.has(fluid) && values.has(name) &&
+                   sim.stats().pending >= 4;
+        },
+        10000ms))
+        << "pending " << sim.stats().pending;
+    EXPECT_EQ(values.number_of(fluid), 130.0);
+    EXPECT_EQ(values.text_of(name), "TCM-HavneSim");
+    ecuio_channel_support_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 0, &module), ECUIO_OK);
+    EXPECT_EQ(module.dropped, 0u) << "a 78 is no refusal";
 }

@@ -1,10 +1,12 @@
 // File/layer: core/include/ecuio/sim.h | C ABI, public interface
-// Testing: UNIT: SimEcuTest (test_obd2): the answers, the URI and the
-//          faults; SimRecordingTest (test_obd2): a recording's answers
-//          and its loading; SimTest (test_socketcan): the contract's
-//          arguments on every platform; HARNESS: SimBusTest (test_vcan,
-//          Linux): a requesting socketcan:// session against it on vcan0,
-//          the mock's car and a recording
+// Testing: UNIT: SimEcuTest (test_obd2): the answers (the second
+//          module's too), the URI and the faults; SimRecordingTest
+//          (test_obd2): a recording's answers and its loading; SimTest
+//          (test_socketcan): the contract's arguments on every platform;
+//          c_abi: the stats' layout, pending's offset; HARNESS: SimBusTest
+//          (test_vcan, Linux): a requesting socketcan:// session against
+//          it on vcan0, the mock's car (both modules, a response pending)
+//          and a recording
 
 #ifndef ECUIO_SIM_H
 #define ECUIO_SIM_H
@@ -25,13 +27,16 @@ extern "C" {
  * runs end to end with no hardware.
  *
  * The URI, one of:
- *   mock://<label>[?values=drive|canned][&vin=<VIN>][&faults=<f>:<n>[,...]]
+ *   mock://<label>[?values=drive|canned][&modules=1|2][&vin=<VIN>]
+ *          [&faults=<f>:<n>[,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[,...]]
  * mock://, the mock's car. values: drive (the default) answers Service 01
  * from the mock's drive cycle, canned the fakes' one reading per linear
- * J1979 PID. vin: what Service 09 item 02 answers, a made-up one by
- * default.
+ * J1979 PID. modules=2: a second module too, on 0x7E1 answering as
+ * 0x7E9, with a few made-up Service 22 DIDs of its own (D100, D101,
+ * D102) and every other request refused. vin: what Service 09 item 02
+ * answers, a made-up one by default.
  * replay://, a recording (its folder or its frames.csv): each request
  * gets the engine ECU's reply the recording held for it at the simulated
  * ECU's time since create, the car's own bitmaps, identification and
@@ -41,8 +46,9 @@ extern "C" {
  * it alone, in the seconds the recording viewer and havne-cli view show
  * (at most three decimals), its first row at the ECU's start. vin: what
  * 09 02 answers instead of the recording's.
- * faults, both: silent, late, bad_sequence and stalled, each every nth
- * reply (1-10000), the bitmaps never broken.
+ * faults, both: silent, late, pending (7F <service> 78 first, the reply
+ * 300 ms later), bad_sequence and stalled, each every nth reply
+ * (1-10000) of each module, the bitmaps never broken.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.
@@ -53,8 +59,9 @@ typedef struct ecuio_sim ecuio_sim_t;
 #define ECUIO_SIM_FAILED  0x00000001u   /* the bus failed (the interface
                                            went down or away): no longer
                                            answering */
-#define ECUIO_SIM_YIELDED 0x00000002u   /* another node sent on 0x7E8, the
-                                           reply ID: silent from then on,
+#define ECUIO_SIM_YIELDED 0x00000002u   /* another node sent on 0x7E8 (or,
+                                           with modules=2, 0x7E9), a reply
+                                           ID: silent from then on,
                                            requests only counted */
 
 /* ecuio_sim_create_with's options */
@@ -77,15 +84,21 @@ typedef struct ecuio_sim_stats {
                                 Control never came for */
     uint64_t clears;         /* Service 04s obeyed */
     uint32_t flags;          /* ECUIO_SIM_* */
-    uint32_t reserved[5];    /* zero; ABI growth space */
+    uint32_t reserved0;      /* zero */
+    uint64_t pending;        /* replies sent after a 7F <service> 78 */
+    uint32_t reserved[2];    /* zero; ABI growth space */
 } ecuio_sim_stats_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_sim_stats_t) == 96, "ecuio_sim_stats_t size is ABI");
 static_assert(offsetof(ecuio_sim_stats_t, flags) == 72, "sim stats flags offset is ABI");
+static_assert(offsetof(ecuio_sim_stats_t, pending) == 80,
+              "sim stats pending offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_sim_stats_t) == 96, "ecuio_sim_stats_t size is ABI");
 _Static_assert(offsetof(ecuio_sim_stats_t, flags) == 72, "sim stats flags offset is ABI");
+_Static_assert(offsetof(ecuio_sim_stats_t, pending) == 80,
+               "sim stats pending offset is ABI");
 #endif
 
 /*

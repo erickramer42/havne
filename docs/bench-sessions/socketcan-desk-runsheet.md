@@ -4,7 +4,8 @@ A real CAN controller under Linux's SocketCAN, on a desk bus with the
 OBDX Pro VX as the other node: no car. It settles BENCH prep #26
 (listening) and #32 (sending), with #32 whether ADR-0040 section 2
 keeps its one-shot rule, #33 (the simulated ECU read over real
-wire), and one reply's time on two clocks (ADR-0049 section 5). Results
+wire), one reply's time on two clocks (ADR-0049 section 5), and #17
+(response pending) for the VX in its ELM mode. Results
 go into a dated session sheet,
 `docs/bench-sessions/<date>-socketcan-desk.md`.
 
@@ -170,9 +171,95 @@ listen-only), so `candump` is the bus's side.
       segmented reply on the test car,
       [2026-11-03-socketcan-car](2026-11-03-socketcan-car.md))
 
+## Phase 5: response pending (BENCH prep #17)
+
+`faults=pending:3` makes every third reply of each kind (single-frame
+and segmented counted apart, the bitmaps never) go out as
+`7F <service> 78` at once and the reply itself 300 ms later, whole
+([ADR-0046](../adr/0046-simulated-ecu.md)'s appendix of 2026-11-04).
+300 ms is past the request engine's 100 ms wait and the ELM327
+setup's `AT ST 19` (100 ms), and well inside P2* (5 s), so only a
+tester that keeps waiting after the 78 gets the answer.
+
+**What a tester must do with a 78:** a "response pending" negative
+reply extends the request's wait to P2*, 5 s ([ADR-0015](../adr/0015-request-engine.md)
+section 1, "Pacing": 5.05 s with the adapter's margin); pending is a
+state on the way, not an outcome. On ELM327, the `7F xx 78` line
+reaches the engine as on J2534 and extends its wait; whether the
+adapter goes on listening for the final reply is the adapter's
+([ADR-0026](../adr/0026-elm327-transport.md) section 3 and its open
+question "response pending"). An STN does by default (parameter 2A,
+bit 2); a plain ELM327's datasheet doesn't say, and neither does the
+OBDX's manual. A Service 01 request carries the response-count digit
+(`elm327_response_count`), so an adapter that doesn't process the 78
+takes its line
+as the one reply asked for and returns to the prompt: the final reply
+arrives while nobody listens (the wire log's `unasked:` line before the
+next command), and the engine waits out its 5.05 s and asks again.
+
+The VX runs one link at a time: its J2534 session, then its ELM mode
+on its USB serial port (`OBDX Pro Serial (COM4)` on the dev machine,
+[2026-10-27-elm327-bench-2](2026-10-27-elm327-bench-2.md)), each
+closed before the next, with the OBDX vendor app closed. The sim's
+`canned` values answer every PID its bitmaps list, so with
+identification and diagnostics off nothing is refused. Each tester
+gets a `sim` run of its own, so the counts are its alone.
+
+1. `can0` as in Phase 3:
+   `sudo ip link set can0 down`, then
+   `sudo ip link set can0 up type can bitrate 500000 restart-ms 0 listen-only off`
+2. In WSL: `candump -t A -e can0 > pending-j2534.log` and
+   `havne-cli sim "mock://sim?values=canned&faults=pending:3" --on can0 --desk-bus --seconds 45 < /dev/null`
+3. On Windows (cmd), the VX through J2534, the frames logged:
+   `set ECUIO_SUR_LOG_FRAMES=1`, then
+   `havne-cli stream "j2534://OBDX Pro - VX?identify=0&diagnose=0" --seconds 30 < NUL`
+   (`obd2`; its `timing` lines every 10 s and at the end)
+4. Once `sim` has ended, step 2 again with `pending-elm.log`, then the
+   VX in ELM mode, its wire log holding each exchange:
+   `havne-cli stream "elm327://COM4?profile=obd2&identify=0&diagnose=0" --seconds 30 < NUL`
+
+For each tester:
+
+- [ ] `sim`'s `end` line: `pending` rose (about a third of the replies
+      that aren't bitmaps), `refused` 0, `unflowed` 0, `yielded` false
+- [ ] The stream's last `timing` lines: `timeouts` 0 and `refused` 0 on
+      every row, and the rows' highest `latency_max_us` about 300,000
+      or more (the reply 300 ms after its 78, plus the adapter's
+      delivery)
+- [ ] The rotation kept answering: each row's `answered` rises from one
+      `timing` line to the next, and the `health` lines report no link
+      problem
+- [ ] `candump`: each `7F xx 78` from 0x7E8 followed about 300 ms
+      later by its reply, and the VX's next request only after that
+      reply
+
+The ELM-mode run alone:
+
+- [ ] The wire log (`ecuio-elm327.<stamp>.log` in `%TEMP%`, the
+      newest): whether the `7F 01 78` line is printed (ADR-0026's first
+      sub-question), and whether the final reply comes in the same read,
+      before the prompt (the VX goes on listening), or after it as an
+      `unasked:` line (it doesn't)
+- [ ] The stream's `session` line: no `pending_off` key (it is there
+      only for an STN whose parameter 2A has the processing off; the VX
+      isn't an STN)
+
+**What it decides:** BENCH prep #17 for the VX in ELM mode. CONFIRMED
+when every pending request completes in the same read: no timeouts,
+the slowest replies about 300 ms, no `unasked:` reply. Answered the
+other way when the 78's request times out (`timeouts` about the
+`pending` count, latencies near 5 s) and its reply comes unasked:
+the VX then needs the engine to ask again without the count digit
+after a 78, an ADR-0026 amendment. The J2534 run is the control: the
+same bus and sim, a transport that hands every frame up, so if it
+times out too, the fault is the bus's or the sim's, not the VX's ELM
+mode. A plain ELM327 and an STN on this bus stay open.
+
 ## After the run
 
 - `sudo ip link set can0 down`; `usbipd detach --busid <id>` when done.
 - `vehicle.sh pull socketcan-desk`, then the session sheet with the
   candump lines (no identification is on this bus), Havne's output and
-  the counters; BENCH prep #26 and #32 from it.
+  the counters; BENCH prep #26 and #32 from it, and #17 from Phase 5
+  (the ELM-mode wire log's exchanges among the evidence: `vehicle.sh
+  pull` takes the `ecuio-elm327.*.log` files too).
