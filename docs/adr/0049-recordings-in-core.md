@@ -523,8 +523,10 @@ How it works:
   time is when its adapter delivered it to core, so two recordings
   through different adapters differ by their delivery delays as well:
   a VX's segmented reply reaches the worker about 52 ms after it
-  crossed the bus
-  ([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md)).
+  crossed the bus on the test car
+  ([2026-11-03-socketcan-car](../bench-sessions/2026-11-03-socketcan-car.md))
+  and about 10 ms after on the desk bus
+  ([2026-11-04-socketcan-desk-utc](../bench-sessions/2026-11-04-socketcan-desk-utc.md)).
 - **Untrusted input:** a recording comes from anywhere. Every row is
   bounds-checked, a bad row is refused with its line number (ADR-0023's
   rule), never its path, and every parser of a recording gets a fuzz

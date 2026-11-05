@@ -154,8 +154,9 @@ listen-only), so `candump` is the bus's side.
 2. In WSL: `candump -t a -L can0 > desk-bus.log` (each frame's absolute
    time from the kernel)
 3. WSL's clock against Windows', before and after the run, in WSL:
-   `date +%s.%N; powershell.exe -NoProfile -c "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()"; date +%s.%N`
-   (the Windows reading falls between the two WSL ones)
+   `date +%s.%N; powershell.exe -NoProfile -c "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()" < /dev/null; date +%s.%N`
+   (the Windows reading falls between the two WSL ones; PowerShell
+   reads standard input, so in a script it gets `/dev/null`)
 4. On Windows: `havne-cli stream "j2534://OBDX Pro - VX" --record <folder> --seconds 60 < NUL`
    (`obd2`)
 
