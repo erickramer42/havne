@@ -28,7 +28,10 @@
 //          (CliViewTest); info (ADR-0049 section 6): golden runs on
 //          tests/fixtures/recording/findings, the replay fixture and a
 //          folder with no frames.csv, its usage errors (CliUsageTest), its
-//          lines UNIT (CliInfoTest);
+//          lines UNIT (CliInfoTest); signals check and stream --signals
+//          (ADR-0051): golden runs on tests/fixtures/signals/, their usage
+//          errors (CliUsageTest), the lines UNIT (CliSignalFileTest), sim
+//          --signals on vcan0 by hand;
 //          main's catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
@@ -44,6 +47,7 @@
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "scan_line.h"
+#include "signal_file_lines.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
 
@@ -684,10 +688,19 @@ void poll_absent(Output& out, ecuio_session_t* session,
     write_line(out, l);
 }
 
+// The session's signals: each def's id, name, unit, decimals and group,
+// then for an enum "enum":true and its "labels" ({"<raw>": label}, as a
+// signal file's "values"), for a computed def "computed":true
 void write_signals(Output& out, const ecuio_signal_set_t* set)
 {
     const uint32_t count = set ? set->count : 0;
-    BigLine b(256 + size_t{count} * 512);
+    size_t bytes = 256 + size_t{count} * 512;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t labels = 0;
+        cli::def_labels(*set, set->defs[i], &labels);
+        bytes += cli::labels_bytes(labels);
+    }
+    BigLine b(bytes);
     cli::Line& l = b.line;
     l.raw("{\"type\":\"signals\"");
     l.key("signals");
@@ -709,11 +722,158 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         l.key("group");
         const char* group = ecuio_signal_group_name(d.group);
         l.string(group, std::strlen(group));
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            l.key("computed");
+            l.raw("true");
+        } else if (d.kind == ECUIO_VALUE_ENUM) {
+            uint32_t n = 0;
+            const ecuio_enum_entry_t* labels = cli::def_labels(*set, d, &n);
+            l.key("enum");
+            l.raw("true");
+            l.key("labels");
+            cli::labels_object(l, labels, n);
+        }
         l.ch('}');
     }
     l.ch(']');
     l.ch('}');
     write_line(out, l);
+}
+
+// A signal file loaded for the process's life: the profile it registers
+// keeps its set, and a session's close can outlive the command's return
+// (an interrupt while it hangs), so it is never freed
+ecuio_signal_file_t* g_signal_file = nullptr;
+
+// Reads and loads a signal file. On failure, the status and why for an
+// error line, never the path: the reason it can't be read, or core's
+// words, which name the line and column
+ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
+                                std::string* why)
+{
+    *file = nullptr;
+    std::string bytes;
+    FILE* f = nullptr;
+#ifdef _WIN32
+    int e = fopen_s(&f, path, "rb");
+#else
+    f = std::fopen(path, "rb");
+    int e = errno;
+#endif
+    bool failed = f == nullptr;
+    if (f != nullptr) {
+        // Up to one byte past the loader's bound, so it refuses a larger
+        // file in its own words
+        char chunk[64 * 1024];
+        size_t n = 0;
+        while (bytes.size() <= ECUIO_SIGNAL_FILE_MAX_BYTES &&
+               (n = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
+            bytes.append(chunk, n);
+        }
+        failed = std::ferror(f) != 0;
+        e = errno;
+        std::fclose(f);
+        if (bytes.size() > ECUIO_SIGNAL_FILE_MAX_BYTES + 1) {
+            bytes.resize(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+        }
+    }
+    if (failed) {
+        // In words of its own: strerror isn't thread-safe, and its
+        // words differ by platform
+        *why = e == ENOENT   ? "the signal file can't be read: there's no "
+                               "such file"
+               : e == EACCES ? "the signal file can't be read: permission "
+                               "denied"
+                             : "the signal file can't be read: error " +
+                                   std::to_string(e);
+        return ECUIO_ERR_LOAD_FAILED;
+    }
+    const ecuio_status_t st =
+        ecuio_signal_file_load(bytes.data(), bytes.size(), file);
+    if (st != ECUIO_OK) {
+        *why = ecuio_last_error_detail();
+    }
+    return st;
+}
+
+// --signals for stream and sim: loads the file, registers its profile
+// for the process's life (g_signal_file) and gives the URI to open, the
+// file's profile added when it selects none. -1 to go on; else the exit
+// code: a file that can't be read or is refused is start and an error
+// line (3), a URI that selects another profile a usage error (2)
+int use_signal_file(const char* path, const char* uri, std::string* opened)
+{
+    std::string why;
+    ecuio_signal_file_t* file = nullptr;
+    ecuio_status_t st = load_signal_file(path, &file, &why);
+    if (st == ECUIO_OK) {
+        const char* profile = ecuio_signal_file_profile(file);
+        if (!cli::uri_for_profile(uri, profile, opened)) {
+            std::fprintf(stderr,
+                         "havne-cli: the URI's profile= isn't the signal "
+                         "file's, %s\n",
+                         profile);
+            ecuio_signal_file_free(file);
+            return kExitUsage;
+        }
+        st = ecuio_profile_register(profile, ecuio_signal_file_set(file),
+                                    nullptr);
+        if (st == ECUIO_OK) {
+            g_signal_file = file;
+            return -1;
+        }
+        why = ecuio_last_error_detail();
+        ecuio_signal_file_free(file);
+    }
+    Output out;
+    write_start(out);
+    write_error(out, st, why.c_str());
+    out.flush();
+    return kExitConnect;
+}
+
+// signals check <file> (ADR-0051 section 3): what the loader read, or why
+// it refused the file. start, signal_file, a signal_def line for each of
+// the file's own signals, then a unit line for each unit that never
+// converts; refused, start and an error line, exit 3. No end line (a
+// list, as view's)
+int run_signals_check(const char* path)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_signal_file_t* file = nullptr;
+    const ecuio_status_t st = load_signal_file(path, &file, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    {
+        BigLine b(1024 + size_t{set.channel_count} * 64);
+        cli::signal_file_line(b.line, ecuio_signal_file_name(file),
+                              ecuio_signal_file_profile(file), set);
+        write_line(out, b.line);
+    }
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (cli::own_signal(set.defs[i])) {
+            BigLine b(cli::def_line_bytes(set, set.defs[i]));
+            cli::def_line(b.line, set, set.defs[i]);
+            write_line(out, b.line);
+        }
+    }
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (cli::unit_kept(set.defs[i])) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::unit_line(l, set.defs[i]);
+            write_line(out, l);
+        }
+    }
+    ecuio_signal_file_free(file);
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
 }
 
 // What the callbacks share with the main thread
@@ -816,14 +976,17 @@ void usage(FILE* to)
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
+        "                         [--signals <file>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
+        "                      [--signals <file>]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
+        "       havne-cli signals check <file>\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -844,6 +1007,8 @@ void usage(FILE* to)
         "         (frames.csv, signals.csv, events.log), named for when it\n"
         "         started and the --label; each line typed meanwhile marks "
         "it.\n"
+        "         --signals loads a signal file (stream and sim alike): its\n"
+        "         profile, user.<name>, is the URI's when it names none.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -876,6 +1041,9 @@ void usage(FILE* to)
         "         interval passed --rate-drop times its median (10), ID first\n"
         "         seen over --settle seconds in (2), overflow, broken ISO-TP\n"
         "         sequence, link change and sleep, then a summary.\n"
+        "signals  check reads a signal file as a session would: what it\n"
+        "         holds, each unit that never converts, or why it's "
+        "refused.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -885,7 +1053,8 @@ void usage(FILE* to)
         "\n"
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
-        "      3 the connect, a recording's open or its check failed.\n");
+        "      3 the connect, a recording's open or its check failed, or a\n"
+        "        signal file was refused.\n");
 }
 
 bool parse_count(const char* text, uint64_t& out)
@@ -911,6 +1080,7 @@ struct StreamArgs {
     bool until_scanned = false;
     const char* record = nullptr; // --record's folder
     const char* label = nullptr;
+    const char* signals = nullptr; // --signals' file
 };
 
 // The markers typed into stream --record (ADR-0049 section 4): a thread
@@ -1394,6 +1564,7 @@ struct SimArgs {
     const char* on = nullptr;
     uint64_t seconds = 0;
     bool desk_bus = false; /* --desk-bus: a real controller too */
+    const char* signals = nullptr; /* --signals' file */
 };
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
@@ -2437,6 +2608,8 @@ int run(int argc, char** argv)
                 sim.on = argv[++i];
             } else if (a == "--desk-bus") {
                 sim.desk_bus = true;
+            } else if (a == "--signals" && i + 1 < argc) {
+                sim.signals = argv[++i];
             } else if (a == "--seconds" && i + 1 < argc) {
                 if (!parse_count(argv[++i], sim.seconds)) {
                     std::fprintf(
@@ -2458,7 +2631,23 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
+        std::string opened;
+        if (sim.signals != nullptr) {
+            const int rc = use_signal_file(sim.signals, sim.uri, &opened);
+            if (rc >= 0) {
+                return rc;
+            }
+            sim.uri = opened.c_str();
+        }
         return run_sim(sim);
+    }
+    if (command == "signals") {
+        if (argc != 4 || std::string(argv[2]) != "check") {
+            std::fprintf(stderr, "havne-cli: signals takes check <file>\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        return run_signals_check(argv[3]);
     }
     if (command != "stream") {
         usage(stderr);
@@ -2493,6 +2682,8 @@ int run(int argc, char** argv)
             }
         } else if (a == "--label" && i + 1 < argc) {
             args.label = argv[++i];
+        } else if (a == "--signals" && i + 1 < argc) {
+            args.signals = argv[++i];
         } else if (a.rfind("--", 0) == 0 || args.uri) {
             std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
             usage(stderr);
@@ -2510,6 +2701,14 @@ int run(int argc, char** argv)
         std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
         usage(stderr);
         return kExitUsage;
+    }
+    std::string opened;
+    if (args.signals != nullptr) {
+        const int rc = use_signal_file(args.signals, args.uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        args.uri = opened.c_str();
     }
     return run_stream(args);
 }

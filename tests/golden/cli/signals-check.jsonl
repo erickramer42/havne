@@ -1,0 +1,10 @@
+{"schema": 1, "type": "start"}
+{"base": 130, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}, {"rx": "0x7E9", "tx": "0x7E1"}], "name": "Desk extras", "profile": "user.desk-extras", "signals": 6, "type": "signal_file"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Vehicle", "id": 30000, "kind": "number", "name": "Road Speed", "offset": 0, "order": "be", "rank": 1, "read": {"number": "0D", "service": "01"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "km/h"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Vehicle", "id": 30001, "kind": "enum", "labels": {"0": "Stopped"}, "name": "Standstill", "order": "be", "rank": 0, "read": {"number": "0D", "service": "01"}, "rx": "0x7E8", "signed": false, "type": "signal_def", "unit": ""}
+{"bits": 8, "byte": 0, "decimals": 1, "group": "Air", "id": 30002, "kind": "number", "name": "Throttle Share", "offset": 0, "order": "be", "rank": 0, "read": {"number": "11", "service": "01"}, "rx": "0x7E8", "scale": 0.392157, "signed": false, "type": "signal_def", "unit": "%"}
+{"bits": 16, "byte": 0, "decimals": 0, "group": "Engine", "id": 30003, "kind": "number", "name": "Trans Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "1E1C", "service": "22"}, "rx": "0x7E9", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"byte": 0, "bytes": 0, "decimals": 0, "group": "Diagnostics", "id": 30004, "kind": "text", "name": "TCM Part", "rank": 0, "read": {"number": "F187", "service": "22"}, "rx": "0x7E9", "type": "signal_def", "unit": ""}
+{"decimals": 2, "group": "Engine", "id": 30005, "inputs": [{"id": 7003, "max_age_us": 2000000}], "kind": "computed", "name": "RPM in Thousands", "rank": 0, "type": "signal_def", "unit": "krpm"}
+{"converts": false, "id": 30002, "name": "Throttle Share", "type": "unit", "unit": "%"}
+{"converts": false, "id": 30005, "name": "RPM in Thousands", "type": "unit", "unit": "krpm"}

@@ -1,0 +1,64 @@
+{
+  "havne_signals": 1,
+  "name": "Desk extras",
+  "notes": "Synthetic: written for Havne's tests, read against the replay fixture",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "ecus": [
+    { "id": "pcm", "rx": "7E8" },
+    { "id": "tcm", "rx": "7E9" }
+  ],
+  "signals": [
+    {
+      "key": "road_speed",
+      "name": "Road Speed",
+      "ecu": "pcm",
+      "read": { "service": "01", "number": "0D" },
+      "field": { "byte": 0, "bits": 8 },
+      "unit": "km/h", "decimals": 0, "group": "vehicle", "plot": 1
+    },
+    {
+      "key": "standstill",
+      "name": "Standstill",
+      "ecu": "pcm",
+      "read": { "service": "01", "number": "0D" },
+      "field": { "byte": 0, "bits": 8 },
+      "kind": "enum",
+      "values": { "0": "Stopped" },
+      "group": "vehicle"
+    },
+    {
+      "key": "pedal",
+      "name": "Throttle Share",
+      "ecu": "pcm",
+      "read": { "service": "01", "number": "11" },
+      "field": { "byte": 0 },
+      "scale": 0.392157, "unit": "%", "decimals": 1, "group": "air"
+    },
+    {
+      "key": "trans_temp",
+      "name": "Trans Temp",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "1E1C" },
+      "field": { "byte": 0, "bits": 16 },
+      "offset": -40, "unit": "°C", "group": "engine"
+    },
+    {
+      "key": "tcm_part",
+      "name": "TCM Part",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F187" },
+      "field": { "byte": 0 },
+      "kind": "text",
+      "group": "diagnostics"
+    },
+    {
+      "key": "krpm",
+      "name": "RPM in Thousands",
+      "kind": "computed",
+      "expr": "obd2.rpm / 1000",
+      "max_age": { "obd2.rpm": 2 },
+      "unit": "krpm", "decimals": 2, "group": "engine"
+    }
+  ]
+}

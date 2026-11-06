@@ -262,6 +262,26 @@ inline size_t labels_bytes(uint32_t count)
     return static_cast<size_t>(count) * (16 + 6 * ECUIO_ENUM_LABEL_MAX);
 }
 
+// An enum's labels as an object, {"<raw>": label, ...} in raw order, as a
+// signal file's "values" (ADR-0051)
+inline void labels_object(Line& l, const ecuio_enum_entry_t* labels,
+                          uint32_t count)
+{
+    l.ch('{');
+    for (uint32_t k = 0; k < count; ++k) {
+        char raw[16];
+        std::snprintf(raw, sizeof raw, "%u",
+                      static_cast<unsigned>(labels[k].raw));
+        if (k > 0) {
+            l.ch(',');
+        }
+        l.string(raw, sizeof raw);
+        l.ch(':');
+        l.string(labels[k].label, sizeof labels[k].label);
+    }
+    l.ch('}');
+}
+
 // A signal: {"type":"signal", recording, index, name, unit, text, then
 // for an enum (format 3) "enum":true and "labels" {"<raw>": label} in
 // raw order, as a signal file's "values" (ADR-0051), then decimals, rank,
@@ -289,19 +309,7 @@ inline void signal_line(Line& l, uint32_t recording, uint32_t index,
         l.key("enum");
         l.raw("true");
         l.key("labels");
-        l.ch('{');
-        for (uint32_t k = 0; k < label_count; ++k) {
-            char raw[16];
-            std::snprintf(raw, sizeof raw, "%u",
-                          static_cast<unsigned>(labels[k].raw));
-            if (k > 0) {
-                l.ch(',');
-            }
-            l.string(raw, sizeof raw);
-            l.ch(':');
-            l.string(labels[k].label, sizeof labels[k].label);
-        }
-        l.ch('}');
+        labels_object(l, labels, label_count);
     }
     l.key("decimals");
     l.u64(s.decimal_places);
