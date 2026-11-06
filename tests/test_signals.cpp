@@ -232,9 +232,15 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
                          0xCD,       // Load raw 0xCD -> 80.4%
                          0x84, 0x1D, // MAF raw 0x1D84 = 7556 -> 75.56 g/s
                          0x78,       // Oil raw 120 -> 80 deg C
-                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 -> 0.86
+                         0x14, 0x6E, // Lambda raw 0x6E14 = 28180 -> 0.86
+                         0x25,       // MAP raw 37 -> 37 kPa
+                         0x65,       // Baro raw 101 -> 101 kPa
+                         0x00, 0x00};
 
     for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) {
+            continue; /* boost: no field of its own */
+        }
         double val = 0.0;
         int rc = ecuio_decode_signal(&set->defs[i], frame, ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val);
         EXPECT_EQ(rc, 0) << "decode failed for " << set->defs[i].name << " at index " << i;
@@ -268,12 +274,18 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
         case ECUIO_MOCK_SIG_LAMBDA_ID:
             EXPECT_NEAR(val, 0.86, 0.0001);
             break;
+        case ECUIO_MOCK_SIG_MAP_ID:
+            EXPECT_DOUBLE_EQ(val, 37.0);
+            break;
+        case ECUIO_MOCK_SIG_BARO_ID:
+            EXPECT_DOUBLE_EQ(val, 101.0);
+            break;
         }
     }
 }
 
 TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
-    /* The mock encoder produces 12-byte payloads, but transports may deliver
+    /* The mock encoder produces 16-byte payloads, but transports may deliver
        shorter frames (CAN classic subsets, partial ISO-TP fragments).
        Signals whose bits live past payload_len must be REJECTED, and
        signals within it must still decode. Out-value must stay untouched
@@ -289,6 +301,9 @@ TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
 
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
+        if (def.flags & ECUIO_DEF_FLAG_COMPUTED) {
+            continue; /* no field to bound */
+        }
         double val = -999.0;
         const uint32_t end_bit =
             def.start_byte * 8u + def.bit_offset + def.bit_length;
@@ -531,7 +546,9 @@ TEST(SignalsTest, AnErrorFrameAppliesToNoDef)
     f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
     for (uint32_t i = 0; i < set->count; ++i) {
         f.flags = ECUIO_FRAME_FLAG_FD;
-        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 1)
+        /* A computed def applies to no frame at all (boost) */
+        const int data = (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) ? 0 : 1;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), data)
             << set->defs[i].name;
         f.flags = ECUIO_FRAME_FLAG_ERROR;
         EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 0)
@@ -681,7 +698,9 @@ TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
      * Temperatures are a UTF-8 degree sign, never "degC". */
     const char* const kShared[] = {"RPM", "Vehicle Speed", "Coolant Temp",
                                    "Engine Oil Temp", "Intake Air Temp", "MAF",
-                                   "Throttle Position", "Engine Load"};
+                                   "Throttle Position", "Engine Load",
+                                   "Intake Manifold Pressure",
+                                   "Barometric Pressure"};
     auto find = [](const ecuio_signal_set_t* set, const char* name) -> const ecuio_signal_def_t* {
         for (uint32_t i = 0; i < set->count; ++i) {
             if (std::strcmp(set->defs[i].name, name) == 0) return &set->defs[i];
@@ -715,7 +734,9 @@ TEST(SignalsTest, MockSignalsDeclareTelemetryMessageId)
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     ASSERT_NE(set, nullptr);
     for (uint32_t i = 0; i < set->count; ++i) {
-        EXPECT_EQ(set->defs[i].message_id, 0x0C0u)
+        /* A computed def rides no message (boost): ID 0 */
+        const uint32_t id = (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) ? 0u : 0x0C0u;
+        EXPECT_EQ(set->defs[i].message_id, id)
             << "signal '" << set->defs[i].name << "' not on telemetry ID";
     }
 }

@@ -1038,6 +1038,13 @@ constexpr float kMockOilMin = 15.0f;    /* cold start reads 20 */
 constexpr float kMockOilMax = 140.0f;
 constexpr float kMockLambdaMin = 0.8f;  /* WOT enrichment reads ~0.86 */
 constexpr float kMockLambdaMax = 2.0f;  /* fuel cut pegs the sensor lean */
+constexpr float kMockMapMin = 15.0f;    /* a closed throttle's most vacuum */
+constexpr float kMockBaroMin = 95.0f;   /* the outside air near sea level */
+constexpr float kMockBaroMax = 105.0f;
+/* Boost, MAP minus baro: an NA engine's vacuum, never above the outside
+ * air, never under a closed throttle's most vacuum */
+constexpr float kMockBoostMin = kMockMapMin - kMockBaroMax;
+constexpr float kMockBoostMax = 0.0f;
 
 struct MockCapture {
     static constexpr size_t kMaxFrames = 20;
@@ -1093,6 +1100,9 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
     for (size_t f = 0; f < cap.count; ++f) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& def = set->defs[i];
+            if (def.flags & ECUIO_DEF_FLAG_COMPUTED) {
+                continue; /* no field: MockBoostIsMapMinusBaro */
+            }
             double val = 0.0;
             ASSERT_EQ(ecuio_decode_signal(&def, cap.payloads[f], ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << "frame " << f << ", signal " << def.name;
@@ -1116,11 +1126,150 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
                 EXPECT_GE(val, kMockOilMin);    EXPECT_LE(val, kMockOilMax); break;
             case ECUIO_MOCK_SIG_LAMBDA_ID:
                 EXPECT_GE(val, kMockLambdaMin); EXPECT_LE(val, kMockLambdaMax); break;
+            case ECUIO_MOCK_SIG_MAP_ID:
+                EXPECT_GE(val, kMockMapMin);
+                EXPECT_LE(val, kMockBaroMax);
+                break;
+            case ECUIO_MOCK_SIG_BARO_ID:
+                EXPECT_GE(val, kMockBaroMin);
+                EXPECT_LE(val, kMockBaroMax);
+                break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
             }
         }
     }
+}
+
+namespace {
+
+/* Each batch's MAP, baro and boost, for the first kMax batches that
+ * carry boost */
+struct BoostCapture {
+    static constexpr size_t kMax = 20;
+    double map[kMax]{};
+    double baro[kMax]{};
+    double boost[kMax]{};
+    size_t count = 0;
+};
+
+void capture_boost_cb(const ecuio_value_batch_t* batch, void* user_data)
+{
+    auto* cap = static_cast<BoostCapture*>(user_data);
+    if (cap->count >= BoostCapture::kMax) {
+        return;
+    }
+    double map = -1.0, baro = -1.0, boost = 0.0;
+    bool has_boost = false;
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        if (v.signal_id == ECUIO_MOCK_SIG_MAP_ID)
+            map = v.value;
+        if (v.signal_id == ECUIO_MOCK_SIG_BARO_ID)
+            baro = v.value;
+        if (v.signal_id == ECUIO_MOCK_SIG_BOOST_ID) {
+            boost = v.value;
+            has_boost = true;
+        }
+    }
+    if (has_boost) {
+        cap->map[cap->count] = map;
+        cap->baro[cap->count] = baro;
+        cap->boost[cap->count] = boost;
+        ++cap->count;
+    }
+}
+
+/* Every batch's boost against its MAP and baro, counted */
+struct BoostTally {
+    size_t batches = 0;
+    size_t wrong = 0; /* boost isn't MAP minus baro */
+    double lowest = 1e9;
+    double highest = -1e9;
+};
+
+void tally_boost_cb(const ecuio_value_batch_t* batch, void* user_data)
+{
+    auto* t = static_cast<BoostTally*>(user_data);
+    double map = -1.0, baro = -1.0, boost = 0.0;
+    bool has_boost = false;
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        if (v.signal_id == ECUIO_MOCK_SIG_MAP_ID)
+            map = v.value;
+        if (v.signal_id == ECUIO_MOCK_SIG_BARO_ID)
+            baro = v.value;
+        if (v.signal_id == ECUIO_MOCK_SIG_BOOST_ID) {
+            boost = v.value;
+            has_boost = true;
+        }
+    }
+    if (!has_boost) {
+        return;
+    }
+    ++t->batches;
+    if (map < 0.0 || baro < 0.0 || boost != map - baro) {
+        ++t->wrong;
+    }
+    t->lowest = std::fmin(t->lowest, boost);
+    t->highest = std::fmax(t->highest, boost);
+}
+
+} // namespace
+
+/* The mock's computed signal (ADR-0051 section 5) through the worker:
+ * every frame carries MAP and baro, so every batch carries boost, the
+ * one minus the other, within the model's bounds */
+TEST(CoreTest, MockBoostIsMapMinusBaro)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://boost", &session), ECUIO_OK);
+    BoostCapture cap;
+    EXPECT_EQ(ecuio_register_values_callback(session, &capture_boost_cb, &cap),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for([&cap]() { return cap.count >= BoostCapture::kMax; }, 10000);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+
+    ASSERT_GE(cap.count, size_t{5}) << "expected boost in several batches";
+    for (size_t i = 0; i < cap.count; ++i) {
+        ASSERT_GE(cap.map[i], 0.0) << "a batch with boost but no MAP, " << i;
+        ASSERT_GE(cap.baro[i], 0.0) << "a batch with boost but no baro, " << i;
+        EXPECT_DOUBLE_EQ(cap.boost[i], cap.map[i] - cap.baro[i])
+            << "batch " << i;
+        EXPECT_GE(cap.boost[i], kMockBoostMin) << "batch " << i;
+        EXPECT_LE(cap.boost[i], kMockBoostMax) << "batch " << i;
+    }
+
+    /* The worker's first frames are all key on, MAP and baro one value,
+     * so a whole loop, the engine running, goes through a session's own
+     * dispatch, every tick a frame */
+    ecuio_session_t* fed = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://boost-fed", &fed), ECUIO_OK);
+    BoostTally tally;
+    EXPECT_EQ(ecuio_register_values_callback(fed, &tally_boost_cb, &tally),
+              ECUIO_OK);
+    auto frame = std::make_unique<ecuio_frame_t>(); /* 4 KB: not on the stack */
+    frame->arbitration_id = ECUIO_MOCK_TELEMETRY_ARB_ID;
+    frame->flags = ECUIO_FRAME_FLAG_FD;
+    frame->data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
+    ecuio_mock::DriveCycle dc;
+    size_t ticks = 0;
+    while (dc.loops < 1 && ticks < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        ++ticks;
+        frame->timestamp_us = ticks * 50000u;
+        ecuio_mock::encode_payload(dc, frame->data);
+        ecuio_session_dispatch_callbacks(fed, frame.get());
+    }
+    ecuio_session_destroy(fed);
+    ASSERT_EQ(dc.loops, 1u) << "the loop never completed";
+    EXPECT_EQ(tally.batches, ticks) << "a frame without boost";
+    EXPECT_EQ(tally.wrong, 0u) << "boost that isn't MAP minus baro";
+    EXPECT_LT(tally.lowest, -50.0) << "no running engine's vacuum";
+    EXPECT_GE(tally.lowest, kMockBoostMin);
+    EXPECT_LE(tally.highest, kMockBoostMax);
 }
 
 // ---------------------------------------------------------------------------
@@ -1412,14 +1561,20 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
 
     DriveCycle dc;
     uint32_t steps = 0;
+    double boost_lo = 1e9, boost_hi = -1e9;
+    uint32_t padded = 0;
     while (dc.loops < 3 && steps < ecuio_mock::ticks_for(1200.0f)) {
         dc.step();
         ++steps;
         uint8_t payload[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN];
         ecuio_mock::encode_payload(dc, payload);
 
+        double map = 0.0, baro = 0.0;
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& def = set->defs[i];
+            if (def.flags & ECUIO_DEF_FLAG_COMPUTED) {
+                continue; /* boost: from the two below */
+            }
             double val = 0.0;
             ASSERT_EQ(ecuio_decode_signal(&def, payload, ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << def.name << " at tick " << steps;
@@ -1434,17 +1589,36 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             case ECUIO_MOCK_SIG_MAF_ID:       phys = dc.maf_gs; break;
             case ECUIO_MOCK_SIG_OIL_ID:       phys = dc.oil_c; break;
             case ECUIO_MOCK_SIG_LAMBDA_ID:    phys = dc.lambda; break;
+            case ECUIO_MOCK_SIG_MAP_ID:
+                phys = dc.map_kpa;
+                map = val;
+                break;
+            case ECUIO_MOCK_SIG_BARO_ID:
+                phys = dc.baro_kpa;
+                baro = val;
+                break;
             default: FAIL() << "unknown signal id in mock set: " << def.id;
             }
             worst_err[i] = std::fmax(worst_err[i], std::fabs(val - phys));
             lo[i] = std::fmin(lo[i], val);
             hi[i] = std::fmax(hi[i], val);
         }
+        /* Boost as the wire's two whole kPa give it */
+        boost_lo = std::fmin(boost_lo, map - baro);
+        boost_hi = std::fmax(boost_hi, map - baro);
+        /* The padding to CAN FD's length, zero */
+        padded += (payload[14] != 0 || payload[15] != 0) ? 1u : 0u;
     }
+    EXPECT_EQ(padded, 0u) << "ticks whose padding wasn't zero";
     ASSERT_EQ(dc.loops, 3u) << "three loops never completed";
+    EXPECT_GE(boost_lo, kMockBoostMin);
+    EXPECT_LE(boost_hi, kMockBoostMax);
 
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
+        if (def.flags & ECUIO_DEF_FLAG_COMPUTED) {
+            continue;
+        }
         /* Half an LSB of each signal's scale, plus float slack */
         const double tol = 0.5 * std::fabs(def.scale) + 0.01;
         EXPECT_LE(worst_err[i], tol) << def.name << " lost precision or clamped";
@@ -1464,6 +1638,14 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             EXPECT_GE(lo[i], kMockOilMin); EXPECT_LE(hi[i], kMockOilMax); break;
         case ECUIO_MOCK_SIG_LAMBDA_ID:
             EXPECT_GE(lo[i], kMockLambdaMin); EXPECT_LE(hi[i], kMockLambdaMax); break;
+        case ECUIO_MOCK_SIG_MAP_ID:
+            EXPECT_GE(lo[i], kMockMapMin);
+            EXPECT_LE(hi[i], kMockBaroMax);
+            break;
+        case ECUIO_MOCK_SIG_BARO_ID:
+            EXPECT_GE(lo[i], kMockBaroMin);
+            EXPECT_LE(hi[i], kMockBaroMax);
+            break;
         default:
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], 100.0f); break;
         }
@@ -1536,6 +1718,34 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
         EXPECT_NEAR(dc.maf_gs, estimate, 0.1f * estimate + 0.5f) << "tick " << dc.tick;
         if (dc.running && dc.rpm >= 600.0f) {
             EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
+        }
+
+        /* The manifold: never above the outside air (an NA engine), the
+         * outside air itself with the engine stopped, and once it pumps
+         * a full vacuum, the residual plus load's share of the outside
+         * air, less the intake's loss; near the outside air at WOT, a
+         * deep vacuum at idle */
+        EXPECT_LE(dc.map_kpa, dc.baro_kpa) << "tick " << dc.tick;
+        if (dc.rpm == 0.0f) {
+            EXPECT_FLOAT_EQ(dc.map_kpa, dc.baro_kpa)
+                << "stopped, tick " << dc.tick;
+        }
+        if (dc.rpm >= ecuio_mock::kMapPumpRpm) {
+            const float fill = ecuio_mock::kMapResidualKpa +
+                               (dc.baro_kpa - ecuio_mock::kMapResidualKpa) *
+                                   dc.load_pct / 100.0f;
+            EXPECT_LE(dc.map_kpa, fill + 0.01f) << "tick " << dc.tick;
+            EXPECT_GE(dc.map_kpa, fill - 1.2f * ecuio_mock::kIntakeLossKpa)
+                << "tick " << dc.tick;
+            EXPECT_GE(dc.map_kpa, kMockMapMin) << "tick " << dc.tick;
+        }
+        if (dc.load_pct >= 95.0f) {
+            EXPECT_GE(dc.map_kpa, 0.9f * dc.baro_kpa)
+                << "WOT, tick " << dc.tick;
+        }
+        if (dc.phase == Phase::Stage) {
+            EXPECT_GE(dc.map_kpa, 25.0f) << "idle, tick " << dc.tick;
+            EXPECT_LE(dc.map_kpa, 50.0f) << "idle, tick " << dc.tick;
         }
         EXPECT_GE(dc.throttle_pct, ecuio_mock::kTpClosedPct - 0.01f);
         EXPECT_LE(dc.throttle_pct, ecuio_mock::kTpWotPct + 0.01f);
@@ -5017,6 +5227,7 @@ struct DirectCheck {
     std::atomic<int> frames{0};
     std::atomic<int> batches{0};
     std::atomic<int> mismatches{0};
+    std::atomic<int> computed{0}; /* computed values after a frame's */
     std::atomic<int> missing{0}; /* a frame that decoded, no batch */
     bool pending = false;
 };
@@ -5054,12 +5265,25 @@ void direct_values_cb(const ecuio_value_batch_t* batch, void* user_data)
 {
     auto* c = static_cast<DirectCheck*>(user_data);
     ++c->batches;
-    bool same = c->pending && batch->count == c->expected.size();
-    for (uint32_t i = 0; same && i < batch->count; ++i) {
+    /* The frame's own values, then any computed one its frame fed */
+    bool same = c->pending && batch->count >= c->expected.size();
+    for (uint32_t i = 0; same && i < c->expected.size(); ++i) {
         const ecuio_value_t& v = batch->values[i];
         const SeenValue& e = c->expected[i];
         same = v.signal_id == e.id && v.value == e.value &&
                (v.text == nullptr ? e.text.empty() : e.text == v.text);
+    }
+    for (uint32_t i = static_cast<uint32_t>(c->expected.size());
+         same && i < batch->count; ++i) {
+        same = false;
+        for (uint32_t d = 0; d < c->set->count; ++d) {
+            const ecuio_signal_def_t& def = c->set->defs[d];
+            if (def.id == batch->values[i].signal_id &&
+                (def.flags & ECUIO_DEF_FLAG_COMPUTED)) {
+                same = true;
+                ++c->computed;
+            }
+        }
     }
     if (!same)
         ++c->mismatches;
@@ -5069,7 +5293,9 @@ void direct_values_cb(const ecuio_value_batch_t* batch, void* user_data)
 } // namespace
 
 /* Every batch equals the direct decode of its frame, over the vehicle
- * fixture under obd2 and the mock's drive cycle under its own set */
+ * fixture under obd2 and the mock's drive cycle under its own set, then
+ * the computed values it fed: none under obd2, the mock's boost after
+ * every frame */
 TEST(CoreTest, ValuesMatchDirectDecodesOfEveryFrame)
 {
     const std::string fixture =
@@ -5078,9 +5304,10 @@ TEST(CoreTest, ValuesMatchDirectDecodesOfEveryFrame)
     struct Case {
         const char* uri;
         int frames;
+        bool computed; /* one computed value a batch */
     };
-    for (const Case& k :
-         {Case{fixture.c_str(), 7074}, Case{"mock://direct", 20}}) {
+    for (const Case& k : {Case{fixture.c_str(), 7074, false},
+                          Case{"mock://direct", 20, true}}) {
         SCOPED_TRACE(k.uri);
         ecuio_session_t* session = nullptr;
         ASSERT_EQ(ecuio_session_create(k.uri, &session), ECUIO_OK)
@@ -5100,6 +5327,7 @@ TEST(CoreTest, ValuesMatchDirectDecodesOfEveryFrame)
         ASSERT_TRUE(reached) << c.frames.load() << " frames";
         EXPECT_GT(c.batches.load(), 0);
         EXPECT_EQ(c.mismatches.load(), 0);
+        EXPECT_EQ(c.computed.load(), k.computed ? c.batches.load() : 0);
         EXPECT_EQ(c.missing.load(), 0) << "a frame that decoded with no batch";
     }
 }

@@ -17,15 +17,19 @@ extern "C" {
 #define ECUIO_MOCK_SIG_MAF_ID      8001
 #define ECUIO_MOCK_SIG_OIL_ID      9001
 #define ECUIO_MOCK_SIG_LAMBDA_ID   10001
+#define ECUIO_MOCK_SIG_MAP_ID      11001
+#define ECUIO_MOCK_SIG_BARO_ID     12001
+/* Computed from the two above, MAP minus baro (ADR-0051 section 5) */
+#define ECUIO_MOCK_SIG_BOOST_ID    13001
 /* CAN arbitration ID carrying the mock telemetry payload. SHARED by
  * mock_transport.cpp (encoder) and signal_sets.cpp (signal defs) so
  * the two halves of the round-trip contract cannot drift apart. */
 #define ECUIO_MOCK_TELEMETRY_ARB_ID  0x0C0u
-/* Mock telemetry payload length. The signals need 12 bytes and classic
+/* Mock telemetry payload length. The signals need 14 bytes and classic
  * CAN carries 8, so mock frames are CAN FD (ECUIO_FRAME_FLAG_FD) at
- * 12 bytes, a valid FD length. Shared by the encoder, the worker and
- * the tests. */
-#define ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN  12u
+ * 16 bytes, the next valid FD length, the last two zero. Shared by the
+ * encoder, the worker and the tests. */
+#define ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN  16u
 
 /* ---- OBD-II v1 set (ADR-0013) ----
  * IDs occupy a distinct band from the mock set (no cross-set def.id

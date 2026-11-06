@@ -287,7 +287,9 @@ TestCase {
         const live = find(main.contentItem, "livePage")
         main.gotoPage(Array.from(live.parent.children).indexOf(live))
         const frame = find(live, "chartFrame")
-        tryVerify(() => frame.width > 300 && frame.height > 200, 3000, "the chart at its size")
+        // The mock's rows fill the list's 55 % of the page; the chart has
+        // the rest, about 196 px here
+        tryVerify(() => frame.width > 300 && frame.height > 150, 3000, "the chart at its size")
         verify(waitForPolish(main), "laid out")
         const before = live.chartMaximized
         const x = frame.width / 2 - data.gap / 2
@@ -431,7 +433,7 @@ TestCase {
         const kept = live.chartWindowS
         const frame = find(live, "chartFrame")
         // Laid out at the phone's size before a finger touches it
-        tryVerify(() => frame.width > 300 && frame.height > 200, 3000, "the chart at its size")
+        tryVerify(() => frame.width > 300 && frame.height > 150, 3000, "the chart at its size")
         waitForRendering(main.contentItem)
 
         live.stepWindow(-1); live.stepWindow(-1); live.stepWindow(-1)

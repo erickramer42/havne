@@ -1,8 +1,8 @@
 // File/layer: core/src/signal_sets.cpp | C++17, Qt-free, every platform
 // Testing: UNIT: Obd2SetTest, Obd2DecodeTest and Obd2MuxTest (test_obd2)
-//          for the obd2 set; CoreTest.MockFramesDecodeAgainstMockSignalSet
-//          and SignalsTest for the mock set; every set passes the
-//          validator at registration; the tables' checks (enum entries,
+//          for the obd2 set; CoreTest.MockFramesDecodeAgainstMockSignalSet,
+//          .MockBoostIsMapMinusBaro and SignalsTest for the mock set;
+//          every set passes the validator at registration; the tables' checks (enum entries,
 //          programs and their inputs): SignalTablesTest
 
 #include <ecuio/signals.h>
@@ -52,6 +52,28 @@ static ecuio_signal_def_t mk(uint16_t id, const char* name,
     return d;
 }
 
+/* A computed def (ADR-0051 section 5): no frame of its own, its value
+ * worked out from other defs' by its program, kMockComputed[program].
+ * The validator wants the decode block plain: message 0, UINT, LE,
+ * every bit field 0, scale 1. */
+static ecuio_signal_def_t computed_def(uint16_t id, const char* name,
+                                       const char* unit, uint8_t dp,
+                                       uint8_t group, uint16_t program)
+{
+    ecuio_signal_def_t d = {};
+    d.id = id;
+    d.flags = ECUIO_DEF_FLAG_COMPUTED;
+    d.kind = static_cast<uint8_t>(ECUIO_VALUE_UINT);
+    d.byte_order = ECUIO_BYTE_ORDER_LE;
+    d.scale = 1.0;
+    d.decimal_places = dp;
+    d.group = group;
+    d.table_first = program;
+    copy_str(d.name, sizeof(d.name), name);
+    copy_str(d.unit, sizeof(d.unit), unit);
+    return d;
+}
+
 /* Names, units and decimal places are display strings: the UI shows
  * them as they are (UTF-8). The names match the obd2 set's, so a gauge
  * finds the same signal under either profile. */
@@ -78,16 +100,42 @@ static const ecuio_signal_def_t kMockDefs[] = {
      * equivalence ratio (2/65536, so 0 to just under 2). Only the mock
      * carries it; the obd2 set doesn't poll an O2 sensor. */
     mk(ECUIO_MOCK_SIG_LAMBDA_ID,    "Lambda",            ECUIO_VALUE_UINT, 10, 0, 16, 1.0/32768.0, 0.0, LAMBDA, 2, ECUIO_SIGNAL_GROUP_OXYGEN),
+    /* MAP and baro at bytes 12 and 13, a byte of kPa each, as J1979's
+     * 0x0B and 0x33 */
+    mk(ECUIO_MOCK_SIG_MAP_ID,       "Intake Manifold Pressure", ECUIO_VALUE_UINT, 12, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    mk(ECUIO_MOCK_SIG_BARO_ID,      "Barometric Pressure", ECUIO_VALUE_UINT, 13, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    computed_def(ECUIO_MOCK_SIG_BOOST_ID, "Boost", "kPa", 0, ECUIO_SIGNAL_GROUP_AIR, 0),
 };
 
 #undef DEG_C
 #undef LAMBDA
+
+/* The programs of kMockDefs' computed defs, by their table_first.
+ * Boost is MAP minus baro, as ADR-0051's example file computes it from
+ * obd2's: below zero a vacuum, which is all an NA engine pulls. Both
+ * ride every frame, so the default age bound holds. */
+static const ecuio_computed_t kMockComputed[] = {
+    [] {
+        ecuio_computed_t c = {};
+        c.input_ids[0] = ECUIO_MOCK_SIG_MAP_ID;
+        c.input_ids[1] = ECUIO_MOCK_SIG_BARO_ID;
+        c.input_count = 2;
+        c.step_count = 3;
+        c.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+        c.steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+        c.steps[2] = ECUIO_COMPUTED_SUBTRACT;
+        return c;
+    }(),
+};
 
 static const ecuio_signal_set_t kMockSet = [] {
     ecuio_signal_set_t s = {};
     s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     s.count = static_cast<uint32_t>(sizeof(kMockDefs) / sizeof(kMockDefs[0]));
     s.defs = kMockDefs;
+    s.computed_count =
+        static_cast<uint32_t>(sizeof(kMockComputed) / sizeof(kMockComputed[0]));
+    s.computed = kMockComputed;
     return s;
 }();
 
