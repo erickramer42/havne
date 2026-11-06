@@ -1183,62 +1183,63 @@ struct FixtureRun {
     std::string why;
 };
 
-// The newest decoded value of each signal a variant's fixtures name,
-// filled on the worker: the ids are fixed before start, so the callback
-// only searches and stores, under the lock, allocating nothing
+// The newest decoded value of each signal a round's fixtures name,
+// filled on the worker without a lock or a wait: the ids are fixed
+// before start, and each slot is an atomic the main thread reads
 struct FixtureValues {
-    std::vector<uint16_t> ids;
-    std::vector<double> values;
-    std::vector<char> have;
-    std::mutex mutex;
+    explicit FixtureValues(const std::vector<uint16_t>& signal_ids)
+        : ids(signal_ids), values(new std::atomic<double>[signal_ids.size()]),
+          have(new std::atomic<bool>[signal_ids.size()])
+    {
+        for (size_t k = 0; k < ids.size(); ++k) {
+            values[k].store(0.0);
+            have[k].store(false);
+        }
+    }
 
     static void on_values(const ecuio_value_batch_t* batch, void* user)
     {
         auto* self = static_cast<FixtureValues*>(user);
-        std::lock_guard<std::mutex> lock(self->mutex);
         for (uint32_t i = 0; i < batch->count; ++i) {
             const ecuio_value_t& v = batch->values[i];
             for (size_t k = 0; k < self->ids.size(); ++k) {
                 if (self->ids[k] == v.signal_id) {
-                    self->values[k] = v.value;
-                    self->have[k] = 1;
+                    self->values[k].store(v.value);
+                    self->have[k].store(true);
                 }
             }
         }
     }
 
-    bool all()
+    bool all() const
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        return std::all_of(have.begin(), have.end(),
-                           [](char h) { return h != 0; });
+        for (size_t k = 0; k < ids.size(); ++k) {
+            if (!have[k].load()) {
+                return false;
+            }
+        }
+        return true;
     }
+
+    const std::vector<uint16_t> ids;
+    std::unique_ptr<std::atomic<double>[]> values;
+    std::unique_ptr<std::atomic<bool>[]> have;
 };
 
 // How long a variant's fixtures wait for their values: the probe's walk
 // and the rotation over the base set's PIDs share the bus with them
 constexpr int kFixtureWaitMs = 20000;
 
-// Runs variant index's fixtures (the runs whose value.variant is index)
+// Runs one round of a variant's fixtures, each signal at most once in it,
 // against the simulated ECU on interface on: the sim answers the
 // variant's DIDs with the fixtures' values, a socketcan:// session
 // decodes them through the variant's own profile, and each must come back
 // within half its field's step. ECUIO_OK, or the status and why of a sim
 // or session that wouldn't start
-ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
-                                    const char* on,
-                                    std::vector<FixtureRun>& runs,
-                                    std::string* why)
+ecuio_status_t run_fixture_round(const std::string& profile, const char* on,
+                                 const std::vector<FixtureRun*>& mine,
+                                 std::string* why)
 {
-    std::vector<FixtureRun*> mine;
-    for (FixtureRun& r : runs) {
-        if (r.value.variant == index) {
-            mine.push_back(&r);
-        }
-    }
-    if (mine.empty()) {
-        return ECUIO_OK;
-    }
     const std::string sim_uri = "mock://check?profile=" + profile;
     ecuio_sim_t* sim = nullptr;
     ecuio_status_t st = ecuio_sim_create(sim_uri.c_str(), on, &sim);
@@ -1246,8 +1247,8 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
         *why = ecuio_last_error_detail();
         return st;
     }
-    FixtureValues got;
     std::vector<FixtureRun*> asked;
+    std::vector<uint16_t> ids;
     for (FixtureRun* r : mine) {
         if (ecuio_sim_set_value(sim, r->value.def->id, r->value.value) !=
             ECUIO_OK) {
@@ -1258,10 +1259,9 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
             continue;
         }
         asked.push_back(r);
-        got.ids.push_back(r->value.def->id);
+        ids.push_back(r->value.def->id);
     }
-    got.values.assign(got.ids.size(), 0.0);
-    got.have.assign(got.ids.size(), 0);
+    FixtureValues got(ids);
     if (!asked.empty()) {
         const std::string uri = std::string("socketcan://") + on +
                                 "?profile=" + profile +
@@ -1293,8 +1293,8 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
     ecuio_sim_destroy(sim);
     for (size_t k = 0; k < asked.size(); ++k) {
         FixtureRun& r = *asked[k];
-        r.have = got.have[k] != 0;
-        r.got = got.values[k];
+        r.have = got.have[k].load();
+        r.got = got.values[k].load();
         if (!r.have) {
             r.result = cli::FixtureResult::failed;
             r.why = g_interrupted.load()
@@ -1307,6 +1307,39 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
             r.result = cli::FixtureResult::failed;
             r.why = "the decoded value is past half the field's step";
         }
+    }
+    return ECUIO_OK;
+}
+
+// Runs variant index's fixtures (the runs whose value.variant is index)
+// in rounds, a signal given in two fixture files being in a later round
+// than its first: the simulated ECU answers one value per signal at a time
+ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
+                                    const char* on,
+                                    std::vector<FixtureRun>& runs,
+                                    std::string* why)
+{
+    std::vector<FixtureRun*> left;
+    for (FixtureRun& r : runs) {
+        if (r.value.variant == index) {
+            left.push_back(&r);
+        }
+    }
+    while (!left.empty()) {
+        std::vector<FixtureRun*> round;
+        std::vector<FixtureRun*> later;
+        for (FixtureRun* r : left) {
+            const bool taken =
+                std::any_of(round.begin(), round.end(), [r](FixtureRun* o) {
+                    return o->value.def == r->value.def;
+                });
+            (taken ? later : round).push_back(r);
+        }
+        const ecuio_status_t st = run_fixture_round(profile, on, round, why);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+        left.swap(later);
     }
     return ECUIO_OK;
 }
@@ -1430,10 +1463,9 @@ int run_plugins_check(const char* path, const char* on)
         write_line(out, b.line);
     }
     {
-        char buf[512];
-        cli::Line l(buf, sizeof buf);
-        cli::checked_line(l, counts, on, info.fixture_count);
-        write_line(out, l);
+        BigLine b(512 + (on != nullptr ? std::strlen(on) * 6 : 0));
+        cli::checked_line(b.line, counts, on, info.fixture_count);
+        write_line(out, b.line);
     }
     ecuio_plugin_free(p);
     out.flush();
@@ -3347,7 +3379,9 @@ int run(int argc, char** argv)
             }
             return run_plugins_list(paths);
         }
-        if (word == "check" && (argc == 4 || argc == 6)) {
+        const bool package =
+            argc > 3 && std::string(argv[3]).rfind("--", 0) != 0;
+        if (word == "check" && package && (argc == 4 || argc == 6)) {
             const char* on = nullptr;
             if (argc == 6) {
                 if (std::string(argv[4]) != "--on" || *argv[5] == '\0') {
@@ -3360,7 +3394,8 @@ int run(int argc, char** argv)
             }
             return run_plugins_check(argv[3], on);
         }
-        if (word == "match" && argc == 6 && std::string(argv[4]) == "--vin") {
+        if (word == "match" && package && argc == 6 &&
+            std::string(argv[4]) == "--vin") {
             return run_plugins_match(argv[3], argv[5]);
         }
         std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check "

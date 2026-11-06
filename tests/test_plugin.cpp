@@ -539,6 +539,23 @@ TEST(PluginTest, TheFreeLeavesANameRegisteredSinceToAnotherSet)
     EXPECT_EQ(ecuio_profile_unregister("plugin.example-sim.base"), ECUIO_OK);
 }
 
+// A manifest whose own words say "out of memory" is refused as any
+// other is, never reported as memory run out
+TEST(PluginTest, AnOutOfMemoryInTheWordsIsStillARefusal)
+{
+    ecuio_status_t s = ECUIO_OK;
+    Plugin p = load_packed(
+        packed(R"("id": "out of memory", "name": "P", "version": "1.0.0",)"
+               R"( "requires": {"core": "0.1.0"}, "source": {"name": "t"},)"
+               R"( "tiers": ["data"], "ecus": [{"id": "pcm", "rx": "7E8"}])",
+               kData),
+        &s);
+    EXPECT_EQ(s, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("out of memory"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+}
+
 TEST(PluginTest, TheAccessorsRefuseWhatTheyCantFill)
 {
     Folder f = example_folder();
@@ -656,6 +673,10 @@ TEST(PluginTest, EveryFixtureRefusalSaysWhy)
          "unknown key 'at'"},
         {head + R"([{"variant": "my2020", "signal": "oil_temp", "value": 1}]})",
          "no variant 'my2020'"},
+        /* The words name it, and it's still a refusal, not memory */
+        {head +
+             R"([{"variant": "out of memory", "signal": "oil_temp", "value": 1}]})",
+         "no variant 'out of memory'"},
         {head +
              R"([{"variant": "base", "signal": "clutch_slip", "value": 1}]})",
          "variant 'base' has no signal 'clutch_slip'"},

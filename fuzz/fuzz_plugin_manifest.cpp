@@ -93,8 +93,7 @@ void check_values(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
     if (s != ECUIO_OK) {
         check(s == ECUIO_ERR_INVALID_ARGUMENT || s == ECUIO_ERR_OUT_OF_MEMORY);
         check(count == 0xFFFFFFFFu && again == 0xFFFFFFFFu);
-        check(!words.empty() && words.find('
-') == std::string::npos);
+        check(!words.empty() && words.find('\n') == std::string::npos);
         return;
     }
     check(count == again && count >= 1 && count <= ECUIO_PLUGIN_MAX_VALUES);
@@ -139,7 +138,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     std::string fixture;
     pieces files;
     if (!folder) {
-        const size_t cut = rest.find('');
+        const size_t cut = rest.find('\x1E');
         if (cut != std::string::npos) {
             manifest = rest.substr(0, cut);
             fixture = rest.substr(cut + 1);

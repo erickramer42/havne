@@ -122,6 +122,13 @@ static_assert(offsetof(ecuio_plugin_value_t, signal) == 16,
               "plugin value signal offset is ABI");
 static_assert(offsetof(ecuio_plugin_value_t, def) == 64,
               "plugin value def offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_plugin_value_t, line) == 12,
+               "plugin value line offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_value_t, signal) == 16,
+               "plugin value signal offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_value_t, def) == 64,
+               "plugin value def offset is ABI");
 #endif
 
 #define ECUIO_PLUGIN_FIXTURES_FORMAT 1     /* "havne_fixtures" read */
