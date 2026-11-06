@@ -7663,8 +7663,12 @@ double liveValue(SessionBridge& bridge, const QString& name)
     for (int r = 0; r < model->rowCount(); ++r) {
         const QModelIndex i = model->index(r, 0);
         if (model->data(i, SignalListModel::NameRole).toString() == name) {
-            const QVariant v = model->data(i, SignalListModel::ValueRole);
-            return v.isValid() ? v.toDouble() : std::nan("");
+            // ValueRole reads 0 before any value: HasValueRole says whether
+            // one came
+            if (!model->data(i, SignalListModel::HasValueRole).toBool()) {
+                return std::nan("");
+            }
+            return model->data(i, SignalListModel::ValueRole).toDouble();
         }
     }
     return std::nan("");
@@ -8119,8 +8123,13 @@ TEST(BridgeTest, PluginInUseIsNeitherReplacedNorRemoved)
     const auto oilValue = [m, oil]() {
         return m->data(m->index(oil), SignalListModel::ValueRole);
     };
-    ASSERT_TRUE(
-        spinUntil([&oilValue]() { return oilValue().isValid(); }, 5000, 10));
+    // ValueRole reads 0 before any value: wait for HasValueRole
+    ASSERT_TRUE(spinUntil(
+        [m, oil]() {
+            return m->data(m->index(oil), SignalListModel::HasValueRole)
+                .toBool();
+        },
+        5000, 10));
     const double first = oilValue().toDouble();
     EXPECT_GE(first, -40.0);
     EXPECT_LE(first, 215.0);
