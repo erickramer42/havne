@@ -517,3 +517,95 @@ TEST(JsonTest, ReadsASignalFileShapedDocument)
     EXPECT_EQ(scale.column, 7u);
     EXPECT_EQ(sig.find("values")->members[1].value.text, "Closed loop");
 }
+
+namespace {
+
+/* Two values the same in every field the reader fills but the place */
+void expect_same(const Value& a, const Value& b, const std::string& at)
+{
+    ASSERT_EQ(a.type, b.type) << at;
+    EXPECT_EQ(a.boolean, b.boolean) << at;
+    EXPECT_EQ(a.integer, b.integer) << at;
+    EXPECT_EQ(a.in_int64, b.in_int64) << at;
+    EXPECT_EQ(a.whole, b.whole) << at;
+    EXPECT_EQ(std::memcmp(&a.number, &b.number, sizeof a.number), 0)
+        << at << ": " << a.number << " and " << b.number;
+    EXPECT_EQ(a.text, b.text) << at;
+    ASSERT_EQ(a.items.size(), b.items.size()) << at;
+    for (size_t i = 0; i < a.items.size(); ++i) {
+        expect_same(a.items[i], b.items[i], at + "[" + std::to_string(i) + "]");
+    }
+    ASSERT_EQ(a.members.size(), b.members.size()) << at;
+    for (size_t i = 0; i < a.members.size(); ++i) {
+        EXPECT_EQ(a.members[i].key, b.members[i].key) << at;
+        expect_same(a.members[i].value, b.members[i].value,
+                    at + "." + a.members[i].key);
+    }
+}
+
+} // namespace
+
+/* write is the reader's inverse: what it writes reads back to the same
+ * value, every number exact, every escape and character kept */
+TEST(JsonTest, WhatIsWrittenReadsBackTheSame)
+{
+    const Value v =
+        ok("{\"a\": [1, -2, 0.1, 1e-7, 1.5e300, 9007199254740993, 0.392157, "
+           "-0.0, 1.0, 2e3, true, false, null, {}, []], \"s\": "
+           "\"q\\\"b\\\\n\\n\\t\\u0001\\u0000\\u00e9\\u20ac\", \"k\": {\"x\": "
+           "-40, \"y\": {\"z\": [[]]}}}");
+    const std::string text = ecuio_json::write(v);
+    const Value back = ok(text);
+    expect_same(v, back, "the document");
+    EXPECT_EQ(ecuio_json::write(back), text) << "and writes the same again";
+    EXPECT_NE(text.find("[]"), std::string::npos) << text;
+    EXPECT_NE(text.find("\u0000"), std::string::npos)
+        << "a NUL kept as its escape";
+}
+
+/* Two spaces a level, members in order, a newline after each line */
+TEST(JsonTest, WrittenTextIsIndentedTwoSpacesALevel)
+{
+    EXPECT_EQ(
+        ecuio_json::write(ok("{\"a\":[1,{}],\"b\":\"x\",\"c\":{\"d\":null}}")),
+        "{\n"
+        "  \"a\": [\n"
+        "    1,\n"
+        "    {}\n"
+        "  ],\n"
+        "  \"b\": \"x\",\n"
+        "  \"c\": {\n"
+        "    \"d\": null\n"
+        "  }\n"
+        "}\n");
+    EXPECT_EQ(ecuio_json::write(ok("[]")), "[]\n");
+    EXPECT_EQ(ecuio_json::write(ok("\"\\\\\"")), "\"\\\\\"\n");
+}
+
+/* A number is its shortest text that reads back to it, with a point
+ * whatever the locale */
+TEST(JsonTest, ANumberIsItsShortestTextThatReadsBack)
+{
+    EXPECT_EQ(ecuio_json::number_text(0.1), "0.1");
+    EXPECT_EQ(ecuio_json::number_text(-40), "-40");
+    EXPECT_EQ(ecuio_json::number_text(0.392157), "0.392157");
+    EXPECT_EQ(ecuio_json::number_text(1e-7), "1e-07");
+    const double third = 1.0 / 3.0;
+    const Value v = ok(ecuio_json::number_text(third));
+    EXPECT_EQ(v.number, third) << ecuio_json::number_text(third);
+    EXPECT_EQ(ecuio_json::write(ok("1.0")), "1.0\n")
+        << "a fraction kept, so it reads back as no integer";
+    EXPECT_EQ(ecuio_json::write(ok("-0.0")), "-0.0\n");
+    EXPECT_EQ(ecuio_json::write(ok("2e3")), "2000.0\n");
+    EXPECT_EQ(ecuio_json::write(ok("-0")), "-0\n") << "its sign kept";
+    const Value past = ok(ecuio_json::write(ok("100000000000000000000")));
+    EXPECT_TRUE(past.integer && !past.in_int64)
+        << "a whole number past int64 stays one";
+    EXPECT_EQ(past.number, 1e20);
+    /* A whole value 16 digits long written with a fraction: "e0" keeps it
+     * no integer without the digit ".0" would add (fuzz_json found it) */
+    const Value whole16 = ok("9000000000000000.999");
+    const std::string w16 = ecuio_json::write(whole16);
+    EXPECT_EQ(w16, "9000000000000001e0\n");
+    EXPECT_FALSE(ok(w16).integer);
+}

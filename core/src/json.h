@@ -1,8 +1,9 @@
 // File/layer: core/src/json.h | internal, C++17, Qt-free; ALL platforms
 // Testing: UNIT: JsonTest (test_core): every accepted form, each node's
 //          line and column, every refusal with its position and words,
-//          the bounds at their edges, numbers under a comma locale;
-//          FUZZ: fuzz_json
+//          the bounds at their edges, numbers under a comma locale; what
+//          write writes read back the same (JsonTest.Written*, .What*,
+//          .ANumber*); FUZZ: fuzz_json
 //
 // A strict JSON reader (RFC 8259) for the files core reads: signal files
 // (ADR-0051 section 1) and what their loader and importers build on. Not
@@ -109,6 +110,26 @@ struct Error {
  */
 bool parse(const char* data, size_t size, Value* out, Error* error,
            const Limits& limits = Limits()) noexcept;
+
+/*
+ * v as JSON text, the reader's inverse: objects and arrays indented two
+ * spaces a level, members in their order, each line ending "\n" (the
+ * last too). A string is escaped where JSON must (the quote, the
+ * backslash, control characters, "\u0000" kept) and its UTF-8 is kept
+ * as is; a number with in_int64 is its whole value ("-0" kept), a
+ * whole number past int64 its double's digits, any other the shortest
+ * text (number_text) that parse_number reads back to it, with ".0" (or,
+ * past 14 digits, "e0") after one that has no fraction. A number keeps
+ * its kind (integer, in_int64) and its sign, and its value whenever 15
+ * significant digits hold it: past that, the reader is close, not exact.
+ * Throws std::bad_alloc only.
+ */
+std::string write(const Value& v);
+
+/* A finite double as the shortest of 15, 16 or 17 significant digits
+ * that recording_rows.h's parse_number reads back to it (17 when none
+ * does), with a '.' whatever the locale */
+std::string number_text(double v);
 
 /* Text from the input shown in words: single-quoted, control characters
  * as '?', cut to 32 characters with "..." after. For keys and strings

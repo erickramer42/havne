@@ -31,11 +31,9 @@
 #include "error_detail.h"
 #include "json.h"
 #include "obdb_import.h"
-#include "recording_rows.h"
 #include "request_engine.h"
 
 #include <algorithm>
-#include <clocale>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -50,6 +48,7 @@
 namespace {
 
 using ecuio_json::Member;
+using ecuio_json::number_text;
 using ecuio_json::Type;
 using ecuio_json::Value;
 
@@ -168,36 +167,6 @@ const path_group kGroups[] = {
     {"ECU", "diagnostics"},       {"OBD", "diagnostics"},
     {"Details", "diagnostics"},
 };
-
-/* A number as JSON, with a '.' whatever the locale, in the fewest digits
- * that read back as the same double */
-std::string number_text(double v)
-{
-    // NOLINTNEXTLINE(concurrency-mt-unsafe): reads the decimal point only
-    const char* point = std::localeconv()->decimal_point;
-    const char p = (point != nullptr && point[0] != '\0') ? point[0] : '.';
-    std::string best;
-    for (int digits = 15; digits <= 17; ++digits) {
-        char buf[40];
-        const int n = std::snprintf(buf, sizeof buf, "%.*g", digits, v);
-        if (n <= 0 || static_cast<size_t>(n) >= sizeof buf) {
-            continue;
-        }
-        best.assign(buf, static_cast<size_t>(n));
-        for (char& c : best) {
-            if (c == p) {
-                c = '.';
-            }
-        }
-        double back = 0;
-        if (ecuio_recording_rows::parse_number(best.data(), best.size(),
-                                               &back) &&
-            back == v) {
-            break;
-        }
-    }
-    return best;
-}
 
 /* A JSON string of text with no control characters (clean() made it so) */
 void add_string(std::string& out, const std::string& s)

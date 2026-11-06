@@ -348,6 +348,7 @@ int main(void)
         ecuio_recording_get_signals(NULL, &reading_signals) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_plugin_variant_file(NULL, 0) != NULL ||
         ecuio_recording_get_signal(NULL, 0, &reading_signal) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_marker(NULL, 0, &reading_marker) !=

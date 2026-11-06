@@ -655,6 +655,7 @@ struct ecuio_recorder {
     const ecuio_signal_set_t* signals_set = nullptr;
     std::string signals_json;
     std::string signals_sha;
+    std::string signals_plugin; /* "<id>,<version>,<variant>" or "" */
 
     /* Fixed at attach */
     std::shared_ptr<ecuio_record_link> link;
@@ -1363,9 +1364,10 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
 
 ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
                                            const ecuio_signal_set_t* set,
-                                           const char* bytes, size_t length)
+                                           const char* bytes, size_t length,
+                                           const char* plugin)
 {
-    if (recorder == nullptr || set == nullptr ||
+    if (recorder == nullptr || set == nullptr || plugin == nullptr ||
         (bytes == nullptr && length > 0)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
@@ -1377,6 +1379,7 @@ ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
     try {
         std::string json(bytes != nullptr ? bytes : "", length);
         recorder->signals_sha = ecuio_sha256::hex_of(json.data(), json.size());
+        recorder->signals_plugin = one_line(plugin);
         recorder->signals_json = std::move(json);
     } catch (...) {
         recorder->signals_sha.clear();
@@ -1499,7 +1502,7 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
     }
     const std::string& bytes = ecuio_sf::bytes_of(*file);
     return ecuio_recorder_take_signals(recorder, &file->set, bytes.data(),
-                                       bytes.size());
+                                       bytes.size(), file->plugin.c_str());
 }
 
 ecuio_status_t ecuio_session_record(ecuio_session_t* session,
@@ -1577,6 +1580,10 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             header += std::string(ecuio_recording_rows::kSignalFileKey) +
                       ecuio_recording_rows::kSignalFileName + "," +
                       recorder->signals_sha + "\n";
+        }
+        if (!recorder->signals_plugin.empty()) {
+            header += std::string(ecuio_recording_rows::kPluginKey) +
+                      recorder->signals_plugin + "\n";
         }
         /* A replay's frames carry its source's flags, so it writes its
          * source's line, which a recording from before ADR-0049 lacks */

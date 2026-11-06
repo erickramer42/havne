@@ -467,3 +467,29 @@ what it left open:
   `dev` is the last release's until the release commit; the example
   plugin names the version its tree builds as, and the release commit
   raises it with the project's.
+
+## Appendix: a variant's recording (2026-11-05)
+
+Section 4's provenance, as built:
+
+- **A variant is one signal file too.** `ecuio_plugin_variant_file`
+  gives it as an `ecuio_signal_file_t` (valid until the plugin is freed,
+  never freed itself), so `ecuio_signal_file_name`, `_profile`
+  (`plugin.<id>.<variant>`), `_find` and `_extends` read it and
+  `ecuio_recorder_signal_file` copies it into a recording, the
+  attach's check that its set is the session's unchanged.
+- **Its text** is written at load: the plugin's `name`, a `notes` line
+  naming the plugin, its version and the variant, the manifest's
+  `source` and `ecus`, the first file's `extends` and the merged
+  signals in their order, through `ecuio_json::write` (each value as it
+  was read: a number keeps its kind and sign, and its value wherever 15
+  significant digits hold it). The text is read back through the
+  signal-file loader and kept only when the set it builds equals the
+  variant's, table by table; otherwise the variant has no text and a
+  recording of it holds no `signals.json`, so a copy never decodes
+  otherwise. The fuzzer requires every variant it loads to have one.
+- **The recording** holds that text as `signals.json`, with ADR-0051's
+  `signal file` line and after it `plugin  <id>,<version>,<variant>`. A
+  replay loading the copy reads it as an ordinary signal file (profile
+  `user.<the plugin's name>`) and decodes the same values; it names no
+  plugin.

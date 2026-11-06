@@ -1322,3 +1322,8 @@ header line. The reader keeps reading formats 1 and 2.
 > past it), refuses one of another shape with its line, and gives it
 > with `ecuio_recording_get_signals` (`ecuio_recording_signals_t`, 128
 > bytes); the frames check reads past it.
+>
+> **Note of 2026-11-05, the plugin line.** A session a plugin variant
+> decodes has `plugin  <id>,<version>,<variant>` after the signal file
+> line ([ADR-0052](0052-plugin-framework.md)'s appendix "a variant's
+> recording"); optional too, and read past by the reader.

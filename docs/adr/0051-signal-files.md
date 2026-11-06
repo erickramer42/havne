@@ -472,3 +472,9 @@ Section 4's provenance, and how it settles:
   has no one file's bytes, so a recording of one holds no `signals.json`
   until a writer turns a set back into a signal file's JSON; the
   plugin's line names what decoded it meanwhile.
+
+> **Note of 2026-11-05, a plugin variant's copy.** The writer is built:
+> a variant's merged signals are written as one signal file at load and
+> copied as any file is, with the plugin line after the signal file
+> line ([ADR-0052](0052-plugin-framework.md)'s appendix "a variant's
+> recording").

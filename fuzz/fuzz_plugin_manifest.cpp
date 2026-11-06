@@ -11,6 +11,8 @@
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 
+#include "signal_file_build.h" /* core/src: a variant's merged text */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -145,6 +147,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         check(want == name);
         const ecuio_signal_set_t* found = nullptr;
         check(ecuio_profile_lookup(name, &found) == ECUIO_OK && found == set);
+        /* The variant as one signal file: its merged text read back to
+         * its own set (an empty one would leave a recording no copy),
+         * the same for the same input */
+        const ecuio_signal_file_t* file = ecuio_plugin_variant_file(a, v);
+        check(file != nullptr && ecuio_signal_file_set(file) == set);
+        check(!ecuio_sf::bytes_of(*file).empty());
+        check(ecuio_sf::bytes_of(*file) ==
+              ecuio_sf::bytes_of(*ecuio_plugin_variant_file(b, v)));
     }
 
     check(ecuio_plugin_free(a) == ECUIO_OK);

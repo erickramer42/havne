@@ -20,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -27,6 +28,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "ecuio/plugin.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
@@ -1682,4 +1684,122 @@ TEST(RecorderTest, AReplayWithTheRecordingsFileDecodesTheSame)
     const ecuio_recording_signals_t s2 = signals_of(second);
     EXPECT_EQ(s2.flags, s1.flags);
     EXPECT_STREQ(s2.sha256, s1.sha256);
+}
+
+namespace {
+
+/* The example plugin read from the repository's plugins/, freed at the
+ * end; variant 1 (my2019) registered as its profile */
+struct ExamplePlugin {
+    std::map<std::string, std::string> files;
+    ecuio_plugin_t* plugin = nullptr;
+    std::string profile;
+
+    static int read(void* user, const char* path, const char** bytes,
+                    size_t* length)
+    {
+        auto* self = static_cast<ExamplePlugin*>(user);
+        auto it = self->files.find(path);
+        if (it == self->files.end()) {
+            return 1;
+        }
+        *bytes = it->second.data();
+        *length = it->second.size();
+        return 0;
+    }
+
+    ExamplePlugin()
+    {
+        const std::string root =
+            std::string(ECUIO_PLUGINS_DIR) + "/example-sim/";
+        for (const char* p : {"manifest.json", "data/base.json",
+                              "data/my2019.json", "fixtures/values.json"}) {
+            files[p] = read_bytes(fs::u8path(root + p));
+        }
+        const std::string& m = files["manifest.json"];
+        EXPECT_EQ(ecuio_plugin_load(m.data(), m.size(), &read, this, &plugin),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        char name[ECUIO_PROFILE_NAME_MAX + 1] = {};
+        EXPECT_EQ(ecuio_plugin_register(plugin, 1, name, sizeof name),
+                  ECUIO_OK);
+        profile = name;
+    }
+    ~ExamplePlugin() { EXPECT_EQ(ecuio_plugin_free(plugin), ECUIO_OK); }
+    const ecuio_signal_file_t* file() const
+    {
+        return ecuio_plugin_variant_file(plugin, 1);
+    }
+};
+
+} // namespace
+
+/* A plugin variant's recording holds its merged file as signals.json and
+ * names the plugin after it; a replay through that copy, loaded as any
+ * signal file, decodes the same values (ADR-0052 section 4) */
+TEST(RecorderTest, APluginVariantsRecordingHoldsItsMergedFile)
+{
+    ExamplePlugin p;
+    ASSERT_NE(p.plugin, nullptr);
+    ASSERT_EQ(p.profile, "plugin.example-sim.my2019");
+    Root root;
+    std::string first;
+    {
+        FileRecording rec(root, "mock://plugin?profile=" + p.profile, p.file());
+        ASSERT_EQ(rec.attached, ECUIO_OK) << ecuio_last_error_detail();
+        /* The TCM's fluid temperature and gear, as its replies read */
+        for (int i = 0; i < 20; ++i) {
+            dispatch(rec.session, 0x7E9,
+                     std::string("\x62\xF4\x10\x1F", 4) +
+                         static_cast<char>(0x40 + i));
+            dispatch(rec.session, 0x7E9,
+                     std::string("\x62\xF4\x11", 3) + static_cast<char>(i % 8));
+        }
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        first = rec.folder;
+    }
+    const std::string json = read_bytes(fs::u8path(first) / "signals.json");
+    ASSERT_FALSE(json.empty());
+    const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+    EXPECT_NE(read_text(fs::u8path(first) / "events.log")
+                  .find("\nprofile  plugin.example-sim.my2019"
+                        "\nsignal file  signals.json," +
+                        sha + "\nplugin  example-sim,1.0.0,my2019\n"),
+              std::string::npos)
+        << read_text(fs::u8path(first) / "events.log").substr(0, 600);
+
+    LoadedFile copy(first + "/signals.json");
+    ASSERT_NE(copy.file, nullptr);
+    EXPECT_EQ(copy.profile, "user.example-the-simulated-car");
+    std::string second;
+    {
+        FileRecording rec(
+            root, "replay://" + first + "?speed=max&profile=" + copy.profile,
+            copy.file);
+        ASSERT_EQ(rec.attached, ECUIO_OK);
+        ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+        ASSERT_TRUE(eventually(
+            [&] {
+                ecuio_recorder_state_t st{};
+                ecuio_recorder_get_state(rec.recorder, &st);
+                return st.frame_rows >= 40;
+            },
+            10000));
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        second = rec.folder;
+    }
+    const std::vector<std::string> a =
+        decoded_rows(fs::u8path(first) / "signals.csv");
+    const std::vector<std::string> b =
+        decoded_rows(fs::u8path(second) / "signals.csv");
+    ASSERT_GE(a.size(), 40u);
+    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv")
+                  .find(",Trans Fluid Temp,40.01,"),
+              std::string::npos)
+        << "the later file's scale, 0.01";
+    EXPECT_EQ(a, b);
+    EXPECT_EQ(read_bytes(fs::u8path(second) / "signals.json"), json);
+    EXPECT_EQ(read_text(fs::u8path(second) / "events.log").find("\nplugin  "),
+              std::string::npos)
+        << "a file loaded alone names no plugin";
 }

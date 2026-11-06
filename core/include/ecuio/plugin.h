@@ -102,6 +102,16 @@ const ecuio_signal_def_t*
 ecuio_plugin_variant_find(const ecuio_plugin_t* plugin, uint32_t index,
                           const char* key);
 
+/* Variant index's merged set as a signal file (NULL past the count),
+ * valid until the plugin is freed and never passed to
+ * ecuio_signal_file_free: what ecuio_recorder_signal_file copies into a
+ * recording (the variant's files merged and written as one signal file,
+ * with the plugin's id, version and variant on its own header line), and
+ * what ecuio_signal_file_name, _profile ("plugin.<id>.<variant>"), _find
+ * and _extends read */
+const ecuio_signal_file_t*
+ecuio_plugin_variant_file(const ecuio_plugin_t* plugin, uint32_t index);
+
 /* The variants the VIN's manufacturer code and model year fall in: one
  * of the manifest's "match" entries covers it and the variant's own
  * years do (a year range never covers model year 0). A proposal only:
