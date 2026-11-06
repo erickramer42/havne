@@ -44,6 +44,7 @@ which has no bench session):
 | [2026-11-04-socketcan-desk-utc](2026-11-04-socketcan-desk-utc.md) | Desk bus, no car: the simulated ECU on the USB2CAN, each reply's time in the VX's recording against `candump`'s |
 | [2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md) | Vehicle: both ECUs in one session through the VX and the MX+, the recorders on the car, the MX+ and the USB2CAN listening beside the VX |
 | [2026-11-05-two-ecu-car-rerun](2026-11-05-two-ecu-car-rerun.md) | Vehicle: the VX's reply latency after the read fix, and the MX+ listening with `AT CFC0` and six more setups |
+| [2026-11-06-own-signals-car](2026-11-06-own-signals-car.md) | Vehicle: v0.5.0's own signals through the VX and the MX+: a signal from the form, a file's DIDs on two modules, a refused DID, an enumeration and boost, a replay through its own copy |
 
 ## The list
 

@@ -549,3 +549,10 @@ refused. The rule is `cli/refused_signals.h`, on the public headers, and
 the app's Live says the same from it. `CliRefusedTest` (the rule and
 the line), `CliRefusedRunTest` (`tests/cli_refused.py`: the fake DLL's
 ECU on Windows, the simulated ECU on vcan0 on Linux).
+
+Amended 2026-11-06: past the eight refusals a report lists, the line
+adds `"more": [{"ecu", "refused"}]`, each such ECU's receive ID in
+`frames.csv`'s form and how many more requests it refused, whose
+signals the list can't name; the key is left out when there are none,
+so a line without it reads as before. `CliRefusedTest.RefusalsPastTheListAreCounted`,
+`CliRefusedRunTest.RefusalsPastTheListAreCounted`.

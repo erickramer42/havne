@@ -25,6 +25,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - When the connected car's VIN picks another saved vehicle than the one picked, the Vehicle section says so ("The connected car's VIN picked Daily driver (Weekend car was picked)") until you pick one yourself; before, only the activity log said it.
 - The viewer's **Replay view** is **Replay in Settings**: it fills Settings' field with the part in view for Connect, as the list's Replay does, and it's off while a session runs.
 - Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, and so does the end of a session in which the car's VIN picked another vehicle; a vehicle the VIN adds keeps no signal file or plugin in its connection. So a connect never reads with another vehicle's signals and keeps them as this one's.
+- For programs that use the core library: a channel's support report (`ecuio_channel_support_t`) lists in `dropped_list` the requests a negative reply refused before those its supported-PID bitmaps left out, each in set order; before, all were in set order, so on a module whose bitmaps leave out many PIDs the list filled before it reached a refusal.
 
 ### Fixed
 

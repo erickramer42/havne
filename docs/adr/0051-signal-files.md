@@ -509,6 +509,16 @@ and stays listed; `havne-cli stream --values` writes a `refused` line
 bitmap's clear bit is unsupported, not refused, and hides the row as
 before. A ninth refused request on one channel stays blank.
 
+Amended 2026-11-06, for the eight's bound: the report lists the
+refused drops ahead of the bitmap's, each in set order, so a module
+whose bitmaps leave out many PIDs (most cars, under a file that
+extends `obd2`) still has its refusals listed. Past the list,
+`refused_unlisted` (`cli/refused_signals.h`) counts the rest (the
+drops past it less the set's PIDs the bitmaps leave out), and Live's
+status line ("ECU 0x7E8 refused 2 more requests") and the `refused`
+line's `more` say how many, whose signals neither can name. No ABI
+change: the list's layout is the same, its order is what moved.
+
 A DID that `uds-generic`'s scan finds refused (`7F 22 31` to the
 scan's request) is counted in its channel's report (`scan_refused`)
 and is not one of its drops, so its row shows no value, where a polled

@@ -252,6 +252,7 @@ for 64-bit ARM, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
+| v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; fixes from the car run of v0.5.0's signals |
 | v0.6.0-v0.9.0 | Exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
