@@ -2189,12 +2189,14 @@ namespace {
 struct Waited {
     int64_t shortest_us = INT64_MAX;
     int64_t mean_us = 0;
+    int64_t median_us = 0; /* what a few preempted waits don't move */
 };
 
 Waited wait_n(ecuio_precise_wait& w, std::chrono::microseconds d, int n)
 {
     Waited out;
     int64_t total = 0;
+    std::vector<int64_t> each;
     for (int i = 0; i < n; ++i) {
         const auto from = std::chrono::steady_clock::now();
         w.sleep_for(d);
@@ -2204,8 +2206,11 @@ Waited wait_n(ecuio_precise_wait& w, std::chrono::microseconds d, int n)
                 .count();
         out.shortest_us = std::min(out.shortest_us, us);
         total += us;
+        each.push_back(us);
     }
     out.mean_us = total / n;
+    std::sort(each.begin(), each.end());
+    out.median_us = each[each.size() / 2];
     return out;
 }
 
@@ -2225,8 +2230,39 @@ TEST(CoreTest, APreciseWaitEndsOnTime)
 #endif
     const Waited got = wait_n(w, std::chrono::milliseconds(2), 20);
     EXPECT_GE(got.shortest_us, 2000) << "a wait ended early";
-    EXPECT_LT(got.mean_us, 4000) << "the waits ended on a timer's step";
+    EXPECT_LT(got.median_us, 4000) << "the waits ended on a timer's step";
     RecordProperty("mean_us", static_cast<int>(got.mean_us));
+    RecordProperty("median_us", static_cast<int>(got.median_us));
+}
+
+/* A wait until a time ends at a stop within a piece: a second's wait
+ * stopped 20 ms in returns long before the second (judged against half
+ * of it, which load stretches only toward the stop), and one never
+ * stopped waits it out, never ending early */
+TEST(CoreTest, APreciseWaitUntilEndsAtAStop)
+{
+    ecuio_precise_wait w;
+    std::atomic<bool> stop{false};
+    const auto from = std::chrono::steady_clock::now();
+    std::thread stopper([&stop] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        stop.store(true);
+    });
+    const bool stopped = w.sleep_until(from + std::chrono::seconds(1), stop);
+    const auto took = std::chrono::steady_clock::now() - from;
+    stopper.join();
+    EXPECT_TRUE(stopped);
+    EXPECT_LT(took, std::chrono::milliseconds(500))
+        << "the stop waited the second out";
+
+    std::atomic<bool> never{false};
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(w.sleep_until(start + std::chrono::milliseconds(50), never));
+    EXPECT_GE(std::chrono::steady_clock::now() - start,
+              std::chrono::milliseconds(50))
+        << "a wait ended early";
+    EXPECT_TRUE(w.sleep_until(start, stop))
+        << "a stop already set ends it at once";
 }
 
 /* Where the flag is refused (built here by asking for none), the wait is

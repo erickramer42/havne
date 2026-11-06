@@ -664,6 +664,19 @@ TEST(JsonTest, QuotedTextShowsWhatALineHides)
     EXPECT_EQ(ecuio_json::quoted("a\xE2\x80\x8F"
                                  "b"),
               "'a?b'");
+    // U+061C, the zero widths U+200B and U+2060, U+FEFF and the soft
+    // hyphen: each shows as nothing or turns the text, so each is '?'
+    EXPECT_EQ(ecuio_json::quoted("a\xD8\x9C"
+                                 "b\xE2\x80\x8B"
+                                 "c\xE2\x81\xA0"
+                                 "d\xEF\xBB\xBF"
+                                 "e\xC2\xAD"
+                                 "f"),
+              "'a?b?c?d?e?f'");
+    // their neighbors stay: U+200A (a hair space), U+2065 (unassigned),
+    // U+FEFE
+    EXPECT_EQ(ecuio_json::quoted("\xE2\x80\x8A\xE2\x81\xA5\xEF\xBB\xBE"),
+              "'\xE2\x80\x8A\xE2\x81\xA5\xEF\xBB\xBE'");
     EXPECT_EQ(ecuio_json::quoted("\xC3\xB8l \xE2\x82\xAC \xC2\xB0"
                                  "C"),
               "'\xC3\xB8l \xE2\x82\xAC \xC2\xB0"

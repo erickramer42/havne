@@ -130,9 +130,11 @@ std::string number_text(double v);
 
 /* The bytes of the character at p (n bytes left) that a line shows as
  * nothing or that moves the text around it: a C1 control (U+0080 to
- * U+009F), the line and paragraph separators (U+2028, U+2029), or a
- * direction mark, embedding, override or isolate (U+200E, U+200F,
- * U+202A to U+202E, U+2066 to U+2069); 0 for any other */
+ * U+009F), the line and paragraph separators (U+2028, U+2029), a
+ * direction mark, embedding, override or isolate (U+061C, U+200E,
+ * U+200F, U+202A to U+202E, U+2066 to U+2069), or a character with no
+ * width (the soft hyphen U+00AD, U+200B to U+200D, U+2060 to U+2064,
+ * U+FEFF); 0 for any other */
 size_t invisible_length(const char* p, size_t n);
 
 /* Text from the input shown in words: single-quoted, control characters

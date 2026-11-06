@@ -134,6 +134,7 @@ public:
      * kRecordDepth), and counts. */
     static constexpr uint32_t kRecordDepth = 96;
     char recorded[kRecordDepth][24] = {};
+    int64_t request_us[kRecordDepth] = {}; /* the first requests' steady_us */
     uint32_t commands = 0;
     uint32_t requests = 0;
     uint32_t packs = 0;    /* Service 01 requests of two or more PIDs */
@@ -730,6 +731,9 @@ private:
 
     void request(const char* cmd, size_t n, int64_t now)
     {
+        if (requests < kRecordDepth) {
+            request_us[requests] = now;
+        }
         ++requests;
         /* An odd digit at the end is the response count: the adapter
          * returns after that many lines (the datasheet's "09 02 1" loses

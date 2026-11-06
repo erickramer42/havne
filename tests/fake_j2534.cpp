@@ -925,7 +925,9 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* Counted on the page, the first kWriteDepth kept whole. */
     if (fake_control::Page* page = fake_control::attach()) {
-        fake_control::record_write(page, pMsg->Data, n, pMsg->TxFlags);
+        fake_control::record_write(
+            page, pMsg->Data, n, pMsg->TxFlags,
+            static_cast<uint32_t>(fake_j2534::now_us() & 0xFFFFFFFFLL));
     }
 
     /* The VX's TX indication for an accepted write: the CAN ID alone,

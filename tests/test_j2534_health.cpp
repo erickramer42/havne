@@ -960,10 +960,34 @@ TEST_F(J2534HealthTest, ATwoEcuSessionAsksAtTheEnginesFloor)
         "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0"));
     ASSERT_TRUE(wait_for_frames(6, 2000)) << "replies didn't arrive";
 
-    const uint32_t n = writes_during(page, 2000);
-    RecordProperty("requests_in_2s", static_cast<int>(n));
-    EXPECT_GE(n, 160u) << "requests waited out the timer's step, not the floor";
-    EXPECT_LE(n, 210u) << "requests came faster than the floor";
+    /* Judged by the fake's stamps on its recorded writes, not a count in
+     * a wall-clock window that load thins: the two channels take turns,
+     * so write i to write i + 2 is one channel's period, and its median
+     * is the floor's (about 21 ms) whatever a few stalls add; on a
+     * timer's 15.6 ms step it is 31 */
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (fake_control::writes(page) < fake_control::kWriteDepth &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_GE(fake_control::writes(page), fake_control::kWriteDepth);
+    std::vector<uint32_t> stamps;
+    for (uint32_t i = 0; i < fake_control::kWriteDepth; ++i) {
+        fake_control::Write w{};
+        ASSERT_TRUE(fake_control::recorded_write(page, i, &w));
+        stamps.push_back(w.us);
+    }
+    std::vector<uint32_t> periods;
+    for (size_t i = 0; i + 2 < stamps.size(); ++i) {
+        periods.push_back(stamps[i + 2] - stamps[i]);
+    }
+    std::sort(periods.begin(), periods.end());
+    const uint32_t median = periods[periods.size() / 2];
+    RecordProperty("period_median_us", static_cast<int>(median));
+    EXPECT_GE(median, 19000u) << "requests came faster than the floor";
+    EXPECT_LE(median, 26000u)
+        << "requests waited out the timer's step, not the floor";
 }
 
 /* On the VX a call holds its whole timeout unless its batch fills.

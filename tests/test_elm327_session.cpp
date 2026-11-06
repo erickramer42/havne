@@ -1178,14 +1178,28 @@ TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
         return on_fake<uint32_t>(
             [](fake_elm327::adapter& a) { return a.requests; });
     };
-    ASSERT_TRUE(wait_for([&] { return requests() >= 6; }, 5000))
+    /* Judged by the fake's stamps on its first requests, not a count in
+     * a wall-clock window that load thins: the two channels take turns,
+     * so request i to request i + 2 is one channel's period, and its
+     * median is the floor's (about 21 ms) whatever a few stalls add; on
+     * a timer's 15.6 ms step it is 31 */
+    static constexpr uint32_t want = 40; /* no capture: MSVC and Clang agree */
+    ASSERT_TRUE(wait_for([&] { return requests() >= want; }, 5000))
         << "no requests";
-    const uint32_t before = requests();
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-    const uint32_t n = requests() - before;
-    RecordProperty("requests_in_2s", static_cast<int>(n));
-    EXPECT_GE(n, 160u) << "requests waited out the timer's step, not the floor";
-    EXPECT_LE(n, 210u) << "requests came faster than the floor";
+    const std::vector<int64_t> stamps =
+        on_fake<std::vector<int64_t>>([](fake_elm327::adapter& a) {
+            return std::vector<int64_t>(a.request_us, a.request_us + want);
+        });
+    std::vector<int64_t> periods;
+    for (size_t i = 0; i + 2 < stamps.size(); ++i) {
+        periods.push_back(stamps[i + 2] - stamps[i]);
+    }
+    std::sort(periods.begin(), periods.end());
+    const int64_t median = periods[periods.size() / 2];
+    RecordProperty("period_median_us", static_cast<int>(median));
+    EXPECT_GE(median, 19000) << "requests came faster than the floor";
+    EXPECT_LE(median, 26000)
+        << "requests waited out the timer's step, not the floor";
 }
 
 /* 29-bit channels: protocol 7, the priority and header in two commands,

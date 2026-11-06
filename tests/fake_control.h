@@ -13,7 +13,8 @@
 //     environment variable of the same name,
 //   - queues received messages with any RxStatus, and
 //   - reads what the fake publishes: the process that opened it, its
-//     successful writes (counted, the first kWriteDepth kept whole), the
+//     successful writes (counted, the first kWriteDepth kept whole with
+//     the fake's microsecond stamp), the
 //     last connect's parameters, the last filter started and stopped,
 //     how often it was disconnected and closed by the IDs it handed
 //     out, and its PassThruReadMsgs calls (counted, the first
@@ -39,7 +40,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 /* Raised with any change to Page. A fake whose layout differs (a
  * build-win32 fake older than the tests) ignores the page, as it
  * ignores a wrong magic, and a test sees opener() stay 0. */
-constexpr uint32_t kLayout = 4;
+constexpr uint32_t kLayout = 5;
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
@@ -65,6 +66,8 @@ struct Write {
     uint32_t size;
     uint32_t tx_flags;       /* PASSTHRU_MSG.TxFlags, verbatim */
     uint8_t data[kMsgMax];
+    uint32_t us; /* when the fake took it: its steady clock's
+                                microseconds, low 32 bits */
 };
 
 struct Filter {
@@ -99,7 +102,7 @@ struct Page {
     uint32_t read_timeouts[kReadDepth]; /* the first reads' Timeout */
 };
 static_assert(sizeof(Page) == 12 + kMaxKnobs * 80 + kInboxDepth * 76 + 20 +
-                                  kWriteDepth * 72 + 12 + 48 + 4 + 4 +
+                                  kWriteDepth * 76 + 12 + 48 + 4 + 4 +
                                   kReadDepth * 4,
               "the page's layout must match in x86 and x64 builds");
 
@@ -308,10 +311,10 @@ inline uint32_t take(Page* p, Message* out, uint32_t cap)
     return n;
 }
 
-/* Fake side: a successful write, counted, and its bytes kept while
- * fewer than kWriteDepth are. */
+/* Fake side: a successful write at us, counted, and its bytes and stamp
+ * kept while fewer than kWriteDepth are. */
 inline void record_write(Page* p, const uint8_t* data, uint32_t size,
-                         uint32_t tx_flags)
+                         uint32_t tx_flags, uint32_t us)
 {
     Guard g(p);
     const LONG i = InterlockedCompareExchange(&p->writes, 0, 0);
@@ -320,6 +323,7 @@ inline void record_write(Page* p, const uint8_t* data, uint32_t size,
         w.size = (size < kMsgMax) ? size : kMsgMax;
         w.tx_flags = tx_flags;
         memcpy(w.data, data, w.size);
+        w.us = us;
     }
     InterlockedIncrement(&p->writes);
 }
