@@ -606,6 +606,13 @@ less, **M** a few days, **L** a week or more or an ADR first.
 
 - **Custom derived channels (M):** a user's expression per channel, in
   core, on v0.5.0's derived-signal stage.
+- **Every refusal named (M, an ABI addition):** a DID `uds-generic`'s
+  scan finds refused, and any refusal in a replay, show no value where
+  a live session's polled request reads Refused: the scan's refusals
+  are only counted in the support report, and a recording keeps a
+  refusal as a note's words
+  ([ADR-0051](docs/adr/0051-signal-files.md)'s appendix "a refused
+  signal shown as refused").
 - **A scanned DID answered "response pending" on a real adapter (S):**
   tested against the fake only; needs an ECU that sends it (BENCH prep
   #17).

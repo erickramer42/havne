@@ -509,6 +509,12 @@ and stays listed; `havne-cli stream --values` writes a `refused` line
 bitmap's clear bit is unsupported, not refused, and hides the row as
 before. A ninth refused request on one channel stays blank.
 
+A DID that `uds-generic`'s scan finds refused (`7F 22 31` to the
+scan's request) is counted in its channel's report (`scan_refused`)
+and is not one of its drops, so its row shows no value, where a polled
+DID with the same reply reads Refused. Naming it needs the scanned DID
+in the report, an ABI addition (STATUS's backlog).
+
 ## Appendix: a replay reads with its recording's copy (2026-11-06)
 
 Section 4 says a replay with a recording's `signals.json` decodes the
