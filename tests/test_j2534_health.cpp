@@ -1424,6 +1424,28 @@ TEST_F(J2534HealthTest, VxQueuedMessagesComeBackWithoutAHold)
     EXPECT_LT(took, 30) << "a read held past its message";
 }
 
+namespace {
+
+/* How a read past its deadline called the vendor, from the fake's own
+ * record (the control page), not the wall clock, which a loaded machine
+ * stretches past any margin one scheduling slice wide (55 ms on
+ * 2026-11-05 and 70 ms on 2026-11-06, against 55, with other sessions
+ * building on the machine): the stalled
+ * call, then exactly one more, and neither asked to wait 0 ms, which
+ * the VX holds 50 ms */
+void expect_the_stalled_call_then_one_more(fake_control::Page* page)
+{
+    ASSERT_EQ(fake_control::reads(page), 2u)
+        << "the stalled call, then one more after the deadline";
+    for (uint32_t i = 0; i < 2; ++i) {
+        uint32_t timeout_ms = 0;
+        ASSERT_TRUE(fake_control::recorded_read_timeout(page, i, &timeout_ms));
+        EXPECT_NE(timeout_ms, 0u) << "call " << i << " asked to wait 0 ms";
+    }
+}
+
+} // namespace
+
 /* A call that brings only an indication after the read's deadline (the
  * fake's first read stalls 30 ms, the read asks for 10) is followed by
  * one more, which waits 1 ms: the VX holds a call asked to wait 0 ms
@@ -1451,7 +1473,7 @@ TEST_F(J2534HealthTest, VxTheReadAfterAnIndicationPastTheDeadlineStillWaits)
                           .count();
     EXPECT_FALSE(got) << "the indication is no frame";
     EXPECT_GE(took, 30) << "the fake's stall";
-    EXPECT_LT(took, 55) << "a call asked to wait 0 ms";
+    expect_the_stalled_call_then_one_more(page);
 }
 
 /* A loss reported after a read's frame (an indication with
@@ -1514,7 +1536,7 @@ TEST_F(J2534HealthTest,
     ASSERT_TRUE(got) << "the read stopped at its deadline before its last call";
     EXPECT_EQ(f.data[6], 1u);
     EXPECT_GE(took, 30) << "the fake's stall";
-    EXPECT_LT(took, 55) << "a call asked to wait 0 ms";
+    expect_the_stalled_call_then_one_more(page);
 }
 
 /* A loss carried from the read before into a read that fails: the
