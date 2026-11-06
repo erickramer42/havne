@@ -1,28 +1,5 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
-// Testing: test_bridge (Qt-linked target): the frame log's ring, order
-//          and payload storage, SignalListModel's history ring and display units,
-//          its hidden rows (unsupported or absent) and LiveSignalModel
-//          (BridgeTest.LiveHides*),
-//          discoverJ2534Devices' and discoverSerialPorts' marshaling
-//          shape, recentRecordings and replayUriFor
-//          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
-//          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
-//          vehicle's VIN key, label and plotted names (ADR-0027;
-//          the VIN core reads, CoreTest.TheVinIsService09sThenF190s;
-//          BridgeTest.UnplottedNames*, ...), the default
-//          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
-//          a mark in a recording (ADR-0049 section 4,
-//          BridgeTest.AMarkGoesIntoTheRecording);
-//          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
-//          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
-//          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
-//          a typed code's title (ADR-0044, BridgeTest.ATypedCodeIsDescribed);
-//          the inspection line (ADR-0045,
-//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession);
-//          Read once (ADR-0051's form) against the fake DLL's ECU
-//          (BridgeTest.ReadOnce*) and the stale age from core
-//          (BridgeTest.TheStaleAgeIsCores); the vehicles' signal files
-//          (ADR-0051, SignalStore: BridgeTest.SignalFile*)
+// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge)
 
 #pragma once
 

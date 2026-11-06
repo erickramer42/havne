@@ -1,23 +1,6 @@
 // File/layer: app/qml/DiagnosticsPage.qml | Qt6 Quick, UI layer
-// Testing: tests/qml/tst_diagnostics.qml (the mock's report: the MIL,
-//          each list's codes, the monitors since the clear and this
-//          drive cycle (PID 41), the freeze frame's values in
-//          either unit system, Read again, ?diagnose=0 and the empty
-//          state; the clear's confirmation (naming the bridge's
-//          targets), Cancel sending nothing, a
-//          clear at the mock's stopped engine, and on Windows the fake's
-//          running engine refusing and its moving vehicle asked about
-//          once more), which finds items by objectName; the entries
-//          themselves and the clear's save by test_bridge
-//          (BridgeTest.DiagnosticsEntry*, .AClear*); on a phone, the
-//          clear's buttons reached on a short page
-//          (test_theClearsButtonsCanBeReachedOnAShortPage) and the page
-//          inside the app's window (tests/qml/tst_phone.qml); each
-//          code's title and a typed code's (ADR-0044,
-//          test_codesCarryTheirTitles, test_aTypedCodeIsNamed); the car's
-//          inspection line (ADR-0045, test_theInspectionLineJudgesTheCar);
-//          the look,
-//          manually (the run-havne skill)
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.diagnostics,
+//          QmlTest.phone (test_qml)
 
 import QtQuick
 import QtQuick.Controls

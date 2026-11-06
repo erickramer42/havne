@@ -1,24 +1,6 @@
 // File/layer: tests/test_j2534_connect.cpp | GTest, HARNESS tier
-// Testing: why a j2534:// connect failed, through the surrogate: the
-//          status ecuio_session_create or ecuio_session_start returns,
-//          and ecuio_last_error_detail's words for it. A refused
-//          PassThruOpen, PassThruConnect or filter names the call, its
-//          status (by its J2534-1 v04.04 name, or as vendor-specific)
-//          and the vendor's own text from PassThruGetLastError, word for
-//          word. A file that can't be a DLL (missing, not a PE, a path
-//          that isn't UTF-8 or isn't absolute) is LOAD_FAILED before any
-//          spawn; a PE the surrogate can't load (an ARM64 image), or one
-//          without the J2534 exports, is LOAD_FAILED from the child; a
-//          success clears the detail. A session
-//          that connects describes what it runs on
-//          (ecuio_session_get_info): backend, DLL architecture, the
-//          channel as connected, and the adapter's battery and version
-//          readings, which may be refused without failing the connect.
-//          Below the connect path, the loader seam's helpers give each
-//          cause of a failure its own code.
-//          J2534SurrogateConnectTest: the surrogate's own failures (no
-//          surrogate exe for the DLL's architecture, one built from
-//          other shared headers).
+// Testing: HARNESS: J2534ConnectTest, J2534SurrogateConnectTest
+//          (test_j2534_connect)
 
 #include <gtest/gtest.h>
 

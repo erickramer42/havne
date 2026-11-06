@@ -1,18 +1,5 @@
 // File/layer: fuzz/fuzz_diagnostics.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: the request engine reading an ECU's diagnostics
-//          (ADR-0037) and clearing them (ADR-0038) from arbitrary
-//          replies: each request answered by a timeout, raw bytes, a
-//          positive reply with an arbitrary tail or a negative one, with
-//          Read again, rescans and clears (at the report's generation or
-//          another, with any of the caller's flags) between; 04 goes out
-//          only right after its gate: the engine speed read 0 rpm, or
-//          under ECUIO_CLEAR_ALLOW_RUNNING the vehicle speed read 0 km/h,
-//          or asked at all under ECUIO_CLEAR_ALLOW_MOVING too; the
-//          report stays within its caps, every
-//          code and monitor it holds has a name, its values are finite,
-//          it reads complete only with nothing left to ask, its
-//          inspection verdict (ADR-0045) counts within it, two runs
-//          agree
+// Testing: FUZZ: fuzz_diagnostics
 
 #include <ecuio/core.h>
 #include <ecuio/signals.h>

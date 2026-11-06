@@ -1,17 +1,6 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
-// Testing: HARNESS: test_j2534_surrogate, plus the cross-arch routing
-//          case against the Win32-tree build (ADR-0014); the 1 ms timer
-//          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep;
-//          a read's calls (one message, answered at once, never a 0 ms
-//          wait, a loss after the last frame) by
-//          J2534HealthTest.VxAReply*, .VxQueuedMessagesComeBackWithoutAHold,
-//          .VxTheReadAfterAnIndicationPastTheDeadline*,
-//          .VxALossAfterAReadsLastFrameFlagsTheNextRead,
-//          .ALossCarriedIntoAFailedReadLetsTheFailureThrough,
-//          .AReconnectedChannelStartsWithNoLoss,
-//          .AVendorThatReturnsMoreThanAskedFlagsTheLoss and
-//          .FramesUnderErrTimeoutAreDelivered; the call lines in the
-//          frame log by hand (a run of the latency step against the fake)
+// Testing: HARNESS: J2534HealthTest (test_j2534_health);
+//          test_j2534_surrogate; Cross-arch
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>

@@ -1,23 +1,6 @@
 // File/layer: core/src/replay_transport.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest.Replay* (the reader's refusals with their line
-//          numbers, either line ending, a whole-message payload, pacing at
-//          speed 1 and 10, late frames catching up with no drift, stamps
-//          rebased and never decreasing, the backward-step fallback, loop
-//          and end of file, an early stop's error state (a bad row, a
-//          file gone, fewer rows; rows added played no further), the
-//          query);
-//          an early stop in a recording's link line
-//          (RecorderTest.AReplayThatStopsEarlySaysSoInALinkLine); the
-//          source's frame flags line passed on
-//          (RecorderTest.AReplayPassesOnItsSourcesFrameFlagsLine);
-//          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
-//          round trip through core's recorder), .ReplayThatStopsEarlySaysSo;
-//          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues;
-//          CoreTest.ReplayFaults* (?faults= and ?seed=: each kind's
-//          effect, its count and the same faults from the same seed),
-//          BridgeTest.ReplayFaults* (the bridge and the recorder under
-//          them); CoreTest.ReplayStretch* (?from= and ?to=: the rows
-//          played, their stamps, a loop of the stretch, the refusals)
+// Testing: UNIT: CoreTest, RecorderTest (test_core); BRIDGE: BridgeTest
+//          (test_bridge)
 //
 // replay:// (ADR-0023): a recording's frames.csv (ADR-0017) played back
 // through the frame API. Attach reads the whole file once and refuses a

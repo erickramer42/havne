@@ -1,9 +1,5 @@
 // File/layer: core/include/ecuio/obdb.h | C ABI, public interface
-// Testing: UNIT: ObdbImportTest (test_core): each rule and its note over
-//          files written by hand and the synthetic fixture in
-//          tests/fixtures/obdb/, the output loaded by ecuio_signal_file_load;
-//          fuzz_obdb_import; test_c_abi: the header as strict C and the
-//          structs' layout
+// Testing: UNIT: ObdbImportTest (test_core); c_abi; FUZZ: fuzz_obdb_import
 #ifndef ECUIO_OBDB_H
 #define ECUIO_OBDB_H
 #include "ecuio/core.h" /* ecuio_status_t */

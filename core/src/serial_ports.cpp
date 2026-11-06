@@ -1,9 +1,5 @@
 // File/layer: core/src/serial_ports.cpp | C++17, Qt-free
-// Testing: UNIT: SerialPortsTest (test_elm327): the arguments, and the
-//          contract against the machine's own ports (none on most CI
-//          runners); the rules over made-up ports are serial_ports.h's.
-//          The Windows registry read and the /dev scan on a machine with
-//          an adapter are manual smoke (Settings) and BENCH
+// Testing: UNIT: SerialPortsTest (test_elm327); BENCH, Manual smoke
 //
 // ecuio_serial_ports (serial.h): gathers the candidates the OS lists and
 // hands them to serial_ports_finish. Nothing here opens a port.

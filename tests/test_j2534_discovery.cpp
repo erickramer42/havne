@@ -1,10 +1,5 @@
 // File/layer: tests/test_j2534_discovery.cpp | GTest, HARNESS tier (the live registry)
-// Testing: Win32-only; skipped on Linux/macOS via compile guard. Against
-//          the machine's own registry: the shape of the result anywhere,
-//          and at least ECUIO_EXPECT_J2534_DEVICES devices where that
-//          variable is set (scripts/verify.sh sets it to 1 on the dev
-//          machine, where a Pass-Thru driver is installed), so the test
-//          can't pass vacuously there.
+// Testing: HARNESS: J2534DiscoveryTest (test_j2534_discovery)
 
 #include <gtest/gtest.h>
 

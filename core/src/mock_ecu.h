@@ -1,12 +1,5 @@
 // File/layer: core/src/mock_ecu.h | internal, C++17, Qt-free, header-only
-// Testing: UNIT: CoreTest.MockReportsTheFakeEcusDiagnostics (the report
-//          against tests/fake_diagnostics.h, the fakes' own),
-//          CoreTest.MockReadAgainReadsTheSameReport,
-//          CoreTest.MockDiagnoseOffReportsNone,
-//          CoreTest.MockEcuClearsOnlyWithTheEngineStopped (the clear's
-//          engine speed and 04, ADR-0038),
-//          .MockEcuClearsAMovingCarOnlyWithTheCallersWord (01 0D),
-//          CoreTest.MockClearsTheReportLikeTheFakeEcu (through the worker)
+// Testing: UNIT: CoreTest (test_core)
 //
 // The simulated car's engine ECU (mock://, ADR-0037) for the diagnostics
 // list: the request engine asks it as it asks a real ECU, and it answers

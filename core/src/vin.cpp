@@ -1,8 +1,5 @@
 // File/layer: core/src/vin.cpp | C++17, Qt-free
-// Testing: UNIT: VinTest (test_core): 49 CFR 565.15's sample VIN, each
-//          year rule, the check digit's X, the six-character codes, the
-//          refusals and the table's lookups; the table's order and its
-//          codes' shape are static_asserts here
+// Testing: UNIT: VinTest (test_core)
 //
 // ecuio_vin_decode, ecuio_vin_make and ecuio_vin_source (vin.h,
 // ADR-0043): the VIN's model year and check digit by 49 CFR 565.15, its

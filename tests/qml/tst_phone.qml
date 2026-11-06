@@ -1,16 +1,5 @@
 // File/layer: tests/qml/tst_phone.qml | Qt Quick Test, QML tier
-// Testing: every page in the app's own window (Main) at a phone's size,
-//          connected to mock://demo with developer mode on: each page's
-//          items lie inside the window's width, the Log page in its
-//          Frames view and the viewer as it opens (its hint showing) too,
-//          and Live's window buttons each on one line. The pages' own
-//          tests run them at 320 px
-//          alone; this one runs them as the window holds them, the
-//          relay's line beside its button, the header's Mark while
-//          recording, developer mode's frame-rate badge, and a thumb's
-//          double tap, two taps a little apart (DoubleTapHandler.qml), on
-//          Live's and the viewer's chart and splitters, timed by the
-//          taps' own stamps. How they look on a phone is the phone's run.
+// Testing: QML: QmlTest.phone (test_qml)
 
 import QtQuick
 import QtTest

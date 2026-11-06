@@ -1,8 +1,5 @@
 // File/layer: cli/info_lines.h | havne-cli, a recording's check as lines (ADR-0049 section 6)
-// Testing: UNIT (tests/test_cli.cpp, CliInfoTest: the kind and ISO-TP
-//          words, each line's fields, the options' forms); the command in
-//          the golden runs (tests/golden/cli/info-*.jsonl, on
-//          tests/fixtures/recording/findings and the replay fixture)
+// Testing: UNIT: CliInfoTest (test_cli)
 //
 // `havne-cli info`'s own lines, around view's opened, signal and marker
 // lines: what the frames check found (ecuio_recording_check), each finding

@@ -1,13 +1,6 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: test_qml (tests/qml/tst_theme.qml) pins linkColor and
-//          linkLabel for every state and the trace palette's rules
-//          (seriesColor and seriesDash through tst_liveview.qml's rows)
-//          and staleMs as core's;
-//          developerMode's effect on the Log page and Settings:
-//          tests/qml/tst_log.qml; dense by the window's shape:
-//          tests/qml/tst_phone.qml; how the palette and a dense page
-//          look is manual smoke (run-havne at 384 x 832 and 832 x 384)
-//          and the phone's run.
+// Testing: QML: QmlTest.theme, QmlTest.liveview, QmlTest.log, QmlTest.phone
+//          (test_qml); Manual smoke
 pragma Singleton
 import QtQuick
 

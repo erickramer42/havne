@@ -1,16 +1,5 @@
 // File/layer: tests/qml/tst_liveview.qml | Qt Quick Test, QML tier
-// Testing: LiveView's trace styles keyed by model row (color from
-//          Theme.seriesColors, dashes past the palette), each row's
-//          swatch under mock://demo, filled while plotted and hollow
-//          while not, a text row under uds-generic (the mock answering
-//          its DIDs), an enum row's label (a signal file's), the list
-//          giving up rows so the chart stays whole
-//          on a short page, the rows the fake ECU withholds from its
-//          bitmaps left out with a line saying how many (Windows: the
-//          fake J2534 DLL), the link banner's message for every state,
-//          F toggling the chart but typed into the filter as a letter,
-//          and every item inside a phone's 320 px.
-//          The banner on screen in each state is tst_linkhealth.qml's.
+// Testing: QML: QmlTest.liveview (test_qml)
 
 import QtQuick
 import QtTest

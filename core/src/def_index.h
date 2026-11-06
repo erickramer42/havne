@@ -1,8 +1,5 @@
 // File/layer: core/src/def_index.h | C++17, Qt-free, ALL platforms (internal)
-// Testing: UNIT: tests/test_core.cpp (DefIndexTest: the defs found for
-//          each frame against ecuio_def_applies_to_frame over every def,
-//          in the set's order), and through a session's decode
-//          (CoreTest.Values*, CoreTest.APacked*)
+// Testing: UNIT: DefIndexTest, CoreTest (test_core)
 //
 // The defs of a set that a frame can match (ADR-0024 section 4), found
 // without checking each def. A def applies to a frame on its message ID

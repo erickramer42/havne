@@ -1,8 +1,5 @@
 // File/layer: fuzz/fuzz_vin.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: arbitrary text as a VIN and as a manufacturer code
-//          (ADR-0043): the status is one of two, a refusal leaves the info
-//          zeroed, a decode's fields stay in their ranges, a make is never
-//          NULL, two calls agree
+// Testing: FUZZ: fuzz_vin
 
 #include <ecuio/core.h>
 #include <ecuio/vin.h>

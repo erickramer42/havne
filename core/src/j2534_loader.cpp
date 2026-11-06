@@ -1,11 +1,6 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
-// Testing: HARNESS: live-registry discovery tests, test_j2534_load
-//          (load/export/open/close), test_j2534_stream (end to end),
-//          test_j2534_routing (the surrogate by PE architecture, the
-//          refusals before any spawn), J2534ConnectTest.MissingDllFailsToLoad
-//          (the sniff's three outcomes) and
-//          J2534ConnectTest.ARelativeDllPathIsRefusedBeforeAnyLoad
-//          (discovery's skip by the CI registry's relative entry)
+// Testing: HARNESS: J2534ConnectTest (test_j2534_connect); test_j2534_load;
+//          test_j2534_stream; test_j2534_routing
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "ecuio/j2534.h"

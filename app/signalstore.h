@@ -1,10 +1,5 @@
 // File/layer: app/signalstore.h | Qt6 Core, app layer, C++17
-// Testing: HARNESS: BridgeTest.SignalStore* and .SignalFile* (test_bridge,
-//          each under a HAVNE_SETTINGS_DIR of its own): a copy kept by
-//          its hash and reused, the loader's words without a path, a file
-//          that no longer loads at start-up, one profile to one file, the
-//          registration followed, and a copy deleted only once its
-//          profile is unregistered; the page's side in tst_settings.qml
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.settings (test_qml)
 //
 // The vehicles' signal files (ADR-0051), kept by the app: each file a
 // user imports is read by core's loader from its bytes, and when it

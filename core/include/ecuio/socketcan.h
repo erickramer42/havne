@@ -1,9 +1,6 @@
 // File/layer: core/include/ecuio/socketcan.h | C ABI, public interface
-// Testing: UNIT: SocketCanTest (test_socketcan): the contract's
-//          arguments on every platform, and the interfaces read from
-//          canned netlink replies (state, modes, the driver's modes);
-//          the names (SocketCanTest.StatesAndModesHaveIpLinksNames);
-//          HARNESS: VcanTest (Linux): vcan0 listed, up, with its MTU
+// Testing: UNIT: SocketCanTest (test_socketcan); HARNESS: VcanTest
+//          (test_vcan)
 
 #ifndef ECUIO_SOCKETCAN_H
 #define ECUIO_SOCKETCAN_H

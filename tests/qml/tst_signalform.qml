@@ -1,11 +1,5 @@
 // File/layer: tests/qml/tst_signalform.qml | Qt Quick Test, QML tier
-// Testing: SignalForm's rules (ADR-0051's form) on plain values, no page
-//          and no bridge: a key from a name, an enum's values both ways,
-//          the form's fields into a signal by kind with its defaults left
-//          out and back again, the module's entry, and the own file with
-//          a signal added, replaced by its key and removed, its modules
-//          only those its signals read. Core's loader judges the files
-//          (tst_settings.qml saves them through the bridge).
+// Testing: QML: QmlTest.signalform (test_qml)
 
 import QtQuick
 import QtTest

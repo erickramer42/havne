@@ -1,9 +1,5 @@
 // File/layer: core/include/ecuio/surrogate_protocol.h | shared app<->surrogate contract
-// Testing: structural: compiled by BOTH x64 client and x86 surrogate, so
-//          layout drift is impossible WITHIN a tree. Across trees it fails
-//          loudly: byte-mode pipe reads return the WRITER's struct size.
-//          A changed value in a same-sized struct is caught at OP_OPEN by
-//          the fingerprint (J2534SurrogateTest.MismatchedFingerprintRefusesOpenBeforeVendor).
+// Testing: HARNESS: J2534SurrogateTest (test_j2534_surrogate)
 
 #ifndef ECUIO_SURROGATE_PROTOCOL_H
 #define ECUIO_SURROGATE_PROTOCOL_H

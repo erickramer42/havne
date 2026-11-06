@@ -1,64 +1,7 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_settings.qml): the URI composed from a
-//          preset, the profile row and the DID field, a typed URI read
-//          back into the row and the field with its other keys kept, no
-//          scheme's keys added or taken (a raw replay composes no filter),
-//          the DID field refusing query characters, the field left
-//          editable, core's refusal in the error line, a composed
-//          uds-generic URI connecting through the mock, every control
-//          locked while a connect is in flight, the last URI that
-//          connected and the Record switch back in a new page (a refused
-//          URI not kept), the device list's rows for interfaces and
-//          serial ports and Bluetooth adapters, a serial port's and a
-//          Bluetooth adapter's row and the elm327:// preset
-//          filling the field, each row's versions last seen at a connect
-//          (kept across a new page; the fake's on Windows); the status label
-//          in each link state (tests/qml/tst_linkhealth.qml), by
-//          objectName; the developer box and the mock:// preset that
-//          follows it (tests/qml/tst_log.qml); the Vehicle section
-//          (ADR-0027): New, Rename, Duplicate and their defaults, Forget
-//          and Forget all asking once, kept across a new page, picking
-//          that fills the field, locked during a session, a mock session
-//          left alone, and (Windows, the fake) an adapter's connect
-//          keeping its URI and plotting, its VIN learned and logged;
-//          a typed VIN decoded and kept nowhere (ADR-0043,
-//          test_aTypedVinIsDecodedOnTheDevice);
-//          every item inside the page's width at a phone's (320 px); a
-//          recording's replay (pickRecording, from the Recordings page)
-//          filling the field and connecting under the recorded profile
-//          and DIDs; the
-//          five sections folded at first, each heading's summary,
-//          chevron and fold; Connect... elsewhere opening Adapter; the
-//          Record line saying a
-//          replay isn't recorded; a preset of another scheme dropping
-//          the keys it doesn't take and the mock profile on an adapter.
-//          Manual smoke: the live discovery list renders (Windows: the
-//          registry's interfaces and ports; macOS/Linux: the /dev ports or
-//          the empty-state hint) sized to its rows, a device row
-//          fills the URI field only, Connect button drives
-//          connectSessionAsync (UI stays responsive while a vendor blocks
-//          ~8 s), Record sessions fixed during a session and its folder
-//          shown relative to Documents; at 1280 x 650 the page scrolls;
-//          the Display row steps Theme.zoom; developer mode kept between
-//          runs (Main.qml). The recording's bridge side:
-//          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
-//          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
-//          BridgeTest.UnitSystem*. The relay's line beside its button at
-//          a phone's width: tst_phone.qml; the relay itself:
-//          BridgeTest.Relay*. The vehicle's signal files (ADR-0051):
-//          Import by URL (importSignalFile) adding the file, its words on
-//          a refusal or a clashing profile, the file's profile among the
-//          choices composing ?profile=user.<slug>, Remove (asking first
-//          for the vehicle's own file) and Forget deleting the copies no
-//          vehicle keeps, a new page registering them again; the store
-//          itself: BridgeTest.SignalFile*. Manual: the file dialog, and
-//          Android's content:// through it (the test phone, 2026-11-05).
-//          The vehicle's own signals (ADR-0051's form, SignalForm): Save
-//          writing its own file and the file a profile, a second Save
-//          adding to it and Edit's replacing a signal, Remove, the
-//          loader's words for a draft it refuses; Read once refused
-//          while connected or with no adapter, and (Windows, the fake)
-//          a DID's reply bytes and value beside the form.
+// Testing: UNIT: SignalsTest (test_signals); BRIDGE: BridgeTest
+//          (test_bridge); QML: QmlTest.settings, QmlTest.linkhealth,
+//          QmlTest.log, QmlTest.phone (test_qml); Manual smoke
 
 import QtCore
 import QtQuick

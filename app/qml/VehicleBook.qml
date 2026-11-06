@@ -1,14 +1,5 @@
 // File/layer: app/qml/VehicleBook.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_vehiclebook.qml): a stored document
-//          read back or dropped whole, the label's rule and its
-//          defaults, New, Duplicate, Rename, Forget the VIN, Forget and
-//          Forget all, a connection and plotted signals remembered for
-//          adapter sessions only, and the VIN key settling the vehicle
-//          (each row of ADR-0027 section 4's table, with its log line);
-//          a vehicle's signal files kept through every change, copied by
-//          Duplicate, and a clashing profile refused (ADR-0051); a
-//          vehicle's plugin variant kept, copied by Duplicate (ADR-0052).
-//          SettingsPage.qml wires it (tests/qml/tst_settings.qml).
+// Testing: QML: QmlTest.vehiclebook, QmlTest.settings (test_qml)
 
 pragma Singleton
 import QtQml

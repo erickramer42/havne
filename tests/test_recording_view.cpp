@@ -1,12 +1,5 @@
 // File/layer: tests/test_recording_view.cpp | GTest + QtCore, app-layer tests
-// Testing: UNIT: RecordingView (app/recordingview.h, ADR-0049 step 5) on
-//          tests/fixtures/recording/: the open and the check off the GUI
-//          thread, the refusals, a later open winning, a close canceling a
-//          pass under way, the signals in display units and the default
-//          plotted ones, columns (a window from before the start: every
-//          sample once), the values at a time, markers, findings, the
-//          alignment finds against havne-cli view's goldens.
-//          Part of test_bridge, whose main() makes the QCoreApplication.
+// Testing: BRIDGE: RecordingViewTest (test_bridge)
 
 #include <gtest/gtest.h>
 

@@ -1,14 +1,6 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
-// Testing: manual smoke: mock://demo drives every gauge; resize across
-//          760 px content width (4 <-> 2 grid columns), 600 px (compact
-//          gaps) and 320 px (the two dials side by side above it, stacked
-//          below; tests/qml/tst_phone.qml), and to 1280 x 650 (the wide arrangement fits without
-//          scrolling); gauges sweep once per session. test_qml
-//          (tests/qml/tst_dashboard.qml) covers each Tap's lookup by
-//          def ID (a set naming its defs otherwise too) and note, the gauges' imperial units, scales and zones, the
-//          peaks cleared on a change of units, and a peak held from
-//          inside a window (the replayed fixture); tst_linkhealth.qml the
-//          header's link state, found by objectName
+// Testing: QML: QmlTest.phone, QmlTest.dashboard, QmlTest.linkhealth
+//          (test_qml); Manual smoke
 
 import QtQuick
 import QtQuick.Controls

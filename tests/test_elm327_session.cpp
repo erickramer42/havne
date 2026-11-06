@@ -1,20 +1,7 @@
 // File/layer: tests/test_elm327_session.cpp | GTest, HARNESS tier,
 //             headless CI job (every platform)
-// Testing: HARNESS: the ELM327 transport (core/src/elm327_transport.cpp,
-//          ADR-0026) end to end against the fake ELM327
-//          (tests/fake_elm327.h) behind the port opener (internal.h):
-//          Elm327SessionTest pins the URI and its refusals, the setup,
-//          the session info, the requests, multi-frame replies,
-//          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
-//          the signals core lists unsupported (ADR-0039 section 6),
-//          link health and recovery, a recording's link lines and
-//          latency.csv (ADR-0049), and that the worker allocates
-//          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
-//          against the fake on a pseudo-terminal; Elm327TcpTest (every
-//          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
-//          the fake behind a loopback listener; Elm327StreamTest (every
-//          platform) runs an app-fed stream (core/src/elm327_stream.cpp,
-//          ADR-0028) with a pump thread as the app. Qt-free.
+// Testing: HARNESS: Elm327SessionTest, Elm327LogTest, Elm327PortTest,
+//          Elm327TcpTest, Elm327StreamTest (test_elm327)
 
 #include <gtest/gtest.h>
 

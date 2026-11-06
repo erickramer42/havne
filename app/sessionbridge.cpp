@@ -1,52 +1,5 @@
 // File/layer: app/sessionbridge.cpp | Qt6 Core, app layer, C++17
-// Testing: test_bridge (QtCore only): worker->GUI marshaling, coalescing,
-//          in-flight backpressure, the frame log's ring and order, its
-//          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
-//          and the counters on the tick, core's values staged from the
-//          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
-//          each window's envelope at its frames' times
-//          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
-//          id, the signal model's roles and age, the rows core reports
-//          unsupported or absent, hidden from Live's filtered view
-//          (BridgeTest.LiveHides*),
-//          refresh, link-state mapping, the activity log's session,
-//          ECU, diagnostics and delivery lines (the ELM327 session line too,
-//          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
-//          .ConnectLogsTheMocksDiagnostics; a clear's saved report and
-//          lines, ADR-0038: BridgeTest.ChannelClearText*,
-//          .DiagnosticsFileTextIsTheCliLines, .AClearSavesTheReportFirst,
-//          .AFailedSaveSendsNoClear, and on Windows
-//          .AClearTheEngineRefusesLogsOneLineAndNoRead,
-//          .AClearAtTheFakesRunningEngineGoesThrough,
-//          .AClearWhileMovingAsksOnceMore (the moving vehicle's
-//          question) and .AClearAtTheFakesStoppedEngineLogsTheReadAfter;
-//          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
-//          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
-//          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
-//          core lists them, session recording through core's recorder
-//          (ADR-0049; BridgeTest.Recording*: the caller lines, the notes,
-//          the activity lines core writes itself never noted) and
-//          the recent ones' replay URIs (.RecentRecordings*,
-//          .ReplayUriForTakesTheRecordedProfile), display
-//          units on the rows, the chart and not the recording
-//          (BridgeTest.UnitSystem*), the URI label
-//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName,
-//          .UriLabelKeepsABluetoothAddresssLastOctets), the
-//          connect's trim (BridgeTest.ConnectTrimsSpacesAroundTheUri), the
-//          vehicle's parts (ADR-0027: BridgeTest.VinFromIdentity*,
-//          .NewSalt*, .FolderLabel*, .UnplottedNames*, and on Windows
-//          .AConnectsVinReachesQmlOnlyAsASaltedHash and
-//          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
-//          rendering: manual smoke.
-//          reply timing's snapshots and line (ADR-0042):
-//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*;
-//          the VIN's decode, its log line and Settings' lookup (ADR-0043):
-//          BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit, and on
-//          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash; each code's
-//          title and Diagnostics' lookup (ADR-0044):
-//          BridgeTest.DiagnosticsEntryIsWhatThePageShows, .ATypedCodeIsDescribed;
-//          the inspection line (ADR-0045):
-//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession
+// Testing: BRIDGE: BridgeTest (test_bridge); Manual smoke
 
 #include "sessionbridge.h"
 #include "carryover.h"

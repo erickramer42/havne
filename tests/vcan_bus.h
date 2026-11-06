@@ -1,10 +1,6 @@
 // File/layer: tests/vcan_bus.h | test-only, C++17, Qt-free, Linux only
 //             (SocketCAN); header-only
-// Testing: HARNESS, the simulated bus for SocketCAN: fake_ecu.h's engine
-//          ECU (or a second one, a module of its table) answering on a
-//          virtual CAN interface through the kernel's ISO-TP, and a
-//          recording's replies played onto it.
-//          test_vcan.cpp checks it on its own
+// Testing: HARNESS: VcanTest and its users in test_vcan
 //
 // The kernel does the ISO 15765-2 framing (the can-isotp module): Single
 // Frames, First and Consecutive Frames and flow control, so what a

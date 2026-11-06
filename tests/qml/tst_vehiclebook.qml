@@ -1,13 +1,5 @@
 // File/layer: tests/qml/tst_vehiclebook.qml | Qt Quick Test, QML tier
-// Testing: VehicleBook's rules (ADR-0027) on documents, no page and no
-//          bridge: a stored document read back or dropped whole, the
-//          label's rule and its defaults, each change returning a new
-//          document and leaving the one it was given alone, a connection
-//          and plotted signals kept for adapter sessions only, and each
-//          row of section 4's table with its log line; a vehicle's
-//          signal files (ADR-0051) through every change, Duplicate
-//          copying them, a clashing profile refused, the form's own file
-//          replaced, and the files the store keeps.
+// Testing: QML: QmlTest.vehiclebook (test_qml)
 
 import QtQuick
 import QtTest

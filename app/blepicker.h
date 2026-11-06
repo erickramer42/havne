@@ -1,9 +1,5 @@
 // File/layer: app/blepicker.h | Qt6 Core, app layer, C++17
-// Testing: UNIT: BridgeTest.BlePicker* (test_bridge): the fixed list's
-//          order over made-up service lists, a service missing its
-//          characteristics passed over, the first service with a notifying
-//          and a writable characteristic last, and none; BENCH: none
-//          until a BLE adapter is on hand (ADR-0028 section 4)
+// Testing: BRIDGE: BridgeTest (test_bridge); BENCH
 
 #pragma once
 

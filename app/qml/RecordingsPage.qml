@@ -1,26 +1,6 @@
 // File/layer: app/qml/RecordingsPage.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_recordings.qml): the list from
-//          Bridge.recentRecordings, a recording that ends joining it, Replay
-//          handing its URI on, Open reaching the viewer (signals, the
-//          default plotted, the chart's series over the view), the cursor's
-//          readout (maximized, its strip beside the chart or below it on a
-//          tall page, folding away and back; a tap snapped to the nearest
-//          sample), pan and zoom kept inside the recording, the wheel's
-//          zoom by its share of a notch and none sideways, the columns
-//          on their grid from time 0 through a pan, a second
-//          recording overlaid and aligned (starts, UTC, a marker, a rise or
-//          fall), a finding's row centering the view, the signal rows'
-//          filter (SignalFilterBar.qml, ADR-0050), Replay view handing on
-//          the stretch in view, a refused folder's error, back to the list;
-//          every item inside a phone's width (tst_phone.qml), maximized
-//          on its side with the cursor's strip, then restored and scrolled
-//          to its end, and a double tap on the chart or its splitter
-//          (DoubleTapHandler.qml: taps a little apart within the interval)
-//          (tst_phone.qml; the splitter's drag and F are manual smoke, and
-//          the phone's run).
-//          RecordingView
-//          itself: test_bridge (RecordingViewTest); the chart's layout:
-//          tst_chartlayout.qml; the drawing is manual smoke (docs/testing.md).
+// Testing: BRIDGE: RecordingViewTest (test_bridge); QML: QmlTest.recordings,
+//          QmlTest.phone, QmlTest.chartlayout (test_qml); Manual smoke
 
 import QtCore
 import QtQuick

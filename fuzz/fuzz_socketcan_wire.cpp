@@ -1,15 +1,5 @@
 // File/layer: fuzz/fuzz_socketcan_wire.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: the SocketCAN parsers of outside input
-//          (core/src/socketcan_wire.h, ADR-0032), the first byte picking
-//          one: ?filter= text (at most 8 filters, each ID within its
-//          width, flagged 29-bit exactly when above 0x7FF, the mask
-//          within the ID's width and carrying the width flag), an
-//          RTM_NEWLINK payload from the kernel (the name and kind
-//          terminated, what discovery lists and the verdict on it
-//          consistent with the link), or a kernel frame (the length
-//          within its kind's room, only the flags it can carry). Every
-//          input is a heap copy of its exact size, so ASan sees a read
-//          past it; two runs agree.
+// Testing: FUZZ: fuzz_socketcan_wire
 
 #include <ecuio/core.h>
 

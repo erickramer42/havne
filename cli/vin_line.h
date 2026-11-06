@@ -1,8 +1,5 @@
 // File/layer: cli/vin_line.h | havne-cli, a VIN's decode and an ECU's identity as lines (ADR-0043, ADR-0021)
-// Testing: UNIT (tests/test_cli.cpp, CliVinTest: a decode with each
-//          field, a refusal, an identity line with every outcome and its
-//          VIN); `vin`'s own output in the golden run
-//          (tests/golden/cli/vin.jsonl)
+// Testing: UNIT: CliVinTest (test_cli)
 //
 // What the app's activity log says of a car's identity, as JSON: the
 // `vin` command's line for a typed VIN, and `stream`'s identity line,

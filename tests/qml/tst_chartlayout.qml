@@ -1,15 +1,5 @@
 // File/layer: tests/qml/tst_chartlayout.qml | Qt Quick Test, QML tier
-// Testing: ChartLayout, the strip chart's layout arithmetic, with
-//          synthetic series: nothing to draw, the plot's width against the
-//          widest label, per-trace scaling with the minimum span, flat
-//          lanes, segments broken at a gap, the time ticks and the value
-//          labels nudged apart inside the plot, a crowded trace's band;
-//          a recording's columns over a fixed span (a line through calm
-//          columns, a band where one swings past its neighbors' lean, a
-//          steep ramp a line, a gap past gapMs a break), columns over a
-//          span of their own cut to the axis, and absolute ticks,
-//          before zero too; a scaleKey's shared range and lane, a series'
-//          dash. No bridge, no session.
+// Testing: QML: QmlTest.chartlayout (test_qml)
 
 import QtQuick
 import QtTest

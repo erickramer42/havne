@@ -1,8 +1,5 @@
 // File/layer: cli/view_lines.h | havne-cli, a recording's view as lines (ADR-0049 section 5)
-// Testing: UNIT (tests/test_cli.cpp, CliViewTest: --align-on's forms and
-//          refusals, seconds, the axis and a recording's window on it, each
-//          line's fields); the command in the golden runs
-//          (tests/golden/cli/view-*.jsonl, on tests/fixtures/recording/)
+// Testing: UNIT: CliViewTest (test_cli)
 //
 // `havne-cli view`'s lines, read through the reader (recording.h): what
 // each recording holds, where an --align-on puts it, then each signal's

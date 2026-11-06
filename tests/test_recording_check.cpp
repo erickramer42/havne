@@ -1,11 +1,5 @@
 // File/layer: tests/test_recording_check.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: CheckRulesTest: recording_check.h's median estimate, its
-//          line parsers and each finding's rule, a checker fed frame by
-//          frame; HARNESS: RecordingCheckTest: ecuio_recording_check
-//          (ADR-0049 section 6) on folders written by hand and on the
-//          replay fixture with one finding of each kind put in it, its
-//          stops, refusals and torn row, and its allocations the same for
-//          the fixture looped ten times as once
+// Testing: UNIT: CheckRulesTest, RecordingCheckTest (test_core)
 //
 // Each case writes into a folder of its own under TEMP/TMPDIR, removed at
 // the end.

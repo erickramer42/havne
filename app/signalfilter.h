@@ -1,8 +1,5 @@
 // File/layer: app/signalfilter.h | Qt Core, app layer, C++17
-// Testing: UNIT: BridgeTest.SignalFilter* (the rule, the groups' choices, the
-//          state); through Live's list: BridgeTest.LiveListFollowsItsFilter;
-//          the bar on both pages: QmlTest.liveview, QmlTest.recordings,
-//          QmlTest.phone
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest (test_qml)
 
 #pragma once
 

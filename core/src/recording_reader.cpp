@@ -1,11 +1,6 @@
 // File/layer: core/src/recording_reader.cpp | C++17, Qt-free; the reader
 //             (ADR-0049 section 5)
-// Testing: HARNESS: RecordingTest (test_core): folders the recorder wrote
-//          (the mock, the replay fixture) and folders written by hand
-//          (an older recording, torn and refused rows, markers); the
-//          queries against a scan of the rows, from several threads, and
-//          the memory bound through the seams in internal.h; the signal
-//          file line and signals.json's hash (RecordingTest.ASignalFile*)
+// Testing: UNIT: RecordingTest (test_core)
 //
 // One pass at open reads events.log's header (the format, the UTC start,
 // each signal's kind, decimal places and plot rank) and signals.csv, and

@@ -1,38 +1,7 @@
 // File/layer: core/src/elm327_transport.cpp | C++17, Qt-free, every
 //             platform (ADR-0026)
-// Testing: HARNESS: Elm327SessionTest (test_elm327) through the fake
-//          ELM327 behind the port opener (tests/fake_elm327.h): the URI
-//          and its refusals, the setup and its refusals (a command
-//          answered by a late reset sent again), the session
-//          info and the readings' "not present", the requests (the count
-//          digit, and its loss for a reply that spans frames, a DID's
-//          taken back and asked again for one that spans frames or is
-//          held pending, the ECU's requests held while it sends a cut
-//          reply's rest (ACutDid*), header
-//          switches, the rotation, the probe, the DID scan,
-//          identification, diagnostics, Read again and a clear), multi-frame
-//          replies, link health and its
-//          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
-//          reset), the pending reply, passive listening (Listening*:
-//          AT MA with flow control off, the channels' messages, the
-//          quiet run, the liveness check, BUFFER FULL's overflow flag,
-//          the monitor's ends and the stop at detach), the wire log
-//          (TheWireLog*), and nothing allocated per frame, with the log's
-//          request lines on or off.
-//          Elm327PortTest (POSIX): a whole session over a
-//          pseudo-terminal through the OS's port. Elm327TcpTest (every
-//          platform): a session over a loopback socket, the far side's
-//          close and its recovery. Elm327StreamTest (every platform): a
-//          session through an app-fed stream (ADR-0028), its failure and
-//          reopen, the open's wait and its stop. BENCH: the Win32 port,
-//          the VX's WiFi.
-//          Reply timing (ADR-0042):
-//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock;
-//          a recording's link lines and latency.csv (ADR-0049):
-//          Elm327SessionTest.ARecordingHoldsTheLinksTransitionsAndReplyTiming;
-//          ECUIO_FRAME_FLAG_REASSEMBLED on a reply and a monitored message:
-//          Elm327SessionTest.Obd2ValuesArriveFromTheEngineEcu,
-//          .ListeningDeliversTheChannelsMessages
+// Testing: HARNESS: Elm327SessionTest, Elm327PortTest, Elm327TcpTest,
+//          Elm327StreamTest (test_elm327); BENCH
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"

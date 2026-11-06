@@ -1,9 +1,5 @@
 // File/layer: cli/signal_file_lines.h | havne-cli, a signal file's lines (ADR-0051)
-// Testing: UNIT (tests/test_cli.cpp, CliSignalFileTest: a URI's profile=,
-//          the URI a loaded file opens, the kind words, a unit's
-//          conversion, each line's fields); the commands in the golden
-//          runs (tests/golden/cli/signals-*.jsonl and stream-signals.jsonl,
-//          on tests/fixtures/signals/)
+// Testing: UNIT: CliSignalFileTest (test_cli)
 //
 // What `havne-cli signals check`, `signals import obdb`, `stream --signals`
 // and `sim --signals`

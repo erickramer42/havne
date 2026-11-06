@@ -1,13 +1,5 @@
 // File/layer: tests/test_qml.cpp | Qt Quick Test, QML tier
-// Testing: runs tests/qml/tst_*.qml against the app's App module
-//          and a real bridge, the one its Bridge singleton serves,
-//          and a relay whose adapter opens at once (Relay); clicks
-//          with stamps of their own (Harness.clickStamped); signal files
-//          to import from a scratch folder, and the store's copies
-//          (Harness.writeScratchFile, .storedSignalFiles); the example
-//          plugin packed and the plugin store's copies
-//          (.writeExamplePlugin, .storedPlugins).
-//          ctest runs each file in its own process (QmlTest.<name>).
+// Testing: QML: QmlTest.<name>, one per tests/qml/tst_*.qml (test_qml)
 
 #include <QCoreApplication>
 #include <QDir>

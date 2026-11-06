@@ -1,13 +1,5 @@
 // File/layer: tests/test_vcan_isotp.cpp | test-only, C++17, Qt-free, Linux only
-// Testing: HARNESS: core's ISO-TP (core/src/isotp.h, ADR-0040 section 1)
-//          against the kernel's can-isotp on vcan0, an implementation of
-//          its own: core's receiver reassembles what the kernel sends at
-//          every length to 4095 bytes, answering its First Frame with
-//          Flow Control; core's sender delivers to the kernel's receiver
-//          under that receiver's block size and STmin, the separation
-//          kept on the wire; a sender slower than N_Cr is dropped. Each
-//          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
-//          that a failure.
+// Testing: HARNESS: IsoTpConformanceTest (test_vcan)
 
 #include "isotp.h"
 #include "vcan_bus.h"

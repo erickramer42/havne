@@ -1,13 +1,5 @@
 // File/layer: tests/test_vcan_socketcan.cpp | test-only, C++17, Qt-free, Linux only
-// Testing: HARNESS: the SocketCAN transport (ADR-0032) on the simulated
-//          bus (vcan_bus.h): discovery, frames in order with their flags,
-//          the filter, the mock's drive cycle decoding off the bus, a
-//          quiet bus and back, an overflow, error frames (flagged, never
-//          decoded, bus-off a hard failure), no allocation per frame, and
-//          (as root) the interface going down and coming back, and two
-//          recordings of the bus lining up on their UTC starts. Each case
-//          skips without the interface; ECUIO_VCAN_REQUIRED=1 makes that a
-//          failure. Holds the binary's new_counter.h.
+// Testing: HARNESS: SocketCanBusTest (test_vcan)
 
 #include "ecuio/core.h"
 #include "ecuio/profile.h"

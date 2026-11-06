@@ -1,17 +1,5 @@
 // File/layer: tests/qml/tst_log.qml | Qt Quick Test, QML tier
-// Testing: the Log page shows the activity log: "Ready.", then each line
-//          the bridge logs, stamped HH:MM:SS.mmm, kept to its newest
-//          lines. With developer mode off it shows nothing else; on, the
-//          Activity | Frames switch shows the raw frame table, staying in
-//          place in either view, and turning developer mode off goes
-//          back to the activity log. Settings'
-//          developer box sets Theme.developerMode and the mock:// preset
-//          follows it. Copy puts the whole log on the clipboard and
-//          leaves nothing selected. In the Frames view a tap selects a
-//          row, a shift-click a range, and Copy or Ctrl+C puts the
-//          selected rows on the clipboard. Paused, the status says whether a recording
-//          still keeps new frames. The Frames view lies inside 320 px.
-//          How the page looks is manual smoke.
+// Testing: QML: QmlTest.log (test_qml)
 
 import QtQuick
 import QtTest

@@ -1,26 +1,5 @@
 // File/layer: fuzz/fuzz_recording.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: a recording's files (ADR-0049 section 5), the first byte
-//          picking one: each line through every parser of
-//          core/src/recording_rows.h (signals.csv's and markers.csv's
-//          rows, events.log's signal, label, utc and activity lines, the
-//          summary and the drop lines; a parsed name within 31 bytes, a
-//          unit within 15, decimals 0 to 3, a label 1 to 27, one kind;
-//          two parses agree, NaN bits included), or a folder ('F', or
-//          '3' with format 3's first line ahead of events.log, and an
-//          enum's labels at most 256, ascending, terminated and found
-//          again by raw value): the input cut at 0x1E bytes into
-//          events.log, signals.csv, markers.csv and frames.csv, written to
-//          a scratch folder in TEMP / TMPDIR, opened through
-//          ecuio_recording_open and checked through ecuio_recording_check
-//          (section 6). Each status is ECUIO_OK or ECUIO_ERR_LOAD_FAILED
-//          with a one-line detail that never holds the path; an open
-//          recording's counts agree with its queries (a whole-range column
-//          holds every sample), every signal's name and unit are
-//          terminated, and its text_at and find return ECUIO_OK; each
-//          finding is of a known kind, within the summary's duration, a
-//          whole-bus one with no ID and an ISO-TP one on ISO 15765-4's IDs,
-//          and the summary counts what was passed; a check stopped at its
-//          first finding counts that one; two opens and two checks agree.
+// Testing: FUZZ: fuzz_recording
 
 #include <ecuio/core.h>
 #include <ecuio/recording.h>

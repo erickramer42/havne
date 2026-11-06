@@ -1,11 +1,6 @@
 // File/layer: tests/fake_ecu.h | test-only, C++17, Qt-free, no platform
 //             headers; header-only
-// Testing: the HARNESS fakes' one ECU: the fake J2534 DLL
-//          (fake_j2534.cpp) and the fake ELM327 (fake_elm327.h) answer
-//          every request from here, so the J2534 and ELM327 suites see the
-//          same vehicle. Its module table's rules: FakeEcuTest (UNIT,
-//          test_obd2); two ECUs in one session through each fake:
-//          *.TwoEcusInOneSessionAnswerEachItsOwn
+// Testing: UNIT: FakeEcuTest (test_obd2)
 //
 // What the fakes' engine ECU answers, from the service byte on: the
 // adapter's framing (J2534's 4-byte CAN ID, the ELM327's lines and PCI

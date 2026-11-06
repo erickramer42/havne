@@ -1,11 +1,8 @@
 // File/layer: tests/fake_diagnostics.h | test-only, C++17, Qt-free,
 //             header-only
-// Testing: (test support) the diagnostics report fake_ecu.h's answers
-//          give (ADR-0037), before a clear and after one (ADR-0038),
-//          checked the same way through the engine (DiagnosticsTest),
-//          the fake J2534 DLL (J2534AdoptionTest, J2534HealthTest,
-//          cross-arch too), the fake ELM327 (Elm327SessionTest) and the
-//          mock's ECU (CoreTest.Mock*)
+// Testing: UNIT: DiagnosticsTest (test_obd2); CoreTest (test_core); HARNESS:
+//          J2534AdoptionTest (test_j2534_stream); J2534HealthTest
+//          (test_j2534_health); Elm327SessionTest (test_elm327); Cross-arch
 
 #ifndef ECUIO_TESTS_FAKE_DIAGNOSTICS_H
 #define ECUIO_TESTS_FAKE_DIAGNOSTICS_H

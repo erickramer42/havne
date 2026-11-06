@@ -1,37 +1,6 @@
 // File/layer: tests/test_j2534_stream.cpp | GTest, HARNESS tier
-// Testing: End-to-end j2534:// session: URI routing -> attach ->
-//          connect -> worker poll -> a message posted on the fake's
-//          control page -> ReadMsgs -> callback dispatch. Exact-count assertions for INJECTED
-//          frames (the fake emits nothing we did not inject).
-//          Request-loop assertions are floors with a bounded budget:
-//          that producer is a TIME-DRIVEN worker, not a test action,
-//          so an exact count would encode a race, not a contract.
-//          Query-param tests: ?baud=/?flags= values observed at
-//          PassThruConnect, as the fake publishes them on its page;
-//          malformed queries and relative DLL paths rejected at
-//          session_create (no DLL load).
-//          Adoption tests (ADR-0012): ?filter=/?txid=/?poll=, filter
-//          registration shape, request framing, header strip + ID
-//          stamp, stop-on-detach, gating, passive receive.
-//          ADR-0013: j2534 defaults to the obd2 profile (its requests +
-//          mux decode). Raw-contract tests opt out with ?profile=raw;
-//          the obd2 block covers rotation, routing to each def's
-//          channel, Service 0x22 and a backlog beside the replies, plus
-//          ?poll= precedence over the profile's rotation. The probe
-//          (ADR-0015 section 4): the bitmap walk before the rotation, what the
-//          bitmaps and a negative reply drop, ?probe=0, the walk resumed
-//          after a quiet bus, and each channel's support report. The
-//          worker allocates nothing per frame (tests/new_counter.h).
-//          The
-//          query's split in create: unknown keys named with the ones
-//          j2534:// takes, and ?probe='s malformed forms.
-//          Diagnostics (ADR-0037): the fake ECU's whole report, the
-//          list's turns with the rotation and its one-byte requests,
-//          ?diagnose=0, Read again and the report after close. The backoff's
-//          capped step, the vendor clock's cases and the J2534 status
-//          names are here; the
-//          request engine's pacing and the link-health machine run
-//          through the surrogate in test_j2534_health.cpp.
+// Testing: HARNESS: J2534QueryParamTest, J2534StreamTest, J2534AdoptionTest
+//          (test_j2534_stream)
 
 #include <gtest/gtest.h>
 

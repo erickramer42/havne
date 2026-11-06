@@ -1,8 +1,6 @@
 // File/layer: core/src/obd2_reply.h | C++17, Qt-free, ALL platforms (internal)
-// Testing: UNIT: tests/test_obd2.cpp (Obd2ReplyTest: each judgment of
-//          ecuio_obd2_split; Obd2TableTest: ECUIO_OBD2_PID_BYTES against
-//          tests/fixtures/obd2/service01.csv's bytes column), and through
-//          a session's decode in tests/test_core.cpp (CoreTest.APacked*)
+// Testing: UNIT: Obd2ReplyTest, Obd2TableTest (test_obd2); CoreTest
+//          (test_core)
 //
 // A Service 01 positive reply's records (ADR-0039 Appendix A): J1979
 // lets one request carry up to six PIDs, and the ECU answers

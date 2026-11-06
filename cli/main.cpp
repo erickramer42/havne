@@ -1,41 +1,8 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
-// Testing: HARNESS: golden runs of the program (CliGoldenTest, against
-//          tests/golden/cli/: the replay fixture, mock:// with its
-//          diagnostics line, the refusals, --until-scanned with nothing
-//          to scan),
-//          its usage errors (CliUsageTest), the connect's deadline
-//          (CliConnectTest, Windows, the fake DLL) and, on POSIX, SIGINT and
-//          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
-//          tests/cli_absent.py); the formatting, the ring and the
-//          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
-//          (BENCH prep #27);
-//          the timing lines UNIT (CliTimingTest) and by hand against the fake
-//          DLL (docs/testing.md); the vin command in the golden run and
-//          CliUsageTest, the vin and identity lines UNIT (CliVinTest),
-//          stream's identity line by hand against the fake DLL; the dtc
-//          command in the golden run and CliUsageTest; the sim
-//          command's lines UNIT (CliSimTest), its usage errors
-//          (CliUsageTest), on vcan0 by hand (ADR-0046); stream
-//          --record (ADR-0049): the replay fixture's folder against
-//          tests/golden/recording/ and marks typed on standard input
-//          (CliRecordTest, tests/cli_record.py), a close held past an
-//          interrupt (Windows, the fake DLL's slow disconnect), the line
-//          splitting UNIT (CliMarkLinesTest), a console's typing by hand;
-//          view (ADR-0049 section 5): golden runs on
-//          tests/fixtures/recording/, every sample counted once and the
-//          aligned pulls equal (CliViewRunTest, tests/cli_view.py), its
-//          usage errors (CliUsageTest), its grammar, axis and lines UNIT
-//          (CliViewTest); info (ADR-0049 section 6): golden runs on
-//          tests/fixtures/recording/findings, the replay fixture and a
-//          folder with no frames.csv, its usage errors (CliUsageTest), its
-//          lines UNIT (CliInfoTest); signals check and stream --signals
-//          (ADR-0051): golden runs on tests/fixtures/signals/, their usage
-//          errors (CliUsageTest), the lines UNIT (CliSignalFileTest), sim
-//          --signals on vcan0 by hand; signals import obdb: golden runs on
-//          tests/fixtures/obdb/, the converted file against a committed one,
-//          its usage errors (CliUsageTest);
-//          main's catch by reading and clang-tidy
-//          (bugprone-exception-escape)
+// Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
+//          CliReplayTest, CliRecordTest, CliViewRunTest (ctest);
+//          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
+//          CliViewTest, CliInfoTest, CliSignalFileTest (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
 

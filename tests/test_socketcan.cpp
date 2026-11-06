@@ -1,13 +1,5 @@
 // File/layer: tests/test_socketcan.cpp | SocketCAN listening's rules (ADR-0032)
-// Testing: UNIT, Qt-free, every platform: socketcan_wire.h (the interface
-//          name, ?filter=, a link from canned netlink messages and the
-//          verdict on it, a kernel frame to an ecuio_frame_t, the
-//          clock), the URI's refusals through ecuio_session_create, and
-//          ecuio_can_interfaces' arguments; the simulated ECU's contract
-//          (SimTest, ADR-0046: its options, profile='s lookup and
-//          refusals, and the link it answers on, a desk bus's
-//          controller too). The transport on a bus is
-//          VcanTest's (Linux), the simulated ECU on one SimBusTest's
+// Testing: UNIT: SocketCanTest, SimTest (test_socketcan)
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"

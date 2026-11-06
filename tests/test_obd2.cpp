@@ -1,25 +1,7 @@
 // File/layer: tests/test_obd2.cpp | GTest, UNIT tier, headless, all
 //             platforms (pure data + decoder + request engine: no
 //             transport)
-// Testing: UNIT: set validation, wire-byte decode round-trips matching
-//          the fake's canned responses, mux gate accept/reject, the
-//          request engine (request_engine.h) with the time passed in,
-//          its DID scan and its identification (the turns, the text, the
-//          report), and uds-generic's ?did= grammar and the set it
-//          builds (uds_generic.h). The Service 01 table
-//          (fixtures/obd2/service01.csv) against its own ranges, the
-//          obd2 set and the fakes' ECU; that ECU's diagnostics
-//          (fake_ecu.h). The trouble codes' and monitors' words and
-//          the replies into the report (diagnostics.h), the
-//          monitors against fixtures/obd2/monitors.csv. The signals
-//          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
-//          The trouble codes' titles and parse (DtcTitleTest, ADR-0044).
-//          The inspection verdict over reports (InspectionTest, ADR-0045).
-//          The simulated ECU's answers, URI and faults, its second
-//          module's too (SimEcuTest, ADR-0046); its DIDs from a signal
-//          set, each field inverted from its def (SimDidsTest).
-//          End-to-end pacing is HARNESS (stream and
-//          health tests) and BENCH (VX), not this file.
+// Testing: UNIT (test_obd2): this file's suites
 
 #include <gtest/gtest.h>
 

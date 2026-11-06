@@ -2,10 +2,7 @@
 //             included by core.cpp (the names) and the request engine
 //             (the replies into the report)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: the code's letter and digits, every monitor's name
-//     against tests/fixtures/obd2/monitors.csv, PID 01 into the
-//     readiness fields, PID 41 onto its monitors, a code list's count,
-//     codes and cut (DiagnosticsTest, test_obd2).
+// Testing: UNIT: DiagnosticsTest (test_obd2)
 
 #ifndef ECUIO_DIAGNOSTICS_H
 #define ECUIO_DIAGNOSTICS_H

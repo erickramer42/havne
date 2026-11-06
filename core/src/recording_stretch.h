@@ -1,10 +1,7 @@
 // File/layer: core/src/recording_stretch.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: UNIT: CoreTest.ReplayStretch* (replay_transport.cpp: the rows a
-//          stretch plays, their stamps, a loop, the refusals);
-//          SimEcuTest.TheUrisKeysAndRefusals and
-//          SimRecordingTest.AStretchAnswersFromItsOwnRows (the simulated
-//          ECU's recording)
+// Testing: UNIT: CoreTest (test_core); SimEcuTest, SimRecordingTest
+//          (test_obd2)
 //
 // A stretch of a recording (ADR-0023's appendix "a stretch replayed"):
 // ?from= and ?to= in seconds of the recording's host_us, the time the

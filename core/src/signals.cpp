@@ -1,9 +1,5 @@
 // File/layer: core/src/signals.cpp | C++17, Qt-free
-// Testing: UNIT: BE vs LE round-trip, mux acceptance/rejection, the frame
-//          gate (an error frame applies to no def), validator rules,
-//          display-unit conversion (SignalsTest.DisplayConvert*), the
-//          groups' names (SignalsTest.EachGroupHasAName), an enum's
-//          decode and label and a computed def's shape (SignalTablesTest)
+// Testing: UNIT: SignalsTest, SignalTablesTest (test_signals)
 
 #include <ecuio/signals.h>
 #include <ecuio/internal.h>

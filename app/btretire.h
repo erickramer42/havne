@@ -1,12 +1,7 @@
 // File/layer: app/btretire.h | Qt6 Core, app layer, C++17, header-only;
 //             every platform (the link that uses it, btstream.cpp, is
 //             Android's)
-// Testing: UNIT: BridgeTest.BtRetire* (test_bridge, against
-//          tests/fake_bt_socket.h): deleted at once when it's already
-//          unconnected, kept past its old parent and every other state
-//          until it says unconnected, deleted by the fallback when it
-//          never does; Vehicle: disconnects while replies arrive, on the
-//          phone with the MX+
+// Testing: BRIDGE: BridgeTest (test_bridge); Vehicle
 //
 // An aborted classic Bluetooth socket outlives its link until it says
 // it's unconnected. On Android, QBluetoothSocket's abort() only asks
