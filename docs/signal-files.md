@@ -424,7 +424,8 @@ written, and `signals check` says it won't convert.
 - **Read once:** with no session connected, the form's signal is asked
   once on the adapter the URI field names (or the vehicle's last), in a
   short session of its own: a Service 22 DID through `uds-generic`, a
-  Service 01 PID through `raw`'s `?poll=`. It shows the request and the
+  Service 01 PID through `raw`'s `?poll=` (`obd2`'s on `socketcan://`,
+  where a profile that only listens asks nothing). It shows the request and the
   reply's bytes in hex beside the value the draft decodes to, or the
   ECU's refusal by its ISO 14229 name (`requestOutOfRange (7F 22 31)`),
   so the field and the scaling are checked before the signal is saved.

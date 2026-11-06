@@ -8,14 +8,17 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 Havne is an OBD-II scan tool and data logger: live gauges, a strip
 chart, the trouble codes and readiness monitors, and every frame
 recorded, to open again, overlay on another run, check for gaps and
-replay. It runs on Windows, Linux and Android; on Linux its tests and
+replay. Past the standard readings, it reads a maker's own data from
+signal files and plugins you write or import.
+
+It reaches the car through J2534 Pass-Thru adapters on Windows,
+ELM327-compatible adapters over USB, Bluetooth or WiFi everywhere, and
+SocketCAN on Linux (listening on a real bus; asking, so far, on a
+virtual one), and a simulated vehicle runs every page with no
+hardware. It runs on Windows, Linux and Android; on Linux its tests and
 simulated bus pass on an x86_64 desktop and, for the core and
 `havne-cli`, on a Raspberry Pi (ARM64). It builds and passes its tests
-on macOS, and runs on the iOS Simulator. It reaches the car
-through J2534 Pass-Thru adapters on Windows, ELM327-compatible
-adapters over USB, Bluetooth or WiFi everywhere, and SocketCAN on
-Linux (listening on a real bus; asking, so far, on a virtual one). A
-simulated vehicle runs every page with no hardware.
+on macOS, and runs on the iOS Simulator.
 
 Underneath is a Qt-free C++17 core that does all the vehicle I/O and
 decoding behind a stable C ABI. The Qt 6 / QML app is one front end
@@ -41,8 +44,8 @@ a quarter mile off launch control on a warm loop.*
   allocation per frame, backpressure bounds the frames in flight, and
   QML gets values at 10 Hz whatever the bus rate. A recorded engine
   start replays through decode at over 300,000 frames a second, about
-  70 times a full classic CAN bus, and CI re-runs that load test on
-  every push ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
+  70 times a full classic CAN bus, and every CI run repeats that load
+  test ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
   [docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Recording never holds the session up.** The worker copies each
   frame into a single-producer ring, and a writer thread of the
@@ -52,17 +55,17 @@ a quarter mile off launch control on a warm loop.*
   signals at 10 Hz, 1.8 million rows, in under 0.2 s on a laptop,
   and the viewer draws it at over 60 frames a second on a phone
   ([ADR-0049](docs/adr/0049-recordings-in-core.md)).
-- **Measured on a real car.** Through a J2534 Pass-Thru on a laptop
-  and an ELM327 on a phone over Bluetooth, the test car's two ECUs
-  answered; asking up to six PIDs per request brought 2.7 times as
-  many replies a minute, and holding Windows' 1 ms timer 28 % more.
-  A second controller listening on the same bus timed the Pass-Thru:
-  a segmented reply is whole on the wire 14 ms after its request, and
-  Havne's own read of the adapter, not the adapter, held most about
-  52 ms more. With the read fixed, the latency per request fell from
-  65.5-73.7 ms to 16.4 ms, about 2.5 ms past the bus's time. Each
-  session is written up
-  with its scrubbed logs
+- **Measured on a real car, and fixed by what it showed.** Through a
+  J2534 Pass-Thru on a laptop and an ELM327 on a phone over Bluetooth,
+  both of the test car's ECUs answered. Packing up to six PIDs into a
+  request brought 2.7 times as many replies a minute, and holding
+  Windows' 1 ms timer 28% more. A second CAN controller listening on
+  the same bus timed the Pass-Thru: a segmented reply was whole on the
+  wire 14 ms after its request but reached the session about 52 ms
+  later, most of that wait in Havne's own read of the adapter rather
+  than in the adapter. With that read fixed, a request's latency fell
+  from 65.5-73.7 ms to 16.4 ms, about 2.5 ms past the bus's own time.
+  Each session is written up with its scrubbed logs
   ([2026-11-01](docs/bench-sessions/2026-11-01-vehicle.md),
   [2026-11-03](docs/bench-sessions/2026-11-03-socketcan-car.md),
   [2026-11-04](docs/bench-sessions/2026-11-04-two-ecu-car.md),
@@ -85,6 +88,15 @@ a quarter mile off launch control on a warm loop.*
   UBSan in CI, and a stateful harness drives the request engine and
   ISO-TP against a simulated ECU, every reply's fate fuzzed
   ([fuzz/README.md](fuzz/README.md)).
+- **A user's signals are data, checked before the car.** Signal files
+  and plugins are JSON that core reads strictly from bytes, never a
+  path, so every platform loads them alike, iOS included, where an app
+  may load no code. Anything wrong is refused at load with its line and
+  column, both readers are fuzzed, and a plugin's own fixtures run
+  through the simulated ECU on a virtual CAN bus in CI, so its scaling
+  is checked with no car
+  ([ADR-0051](docs/adr/0051-signal-files.md),
+  [ADR-0052](docs/adr/0052-plugin-framework.md)).
 - **A stable C ABI.** Opaque handles, flat functions, POD structs with
   reserved room; CI compiles every public header as strict C, compares
   the ABI with the last release's and builds the core with no Qt
@@ -125,15 +137,36 @@ a quarter mile off launch control on a warm loop.*
 - **Profiles chosen by the URI:** `obd2` polls every standard
   Service 01 reading the car has, the fast-changing ones more often;
   `uds-generic` polls or scans the UDS identifiers the URI names; `raw`
-  logs frames. The VIN and calibration IDs are read at connect, the
-  VIN's model year and make decoded on the device, and each request's
-  reply time is measured
+  logs frames; a signal file is `user.<name>`, and a plugin's variant
+  `plugin.<id>.<variant>`. The VIN and calibration IDs are read at
+  connect, the VIN's model year and make decoded on the device, and
+  each request's reply time is measured
   ([ADR-0039](docs/adr/0039-full-service01-coverage.md),
   [ADR-0042](docs/adr/0042-reply-timing.md),
   [ADR-0043](docs/adr/0043-vin-decode.md)).
+- **Your own signals:** a signal file (JSON) names Service 01 PIDs and
+  Service 22 DIDs on up to four modules, read as numbers, text,
+  enumerations or signals computed from others (the simulated car's
+  boost is MAP minus baro), the same in the app and `havne-cli`. In
+  Settings, each vehicle imports files or writes its own a signal at a
+  time, and **Read once** asks the car for one signal, showing the
+  reply's bytes beside the value; `havne-cli` converts an OBDb signal
+  set on disk to a signal file ([docs/signal-files.md](docs/signal-files.md),
+  [ADR-0051](docs/adr/0051-signal-files.md)).
+- **Plugins:** a package of signal files for a maker's cars, its
+  variants each a profile. The car's VIN proposes the variants that fit
+  and the user picks one, kept with the vehicle; on Linux, `havne-cli`
+  checks a plugin's values through the simulated ECU, with no car
+  ([plugins/README.md](plugins/README.md),
+  [ADR-0052](docs/adr/0052-plugin-framework.md)).
 - **`havne-cli`:** any session's frames, values and link health as JSON
-  lines; recordings read and checked offline (`view`, `info`); on Linux, the simulated car or a recording answering requests
-  on a virtual CAN bus as the car's engine ECU
+  lines, through a signal file (`--signals`) or a plugin's variant
+  (`--plugin`) too; recordings read and checked offline (`view`,
+  `info`); signal files checked and OBDb sets converted (`signals
+  check`, `signals import obdb`); plugins listed, matched to a VIN and
+  checked (`plugins list`, `match`, `check`); on Linux, the simulated
+  car or a recording answering requests on a virtual CAN bus as the
+  car's engine ECU
   ([ADR-0031](docs/adr/0031-command-line-client.md),
   [ADR-0046](docs/adr/0046-simulated-ecu.md)). An Android phone can
   relay its paired Bluetooth adapter to a computer's `havne-cli` over
@@ -182,8 +215,9 @@ the cursor reading both runs at the limiter.*
  SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health
    │   havne-cli (cli/)        a second front end: a session as JSON lines
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h · sim.h · recording.h
- ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding, recordings
+   ▼  C ABI: core.h · signals.h · profile.h · plugin.h · obdb.h · j2534.h · serial.h
+             stream.h · socketcan.h · vin.h · sim.h · recording.h
+ ecuio-core (core/)            no Qt, ever: sessions, profiles, signal files, plugins, decoding, recordings
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
    ├── elm327://  a serial port, a WiFi socket, or a link the app opens
@@ -210,6 +244,7 @@ it, a frame's path from transport to screen included.
 | [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading and frame parsing; fuzzed |
 | [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
 | [`core/src/recorder.cpp`](core/src/recorder.cpp), [`core/src/recording_reader.cpp`](core/src/recording_reader.cpp) | Recordings in core: the worker's single-producer ring to a writer thread that never holds the session, and a reader that answers the viewer from one pass's index; the reader fuzzed |
+| [`core/src/signal_file.cpp`](core/src/signal_file.cpp), [`core/src/plugin.cpp`](core/src/plugin.cpp) | A user's signals and a maker's plugins read as data: a strict JSON reader over bytes, each refusal with its line and column, one build of a signal set for both; fuzzed |
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
 | [`cli/main.cpp`](cli/main.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |
@@ -224,8 +259,8 @@ unzip it and run `havne.exe`; Qt and the Visual C++ runtime are inside.
 It isn't code-signed, so SmartScreen may ask first (**More info**, then
 **Run anyway**). On Android 12 or later, download and open the release's
 APK on the phone; it's signed with Havne's release key, and each
-release installs over the last. On Linux (x86_64, glibc 2.39 or
-later), download the AppImage, make it executable and run it;
+release installs over the last. On Linux (x86_64, or 64-bit ARM such
+as a Raspberry Pi; glibc 2.39 or later), download the AppImage, make it executable and run it;
 [docs/linux.md](docs/linux.md) covers what it needs, the core packages
 for `havne-cli` and your own programs, serial permissions and
 SocketCAN. In Settings, tick **Developer mode** under Display, then
@@ -271,6 +306,8 @@ changed.
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
 | [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
+| [docs/signal-files.md](docs/signal-files.md) | Writing your own signals: the format, what's refused at load, using a file, importing an OBDb set |
+| [plugins/README.md](plugins/README.md) | Plugins: the package, its variants, the example for the simulated car |
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |

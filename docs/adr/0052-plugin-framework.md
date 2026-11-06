@@ -540,3 +540,13 @@ Section 4's provenance, as built:
 > one. A manifest `name` with no letter or digit, or one making a
 > profile name past 63 characters, is refused at the name, since each
 > variant's file takes its profile name from it.
+
+## Appendix: what the app lacks (2026-11-06)
+
+The app imports a packed plugin, proposes its variants for the car's
+VIN and connects with the one picked, as section 5 has it. It has no
+`plugins check` (section 8): a plugin's value fixtures run through the
+simulated ECU on a Linux virtual bus, which `havne-cli plugins check
+--on <vcan>` drives, so a plugin is checked with `havne-cli` before the
+app imports it. The app takes only the packed form, which carries no
+fixtures (the appendix "the data tier's core as built").

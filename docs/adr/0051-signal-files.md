@@ -478,3 +478,19 @@ Section 4's provenance, and how it settles:
 > copied as any file is, with the plugin line after the signal file
 > line ([ADR-0052](0052-plugin-framework.md)'s appendix "a variant's
 > recording").
+
+## Appendix: what each front end lacks (2026-11-06)
+
+The app and `havne-cli` read a signal file alike (section 4). Two of
+the tools around it reach one front end only:
+
+- **Read once is the app's.** Settings' form asks the adapter for one
+  draft signal, with no session connected, and shows the reply's bytes
+  beside the value they decode to
+  ([docs/signal-files.md](../signal-files.md)). `havne-cli` has no
+  one-request command: `signals check` reads a file with no car, and
+  on a car `stream --signals` runs a session over every signal the
+  file holds, its frame lines carrying the replies' bytes.
+- **The OBDb import is `havne-cli`'s.** `signals import obdb` writes a
+  signal file, which the app then imports as any other; the app has no
+  import of its own. It is placed in v0.6.0, whose scope is imports.
