@@ -97,6 +97,7 @@ struct Error {
     uint32_t line = 0;
     uint32_t column = 0;
     std::string words;   /* one line, never the input's bytes but quoted() */
+    bool out_of_memory = false; /* the parse ran out of memory */
 
     /* "line 12, column 9: words", or the words alone at line 0 */
     std::string to_string() const;

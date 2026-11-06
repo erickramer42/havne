@@ -372,6 +372,9 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_example})
         app_cli_golden(PluginsCheckWarnsOfNoFixtures plugins-check-packed.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/packed.json)
+        app_cli_golden(PluginsCheckSaysALongInterfacesName plugins-check-long-on.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/packed.json
+               --on vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv)
         app_cli_golden(PluginsCheckNamesARefusedFixtureFile
             plugins-check-bad-fixture.jsonl --exit 1
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)
@@ -387,14 +390,16 @@ if(TARGET havne-cli)
                "mock://x?profile=plugin.example-sim.base"
                --plugin ${_cli_example} --values --count 6)
         # Every plugin in the repository with its fixtures answered by the
-        # simulated ECU on vcan0 and decoded back (ADR-0052 section 8);
+        # simulated ECU on vcan0 and decoded back (ADR-0052 section 8), and
+        # a test plugin giving one signal a value in each of two files;
         # skipped without vcan0 unless ECUIO_VCAN_REQUIRED, and serial, as
         # test_vcan is: the simulated ECU answers 0x7E0 for the whole bus
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test(NAME CliPluginRunTest.EveryPluginsFixturesPass
                 COMMAND ${Python3_EXECUTABLE}
                         ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_check.py
-                        $<TARGET_FILE:havne-cli> ${CMAKE_SOURCE_DIR}/plugins)
+                        $<TARGET_FILE:havne-cli> ${CMAKE_SOURCE_DIR}/plugins
+                        ${_cli_plugins}/repeat)
             set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
                 PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
         endif()
@@ -510,6 +515,10 @@ if(TARGET havne-cli)
     app_cli_usage(PluginsCheckWithoutAPackageIsUsage "plugins|check")
     app_cli_usage(PluginsCheckAnUnknownOptionIsUsage "plugins|check|x|--of|vcan0")
     app_cli_usage(PluginsCheckOnWithoutAnInterfaceIsUsage "plugins|check|x|--on")
+    app_cli_usage(PluginsCheckAFlagForThePackageIsUsage "plugins|check|--on")
+    app_cli_usage(PluginsCheckHelpForThePackageIsUsage "plugins|check|--help")
+    app_cli_usage(PluginsMatchAFlagForThePackageIsUsage
+        "plugins|match|--x|--vin|ZZZFAKE11K0000001")
     app_cli_usage(PluginsMatchWithoutAVinIsUsage "plugins|match|x")
     app_cli_usage(PluginsMatchNotAVinIsUsage "plugins|match|x|--vin|FAKEJ2534VIN00001")
     app_cli_usage(PluginWithoutAPackageIsUsage "stream|mock://x|--plugin")

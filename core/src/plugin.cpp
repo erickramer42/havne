@@ -249,7 +249,17 @@ bool holds(const Value& v, const Value* target)
  * give, a data file's JSON refused */
 struct placed {
     std::string words;
+    bool out_of_memory = false; /* the reader ran out, whatever the words */
 };
+
+/* A JSON refusal, placed after prefix: out of memory when the reader ran
+ * out, never because the input's own words say so */
+placed placed_json(const std::string& prefix, const ecuio_json::Error& error)
+{
+    placed p{prefix + error.to_string()};
+    p.out_of_memory = error.out_of_memory;
+    return p;
+}
 
 class loader
 {
@@ -267,7 +277,7 @@ public:
         ecuio_json::Error error;
         if (!ecuio_json::parse(bytes_ != nullptr ? bytes_ : "", length_,
                                &manifest_, &error, limits)) {
-            throw placed{where_manifest() + error.to_string()};
+            throw placed_json(where_manifest(), error);
         }
         total_ = length_;
         std::unique_ptr<ecuio_plugin> p(new ecuio_plugin());
@@ -631,7 +641,7 @@ private:
         limits.max_bytes = ECUIO_SIGNAL_FILE_MAX_BYTES;
         if (!ecuio_json::parse(bytes != nullptr ? bytes : "", length,
                                f.owned.get(), &error, limits)) {
-            throw placed{path + ", " + error.to_string()};
+            throw placed_json(path + ", ", error);
         }
         f.root = f.owned.get();
         files_.push_back(std::move(f));
@@ -765,7 +775,7 @@ std::vector<ecuio_plugin_value_t> read_values(const ecuio_plugin& p,
     Value root;
     if (!ecuio_json::parse(bytes != nullptr ? bytes : "", length, &root, &error,
                            limits)) {
-        throw placed{error.to_string()};
+        throw placed_json("", error);
     }
     std::vector<ecuio_plugin_value_t> out;
     try {
@@ -872,9 +882,8 @@ ecuio_status_t ecuio_plugin_load(const char* manifest, size_t length,
         return ECUIO_OK;
     } catch (const placed& r) {
         ecuio_detail_set("%s", r.words.c_str());
-        return r.words.find("out of memory") != std::string::npos
-                   ? ECUIO_ERR_OUT_OF_MEMORY
-                   : ECUIO_ERR_INVALID_ARGUMENT;
+        return r.out_of_memory ? ECUIO_ERR_OUT_OF_MEMORY
+                               : ECUIO_ERR_INVALID_ARGUMENT;
     } catch (const std::bad_alloc&) {
         ecuio_detail_set("out of memory");
         return ECUIO_ERR_OUT_OF_MEMORY;
@@ -970,9 +979,8 @@ ecuio_status_t ecuio_plugin_values(const ecuio_plugin_t* plugin,
         return ECUIO_OK;
     } catch (const placed& r) {
         ecuio_detail_set("%s", r.words.c_str());
-        return r.words.find("out of memory") != std::string::npos
-                   ? ECUIO_ERR_OUT_OF_MEMORY
-                   : ECUIO_ERR_INVALID_ARGUMENT;
+        return r.out_of_memory ? ECUIO_ERR_OUT_OF_MEMORY
+                               : ECUIO_ERR_INVALID_ARGUMENT;
     } catch (const std::bad_alloc&) {
         ecuio_detail_set("out of memory");
         return ECUIO_ERR_OUT_OF_MEMORY;

@@ -746,6 +746,7 @@ bool parse(const char* data, size_t size, Value* out, Error* error,
         error->line = 0;
         error->column = 0;
         error->words = "out of memory";
+        error->out_of_memory = true;
         return false;
     }
 }
