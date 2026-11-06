@@ -102,6 +102,48 @@ const ecuio_signal_def_t*
 ecuio_plugin_variant_find(const ecuio_plugin_t* plugin, uint32_t index,
                           const char* key);
 
+/* A value fixture (ADR-0052 section 8): a variant's numeric signal and
+ * the value its field must decode to when the simulated ECU answers it.
+ * The pointer goes last, so the offsets are the same on every width. */
+typedef struct ecuio_plugin_value {
+    double value;
+    uint32_t variant;              /* its index */
+    uint32_t line;                 /* the entry's line in its file */
+    char signal[32];               /* the signal's key, NUL-terminated */
+    uint32_t reserved[4];          /* zero; ABI growth space */
+    const ecuio_signal_def_t* def; /* in the variant's set, valid until
+                                      the plugin is freed */
+} ecuio_plugin_value_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_plugin_value_t, line) == 12,
+              "plugin value line offset is ABI");
+static_assert(offsetof(ecuio_plugin_value_t, signal) == 16,
+              "plugin value signal offset is ABI");
+static_assert(offsetof(ecuio_plugin_value_t, def) == 64,
+              "plugin value def offset is ABI");
+#endif
+
+#define ECUIO_PLUGIN_FIXTURES_FORMAT 1     /* "havne_fixtures" read */
+#define ECUIO_PLUGIN_MAX_VALUES      4096u /* entries in one file */
+
+/* Reads one of the plugin's fixture files (ecuio_plugin_fixture names
+ * them; the host reads its bytes, at most ECUIO_SIGNAL_FILE_MAX_BYTES):
+ * {"havne_fixtures": 1, "values": [{"variant", "signal", "value"}, ...]},
+ * 1 to ECUIO_PLUGIN_MAX_VALUES entries, each a variant of this plugin, a
+ * numeric signal of that variant's by key (a number or an enum; not
+ * text, hex or computed, since the simulated ECU answers a field), the
+ * pair given once in the file, and a number. *count gets every entry;
+ * the first cap are copied, in the file's order. cap 0 (values NULL)
+ * asks the count. ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or count,
+ * NULL bytes with a length, or NULL values with a cap;
+ * ECUIO_ERR_INVALID_ARGUMENT for a file refused, *count untouched, with
+ * "line L, column C: why" in the detail; ECUIO_ERR_OUT_OF_MEMORY. */
+ecuio_status_t ecuio_plugin_values(const ecuio_plugin_t* plugin,
+                                   const char* bytes, size_t length,
+                                   ecuio_plugin_value_t* values, uint32_t cap,
+                                   uint32_t* count);
+
 /* The variants the VIN's manufacturer code and model year fall in: one
  * of the manifest's "match" entries covers it and the variant's own
  * years do (a year range never covers model year 0). A proposal only:

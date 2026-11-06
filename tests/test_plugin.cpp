@@ -575,3 +575,135 @@ TEST(PluginTest, TheAccessorsRefuseWhatTheyCantFill)
     EXPECT_EQ(ecuio_plugin_load("{}", 2, nullptr, nullptr, nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
 }
+
+namespace {
+
+/* A fixture file's refusal against plugin p: INVALID_ARGUMENT, the count
+ * untouched, and the detail */
+std::string values_refusal(const ecuio_plugin_t* p, const std::string& json)
+{
+    uint32_t count = 77;
+    EXPECT_EQ(
+        ecuio_plugin_values(p, json.data(), json.size(), nullptr, 0, &count),
+        ECUIO_ERR_INVALID_ARGUMENT)
+        << json;
+    EXPECT_EQ(count, 77u) << "the count is untouched on a refusal";
+    return ecuio_last_error_detail();
+}
+
+} // namespace
+
+TEST(PluginTest, TheExamplesFixturesReadAsItsVariantsSignals)
+{
+    Folder f = example_folder();
+    Plugin p = load_folder(f);
+    ASSERT_NE(p, nullptr);
+    const std::string& text = f.files["fixtures/values.json"];
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_plugin_values(p.get(), text.data(), text.size(), nullptr, 0,
+                                  &count),
+              ECUIO_OK);
+    ASSERT_EQ(count, 7u);
+    std::vector<ecuio_plugin_value_t> v(count);
+    uint32_t again = 0;
+    ASSERT_EQ(ecuio_plugin_values(p.get(), text.data(), text.size(), v.data(),
+                                  2, &again),
+              ECUIO_OK);
+    EXPECT_EQ(again, 7u) << "every entry is counted, the first cap copied";
+    ASSERT_EQ(ecuio_plugin_values(p.get(), text.data(), text.size(), v.data(),
+                                  count, &count),
+              ECUIO_OK);
+    EXPECT_EQ(v[0].variant, 0u);
+    EXPECT_EQ(v[0].def, ecuio_plugin_variant_find(p.get(), 0, "oil_temp"));
+    EXPECT_EQ(v[0].value, 104.0);
+    EXPECT_EQ(v[0].line, 4u);
+    EXPECT_STREQ(v[0].signal, "oil_temp");
+    EXPECT_EQ(v[4].variant, 1u);
+    EXPECT_EQ(v[4].def, ecuio_plugin_variant_find(p.get(), 1, "trans_temp"))
+        << "my2019's own trans_temp, not base's";
+    EXPECT_NE(v[4].def, v[2].def);
+    EXPECT_EQ(v[4].value, 81.37);
+    EXPECT_EQ(v[6].def, ecuio_plugin_variant_find(p.get(), 1, "clutch_slip"));
+    EXPECT_EQ(v[6].value, -120.0);
+    for (const ecuio_plugin_value_t& e : v) {
+        for (uint32_t r : e.reserved) {
+            EXPECT_EQ(r, 0u);
+        }
+    }
+}
+
+TEST(PluginTest, EveryFixtureRefusalSaysWhy)
+{
+    Folder f = example_folder();
+    Plugin p = load_folder(f);
+    ASSERT_NE(p, nullptr);
+    const std::string head = R"({"havne_fixtures": 1, "values": )";
+    const struct {
+        std::string json;
+        std::string words;
+    } cases[] = {
+        {"[]", "line 1, column 1: "},
+        {R"({"values": []})", "starts with \"havne_fixtures\""},
+        {R"({"havne_fixtures": 2, "values": []})", "is format 2"},
+        {R"({"havne_fixtures": 1})", "needs \"values\""},
+        {R"({"havne_fixtures": 1, "values": [], "tint": 1})",
+         "unknown key 'tint'"},
+        {head + "[]}", "lists 1 to 4096 entries"},
+        {head + R"([{"variant": "base", "signal": "oil_temp"}]})",
+         "needs \"variant\", \"signal\" and \"value\""},
+        {head +
+             R"([{"variant": "base", "signal": "oil_temp", "value": 1, "at": 2}]})",
+         "unknown key 'at'"},
+        {head + R"([{"variant": "my2020", "signal": "oil_temp", "value": 1}]})",
+         "no variant 'my2020'"},
+        {head +
+             R"([{"variant": "base", "signal": "clutch_slip", "value": 1}]})",
+         "variant 'base' has no signal 'clutch_slip'"},
+        {head + R"([{"variant": "base", "signal": "boost", "value": 1}]})",
+         "'boost' isn't a number or an enum"},
+        {head + R"([{"variant": "base", "signal": "oil_temp", "value": "1"}]})",
+         "\"value\""},
+        {head + R"([{"variant": "base", "signal": "oil_temp", "value": 1},)"
+                R"( {"variant": "base", "signal": "oil_temp", "value": 2}]})",
+         "line 1, column 119: 'oil_temp' of variant 'base' is given twice"},
+    };
+    for (const auto& c : cases) {
+        const std::string why = values_refusal(p.get(), c.json);
+        EXPECT_NE(why.find(c.words), std::string::npos)
+            << c.json << "\n  said: " << why;
+        EXPECT_EQ(why.find('\n'), std::string::npos) << why;
+    }
+    /* The same signal key in two variants is two fixtures */
+    const std::string both =
+        head + R"([{"variant": "base", "signal": "gear", "value": 1},)"
+               R"( {"variant": "my2019", "signal": "gear", "value": 1}]})";
+    uint32_t count = 0;
+    EXPECT_EQ(ecuio_plugin_values(p.get(), both.data(), both.size(), nullptr, 0,
+                                  &count),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(count, 2u);
+
+    /* A text signal is refused as a computed one is */
+    Plugin text(load_packed(packed(
+        kHead,
+        R"({"havne_signals": 1, "signals": [{"key": "part", "name": "Part",)"
+        R"( "kind": "text", "ecu": "pcm", "read": {"service": "22",)"
+        R"( "number": "F187"}, "field": {"byte": 0}}]})")));
+    ASSERT_NE(text, nullptr) << ecuio_last_error_detail();
+    EXPECT_NE(
+        values_refusal(
+            text.get(),
+            head + R"([{"variant": "base", "signal": "part", "value": 1}]})")
+            .find("'part' isn't a number or an enum"),
+        std::string::npos);
+
+    EXPECT_EQ(ecuio_plugin_values(nullptr, "{}", 2, nullptr, 0, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_values(p.get(), nullptr, 2, nullptr, 0, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_values(p.get(), "{}", 2, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_values(p.get(), "{}", 2, nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+}

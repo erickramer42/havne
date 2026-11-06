@@ -11,7 +11,8 @@
 //          view's grammar, axis and lines (CliViewTest, ADR-0049);
 //          info's lines and --rate-drop (CliInfoTest, ADR-0049);
 //          a signal file's lines and a URI's profile (CliSignalFileTest,
-//          ADR-0051), the file loaded through core.
+//          ADR-0051), the file loaded through core; CliPluginTest
+//          (ADR-0052).
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
@@ -21,6 +22,7 @@
 #include "jsonl.h"
 #include "line_ring.h"
 #include "mark_lines.h"
+#include "plugin_lines.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
 #include "sim_line.h"
@@ -1479,4 +1481,182 @@ TEST(CliSignalFileTest, AnImportsNotesAreLinesOfTheirOwn)
     EXPECT_EQ(std::string(s.data(), s.size()),
               "{\"type\":\"imported\",\"converted\":7,\"changed\":6,"
               "\"skipped\":5}");
+}
+
+namespace {
+
+std::string text_of(cli::Line& l)
+{
+    EXPECT_TRUE(l.finish());
+    return std::string(l.data(), l.size());
+}
+
+// A packed plugin of two variants, the second for 2019 on
+const char kPacked[] =
+    R"({"havne_plugin": 1, "id": "p", "name": "P", "version": "1.2.3",)"
+    R"( "requires": {"core": "0.1.0"}, "source": {"name": "t"},)"
+    R"( "tiers": ["data"], "match": [{"wmi": ["ZZZ"]}],)"
+    R"( "ecus": [{"id": "pcm", "rx": "7E8"}],)"
+    R"( "variants": [{"id": "base", "files": ["a.json"]},)"
+    R"( {"id": "late", "years": [2019, 2030], "files": ["a.json"]}],)"
+    R"( "files": {"a.json": {"havne_signals": 1, "signals": [{"key": "oil",)"
+    R"( "name": "Oil", "ecu": "pcm", "read": {"service": "22",)"
+    R"( "number": "F40D"}, "field": {"byte": 0}, "scale": 0.25}]}}})";
+
+struct Packed {
+    ecuio_plugin_t* p = nullptr;
+    Packed()
+    {
+        EXPECT_EQ(ecuio_plugin_load(kPacked, sizeof kPacked - 1, nullptr,
+                                    nullptr, &p),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+    }
+    ~Packed() { ecuio_plugin_free(p); }
+    ecuio_plugin_info_t info() const
+    {
+        ecuio_plugin_info_t i{};
+        i.struct_size = sizeof i;
+        ecuio_plugin_info(p, &i);
+        return i;
+    }
+};
+
+} // namespace
+
+// A fixture passes within half its field's step, an enum's step being 1,
+// with only the double's own rounding as slack
+TEST(CliPluginTest, AFixturePassesWithinHalfItsFieldsStep)
+{
+    ecuio_signal_def_t d{};
+    d.kind = ECUIO_VALUE_UINT;
+    d.scale = 0.1;
+    EXPECT_TRUE(cli::fixture_passes(d, 81.3, 81.3));
+    EXPECT_TRUE(cli::fixture_passes(d, 81.3, 81.35));
+    EXPECT_TRUE(cli::fixture_passes(d, 81.3, 81.25));
+    EXPECT_FALSE(cli::fixture_passes(d, 81.3, 81.36));
+    EXPECT_FALSE(cli::fixture_passes(d, 81.3, 81.2));
+    d.scale = -2;
+    EXPECT_TRUE(cli::fixture_passes(d, 10, 11)) << "the step's size, |scale|";
+    EXPECT_FALSE(cli::fixture_passes(d, 10, 11.01));
+    d.kind = ECUIO_VALUE_ENUM;
+    d.scale = 1;
+    EXPECT_TRUE(cli::fixture_passes(d, 3, 3));
+    EXPECT_FALSE(cli::fixture_passes(d, 3, 4));
+    EXPECT_FALSE(cli::fixture_passes(d, 3, 2));
+    EXPECT_EQ(cli::plugin_profile("example-sim", "my2019"),
+              "plugin.example-sim.my2019");
+}
+
+// The plugin line names each variant's profile; the match line the
+// variants proposed, and a VIN with no model year's null
+TEST(CliPluginTest, ThePluginAndMatchLinesNameTheProfiles)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    char buf[2048];
+    cli::Line l(buf, sizeof buf);
+    cli::plugin_line(l, 2, pk.p, pk.info());
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"plugin\",\"package\":2,\"id\":\"p\",\"version\":"
+              "\"1.2.3\",\"name\":\"P\",\"tiers\":[\"data\"],\"variants\":["
+              "{\"id\":\"base\",\"profile\":\"plugin.p.base\"},{\"id\":"
+              "\"late\",\"profile\":\"plugin.p.late\"}],\"fixtures\":0}\n");
+
+    ecuio_vin_info_t vin{};
+    std::strcpy(vin.wmi, "ZZZ");
+    vin.model_year = 2018;
+    uint32_t idx[4] = {};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_plugin_match(pk.p, &vin, idx, 4, &n), ECUIO_OK);
+    cli::Line m(buf, sizeof buf);
+    cli::match_line(m, pk.p, pk.info(), vin, idx, n);
+    EXPECT_EQ(text_of(m), "{\"type\":\"match\",\"wmi\":\"ZZZ\",\"model_year\":"
+                          "2018,\"variants\":[{\"id\":\"base\",\"profile\":"
+                          "\"plugin.p.base\"}]}\n");
+    vin.model_year = 0;
+    ASSERT_EQ(ecuio_plugin_match(pk.p, &vin, idx, 4, &n), ECUIO_OK);
+    cli::Line z(buf, sizeof buf);
+    cli::match_line(z, pk.p, pk.info(), vin, idx, n);
+    EXPECT_NE(text_of(z).find("\"model_year\":null"), std::string::npos);
+}
+
+// A variant line counts its own signals apart from its base set's, and
+// lists its ECUs
+TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(pk.p, 0);
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::variant_line(l, "base", "plugin.p.base", set);
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
+              "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
+              "\"0x7E8\",\"tx\":\"0x7E0\"}]}\n");
+}
+
+// A fixture line: its place, the value and tolerance, the result, what
+// came back (null with nothing) and why when it didn't pass
+TEST(CliPluginTest, AFixtureLineSaysWhatCameBack)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    const char file[] =
+        R"({"havne_fixtures": 1, "values": [{"variant": "late", "signal": "oil", "value": 2.5}]})";
+    ecuio_plugin_value_t v{};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_plugin_values(pk.p, file, sizeof file - 1, &v, 1, &n),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    cli::Line a(buf, sizeof buf);
+    cli::fixture_line(a, "f.json", "late", v, cli::FixtureResult::passed, true,
+                      2.5, nullptr);
+    EXPECT_EQ(text_of(a),
+              "{\"type\":\"fixture\",\"file\":\"f.json\",\"line\":1,"
+              "\"variant\":\"late\",\"signal\":\"oil\",\"value\":2.5,"
+              "\"tolerance\":0.125,\"result\":\"passed\",\"got\":2.5}\n");
+    cli::Line b(buf, sizeof buf);
+    cli::fixture_line(b, "f.json", "late", v, cli::FixtureResult::not_run,
+                      false, 0, "no --on");
+    EXPECT_EQ(text_of(b),
+              "{\"type\":\"fixture\",\"file\":\"f.json\",\"line\":1,"
+              "\"variant\":\"late\",\"signal\":\"oil\",\"value\":2.5,"
+              "\"tolerance\":0.125,\"result\":\"not-run\",\"got\":null,"
+              "\"why\":\"no --on\"}\n");
+    EXPECT_STREQ(cli::fixture_word(cli::FixtureResult::failed), "failed");
+}
+
+// The checked line counts each result, names the interface or null, and
+// warns of a plugin with no fixtures only; a refusal names its package or
+// its file
+TEST(CliPluginTest, TheCheckedAndRefusedLinesSayWhatHappened)
+{
+    cli::FixtureCounts c;
+    c.passed = 6;
+    c.failed = 1;
+    c.files_refused = 1;
+    char buf[1024];
+    cli::Line a(buf, sizeof buf);
+    cli::checked_line(a, c, "vcan0", 2);
+    EXPECT_EQ(text_of(a),
+              "{\"type\":\"checked\",\"fixtures\":7,\"passed\":6,\"failed\":1,"
+              "\"not_run\":0,\"files_refused\":1,\"on\":\"vcan0\"}\n");
+    cli::Line b(buf, sizeof buf);
+    cli::checked_line(b, cli::FixtureCounts{}, nullptr, 0);
+    EXPECT_EQ(text_of(b),
+              "{\"type\":\"checked\",\"fixtures\":0,\"passed\":0,\"failed\":0,"
+              "\"not_run\":0,\"files_refused\":0,\"on\":null,\"warning\":"
+              "\"the plugin has no fixtures: its values are unchecked\"}\n");
+    cli::Line r(buf, sizeof buf);
+    cli::refused_line(r, "refused", nullptr, 3, ECUIO_ERR_LOAD_FAILED, "why");
+    EXPECT_NE(text_of(r).find("\"package\":3,\"code\":7"), std::string::npos);
+    cli::Line f(buf, sizeof buf);
+    cli::refused_line(f, "fixture_refused", "a.json", 0,
+                      ECUIO_ERR_INVALID_ARGUMENT, "why");
+    const std::string ft = text_of(f);
+    EXPECT_NE(ft.find("\"file\":\"a.json\",\"code\":11"), std::string::npos);
+    EXPECT_EQ(ft.find("package"), std::string::npos);
 }

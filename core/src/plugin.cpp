@@ -754,6 +754,101 @@ void copy_field(char* dst, size_t cap, const std::string& s)
     dst[n] = '\0';
 }
 
+/* A value fixture file's entries, or a placed thrown with its words
+ * ("line L, column C: why"); std::bad_alloc too */
+std::vector<ecuio_plugin_value_t> read_values(const ecuio_plugin& p,
+                                              const char* bytes, size_t length)
+{
+    ecuio_json::Limits limits;
+    limits.max_bytes = ECUIO_SIGNAL_FILE_MAX_BYTES;
+    ecuio_json::Error error;
+    Value root;
+    if (!ecuio_json::parse(bytes != nullptr ? bytes : "", length, &root, &error,
+                           limits)) {
+        throw placed{error.to_string()};
+    }
+    std::vector<ecuio_plugin_value_t> out;
+    try {
+        expect(root, Type::object, "a fixture file");
+        if (root.members.empty() ||
+            root.members.front().key != "havne_fixtures") {
+            refuse(root, "a fixture file starts with \"havne_fixtures\"");
+        }
+        const Value& format = root.members.front().value;
+        expect(format, Type::number, "\"havne_fixtures\"");
+        if (!format.integer || format.whole != ECUIO_PLUGIN_FIXTURES_FORMAT) {
+            refuse(format, "\"havne_fixtures\" is format " +
+                               (format.integer ? std::to_string(format.whole)
+                                               : std::string("?")) +
+                               ", and this Havne reads format 1");
+        }
+        only_keys(root, {"havne_fixtures", "values"}, "a fixture file");
+        const Value* list = root.find("values");
+        if (list == nullptr) {
+            refuse(root, "a fixture file needs \"values\"");
+        }
+        expect(*list, Type::array, "\"values\"");
+        if (list->items.empty() ||
+            list->items.size() > ECUIO_PLUGIN_MAX_VALUES) {
+            refuse(*list, "\"values\" lists 1 to 4096 entries");
+        }
+        std::vector<std::pair<uint32_t, uint16_t>> seen;
+        for (const Value& e : list->items) {
+            expect(e, Type::object, "a value fixture");
+            only_keys(e, {"variant", "signal", "value"}, "a value fixture");
+            const Value* variant = e.find("variant");
+            const Value* signal = e.find("signal");
+            const Value* value = e.find("value");
+            if (variant == nullptr || signal == nullptr || value == nullptr) {
+                refuse(e, "a value fixture needs \"variant\", \"signal\" "
+                          "and \"value\"");
+            }
+            const std::string id = text_of(
+                *variant, 1, ECUIO_PLUGIN_VARIANT_ID_MAX, "\"variant\"");
+            uint32_t index = 0;
+            while (index < p.variants.size() && p.variants[index].id != id) {
+                ++index;
+            }
+            if (index == p.variants.size()) {
+                refuse(*variant, "the plugin has no variant " + q(id));
+            }
+            const std::string key = text_of(*signal, 1, 31, "\"signal\"");
+            const ecuio_signal_def_t* def = ecuio_signal_file_find(
+                p.variants[index].file.get(), key.c_str());
+            if (def == nullptr) {
+                refuse(*signal,
+                       "variant " + q(id) + " has no signal " + q(key));
+            }
+            if ((def->flags & ECUIO_DEF_FLAG_COMPUTED) != 0 ||
+                def->kind == ECUIO_VALUE_TEXT || def->kind == ECUIO_VALUE_HEX) {
+                refuse(*signal, q(key) +
+                                    " isn't a number or an enum: a value "
+                                    "fixture checks a field the simulated ECU "
+                                    "answers");
+            }
+            for (const auto& s : seen) {
+                if (s.first == index && s.second == def->id) {
+                    refuse(*signal,
+                           q(key) + " of variant " + q(id) + " is given twice");
+                }
+            }
+            seen.emplace_back(index, def->id);
+            expect(*value, Type::number, "\"value\"");
+            ecuio_plugin_value_t v{};
+            v.value = value->number;
+            v.variant = index;
+            v.line = e.line;
+            copy_field(v.signal, sizeof v.signal, key);
+            v.def = def;
+            out.push_back(v);
+        }
+    } catch (const refused& r) {
+        throw placed{"line " + std::to_string(r.line) + ", column " +
+                     std::to_string(r.column) + ": " + r.words};
+    }
+    return out;
+}
+
 } // namespace
 
 extern "C" {
@@ -853,6 +948,38 @@ ecuio_plugin_variant_find(const ecuio_plugin_t* plugin, uint32_t index,
         return nullptr;
     }
     return ecuio_signal_file_find(plugin->variants[index].file.get(), key);
+}
+
+ecuio_status_t ecuio_plugin_values(const ecuio_plugin_t* plugin,
+                                   const char* bytes, size_t length,
+                                   ecuio_plugin_value_t* values, uint32_t cap,
+                                   uint32_t* count)
+{
+    ecuio_detail_clear();
+    if (plugin == nullptr || count == nullptr ||
+        (bytes == nullptr && length > 0) || (values == nullptr && cap > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    try {
+        const std::vector<ecuio_plugin_value_t> read =
+            read_values(*plugin, bytes, length);
+        for (size_t i = 0; i < read.size() && i < cap; ++i) {
+            values[i] = read[i];
+        }
+        *count = static_cast<uint32_t>(read.size());
+        return ECUIO_OK;
+    } catch (const placed& r) {
+        ecuio_detail_set("%s", r.words.c_str());
+        return r.words.find("out of memory") != std::string::npos
+                   ? ECUIO_ERR_OUT_OF_MEMORY
+                   : ECUIO_ERR_INVALID_ARGUMENT;
+    } catch (const std::bad_alloc&) {
+        ecuio_detail_set("out of memory");
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    } catch (...) {
+        ecuio_detail_set("the fixture file couldn't be read");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
 }
 
 ecuio_status_t ecuio_plugin_match(const ecuio_plugin_t* plugin,

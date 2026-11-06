@@ -48,6 +48,7 @@
 #include "jsonl.h"
 #include "line_ring.h"
 #include "mark_lines.h"
+#include "plugin_lines.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
 #include "sim_line.h"
@@ -56,6 +57,7 @@
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
 #include "ecuio/obdb.h"
+#include "ecuio/plugin.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/serial.h"
@@ -88,7 +90,8 @@
 #include <io.h>
 #include <windows.h>
 #else
-#include <unistd.h> /* read: the marks typed into stream --record */
+#include <sys/stat.h> /* stat: a plugin's folder */
+#include <unistd.h>   /* read: the marks typed into stream --record */
 #endif
 
 // play writes to a SocketCAN interface: Linux only, as socketcan:// is
@@ -939,6 +942,508 @@ int run_signals_check(const char* path)
     return out.ok() ? kExitOk : kExitFailed;
 }
 
+// A plugin loaded for the process's life (stream --plugin, sim --plugin):
+// its profiles keep their sets, and a session's close can outlive the
+// command's return, so it is never freed, as g_signal_file isn't
+ecuio_plugin_t* g_plugin = nullptr;
+
+// Whether path names a folder (a plugin's); otherwise it's read as a file
+bool is_folder(const char* path)
+{
+#ifdef _WIN32
+    const DWORD a = GetFileAttributesA(path);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    struct stat st{};
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+// A folder package's files for ecuio_plugin_load, read beside its
+// manifest; a file that can't be read is refused by core at the path the
+// manifest names it by
+struct PackageFolder {
+    std::string root;
+    std::string bytes;
+
+    static int read(void* user, const char* path, const char** bytes,
+                    size_t* length)
+    {
+        auto* self = static_cast<PackageFolder*>(user);
+        std::string why;
+        if (!read_whole((self->root + "/" + path).c_str(),
+                        ECUIO_SIGNAL_FILE_MAX_BYTES, "file", &self->bytes,
+                        &why)) {
+            return 1;
+        }
+        *bytes = self->bytes.data();
+        *length = self->bytes.size();
+        return 0;
+    }
+};
+
+// Reads and loads a package: a folder holding manifest.json, or a packed
+// plugin's file. On failure the status and why for an error line, never
+// the path: the reason it can't be read, or core's words, which name the
+// file in the package, the line and the column
+ecuio_status_t load_package(const char* path, ecuio_plugin_t** out,
+                            std::string* why)
+{
+    *out = nullptr;
+    std::string bytes;
+    ecuio_status_t st = ECUIO_OK;
+    if (is_folder(path)) {
+        PackageFolder folder;
+        folder.root = path;
+        if (!read_whole((folder.root + "/manifest.json").c_str(),
+                        ECUIO_PLUGIN_MANIFEST_MAX, "plugin's manifest.json",
+                        &bytes, why)) {
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        st = ecuio_plugin_load(bytes.data(), bytes.size(), &PackageFolder::read,
+                               &folder, out);
+    } else {
+        if (!read_whole(path, ECUIO_PLUGIN_PACKAGE_MAX, "plugin", &bytes,
+                        why)) {
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        st = ecuio_plugin_load(bytes.data(), bytes.size(), nullptr, nullptr,
+                               out);
+    }
+    if (st != ECUIO_OK) {
+        *why = ecuio_last_error_detail();
+    }
+    return st;
+}
+
+ecuio_plugin_info_t plugin_info(const ecuio_plugin_t* p)
+{
+    ecuio_plugin_info_t info{};
+    info.struct_size = sizeof info;
+    ecuio_plugin_info(p, &info);
+    return info;
+}
+
+std::string variant_of(const ecuio_plugin_t* p, uint32_t index)
+{
+    char id[ECUIO_PLUGIN_VARIANT_ID_MAX + 1] = {};
+    ecuio_plugin_variant(p, index, id, sizeof id);
+    return id;
+}
+
+// Registers every variant's profile: ECUIO_OK, or the first refusal's
+// status with why
+ecuio_status_t register_variants(ecuio_plugin_t* p, std::string* why)
+{
+    const ecuio_plugin_info_t info = plugin_info(p);
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_status_t st = ecuio_plugin_register(p, v, nullptr, 0);
+        if (st != ECUIO_OK) {
+            *why = ecuio_last_error_detail();
+            return st;
+        }
+    }
+    return ECUIO_OK;
+}
+
+// --plugin for stream and sim: loads the package and registers its
+// variants for the process's life (g_plugin); the URI must select one of
+// them by profile=, never a guess (ADR-0052 section 5). -1 to go on; else
+// the exit code: a package that can't be read or is refused is start and
+// an error line (3), a URI that selects none of its variants a usage
+// error (2)
+int use_plugin(const char* path, const char* uri)
+{
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    ecuio_status_t st = load_package(path, &p, &why);
+    if (st == ECUIO_OK) {
+        const ecuio_plugin_info_t info = plugin_info(p);
+        std::string selected;
+        const bool given = cli::uri_profile(uri, &selected);
+        std::string names;
+        bool known = false;
+        for (uint32_t v = 0; v < info.variant_count; ++v) {
+            const std::string name =
+                cli::plugin_profile(info.id, variant_of(p, v).c_str());
+            names += (v > 0 ? ", " : "") + name;
+            known = known || (given && name == selected);
+        }
+        if (!known) {
+            std::fprintf(stderr,
+                         "havne-cli: --plugin needs the URI's profile= to "
+                         "name one of its variants: %s\n",
+                         names.c_str());
+            ecuio_plugin_free(p);
+            return kExitUsage;
+        }
+        st = register_variants(p, &why);
+        if (st == ECUIO_OK) {
+            g_plugin = p;
+            return -1;
+        }
+        ecuio_plugin_free(p);
+    }
+    Output out;
+    write_start(out);
+    write_error(out, st, why.c_str());
+    out.flush();
+    return kExitConnect;
+}
+
+// plugins list <pkg>... (ADR-0052): start, then a plugin line for each
+// package, or a refused line saying why and going on; exit 3 when any was
+// refused. No end line (a list)
+int run_plugins_list(const std::vector<const char*>& paths)
+{
+    Output out;
+    write_start(out);
+    bool refused = false;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        std::string why;
+        ecuio_plugin_t* p = nullptr;
+        const ecuio_status_t st = load_package(paths[i], &p, &why);
+        const auto index = static_cast<uint32_t>(i);
+        BigLine b(4096 + why.size() * 6);
+        if (st != ECUIO_OK) {
+            refused = true;
+            cli::refused_line(b.line, "refused", nullptr, index, st,
+                              why.c_str());
+        } else {
+            cli::plugin_line(b.line, index, p, plugin_info(p));
+            ecuio_plugin_free(p);
+        }
+        write_line(out, b.line);
+    }
+    out.flush();
+    if (!out.ok()) {
+        return kExitFailed;
+    }
+    return refused ? kExitConnect : kExitOk;
+}
+
+// plugins match <pkg> --vin <VIN> (ADR-0052 section 5): the variants the
+// VIN's manufacturer code and model year fall in, a proposal only. The
+// VIN is taken as vin takes it, and never written. start, plugin, match;
+// a package refused is start and an error line, exit 3
+int run_plugins_match(const char* path, const char* typed)
+{
+    std::string vin;
+    for (const char* c = typed; *c != '\0'; ++c) {
+        if (*c != ' ') {
+            vin += (*c >= 'a' && *c <= 'z') ? static_cast<char>(*c - 'a' + 'A')
+                                            : *c;
+        }
+    }
+    ecuio_vin_info_t decoded{};
+    if (ecuio_vin_decode(vin.c_str(), latest_model_year(), &decoded) !=
+        ECUIO_OK) {
+        std::fprintf(stderr,
+                     "havne-cli: not a VIN: 49 CFR 565 takes 17 digits and "
+                     "capital letters, never I, O or Q\n");
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    const ecuio_status_t st = load_package(path, &p, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    const ecuio_plugin_info_t info = plugin_info(p);
+    uint32_t indices[ECUIO_PLUGIN_MAX_VARIANTS] = {};
+    uint32_t count = 0;
+    ecuio_plugin_match(p, &decoded, indices, ECUIO_PLUGIN_MAX_VARIANTS, &count);
+    {
+        BigLine b(4096);
+        cli::plugin_line(b.line, 0, p, info);
+        write_line(out, b.line);
+    }
+    {
+        BigLine b(4096);
+        cli::match_line(b.line, p, info, decoded, indices,
+                        std::min<uint32_t>(count, ECUIO_PLUGIN_MAX_VARIANTS));
+        write_line(out, b.line);
+    }
+    ecuio_plugin_free(p);
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A fixture entry and what its run found
+struct FixtureRun {
+    std::string file;
+    ecuio_plugin_value_t value{};
+    cli::FixtureResult result = cli::FixtureResult::not_run;
+    bool have = false;
+    double got = 0;
+    std::string why;
+};
+
+// The newest decoded value of each signal a variant's fixtures name,
+// filled on the worker: the ids are fixed before start, so the callback
+// only searches and stores, under the lock, allocating nothing
+struct FixtureValues {
+    std::vector<uint16_t> ids;
+    std::vector<double> values;
+    std::vector<char> have;
+    std::mutex mutex;
+
+    static void on_values(const ecuio_value_batch_t* batch, void* user)
+    {
+        auto* self = static_cast<FixtureValues*>(user);
+        std::lock_guard<std::mutex> lock(self->mutex);
+        for (uint32_t i = 0; i < batch->count; ++i) {
+            const ecuio_value_t& v = batch->values[i];
+            for (size_t k = 0; k < self->ids.size(); ++k) {
+                if (self->ids[k] == v.signal_id) {
+                    self->values[k] = v.value;
+                    self->have[k] = 1;
+                }
+            }
+        }
+    }
+
+    bool all()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::all_of(have.begin(), have.end(),
+                           [](char h) { return h != 0; });
+    }
+};
+
+// How long a variant's fixtures wait for their values: the probe's walk
+// and the rotation over the base set's PIDs share the bus with them
+constexpr int kFixtureWaitMs = 20000;
+
+// Runs variant index's fixtures (the runs whose value.variant is index)
+// against the simulated ECU on interface on: the sim answers the
+// variant's DIDs with the fixtures' values, a socketcan:// session
+// decodes them through the variant's own profile, and each must come back
+// within half its field's step. ECUIO_OK, or the status and why of a sim
+// or session that wouldn't start
+ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
+                                    const char* on,
+                                    std::vector<FixtureRun>& runs,
+                                    std::string* why)
+{
+    std::vector<FixtureRun*> mine;
+    for (FixtureRun& r : runs) {
+        if (r.value.variant == index) {
+            mine.push_back(&r);
+        }
+    }
+    if (mine.empty()) {
+        return ECUIO_OK;
+    }
+    const std::string sim_uri = "mock://check?profile=" + profile;
+    ecuio_sim_t* sim = nullptr;
+    ecuio_status_t st = ecuio_sim_create(sim_uri.c_str(), on, &sim);
+    if (st != ECUIO_OK) {
+        *why = ecuio_last_error_detail();
+        return st;
+    }
+    FixtureValues got;
+    std::vector<FixtureRun*> asked;
+    for (FixtureRun* r : mine) {
+        if (ecuio_sim_set_value(sim, r->value.def->id, r->value.value) !=
+            ECUIO_OK) {
+            r->result = cli::FixtureResult::failed;
+            r->why = "the simulated ECU can't answer it: it answers a "
+                     "Service 22 DID's field, and only a value the field "
+                     "holds";
+            continue;
+        }
+        asked.push_back(r);
+        got.ids.push_back(r->value.def->id);
+    }
+    got.values.assign(got.ids.size(), 0.0);
+    got.have.assign(got.ids.size(), 0);
+    if (!asked.empty()) {
+        const std::string uri = std::string("socketcan://") + on +
+                                "?profile=" + profile +
+                                "&identify=0&diagnose=0";
+        ecuio_session_t* s = nullptr;
+        st = ecuio_session_create(uri.c_str(), &s);
+        if (st == ECUIO_OK) {
+            st = ecuio_register_values_callback(s, &FixtureValues::on_values,
+                                                &got);
+        }
+        if (st == ECUIO_OK) {
+            st = ecuio_session_start(s);
+        }
+        if (st != ECUIO_OK) {
+            *why = ecuio_last_error_detail();
+            ecuio_session_destroy(s);
+            ecuio_sim_destroy(sim);
+            return st;
+        }
+        const auto until = std::chrono::steady_clock::now() +
+                           std::chrono::milliseconds(kFixtureWaitMs);
+        while (!got.all() && !g_interrupted.load() &&
+               std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        ecuio_session_close(s);
+        ecuio_session_destroy(s);
+    }
+    ecuio_sim_destroy(sim);
+    for (size_t k = 0; k < asked.size(); ++k) {
+        FixtureRun& r = *asked[k];
+        r.have = got.have[k] != 0;
+        r.got = got.values[k];
+        if (!r.have) {
+            r.result = cli::FixtureResult::failed;
+            r.why = g_interrupted.load()
+                        ? "interrupted before its value came"
+                        : "no value came within " +
+                              std::to_string(kFixtureWaitMs / 1000) + " s";
+        } else if (cli::fixture_passes(*r.value.def, r.value.value, r.got)) {
+            r.result = cli::FixtureResult::passed;
+        } else {
+            r.result = cli::FixtureResult::failed;
+            r.why = "the decoded value is past half the field's step";
+        }
+    }
+    return ECUIO_OK;
+}
+
+// plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
+// package as a session would, then reads its value fixtures. start,
+// plugin, for each variant a variant line and its own signals'
+// signal_def lines, a fixture_refused line for each fixture file that
+// can't be read or that core refused, a fixture line for each entry (with
+// --on, run through the simulated ECU on that interface, Linux's vcan;
+// else not run), then checked. A package refused is start and an error
+// line, exit 3, as is a sim or session that won't start; a fixture failed
+// or a file refused, exit 1. No end line
+int run_plugins_check(const char* path, const char* on)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    ecuio_status_t st = load_package(path, &p, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    const ecuio_plugin_info_t info = plugin_info(p);
+    {
+        BigLine b(4096);
+        cli::plugin_line(b.line, 0, p, info);
+        write_line(out, b.line);
+    }
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
+        const std::string id = variant_of(p, v);
+        {
+            BigLine b(1024 + size_t{set.channel_count} * 64);
+            cli::variant_line(b.line, id.c_str(),
+                              cli::plugin_profile(info.id, id.c_str()), set);
+            write_line(out, b.line);
+        }
+        for (uint32_t i = 0; i < set.count; ++i) {
+            if (cli::own_signal(set.defs[i])) {
+                BigLine b(cli::def_line_bytes(set, set.defs[i]));
+                cli::def_line(b.line, set, set.defs[i]);
+                write_line(out, b.line);
+            }
+        }
+    }
+
+    cli::FixtureCounts counts;
+    std::vector<FixtureRun> runs;
+    for (uint32_t f = 0; f < info.fixture_count; ++f) {
+        char name[ECUIO_PLUGIN_PATH_MAX + 1] = {};
+        ecuio_plugin_fixture(p, f, name, sizeof name);
+        std::string bytes;
+        st = read_whole((std::string(path) + "/" + name).c_str(),
+                        ECUIO_SIGNAL_FILE_MAX_BYTES, "fixture file", &bytes,
+                        &why)
+                 ? ECUIO_OK
+                 : ECUIO_ERR_LOAD_FAILED;
+        uint32_t count = 0;
+        if (st == ECUIO_OK) {
+            st = ecuio_plugin_values(p, bytes.data(), bytes.size(), nullptr, 0,
+                                     &count);
+            why = ecuio_last_error_detail();
+        }
+        std::vector<ecuio_plugin_value_t> values(count);
+        if (st == ECUIO_OK) {
+            st = ecuio_plugin_values(p, bytes.data(), bytes.size(),
+                                     values.data(), count, &count);
+            why = ecuio_last_error_detail();
+        }
+        if (st != ECUIO_OK) {
+            ++counts.files_refused;
+            BigLine b(1024 + why.size() * 6);
+            cli::refused_line(b.line, "fixture_refused", name, 0, st,
+                              why.c_str());
+            write_line(out, b.line);
+            continue;
+        }
+        for (const ecuio_plugin_value_t& v : values) {
+            FixtureRun r;
+            r.file = name;
+            r.value = v;
+            r.why = "no --on interface: the simulated ECU answers on one";
+            runs.push_back(r);
+        }
+    }
+
+    if (on != nullptr && !runs.empty()) {
+        st = register_variants(p, &why);
+        for (uint32_t v = 0; st == ECUIO_OK && v < info.variant_count; ++v) {
+            const std::string profile =
+                cli::plugin_profile(info.id, variant_of(p, v).c_str());
+            st = run_variant_fixtures(profile, v, on, runs, &why);
+        }
+        if (st != ECUIO_OK) {
+            write_error(out, st, why.c_str());
+            out.flush();
+            ecuio_plugin_free(p);
+            return kExitConnect;
+        }
+    }
+    for (const FixtureRun& r : runs) {
+        switch (r.result) {
+        case cli::FixtureResult::passed:
+            ++counts.passed;
+            break;
+        case cli::FixtureResult::failed:
+            ++counts.failed;
+            break;
+        default:
+            ++counts.not_run;
+        }
+        const std::string variant = variant_of(p, r.value.variant);
+        BigLine b(1024 + r.why.size() * 6);
+        cli::fixture_line(
+            b.line, r.file.c_str(), variant.c_str(), r.value, r.result, r.have,
+            r.got,
+            r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
+        write_line(out, b.line);
+    }
+    {
+        char buf[512];
+        cli::Line l(buf, sizeof buf);
+        cli::checked_line(l, counts, on, info.fixture_count);
+        write_line(out, l);
+    }
+    ecuio_plugin_free(p);
+    out.flush();
+    if (!out.ok()) {
+        return kExitFailed;
+    }
+    return counts.failed > 0 || counts.files_refused > 0 ? kExitFailed
+                                                         : kExitOk;
+}
+
 struct ImportArgs {
     const char* file = nullptr; // the OBDb set
     const char* out = nullptr;  // --out: the signal file written
@@ -1117,11 +1622,11 @@ void usage(FILE* to)
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
-        "                         [--signals <file>]\n"
+        "                         [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
-        "                      [--signals <file>]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
@@ -1130,6 +1635,9 @@ void usage(FILE* to)
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
+        "       havne-cli plugins list <pkg>...\n"
+        "       havne-cli plugins check <pkg> [--on <vcan>]\n"
+        "       havne-cli plugins match <pkg> --vin <VIN>\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -1152,6 +1660,9 @@ void usage(FILE* to)
         "it.\n"
         "         --signals loads a signal file (stream and sim alike): its\n"
         "         profile, user.<name>, is the URI's when it names none.\n"
+        "         --plugin loads a plugin (a folder or a packed file) and\n"
+        "         registers its variants as plugin.<id>.<variant>; the URI's\n"
+        "         profile= names the one to read.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -1192,6 +1703,12 @@ void usage(FILE* to)
         "         out; --year takes the commands for that model year, --name,\n"
         "         --url and --commit go in the file, and --alone leaves\n"
         "         obd2 out of it.\n"
+        "plugins  list says what each package holds, or why it's refused.\n"
+        "         check reads one as a session would, then its value\n"
+        "         fixtures: with --on (Linux), each answered by the\n"
+        "         simulated ECU on that interface and decoded back.\n"
+        "         match lists the variants a VIN's manufacturer code and\n"
+        "         model year fall in: the choice stays yours.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -1229,6 +1746,7 @@ struct StreamArgs {
     const char* record = nullptr; // --record's folder
     const char* label = nullptr;
     const char* signals = nullptr; // --signals' file
+    const char* plugin = nullptr;  // --plugin's package
 };
 
 // The markers typed into stream --record (ADR-0049 section 4): a thread
@@ -1719,6 +2237,7 @@ struct SimArgs {
     uint64_t seconds = 0;
     bool desk_bus = false; /* --desk-bus: a real controller too */
     const char* signals = nullptr; /* --signals' file */
+    const char* plugin = nullptr;  /* --plugin's package */
 };
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
@@ -2768,6 +3287,8 @@ int run(int argc, char** argv)
                 sim.desk_bus = true;
             } else if (a == "--signals" && i + 1 < argc) {
                 sim.signals = argv[++i];
+            } else if (a == "--plugin" && i + 1 < argc) {
+                sim.plugin = argv[++i];
             } else if (a == "--seconds" && i + 1 < argc) {
                 if (!parse_count(argv[++i], sim.seconds)) {
                     std::fprintf(
@@ -2789,6 +3310,18 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
+        if (sim.signals != nullptr && sim.plugin != nullptr) {
+            std::fprintf(stderr, "havne-cli: --signals and --plugin each "
+                                 "give the profile: one at a time\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (sim.plugin != nullptr) {
+            const int rc = use_plugin(sim.plugin, sim.uri);
+            if (rc >= 0) {
+                return rc;
+            }
+        }
         std::string opened;
         if (sim.signals != nullptr) {
             const int rc = use_signal_file(sim.signals, sim.uri, &opened);
@@ -2798,6 +3331,43 @@ int run(int argc, char** argv)
             sim.uri = opened.c_str();
         }
         return run_sim(sim);
+    }
+    if (command == "plugins") {
+        const std::string word = argc > 2 ? argv[2] : "";
+        if (word == "list" && argc > 3) {
+            std::vector<const char*> paths;
+            for (int i = 3; i < argc; ++i) {
+                if (argv[i][0] == '-' && argv[i][1] == '-') {
+                    std::fprintf(stderr, "havne-cli: unexpected '%s'\n",
+                                 argv[i]);
+                    usage(stderr);
+                    return kExitUsage;
+                }
+                paths.push_back(argv[i]);
+            }
+            return run_plugins_list(paths);
+        }
+        if (word == "check" && (argc == 4 || argc == 6)) {
+            const char* on = nullptr;
+            if (argc == 6) {
+                if (std::string(argv[4]) != "--on" || *argv[5] == '\0') {
+                    std::fprintf(stderr, "havne-cli: plugins check takes "
+                                         "<pkg> [--on <vcan>]\n");
+                    usage(stderr);
+                    return kExitUsage;
+                }
+                on = argv[5];
+            }
+            return run_plugins_check(argv[3], on);
+        }
+        if (word == "match" && argc == 6 && std::string(argv[4]) == "--vin") {
+            return run_plugins_match(argv[3], argv[5]);
+        }
+        std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check "
+                             "<pkg> [--on <vcan>], or match <pkg> --vin "
+                             "<VIN>\n");
+        usage(stderr);
+        return kExitUsage;
     }
     if (command == "signals") {
         const std::string word = argc > 2 ? argv[2] : "";
@@ -2885,6 +3455,8 @@ int run(int argc, char** argv)
             args.label = argv[++i];
         } else if (a == "--signals" && i + 1 < argc) {
             args.signals = argv[++i];
+        } else if (a == "--plugin" && i + 1 < argc) {
+            args.plugin = argv[++i];
         } else if (a.rfind("--", 0) == 0 || args.uri) {
             std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
             usage(stderr);
@@ -2902,6 +3474,18 @@ int run(int argc, char** argv)
         std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
         usage(stderr);
         return kExitUsage;
+    }
+    if (args.signals != nullptr && args.plugin != nullptr) {
+        std::fprintf(stderr, "havne-cli: --signals and --plugin each give "
+                             "the profile: one at a time\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.plugin != nullptr) {
+        const int rc = use_plugin(args.plugin, args.uri);
+        if (rc >= 0) {
+            return rc;
+        }
     }
     std::string opened;
     if (args.signals != nullptr) {

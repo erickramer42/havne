@@ -467,3 +467,44 @@ what it left open:
   `dev` is the last release's until the release commit; the example
   plugin names the version its tree builds as, and the release commit
   raises it with the project's.
+
+## Appendix: havne-cli's plugins as built (2026-11-05)
+
+`havne-cli plugins list`, `check` and `match`, and `stream --plugin`
+and `sim --plugin`, build section 5's CLI and section 8's check:
+
+- **Core reads the fixture files.** The CLI reaches core through its
+  public headers alone, so a fixture file is read by core's own JSON
+  reader, `ecuio_plugin_values(plugin, bytes, length, values, cap,
+  &count)`, one more additive function in `plugin.h`: format 1 is
+  `{"havne_fixtures": 1, "values": [{"variant", "signal", "value"}]}`,
+  1 to 4096 entries, each naming a variant of the plugin and a number
+  or enum signal of that variant's by key (not text, hex or computed:
+  the simulated ECU answers a field), the pair once in the file. Each
+  entry comes back with its variant's index, its def, its key and its
+  line; a refusal is the loader's `line L, column C: why`.
+- **A fixture's run:** per variant, the simulated ECU on the
+  interface `--on` names, `mock://check?profile=plugin.<id>.<variant>`,
+  answers the variant's DIDs with the fixtures' values
+  (`ecuio_sim_set_value`), and a `socketcan://` session through the
+  same profile, with identification and the diagnostics off, decodes
+  them back. A value passes within half its field's step (|scale|; an
+  enum's step is 1), and fails when it decodes past that, when the
+  simulated ECU can't answer it (not a Service 22 DID's field, or a
+  value the field can't hold), or when none comes within 20 s.
+- **Off Linux,** or without `--on`, the fixtures are listed as not
+  run; with `--on` off Linux the simulated ECU's refusal is the
+  command's error. A plugin with no fixture files is a warning on the
+  check's summary line, never a failure, as section 8 has it for a
+  user's own; `CliPluginRunTest` holds every plugin in the repository
+  to at least one fixture, all passing, on CI's vcan.
+- **`--plugin` needs the URI's `profile=`** to name one of the
+  plugin's variants, every one of which it registers; anything else is
+  a usage error naming them. `--plugin` and `--signals` together are
+  too, since each gives the profile.
+- **The exits:** a package refused is exit 3, as a refused signal file
+  is; a fixture failed or a fixture file refused is exit 1; `plugins
+  list` goes on past a refused package and exits 3 at the end.
+- **A plugin variant's recording** holds no `signals.json` yet: the
+  merged set has no file of its own to copy, which needs a writer from
+  a set back to a signal file.

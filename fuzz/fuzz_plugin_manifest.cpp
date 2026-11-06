@@ -1,10 +1,13 @@
 // File/layer: fuzz/fuzz_plugin_manifest.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: the plugin loader (ADR-0052, ecuio_plugin_load)
+// Testing: FUZZ: the plugin loader (ADR-0052, ecuio_plugin_load) and its
+//          value fixtures (ecuio_plugin_values)
 //
-// The first byte picks the form: even, a packed package (the rest is the
-// file); odd, a folder, the rest cut at 0x1E bytes into manifest.json
-// and the files the loader asks for in turn. fuzz/README.md lists what
-// each input must hold to.
+// The first byte picks the form: even, a packed package (the rest up to
+// its first 0x1E byte is the file); odd, a folder, the rest cut at 0x1E
+// bytes into manifest.json and the files the loader asks for in turn.
+// What follows (the packed file's 0x1E, or the first piece the folder's
+// loader didn't ask for) is a fixture file read against the plugin
+// loaded. fuzz/README.md lists what each input must hold to.
 
 #include <ecuio/core.h>
 #include <ecuio/plugin.h>
@@ -73,6 +76,56 @@ ecuio_status_t load(const std::string& manifest, pieces* folder,
     return s;
 }
 
+/* A fixture file read against both plugins alike: refused in one line
+ * with the count untouched, or entries that each name a variant and a
+ * numeric field of that variant's set, the first cap copied */
+void check_values(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
+                  uint32_t variants, const std::string& bytes)
+{
+    uint32_t count = 0xFFFFFFFFu;
+    const ecuio_status_t s =
+        ecuio_plugin_values(a, bytes.data(), bytes.size(), nullptr, 0, &count);
+    const std::string words = ecuio_last_error_detail();
+    uint32_t again = 0xFFFFFFFFu;
+    check(ecuio_plugin_values(b, bytes.data(), bytes.size(), nullptr, 0,
+                              &again) == s);
+    check(words == ecuio_last_error_detail());
+    if (s != ECUIO_OK) {
+        check(s == ECUIO_ERR_INVALID_ARGUMENT || s == ECUIO_ERR_OUT_OF_MEMORY);
+        check(count == 0xFFFFFFFFu && again == 0xFFFFFFFFu);
+        check(!words.empty() && words.find('
+') == std::string::npos);
+        return;
+    }
+    check(count == again && count >= 1 && count <= ECUIO_PLUGIN_MAX_VALUES);
+    std::vector<ecuio_plugin_value_t> v(count + 1);
+    const uint32_t cap = count / 2;
+    v[cap].line = 0xABCDu; /* past the cap: left alone */
+    uint32_t n = 0;
+    check(ecuio_plugin_values(a, bytes.data(), bytes.size(), v.data(), cap,
+                              &n) == ECUIO_OK);
+    check(n == count && v[cap].line == 0xABCDu);
+    check(ecuio_plugin_values(a, bytes.data(), bytes.size(), v.data(), count,
+                              &n) == ECUIO_OK);
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_plugin_value_t& e = v[i];
+        check(e.variant < variants && e.line >= 1);
+        const ecuio_signal_set_t* set = ecuio_plugin_variant_set(a, e.variant);
+        check(e.def >= set->defs && e.def < set->defs + set->count);
+        check(memchr(e.signal, '\0', sizeof e.signal) != nullptr);
+        check(ecuio_plugin_variant_find(a, e.variant, e.signal) == e.def);
+        check((e.def->flags & ECUIO_DEF_FLAG_COMPUTED) == 0);
+        check(e.def->kind != ECUIO_VALUE_TEXT &&
+              e.def->kind != ECUIO_VALUE_HEX);
+        for (uint32_t r : e.reserved) {
+            check(r == 0);
+        }
+        for (uint32_t j = 0; j < i; ++j) {
+            check(v[j].variant != e.variant || v[j].def != e.def);
+        }
+    }
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -83,8 +136,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     const bool folder = (data[0] & 1u) != 0;
     const std::string rest(reinterpret_cast<const char*>(data) + 1, size - 1);
     std::string manifest = rest;
+    std::string fixture;
     pieces files;
-    if (folder) {
+    if (!folder) {
+        const size_t cut = rest.find('');
+        if (cut != std::string::npos) {
+            manifest = rest.substr(0, cut);
+            fixture = rest.substr(cut + 1);
+        }
+    } else {
         size_t start = 0;
         bool first = true;
         for (size_t i = 0; i <= rest.size(); ++i) {
@@ -121,6 +181,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         return 0;
     }
     check(a != nullptr && b != nullptr);
+    if (folder && files.next < files.files.size()) {
+        fixture = files.files[files.next];
+    }
 
     ecuio_plugin_info_t info{};
     info.struct_size = sizeof info;
@@ -146,6 +209,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         const ecuio_signal_set_t* found = nullptr;
         check(ecuio_profile_lookup(name, &found) == ECUIO_OK && found == set);
     }
+
+    check_values(a, b, info.variant_count, fixture);
 
     check(ecuio_plugin_free(a) == ECUIO_OK);
     check(ecuio_plugin_free(b) == ECUIO_OK);

@@ -359,6 +359,45 @@ if(TARGET havne-cli)
             --exit 3
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max"
                --signals ${_cli_signals}/refused.json --values)
+        # Plugins (ADR-0052): the example and the test packages listed,
+        # checked with their fixtures unrun (the vcan run is
+        # CliPluginRunTest's), the variants a made-up VIN proposes, and the
+        # example's base variant read from the mock
+        set(_cli_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+        set(_cli_plugins ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/plugins)
+        app_cli_golden(PluginsListSaysWhatEachHolds plugins-list.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> plugins list ${_cli_example}
+               ${_cli_plugins}/packed.json ${_cli_plugins}/none)
+        app_cli_golden(PluginsCheckReadsTheExample plugins-check.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_example})
+        app_cli_golden(PluginsCheckWarnsOfNoFixtures plugins-check-packed.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/packed.json)
+        app_cli_golden(PluginsCheckNamesARefusedFixtureFile
+            plugins-check-bad-fixture.jsonl --exit 1
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)
+        app_cli_golden(PluginsCheckRefusesWhatIsntAPlugin plugins-refused.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_signals}/extras.json)
+        app_cli_golden(PluginsMatchProposesTheVariants plugins-match.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins match ${_cli_example}
+               --vin ZZZFAKE11K0000001)
+        app_cli_golden(StreamReadsThroughAPluginsVariant stream-plugin.jsonl
+            --ignore t_us
+            -- $<TARGET_FILE:havne-cli> stream
+               "mock://x?profile=plugin.example-sim.base"
+               --plugin ${_cli_example} --values --count 6)
+        # Every plugin in the repository with its fixtures answered by the
+        # simulated ECU on vcan0 and decoded back (ADR-0052 section 8);
+        # skipped without vcan0 unless ECUIO_VCAN_REQUIRED, and serial, as
+        # test_vcan is: the simulated ECU answers 0x7E0 for the whole bus
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliPluginRunTest.EveryPluginsFixturesPass
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_check.py
+                        $<TARGET_FILE:havne-cli> ${CMAKE_SOURCE_DIR}/plugins)
+            set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
         # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
         # model year, its notes and the file written whole, beside nothing
         # else, against committed ones; an --out that can't be written
@@ -463,6 +502,25 @@ if(TARGET havne-cli)
     app_cli_usage(SignalsImportAnUnknownOptionIsUsage
         "signals|import|obdb|a.json|--out|b.json|--fast")
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
+    set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+    app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
+    app_cli_usage(PluginsAnUnknownWordIsUsage "plugins|lint|x")
+    app_cli_usage(PluginsListWithoutAPackageIsUsage "plugins|list")
+    app_cli_usage(PluginsListAnOptionIsUsage "plugins|list|x|--fast")
+    app_cli_usage(PluginsCheckWithoutAPackageIsUsage "plugins|check")
+    app_cli_usage(PluginsCheckAnUnknownOptionIsUsage "plugins|check|x|--of|vcan0")
+    app_cli_usage(PluginsCheckOnWithoutAnInterfaceIsUsage "plugins|check|x|--on")
+    app_cli_usage(PluginsMatchWithoutAVinIsUsage "plugins|match|x")
+    app_cli_usage(PluginsMatchNotAVinIsUsage "plugins|match|x|--vin|FAKEJ2534VIN00001")
+    app_cli_usage(PluginWithoutAPackageIsUsage "stream|mock://x|--plugin")
+    app_cli_usage(PluginWithoutItsVariantIsUsage
+        "stream|mock://x|--plugin|${_usage_example}")
+    app_cli_usage(PluginForAnotherProfileIsUsage
+        "stream|mock://x?profile=obd2|--plugin|${_usage_example}")
+    app_cli_usage(PluginAndSignalsIsUsage
+        "stream|mock://x?profile=plugin.example-sim.base|--plugin|${_usage_example}|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
+    app_cli_usage(SimPluginWithoutItsVariantIsUsage
+        "sim|mock://sim|--on|vcan0|--plugin|${_usage_example}")
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")

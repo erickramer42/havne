@@ -1,0 +1,4 @@
+{
+  "havne_fixtures": 1,
+  "values": [ { "variant": "my2030", "signal": "oil_temp", "value": 90 } ]
+}
