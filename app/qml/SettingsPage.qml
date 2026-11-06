@@ -238,6 +238,7 @@ Pane {
             return qsTr("%1: %2").arg(f.name, e.words)
         return e.extends === "obd2"
             ? qsTr("%1: obd2 and %2 of your own, profile %3").arg(f.name).arg(e.own).arg(f.profile)
+            : e.count === 1 ? qsTr("%1: 1 signal, profile %2").arg(f.name).arg(f.profile)
             : qsTr("%1: %2 signals, profile %3").arg(f.name).arg(e.count).arg(f.profile)
     }
 
@@ -265,6 +266,7 @@ Pane {
         signalNote = r.extends === "obd2"
             ? qsTr("%1 added: obd2 and %2 of your own, profile %3").arg(r.name).arg(r.own)
                   .arg(r.profile)
+            : r.count === 1 ? qsTr("%1 added: 1 signal, profile %2").arg(r.name).arg(r.profile)
             : qsTr("%1 added: %2 signals, profile %3").arg(r.name).arg(r.count).arg(r.profile)
         // The field on an adapter reading Default, obd2, with no profile=
         // of its own: the file that now stands in for obd2 is read
@@ -717,8 +719,10 @@ Pane {
                                             && (standIn === null || f.sha256 !== standIn.sha256))
               .map(f => ({
               name: f.profile, label: f.name,
-              hint: qsTr("Your signal file %1: %2 signals").arg(f.name)
-                        .arg(signalInfo[f.sha256].count) }))
+              hint: signalInfo[f.sha256].count === 1
+                    ? qsTr("Your signal file %1: 1 signal").arg(f.name)
+                    : qsTr("Your signal file %1: %2 signals").arg(f.name)
+                          .arg(signalInfo[f.sha256].count) }))
 
     // On an adapter, Default is obd2, and a file that extends obd2 reads
     // all of obd2 and more, so it takes obd2's place there (ADR-0052):

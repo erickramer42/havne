@@ -962,8 +962,9 @@ TestCase {
         compare(page.pickedVehicle.signals.length, 1)
         compare(page.pickedVehicle.signals[0].profile, "user.extras")
         compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Extras: 1 signals, profile user.extras")
-        compare(find(page, "signalNote").text, "Extras added: 1 signals, profile user.extras")
+                "Extras: 1 signal, profile user.extras")
+        compare(find(page, "signalNote").text, "Extras added: 1 signal, profile user.extras")
+        compare(page.vehicleProfiles[0].hint, "Your signal file Extras: 1 signal")
         verify(!find(page, "signalFilesNone").visible)
         compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
 
@@ -982,8 +983,18 @@ TestCase {
         wait(10)
         page = createPage()
         compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Extras: 1 signals, profile user.extras")
+                "Extras: 1 signal, profile user.extras")
         verify(findChild(page, "profile_user.extras"), "still a choice")
+
+        // Two signals are counted as signals
+        const pair = JSON.parse(signalFileText("Pair"))
+        pair.signals.push({ key: "b", name: "B", read: { service: "22", number: "D101" },
+                            field: { byte: 0, bits: 8 } })
+        verify(page.importSignalFile(Harness.writeScratchFile("pair.json", JSON.stringify(pair))))
+        compare(find(page, "signalNote").text, "Pair added: 2 signals, profile user.pair")
+        compare(find(find(page, "signalFile_1"), "signalFileText").text,
+                "Pair: 2 signals, profile user.pair")
+        compare(page.vehicleProfiles[1].hint, "Your signal file Pair: 2 signals")
     }
 
     function test_aRefusedOrClashingFileIsNotAdded() {
@@ -1199,7 +1210,7 @@ TestCase {
         compare(find(page, "formNote").text, "Trans Temp saved in Vehicle 1 own")
         compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
         compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Vehicle 1 own: 1 signals, profile user.vehicle-1-own")
+                "Vehicle 1 own: 1 signal, profile user.vehicle-1-own")
         verify(findChild(page, "profile_user.vehicle-1-own"), "a profile under What to read")
         compare(page.pickedVehicle.own, page.pickedVehicle.signals[0].sha256)
         compare(Harness.storedSignalFiles().length, 1)
