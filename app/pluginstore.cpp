@@ -205,42 +205,63 @@ QVariantMap PluginStore::import(const QByteArray& bytes)
     (void)ecuio_plugin_info(probe, &info);
     const QString id = QString::fromUtf8(info.id);
     (void)ecuio_plugin_free(probe); // read again by take(), once room is made
-    // One version per id: the loaded one goes first, or the import does
+    // The copy goes first, so a copy that can't be kept changes nothing
+    const QString path = pathOf(sha);
+    const bool kept = holds(path, bytes);
+    if (!kept) {
+        QSaveFile copy(path);
+        if (!QDir().mkpath(root()) || !copy.open(QIODevice::WriteOnly) ||
+            copy.write(bytes) != bytes.size() || !copy.commit()) {
+            return refusal(
+                QStringLiteral("Couldn't keep a copy of the plugin"));
+        }
+    }
+    const auto dropCopy = [&]() {
+        if (!kept) {
+            (void)QFile::remove(path);
+        }
+    };
+    // One version per id: the loaded one goes first (their profiles share
+    // names), its copy only once the import has taken its place
     QString replaced;
+    QString oldSha;
+    QByteArray oldBytes;
     for (auto it = m_held.begin(); it != m_held.end(); ++it) {
         if (it->second.id != id) {
             continue;
         }
+        QFile old(pathOf(it->first));
+        if (old.open(QIODevice::ReadOnly)) {
+            oldBytes = old.readAll();
+        }
         if (ecuio_plugin_free(it->second.plugin) == ECUIO_ERR_IN_USE) {
+            dropCopy();
             return refusal(
                 QStringLiteral("A session decodes with %1 %2: disconnect, then "
                                "import it again")
                     .arg(it->second.name, it->second.version));
         }
         replaced = it->second.version;
-        (void)QFile::remove(pathOf(it->first));
+        oldSha = it->first;
         m_held.erase(it);
         break;
     }
     if (!take(sha, bytes, &words)) {
+        dropCopy();
+        // The version it would have replaced is loaded again from its copy
+        QString again;
+        if (!oldSha.isEmpty() && !take(oldSha, oldBytes, &again)) {
+            m_refused[oldSha] = again;
+        }
         return refusal(words);
+    }
+    if (!oldSha.isEmpty()) {
+        (void)QFile::remove(pathOf(oldSha));
     }
     m_refused.erase(sha);
     QVariantMap out = entryOf(sha, m_held.at(sha));
     out.insert(QStringLiteral("replaced"), replaced);
-    const QString path = pathOf(sha);
-    if (holds(path, bytes)) {
-        out.insert(QStringLiteral("kept"), true);
-        return out;
-    }
-    QSaveFile copy(path);
-    if (!QDir().mkpath(root()) || !copy.open(QIODevice::WriteOnly) ||
-        copy.write(bytes) != bytes.size() || !copy.commit()) {
-        (void)ecuio_plugin_free(m_held.at(sha).plugin);
-        m_held.erase(sha);
-        return refusal(QStringLiteral("Couldn't keep a copy of the plugin"));
-    }
-    out.insert(QStringLiteral("kept"), false);
+    out.insert(QStringLiteral("kept"), kept);
     return out;
 }
 

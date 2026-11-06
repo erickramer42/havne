@@ -25,6 +25,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Fixed
 
 - On Windows, a session that asks waits out the engine's 20 ms floor between two requests to a module on time, instead of at Windows' 15.6 ms timer step: against an adapter whose empty reads return at once, each module was asked about every 31 ms, now about every 21 ms, however many modules. A session through the OBDX Pro VX keeps its pace (about 27 ms), which its own held reads set.
+- Importing a newer version of a plugin that couldn't be kept (its copy not written) left neither version loaded; the version loaded now stays loaded and kept until the new one has loaded in its place.
 
 ## [0.5.0] - 2026-11-06
 

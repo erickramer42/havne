@@ -48,7 +48,9 @@ public:
     // copy of these bytes was there) and replaced (the name of the
     // version it replaced, "" for none). words, when it's refused, are
     // core's ("line 12, column 9: ..."), never a path; an id whose loaded
-    // version a session decodes with is refused, nothing changed
+    // version a session decodes with is refused, nothing changed, and so
+    // is an import whose copy can't be kept. The version it replaces goes
+    // once the import has loaded; one that doesn't is loaded again
     QVariantMap import(const QByteArray& bytes);
 
     // Its profiles unregistered and the plugin freed, then its copy
