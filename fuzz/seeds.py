@@ -5,12 +5,12 @@
 # Writes the seed inputs of the harnesses that read a structured format
 # into <out>/<harness>/, one file each, from the files the tree commits:
 # the signal-file and OBDb fixtures and the example plugin. Each seed is
-# in the harness's own form (fuzz/README.md): the OBDb harness's first
-# byte picks its options, the plugin harness's first byte its form, with
-# the pieces cut at 0x1E bytes. Started from these, a 60 s run reaches
-# the loaders behind the JSON reader; from nothing, it barely leaves the
-# reader. Built from the fixtures, never copies of them, so the seeds
-# follow the formats as the fixtures do.
+# in the harness's own form (fuzz/README.md): the JSON harness's first
+# byte picks its bounds, the OBDb harness's its options, the plugin
+# harness's its form, with the pieces cut at 0x1E bytes. Started from
+# these, a 60 s run reaches the loaders behind the JSON reader; from
+# nothing, it barely leaves the reader. Built from the fixtures, never
+# copies of them, so the seeds follow the formats as the fixtures do.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -55,12 +55,13 @@ def main(argv):
                 data_files.append(path)
     fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
 
-    # The JSON reader: every JSON file above, as it is
+    # The JSON reader: every JSON file above, whole after the bounds
+    # byte (0x1F: depth 32, the loaders' bound, and no size bound)
     every = [os.path.relpath(p, ROOT).replace(os.sep, "/") for p in signal_files + obdb_sets]
     every += [plugin + "/manifest.json"] + [plugin + "/" + p for p in data_files]
     every += [plugin + "/" + p for p in manifest.get("fixtures", [])]
     for path in every:
-        write(out, "fuzz_json", path.replace("/", "_"), read(path))
+        write(out, "fuzz_json", path.replace("/", "_"), b"\x1f" + read(path))
 
     # The signal-file loader: the fixtures, and the plugin's data files
     # (signal files with no name or source, refused late)
