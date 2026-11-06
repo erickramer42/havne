@@ -2338,6 +2338,7 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::DecimalsRole), QByteArray("decimals"));
     EXPECT_EQ(roles.value(SignalListModel::TextRole), QByteArray("text"));
     EXPECT_EQ(roles.value(SignalListModel::IsTextRole), QByteArray("isText"));
+    EXPECT_EQ(roles.value(SignalListModel::RefusedRole), QByteArray("refused"));
 
     // A row answers only its roles, and only rows that exist answer
     ecuio_signal_def_t defs[2];
@@ -2349,6 +2350,56 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_FALSE(model.data(model.index(0, 0), Qt::DisplayRole).isValid());
     EXPECT_FALSE(
         model.data(model.index(2, 0), SignalListModel::NameRole).isValid());
+}
+
+/* ADR-0051 section 3: a refused signal's words name the code, with the
+ * reply in frames.csv's form; a code with no name gives the reply alone */
+TEST(BridgeTest, ARefusalNamesItsCode)
+{
+    EXPECT_EQ(SessionBridge::refusalText(0x22, 0x31),
+              QStringLiteral("Refused: requestOutOfRange (7F 22 31)"));
+    EXPECT_EQ(SessionBridge::refusalText(0x22, 0x33),
+              QStringLiteral("Refused: securityAccessDenied (7F 22 33)"));
+    EXPECT_EQ(SessionBridge::refusalText(0x01, 0x12),
+              QStringLiteral("Refused: subFunctionNotSupported (7F 01 12)"));
+    EXPECT_EQ(SessionBridge::refusalText(0x22, 0x99),
+              QStringLiteral("Refused: 7F 22 99"));
+}
+
+/* The model takes each refusal by id, judges every row afresh on each
+ * call, and a new set refuses none */
+TEST(BridgeTest, ARefusedRowSaysSoUntilItIsntRefused)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto refused = [&model](int row) {
+        return model.data(model.index(row, 0), SignalListModel::RefusedRole)
+            .toString();
+    };
+    QList<int> changed;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+                     [&changed](const QModelIndex& first, const QModelIndex&,
+                                const QList<int>& roles) {
+                         if (roles.contains(SignalListModel::RefusedRole)) {
+                             changed << first.row();
+                         }
+                     });
+    const uint16_t second = static_cast<uint16_t>(defs[1].id);
+    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31")},
+                        {9999, QStringLiteral("x")}});
+    EXPECT_EQ(refused(0), QString());
+    EXPECT_EQ(refused(1), QStringLiteral("Refused: 7F 22 31"));
+    EXPECT_EQ(changed, QList<int>{1}) << "only the row that changed";
+    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31")}});
+    EXPECT_EQ(changed, QList<int>{1}) << "the same words change nothing";
+    model.applyRefused({});
+    EXPECT_EQ(refused(1), QString());
+    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31")}});
+    model.setSignalSet(&set);
+    EXPECT_EQ(refused(1), QString()) << "a new set refuses none";
 }
 
 TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
@@ -3400,6 +3451,54 @@ TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
     EXPECT_EQ(hidden, (QStringList{QStringLiteral("Engine Oil Temp"),
                                    QStringLiteral("Fuel Pressure")}));
     EXPECT_EQ(bridge.liveSignalModel()->rowCount(), model->rowCount() - 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* ADR-0051 section 3: a DID the fake ECU holds no reply for (it answers
+ * 7F 22 31) shows on Live as refused, with the code by name, and the one
+ * it answers takes its value; neither is hidden */
+TEST(BridgeTest, LiveSaysWhichDidsTheFakeEcuRefuses)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    const QString uri = QStringLiteral("j2534://"
+                                       "%1?profile=uds-generic&did=1E1C:u16,"
+                                       "F1FE:u16&identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    const auto rowNamed = [model](const QString& name) {
+        for (int r = 0; r < model->rowCount(); ++r) {
+            if (model->data(model->index(r), SignalListModel::NameRole)
+                    .toString() == name) {
+                return r;
+            }
+        }
+        return -1;
+    };
+    const int answered = rowNamed(QStringLiteral("DID 1E1C"));
+    const int refused = rowNamed(QStringLiteral("DID F1FE"));
+    ASSERT_GE(answered, 0);
+    ASSERT_GE(refused, 0);
+    const auto words = [model](int row) {
+        return model->data(model->index(row), SignalListModel::RefusedRole)
+            .toString();
+    };
+    ASSERT_TRUE(spinUntil([&]() { return !words(refused).isEmpty(); }, 5000))
+        << "DID F1FE never refused";
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return model
+                ->data(model->index(answered), SignalListModel::HasValueRole)
+                .toBool();
+        },
+        5000))
+        << "DID 1E1C never answered";
+    EXPECT_EQ(words(refused),
+              QStringLiteral("Refused: requestOutOfRange (7F 22 31)"));
+    EXPECT_EQ(words(answered), QString());
+    EXPECT_EQ(model->hiddenCount(), 0) << "a refused row stays on Live";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 

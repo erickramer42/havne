@@ -249,6 +249,7 @@ Page {
                 required property int decimals
                 required property string text          // a text row's value
                 required property string label         // an enum value's word
+                required property string refused       // its ECU's refusal in words, or ""
                 required property bool isText
                 required property bool subscribed
                 required property bool hasValue
@@ -303,10 +304,12 @@ Page {
                     }
                     Label {
                         objectName: "valueLabel"
-                        // Never-arrived signals render "—", not a
-                        // fabricated 0 (a PID not yet answered, or refused
-                        // with a negative reply rather than by its bitmap).
-                        text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")
+                        // A signal its ECU refused says so, with the code
+                        // by name (ADR-0051 section 3); one not yet
+                        // answered renders "—", not a fabricated 0.
+                        text: !Bridge.connected ? qsTr("—")
+                              : signalDelegate.refused !== "" ? signalDelegate.refused
+                              : !signalDelegate.hasValue ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
                               : signalDelegate.label !== "" ? signalDelegate.label
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,
@@ -315,7 +318,7 @@ Page {
                         // keeps its room
                         Layout.maximumWidth: Math.round(signalDelegate.width * 0.6)
                         elide: Text.ElideRight
-                        color: Theme.text
+                        color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
                         font.pixelSize: 16
                         font.family: Theme.monoFamily   // fixed-width digits, no jitter
                         opacity: signalDelegate.hasValue

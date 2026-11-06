@@ -234,10 +234,14 @@ public:
         GroupRole,  /* the def's group (ECUIO_SIGNAL_GROUP_*,
                          * ADR-0050), for Live's filter. Fixed per
                          * signal set. */
-        LabelRole   /* an enum row's label for its newest raw value
+        LabelRole,  /* an enum row's label for its newest raw value
                          * (ADR-0051), from the set's enums; "" for a
                          * value with none, which shows its number, and
                          * for any other kind. Notified with ValueRole. */
+        RefusedRole /* the words of its ECU's negative reply to the
+                         * request that reads it ("Refused:
+                         * requestOutOfRange (7F 22 31)", applyRefused,
+                         * ADR-0051 section 3); "" while none refused it */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -272,6 +276,11 @@ public:
     // (ecuio_session_get_absent_signals): those rows are hidden too, and
     // the rest are judged by their support alone. A new set shows all.
     void applyAbsent(const std::vector<uint16_t>& ids);
+    // The signals their ECU refused with a negative reply, each with the
+    // refusal's words (cli/refused_signals.h, from the channels' support
+    // reports): Live shows the words in place of a value, never a blank.
+    // Each call judges every row afresh; a new set refuses none.
+    void applyRefused(const std::vector<std::pair<uint16_t, QString>>& refused);
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -349,6 +358,7 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        QString refused;          // its ECU's refusal in words, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
         uint8_t group = 0;        // the def's group (ADR-0050)
         // The user's tick or untick; Default follows plotDefault
@@ -601,6 +611,8 @@ public:
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
+    // Live's "Refused: <name> (7F <service> <code>)"
+    static QString refusalText(uint8_t service, uint8_t nrc);
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
     // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system
@@ -1040,6 +1052,9 @@ private:
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // Each channel's last report, for the signals their ECUs refused
+    ecuio_channel_support_t m_supportReports[ECUIO_SESSION_INFO_MAX_CHANNELS] =
+        {};
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
     std::vector<uint16_t> m_unsupportedRead;

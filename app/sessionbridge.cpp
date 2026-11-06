@@ -6,6 +6,7 @@
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
+#include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
@@ -346,6 +347,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return static_cast<int>(e.group);
         case LabelRole:
             return labelOf(e);
+        case RefusedRole:
+            return e.refused;
         default: return QVariant();
     }
 }
@@ -367,7 +370,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RowRole, "row"},
             {HiddenRole, "hidden"},
             {GroupRole, "group"},
-            {LabelRole, "label"}};
+            {LabelRole, "label"},
+            {RefusedRole, "refused"}};
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
@@ -802,6 +806,25 @@ void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
         }
     }
     rejudgeHidden();
+}
+
+void SignalListModel::applyRefused(
+    const std::vector<std::pair<uint16_t, QString>>& refused)
+{
+    std::vector<QString> words(m_entries.size());
+    for (const auto& r : refused) {
+        const int row = m_rowOfId.value(r.first, -1);
+        if (row >= 0) {
+            words[static_cast<size_t>(row)] = r.second;
+        }
+    }
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        if (m_entries[row].refused != words[row]) {
+            m_entries[row].refused = words[row];
+            const QModelIndex i = index(static_cast<int>(row));
+            emit dataChanged(i, i, {RefusedRole});
+        }
+    }
 }
 
 void SignalListModel::rejudgeHidden()
@@ -1642,6 +1665,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
                         (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
+    }
+    for (ecuio_channel_support_t& s : m_supportReports) {
+        s = ecuio_channel_support_t{};
     }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
@@ -2641,8 +2667,20 @@ void SessionBridge::pollChannelSupport()
             continue;
         }
         m_supportGeneration[c] = s.generation;
+        m_supportReports[c] = s;
         changed = true;
         emit logMessage(channelSupportText(s));
+    }
+    // Live says which signals their ECU refused, and with what (ADR-0051
+    // section 3): the drops a negative reply made, by the defs they read
+    if (changed) {
+        std::vector<std::pair<uint16_t, QString>> refused;
+        for (const cli::RefusedSignal& r :
+             cli::refused_signals(ecuio_session_signal_set(m_session),
+                                  m_supportReports, m_channelCount)) {
+            refused.emplace_back(r.id, refusalText(r.request[0], r.nrc));
+        }
+        m_signalModel->applyRefused(refused);
     }
     // Live hides the rows core judges unsupported from the reports
     // (ADR-0039 section 6)
@@ -2687,6 +2725,15 @@ void SessionBridge::pollAbsentSignals()
  * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
  * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
+QString SessionBridge::refusalText(uint8_t service, uint8_t nrc)
+{
+    const QString reply =
+        QStringLiteral("7F %1 %2").arg(hexByte(service), hexByte(nrc));
+    const QString name = QString::fromLatin1(cli::nrc_name(nrc));
+    return name.isEmpty() ? QStringLiteral("Refused: %1").arg(reply)
+                          : QStringLiteral("Refused: %1 (%2)").arg(name, reply);
+}
+
 QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
 

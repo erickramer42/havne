@@ -17,6 +17,7 @@
 #include "mark_lines.h"
 #include "plugin_lines.h"
 #include "recording_signals.h"
+#include "refused_signals.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
 #include "sim_line.h"
@@ -660,6 +661,31 @@ void poll_absent(Output& out, ecuio_session_t* session,
     l.ch(']');
     l.ch('}');
     write_line(out, l);
+}
+
+// A refused line whenever the signals their ECUs refused change
+// (cli/refused_signals.h, ADR-0051 section 3), from the channels' reports
+// poll_scan read; an emptied list writes []. With --values only, as the
+// signals they name.
+void poll_refused(Output& out, const ecuio_signal_set_t* set,
+                  const ecuio_channel_support_t* reports, uint32_t channels,
+                  std::vector<cli::RefusedSignal>& last)
+{
+    std::vector<cli::RefusedSignal> now =
+        cli::refused_signals(set, reports, channels);
+    const auto same = [](const cli::RefusedSignal& a,
+                         const cli::RefusedSignal& b) {
+        return a.id == b.id && a.length == b.length && a.nrc == b.nrc &&
+               std::equal(a.request, a.request + sizeof a.request, b.request);
+    };
+    if (now.size() == last.size() &&
+        std::equal(now.begin(), now.end(), last.begin(), same)) {
+        return;
+    }
+    last = std::move(now);
+    BigLine b(cli::refused_line_bytes(last.size()));
+    cli::refused_line(b.line, last);
+    write_line(out, b.line);
 }
 
 // The session's signals: each def's id, name, unit, decimals and group,
@@ -2144,6 +2170,7 @@ int run_stream(const StreamArgs& args)
         (args.values && set != nullptr && set->defs != nullptr) ? set->count
                                                                 : 0u);
     std::vector<uint16_t> absent_last;
+    std::vector<cli::RefusedSignal> refused_last;
     cli::TimingSnapshots timing_snaps;
     std::vector<ecuio_request_timing_t> timing_rows(ECUIO_PROFILE_MAX_REQUESTS);
     if (args.values) {
@@ -2224,6 +2251,9 @@ int run_stream(const StreamArgs& args)
         poll_diagnostics(out, session, channels, diag_generations);
         poll_scan(out, session, channels, scan_seen, scan_reports);
         poll_absent(out, session, absent_read, absent_last);
+        if (args.values) {
+            poll_refused(out, set, scan_reports, channels, refused_last);
+        }
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
 
