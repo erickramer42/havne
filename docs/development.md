@@ -712,7 +712,10 @@ takes as long as its longest job. Every build and every ctest run
 count (`CMAKE_BUILD_PARALLEL_LEVEL` and `CTEST_PARALLEL_LEVEL` in the
 workflow's `env`); the cases that share a fixed resource are
 `RUN_SERIAL`. Every job that uses Qt uses 6.12.0; the jobs that
-install it through `install-qt-action` keep it in the Actions cache.
+install it through `install-qt-action` keep it in the Actions cache,
+except the iOS kit (about 3.6 GB, the largest entry): only `main`'s
+runs cache it, so the repository stays under the cache's 10 GB, and
+other branches install it from the mirrors.
 Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
