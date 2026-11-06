@@ -438,12 +438,18 @@ written, and `signals check` says it won't convert.
   says exactly what decoded it: the app copies the vehicle's file, and
   `havne-cli stream --record` the one `--signals` names (with
   `--plugin`, the variant's files merged into one). A replay of the
-  recording with that copy decodes the same values:
+  recording decodes with that copy, the same values, even after the
+  vehicle's file has changed or gone, or on another machine: the app's
+  Replay does when the copy differs from the file loaded now (under a
+  name of its own, `rec.` and the start of its hash, which the activity
+  log names), and so does `havne-cli stream` with no `--signals`:
 
   ```sh
-  havne-cli stream "replay://<the recording's folder>" \
-    --signals "<the recording's folder>/signals.json"
+  havne-cli stream "replay://<the recording's folder>" --values
   ```
+
+  A copy that no longer matches the hash on the header isn't used: the
+  replay decodes with the profile as loaded now and says why.
 
   `havne-cli info <folder>` says on its `opened` line whether the copy
   is there and is still the bytes the header names (`signal_file`).

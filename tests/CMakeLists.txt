@@ -302,6 +302,13 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_torn.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.ATornLastRowIsLeftOut PROPERTIES TIMEOUT 30)
+        # A replay reads with its recording's own signals.json (ADR-0051
+        # section 4): no --signals, the copy's values; its hash broken, raw
+        add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_replay_signals.py
+                    $<TARGET_FILE:havne-cli> "${_cli_replay}"
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json)
+        set_tests_properties(CliReplayTest.AReplayReadsWithItsOwnSignalFile PROPERTIES TIMEOUT 60)
         # stream --record (ADR-0049): the engine start recorded to its last
         # frame, its folder against tests/golden/recording/ and its frames
         # against the fixture's (rewrite both with the command plus

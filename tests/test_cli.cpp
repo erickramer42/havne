@@ -8,6 +8,7 @@
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "plugin_lines.h"
+#include "recording_signals.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
 #include "sim_line.h"
@@ -1644,4 +1645,68 @@ TEST(CliPluginTest, TheCheckedAndRefusedLinesSayWhatHappened)
     const std::string ft = text_of(f);
     EXPECT_NE(ft.find("\"file\":\"a.json\",\"code\":11"), std::string::npos);
     EXPECT_EQ(ft.find("package"), std::string::npos);
+}
+
+// ---- A replay's own signal file (cli/recording_signals.h, ADR-0051
+// section 4) ----
+
+/* The header's profile and signal file lines, up to its blank line; a
+ * hash that isn't 64 lowercase hex digits names no file */
+TEST(CliRecordingSignalsTest, TheHeaderNamesTheProfileAndTheFile)
+{
+    const std::string sha(64, 'a');
+    cli::RecordedSignals r;
+    EXPECT_TRUE(r.take("ecuio session recording, format 3 (ADR-0049)"));
+    EXPECT_TRUE(r.take("profile  user.extras\r"));
+    EXPECT_TRUE(r.take("signal  A,number,,0,0,0"));
+    EXPECT_TRUE(r.take("signal file  signals.json," + sha));
+    EXPECT_FALSE(r.take(""));
+    EXPECT_FALSE(r.take("profile  after.the.header"));
+    EXPECT_EQ(r.profile, "user.extras");
+    EXPECT_EQ(r.sha256, sha);
+    EXPECT_TRUE(r.names_file());
+
+    cli::RecordedSignals upper;
+    upper.take("profile  user.extras");
+    upper.take("signal file  signals.json," + std::string(64, 'A'));
+    EXPECT_FALSE(upper.names_file()) << "the recorder writes lower case";
+    cli::RecordedSignals short_hash;
+    short_hash.take("profile  user.extras");
+    short_hash.take("signal file  signals.json," + std::string(63, 'a'));
+    EXPECT_FALSE(short_hash.names_file());
+    cli::RecordedSignals none;
+    none.take("profile  obd2");
+    EXPECT_FALSE(none.names_file());
+}
+
+/* The folder: the path up to the query, a frames.csv's own folder, any
+ * scheme's case; another scheme none */
+TEST(CliRecordingSignalsTest, AReplayUrisFolder)
+{
+    std::string folder;
+    ASSERT_TRUE(
+        cli::replay_folder("replay://C:/r/20261106-0900?speed=max", &folder));
+    EXPECT_EQ(folder, "C:/r/20261106-0900");
+    ASSERT_TRUE(cli::replay_folder("REPLAY:///data/r/frames.CSV", &folder));
+    EXPECT_EQ(folder, "/data/r");
+    ASSERT_TRUE(cli::replay_folder("replay:///data/r/", &folder));
+    EXPECT_EQ(folder, "/data/r");
+    EXPECT_FALSE(cli::replay_folder("mock://demo", &folder));
+    EXPECT_FALSE(cli::replay_folder("replay://", &folder));
+    EXPECT_FALSE(cli::replay_folder("replay://?profile=obd2", &folder));
+}
+
+/* One profile=, the rest of the query kept in order; the copy's own
+ * name from the hash */
+TEST(CliRecordingSignalsTest, TheUriWithAnotherProfile)
+{
+    EXPECT_EQ(cli::with_profile("replay://f", "rec.0123"),
+              "replay://f?profile=rec.0123");
+    EXPECT_EQ(cli::with_profile("replay://f?profile=user.a&speed=max", "rec.1"),
+              "replay://f?speed=max&profile=rec.1");
+    EXPECT_EQ(
+        cli::with_profile("replay://f?speed=2&profile=a&loop=1&profile=b", "c"),
+        "replay://f?speed=2&loop=1&profile=c");
+    EXPECT_EQ(cli::own_profile(std::string(16, '0') + std::string(48, 'f')),
+              "rec.0000000000000000");
 }

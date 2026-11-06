@@ -4,6 +4,8 @@
 #include "sessionbridge.h"
 #include "carryover.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
+#include "recording_signals.h" /* cli/: a replay's own signal file */
+#include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
@@ -971,6 +973,12 @@ SessionBridge::~SessionBridge()
     // Only now: no session is left to decode with the files' sets
     m_signalStore.close();
     m_pluginStore.close();
+    for (auto& held : m_replayFiles) {
+        const QByteArray name = held.second.profile.toUtf8();
+        (void)ecuio_profile_unregister(name.constData());
+        ecuio_signal_file_free(held.second.file);
+    }
+    m_replayFiles.clear();
     ecuio_shutdown();
 }
 
@@ -1349,6 +1357,103 @@ QString SessionBridge::replayUriFor(const QString& folder,
     return uri;
 }
 
+QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
+{
+    const std::string uri8 = uri.toStdString();
+    std::string folder8;
+    if (!cli::replay_folder(uri8, &folder8)) {
+        return uri;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::ReadOnly)) {
+        return uri;
+    }
+    // The header alone: its lines up to the blank one (the enum labels'
+    // lines make it longer than a few)
+    while (!events.atEnd()) {
+        QByteArray line = events.readLine(64 * 1024);
+        if (line.endsWith('\n')) {
+            line.chop(1);
+        }
+        if (!recorded.take(line.toStdString())) {
+            break;
+        }
+    }
+    if (!recorded.names_file()) {
+        return uri;
+    }
+    // A URI with no profile= replays raw (ADR-0013), which nothing decodes
+    // wrongly: the copy is for the profile the recording names
+    std::string selected;
+    if (!cli::uri_profile(uri8, &selected)) {
+        return uri;
+    }
+    const QString profile = QString::fromStdString(recorded.profile);
+    const QString own =
+        QString::fromStdString(cli::own_profile(recorded.sha256));
+    const QString chosen = QString::fromStdString(selected);
+    if (chosen != profile && chosen != own) {
+        return uri;
+    }
+    const auto as_loaded = [&](const QString& why) {
+        emit logMessage(QStringLiteral("Replay: the recording's signals.json "
+                                       "%1; decoding with %2 as loaded now")
+                            .arg(why, chosen));
+        return uri;
+    };
+    QFile copy(folder + QStringLiteral("/signals.json"));
+    if (!copy.open(QIODevice::ReadOnly)) {
+        return as_loaded(QStringLiteral("is missing"));
+    }
+    const QByteArray bytes = copy.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+    const QString sha = QString::fromLatin1(
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+    if (sha.toStdString() != recorded.sha256) {
+        return as_loaded(QStringLiteral("doesn't match its hash"));
+    }
+    const auto selecting = [&](const QString& p) {
+        return chosen == p ? uri
+                           : QString::fromStdString(
+                                 cli::with_profile(uri8, p.toStdString()));
+    };
+    // The same bytes in the store: the vehicle's own file, under its name
+    if (m_signalStore.profileOf(sha) == profile) {
+        return selecting(profile);
+    }
+    auto held = m_replayFiles.find(sha);
+    if (held == m_replayFiles.end()) {
+        ecuio_signal_file_t* file = nullptr;
+        if (ecuio_signal_file_load(bytes.constData(),
+                                   static_cast<size_t>(bytes.size()),
+                                   &file) != ECUIO_OK) {
+            return as_loaded(
+                QStringLiteral("doesn't load (%1)")
+                    .arg(QString::fromUtf8(ecuio_last_error_detail())));
+        }
+        const QByteArray name8 = own.toUtf8();
+        const ecuio_status_t rc = ecuio_profile_register(
+            name8.constData(), ecuio_signal_file_set(file), nullptr);
+        if (rc != ECUIO_OK) {
+            ecuio_signal_file_free(file);
+            return as_loaded(
+                QStringLiteral("can't be registered (%1)")
+                    .arg(QString::fromUtf8(ecuio_status_string(rc))));
+        }
+        held = m_replayFiles
+                   .emplace(sha, ReplayFile{file,
+                                            QString::fromUtf8(
+                                                ecuio_signal_file_name(file)),
+                                            own})
+                   .first;
+    }
+    emit logMessage(QStringLiteral("Replay: decoding with the recording's own "
+                                   "signal file, %1 (%2)")
+                        .arg(held->second.name, own));
+    return selecting(own);
+}
+
 QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
@@ -1567,7 +1672,7 @@ QString SessionBridge::connectSession(const QString& typed)
 {
     // Spaces around a pasted URI are the field's, not the URI's: core
     // matches the scheme at the first character
-    const QString uri = typed.trimmed();
+    QString uri = typed.trimmed();
     if (m_disconnecting) {
         return QStringLiteral("Disconnect in progress");
     }
@@ -1577,6 +1682,7 @@ QString SessionBridge::connectSession(const QString& typed)
     if (m_readOnce.busy()) {
         return QStringLiteral("Read once is using the adapter");
     }
+    uri = replayUriWithOwnSignals(uri);
 
     QString err = m_streamPreparer ? m_streamPreparer(uri) : QString();
     if (!err.isEmpty()) {
@@ -1600,7 +1706,7 @@ QString SessionBridge::connectSession(const QString& typed)
 
 void SessionBridge::connectSessionAsync(const QString& typed)
 {
-    const QString uri = typed.trimmed(); // as connectSession does
+    QString uri = typed.trimmed(); // as connectSession does
     if (m_connected.load(std::memory_order_acquire) || m_connecting
         || m_disconnecting) {
         return;   // one attempt at a time, none during a teardown; the
@@ -1613,6 +1719,7 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         emit connectResult(uri, err);
         return;
     }
+    uri = replayUriWithOwnSignals(uri);
     // An app-fed stream's link is readied here, on the GUI thread, before
     // core opens it on the connect thread
     const QString unprepared =
@@ -1925,6 +2032,12 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
     const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
     if (file == nullptr) {
         file = m_pluginStore.fileFor(set);
+    }
+    for (auto it = m_replayFiles.begin();
+         file == nullptr && set != nullptr && it != m_replayFiles.end(); ++it) {
+        if (ecuio_signal_file_set(it->second.file) == set) {
+            file = it->second.file;
+        }
     }
     if (file != nullptr) {
         rc = ecuio_recorder_signal_file(recorder, file);

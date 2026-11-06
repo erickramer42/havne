@@ -7415,6 +7415,192 @@ TEST(BridgeTest, SignalFileRecordingHoldsTheStoresCopy)
     EXPECT_FALSE(QFile::exists(second + QStringLiteral("/signals.json")));
 }
 
+namespace {
+
+/* The value Live shows for the signal named name, NaN with no row or no
+ * value yet */
+double liveValue(SessionBridge& bridge, const QString& name)
+{
+    SignalListModel* model = bridge.signalModel();
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r, 0);
+        if (model->data(i, SignalListModel::NameRole).toString() == name) {
+            const QVariant v = model->data(i, SignalListModel::ValueRole);
+            return v.isValid() ? v.toDouble() : std::nan("");
+        }
+    }
+    return std::nan("");
+}
+
+/* A mock session decoded by the store's file `bytes` (profile
+ * user.recorded), recorded under root until signal A has a value; the
+ * recording's folder */
+QString recordWithSignalFile(SessionBridge& bridge, const QString& root,
+                             const QByteArray& bytes)
+{
+    QTemporaryDir from;
+    const QString sha = sha256Of(bytes);
+    EXPECT_TRUE(
+        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    EXPECT_EQ(bridge.useSignalFiles({sha}).size(), 1);
+    bridge.setRecordingsRootForTesting(root);
+    bridge.setRecording(true);
+    EXPECT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
+            .isEmpty());
+    EXPECT_TRUE(spinUntil(
+        [&bridge]() {
+            return !std::isnan(liveValue(bridge, QStringLiteral("A")));
+        },
+        5000));
+    EXPECT_TRUE(disconnectAndWait(bridge));
+    bridge.setRecording(false);
+    const QStringList folders = recordingFolders(root);
+    EXPECT_EQ(folders.size(), 1);
+    return folders.isEmpty() ? QString()
+                             : root + QLatin1Char('/') + folders.first();
+}
+
+/* The app's Replay of folder, at max speed: connected, and signal A
+ * given a value, or the connect's error */
+QString replayFolder(SessionBridge& bridge, const QString& folder,
+                     bool expectValue = true)
+{
+    const QString uri =
+        SessionBridge::replayUriFor(
+            folder, QStringLiteral("mock://rec?profile=user.recorded")) +
+        QStringLiteral("&speed=max");
+    const QString err = bridge.connectSession(uri);
+    if (err.isEmpty() && expectValue) {
+        EXPECT_TRUE(spinUntil(
+            [&bridge]() {
+                return !std::isnan(liveValue(bridge, QStringLiteral("A")));
+            },
+            5000))
+            << "signal A decoded in the replay";
+    }
+    return err;
+}
+
+} // namespace
+
+/* A replay decodes with the recording's own signals.json (ADR-0051
+ * section 4): under the recorded profile while the store registers the
+ * same bytes there, and as rec.<16 hex> once the vehicle's file has been
+ * removed or changed, so the replay still decodes what was recorded */
+TEST(BridgeTest, ReplayDecodesWithTheRecordingsOwnSignalFile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    QTemporaryDir from;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString sha1 = sha256Of(v1);
+    const QString own = QStringLiteral("rec.") + sha1.left(16);
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+
+    /* The same bytes in the store: its profile, as recorded */
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(
+        QStringLiteral("?profile=user.recorded&speed=max")))
+        << bridge.currentUri().toStdString();
+    EXPECT_FALSE(registered(own.toUtf8().constData()));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    /* The file changed under the same name (another DID, which the
+     * recording's frames don't hold): the copy, under its own name */
+    const QByteArray v2 =
+        signalFile(QStringLiteral("Recorded"), QStringLiteral("D101"));
+    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", v2))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_EQ(bridge.useSignalFiles({sha256Of(v2)}).size(), 1);
+    ASSERT_TRUE(registered("user.recorded"));
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(
+        QStringLiteral("?speed=max&profile=") + own))
+        << bridge.currentUri().toStdString();
+    EXPECT_TRUE(registered(own.toUtf8().constData()));
+    EXPECT_TRUE(
+        log.contains(QStringLiteral("Replay: decoding with the recording's own "
+                                    "signal file, Recorded (") +
+                     own + QLatin1Char(')')))
+        << log.join(QLatin1Char('\n')).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    /* The file removed: the copy again, and a replay of the replay holds
+     * the copy as its own signals.json */
+    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    ASSERT_FALSE(registered("user.recorded"));
+    QTemporaryDir again;
+    ASSERT_TRUE(again.isValid());
+    bridge.setRecordingsRootForTesting(again.path());
+    bridge.setRecordReplaysForTesting(true);
+    bridge.setRecording(true);
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList replayed = recordingFolders(again.path());
+    ASSERT_EQ(replayed.size(), 1);
+    EXPECT_EQ(readFile(again.path() + QLatin1Char('/') + replayed.first() +
+                       QStringLiteral("/signals.json")),
+              v1);
+
+    /* Its own name, as the URI the last replay left in the field */
+    bridge.setRecording(false);
+    const QString err = bridge.connectSession(
+        QStringLiteral("replay://") + QDir::fromNativeSeparators(folder) +
+        QStringLiteral("?profile=") + own + QStringLiteral("&speed=max"));
+    EXPECT_TRUE(err.isEmpty()) << err.toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A copy that no longer matches the hash its recording names isn't
+ * loaded: the replay decodes with the profile as loaded now, and says so */
+TEST(BridgeTest, ReplayOfAChangedSignalFileCopyDecodesAsLoaded)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+    {
+        QFile copy(folder + QStringLiteral("/signals.json"));
+        ASSERT_TRUE(copy.open(QIODevice::Append));
+        copy.write(" ");
+    }
+    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    const QString err = replayFolder(bridge, folder, false);
+    EXPECT_FALSE(err.isEmpty()) << "user.recorded is registered by nothing";
+    EXPECT_FALSE(
+        registered(("rec." + sha256Of(v1).left(16)).toUtf8().constData()));
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "Replay: the recording's signals.json doesn't match its hash; "
+        "decoding with user.recorded as loaded now")))
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    QFile::remove(folder + QStringLiteral("/signals.json"));
+    (void)replayFolder(bridge, folder, false);
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Replay: the recording's signals.json is missing; "
+                       "decoding with user.recorded as loaded now")))
+        << log.join(QLatin1Char('\n')).toStdString();
+}
+
 // ---- The app's plugins (ADR-0052, PluginStore): the example plugin
 // packed, as a phone imports it ----
 

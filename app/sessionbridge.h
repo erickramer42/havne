@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -1008,6 +1009,15 @@ private:
     // thread (in the async entry and the queued completion), so a plain
     // bool suffices despite the worker's existence.
     QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
+    // A replay:// URI selecting the profile its recording names (or that
+    // copy's own name, rec.<16 hex>), with the recording's signals.json
+    // there and matching its hash: the URI that decodes with those bytes
+    // (ADR-0051 section 4). The recorded profile when the signal store
+    // registers the same bytes under it; otherwise the copy, loaded and
+    // registered as rec.<16 hex> for the bridge's life. Any other URI,
+    // or a copy missing, changed or refused, comes back as given, with a
+    // log line saying why. GUI thread, before the connect.
+    QString replayUriWithOwnSignals(const QString& uri);
     QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
@@ -1086,5 +1096,14 @@ private:
     ReadOnce m_readOnce;
     SignalStore m_signalStore;
     PluginStore m_pluginStore;
+    // Recordings' own signal files by their hash, each registered under
+    // its rec.<16 hex> profile until the bridge closes, as the store keeps
+    // its files: the registry keeps the set's pointer
+    struct ReplayFile {
+        ecuio_signal_file_t* file = nullptr;
+        QString name;    // the file's "name"
+        QString profile; // rec.<16 hex>
+    };
+    std::map<QString, ReplayFile> m_replayFiles;
     int m_readOnceWaitMs = 3000;
 };

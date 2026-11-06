@@ -494,3 +494,36 @@ the tools around it reach one front end only:
 - **The OBDb import is `havne-cli`'s.** `signals import obdb` writes a
   signal file, which the app then imports as any other; the app has no
   import of its own. It is placed in v0.6.0, whose scope is imports.
+
+## Appendix: a replay reads with its recording's copy (2026-11-06)
+
+Section 4 says a replay with a recording's `signals.json` decodes the
+same values. Both front ends load that copy themselves, so a
+recording whose file has since been edited or removed, or one from
+another machine, replays as it was recorded:
+
+- **When:** the replay URI selects the profile `events.log`'s header
+  names, or the copy's own name (below), and `signals.json` is there
+  and still the bytes the header's hash names. `havne-cli stream` uses
+  it when the URI selects no profile too, and `--signals` or `--plugin`
+  replaces it. A URI selecting another profile decodes as before. The
+  app's URI with no `profile=` replays raw, as any replay does.
+- **Under which name:** a profile name holds one set (`profile.h`: last
+  wins), so the copy never takes a name another file holds. In the app,
+  the signal store registering the same bytes under the recorded name
+  is the vehicle's own file, and the replay uses it; otherwise the copy
+  registers as `rec.` and the hash's first 16 digits, for the bridge's
+  life as the store keeps its files, and the URI selects that name. The
+  activity log says so. `havne-cli` registers the copy under the profile
+  the URI selects, the recorded one when it selects none: a CLI
+  process registers nothing else under it.
+- **The check:** the app hashes the copy (SHA-256) against the header's
+  line; `havne-cli` takes the reader's MATCH (`ecuio_recording_get_signals`),
+  which costs one pass over `signals.csv` before the replay starts,
+  since the public API has no hash of its own. A copy missing, changed
+  or refused by the loader leaves the URI as given, with a line saying
+  why (the activity log; `havne-cli`'s stderr).
+- **A replay recorded** (the app's test seam, or `havne-cli stream
+  --record`) holds the copy again as its own `signals.json`.
+- **No ABI change:** the header's two lines are read by
+  `cli/recording_signals.h`, which both front ends include.

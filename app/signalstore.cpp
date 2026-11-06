@@ -237,6 +237,15 @@ SignalStore::fileFor(const ecuio_signal_set_t* set) const
     return nullptr;
 }
 
+QString SignalStore::profileOf(const QString& sha) const
+{
+    if (!m_registered.contains(sha)) {
+        return {};
+    }
+    const auto held = m_held.find(sha);
+    return held != m_held.end() ? held->second.profile : QString();
+}
+
 int SignalStore::deleteUnused(const QStringList& keep)
 {
     QDir dir(root());

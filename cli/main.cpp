@@ -16,6 +16,7 @@
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "plugin_lines.h"
+#include "recording_signals.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
 #include "sim_line.h"
@@ -872,6 +873,96 @@ int use_signal_file(const char* path, const char* uri, std::string* opened)
     return kExitConnect;
 }
 
+// stream replay:// with neither --signals nor --plugin (ADR-0051
+// section 4): the recording's own signals.json, when events.log's header
+// names one, the reader finds it matching that hash, and the URI selects
+// the recorded profile, the copy's own name (rec.<16 hex>) or none. The
+// copy is loaded and registered under the profile the URI selects (the
+// recorded one when it selects none) for the process's life
+// (g_signal_file, so a --record of the replay holds it too), and
+// *opened is the URI with that profile. -1 to go on, *opened empty when
+// the URI stays as given (a stderr line says why when a copy is there
+// but unused); a copy that doesn't load or register is start and an
+// error line (3). The match costs the reader's open, one pass over
+// signals.csv, before the replay starts.
+int use_recording_signals(const char* uri, std::string* opened)
+{
+    opened->clear();
+    std::string folder;
+    if (!cli::replay_folder(uri, &folder)) {
+        return -1;
+    }
+    std::string head;
+    std::string why;
+    if (!read_whole((folder + "/events.log").c_str(), 4u << 20, "events.log",
+                    &head, &why)) {
+        return -1;
+    }
+    cli::RecordedSignals recorded;
+    size_t at = 0;
+    while (at < head.size()) {
+        size_t end = head.find('\n', at);
+        if (end == std::string::npos) {
+            end = head.size();
+        }
+        if (!recorded.take(head.substr(at, end - at))) {
+            break;
+        }
+        at = end + 1;
+    }
+    if (!recorded.names_file()) {
+        return -1;
+    }
+    std::string selected;
+    const bool selects = cli::uri_profile(uri, &selected);
+    const std::string own = cli::own_profile(recorded.sha256);
+    if (selects && selected != recorded.profile && selected != own) {
+        return -1;
+    }
+    const std::string profile = selects ? selected : recorded.profile;
+    const auto unused = [&](const char* how) {
+        std::fprintf(stderr,
+                     "havne-cli: the recording's signals.json %s; decoding "
+                     "with %s as loaded\n",
+                     how, selects ? selected.c_str() : "the replay's raw");
+        return -1;
+    };
+    ecuio_recording_t* r = nullptr;
+    if (ecuio_recording_open(folder.c_str(), nullptr, nullptr, &r) !=
+        ECUIO_OK) {
+        return unused("can't be checked: the recording doesn't open");
+    }
+    ecuio_recording_signals_t sig{};
+    const ecuio_status_t got = ecuio_recording_get_signals(r, &sig);
+    ecuio_recording_close(r);
+    if (got != ECUIO_OK || (sig.flags & ECUIO_RECORDING_SIGNALS_PRESENT) == 0) {
+        return unused("is missing");
+    }
+    if ((sig.flags & ECUIO_RECORDING_SIGNALS_MATCH) == 0) {
+        return unused("doesn't match its hash");
+    }
+    ecuio_signal_file_t* file = nullptr;
+    ecuio_status_t st =
+        load_signal_file((folder + "/signals.json").c_str(), &file, &why);
+    if (st == ECUIO_OK) {
+        st = ecuio_profile_register(profile.c_str(),
+                                    ecuio_signal_file_set(file), nullptr);
+        if (st == ECUIO_OK) {
+            g_signal_file = file;
+            *opened =
+                selects ? std::string(uri) : cli::with_profile(uri, profile);
+            return -1;
+        }
+        why = ecuio_last_error_detail();
+        ecuio_signal_file_free(file);
+    }
+    Output out;
+    write_start(out);
+    write_error(out, st, why.c_str());
+    out.flush();
+    return kExitConnect;
+}
+
 // signals check's lines for a loaded file: signal_file, a signal_def line
 // for each of the file's own signals, then a unit line for each unit that
 // never converts
@@ -1678,6 +1769,9 @@ void usage(FILE* to)
         "it.\n"
         "         --signals loads a signal file (stream and sim alike): its\n"
         "         profile, user.<name>, is the URI's when it names none.\n"
+        "         A replay:// with neither reads with its recording's own\n"
+        "         signals.json when its hash still matches and the URI\n"
+        "         selects the recorded profile or none.\n"
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
         "         profile= names the one to read.\n"
@@ -3521,6 +3615,14 @@ int run(int argc, char** argv)
             return rc;
         }
         args.uri = opened.c_str();
+    } else if (args.plugin == nullptr) {
+        const int rc = use_recording_signals(args.uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        if (!opened.empty()) {
+            args.uri = opened.c_str();
+        }
     }
     return run_stream(args);
 }
