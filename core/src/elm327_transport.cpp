@@ -18,6 +18,7 @@
 #include "uri_query.h"
 #include "error_detail.h"
 #include "host_clock.h"
+#include "precise_wait.h"
 
 #include <atomic>
 #include <chrono>
@@ -1161,6 +1162,9 @@ void elm327_worker(transport* t)
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     uint32_t next_chan = 0;
     const bool passive = asks_nothing(t);
+    /* A requesting worker's waits to the engine's next event end on
+     * time (precise_wait.h) */
+    ecuio_precise_wait precise(!passive);
     uint32_t relisten_ms = 0;
     int64_t timing_at = 0;
     if (t->probe) {
@@ -1250,7 +1254,16 @@ void elm327_worker(transport* t)
                                ? ELM327_WAIT_SLICE_MS
                                : static_cast<uint32_t>(ms);
                 }
-                io = drain(t, wait);
+                if (asking) {
+                    /* No command is out (ask reads to the prompt), so
+                     * the adapter is idle until the engine's next event:
+                     * wait for it on time, then take what came unasked */
+                    precise.sleep_for(std::chrono::milliseconds(wait));
+                    io = t->stop_requested.load() ? elm327_io::stopped
+                                                  : drain(t, 0);
+                } else {
+                    io = drain(t, wait);
+                }
                 if (io == elm327_io::prompt && !asking) {
                     link_on_read(h, false, false, true);
                 }

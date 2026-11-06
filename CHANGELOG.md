@@ -15,6 +15,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - A replay decodes with the signal file its recording holds, so a recording replays as it was recorded after the vehicle's file has changed or been removed, or on another machine: the app's Replay loads the copy under a name of its own when it differs from the file loaded now, and `havne-cli stream replay://` uses it with no `--signals`; a copy that no longer matches its hash isn't used, and the replay says why ([docs/signal-files.md](docs/signal-files.md)).
 
+### Fixed
+
+- On Windows, a session that asks waits out the engine's 20 ms floor between two requests to a module on time, instead of at Windows' 15.6 ms timer step: against an adapter whose empty reads return at once, each module was asked about every 31 ms, now about every 21 ms, however many modules. A session through the OBDX Pro VX keeps its pace (about 27 ms), which its own held reads set.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added

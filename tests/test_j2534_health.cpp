@@ -947,6 +947,25 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
     EXPECT_EQ(ec, 0u);
 }
 
+/* Two ECUs, each asked at the engine's floor (20 ms send to send), not at
+ * two of Windows' 15.6 ms timer steps: the fake answers at once and its
+ * empty reads return at once, so the worker's waits set the pace, which
+ * end on time only on its high-resolution timer (precise_wait.h). On a
+ * plain sleep each channel's requests came 31 ms apart, about 63 a
+ * second for the two; on the timer 192 to 194 in 2 s (2026-11-06). The
+ * floor's 100 a second bounds it from above. */
+TEST_F(J2534HealthTest, ATwoEcuSessionAsksAtTheEnginesFloor)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(
+        "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0"));
+    ASSERT_TRUE(wait_for_frames(6, 2000)) << "replies didn't arrive";
+
+    const uint32_t n = writes_during(page, 2000);
+    RecordProperty("requests_in_2s", static_cast<int>(n));
+    EXPECT_GE(n, 160u) << "requests waited out the timer's step, not the floor";
+    EXPECT_LE(n, 210u) << "requests came faster than the floor";
+}
+
 /* On the VX a call holds its whole timeout unless its batch fills.
  * Reads capped at the 10 ms slice keep requests near the floor's pace
  * whatever the vendor holds; a read held for the 100 ms wait would leave

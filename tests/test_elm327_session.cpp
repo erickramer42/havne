@@ -1160,6 +1160,34 @@ TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
     }
 }
 
+/* Two ECUs asked through one adapter, at the engine's floor (20 ms send
+ * to send on each channel), not at Windows' 15.6 ms timer step: the fake
+ * answers at once, so the worker's wait while no command is out sets the
+ * pace, which ends on time only on its high-resolution timer
+ * (precise_wait.h); 195 and 196 in 2 s (2026-11-06) */
+TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
+{
+    Session s;
+    ASSERT_EQ(
+        s.create(uri(
+            "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0")),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const auto requests = [] {
+        return on_fake<uint32_t>(
+            [](fake_elm327::adapter& a) { return a.requests; });
+    };
+    ASSERT_TRUE(wait_for([&] { return requests() >= 6; }, 5000))
+        << "no requests";
+    const uint32_t before = requests();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    const uint32_t n = requests() - before;
+    RecordProperty("requests_in_2s", static_cast<int>(n));
+    EXPECT_GE(n, 160u) << "requests waited out the timer's step, not the floor";
+    EXPECT_LE(n, 210u) << "requests came faster than the floor";
+}
+
 /* 29-bit channels: protocol 7, the priority and header in two commands,
  * the 29-bit receive filter, and frames flagged EXTENDED */
 TEST_F(Elm327SessionTest, TwentyNineBitChannelsUseTheirOwnProtocol)
