@@ -305,9 +305,12 @@ Full output goes to `Testing/verify/<step>.log` (git-ignored). On a
 failure it prints the compiler errors or the failed test names and
 stops. It fails, rather than passing, when `-R` matches no test, and
 when the env-gated routing case skips in the cross-arch step, since
-that means the x86 paths are wrong. The trees must already be
-configured. Off Windows, or without `build-win32`, the Win32 and
-cross-arch steps are left out.
+that means the x86 paths are wrong. The cross-arch line names each
+case that skipped: any other skip is reported, not failed (the
+surrogate's session-log case skips while another checkout's run holds
+its fixed log name). The trees must already be configured. Off
+Windows, or without `build-win32`, the Win32 and cross-arch steps are
+left out.
 
 For any change touching the surrogate, the fakes, or the J2534
 client/transport: in this order:
@@ -426,7 +429,7 @@ which is read at configure time, never at runtime. A variable under
 any other name is ignored without a word: the routing case skips, the
 other surrogate cases run against the x64 tree's surrogate and pass,
 and the run looks green. Read the skip count, or use
-`scripts/verify.sh`, whose cross-arch step fails on a skip.
+`scripts/verify.sh`, whose cross-arch step fails when that case skips.
 
 **Two ways an env-gated test lies to you** (both hit during the
 2026-10-16 bench pre-flight, both operator error):
