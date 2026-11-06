@@ -1885,6 +1885,77 @@ TEST(CliRefusedTest, TheRefusedLineNamesEachSignalsReply)
               cli::refused_line_bytes(2));
 }
 
+/* Past a report's list, refused_unlisted counts the refusals: the drops
+ * past the list less the requests the bitmaps left out (one a Service 01
+ * PID among the set's defs on the channel, a PID's second def not
+ * counted again). A list that ends in a bitmap drop, or has room, named
+ * every refusal; a report that learned nothing counts none. */
+TEST(CliRefusedTest, RefusalsPastTheListAreCounted)
+{
+    std::vector<ecuio_signal_def_t> defs;
+    for (uint16_t did = 0; did < 12; ++did) {
+        defs.push_back(
+            keyed(static_cast<uint16_t>(100 + did), 0x7E8, 3, 0x62F100u + did));
+    }
+    defs.push_back(keyed(200, 0x7E8, 2, 0x4104)); // left out by its bitmap
+    defs.push_back(keyed(201, 0x7E8, 2, 0x4104)); // its second field
+    defs.push_back(keyed(202, 0x7E8, 2, 0x4105)); // left out by its bitmap
+    defs.push_back(keyed(203, 0x7E8, 2, 0x410C)); // supported
+    defs.push_back(keyed(204, 0x7E8, 2, 0x4161)); // its bitmap unanswered
+    defs.push_back(keyed(205, 0x7E9, 2, 0x4106)); // another ECU's
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = static_cast<uint32_t>(defs.size());
+    set.defs = defs.data();
+
+    ecuio_channel_support_t s = report(0x7E8, {});
+    s.ranges = 0x1; // the bitmap at 0x00 answered: PIDs 0x01 to 0x20
+    s.pid_bitmap[(0x0C - 1) / 8] |= 0x80u >> ((0x0C - 1) % 8);
+    for (uint16_t did = 0; did < ECUIO_SUPPORT_MAX_DROPPED; ++did) {
+        s.dropped_list[did] = dropped(0x22, static_cast<uint16_t>(0xF100 + did),
+                                      3, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    }
+    // the twelve DIDs refused and two PIDs left out: four refusals past
+    s.dropped = 12 + 2;
+    std::vector<cli::RefusedMore> more = cli::refused_unlisted(&set, &s, 1);
+    ASSERT_EQ(more.size(), 1u);
+    EXPECT_EQ(more[0].rx_id, 0x7E8u);
+    EXPECT_EQ(more[0].count, 4u);
+
+    s.dropped = 8 + 2; // only the bitmap's two past the list
+    EXPECT_TRUE(cli::refused_unlisted(&set, &s, 1).empty());
+    s.dropped = 12 + 2;
+    s.dropped_list[ECUIO_SUPPORT_MAX_DROPPED - 1] =
+        dropped(0x01, 0x04, 2, ECUIO_DROP_BITMAP, 0);
+    EXPECT_TRUE(cli::refused_unlisted(&set, &s, 1).empty())
+        << "a list ending in a bitmap drop named every refusal";
+    s.dropped_list[ECUIO_SUPPORT_MAX_DROPPED - 1] =
+        dropped(0x22, 0xF107, 3, ECUIO_DROP_ACCESS, 0x33);
+    s.generation = 0;
+    EXPECT_TRUE(cli::refused_unlisted(&set, &s, 1).empty());
+    s.generation = 1;
+    EXPECT_TRUE(cli::refused_unlisted(nullptr, &s, 1).empty());
+    EXPECT_EQ(cli::refused_unlisted(&set, &s, 1).size(), 1u);
+
+    cli::RefusedSignal a;
+    a.id = 100;
+    a.request[0] = 0x22;
+    a.request[1] = 0xF1;
+    a.request[2] = 0x00;
+    a.length = 3;
+    a.nrc = 0x31;
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::refused_line(l, {a}, more);
+    const std::string line(l.data(), l.size());
+    EXPECT_EQ(line,
+              "{\"type\":\"refused\",\"signals\":[{\"id\":100,\"request\":"
+              "\"22 F1 00\",\"reply\":\"7F 22 31\",\"nrc\":"
+              "\"requestOutOfRange\"}],\"more\":[{\"ecu\":\"0x7E8\","
+              "\"refused\":4}]}");
+    EXPECT_LE(line.size(), cli::refused_line_bytes(1, 1));
+}
+
 /* The code's names, ISO 14229-1's, and "" past them */
 TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
 {

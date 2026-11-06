@@ -1703,6 +1703,10 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (ecuio_channel_support_t& s : m_supportReports) {
         s = ecuio_channel_support_t{};
     }
+    if (!m_refusedUnnamed.isEmpty()) {
+        m_refusedUnnamed.clear();
+        emit refusedUnnamedChanged();
+    }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
     m_unsupportedRead.assign(m_absentRead.size(), 0);
@@ -2715,6 +2719,17 @@ void SessionBridge::pollChannelSupport()
             refused.emplace_back(r.id, refusalText(r.request[0], r.nrc));
         }
         m_signalModel->applyRefused(refused);
+        std::vector<std::pair<uint32_t, uint32_t>> more;
+        for (const cli::RefusedMore& m :
+             cli::refused_unlisted(ecuio_session_signal_set(m_session),
+                                   m_supportReports, m_channelCount)) {
+            more.emplace_back(m.rx_id, m.count);
+        }
+        const QString unnamed = refusedUnnamedText(more);
+        if (unnamed != m_refusedUnnamed) {
+            m_refusedUnnamed = unnamed;
+            emit refusedUnnamedChanged();
+        }
     }
     // Live hides the rows core judges unsupported from the reports
     // (ADR-0039 section 6)
@@ -2766,6 +2781,19 @@ QString SessionBridge::refusalText(uint8_t service, uint8_t nrc)
     const QString name = QString::fromLatin1(cli::nrc_name(nrc));
     return name.isEmpty() ? QStringLiteral("Refused: %1").arg(reply)
                           : QStringLiteral("Refused: %1 (%2)").arg(name, reply);
+}
+
+QString SessionBridge::refusedUnnamedText(
+    const std::vector<std::pair<uint32_t, uint32_t>>& more)
+{
+    QStringList parts;
+    for (const auto& m : more) {
+        parts << QStringLiteral("ECU %1 refused %2 more request%3")
+                     .arg(hexId(m.first))
+                     .arg(m.second)
+                     .arg(m.second == 1 ? QString() : QStringLiteral("s"));
+    }
+    return parts.join(QStringLiteral("; "));
 }
 
 QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)

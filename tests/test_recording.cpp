@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <clocale>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1431,6 +1432,61 @@ TEST(RecordingTest, TheReaderRefusesWhatItMust)
     EXPECT_EQ(ecuio_recording_find(r.r, &bad, 0, &at), ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(r.find(fd, 0), ECUIO_RECORDING_NONE) << "found nothing is OK";
     ecuio_recording_close(nullptr);
+}
+
+// A number is the double nearest it, as strtod gives: a 17-digit text
+// (a tool's shortest for its double, or "%.17g") lands on that double,
+// not a unit off as a second rounding would, and so does every one of
+// many random doubles; a fraction's leading zeros count however many,
+// and a German locale's comma changes nothing
+TEST(RecordingRowsTest, ANumberIsTheDoubleNearestIt)
+{
+    double v = 0;
+    const char* tool = "1.0212934580499022e-07";
+    ASSERT_TRUE(rows::parse_number(tool, std::strlen(tool), &v));
+    EXPECT_EQ(v, std::strtod(tool, nullptr));
+
+    uint64_t bits = 0x9E3779B97F4A7C15u;
+    int misses = 0;
+    for (int i = 0; i < 100000; ++i) {
+        bits ^= bits << 13; /* xorshift64 */
+        bits ^= bits >> 7;
+        bits ^= bits << 17;
+        double x = 0;
+        std::memcpy(&x, &bits, sizeof x);
+        if (!std::isfinite(x)) {
+            continue;
+        }
+        char text[40];
+        const int n = std::snprintf(text, sizeof text, "%.17g", x);
+        ASSERT_GT(n, 0);
+        double back = 0;
+        ASSERT_TRUE(rows::parse_number(text, static_cast<size_t>(n), &back))
+            << text;
+        if (back != x && misses++ < 5) {
+            ADD_FAILURE() << text << " read back as another double";
+        }
+    }
+    EXPECT_EQ(misses, 0);
+
+    std::string zeros = "0." + std::string(999999, '0') + "1e1000000";
+    ASSERT_TRUE(rows::parse_number(zeros.data(), zeros.size(), &v));
+    EXPECT_EQ(v, 1.0) << "the fraction's zeros counted";
+    zeros = "-0." + std::string(400, '0') + "5e400";
+    ASSERT_TRUE(rows::parse_number(zeros.data(), zeros.size(), &v));
+    EXPECT_EQ(v, -0.5);
+
+    const char* before = std::setlocale(LC_NUMERIC, nullptr);
+    const std::string saved = before != nullptr ? before : "C";
+    if (std::setlocale(LC_NUMERIC, "de-DE") == nullptr &&
+        std::setlocale(LC_NUMERIC, "de_DE.UTF-8") == nullptr) {
+        GTEST_SKIP() << "no German locale here";
+    }
+    double comma = 0;
+    const bool read = rows::parse_number("0.30000000000000004", 19, &comma);
+    std::setlocale(LC_NUMERIC, saved.c_str());
+    ASSERT_TRUE(read);
+    EXPECT_EQ(comma, 0.1 + 0.2) << "the slow path reads in the C locale";
 }
 
 // Past a double's range or under half its least, a value is infinite or

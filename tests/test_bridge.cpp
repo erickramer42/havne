@@ -2352,6 +2352,18 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
         model.data(model.index(2, 0), SignalListModel::NameRole).isValid());
 }
 
+/* Live's count of the refusals past a report's list: each ECU's, one
+ * request said as one */
+TEST(BridgeTest, TheRefusalsLiveCantNameAreCounted)
+{
+    EXPECT_EQ(SessionBridge::refusedUnnamedText({}), QString());
+    EXPECT_EQ(SessionBridge::refusedUnnamedText({{0x7E8, 3}}),
+              QStringLiteral("ECU 0x7E8 refused 3 more requests"));
+    EXPECT_EQ(SessionBridge::refusedUnnamedText({{0x7E8, 1}, {0x7E9, 2}}),
+              QStringLiteral("ECU 0x7E8 refused 1 more request; "
+                             "ECU 0x7E9 refused 2 more requests"));
+}
+
 /* ADR-0051 section 3: a refused signal's words name the code, with the
  * reply in frames.csv's form; a code with no name gives the reply alone */
 TEST(BridgeTest, ARefusalNamesItsCode)
@@ -3499,6 +3511,54 @@ TEST(BridgeTest, LiveSaysWhichDidsTheFakeEcuRefuses)
               QStringLiteral("Refused: requestOutOfRange (7F 22 31)"));
     EXPECT_EQ(words(answered), QString());
     EXPECT_EQ(model->hiddenCount(), 0) << "a refused row stays on Live";
+    EXPECT_EQ(bridge.refusedUnnamed(), QString()) << "every refusal named";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* Ten DIDs the fake refuses: the report lists eight, whose rows say so,
+ * and Live's status says the two more it can't name; a new connect
+ * starts with none */
+TEST(BridgeTest, LiveCountsTheRefusalsItCantName)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    QStringList dids;
+    for (int n = 0xF0; n < 0xFA; ++n) {
+        dids << QStringLiteral("F1%1")
+                        .arg(n, 2, 16, QLatin1Char('0'))
+                        .toUpper() +
+                    QStringLiteral(":u16");
+    }
+    const QString uri =
+        QStringLiteral(
+            "j2534://%1?profile=uds-generic&did=%2&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH),
+                 dids.join(QLatin1Char(',')));
+    int changed = 0;
+    QObject::connect(&bridge, &SessionBridge::refusedUnnamedChanged,
+                     [&changed]() { ++changed; });
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.refusedUnnamed().isEmpty(); }, 5000))
+        << "no refusals counted past the list";
+    EXPECT_EQ(bridge.refusedUnnamed(),
+              QStringLiteral("ECU 0x7E8 refused 2 more requests"));
+    EXPECT_GE(changed, 1);
+    SignalListModel* model = bridge.signalModel();
+    int named = 0;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        named += model->data(model->index(r), SignalListModel::RefusedRole)
+                         .toString()
+                         .isEmpty()
+                     ? 0
+                     : 1;
+    }
+    EXPECT_EQ(named, ECUIO_SUPPORT_MAX_DROPPED);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    EXPECT_EQ(bridge.refusedUnnamed(), QString())
+        << "a new session starts with none";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 

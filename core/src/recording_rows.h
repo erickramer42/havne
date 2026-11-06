@@ -15,9 +15,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <string>
+
+#include <locale.h> /* the C locale's strtod: _strtod_l, strtod_l */
+#if defined(__APPLE__)
+#include <xlocale.h>
+#endif
 
 namespace ecuio_recording_rows {
 
@@ -88,11 +94,105 @@ inline bool parse_count(const char* p, size_t n, uint64_t* out)
     return true;
 }
 
+/* strtod in the C locale, whatever the process's LC_NUMERIC (a Qt
+ * program sets it from the environment, a comma in German): the locale
+ * made once and read by every thread, which localeconv and setlocale
+ * aren't safe for */
+inline double c_strtod(const char* text)
+{
+#ifdef _WIN32
+    static _locale_t c = _create_locale(LC_NUMERIC, "C");
+    return c != nullptr ? _strtod_l(text, nullptr, c)
+                        : std::strtod(text, nullptr);
+#else
+    static locale_t c = newlocale(LC_NUMERIC_MASK, "C", locale_t{});
+    return c != locale_t{} ? strtod_l(text, nullptr, c)
+                           : std::strtod(text, nullptr);
+#endif
+}
+
+/* The double nearest the decimal text [p, p + n), which parse_number has
+ * already judged a number in its grammar: strtod, correctly rounded, in
+ * the C locale (c_strtod), on the same value written plainly, "0." then
+ * the significant digits, "e" and one exponent, so no library sees a
+ * fraction's leading zeros against an exponent past its range (MSVC's
+ * gives infinity for 0.0...01e1000000). Digits past 800 are one nonzero
+ * digit at most: a double's nearest needs no more than about 770, and a
+ * digit kept past them keeps a tie from reading as exact. */
+inline double nearest_double(const char* p, size_t n)
+{
+    size_t i = 0;
+    bool negative = false;
+    if (i < n && (p[i] == '-' || p[i] == '+')) {
+        negative = p[i] == '-';
+        ++i;
+    }
+    std::string digits;  /* from the first nonzero */
+    long long place = 0; /* the point's place after digits' first */
+    bool past_point = false;
+    bool rest_nonzero = false;
+    for (; i < n && ((p[i] >= '0' && p[i] <= '9') || p[i] == '.'); ++i) {
+        if (p[i] == '.') {
+            past_point = true;
+            continue;
+        }
+        if (digits.empty() && p[i] == '0') {
+            if (past_point) {
+                --place; /* a leading zero after the point */
+            }
+            continue;
+        }
+        if (!past_point) {
+            ++place;
+        }
+        if (digits.size() < 800) {
+            digits += p[i];
+        } else {
+            rest_nonzero = rest_nonzero || p[i] != '0';
+        }
+    }
+    long long exponent = 0;
+    if (i < n && (p[i] == 'e' || p[i] == 'E')) {
+        ++i;
+        bool neg_exp = false;
+        if (i < n && (p[i] == '-' || p[i] == '+')) {
+            neg_exp = p[i] == '-';
+            ++i;
+        }
+        for (; i < n && p[i] >= '0' && p[i] <= '9'; ++i) {
+            if (exponent < 1000000000LL) {
+                exponent = exponent * 10 + (p[i] - '0');
+            }
+        }
+        exponent = neg_exp ? -exponent : exponent;
+    }
+    if (digits.empty()) {
+        return negative ? -0.0 : 0.0;
+    }
+    if (rest_nonzero) {
+        digits += '1';
+    }
+    while (digits.size() > 1 && digits.back() == '0') {
+        digits.pop_back();
+    }
+    /* 0.<digits> times 10^(place + exponent); past 400 either way it is
+     * infinite or 0 for 801 digits, so the exponent stays small */
+    long long e = place + exponent;
+    e = e > 400 ? 400 : e < -1200 ? -1200 : e;
+    std::string text = negative ? "-0." : "0.";
+    text += digits;
+    text += 'e';
+    text += std::to_string(e);
+    return c_strtod(text.c_str());
+}
+
 /* A number as "%.12g" writes it (and "inf", "-inf", "nan"), the whole of
- * [p, p + n), with a '.' whatever the locale: strtod reads the process's,
- * which a Qt program sets from the environment. Exact for up to 15
- * significant digits and a power of ten within 22, which covers every
- * value the writer formats; close otherwise. */
+ * [p, p + n), with a '.' whatever the locale, as the double nearest it:
+ * digit by digit where that is exact (every significant digit kept, the
+ * digits under 2^53 and a power of ten within 22, so one correctly
+ * rounded step), else through nearest_double. Which covers every value
+ * the writer formats at the first, and a 17-digit shortest text, which a
+ * second rounding would land a unit off, at the second. */
 inline bool parse_number(const char* p, size_t n, double* out)
 {
     size_t i = 0;
@@ -113,6 +213,8 @@ inline bool parse_number(const char* p, size_t n, double* out)
     int digits = 0;
     int exponent = 0;
     bool any = false;
+    bool dropped = false; /* a nonzero digit past the 19 kept */
+    bool capped = false;  /* the exponent's text past what's counted */
     for (; i < n && p[i] >= '0' && p[i] <= '9'; ++i) {
         any = true;
         if (digits < 19) {
@@ -121,6 +223,7 @@ inline bool parse_number(const char* p, size_t n, double* out)
                 ++digits;
             }
         } else {
+            dropped = dropped || p[i] != '0';
             ++exponent;
         }
     }
@@ -134,6 +237,8 @@ inline bool parse_number(const char* p, size_t n, double* out)
                     ++digits;
                 }
                 --exponent;
+            } else {
+                dropped = dropped || p[i] != '0';
             }
         }
     }
@@ -154,6 +259,8 @@ inline bool parse_number(const char* p, size_t n, double* out)
         for (; i < n && p[i] >= '0' && p[i] <= '9'; ++i) {
             if (e < 100000) {
                 e = e * 10 + (p[i] - '0');
+            } else {
+                capped = true; /* an exponent past the cap: strtod's */
             }
         }
         exponent += neg_exp ? -e : e;
@@ -161,32 +268,31 @@ inline bool parse_number(const char* p, size_t n, double* out)
     if (i != n) {
         return false;
     }
+    /* The kept digits are under 1e19 and the dropped ones under one of
+     * their last place, so past these the value is past a double's range
+     * or under half its least: infinite or 0 at once, whatever the
+     * digits (a list of 1e-999999 costs what ordinary numbers do) */
+    if (!capped && (mantissa == 0 || exponent < -343)) {
+        *out = negative ? -0.0 : 0.0;
+        return true;
+    }
+    if (!capped && exponent > 308) {
+        *out = negative ? -std::numeric_limits<double>::infinity()
+                        : std::numeric_limits<double>::infinity();
+        return true;
+    }
+    /* Exact digit by digit only with every digit kept, under 2^53 and a
+     * power of ten in the table: else strtod's one rounding */
+    if (capped || dropped || mantissa > (uint64_t{1} << 53) || exponent > 22 ||
+        exponent < -22) {
+        *out = nearest_double(p, n);
+        return true;
+    }
     static const double kPow10[] = {
         1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
         1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
     double v = static_cast<double>(mantissa);
-    if (v != 0.0) {
-        int e = exponent;
-        /* The mantissa is under 1e19, so past these the value is past a
-         * double's range or under half its least, whatever its digits:
-         * no loop below runs more than a few steps */
-        if (e > 330) {
-            v = std::numeric_limits<double>::infinity();
-            e = 0;
-        } else if (e < -350) {
-            v = 0.0;
-            e = 0;
-        }
-        while (e > 22) {
-            v *= 1e22;
-            e -= 22;
-        }
-        while (e < -22) {
-            v /= 1e22;
-            e += 22;
-        }
-        v = e >= 0 ? v * kPow10[e] : v / kPow10[-e];
-    }
+    v = exponent >= 0 ? v * kPow10[exponent] : v / kPow10[-exponent];
     *out = negative ? -v : v;
     return true;
 }
