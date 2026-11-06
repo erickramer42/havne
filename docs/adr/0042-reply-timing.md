@@ -231,6 +231,25 @@ the median request's P50 18.4 ms against 15.4, the slowest's 30.7 to
 11.3 ms doesn't carry: the car's ECU answers slower than the fake's
 4 ms, and its time is in each figure.
 
+*Amended 2026-11-06 (the requesting workers' waits):* the app's own
+process still keeps the default timer, but a requesting worker's waits
+to the engine's next event no longer round up to its step. The J2534
+worker's wait after an empty read, and the ELM327 worker's wait while
+no command is out, run on a waitable timer of its own made with
+`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` (`core/src/precise_wait.h`,
+Windows 10 1803 and later; a plain sleep where it's refused), not
+`timeBeginPeriod`: nothing changes for the rest of the process, and
+Windows 11 honors no 1 ms request from a window-owning process that
+can't be seen, the app minimized. Against the fake DLL answering at
+once, through `havne-cli`, each module was asked every 31.7 ms, one
+module or two, and is asked every 21 ms with it (47 to 48 a second
+against the floor's 50); the fake ELM327's two modules, 195 requests
+in 2 s for both. The fake as the VX keeps 26.7 ms with or without it,
+the car's figure: a reply lands about 4 ms after its write, and the
+next read, asked for under 10 ms as the floor nears, is held 10 ms by
+the VX inside the surrogate, where the 1 ms timer already is. That
+pace is the VX's read hold, the bench item under "Left" above.
+
 ## Appendix: the bus beside the host's clock (2026-11-03)
 
 On the test car, a listen-only SocketCAN controller beside the VX timed
