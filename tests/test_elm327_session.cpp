@@ -1182,7 +1182,9 @@ TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
      * a wall-clock window that load thins: the two channels take turns,
      * so request i to request i + 2 is one channel's period, and its
      * median is the floor's (about 21 ms) whatever a few stalls add; on
-     * a timer's 15.6 ms step it is 31 */
+     * a timer's 15.6 ms step it is 31. The upper bound isn't judged on
+     * macOS, whose CI runners end a plain sleep up to 18 ms late (28 ms
+     * there once): the floor, the lower bound, is */
     static constexpr uint32_t want = 40; /* no capture: MSVC and Clang agree */
     ASSERT_TRUE(wait_for([&] { return requests() >= want; }, 5000))
         << "no requests";
@@ -1198,8 +1200,10 @@ TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
     const int64_t median = periods[periods.size() / 2];
     RecordProperty("period_median_us", static_cast<int>(median));
     EXPECT_GE(median, 19000) << "requests came faster than the floor";
+#ifndef __APPLE__
     EXPECT_LE(median, 26000)
         << "requests waited out the timer's step, not the floor";
+#endif
 }
 
 /* 29-bit channels: protocol 7, the priority and header in two commands,
