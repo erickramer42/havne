@@ -173,7 +173,7 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   `plugin.h`): a package of signal files with one manifest, as a
   folder or packed into one file. Each variant, an ordered list of the
   package's files merged by signal key, registers as
-  `plugin.<id>.<variant>`, and a VIN's maker code and model year
+  `plugin.<id>.<variant>`, and a VIN's manufacturer code and model year
   propose the variants that fit. A plugin can't be freed while a
   session decodes with one of its sets (`ECUIO_ERR_IN_USE`).
 - **Enumerations and computed signals:** an enum def is a raw number

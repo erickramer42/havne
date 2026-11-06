@@ -60,7 +60,7 @@ sudo apt install ./havne-core_X.Y.Z_amd64.deb    # havne-core_X.Y.Z_arm64.deb on
 havne-cli stream mock://demo --values --count 20
 ```
 
-Signals of your own, a maker's DID or one computed from others, go in a
+Signals of your own, a manufacturer's DID or one computed from others, go in a
 signal file ([signal-files.md](signal-files.md)), which `havne-cli` and
 the app read alike.
 

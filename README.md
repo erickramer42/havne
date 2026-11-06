@@ -8,8 +8,8 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 Havne is a cross-platform OBD-II scan tool and data logger built on a
 Qt-free C++17 core behind a stable C ABI. It shows live data, reads
 trouble codes and readiness monitors, records every frame to replay
-and compare, and reads a maker's own signals from data files you write
-or import.
+and compare, and reads manufacturer-specific signals from data files
+you write or import.
 
 It reaches a car through J2534 Pass-Thru adapters on Windows,
 ELM327-compatible adapters over USB, Bluetooth or WiFi on every
@@ -123,9 +123,9 @@ a quarter mile off launch control on a warm loop.*
   Write them per vehicle in Settings, where **Read once** shows a
   reply's bytes beside its value, or convert an OBDb set with
   `havne-cli` ([docs/signal-files.md](docs/signal-files.md)).
-- **Plugins:** packages of signal files for a maker's cars; the car's
-  VIN proposes the variants that fit, and the pick stays with the
-  vehicle ([plugins/README.md](plugins/README.md)).
+- **Plugins:** packages of signal files for one manufacturer's cars;
+  the car's VIN proposes the variants that fit, and the pick stays
+  with the vehicle ([plugins/README.md](plugins/README.md)).
 - **Recording and replay:** every frame, value and event of a session.
   The Recordings page pans, zooms, reads every value at a cursor, marks
   what a check of the frames found and overlays a second run;
@@ -203,7 +203,7 @@ it, a frame's path from transport to screen included.
 | [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading and frame parsing; fuzzed |
 | [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
 | [`core/src/recorder.cpp`](core/src/recorder.cpp), [`core/src/recording_reader.cpp`](core/src/recording_reader.cpp) | Recordings in core: the worker's single-producer ring to a writer thread that never holds the session, and a reader that answers the viewer from one pass's index; the reader fuzzed |
-| [`core/src/signal_file.cpp`](core/src/signal_file.cpp), [`core/src/plugin.cpp`](core/src/plugin.cpp) | A user's signals and a maker's plugins read as data: a strict JSON reader over bytes, each refusal with its line and column, one build of a signal set for both; fuzzed |
+| [`core/src/signal_file.cpp`](core/src/signal_file.cpp), [`core/src/plugin.cpp`](core/src/plugin.cpp) | A user's signals and a manufacturer's plugins read as data: a strict JSON reader over bytes, each refusal with its line and column, one build of a signal set for both; fuzzed |
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
 | [`cli/main.cpp`](cli/main.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |

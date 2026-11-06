@@ -498,7 +498,7 @@ which breaks the C ABI on purpose where ADR-0051 says.
   256 requests, the set's layout version 4, recording format 3.
 - **The plugin framework** ([ADR-0052](docs/adr/0052-plugin-framework.md)): one package and
   manifest, the three tiers, the registry and selection by the VIN's
-  maker code and model year, designed whole; v0.5.0 builds the data
+  manufacturer code and model year, designed whole; v0.5.0 builds the data
   tier, which is the signal-file format.
 - **Your own signals, per vehicle:** a form under Settings' Vehicle
   section, with **Read once** showing the raw reply beside the decoded

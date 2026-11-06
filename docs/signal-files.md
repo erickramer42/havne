@@ -1,7 +1,7 @@
 # Signal files: writing your own signals
 
 A signal file describes signals of your own, the ones no built-in set
-has: a maker's DID on the transmission's module, a PID decoded your own
+has: a manufacturer's DID on the transmission's module, a PID decoded your own
 way, a value computed from two others. It is a JSON file that the app
 and `havne-cli` read alike, on every platform, with no code in it. Its
 design and the reasons behind each rule are
@@ -45,7 +45,7 @@ writing one by hand.
 This reads DID 0xD100 from the module answering on 0x7E9 (asked on
 0x7E1, the standard's rx - 8), takes its first data byte, subtracts 40
 and shows it in degrees Celsius, beside every signal of the `obd2` set.
-DID 0xD100 is made up for this page: a real car's DIDs are its maker's,
+DID 0xD100 is made up for this page: a real car's DIDs are its manufacturer's,
 found with the DID scan (`?scan=first`, [ADR-0020](adr/0020-uds-generic.md))
 and checked with **Read once** before they're trusted.
 
