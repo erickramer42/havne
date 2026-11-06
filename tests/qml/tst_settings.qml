@@ -1437,6 +1437,32 @@ TestCase {
         return find(find(page, "ownSignal_" + i), "ownSignalText").text
     }
 
+    // Each box is named above it, so a box keeps saying what it holds once
+    // its placeholder has gone
+    function test_theFormsBoxesKeepTheirNamesOnceTyped() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        compare(page.formKind, "number")
+        const caption = name => find(page, name).parent.children[0]
+        const named = { formName: "Name", formRx: "Reply ID", formTx: "Request ID",
+                        formNumber: "DID", formByte: "Byte", formBits: "Bits",
+                        formBit: "Start bit", formScale: "Scale", formOffset: "Offset",
+                        formUnit: "Unit", formDecimals: "Decimals" }
+        press(page, "formService_22")
+        for (const box in named) {
+            find(page, box).text = "1"
+            compare(caption(box).text, named[box], box)
+            verify(caption(box).visible, box)
+        }
+        press(page, "formService_01")
+        compare(caption("formNumber").text, "PID")
+        press(page, "formKind_hex")
+        verify(!caption("formBits").visible, "no bits for a hex field")
+        verify(!caption("formBit").visible)
+        verify(caption("formBytes").visible)
+        compare(caption("formBytes").text, "Bytes")
+    }
+
     function test_theFormSavesTheVehiclesOwnSignals() {
         const page = createPage()
         press(page, "vehicleNew")

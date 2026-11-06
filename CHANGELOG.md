@@ -20,6 +20,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Changed
 
 - In the form for a vehicle's own signals, a Request ID left empty keeps the one the module has while another of its signals reads it, and a typed one that differs moves the module's other signals too, the note naming them; before, the last signal saved set the module's request ID without a word.
+- Each box in the form for a vehicle's own signals has its name above it (Byte, Bits, Start bit, and the rest), so a box still says what it holds once something is typed; the names were only placeholders before.
 - Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, so a connect never reads with another vehicle's signals and keeps them as this one's.
 
 ### Fixed

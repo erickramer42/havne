@@ -637,6 +637,17 @@ Pane {
         Layout.topMargin: Theme.spacing
     }
 
+    // A form's box with its name above it: a placeholder alone goes once
+    // something is typed, and the box no longer says what it holds
+    component Captioned: Column {
+        property alias caption: captionText.text
+        spacing: 2
+        Label {
+            id: captionText
+            color: Theme.textDim
+        }
+    }
+
     // A caption, then buttons that wrap: a row of them would hold the
     // page at its natural width, past a phone's. The caption is the
     // flow's first item, so a wrapped button has the whole width
@@ -1874,26 +1885,36 @@ Pane {
                     spacing: Theme.spacing
 
                     Flow {
+                        id: formNameRow
                         Layout.fillWidth: true
                         spacing: Theme.spacing
-                        TextField {
-                            id: formName
-                            objectName: "formName"
-                            placeholderText: qsTr("Name")
-                            width: Math.min(parent.width, Theme.controlHeight * 8)
+                        Captioned {
+                            caption: qsTr("Name")
+                            TextField {
+                                id: formName
+                                objectName: "formName"
+                                placeholderText: qsTr("Name")
+                                width: Math.min(formNameRow.width, Theme.controlHeight * 8)
+                            }
                         }
-                        TextField {
-                            id: formRx
-                            objectName: "formRx"
-                            text: "7E8"
-                            placeholderText: qsTr("Reply ID")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Reply ID")
+                            TextField {
+                                id: formRx
+                                objectName: "formRx"
+                                text: "7E8"
+                                placeholderText: qsTr("Reply ID")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formTx
-                            objectName: "formTx"
-                            placeholderText: qsTr("Request ID")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Request ID")
+                            TextField {
+                                id: formTx
+                                objectName: "formTx"
+                                placeholderText: qsTr("Request ID")
+                                width: Theme.controlHeight * 3
+                            }
                         }
                     }
 
@@ -1910,12 +1931,15 @@ Pane {
                                 onClicked: page.formService = modelData.name
                             }
                         }
-                        TextField {
-                            id: formNumber
-                            objectName: "formNumber"
-                            placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
-                                                                       : qsTr("PID, 2 hex digits")
-                            width: Theme.controlHeight * 5
+                        Captioned {
+                            caption: page.formService === "22" ? qsTr("DID") : qsTr("PID")
+                            TextField {
+                                id: formNumber
+                                objectName: "formNumber"
+                                placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
+                                                                           : qsTr("PID, 2 hex digits")
+                                width: Theme.controlHeight * 5
+                            }
                         }
                     }
 
@@ -1937,37 +1961,49 @@ Pane {
                     Flow {
                         Layout.fillWidth: true
                         spacing: Theme.spacing
-                        TextField {
-                            id: formByte
-                            objectName: "formByte"
-                            text: "0"
-                            placeholderText: qsTr("Byte")
-                            width: Theme.controlHeight * 2.5
+                        Captioned {
+                            caption: qsTr("Byte")
+                            TextField {
+                                id: formByte
+                                objectName: "formByte"
+                                text: "0"
+                                placeholderText: qsTr("Byte")
+                                width: Theme.controlHeight * 2.5
+                            }
                         }
-                        TextField {
-                            id: formBits
-                            objectName: "formBits"
+                        Captioned {
+                            caption: qsTr("Bits")
                             visible: page.formKind === "number" || page.formKind === "enum"
-                            text: "8"
-                            placeholderText: qsTr("Bits")
-                            width: Theme.controlHeight * 2.5
+                            TextField {
+                                id: formBits
+                                objectName: "formBits"
+                                text: "8"
+                                placeholderText: qsTr("Bits")
+                                width: Theme.controlHeight * 2.5
+                            }
                         }
-                        TextField {
-                            id: formBit
-                            objectName: "formBit"
-                            visible: formBits.visible
-                            placeholderText: qsTr("Bit")
-                            width: Theme.controlHeight * 2.5
+                        Captioned {
+                            caption: qsTr("Start bit")
+                            visible: page.formKind === "number" || page.formKind === "enum"
+                            TextField {
+                                id: formBit
+                                objectName: "formBit"
+                                placeholderText: qsTr("Bit")
+                                width: Theme.controlHeight * 2.5
+                            }
                         }
-                        TextField {
-                            id: formBytes
-                            objectName: "formBytes"
-                            visible: !formBits.visible
-                            placeholderText: qsTr("Bytes (all)")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Bytes")
+                            visible: !(page.formKind === "number" || page.formKind === "enum")
+                            TextField {
+                                id: formBytes
+                                objectName: "formBytes"
+                                placeholderText: qsTr("Bytes (all)")
+                                width: Theme.controlHeight * 3
+                            }
                         }
                         Repeater {
-                            model: formBits.visible ? ["be", "le"] : []
+                            model: page.formKind === "number" || page.formKind === "enum" ? ["be", "le"] : []
                             ThemedButton {
                                 required property string modelData
                                 objectName: "formOrder_" + modelData
@@ -1988,29 +2024,41 @@ Pane {
                         Layout.fillWidth: true
                         spacing: Theme.spacing
                         visible: page.formKind === "number"
-                        TextField {
-                            id: formScale
-                            objectName: "formScale"
-                            placeholderText: qsTr("Scale (1)")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Scale")
+                            TextField {
+                                id: formScale
+                                objectName: "formScale"
+                                placeholderText: qsTr("Scale (1)")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formOffset
-                            objectName: "formOffset"
-                            placeholderText: qsTr("Offset (0)")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Offset")
+                            TextField {
+                                id: formOffset
+                                objectName: "formOffset"
+                                placeholderText: qsTr("Offset (0)")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formUnit
-                            objectName: "formUnit"
-                            placeholderText: qsTr("Unit")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Unit")
+                            TextField {
+                                id: formUnit
+                                objectName: "formUnit"
+                                placeholderText: qsTr("Unit")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formDecimals
-                            objectName: "formDecimals"
-                            placeholderText: qsTr("Decimals")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Decimals")
+                            TextField {
+                                id: formDecimals
+                                objectName: "formDecimals"
+                                placeholderText: qsTr("Decimals")
+                                width: Theme.controlHeight * 3
+                            }
                         }
                     }
 
