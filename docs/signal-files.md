@@ -403,7 +403,13 @@ written, and `signals check` says it won't convert.
   then a profile under **What to read**, named as the file's profile
   (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
   vehicle's files with the rest of it. **Remove** takes a file from the
-  vehicle.
+  vehicle. On an adapter (`j2534://`, `elm327://`), where **Default**
+  reads `obd2`, a file that extends `obd2` takes its place: its button
+  reads **obd2 + <name>**, and Default's shows only while the field
+  reads it. Imported while the field reads Default with no `profile=`
+  of its own, the file is read instead, and the line under the files
+  says so; a profile you picked stays. Of two such files, the first
+  stands in and the second keeps a button of its own.
 - **The app's form:** under **Your own signals**, the same section
   writes a vehicle's own file, one signal at a time: its name, the
   module's reply ID (and its request ID where the standard gives none),
