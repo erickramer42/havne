@@ -399,7 +399,13 @@ Pane {
     // another is picked (or none), the field reads Default, so a connect
     // never decodes with the last vehicle's signals and remembers them as
     // this one's. A vehicle with a connection of its own then sets the
-    // field (pickVehicle); a session's URI is left as it is
+    // field (pickVehicle); a session's URI is left as it is until the
+    // session ends, since a VIN may pick another vehicle while it runs
+    onIdleChanged: {
+        if (idle)
+            dropAnotherVehiclesProfile()
+    }
+
     function dropAnotherVehiclesProfile() {
         if (!idle)
             return

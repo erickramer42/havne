@@ -282,7 +282,9 @@ public:
     // The signals their ECU refused with a negative reply, each with the
     // refusal's words (cli/refused_signals.h, from the channels' support
     // reports): Live shows the words in place of a value, never a blank.
-    // Each call judges every row afresh; a new set refuses none.
+    // Each call judges every row afresh; a new set refuses none. A
+    // refused row gives its place in the default plot to the next, as a
+    // hidden one does: it never has a value to draw.
     struct Refusal {
         uint16_t id = 0;
         QString words; // "Refused: requestOutOfRange (7F 22 31)"
@@ -395,7 +397,8 @@ private:
     void rejudgeHidden();
     // Each row's default and so its subscribed state, and the plotted
     // count; notifies the rows that changed and the count. Run after
-    // anything that moves the defaults: a new set, hidden rows, choices.
+    // anything that moves the defaults: a new set, hidden or refused
+    // rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
     // An enum row's label for its newest value, "" when it has none
@@ -844,6 +847,11 @@ public:
     // Test seam: record a replay too, to compare it with its source. The
     // app never records one: it would copy the recording it plays
     void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
+    // Test seam: the next load of the plugin copy with this hash fails
+    void failPluginLoadForTesting(const QString& sha)
+    {
+        m_pluginStore.failLoadForTesting(sha);
+    }
     // Test seam: the session's recorder, for core's internal.h seams
     // (a failed write); nullptr with none
     ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
