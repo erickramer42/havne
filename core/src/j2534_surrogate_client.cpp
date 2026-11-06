@@ -88,18 +88,22 @@ const SurrogateExe& surrogate_for(uint32_t dll_arch)
     return dll_arch == ECUIO_DLL_ARCH_X86 ? kX86Surrogate : kX64Surrogate;
 }
 constexpr DWORD kTransactTimeoutMs   = 3000;
-constexpr DWORD kHandshakeTimeoutMs_default = 8000;
+/* The child's startup, from resuming it to its pipe connecting: fixed,
+ * so a test that shrinks the open's window can't fail on a slow start */
+constexpr DWORD kStartupTimeoutMs = 8000;
+constexpr DWORD kOpenTimeoutMs_default = 8000;
 
-DWORD handshake_timeout_ms()
+/* The OP_OPEN reply's window: the vendor's DllMain and PassThruOpen */
+DWORD open_timeout_ms()
 {
     char buf[32] = {};
-    const DWORD n = GetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS",
-                                             buf, sizeof(buf));
+    const DWORD n =
+        GetEnvironmentVariableA("ECUIO_SUR_OPEN_MS", buf, sizeof(buf));
     if (n > 0 && n < sizeof(buf)) {
         const DWORD v = static_cast<DWORD>(strtoul(buf, nullptr, 10));
         if (v >= 100) return v;
     }
-    return kHandshakeTimeoutMs_default;
+    return kOpenTimeoutMs_default;
 }
 
 /* Client trace line: to stderr, and to the session log when there is
@@ -869,9 +873,11 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     /* The spawn's last step before the handshake's wait: a log ending
-     * here waited on the handshake, one ending above never got this far */
+     * here waited on the handshake, one ending above never got this far.
+     * The line names the window the wait below uses. */
+    const DWORD startup_ms = kStartupTimeoutMs;
     SUR_LOG(h, "open: child resumed, waiting up to %lu ms for its pipe\n",
-            handshake_timeout_ms());
+            startup_ms);
 
     OVERLAPPED ov = {};
     ov.hEvent = h->io_event;
@@ -884,8 +890,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         connected = true;
     } else if (cerr == ERROR_IO_PENDING) {
         const HANDLE waits[2] = { ov.hEvent, h->process };
-        const DWORD wr = WaitForMultipleObjects(2, waits, FALSE,
-                                                 handshake_timeout_ms());
+        const DWORD wr = WaitForMultipleObjects(2, waits, FALSE, startup_ms);
         if (wr == WAIT_OBJECT_0) {
             DWORD xfer = 0;
             connected = GetOverlappedResult(h->pipe, &ov, &xfer, FALSE);
@@ -893,9 +898,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
             exit_code = log_child_exit(h);
         } else {
             handshake_timed_out = true;
-            SUR_LOG(h, "open: handshake timeout after %lu ms; child alive but "
+            SUR_LOG(h,
+                    "open: handshake timeout after %lu ms; child alive but "
                     "never opened the pipe (process startup stalled)\n",
-                    handshake_timeout_ms());
+                    startup_ms);
         }
     }
 
@@ -916,7 +922,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         }
         if (handshake_timed_out) {
             ecuio_detail_set("the surrogate didn't start within %lu ms",
-                             handshake_timeout_ms());
+                             startup_ms);
             return ECUIO_ERR_SURROGATE_FAILED;
         }
         return spawn_failed("the pipe handshake", cerr);
@@ -937,7 +943,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     req.opcode = ECUIO_SUR_OP_OPEN;
     req.u.open.fingerprint = ECUIO_SUR_FINGERPRINT;
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, handshake_timeout_ms())) {
+    const DWORD open_ms = open_timeout_ms();
+    if (!transact(h, req, &resp, open_ms)) {
         /* Classify by why the transaction failed, not by a liveness
          * snapshot. A reply that TIMED OUT with the child still alive
          * is a vendor wedged in DllMain or PassThruOpen. A broken pipe
@@ -949,9 +956,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         const bool timed_out = (h->pending_response_id == req.request_id);
         bool vendor_blocked = false;
         if (timed_out && WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
-            SUR_LOG(h, "open: no reply to OP_OPEN after %lu ms, child alive "
+            SUR_LOG(h,
+                    "open: no reply to OP_OPEN after %lu ms, child alive "
                     "(vendor blocked in DllMain or PassThruOpen)\n",
-                    handshake_timeout_ms());
+                    open_ms);
             vendor_blocked = true;
         } else {
             WaitForSingleObject(h->process, 1000);
@@ -965,7 +973,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         if (vendor_blocked) {
             ecuio_detail_set("PassThruOpen didn't return within %lu ms; the "
                              "driver may be waiting for its adapter",
-                             handshake_timeout_ms());
+                             open_ms);
             return ECUIO_ERR_VENDOR_REFUSED;
         }
         if (code != STILL_ACTIVE) {

@@ -30,7 +30,6 @@ import json
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # no __pycache__ beside the tests
@@ -150,31 +149,64 @@ def fails(cli):
 
 def hang(cli, dll):
     """Windows: the fake DLL holds its disconnect 6 s, and Ctrl+Break
-    comes a second in; the recorder closes while still attached, 2 s on,
-    so its files end whole before the session's close returns"""
+    comes after the first frame; the recorder closes while still
+    attached, 2 s on, so its files end whole before the session's close
+    returns"""
     import os
     import signal
+    import threading
     env = dict(os.environ, ECUIO_FAKE_DISCONNECT_DELAY_MS="6000")
     with tempfile.TemporaryDirectory(prefix="havne-cli-hang-") as root:
         p = subprocess.Popen([cli, "stream", f"j2534://{dll}", "--record", root],
                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, env=env,
                              creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-        time.sleep(1.5)
+        # Both pipes read as they come, so the client's trace on stderr
+        # never fills its pipe; the first frame says the session started,
+        # after the handlers went in: a fixed sleep instead raced the
+        # connect on a loaded machine
+        out_lines, err_chunks = [], []
+        first_frame = threading.Event()
+
+        def read_out():
+            for line in p.stdout:
+                out_lines.append(line)
+                if line.startswith(b'{"type":"frame"'):
+                    first_frame.set()
+
+        readers = [threading.Thread(target=read_out),
+                   threading.Thread(target=lambda: err_chunks.extend(p.stderr))]
+        for r in readers:
+            r.start()
+
+        def ended():
+            for r in readers:
+                r.join()
+            return b"".join(out_lines), b"".join(err_chunks)
+
+        if not first_frame.wait(30):
+            p.kill()
+            p.wait()
+            out, err = ended()
+            print(f"FAIL  no frame in 30 s\n{out.decode()[-400:]}\n{err.decode()[-400:]}")
+            return 1
         try:
             p.send_signal(signal.CTRL_BREAK_EVENT)
         except OSError as e:
             p.kill()
-            p.communicate()
+            p.wait()
+            ended()
             print(f"skip  no console to send Ctrl+Break through: {e}")
             return SKIP
         try:
-            out, err = p.communicate(timeout=20)
+            p.wait(timeout=20)
         except subprocess.TimeoutExpired:
             p.kill()
-            p.communicate()
+            p.wait()
+            ended()
             print("FAIL  still running 20 s after Ctrl+Break")
             return 1
+        out, err = ended()
         rows = golden.parse(out.decode("utf-8"), "stdout")
         own = [r for r in rows if r.get("type") not in ("frame", "values")]
         types = [(r.get("type"), r.get("state")) for r in own]
