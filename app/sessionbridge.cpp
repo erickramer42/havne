@@ -389,6 +389,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case HiddenRole: return e.hidden;
         case GroupRole:
             return static_cast<int>(e.group);
+        case LabelRole:
+            return labelOf(e);
         default: return QVariant();
     }
 }
@@ -409,7 +411,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {WindowLowRole, "windowLow"},
             {RowRole, "row"},
             {HiddenRole, "hidden"},
-            {GroupRole, "group"}};
+            {GroupRole, "group"},
+            {LabelRole, "label"}};
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
@@ -450,6 +453,14 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
+        if (set->defs[i].kind == ECUIO_VALUE_ENUM && set->enums != nullptr) {
+            const uint32_t first = set->defs[i].table_first;
+            const uint32_t end = first + set->defs[i].table_count;
+            for (uint32_t k = first; k < end && k < set->enum_count; ++k) {
+                e.labels.emplace_back(set->enums[k].raw,
+                                      QString::fromUtf8(set->enums[k].label));
+            }
+        }
         e.plotRank = set->defs[i].plot_rank;
         e.group = set->defs[i].group;
         m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
@@ -516,8 +527,8 @@ void SignalListModel::updateWindow(const std::vector<WindowValue>& window)
         // bind opacity to ageMs; a QML-side clock stamped on value
         // changes would dim steady values that are still arriving.
         emit dataChanged(index(firstRow), index(lastRow),
-                         {ValueRole, WindowHighRole, WindowLowRole, HasValueRole,
-                          AgeMsRole});
+                         {ValueRole, WindowHighRole, WindowLowRole,
+                          HasValueRole, AgeMsRole, LabelRole});
         // One emission per batch: the strip chart's sole repaint trigger.
         emit valuesUpdated();
     }
@@ -546,6 +557,22 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
         emit dataChanged(index(firstRow), index(lastRow),
                          {TextRole, HasValueRole, AgeMsRole});
     }
+}
+
+QString SignalListModel::labelOf(const Entry& e)
+{
+    // An enum's value is its raw number: a whole number from 0 up
+    if (e.labels.empty() || e.histCount == 0 || !(e.value >= 0.0) ||
+        e.value != std::floor(e.value) || e.value > 4294967295.0) {
+        return QString();
+    }
+    const auto raw = static_cast<uint32_t>(e.value);
+    for (const auto& l : e.labels) {
+        if (l.first == raw) {
+            return l.second;
+        }
+    }
+    return QString();
 }
 
 ecuio_display_value_t SignalListModel::shown(const Entry& e, double value) const
@@ -994,6 +1021,13 @@ SessionBridge::~SessionBridge()
     ecuio_shutdown();
 }
 
+// "1 signal", "2 signals": the activity log's count of a file's signals
+static QString signalCountText(int count)
+{
+    return count == 1 ? QStringLiteral("1 signal")
+                      : QStringLiteral("%1 signals").arg(count);
+}
+
 QVariantMap SessionBridge::importSignalFile(const QUrl& url)
 {
     // Android's content:// URIs open through QFile as they are
@@ -1015,10 +1049,11 @@ QVariantMap SessionBridge::importSignalFile(const QUrl& url)
     }
     emit logMessage(
         result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("Signal file: %1 (%2, %3 signals)")
+            ? QStringLiteral("Signal file: %1 (%2, %3)")
                   .arg(result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("profile")).toString())
-                  .arg(result.value(QStringLiteral("count")).toInt())
+                       result.value(QStringLiteral("profile")).toString(),
+                       signalCountText(
+                           result.value(QStringLiteral("count")).toInt()))
             : QStringLiteral("Signal file refused: %1")
                   .arg(result.value(QStringLiteral("words")).toString()));
     return result;
@@ -1029,10 +1064,11 @@ QVariantMap SessionBridge::importSignalText(const QString& text)
     const QVariantMap result = m_signalStore.import(text.toUtf8());
     emit logMessage(
         result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("Signal file saved: %1 (%2, %3 signals)")
+            ? QStringLiteral("Signal file saved: %1 (%2, %3)")
                   .arg(result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("profile")).toString())
-                  .arg(result.value(QStringLiteral("count")).toInt())
+                       result.value(QStringLiteral("profile")).toString(),
+                       signalCountText(
+                           result.value(QStringLiteral("count")).toInt()))
             : QStringLiteral("Signal file not saved: %1")
                   .arg(result.value(QStringLiteral("words")).toString()));
     return result;
@@ -3849,13 +3885,27 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
                profile;
     }
     if (info.backend == ECUIO_BACKEND_SOCKETCAN) {
-        // The interface is in the "Connected:" line just before
+        // The interface is in the "Connected:" line just before. A real
+        // controller has a bit rate (core reads it from the interface);
+        // vcan has none. A profile that requests runs through ISO-TP on
+        // its channels; any other only listens
+        const bool listenOnly =
+            (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0;
         const QString bus =
-            (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0
-                ? QStringLiteral("a CAN controller in listen-only mode at %1 bit/s")
-                      .arg(info.baud)
+            listenOnly ? QStringLiteral(
+                             "a CAN controller in listen-only mode at %1 bit/s")
+                             .arg(info.baud)
+            : info.baud != 0
+                ? QStringLiteral("a CAN controller at %1 bit/s").arg(info.baud)
                 : QStringLiteral("a virtual CAN bus");
-        return QStringLiteral("Session: SocketCAN, %1, listening; ").arg(bus) +
+        const QString mode =
+            info.channel_count > 0
+                ? (info.channel_count == 1
+                       ? QStringLiteral("requesting on 1 channel")
+                       : QStringLiteral("requesting on %1 channels")
+                             .arg(info.channel_count))
+                : QStringLiteral("listening");
+        return QStringLiteral("Session: SocketCAN, %1, %2; ").arg(bus, mode) +
                profile;
     }
     const bool elm327 = info.backend == ECUIO_BACKEND_ELM327;

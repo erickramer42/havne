@@ -1272,10 +1272,16 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     /* Stamped at the wake that saw it, on the test's own clock: no
      * earlier than the sleep went in, no later than one idle wake after,
      * and a late wake's margin, kept under a wake so that a stamp a wake
-     * late fails. Both from the recording's zero, somewhere in the attach;
-     * the stamp is whole ms */
+     * late fails. macOS's runner fires timers 100-200 ms late (a stamp
+     * 22 ms past this bound there): its margin is wider, and the "a wake
+     * late fails" check is Windows' and Linux's. Both from the
+     * recording's zero, somewhere in the attach; the stamp is whole ms */
     constexpr uint64_t kWakeUs = 100000;  /* the writer's idle wake */
+#ifdef __APPLE__
+    constexpr uint64_t kMarginUs = 400000; /* macOS's late timers */
+#else
     constexpr uint64_t kMarginUs = 90000; /* a timer firing late */
+#endif
     const uint64_t earliest_ms = (added_from - attach_to) / 1000;
     const uint64_t latest_ms =
         (added_to + kWakeUs + kMarginUs - attach_from) / 1000 + 1;

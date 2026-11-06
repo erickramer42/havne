@@ -658,7 +658,9 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
 TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
 {
     SetEnvironmentVariableA("ECUIO_FAKE_OPEN_DELAY_MS", "60000");
-    SetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS", "500");
+    /* 2 s, not less: the window covers the child starting as well as
+     * the vendor's open, and a loaded machine started it past 500 ms */
+    SetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS", "2000");
     const auto t0 = std::chrono::steady_clock::now();
 
     ecuio_j2534_sur_handle_t* h = nullptr;
@@ -676,12 +678,12 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     /* The vendor's call never returned: the driver's doing, not the
      * surrogate's. */
     EXPECT_EQ(rc, ECUIO_ERR_VENDOR_REFUSED);
-    EXPECT_EQ(detail, "PassThruOpen didn't return within 500 ms; the "
+    EXPECT_EQ(detail, "PassThruOpen didn't return within 2000 ms; the "
                       "driver may be waiting for its adapter");
     EXPECT_EQ(h, nullptr);
-    /* Failed at the SHRUNK window (~0.5s), nowhere near the 8s default:
-     * if this approaches 8s, an env knob stopped being honored. */
-    EXPECT_LT(elapsed, 3000);
+    /* Failed at the SHRUNK window (~2 s), nowhere near the 8 s default:
+     * if this approaches 8 s, an env knob stopped being honored. */
+    EXPECT_LT(elapsed, 5000);
 }
 
 /* Shares read access with the session's writers. "" if it can't open.

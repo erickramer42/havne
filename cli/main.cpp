@@ -791,12 +791,19 @@ bool read_whole(const char* path, size_t max, const char* what,
     return true;
 }
 
+bool is_folder(const char* path);
+
 // Writes a file whole, or not at all: into <path>.partial beside it, then
 // renamed over path, so a failed write never leaves half a file at the
-// user's path. false with why, never the path
+// user's path, and never over a folder. false with why, never the path
 bool write_whole(const char* path, const std::string& bytes, std::string* why)
 {
+    if (is_folder(path)) {
+        *why = "the converted file can't be written: it's a folder";
+        return false;
+    }
     const std::string partial = std::string(path) + ".partial";
+    std::string words; /* a Windows error errno doesn't name */
     FILE* f = nullptr;
 #ifdef _WIN32
     int e = fopen_s(&f, partial.c_str(), "wb");
@@ -817,7 +824,14 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
         failed = MoveFileExA(partial.c_str(), path,
                              MOVEFILE_REPLACE_EXISTING |
                                  MOVEFILE_WRITE_THROUGH) == 0;
-        e = failed && GetLastError() == ERROR_ACCESS_DENIED ? EACCES : e;
+        if (failed) {
+            const DWORD w = GetLastError();
+            if (w == ERROR_ACCESS_DENIED) {
+                e = EACCES;
+            } else {
+                words = "Windows error " + std::to_string(w);
+            }
+        }
 #else
         failed = std::rename(partial.c_str(), path) != 0;
         e = errno;
@@ -826,9 +840,10 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
     if (failed) {
         std::remove(partial.c_str());
         *why = std::string("the converted file can't be written: ") +
-               (e == ENOENT   ? std::string("there's no such folder")
-                : e == EACCES ? std::string("permission denied")
-                              : "error " + std::to_string(e));
+               (!words.empty() ? words
+                : e == ENOENT  ? std::string("there's no such folder")
+                : e == EACCES  ? std::string("permission denied")
+                               : "error " + std::to_string(e));
         return false;
     }
     return true;

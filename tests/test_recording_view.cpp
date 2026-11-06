@@ -420,6 +420,37 @@ TEST(RecordingViewTest, ValuesAtAreTheValuesInForce)
               QStringLiteral("ZZZFAKE11M0000001"));
 }
 
+// An enum signal's value in force carries its label from the
+// recording's events.log (format 3), beside the raw number it plots; a
+// number signal's carries none
+TEST(RecordingViewTest, AnEnumsValueCarriesItsLabel)
+{
+    RecordingView v;
+    v.open(fixture("fuel-status"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const QVariant fuel =
+        signalNamed(v, "Fuel System 1").value(QStringLiteral("index"));
+    const QVariant rpm = signalNamed(v, "RPM").value(QStringLiteral("index"));
+
+    const QVariantMap cold = v.valuesAt({fuel}, 1000).value(0).toMap();
+    EXPECT_EQ(cold.value(QStringLiteral("text")).toString(),
+              QStringLiteral("1"));
+    EXPECT_EQ(cold.value(QStringLiteral("label")).toString(),
+              QStringLiteral("Open loop, cold"));
+    EXPECT_EQ(v.valuesAt({fuel}, 4200)
+                  .value(0)
+                  .toMap()
+                  .value(QStringLiteral("label"))
+                  .toString(),
+              QStringLiteral("Closed loop"));
+    EXPECT_EQ(v.valuesAt({rpm}, 1000)
+                  .value(0)
+                  .toMap()
+                  .value(QStringLiteral("label"))
+                  .toString(),
+              QString());
+}
+
 // A tapped cursor lands on the sample nearest it, before or after, the
 // earlier of two as near; before the first sample on the first, past the
 // last on the last; a signal with no samples or a bad index gives -1

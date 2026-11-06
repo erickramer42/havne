@@ -268,6 +268,7 @@ Page {
                 required property double value
                 required property int decimals
                 required property string text          // a text row's value
+                required property string label         // an enum value's word
                 required property bool isText
                 required property bool subscribed
                 required property bool hasValue
@@ -327,6 +328,7 @@ Page {
                         // with a negative reply rather than by its bitmap).
                         text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
+                              : signalDelegate.label !== "" ? signalDelegate.label
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,
                                                signalDelegate.unit)
                         // A text value can run to kilobytes: the name

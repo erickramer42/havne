@@ -703,7 +703,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         )
     endif()
 
-    gtest_discover_tests(test_bridge)
+    # Listing its cases loads Qt's DLLs first, which on a loaded machine
+    # took past the default 5 s and failed the build
+    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60)
 
     # The GUI thread's cost per frame by profile size, a measurement for
     # docs/testing.md; built with the tests, never run by ctest

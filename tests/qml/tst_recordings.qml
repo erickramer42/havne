@@ -242,6 +242,25 @@ TestCase {
     // value is the one the line has there; each trace's label carries its
     // value's sample time, where the chart puts a dot. With nothing
     // plotted a tap stays where it fell
+    // An enum signal's cursor value is its label, not its raw number
+    function test_theCursorReadsAnEnumsLabel() {
+        const page = createPage()
+        page.open({ title: "Fuel", folder: Harness.recordingFixtures + "/fuel-status" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 2, 10000, "the recording opens")
+        let row = null
+        for (let i = 0; i < 2 && row === null; ++i) {
+            tryVerify(() => rows.itemAtIndex(i) !== null, 2000, "row " + i + " has a delegate")
+            if (rows.itemAtIndex(i).modelData.name === "Fuel System 1")
+                row = rows.itemAtIndex(i)
+        }
+        verify(row !== null, "the enum's row")
+        page.setCursor(1000)
+        compare(find(row, "cursorValue").text, "Open loop, cold")
+        page.setCursor(4200)
+        compare(find(row, "cursorValue").text, "Closed loop")
+    }
+
     function test_aTapSnapsToTheNearestSample() {
         const page = openEarly()
         const sigs = find(page, "signalRows").model

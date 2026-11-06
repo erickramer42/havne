@@ -10,8 +10,9 @@
 # golden.jsonl, the file it wrote against golden.json byte for byte (its
 # CRLF taken as LF, a Windows checkout's), and
 # nothing else left in the folder (no .partial). unwritable: an --out in a
-# folder that isn't there exits 1 with why, never the path, and writes
-# nothing. --update rewrites both goldens from the run.
+# folder that isn't there, and an --out that is a folder, each exit 1 with
+# why, never the path, and write nothing. --update rewrites both goldens
+# from the run.
 
 import subprocess
 import sys
@@ -68,27 +69,41 @@ def convert(cli, fixture, golden_lines, golden_file, rewrite):
         return 0
 
 
+def refused_out(cli, fixture, root, out, words, left):
+    """One --out that can't be written: exit 1, an error line with words
+    and never the path, and nothing in root but left"""
+    code, rows, err = run(cli, ["signals", "import", "obdb", fixture,
+                                "--out", str(out)] + OPTIONS)
+    if code != 1:
+        print(f"FAIL  exit {code}, not 1\n{err}")
+        return False
+    last = rows[-1] if rows else {}
+    if last.get("type") != "error":
+        print(f"FAIL  the last line is {last}, not an error")
+        return False
+    detail = last.get("detail", "")
+    if detail != "the converted file can't be written: " + words:
+        print(f"FAIL  the error says {detail!r}")
+        return False
+    if root in detail or root.replace("\\", "/") in detail or root in err:
+        print("FAIL  the error names the path")
+        return False
+    written = sorted(p for p in Path(root).rglob("*") if p not in left)
+    if written:
+        print(f"FAIL  something was written: {[p.name for p in written]}")
+        return False
+    return True
+
+
 def unwritable(cli, fixture):
     with tempfile.TemporaryDirectory(prefix="havne-cli-obdb-") as root:
-        out = Path(root) / "missing" / "converted.json"
-        code, rows, err = run(cli, ["signals", "import", "obdb", fixture,
-                                    "--out", str(out)] + OPTIONS)
-        if code != 1:
-            print(f"FAIL  exit {code}, not 1\n{err}")
+        if not refused_out(cli, fixture, root,
+                           Path(root) / "missing" / "converted.json",
+                           "there's no such folder", []):
             return 1
-        last = rows[-1] if rows else {}
-        if last.get("type") != "error":
-            print(f"FAIL  the last line is {last}, not an error")
-            return 1
-        detail = last.get("detail", "")
-        if detail != "the converted file can't be written: there's no such folder":
-            print(f"FAIL  the error says {detail!r}")
-            return 1
-        if root in detail or root.replace("\\", "/") in detail or root in err:
-            print("FAIL  the error names the path")
-            return 1
-        if any(Path(root).rglob("*")):
-            print("FAIL  something was written")
+        folder = Path(root) / "a-folder.json"
+        folder.mkdir()
+        if not refused_out(cli, fixture, root, folder, "it's a folder", [folder]):
             return 1
         print("ok    an --out that can't be written says why and writes nothing")
         return 0

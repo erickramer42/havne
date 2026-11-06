@@ -990,6 +990,7 @@ Page {
                         objectName: "cursorValue"
                         text: !signalRow.at || signalRow.at.atMs < 0 ? qsTr("—")
                               : signalRow.modelData.isText ? signalRow.at.text
+                              : signalRow.at.label ? signalRow.at.label
                               : root.valueText(Number(signalRow.at.text), signalRow.modelData.decimals,
                                                signalRow.at.unit)
                         Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
@@ -1004,6 +1005,7 @@ Page {
                         visible: root.compareAligned
                         text: !at || at.atMs < 0 ? qsTr("—")
                               : signalRow.modelData.isText ? at.text
+                              : at.label ? at.label
                               : root.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
                         Layout.maximumWidth: Math.round(signalRow.width * 0.3)
                         elide: Text.ElideRight
@@ -1308,6 +1310,7 @@ Page {
                         width: parent.width - 12
                         text: !stripRow.at || stripRow.at.atMs < 0 ? qsTr("—")
                               : stripRow.modelData.isText ? stripRow.at.text
+                              : stripRow.at.label ? stripRow.at.label
                               : root.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                                stripRow.at.unit)
                         color: Theme.text

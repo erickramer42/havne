@@ -2208,6 +2208,58 @@ TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
     EXPECT_EQ(model.data(row0, SignalListModel::TextRole).toString(), QString());
 }
 
+/* An enum row (ADR-0051) shows its label for the newest raw value, and
+ * a raw value with no label its number; the label is notified with the
+ * value, and a row of another kind has none */
+TEST(BridgeTest, AnEnumRowShowsItsLabel)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    static const ecuio_enum_entry_t kGears[] = {
+        {0, "Park"}, {3, "Drive"}, {7, "Low"}};
+    defs[1].kind = ECUIO_VALUE_ENUM; /* row 1, id 2001 */
+    defs[1].table_first = 1;         /* Drive and Low */
+    defs[1].table_count = 2;
+    set.enums = kGears;
+    set.enum_count = 3;
+    model.setSignalSet(&set);
+
+    const QModelIndex row0 = model.index(0, 0);
+    const QModelIndex row1 = model.index(1, 0);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QString())
+        << "a label before any value";
+    QList<int> notified;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+                     [&notified](const QModelIndex& topLeft, const QModelIndex&,
+                                 const QList<int>& roles) {
+                         if (topLeft.row() <= 1)
+                             notified = roles;
+                     });
+    model.updateValues({{uint16_t(2001), 3.0}, {uint16_t(1001), 3.0}}, 10);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QStringLiteral("Drive"));
+    EXPECT_TRUE(notified.contains(SignalListModel::LabelRole));
+    EXPECT_EQ(model.data(row0, SignalListModel::LabelRole).toString(),
+              QString())
+        << "a number row has no label";
+    model.updateValues({{uint16_t(2001), 7.0}}, 11);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QStringLiteral("Low"));
+    /* Park is the set's, but not the def's: past its table_first */
+    model.updateValues({{uint16_t(2001), 0.0}}, 12);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QString());
+    model.updateValues({{uint16_t(2001), 5.0}}, 13);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QString())
+        << "a raw value with no label shows its number";
+    EXPECT_DOUBLE_EQ(model.data(row1, SignalListModel::ValueRole).toDouble(),
+                     5.0);
+}
+
 /* A text def takes the bridge's whole path like a number: decoded
  * from the frame (here two bytes of the mock's telemetry as hex),
  * staged, shown on its row, and written to signals.csv. */
@@ -3518,7 +3570,8 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "reply's answer is lost");
     EXPECT_TRUE(SessionBridge::versionsText(elm).isEmpty());
 
-    /* SocketCAN (ADR-0032): a listen-only controller, and vcan */
+    /* SocketCAN (ADR-0032, ADR-0040): a listen-only controller, vcan,
+     * and a requesting profile on a controller and on vcan */
     ecuio_session_info_t can{};
     can.backend = ECUIO_BACKEND_SOCKETCAN;
     can.baud = 500000;
@@ -3533,6 +3586,18 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
               "Session: SocketCAN, a virtual CAN bus, listening; profile mock");
     EXPECT_TRUE(SessionBridge::versionsText(can).isEmpty());
+    can.baud = 500000;
+    can.channel_count = 2;
+    qstrncpy(can.profile, "obd2", sizeof(can.profile));
+    EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
+              "Session: SocketCAN, a CAN controller at 500000 bit/s, "
+              "requesting on 2 channels; profile obd2");
+    can.baud = 0;
+    can.channel_count = 1;
+    qstrncpy(can.profile, "user.sim-car-own", sizeof(can.profile));
+    EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
+              "Session: SocketCAN, a virtual CAN bus, requesting on 1 "
+              "channel; profile user.sim-car-own");
 
     ecuio_session_info_t later{};
     later.backend = 7; // a backend this build doesn't know
@@ -7043,7 +7108,7 @@ TEST(BridgeTest, SignalFileImportKeepsACopyByItsHash)
     ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
     EXPECT_EQ(copy.readAll(), bytes);
     EXPECT_TRUE(log.contains(
-        QStringLiteral("Signal file: Extras (user.extras, 1 signals)")))
+        QStringLiteral("Signal file: Extras (user.extras, 1 signal)")))
         << log.join(QLatin1Char('\n')).toStdString();
     EXPECT_FALSE(registered("user.extras")) << "import registers nothing";
 
@@ -7289,7 +7354,18 @@ TEST(BridgeTest, SignalFileTextGoesInAndComesBack)
     EXPECT_EQ(bridge.signalFileText(sha), text);
     EXPECT_TRUE(bridge.signalFileText(QString(64, QLatin1Char('e'))).isEmpty());
     EXPECT_TRUE(log.contains(
-        QStringLiteral("Signal file saved: Mine (user.mine, 1 signals)")))
+        QStringLiteral("Signal file saved: Mine (user.mine, 1 signal)")))
+        << log.join(QLatin1Char('\n')).toStdString();
+    /* Two signals: the count's plural */
+    QString two = QString::fromUtf8(signalFile(QStringLiteral("Pair")));
+    two.replace(QStringLiteral("}}]}"),
+                QStringLiteral("}},{\"key\":\"b\",\"name\":\"B\",\"read\":"
+                               "{\"service\":\"22\",\"number\":\"D101\"},"
+                               "\"field\":{\"byte\":0,\"bits\":8}}]}"));
+    ASSERT_TRUE(
+        bridge.importSignalText(two).value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Signal file saved: Pair (user.pair, 2 signals)")))
         << log.join(QLatin1Char('\n')).toStdString();
 
     QString bad = text;
@@ -7299,7 +7375,7 @@ TEST(BridgeTest, SignalFileTextGoesInAndComesBack)
     EXPECT_TRUE(refused.value(QStringLiteral("words"))
                     .toString()
                     .contains(QStringLiteral("bitz")));
-    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
+    EXPECT_EQ(storeFiles(dir.store()).size(), 2);
 }
 
 /* A recording of a session a vehicle's file decodes holds the store's

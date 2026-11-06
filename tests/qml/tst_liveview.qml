@@ -3,7 +3,8 @@
 //          Theme.seriesColors, dashes past the palette), each row's
 //          swatch under mock://demo, filled while plotted and hollow
 //          while not, a text row under uds-generic (the mock answering
-//          its DIDs), the list giving up rows so the chart stays whole
+//          its DIDs), an enum row's label (a signal file's), the list
+//          giving up rows so the chart stays whole
 //          on a short page, the rows the fake ECU withholds from its
 //          bitmaps left out with a line saying how many (Windows: the
 //          fake J2534 DLL), the link banner's message for every state,
@@ -36,6 +37,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
+        Bridge.deleteUnusedSignalFiles([])
     }
 
     function sameColor(actual, expected, what) {
@@ -290,6 +292,35 @@ TestCase {
         const numberValue = findChild(numberRow, "valueLabel")
         verify(/^\d+/.test(numberValue.text.trim()), "a number shown: " + numberValue.text)
         verify(findChild(numberRow, "plotCheck").enabled, "a number row can be plotted")
+    }
+
+    // An enum row (ADR-0051) shows its label where the number would go:
+    // a signal file's one enum on 1E1C's first byte, every raw value
+    // labeled, so whatever the mock answers has its word
+    function test_anEnumRowShowsItsLabel() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const values = {}
+        for (let raw = 0; raw < 256; ++raw)
+            values[String(raw)] = "v" + raw
+        const file = {
+            havne_signals: 1, name: "Enum test", source: { name: "t" },
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "mode", name: "Mode", read: { service: "22", number: "1E1C" },
+                        field: { byte: 0, bits: 8 }, kind: "enum", values: values }]
+        }
+        const r = Bridge.importSignalText(JSON.stringify(file))
+        verify(r.ok, "the file loads: " + r.words)
+        verify(Bridge.useSignalFiles([r.sha256])[0].ok, "its profile registers")
+        compare(Bridge.connectSession("mock://demo?profile=" + r.profile), "",
+                "the file's profile connects")
+        const list = findChild(page, "signalList")
+        compare(list.count, 1, "the file's one signal")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        const row = list.itemAtIndex(0)
+        tryVerify(() => row.hasValue, 3000, "the mock answered the DID")
+        const label = findChild(row, "valueLabel")
+        compare(label.text, "v" + Math.round(row.value), "the label, not the number")
+        compare(label.text, row.label)
     }
 
     // The rows whose PID the ECU's bitmaps leave out are hidden, with

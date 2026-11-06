@@ -253,9 +253,13 @@ public:
         HiddenRole, /* core reports it unsupported or absent
                          * (applyUnsupported, applyAbsent): Live
                          * leaves the row out */
-        GroupRole   /* the def's group (ECUIO_SIGNAL_GROUP_*,
+        GroupRole,  /* the def's group (ECUIO_SIGNAL_GROUP_*,
                          * ADR-0050), for Live's filter. Fixed per
                          * signal set. */
+        LabelRole   /* an enum row's label for its newest raw value
+                         * (ADR-0051), from the set's enums; "" for a
+                         * value with none, which shows its number, and
+                         * for any other kind. Notified with ValueRole. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -361,6 +365,9 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
+        // An ENUM def's labels by raw value, copied from the set when it
+        // loads, so a row keeps them whatever happens to the set later
+        std::vector<std::pair<uint32_t, QString>> labels;
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
@@ -394,6 +401,8 @@ private:
     // anything that moves the defaults: a new set, hidden rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
+    // An enum row's label for its newest value, "" when it has none
+    static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;

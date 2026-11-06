@@ -502,11 +502,13 @@ which breaks the C ABI on purpose where ADR-0051 says.
 - **Your own signals, per vehicle:** a form under Settings' Vehicle
   section, with **Read once** showing the raw reply beside the decoded
   value; `havne-cli stream --signals <file>` and `signals check`.
-- **Bulk import:** an OBDb signal set, a file the user picks (CC BY-SA
-  4.0, its attribution kept in the converted file's `source` block),
-  converted on import and reported field by field where it differs.
-- **Computed signals in core:** boost from `obd2`'s MAP and baro, and
-  from a user's own signals, each input judged by its own age bound.
+- **Bulk import:** an OBDb signal set (CC BY-SA 4.0, its attribution
+  kept in the converted file's `source` block), converted by
+  `havne-cli signals import obdb` and reported field by field where it
+  differs; the app imports the converted file as any signal file.
+- **Computed signals in core:** the simulated car's boost from its MAP
+  and baro, and a user's own, such as boost from `obd2`'s two PIDs in a
+  signal file, each input judged by its own age bound.
 - **The simulated ECU answers a plugin's DIDs** from the same file, so
   an example plugin for the simulated car runs in CI with no car;
   `havne-cli plugins list` and `plugins check`.
