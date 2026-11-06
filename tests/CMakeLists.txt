@@ -22,8 +22,8 @@ if(MSVC)
 endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_core test_core.cpp test_json.cpp test_recorder.cpp
-    test_recording.cpp test_recording_check.cpp)
+add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
+    test_recorder.cpp test_recording.cpp test_recording_check.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -345,6 +345,25 @@ if(TARGET havne-cli)
             --exit 3
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max"
                --signals ${_cli_signals}/refused.json --values)
+        # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
+        # model year, its notes and the file written whole, beside nothing
+        # else, against committed ones; an --out that can't be written
+        # writes nothing and names no path; a file that isn't a set refused
+        set(_cli_obdb ${CMAKE_CURRENT_SOURCE_DIR}/cli_obdb_import.py)
+        set(_obdb_set ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json)
+        add_test(NAME CliObdbImportTest.ASetConvertsToTheCommittedFile
+            COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} convert $<TARGET_FILE:havne-cli>
+                    ${_obdb_set} ${_cli_golden}/obdb-import.jsonl
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/obdb/example-car.json)
+        add_test(NAME CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing
+            COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} unwritable
+                    $<TARGET_FILE:havne-cli> ${_obdb_set})
+        set_tests_properties(CliObdbImportTest.ASetConvertsToTheCommittedFile
+            CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing PROPERTIES TIMEOUT 60)
+        app_cli_golden(SignalsImportRefusesWhatIsntAnObdbSet obdb-not-a-set.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> signals import obdb ${_cli_signals}/extras.json
+               --out never-written.json)
         # A format 3 recording (written by hand): an enum's line carries its
         # labels, its columns its raw numbers
         app_cli_golden(ViewShowsAnEnumsLabels view-enum.jsonl
@@ -422,6 +441,13 @@ if(TARGET havne-cli)
     app_cli_usage(SignalsWithoutCheckIsUsage "signals")
     app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
     app_cli_usage(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json")
+    app_cli_usage(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json")
+    app_cli_usage(SignalsImportFromAnotherFormatIsUsage
+        "signals|import|dbc|a.json|--out|b.json")
+    app_cli_usage(SignalsImportAYearBeforeOBDIIIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--year|1979")
+    app_cli_usage(SignalsImportAnUnknownOptionIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--fast")
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")

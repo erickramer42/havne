@@ -1,0 +1,92 @@
+{
+  "ecu": [
+    { "hdr": "7E0", "type": "engine" },
+    { "hdr": "7E1", "type": "transmission" }
+  ],
+  "commands": [
+    {
+      "hdr": "7E0", "rax": "7E8", "cmd": { "01": "0D" }, "freq": 0.5,
+      "signals": [
+        { "id": "EXAMPLE_SPEED", "path": "Movement", "name": "Road speed",
+          "suggestedMetric": "speed",
+          "fmt": { "len": 8, "max": 255, "unit": "kilometersPerHour" } }
+      ]
+    },
+    {
+      "hdr": "7E1", "rax": "7E9", "cmd": { "22": "D101" }, "freq": 1,
+      "signals": [
+        { "id": "EXAMPLE_TFT", "path": "Transmission", "name": "Fluid temperature",
+          "description": "Made up for Havne's tests",
+          "fmt": { "len": 16, "div": 4, "add": -40, "min": -40, "max": 215,
+                   "unit": "celsius" } },
+        { "id": "EXAMPLE_GEAR", "path": "Transmission", "name": "Gear",
+          "fmt": { "bix": 16, "len": 4, "map": {
+            "0": { "description": "Park", "value": "P" },
+            "1": { "description": "Reverse", "value": "R" },
+            "2": { "description": "Neutral", "value": "N" },
+            "3": { "description": "Drive", "value": "D" } } } },
+        { "id": "EXAMPLE_LOCKUP", "path": "Transmission", "name": "Converter lockup",
+          "fmt": { "bix": 20, "len": 1, "map": {
+            "0": { "description": "Open", "value": "OPEN" },
+            "1": { "description": "Locked", "value": "LOCKED" } } } }
+      ]
+    },
+    {
+      "hdr": "7E1", "rax": "7E9", "cmd": { "22": "D102" }, "freq": 5, "din": "03",
+      "signals": [
+        { "id": "EXAMPLE_LINE_PRESSURE", "path": "Transmission", "name": "Line pressure",
+          "fmt": { "len": 16, "blsb": true, "mul": 10, "div": 100, "max": 2500,
+                   "unit": "kilopascal", "nullmax": 6553.5 } }
+      ]
+    },
+    {
+      "hdr": "7E0", "rax": "7E8", "cmd": { "22": "D200" }, "freq": 1,
+      "filter": { "from": 2018, "to": 2020 },
+      "signals": [
+        { "id": "EXAMPLE_BOOST_TARGET", "path": "Engine", "name": "Boost target",
+          "fmt": { "len": 8, "max": 255, "unit": "kilopascal" } }
+      ]
+    },
+    {
+      "hdr": "7E0", "rax": "7E8", "cmd": { "22": "D201" }, "freq": 1,
+      "filter": { "from": 2021 },
+      "signals": [
+        { "id": "EXAMPLE_BOOST_TARGET", "path": "Engine", "name": "Boost target",
+          "fmt": { "len": 16, "div": 10, "max": 255, "unit": "kilopascal" } }
+      ]
+    },
+    {
+      "hdr": "7E0", "rax": "7E8", "cmd": { "22": "D202" }, "freq": 1,
+      "signals": [
+        { "id": "EXAMPLE_DEBUG", "hidden": true, "name": "Debug",
+          "fmt": { "len": 8, "max": 255, "unit": "scalar" } },
+        { "id": "EXAMPLE_KNOCK", "path": "Engine", "name": "Knock retard",
+          "fmt": { "bix": 4, "len": 10, "sign": true, "min": -20, "max": 20,
+                   "div": 10, "unit": "degrees" } }
+      ]
+    },
+    {
+      "hdr": "DA10", "rax": "10", "cmd": { "22": "D300" }, "freq": 1,
+      "proto": "15765-4-29bit",
+      "signals": [
+        { "id": "EXAMPLE_DOOR", "path": "Doors", "name": "Door",
+          "fmt": { "len": 8, "map": { "0": "Closed", "1": "Open" } } }
+      ]
+    },
+    {
+      "hdr": "7E0", "rax": "7E8", "cmd": { "21": "10" }, "freq": 1,
+      "signals": [
+        { "id": "EXAMPLE_OLD", "path": "Engine", "name": "Old service",
+          "fmt": { "len": 8, "max": 255, "unit": "rpm" } }
+      ]
+    }
+  ],
+  "synthetics": [
+    { "id": "EXAMPLE_TFT_PER_SPEED", "path": "Transmission",
+      "name": "Fluid temp per speed", "max": 100, "unit": "scalar",
+      "formula": { "op": "ratio", "a": "EXAMPLE_TFT", "b": "EXAMPLE_SPEED" } }
+  ],
+  "signalGroups": [
+    { "id": "EXAMPLE_GROUP", "matchingRegex": "EXAMPLE_.*" }
+  ]
+}

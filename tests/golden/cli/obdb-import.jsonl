@@ -1,0 +1,30 @@
+{"schema": 1, "type": "start"}
+{"field": "signalGroups", "key": "", "line": 89, "signal": "", "text": "signal groups aren't imported: each signal keeps its own name", "type": "import_note", "what": "file"}
+{"field": "freq", "key": "", "line": 6, "signal": "", "text": "Havne asks each request in turn, never on OBDb's own period", "type": "import_note", "what": "file"}
+{"field": "", "key": "example_speed", "line": 10, "signal": "EXAMPLE_SPEED", "text": "converted", "type": "import_note", "what": "converted"}
+{"field": "max", "key": "example_speed", "line": 10, "signal": "EXAMPLE_SPEED", "text": "OBDb holds the value within 0 to 255; Havne shows it as read", "type": "import_note", "what": "changed"}
+{"field": "", "key": "example_tft", "line": 18, "signal": "EXAMPLE_TFT", "text": "converted", "type": "import_note", "what": "converted"}
+{"field": "max", "key": "example_tft", "line": 18, "signal": "EXAMPLE_TFT", "text": "OBDb holds the value within -40 to 215; Havne shows it as read", "type": "import_note", "what": "changed"}
+{"field": "", "key": "example_gear", "line": 22, "signal": "EXAMPLE_GEAR", "text": "converted", "type": "import_note", "what": "converted"}
+{"field": "", "key": "example_lockup", "line": 28, "signal": "EXAMPLE_LOCKUP", "text": "converted", "type": "import_note", "what": "converted"}
+{"field": "", "key": "example_line_pressure", "line": 37, "signal": "EXAMPLE_LINE_PRESSURE", "text": "converted", "type": "import_note", "what": "converted"}
+{"field": "din", "key": "example_line_pressure", "line": 37, "signal": "EXAMPLE_LINE_PRESSURE", "text": "OBDb enters diagnostic session 03 first; Havne asks in the default session, where the module may refuse it", "type": "import_note", "what": "changed"}
+{"field": "max", "key": "example_line_pressure", "line": 37, "signal": "EXAMPLE_LINE_PRESSURE", "text": "OBDb holds the value within 0 to 2500; Havne shows it as read", "type": "import_note", "what": "changed"}
+{"field": "nullmax", "key": "example_line_pressure", "line": 37, "signal": "EXAMPLE_LINE_PRESSURE", "text": "OBDb shows nothing at or above 6553.5; Havne shows the value", "type": "import_note", "what": "changed"}
+{"field": "", "key": "example_boost_target", "line": 46, "signal": "EXAMPLE_BOOST_TARGET", "text": "converted", "type": "import_note", "what": "converted"}
+{"field": "max", "key": "example_boost_target", "line": 46, "signal": "EXAMPLE_BOOST_TARGET", "text": "OBDb holds the value within 0 to 255; Havne shows it as read", "type": "import_note", "what": "changed"}
+{"field": "", "key": "", "line": 54, "signal": "EXAMPLE_BOOST_TARGET", "text": "its command isn't for model year 2019", "type": "import_note", "what": "skipped"}
+{"field": "", "key": "", "line": 61, "signal": "EXAMPLE_DEBUG", "text": "hidden in OBDb", "type": "import_note", "what": "skipped"}
+{"field": "", "key": "", "line": 63, "signal": "EXAMPLE_KNOCK", "text": "a field across bytes that isn't whole bytes (bix 4, len 10), which a signal file can't say", "type": "import_note", "what": "skipped"}
+{"field": "", "key": "", "line": 72, "signal": "EXAMPLE_DOOR", "text": "29-bit IDs aren't imported", "type": "import_note", "what": "skipped"}
+{"field": "", "key": "", "line": 79, "signal": "EXAMPLE_OLD", "text": "Service 21 isn't one Havne reads", "type": "import_note", "what": "skipped"}
+{"field": "", "key": "example_tft_per_speed", "line": 85, "signal": "EXAMPLE_TFT_PER_SPEED", "text": "converted", "type": "import_note", "what": "converted"}
+{"changed": 6, "converted": 7, "skipped": 5, "type": "imported"}
+{"base": 130, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}, {"rx": "0x7E9", "tx": "0x7E1"}], "name": "Example car", "profile": "user.example-car", "signals": 7, "type": "signal_file"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Vehicle", "id": 30000, "kind": "number", "name": "Road speed", "offset": 0, "order": "be", "rank": 0, "read": {"number": "0D", "service": "01"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "km/h"}
+{"bits": 16, "byte": 0, "decimals": 2, "group": "Vehicle", "id": 30001, "kind": "number", "name": "Fluid temperature", "offset": -40, "order": "be", "rank": 0, "read": {"number": "D101", "service": "22"}, "rx": "0x7E9", "scale": 0.25, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"bit": 4, "bits": 4, "byte": 2, "decimals": 0, "group": "Vehicle", "id": 30002, "kind": "enum", "labels": {"0": "Park", "1": "Reverse", "2": "Neutral", "3": "Drive"}, "name": "Gear", "order": "le", "rank": 0, "read": {"number": "D101", "service": "22"}, "rx": "0x7E9", "signed": false, "type": "signal_def", "unit": ""}
+{"bit": 3, "bits": 1, "byte": 2, "decimals": 0, "group": "Vehicle", "id": 30003, "kind": "enum", "labels": {"0": "Open", "1": "Locked"}, "name": "Converter lockup", "order": "le", "rank": 0, "read": {"number": "D101", "service": "22"}, "rx": "0x7E9", "signed": false, "type": "signal_def", "unit": ""}
+{"bit": 0, "bits": 16, "byte": 0, "decimals": 1, "group": "Vehicle", "id": 30004, "kind": "number", "name": "Line pressure", "offset": 0, "order": "le", "rank": 0, "read": {"number": "D102", "service": "22"}, "rx": "0x7E9", "scale": 0.1, "signed": false, "type": "signal_def", "unit": "kPa"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30005, "kind": "number", "name": "Boost target", "offset": 0, "order": "be", "rank": 0, "read": {"number": "D200", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "kPa"}
+{"decimals": 2, "group": "Vehicle", "id": 30006, "inputs": [{"id": 30001, "max_age_us": 3000000}, {"id": 30000, "max_age_us": 3000000}], "kind": "computed", "name": "Fluid temp per speed", "rank": 0, "type": "signal_def", "unit": ""}

@@ -401,3 +401,39 @@ its kin in `signals.h`) settles what section 2 left open:
   answers the file's DIDs from `havne-cli` too.
 - **The `signals` line** marks each computed signal and carries each
   enumeration's labels, as a recording's signal line does in format 3.
+
+## Appendix: the OBDb import as built (2026-11-05)
+
+Core converts a set (`ecuio_obdb_import`, `obdb.h`,
+`core/src/obdb_import.cpp`) to a signal file's text, which the caller
+loads as any other; `havne-cli signals import obdb` writes it. The
+semantics are OBDb's own decoder's (its `.schemas` repository's
+`python/can/`), which the schema leaves open, and settle section 7's
+questions:
+
+- **The field:** OBDb's bit index counts from the most significant bit
+  of the first byte after the echo, and `blsb` reverses the order of
+  the field's whole bytes. Whole bytes are a big-endian field (a
+  little-endian one under `blsb`), and a field within one byte a
+  little-endian one from its lowest bit. A field across bytes that
+  isn't whole bytes has no form here: the import leaves it out and
+  notes it, so a set the user imports shows how many need the sub-byte
+  big-endian field section 6 keeps room for, before it's added.
+- **What a value is:** `raw * mul / div + add`, two's complement over
+  the field's bits under `sign`. OBDb holds a value within `min` and
+  `max` and blanks it at `nullmin` and `nullmax`; a signal file does
+  neither, so each is a note on its signal, not a refusal.
+- **The modules:** `hdr` is the request ID and `rax` the reply's. OBDb
+  matches a command with no `rax` to any module; the import takes the
+  standard's reply for 7E0 to 7E7 and leaves out the rest. 29-bit
+  commands are left out: OBDb's decoder forms only the reply ID, not
+  the request's.
+- **The model year** (`year_takes`, `core/src/obdb_import.h`): a
+  filter's `years`, a range with both ends, a range turned round (from
+  past to, the years outside it), either end alone; no year takes only
+  the commands with no filter. ADR-0052's OBDb variants take the same
+  function.
+- **The notes** are field by field (`ecuio_obdb_note_t`): each signal
+  converted with its key, each field that differs, each signal left out
+  with why, and the set's own keys (`freq`, `diagnosticLevel`,
+  `signalGroups`) once.

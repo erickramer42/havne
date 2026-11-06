@@ -15,6 +15,7 @@
  * j2534_ptypes.h comes in through j2534_surrogate.h.
  */
 
+#include "ecuio/obdb.h"
 #include "ecuio/recording.h"
 #include "ecuio/internal.h"
 #include "ecuio/surrogate_protocol.h"
@@ -61,6 +62,11 @@ typedef char abi_set_enum_count_check[(offsetof(ecuio_signal_set_t, enum_count) 
 typedef char abi_set_enums_check[(offsetof(ecuio_signal_set_t, enums) == 2 * sizeof(void*) + 24) ? 1 : -1];
 typedef char abi_set_reserved_check[(offsetof(ecuio_signal_set_t, reserved) == 4 * sizeof(void*) + 24) ? 1 : -1];
 typedef char abi_set_size_check[(sizeof(ecuio_signal_set_t) == 4 * sizeof(void*) + 40) ? 1 : -1];
+typedef char abi_obdb_options_reserved_check[(offsetof(ecuio_obdb_options_t, reserved) == 8) ? 1 : -1];
+typedef char abi_obdb_options_name_check[(offsetof(ecuio_obdb_options_t, name) == 32) ? 1 : -1];
+typedef char abi_obdb_options_commit_check[(offsetof(ecuio_obdb_options_t, commit) == 32 + 2 * sizeof(void*)) ? 1 : -1];
+typedef char abi_obdb_note_signal_check[(offsetof(ecuio_obdb_note_t, signal) == 8) ? 1 : -1];
+typedef char abi_obdb_note_text_check[(offsetof(ecuio_obdb_note_t, text) == 8 + 3 * sizeof(void*)) ? 1 : -1];
 typedef char abi_enum_entry_size_check[(sizeof(ecuio_enum_entry_t) == 32) ? 1 : -1];
 typedef char abi_enum_label_check[(offsetof(ecuio_enum_entry_t, label) == 4) ? 1 : -1];
 typedef char abi_computed_size_check[(sizeof(ecuio_computed_t) == 208) ? 1 : -1];
@@ -362,6 +368,12 @@ int main(void)
                               &check_summary) != ECUIO_ERR_INVALID_ARGUMENT) {
         return 1;
     }
+    if (ecuio_obdb_import("{}", 2, NULL, NULL, NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_OBDB_NOTE_SKIPPED != 2u || ECUIO_OBDB_ALONE != 1u) {
+        return 1;
+    }
+    ecuio_obdb_free(NULL);
     if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_vin_make(NULL)[0] != 0 || ecuio_vin_source()[0] == 0) {
         return 1;

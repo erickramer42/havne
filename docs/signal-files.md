@@ -9,8 +9,10 @@ design and the reasons behind each rule are
 writing one by hand.
 
 > **Status:** the format is decided (ADR-0051), core's loader reads
-> it (`ecuio_signal_file_load`, `signals.h`) and `havne-cli` checks and
-> streams a file ("Using a file"). The app's import is v0.5.0's work too.
+> it (`ecuio_signal_file_load`, `signals.h`), `havne-cli` checks and
+> streams a file ("Using a file") and imports an OBDb set ("Importing an
+> OBDb signal set", `ecuio_obdb_import`, `obdb.h`). The app's import is
+> v0.5.0's work too.
 > None of it is in a release yet; what isn't settled is marked **Not
 > settled** below.
 
@@ -402,6 +404,64 @@ written, and `signals check` says it won't convert.
   that file decodes the same.
 
 **Not settled:** how the app lists a vehicle's files.
+
+## Importing an OBDb signal set
+
+[OBDb](https://github.com/OBDb) keeps signal sets for many vehicles,
+one repository each, as JSON (`signalsets/v3/default.json`, and files
+for ranges of model years). `havne-cli signals import obdb` converts one
+you have on disk into a signal file; Havne fetches nothing and ships no
+OBDb data:
+
+```sh
+havne-cli signals import obdb default.json --out extras.json --year 2019 \
+  --url https://github.com/OBDb/<repository> --commit <the commit>
+```
+
+It writes the file whole or not at all, and says field by field what it
+did, one JSON line a note (`import_note`): each signal converted, each
+field that differs from OBDb's reading, and each signal left out and
+why; then a count of each (`imported`) and `signals check`'s lines for
+the file written. A set that isn't OBDb's is an `error` line and exit 3.
+
+What converts:
+
+- **Commands:** Service 01 and 22 on 11-bit IDs. `hdr` is the module's
+  request ID and `rax` its reply's; with no `rax`, a request ID from
+  7E0 to 7E7 takes the reply ID the standard gives it, 8 above, and
+  any other is left out. At most four modules, `obd2`'s counted unless
+  `--alone` leaves `obd2` out. A command's `filter` takes the model years
+  it names: give `--year` for those, or they're left out.
+- **Fields:** OBDb counts bits from the top of the first byte after the
+  echo. Whole bytes become a big-endian field (little-endian under
+  `blsb`), and a field within one byte a little-endian one. A field
+  across bytes that isn't whole bytes has no form in a signal file and
+  is left out.
+- **Values:** `sign` is `signed`, `mul` / `div` the scale, `add` the
+  offset, the decimals the scale's step; the unit in the built-in sets'
+  spelling (`celsius` is `°C`, `kilometersPerHour` `km/h`), and a word
+  that isn't a unit (`onoff`, `yesno`) left off, the value its number. A
+  `map` is an enumeration, each label its `description` (or its `value`),
+  cut to 27 bytes. The first part of `path` is the group, `description`
+  the notes.
+- **Synthetics:** a `ratio` of two converted signals is a computed
+  signal; any other formula is left out.
+
+What differs, each noted where it applies:
+
+- **`min` and `max`:** OBDb holds a value within them; Havne shows it as
+  read.
+- **`nullmin` and `nullmax`:** OBDb shows nothing at or past them; Havne
+  shows the value.
+- **`freq`:** Havne asks each request in turn, not on OBDb's period.
+- **`din`:** OBDb enters a diagnostic session first; Havne asks in the
+  default one, where the module may refuse.
+
+What's left out: Service 21, K-line commands, 29-bit IDs, extended
+addressing, functional requests, hidden signals and fields wider than
+32 bits. The converted file's `source` names OBDb's editors and
+contributors, the license, the URL and commit you give, and that it was
+converted ([ADR-0051](adr/0051-signal-files.md) section 7).
 
 ## Checking one with no car
 

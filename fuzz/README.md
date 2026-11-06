@@ -23,6 +23,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_request_bus` | A requesting session's state across many requests ([ADR-0040](../docs/adr/0040-socketcan-requests-isotp.md)): the request engine (`core/src/request_engine.h`) and core's ISO-TP driven as the SocketCAN worker drives them, on a simulated bus and clock, against one ECU per channel answering through `tests/fake_ecu.h` and core's ISO-TP sender. The first byte picks the profile (`obd2` on one or two channels, packing on or off; `uds-generic` with DIDs polled and scanned, 11-bit or 29-bit); the rest, request by request, each reply's fate (intact, silent, response pending first, a negative code, garbage, on the other channel's ID, a wrong sequence number, a stall past N_Cr, cut short, a frame twice, a Single Frame longer than its frame), stray frames, the clock's steps, and Read again, rescans, clears and re-probes between. After every step each request is one the engine may send (`04` only while clearing) and a Single Frame; no worker would spin (nothing out, nothing due, `next_event_us` 0); a reply on one channel changes no other channel's request; every report stays within its caps, its generation never going back; ISO-TP's slots stay within bounds and nothing outlives N_Cr. Then intact replies alone must end every channel's walk, identification, diagnostics and DID scan within simulated minutes, and after a Read again leave every identification item answered or refused and every report complete. It runs at a few hundred inputs a second; two runs agree. |
 | `fuzz_json` | The strict JSON reader that signal files go through (`core/src/json.h`, [ADR-0051](../docs/adr/0051-signal-files.md) section 1): arbitrary bytes, the first byte picking the depth bound (1 to 64) and, with its top bit, a size bound at half the input. A refusal has one line of words and a position within the input's lines (none only for the size bound) and leaves the value null; a document stays within the depth bound, holds only valid UTF-8 (checked apart from the reader's own check), finite numbers, an exact `int64_t` only for an integer, no key twice in an object, and positions that move forward in document order; written back out and read again it is the same document; two parses agree. |
 | `fuzz_signal_file` | The signal-file loader (`ecuio_signal_file_load`, [ADR-0051](../docs/adr/0051-signal-files.md)): arbitrary bytes, best seeded with real files (`tests/fixtures/signal-files/`). Two loads agree, status and words; a refusal leaves no file and one line of words; a loaded file's set passes the validator, its profile name registers, and every def decodes a payload carrying its own key through the decoder its kind takes. |
+| `fuzz_obdb_import` | The OBDb import (`ecuio_obdb_import`, `obdb.h`, [ADR-0051](../docs/adr/0051-signal-files.md) section 7): the first byte picks the options (a model year, alone or extending obd2), the rest is the set, best seeded with one in OBDb's shape (`tests/fixtures/obdb/`). Two imports agree, status, words and notes; a refusal leaves no file and one line of words, never the converted file refused; an import's file is NUL-terminated and loads, with as many own signals as converted notes, and every note's strings are one line. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -40,7 +41,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file fuzz_obdb_import
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -54,7 +55,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file fuzz_obdb_import
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

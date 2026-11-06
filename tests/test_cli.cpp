@@ -1425,3 +1425,33 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
     EXPECT_NE(cli::def_program(set, set.defs[3]), nullptr);
     ecuio_signal_file_free(file);
 }
+
+// An import's notes and summary are lines of their own, each kind a word
+TEST(CliSignalFileTest, AnImportsNotesAreLinesOfTheirOwn)
+{
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_CONVERTED), "converted");
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_CHANGED), "changed");
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_SKIPPED), "skipped");
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_FILE), "file");
+    EXPECT_STREQ(cli::note_word(9), "unknown");
+    ecuio_obdb_note_t n{};
+    n.what = ECUIO_OBDB_NOTE_CHANGED;
+    n.line = 12;
+    n.signal = "TCM_TFT";
+    n.key = "tcm_tft";
+    n.field = "max";
+    n.text = "OBDb holds the value within 0 to 215";
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::import_note_line(l, n);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"import_note\",\"what\":\"changed\",\"line\":12,"
+              "\"signal\":\"TCM_TFT\",\"key\":\"tcm_tft\",\"field\":\"max\","
+              "\"text\":\"OBDb holds the value within 0 to 215\"}");
+    EXPECT_LE(l.size(), cli::note_line_bytes(n));
+    cli::Line s(buf, sizeof buf);
+    cli::imported_line(s, 7, 6, 5);
+    EXPECT_EQ(std::string(s.data(), s.size()),
+              "{\"type\":\"imported\",\"converted\":7,\"changed\":6,"
+              "\"skipped\":5}");
+}
