@@ -955,6 +955,9 @@ SessionBridge::SessionBridge(QObject* parent)
 
 SessionBridge::~SessionBridge()
 {
+    // A Read once's session closes within its wait; its queued result is
+    // dropped with `this`, and core must outlive it
+    m_readOnce.join();
     // Async connect worker first: it calls core and posts a queued
     // completion against `this`. Join before tearing the session or
     // shutting core down. Worst case bounded by the surrogate handshake
@@ -986,6 +989,65 @@ SessionBridge::~SessionBridge()
         m_recorder = nullptr;
     }
     ecuio_shutdown();
+}
+
+QString SessionBridge::readOnce(const QString& adapterUri,
+                                const QVariantMap& signal,
+                                const QVariantMap& module)
+{
+    // The adapter is the session's while one runs, and a second open
+    // of it may be refused: Read once waits for none
+    if (m_connected.load(std::memory_order_acquire) || m_connecting ||
+        m_disconnecting) {
+        return QStringLiteral(
+            "Read once reads only while no session is connected");
+    }
+    if (m_readOnce.busy()) {
+        return QStringLiteral("A read is running");
+    }
+    ReadOnce::Request request;
+    QString why;
+    if (!ReadOnce::requestFrom(signal, module, &request, &why)) {
+        return why;
+    }
+    const QString uri = ReadOnce::uriFor(adapterUri, request, &why);
+    if (uri.isEmpty()) {
+        return why;
+    }
+    // An app-fed stream's link is readied here, as a connect's is
+    if (m_streamPreparer) {
+        why = m_streamPreparer(uri);
+        if (!why.isEmpty()) {
+            return why;
+        }
+    }
+    applyFrameLoggingEnv();
+    const bool started = m_readOnce.start(
+        uri, request, m_readOnceWaitMs, [this, uri](const QVariantMap& result) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, uri, result]() {
+                    m_readOnce.join();
+                    QVariantMap shown = result;
+                    shown.insert(QStringLiteral("uri"), uri);
+                    emit readingOnceChanged();
+                    emit logMessage(
+                        QStringLiteral("Read once: %1 %2")
+                            .arg(result.value(QStringLiteral("request"))
+                                     .toString(),
+                                 result.value(QStringLiteral("ok")).toBool()
+                                     ? QStringLiteral("answered")
+                                     : result.value(QStringLiteral("words"))
+                                           .toString()));
+                    emit readOnceResult(shown);
+                },
+                Qt::QueuedConnection);
+        });
+    if (!started) {
+        return QStringLiteral("A read is running");
+    }
+    emit readingOnceChanged();
+    return {};
 }
 
 void SessionBridge::destroySessionLocked()
@@ -1398,6 +1460,9 @@ QString SessionBridge::connectSession(const QString& typed)
     if (m_connected.load(std::memory_order_acquire) || m_connecting) {
         return {};
     }
+    if (m_readOnce.busy()) {
+        return QStringLiteral("Read once is using the adapter");
+    }
 
     QString err = m_streamPreparer ? m_streamPreparer(uri) : QString();
     if (!err.isEmpty()) {
@@ -1426,6 +1491,13 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         || m_disconnecting) {
         return;   // one attempt at a time, none during a teardown; the
                   // UI already reflects state
+    }
+    if (m_readOnce.busy()) {
+        const QString err = QStringLiteral("Read once is using the adapter");
+        emit logMessage(
+            QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
+        emit connectResult(uri, err);
+        return;
     }
     // An app-fed stream's link is readied here, on the GUI thread, before
     // core opens it on the connect thread

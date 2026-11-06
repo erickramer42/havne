@@ -4,7 +4,10 @@
 //          label's rule and its defaults, each change returning a new
 //          document and leaving the one it was given alone, a connection
 //          and plotted signals kept for adapter sessions only, and each
-//          row of section 4's table with its log line.
+//          row of section 4's table with its log line; a vehicle's
+//          signal files (ADR-0051) through every change, Duplicate
+//          copying them, a clashing profile refused, the form's own file
+//          replaced, and the files the store keeps.
 
 import QtQuick
 import QtTest
@@ -12,7 +15,13 @@ import App
 TestCase {
     name: "VehicleBook"
 
-    // Two vehicles, the first picked and recognized
+    // Signal files as the store names them, by their content's SHA-256
+    readonly property string shaA: "a".repeat(64)
+    readonly property string shaB: "b".repeat(64)
+    readonly property string shaC: "c".repeat(64)
+    function fileA() { return { sha256: shaA, name: "Transmission", profile: "user.transmission" } }
+
+    // Two vehicles, the first picked and recognized, with a signal file
     function book() {
         return {
             salt: "5a17",
@@ -20,9 +29,9 @@ TestCase {
             list: [
                 { id: "v1", label: "Daily driver", vinKey: "key-a",
                   uri: "elm327://COM6?profile=obd2", plotted: ["Timing Advance"],
-                  unplotted: ["Intake Air Temp"] },
+                  unplotted: ["Intake Air Temp"], signals: [fileA()], own: "" },
                 { id: "v2", label: "Weekend car", vinKey: "", uri: "", plotted: [],
-                  unplotted: [] }
+                  unplotted: [], signals: [], own: "" }
             ]
         }
     }
@@ -42,8 +51,34 @@ TestCase {
         compare(d.list[0].unplotted, ["Intake Air Temp"])
     }
 
+    // An entry stored before signal files existed has none
+    function test_anEntryWithoutSignalFilesReadsAsNone() {
+        const old = book()
+        delete old.list[0].signals
+        delete old.list[0].own
+        const d = VehicleBook.parse(JSON.stringify(old))
+        compare(d.list[0].signals, [])
+        compare(d.list[0].own, "")
+        compare(d.list[0].uri, "elm327://COM6?profile=obd2", "the rest as stored")
+    }
+
+    // As a picked id that's gone: the file isn't the vehicle's
+    function test_anOwnThatNamesNoFileIsNone() {
+        const d = book()
+        d.list[0].own = shaB
+        compare(VehicleBook.parse(JSON.stringify(d)).list[0].own, "")
+        d.list[0].own = shaA
+        compare(VehicleBook.parse(JSON.stringify(d)).list[0].own, shaA)
+    }
+
     function test_aDamagedDocumentIsDroppedWhole_data() {
         const missing = book(); delete missing.list[1].vinKey
+        const badSignals = book(); badSignals.list[0].signals = fileA()
+        const badSha = book(); badSha.list[0].signals[0].sha256 = "A".repeat(64)
+        const shortSha = book(); shortSha.list[0].signals[0].sha256 = "a".repeat(63)
+        const noProfile = book(); delete noProfile.list[0].signals[0].profile
+        const noName = book(); noName.list[0].signals[0].name = ""
+        const badOwn = book(); badOwn.list[0].own = 7
         const twice = book(); twice.list[1].id = "v1"
         const unnamed = book(); unnamed.list[0].label = "  "
         const badList = book(); badList.list[0].unplotted = ["RPM", 3]
@@ -57,7 +92,13 @@ TestCase {
             { tag: "an id twice", text: JSON.stringify(twice) },
             { tag: "a blank label", text: JSON.stringify(unnamed) },
             { tag: "a name that isn't text", text: JSON.stringify(badList) },
-            { tag: "plotted that isn't a list", text: JSON.stringify(badPlotted) }
+            { tag: "plotted that isn't a list", text: JSON.stringify(badPlotted) },
+            { tag: "signals that aren't a list", text: JSON.stringify(badSignals) },
+            { tag: "a SHA-256 in upper case", text: JSON.stringify(badSha) },
+            { tag: "a SHA-256 a digit short", text: JSON.stringify(shortSha) },
+            { tag: "a file without its profile", text: JSON.stringify(noProfile) },
+            { tag: "a file without a name", text: JSON.stringify(noName) },
+            { tag: "own that isn't text", text: JSON.stringify(badOwn) }
         ]
     }
     function test_aDamagedDocumentIsDroppedWhole(data) {
@@ -103,7 +144,7 @@ TestCase {
         compare(added.picked, "v3")
         compare(VehicleBook.picked(added),
                 { id: "v3", label: "Track day", vinKey: "", uri: "", plotted: [],
-                  unplotted: [] })
+                  unplotted: [], signals: [], own: "" })
 
         const copied = VehicleBook.duplicate(d, "Daily driver (copy)")
         const c = VehicleBook.picked(copied)
@@ -111,7 +152,83 @@ TestCase {
         compare(c.plotted, ["Timing Advance"], "the plotted signals")
         compare(c.unplotted, ["Intake Air Temp"], "and the unplotted")
         compare(c.vinKey, "", "never the VIN key")
+        compare(c.signals, [fileA()], "the signal files")
         compare(d, book(), "the given document is unchanged")
+
+        const owned = VehicleBook.setOwn(d, { sha256: shaB, name: "Mine", profile: "user.mine" })
+        const ownCopy = VehicleBook.picked(VehicleBook.duplicate(owned, "Daily driver (copy)"))
+        compare(ownCopy.signals.map(f => f.sha256), [shaA, shaB])
+        compare(ownCopy.own, shaB, "and which one the form writes")
+    }
+
+    // ADR-0027 section 5's trap: an entry rebuilt from the fields it knew
+    // would drop the files at the next change
+    function test_everyChangeKeepsTheSignalFiles_data() {
+        return [
+            { tag: "pick", apply: d => VehicleBook.pick(d, "v1") },
+            { tag: "rename", apply: d => VehicleBook.rename(d, "Commuter") },
+            { tag: "forget the VIN", apply: d => VehicleBook.forgetVin(d) },
+            { tag: "a connect", apply: d => VehicleBook.rememberUri(d, "j2534://OBDX Pro - VX") },
+            { tag: "plotting", apply: d => VehicleBook.rememberPlotting(d, ["MAP"], []) },
+            { tag: "another vehicle added", apply: d => VehicleBook.pick(VehicleBook.add(d, "New"), "v1") },
+            { tag: "another vehicle forgotten",
+              apply: d => VehicleBook.pick(VehicleBook.forget(VehicleBook.pick(d, "v2")), "v1") },
+            { tag: "recognized", apply: d => VehicleBook.recognize(d, "key-a", "elm327://COM6").doc },
+            { tag: "stored and read",
+              apply: d => VehicleBook.parse(VehicleBook.serialize(VehicleBook.copy(d))) }
+        ]
+    }
+    function test_everyChangeKeepsTheSignalFiles(data) {
+        const d = VehicleBook.setOwn(book(), { sha256: shaB, name: "Mine", profile: "user.mine" })
+        const v = VehicleBook.picked(data.apply(d))
+        compare(v.signals, [fileA(), { sha256: shaB, name: "Mine", profile: "user.mine" }])
+        compare(v.own, shaB)
+    }
+
+    function test_aClashingProfileIsRefused() {
+        const d = book()
+        const clash = { sha256: shaB, name: "Transmission v2", profile: "user.transmission" }
+        compare(VehicleBook.profileProblem(d, clash, ""),
+                "user.transmission is made by another file already (Transmission, in Daily driver)")
+        compare(VehicleBook.addSignals(d, clash), d, "refused into its own vehicle")
+        const other = VehicleBook.pick(d, "v2")
+        verify(VehicleBook.profileProblem(other, clash, "") !== "", "and from another vehicle")
+        compare(VehicleBook.addSignals(other, clash), other)
+
+        const shared = VehicleBook.addSignals(other, fileA())
+        compare(VehicleBook.picked(shared).signals, [fileA()], "the same file in two vehicles")
+        compare(VehicleBook.addSignals(d, fileA()), d, "a file the vehicle has is kept once")
+
+        const another = { sha256: shaC, name: "Body", profile: "user.body" }
+        compare(VehicleBook.picked(VehicleBook.addSignals(d, another)).signals,
+                [fileA(), another])
+        compare(d, book(), "the given document is unchanged")
+    }
+
+    // The form saves its file again under the same name: a new hash, the
+    // same profile, replacing its last; another vehicle's file still clashes
+    function test_theFormsOwnFileIsReplaced() {
+        let d = VehicleBook.setOwn(book(), { sha256: shaB, name: "Mine", profile: "user.mine" })
+        compare(VehicleBook.picked(d).own, shaB)
+        d = VehicleBook.setOwn(d, { sha256: shaC, name: "Mine", profile: "user.mine" })
+        compare(VehicleBook.picked(d).signals.map(f => f.sha256), [shaA, shaC])
+        compare(VehicleBook.picked(d).own, shaC)
+
+        const theirs = { sha256: shaB, name: "Mine", profile: "user.transmission" }
+        compare(VehicleBook.setOwn(d, theirs), d, "an imported file's profile is not the form's")
+
+        const removed = VehicleBook.removeSignals(d, shaC)
+        compare(VehicleBook.picked(removed).signals, [fileA()])
+        compare(VehicleBook.picked(removed).own, "", "removing the own file leaves none")
+        compare(VehicleBook.picked(VehicleBook.removeSignals(d, shaA)).own, shaC)
+    }
+
+    function test_theFilesTheStoreKeeps() {
+        let d = VehicleBook.addSignals(VehicleBook.pick(book(), "v2"), fileA())
+        d = VehicleBook.setOwn(d, { sha256: shaC, name: "Mine", profile: "user.mine" })
+        compare(VehicleBook.referencedFiles(d), [shaA, shaC], "each once, sorted")
+        compare(VehicleBook.referencedFiles(VehicleBook.forget(d)), [shaA])
+        compare(VehicleBook.referencedFiles(VehicleBook.forgetAll(d)), [])
     }
 
     function test_renameForgetTheVinForgetAndForgetAll() {
@@ -161,7 +278,8 @@ TestCase {
         compare(r.outcome, "new")
         compare(VehicleBook.picked(r.doc),
                 { id: "v3", label: "Vehicle 1", vinKey: "key-c",
-                  uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [] })
+                  uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [],
+                  signals: [], own: "" })
         compare(VehicleBook.logLine(r), "Vehicle: not Daily driver (its VIN differs); saved as Vehicle 1")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")
