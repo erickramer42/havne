@@ -1,9 +1,7 @@
 // File/layer: core/src/absolute_path.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: HARNESS: J2534QueryParamTest.RelativeDllPathsAreRefused and
-//          J2534SurrogateTest.SurrogateExeOverrideIsRestricted (through
-//          win_utf8.h); UNIT: SimEcuTest.TheUrisKeysAndRefusals (a
-//          recording's path, sim_ecu.h)
+// Testing: UNIT: SimEcuTest (test_obd2); HARNESS: J2534QueryParamTest
+//          (test_j2534_stream); J2534SurrogateTest (test_j2534_surrogate)
 //
 // Windows' rule for an absolute path, kept apart from win_utf8.h so a
 // header that judges a URI's path on every platform (sim_ecu.h) doesn't

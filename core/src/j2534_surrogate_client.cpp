@@ -1,8 +1,6 @@
 // File/layer: core/src/j2534_surrogate_client.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS: every J2534 suite (the x64 surrogate) and the
-//          cross-arch run (the x86 one); the exe chosen by the DLL's arch.
-//          The session logs' names and which are pruned: UNIT,
-//          CoreTest.SurrogateLog* (surrogate_log_names.h)
+// Testing: UNIT: CoreTest (test_core); HARNESS: every test_j2534_* binary;
+//          Cross-arch
 
 #include "ecuio/j2534_surrogate.h"
 #include "ecuio/core.h"

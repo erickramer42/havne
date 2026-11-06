@@ -1,32 +1,8 @@
 // File/layer: core/src/socketcan_transport.cpp | C++17, Qt-free; Linux only
 //             (ECUIO_HAVE_SOCKETCAN), its query keys everywhere
-// Testing: UNIT: SocketCanTest.* (the URI's refusals off Linux and on it,
-//          before any interface is read; the judges and the rate's proof,
-//          socketcan_wire.h); HARNESS: SocketCanBusTest.* (Linux, vcan0:
-//          frames in order with their flags, the filter, the mock's drive
-//          cycle decoding, quiet and back, the interface down and up, an
-//          overflow, error frames, no allocation per frame) and
-//          SocketCanRequestTest.* (requests through ISO-TP against the
-//          fakes' ECU on vcan0). A failed poll other than EINTR by code
-//          reading only: nothing makes the kernel fail one on demand;
-//          Reply timing on the kernel's clock (ADR-0042):
-//          SocketCanRequestTest.TimingReportsEachRequestOnTheKernelsClock;
-//          ISO-TP's N_Cr on the kernel's receive times:
-//          SocketCanRequestTest.AReplyOnTimeSurvivesAWorkerHeldUpMidMessage
-//          (a worker held inside its reads; one held between passes, which
-//          the expiry after the reads covers, by code reading only), and
-//          the session's own echoes left out of the clock by the same
-//          case run under load, where it failed with them in (ADR-0032's
-//          appendix "frames out of order");
-//          the rate's proof after the first echo (ADR-0040's appendix of
-//          2026-11-02), on
-//          vcan0 started unproven (ecuio_socketcan_set_vcan_unproven):
-//          SocketCanRequestTest.AnUnproven*. A recording's link lines
-//          (ADR-0049) come through link_health.h, tested there
-//          (RecorderTest.ALinkTransition*) and through the fake ELM327;
-//          these workers' argument by code reading.
-//          ECUIO_FRAME_FLAG_REASSEMBLED on a requesting session's replies:
-//          SocketCanFaultTest (expect_in_step)
+// Testing: UNIT: SocketCanTest (test_socketcan); RecorderTest (test_core);
+//          HARNESS: SocketCanBusTest, SocketCanRequestTest,
+//          SocketCanFaultTest (test_vcan)
 //
 // socketcan:// (ADR-0032, ADR-0040): a Linux CAN interface. Attach reads
 // the interface through rtnetlink and refuses one a session can't use

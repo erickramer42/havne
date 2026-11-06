@@ -1,9 +1,6 @@
 // File/layer: app/qml/SignalFilterBar.qml | Qt6 Quick, UI layer
-// Testing: the rule and its state by test_bridge
-//          (BridgeTest.SignalFilter*, .LiveListFollowsItsFilter); the bar
-//          on Live and the Recordings page by test_qml
-//          (tst_liveview.qml, tst_recordings.qml), inside a phone's width
-//          (tst_phone.qml)
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview,
+//          QmlTest.recordings, QmlTest.phone (test_qml)
 
 pragma ComponentBehavior: Bound
 

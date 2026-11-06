@@ -1,9 +1,6 @@
 // File/layer: core/src/signal_sets.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: Obd2SetTest, Obd2DecodeTest and Obd2MuxTest (test_obd2)
-//          for the obd2 set; CoreTest.MockFramesDecodeAgainstMockSignalSet,
-//          .MockBoostIsMapMinusBaro and SignalsTest for the mock set;
-//          every set passes the validator at registration; the tables' checks (enum entries,
-//          programs and their inputs): SignalTablesTest
+// Testing: UNIT: Obd2SetTest, Obd2DecodeTest, Obd2MuxTest (test_obd2);
+//          CoreTest (test_core); SignalsTest, SignalTablesTest (test_signals)
 
 #include <ecuio/signals.h>
 #include <ecuio/signal_sets.h>

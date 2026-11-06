@@ -2,26 +2,9 @@
 //             included by j2534_transport.cpp (its driver) and
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: derivation, deduplication and the limit, the
-//     read-only rule, rotation per channel and its two rate classes
-//     (a duplicate pair judged at each walk's end),
-//     correlation, the wait, the pending wait and the floor; the
-//     supported-PID walk, its budget,
-//     a bitmap asked again once after another PID's answer, and
-//     its resumption (behind a one-shot already taken), and what each
-//     answer drops; the DID scan's turns (and ?scan=first's), outcomes
-//     and rescan;
-//     identification's turns, outcomes, text and report; the
-//     diagnostics list's turns, its one-byte requests, PID 41 and its
-//     skip when the bitmaps leave it out, the freeze
-//     frame's follow-ups and values, rescan and read again; a clear's
-//     gate (the report's generation, the engine speed, under the
-//     caller's word the vehicle speed) and its steps;
-//     packing several PIDs per request, its replies and its fallback
-//     (RequestEngineTest, DiagnosticsTest, ClearTest; test_obd2); the worker that drives it is
-//     HARNESS (J2534AdoptionTest, J2534HealthTest), its timing on a
-//     vehicle BENCH.
-//     reply timing (ADR-0042): RequestEngineTest.Timing*
+// Testing: UNIT: RequestEngineTest, DiagnosticsTest, ClearTest (test_obd2);
+//          HARNESS: J2534AdoptionTest (test_j2534_stream); J2534HealthTest
+//          (test_j2534_health); BENCH
 
 #ifndef ECUIO_REQUEST_ENGINE_H
 #define ECUIO_REQUEST_ENGINE_H

@@ -1,13 +1,6 @@
 // File/layer: core/src/sim_dids.h | internal, C++17, Qt-free, header-only;
 //             no platform headers
-// Testing: UNIT: SimDidsTest (test_obd2): each field kind and byte order
-//          through ecuio_decode_signal and ecuio_decode_text, the edges of
-//          a field's range and the values past them, two signals in one
-//          DID's reply, a DID the set lacks, another module's DID, another
-//          service, a functional request's refusals; HARNESS: SimBusTest
-//          (test_vcan, Linux): a requesting socketcan:// session on the
-//          same profile reads the values the simulated ECU was given, on
-//          the engine ECU and on a module of the set's own
+// Testing: UNIT: SimDidsTest (test_obd2); HARNESS: SimBusTest (test_vcan)
 //
 // The simulated ECU's Service 22 answers from a signal set (ADR-0046's
 // appendix "DIDs from a signal set"): each def keyed 62 <DID> at offset 0

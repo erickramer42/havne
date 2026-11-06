@@ -1,10 +1,6 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
-// Testing: UNIT (registry lookup/overwrite); session-level selection and
-//          the decoded values (CoreTest.Values*) and the absent signals
-//          (CoreTest.AFieldPastEveryReplyIsAbsent) in test_core; the value
-//          layouts in c_abi; BRIDGE (BridgeTest.BothDecodePathsAgreeOverTheFixture);
-//          the timing report (ADR-0042): RequestTimingTest, the transports'
-//          Timing* cases, CoreTest.ASessionWithNoRotationHasNoTimingRows, c_abi
+// Testing: UNIT: CoreTest (test_core); RequestTimingTest (test_obd2); BRIDGE:
+//          BridgeTest (test_bridge)
 
 #ifndef ECUIO_PROFILE_H
 #define ECUIO_PROFILE_H

@@ -1,23 +1,6 @@
 // File/layer: tests/test_vcan_requests.cpp | test-only, C++17, Qt-free, Linux only
-// Testing: HARNESS: socketcan:// requesting (ADR-0040) on the simulated
-//          bus (vcan_bus.h): the fakes' ECU answers through the kernel's
-//          can-isotp, an implementation independent of core's, so the
-//          probe's walk, identification's replies across frames (core's
-//          Flow Control), the diagnostics report, the requests' and Flow
-//          Control's bytes on the wire, and the refusals of a link that
-//          can't send. SocketCanFaultTest: the test car's recording
-//          answering as the ECU (vcan_recording_ecu.h, ADR-0041 section
-//          4), whole and with replies broken at the ISO-TP level.
-//          SimBusTest: the simulated ECU (ADR-0046, core's ISO-TP sender)
-//          answering an obd2 session, a clear and every fault, a
-//          response pending waited for, a uds-generic session asking
-//          both of modules=2's ECUs, a profile's DIDs read at the values
-//          the simulated ECU was given, and going silent once another
-//          node sends on its reply ID. The
-//          rate's proof after the first echo (ADR-0040 section 3 and its
-//          appendix of 2026-11-02) on vcan0 started unproven. Each
-//          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
-//          that a failure.
+// Testing: HARNESS: SocketCanRequestTest, SocketCanFaultTest, SimBusTest
+//          (test_vcan)
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"

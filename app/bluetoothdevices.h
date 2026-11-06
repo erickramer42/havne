@@ -1,9 +1,5 @@
 // File/layer: app/bluetoothdevices.h | Qt6 Core/Qml, app layer, C++17
-// Testing: test_qml (tests/qml/tst_settings.qml): the Bluetooth rows in
-//          Settings' device list and the field they fill; a bt: URI on the
-//          desktop refused before core is asked, its reason in the error
-//          line. BENCH: the phone (ADR-0028 section 4): the permission prompt,
-//          the paired list, the BLE scan; Vehicle: the MX+ through it
+// Testing: QML: QmlTest.settings (test_qml); BENCH, Vehicle
 
 #pragma once
 

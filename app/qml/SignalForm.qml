@@ -1,10 +1,5 @@
 // File/layer: app/qml/SignalForm.qml | Qt6 Quick singleton, UI layer
-// Testing: test_qml (tests/qml/tst_signalform.qml): a signal's key from its
-//          name, an enum's values read and written, the form's fields
-//          into a signal (each kind's keys, defaults left out) and back,
-//          a vehicle's own file with a signal added, replaced by its key
-//          or removed, its modules kept to the ones its signals read; the
-//          page's use: tst_settings.qml. Core's loader judges the result.
+// Testing: QML: QmlTest.signalform, QmlTest.settings (test_qml)
 //
 // The vehicle's own signals (ADR-0051's form) as rules on documents: the
 // form's fields are text, as typed; draft() makes them a signal as a

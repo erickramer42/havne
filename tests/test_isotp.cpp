@@ -1,9 +1,5 @@
 // File/layer: tests/test_isotp.cpp | ISO-TP's rules (ADR-0040 section 1)
-// Testing: UNIT, Qt-free, every platform: core/src/isotp.h, the receiver
-//          (each frame kind, interleaving, every way a message ends
-//          unfinished, N_Cr, the Flow Control frame) and the sender (the
-//          Single and First Frame, block size, STmin, wait frames,
-//          overflow, N_Bs), and the two against each other
+// Testing: UNIT: IsoTpTest (test_socketcan)
 
 #include "isotp.h"
 

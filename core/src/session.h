@@ -1,12 +1,6 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
-//          their buffers and def index, the absent signals' counts, the info, support, identity and diagnostics
-//          copies, the timing report's, the computed values' newest
-//          inputs and plans; RecorderTest the recorder's
-//          link); HARNESS: the J2534, ELM327 and
-//          SocketCAN suites, whose workers write support[], identity[],
-//          diagnostics[] and the timing rows
+// Testing: UNIT: CoreTest, RecorderTest (test_core)
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H

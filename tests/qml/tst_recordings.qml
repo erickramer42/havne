@@ -1,23 +1,5 @@
 // File/layer: tests/qml/tst_recordings.qml | Qt Quick Test, QML tier
-// Testing: RecordingsPage.qml (ADR-0049 step 5) against the real bridge
-//          and RecordingView: the list from Bridge.recentRecordings and a
-//          recording that ends joining it, Replay handing its URI on, Open
-//          reaching the viewer on tests/fixtures/recording/findings (its
-//          signal, the default plotted, the chart's series over the view,
-//          the frames check's findings), the cursor's readout (maximized,
-//          its strip beside the chart or below it on a tall page, folding
-//          away and back; a tap snapped to the first plotted signal's
-//          nearest sample, each trace's dot at its value's sample), the view
-//          kept inside the recording through setView, zoom, a drag and the
-//          wheel (a notch in parts zooming as one, a sideways scroll not at
-//          all), the columns kept on their grid through a pan by part of
-//          one, the chart without antialiasing while the view moves and
-//          with it at rest, a second recording overlaid (dashed beside the
-//          first's rows, sharing their scales) and aligned on the starts, a
-//          rise, a marker and the UTC starts as havne-cli view aligns them
-//          (tests/fixtures/recording/pull-early and pull-late), a finding's
-//          row centering the view, a refused folder's error, and back to
-//          the list. test_qml's recordings go to a scratch folder.
+// Testing: QML: QmlTest.recordings (test_qml)
 
 import QtQuick
 import QtTest

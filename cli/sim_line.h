@@ -1,8 +1,5 @@
 // File/layer: cli/sim_line.h | havne-cli, the simulated ECU's lines (ADR-0046)
-// Testing: UNIT (tests/test_cli.cpp, CliSimTest: the sim line and its
-//          desk bus, the stats line's counts (pending among them) and
-//          flags, the end line's reason and counts); the command on vcan0
-//          by hand (Linux)
+// Testing: UNIT: CliSimTest (test_cli)
 //
 // `havne-cli sim`'s own lines: `sim` names what answers and where, the
 // URI as given (its values, VIN and faults are in it, the defaults

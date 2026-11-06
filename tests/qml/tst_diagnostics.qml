@@ -1,22 +1,5 @@
 // File/layer: tests/qml/tst_diagnostics.qml | Qt Quick Test, QML tier
-// Testing: the Diagnostics page (ADR-0037) against the mock's report
-//          (core/src/mock_ecu.h): the empty state before any connect,
-//          the MIL, the three lists' codes, eight complete monitors, done
-//          this drive cycle too, the
-//          freeze frame's code and values in either unit system, Read
-//          again (a second read logged), diagnose=0's state, and the last
-//          read kept after a disconnect; the clear (ADR-0038): its
-//          confirmation (naming the ECUs Bridge.clearTargets lists, the
-//          bridge's own rule for a clear; that the title reads that list
-//          and no other, by code reading: the mock has one ECU, so any
-//          list names it), Cancel sending nothing, Clear once at the mock's
-//          stopped engine (its first 15 s), and on Windows the fake's
-//          running engine leaving the codes; at 320 x 400 the
-//          confirmation scrolls, so Clear and Cancel can be reached; the
-//          car's inspection line (ADR-0045), hidden until a read. The
-//          entries themselves are
-//          test_bridge's (BridgeTest.DiagnosticsEntryIsWhatThePageShows,
-//          .AClear*).
+// Testing: QML: QmlTest.diagnostics (test_qml)
 
 import QtQuick
 import QtTest

@@ -1,15 +1,5 @@
 // File/layer: fuzz/fuzz_replay_file.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: arbitrary rows of a recording's frames.csv (ADR-0017)
-//          under its header, through ecuio_session_create's replay
-//          attach, which reads the whole file (ADR-0023): the status is
-//          ECUIO_OK or ECUIO_ERR_LOAD_FAILED, a refusal names its line in
-//          one terminated detail that never holds the path, a success
-//          counts the rows, two creates agree. An input starting with 'F'
-//          carries a ?faults= query on its first line (ADR-0041): a
-//          refusal of it is BAD_URI, or UNKNOWN_PROFILE for a profile key
-//          the text adds after an '&', each with a one-line detail; and a
-//          fault set that parses draws within its bounds for frames of
-//          every length
+// Testing: FUZZ: fuzz_replay_file
 
 #include <ecuio/core.h>
 

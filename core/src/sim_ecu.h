@@ -1,15 +1,6 @@
 // File/layer: core/src/sim_ecu.h | internal, C++17, Qt-free, header-only;
 //             no platform headers
-// Testing: UNIT: SimEcuTest (test_obd2): each value through the obd2
-//          set's defs against the drive cycle, the bitmaps against what
-//          each mode answers, the canned values against the fakes', the
-//          diagnostics against the mock's, a clear, identification, the
-//          refusals and their silence to a functional request, a pack,
-//          the URI's keys and refusals (replay:// too; profile= and
-//          its refusals), the faults'
-//          grammar and their periods (pending's per module); the second
-//          module's DIDs and refusals; SimRecordingTest (test_obd2): the
-//          ECU answering from a recording at its ticks' time
+// Testing: UNIT: SimEcuTest, SimRecordingTest (test_obd2)
 //
 // What the simulated ECU answers (ADR-0046): the engine ECU, from the
 // service byte on, its framing (ISO-TP) and its bus left to sim.cpp.

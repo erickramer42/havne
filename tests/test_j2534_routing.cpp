@@ -1,13 +1,5 @@
 // File/layer: tests/test_j2534_routing.cpp | GTest, HARNESS tier
-// Testing: the PE routing decision itself (ADR-0025, replacing
-//          ADR-0009's table). ecuio_j2534_open must sniff the DLL's PE
-//          architecture and pick the surrogate: x64 fake -> the x64
-//          surrogate (CI-verifiable), x86 fake -> the x86 one
-//          (dev-machine cross-arch, env-gated), a missing file ->
-//          ECUIO_ERR_LOAD_FAILED from the sniff, no spawn. Round trips
-//          go through the FULL loader API surface
-//          (open/connect/inject/read/write/ioctl/filter/close): the
-//          same functions j2534_transport.cpp consumes.
+// Testing: HARNESS: J2534RoutingTest (test_j2534_routing); Cross-arch
 
 #include <gtest/gtest.h>
 

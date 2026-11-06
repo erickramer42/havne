@@ -1,20 +1,5 @@
 // File/layer: tests/test_cli.cpp | havne-cli's line formatting and output ring (ADR-0031)
-// Testing: UNIT, Qt-free; the diagnostics line (CliDiagnosticsTest,
-//          ADR-0037) names codes and monitors through core; the timing line
-//          (CliTimingTest, ADR-0042) has latency.csv's columns; the vin
-//          and identity lines (CliVinTest, ADR-0043) decode through core;
-//          the titles and the dtc line (CliDtcTest, ADR-0044) name through it;
-//          the inspection line (CliInspectionTest, ADR-0045) is core's verdict;
-//          the simulated ECU's lines (CliSimTest, ADR-0046); the DID
-//          scan's line and --until-scanned's end (CliScanTest, ADR-0020);
-//          the lines typed into stream --record (CliMarkLinesTest, ADR-0049);
-//          view's grammar, axis and lines (CliViewTest, ADR-0049);
-//          info's lines and --rate-drop (CliInfoTest, ADR-0049);
-//          a signal file's lines and a URI's profile (CliSignalFileTest,
-//          ADR-0051), the file loaded through core; CliPluginTest
-//          (ADR-0052).
-//          The program end to end is the golden runs'
-//          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
+// Testing: UNIT (test_cli): this file's suites
 
 #include "can_line.h"
 #include "diagnostics_line.h"

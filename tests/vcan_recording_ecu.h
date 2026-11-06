@@ -1,9 +1,6 @@
 // File/layer: tests/vcan_recording_ecu.h | test-only, C++17, Qt-free, Linux
 //             only (SocketCAN); header-only
-// Testing: HARNESS, a recording answering as the ECU on the simulated bus
-//          (ADR-0041 section 4): SocketCanFaultTest in
-//          test_vcan_requests.cpp drives a requesting socketcan:// session
-//          against it, with and without faults
+// Testing: HARNESS: SocketCanFaultTest (test_vcan)
 //
 // The test car's own replies answer a live session: each Service 01
 // request gets the recording's reply for its PID at the ECU's time since

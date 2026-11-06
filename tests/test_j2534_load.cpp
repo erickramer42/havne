@@ -1,10 +1,5 @@
 // File/layer: tests/test_j2534_load.cpp | GTest, HARNESS tier
-// Testing: Exercises open/export-resolution/close through the loader,
-//          which loads the fake vendor DLLs in the x64 surrogate
-//          (ADR-0025): no hardware, no polling.
-//          The everyday fake (spec spelling) path is baked in by CMake
-//          ($<TARGET_FILE:fake_j2534>); the legacy fixture (fallback
-//          spelling) via FAKE_J2534_LEGACY_DLL_PATH.
+// Testing: HARNESS: FakeFixture (test_j2534_load)
 
 #include <gtest/gtest.h>
 

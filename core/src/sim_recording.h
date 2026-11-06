@@ -1,12 +1,7 @@
 // File/layer: core/src/sim_recording.h | internal, C++17, Qt-free;
 //             ALL platforms; the loader in sim.cpp
-// Testing: UNIT: SimRecordingTest (test_obd2): replies kept by the
-//          request they answer, packed replies split, each answer at its
-//          time (before the first, between, held after the last, looped),
-//          packs, the car's bitmaps and the ones worked out without them,
-//          the VIN given, the refusals; the loader on the committed
-//          fixture and its refusals; HARNESS: SimBusTest (test_vcan,
-//          Linux): an obd2 session against a recording on vcan0
+// Testing: UNIT: SimRecordingTest (test_obd2); HARNESS: SimBusTest
+//          (test_vcan)
 //
 // A recording as the simulated ECU (ADR-0046 section 7): the replies the
 // engine ECU (0x7E8) sent in a recording's frames.csv, each kept under

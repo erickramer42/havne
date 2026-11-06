@@ -1,10 +1,6 @@
 // File/layer: core/src/win_utf8.h | internal, Win32-only, C++17, Qt-free
-// Testing: HARNESS: FakeFixture.NonAsciiDllPathLoads and
-//          J2534SurrogateTest.NonAsciiDllPathLoadsInTheChild load the
-//          fake DLL from a directory with a non-ASCII name;
-//          J2534QueryParamTest.RelativeDllPathsAreRefused and
-//          J2534SurrogateTest.SurrogateExeOverrideIsRestricted judge
-//          paths with ecuio_is_absolute_path
+// Testing: HARNESS: J2534SurrogateTest (test_j2534_surrogate);
+//          J2534QueryParamTest (test_j2534_stream)
 //
 // Paths cross the C ABI as UTF-8 (j2534.h); Win32 takes them as UTF-16
 // through the W APIs. The A APIs would read the same bytes in the ANSI

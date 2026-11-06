@@ -1,17 +1,7 @@
 // File/layer: core/src/sim.cpp | C++17, Qt-free; the bus side Linux only
 //             (SocketCAN), a refusal elsewhere
-// Testing: UNIT: SimTest (test_socketcan): the arguments and the URI's
-//          refusals on every platform, NO_TRANSPORT off Linux, a
-//          recording read before the interface, its stretch with it;
-//          SimRecordingTest (test_obd2): the loader on the committed
-//          fixture, a stretch's rows, and its refusals; HARNESS: SimBusTest (test_vcan, Linux): a requesting
-//          socketcan:// session against it on vcan0 reads the drive
-//          cycle's values, the diagnostics and the VIN, clears, and stays
-//          in step under every fault, waits out a response pending, and
-//          reads a recording as its car; a uds-generic session asks both
-//          of modules=2's ECUs; a session on a profile reads the DIDs the
-//          simulated ECU answers from that profile's set, on the engine
-//          ECU and a module of the set's own, at the values it was given
+// Testing: UNIT: SimTest (test_socketcan); SimRecordingTest (test_obd2);
+//          HARNESS: SimBusTest (test_vcan)
 //
 // The simulated ECU on a virtual bus (ADR-0046): a CAN_RAW socket on a
 // vcan interface hearing 0x7DF and 0x7E0 (and with modules=2 0x7E1, or

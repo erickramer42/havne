@@ -1,28 +1,6 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS: test_j2534_connect: connect failures and the
-//          session info, also cross-arch. test_j2534_stream: URI parsing,
-//          the vendor clock's unit cases, connect parameters,
-//          filter registration, request framing and routing, header
-//          strip and arbitration_id stamp, raw on the engine ECU's
-//          channel without ?filter=, rotation, ?poll= precedence,
-//          the probe's walk, its drops, ?probe=0 and its resumption on
-//          recovery, the support report it publishes, uds-generic's
-//          requests, ECU prefix and DID scan, identification's
-//          requests, ?identify=0 and the report it publishes, and
-//          diagnostics' (ADR-0037): the report, ?diagnose=0 and Read
-//          again, and a clear with the engine stopped and running
-//          (ADR-0038).
-//          test_j2534_health, also cross-arch: the request engine's
-//          pacing (the floor, the wait, negative and pending replies,
-//          two channels at once), the drain in passive mode, and the
-//          link-health machine (link_health.h, UNIT in CoreTest.Link*)
-//          through this worker: hard and quiet reads, untouched counts,
-//          the write latch, its priority and its step-down, a zero
-//          written count, unmatched frames, backoff growth, its end at
-//          a clean read and its restart, quiet reads once nothing is
-//          left to ask, and frames lost (ERR_BUFFER_OVERFLOW, the
-//          BUFFER_OVERFLOW bit) flagged on the next frame with the link
-//          unchanged.
+// Testing: UNIT: CoreTest (test_core); HARNESS: test_j2534_connect;
+//          test_j2534_stream; test_j2534_health; Cross-arch
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there;
 //          Reply timing on the adapter's clock (ADR-0042):

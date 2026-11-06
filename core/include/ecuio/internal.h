@@ -2,11 +2,8 @@
 //             C declarations, Qt-free; included by core sources,
 //             test_core, test_elm327, test_j2534_load and
 //             test_j2534_routing
-// Testing: HARNESS: test_j2534_load and test_j2534_routing call the
-//          loader helpers directly, the other J2534 suites reach them
-//          through the transport ops; test_elm327 puts its fake ELM327
-//          behind the port opener; UNIT: CoreTest through the mock
-//          transport; RecorderTest through the recorder's seams
+// Testing: UNIT: CoreTest, RecorderTest (test_core); test_elm327; HARNESS:
+//          test_j2534_load; test_j2534_routing
 
 #ifndef ECUIO_INTERNAL_H
 #define ECUIO_INTERNAL_H

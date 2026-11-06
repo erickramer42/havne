@@ -1,9 +1,5 @@
 // File/layer: core/src/elm327_log.cpp | C++17, Qt-free, every platform
-// Testing: HARNESS: Elm327SessionTest.TheWireLog* (test_elm327) against
-//          the fake ELM327, in a directory of the test's own
-//          (ecuio_elm327_set_log_dir); UNIT: Elm327LogTest for the kept
-//          name and the text's escapes. The POSIX file calls first
-//          compile in CI
+// Testing: HARNESS: Elm327SessionTest, Elm327LogTest (test_elm327)
 //
 // The wire log's file (elm327_log.h): its name, its lines, and the
 // pruning, on Windows' wide-character calls and POSIX alike.

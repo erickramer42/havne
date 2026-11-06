@@ -1,8 +1,5 @@
 // File/layer: app/readonce.h | Qt6 Core, app layer, C++17
-// Testing: UNIT: ReadOnceTest.* (test_bridge): the request URI from an
-//          adapter's, the draft's refusals, a reply's bytes, value and
-//          NRC words; HARNESS: BridgeTest.ReadOnce* against the fake
-//          J2534 DLL's ECU (a DID, a PID, a refusal, the idle rule)
+// Testing: BRIDGE: ReadOnceTest, BridgeTest (test_bridge)
 //
 // Read once (ADR-0051's form): one request for a signal still being
 // written, its reply's bytes shown beside the value its draft decodes

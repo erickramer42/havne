@@ -1,15 +1,7 @@
 // File/layer: core/src/mock_drive_cycle.h | internal, not ABI-exported;
 //             included by mock_transport.cpp (its only producer)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: CoreTest.MockDriveCycle* step whole loops tick by tick
-//     and round-trip every tick through the mock signal set (test_core);
-//     CoreTest.MockDriveCycleSignalsStayPhysical checks every tick against
-//     the consistency rules below, and ...ReadingsNeverHoldDeadStill that
-//     rpm neither sits still nor steps, the engine stopped aside;
-//     CoreTest.MockDriveCycleEachLoopStartsWithTheEngineStopped the
-//     key-on phase and the start; CoreTest.MockFramesDecodeAgainstMockSignalSet
-//     covers the worker, CoreTest.MockBoostIsMapMinusBaro the boost its
-//     MAP and baro give.
+// Testing: UNIT: CoreTest (test_core)
 
 #ifndef ECUIO_MOCK_DRIVE_CYCLE_H
 #define ECUIO_MOCK_DRIVE_CYCLE_H

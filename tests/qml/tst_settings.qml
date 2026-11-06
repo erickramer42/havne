@@ -1,38 +1,5 @@
 // File/layer: tests/qml/tst_settings.qml | Qt Quick Test, QML tier
-// Testing: Settings composes the URI from a preset (the base), the
-//          profile row and uds-generic's DID field, reads a typed URI
-//          back into the row and the field and keeps its other keys (the
-//          vehicle run sheet's URIs pass through untouched), refuses
-//          query characters in the DID field, shows core's refusal of a
-//          DID list in the error line, connects a composed uds-generic
-//          URI through the mock, lists serial ports after the interfaces
-//          (a port's row and the elm327:// preset filling the field) and
-//          the phone's Bluetooth adapters after them (a bt: or ble: row's
-//          stream URI; on the desktop a bt: URI refused, its reason in the
-//          error line), and
-//          locks every control, the device rows among them, while a
-//          connect is in flight (Windows: the fake's open stalled by a
-//          knob); the Units row sets the bridge's unit system, connected
-//          or not; a new page (a restart) gets back the last URI that
-//          connected, read into the row, and the Record switch, while a
-//          refused URI isn't kept; a device's row shows the versions last
-//          seen there (Windows: the fake's, from a connect), across a
-//          restart, and a damaged store shows none. The Vehicle section
-//          (ADR-0027): New, Rename, Duplicate and the defaults, Forget
-//          and Forget all asking once, kept across a restart; picking
-//          fills the field; locked during a session; a mock session
-//          leaves the vehicle alone, and (Windows, the fake) an adapter's
-//          connect keeps its URI and plotted signals and its VIN is
-//          learned and logged. A recording that ends is listed, and its
-//          row fills the field with a replay that connects, under the
-//          profile and DIDs recorded. At the narrowest phone's width (320 px) every item lies
-//          inside the page, a long URI in the field and a recording's row
-//          too; the URI and
-//          DID fields ask the keyboard for no
-//          capitals or predictions; the WiFi presets fill their
-//          addresses. The live registry, and
-//          the units kept across a restart (Main.qml's Settings), are
-//          manual smoke.
+// Testing: QML: QmlTest.settings (test_qml)
 
 import QtCore
 import QtQuick

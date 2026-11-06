@@ -1,13 +1,7 @@
 // File/layer: app/adapterrelay.h | Qt6 Core/Network, app layer, C++17;
 //             every platform (its Bluetooth adapter, btrelay.cpp, is
 //             Android's)
-// Testing: UNIT: BridgeTest.Relay* (test_bridge, a fake adapter and real
-//          loopback TCP sockets): bytes both ways in order, a computer's
-//          bytes held until the adapter opens and too many refused, a
-//          second computer refused, the adapter's loss ending the
-//          computer's link, the computer's leaving keeping the adapter,
-//          stop, the URI's refusals; BENCH and Vehicle: the phone with
-//          the MX+ (ADR-0047)
+// Testing: BRIDGE: BridgeTest (test_bridge); BENCH, Vehicle
 //
 // One adapter relayed to a computer (ADR-0047): the phone holds the
 // adapter's link and listens on its own loopback address, and a computer

@@ -1,8 +1,5 @@
 // File/layer: app/qml/SignalHub.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_dashboard.qml): lookup by def ID,
-//          values following the model, and a profile switch, alone and
-//          under the Dashboard's gauges, a set whose defs are named
-//          otherwise too
+// Testing: QML: QmlTest.dashboard (test_qml)
 
 import QtQuick
 

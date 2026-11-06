@@ -1,12 +1,5 @@
 // File/layer: fuzz/fuzz_sim.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: the simulated ECU (ADR-0046) from arbitrary bytes: the
-//          URI's parser on arbitrary text, and the ECU answering a run of
-//          arbitrary requests off the bus, its car stepped between them,
-//          the mock's or a recording made of arbitrary frames. A reply
-//          stays within ECUIO_SIM_REPLY_MAX and is a positive reply to
-//          the request's service or a three-byte negative one naming it;
-//          a fate is one of five, and two ECUs given the same requests
-//          answer the same
+// Testing: FUZZ: fuzz_sim
 
 #include "sim_ecu.h"
 

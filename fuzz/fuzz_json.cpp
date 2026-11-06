@@ -1,14 +1,5 @@
 // File/layer: fuzz/fuzz_json.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: arbitrary bytes through the strict JSON reader
-//          (core/src/json.h, ADR-0051 section 1), the first byte picking
-//          the bounds. A refusal has one line of words and a position
-//          inside the input (0:0 only for the size bound); a document
-//          stays within its depth bound, holds only valid UTF-8 and
-//          finite numbers, no duplicate key, and positions that move
-//          forward in document order; written back out and read again it
-//          is the same document, and so is what core's writer writes
-//          (json.h's write), each number of its kind and sign and exact
-//          where its shortest text reads back; two parses agree.
+// Testing: FUZZ: fuzz_json
 
 #include "json.h"
 #include "recording_rows.h" /* parse_number: what number_text checks */

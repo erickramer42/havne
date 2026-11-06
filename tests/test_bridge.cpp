@@ -1,15 +1,5 @@
 // File/layer: tests/test_bridge.cpp | GTest + QtCore/Network, app-layer tests
-// Testing: UNIT/HARNESS: the bridge and its models against the real mock
-//          worker (and, on Windows, the fake J2534 DLL): marshaling,
-//          coalescing, backpressure, the frame log's ring and order, the
-//          signal model's roles and freshness, link states, the activity
-//          log's lines, connect and disconnect threads, both decode
-//          paths over the vehicle fixture, recording, the stream
-//          preparer's refusal (ADR-0028), the BLE service picker
-//          and the inspection line (ADR-0045,
-//          BridgeTest.InspectionEntryIsWhatThePageShows), and the adapter
-//          relay over loopback TCP with a fake adapter (ADR-0047,
-//          BridgeTest.Relay*)
+// Testing: BRIDGE: BridgeTest, ReadOnceTest (test_bridge)
 
 #include <cmath>
 #include <gtest/gtest.h>

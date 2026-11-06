@@ -1,11 +1,5 @@
 // File/layer: fuzz/fuzz_signal_file.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: arbitrary bytes through the signal-file loader
-//          (ecuio_signal_file_load, ADR-0051), the input mostly mutated
-//          from seed files (tests/fixtures/signal-files/). A refusal
-//          leaves *out NULL and one line of words; a file loaded has a
-//          set the validator passes and a profile name the registry
-//          takes, and each def decodes a payload carrying its own key;
-//          two loads agree.
+// Testing: FUZZ: fuzz_signal_file
 
 #include <ecuio/core.h>
 #include <ecuio/profile.h>

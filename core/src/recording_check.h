@@ -1,9 +1,6 @@
 // File/layer: core/src/recording_check.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
-// Testing: UNIT: CheckRulesTest (test_core: the median estimate, the
-//          link and asleep lines, ISO-TP's sequences, each finding's rule,
-//          frame by frame); HARNESS: the same through ecuio_recording_check
-//          on folders; FUZZ: fuzz_recording (a folder's frames.csv)
+// Testing: UNIT: CheckRulesTest (test_core); FUZZ: fuzz_recording
 //
 // The frames check (ADR-0049 section 6) as a stream: a checker is fed the
 // events.log lines it takes first, then each frame in order, and settles

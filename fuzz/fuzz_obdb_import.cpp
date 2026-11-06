@@ -1,12 +1,5 @@
 // File/layer: fuzz/fuzz_obdb_import.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: arbitrary bytes through the OBDb import (ecuio_obdb_import,
-//          obdb.h, ADR-0051 section 7), best seeded with a set in OBDb's
-//          shape (tests/fixtures/obdb/). The first byte picks the options
-//          (a model year, alone or extending obd2) and the rest is the
-//          set. A refusal leaves no file and one line of words; an import
-//          gives a NUL-terminated file that the loader takes, with as many
-//          own signals as converted notes, every note's strings one line;
-//          two imports agree.
+// Testing: FUZZ: fuzz_obdb_import
 
 #include <ecuio/core.h>
 #include <ecuio/obdb.h>

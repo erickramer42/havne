@@ -1,24 +1,5 @@
 // File/layer: tests/test_j2534_surrogate.cpp | GTest, HARNESS tier
-// Testing: spawns the REAL surrogate process hosting the fake vendor DLL,
-//          and asserts frames cross the pipe intact: exact counts,
-//          payload fidelity, RxStatus->flags translation, vendor
-//          timestamp passthrough, FIFO order, no reads before CONNECT,
-//          clean job-object teardown, and fast failure on a dead DLL.
-//          Also: write->echo round trip, ioctl SET->GET + VBATT,
-//          child-side ioctl whitelist, filter start/stop lifecycle,
-//          recovery after a timed-out request, a late read reply
-//          dropped and logged, a request-ID mismatch ending the
-//          handle, a blocked vendor open,
-//          an ERR_TIMEOUT partial batch (spec-mode fake), no
-//          phantom frames from an untouched count under a hard error,
-//          a child from other shared headers refused at OP_OPEN,
-//          device and channel ID 0 handled as real IDs, malformed
-//          requests refused by the client before sending and by the
-//          child on arrival, a surrogate exe that exits before the
-//          handshake, a close that fails for a child that exited on
-//          its own or was killed (so every close == OK asserts the
-//          child survived what came before), and replies skewed past
-//          the wire's limits (the child's ECUIO_SUR_TEST_SKEW).
+// Testing: HARNESS: J2534SurrogateTest (test_j2534_surrogate)
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86

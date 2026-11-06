@@ -1,15 +1,6 @@
 // File/layer: core/include/ecuio/sim.h | C ABI, public interface
-// Testing: UNIT: SimEcuTest (test_obd2): the answers (the second
-//          module's too), the URI and the faults; SimRecordingTest
-//          (test_obd2): a recording's answers and its loading; SimTest
-//          (test_socketcan): the contract's arguments on every platform,
-//          profile='s refusals and ecuio_sim_set_value's; SimDidsTest
-//          (test_obd2): the DIDs answered from a set;
-//          c_abi: the stats' layout, pending's offset; HARNESS: SimBusTest
-//          (test_vcan, Linux): a requesting socketcan:// session against
-//          it on vcan0, the mock's car (both modules, a response pending)
-//          and a recording, and a profile's DIDs on the engine ECU and a
-//          module of its own
+// Testing: UNIT: SimEcuTest, SimRecordingTest, SimDidsTest (test_obd2);
+//          SimTest (test_socketcan); HARNESS: SimBusTest (test_vcan)
 
 #ifndef ECUIO_SIM_H
 #define ECUIO_SIM_H

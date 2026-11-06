@@ -1,9 +1,5 @@
 // File/layer: tests/test_vcan.cpp | test-only, C++17, Qt-free, Linux only
-// Testing: HARNESS, the simulated bus itself (vcan_bus.h): the fake ECU
-//          answering through the kernel's ISO-TP, what a listener on the
-//          bus sees of it, and a recording played onto it. Each case
-//          skips without the interface; ECUIO_VCAN_REQUIRED=1 (CI's
-//          linux-build, which brings vcan0 up) makes that a failure
+// Testing: HARNESS: VcanTest (test_vcan)
 //
 // The SocketCAN transport's tests listen to this same bus, so these pin
 // what it puts there: the frames, their PCI bytes and their padding.
