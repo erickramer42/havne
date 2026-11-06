@@ -9,8 +9,10 @@
 # --record. Its recording, replayed with no --signals and no profile=,
 # must select the file's profile and give the same values lines; with its
 # own name (rec.<16 hex>) the same again; with profile=obd2 the copy is
-# unused; and once signals.json no longer matches its hash the replay
-# decodes nothing (raw) and stderr says why.
+# unused; another .csv in the folder is a frames file of its own, which
+# doesn't take the copy (raw); a malformed query is refused as core
+# refuses it, the copy there or not; and once signals.json no longer
+# matches its hash the replay decodes nothing (raw) and stderr says why.
 
 import hashlib
 import json
@@ -92,6 +94,21 @@ def main():
                   f"{profile(lines)}, stderr {r.stderr!r}")
             ok = False
 
+        # Another .csv beside it: its own frames, so not the folder's copy
+        shutil.copy(os.path.join(folder, "frames.csv"), os.path.join(folder, "other.csv"))
+        r, lines = run([cli, "stream", f"replay://{folder}/other.csv?speed=max",
+                        "--values", "--count", "5"])
+        if r.returncode != 0 or profile(lines) != "raw":
+            print(f"FAIL  other.csv: exit {r.returncode}, profile {profile(lines)}")
+            ok = False
+
+        # A query core refuses stays refused with the copy there
+        for query in ["?", "?speed=max&&loop=0"]:
+            r, lines = run([cli, "stream", f"replay://{folder}{query}", "--values"])
+            if r.returncode != 3:
+                print(f"FAIL  {query!r}: exit {r.returncode}, profile {profile(lines)}")
+                ok = False
+
         # A copy changed since: raw, and stderr says why
         with open(os.path.join(folder, "signals.json"), "ab") as f:
             f.write(b" ")
@@ -108,8 +125,8 @@ def main():
         shutil.rmtree(root, ignore_errors=True)
     if ok:
         print(f"ok    {len(want)} values lines replayed through the copy "
-              f"({recorded}), its own name, unused under obd2, refused "
-              "once changed")
+              f"({recorded}), its own name, unused under obd2 and for another "
+              ".csv, a bad query refused, refused once changed")
     return 0 if ok else 1
 
 

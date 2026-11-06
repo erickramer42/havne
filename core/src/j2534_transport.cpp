@@ -490,13 +490,12 @@ void j2534_worker(ecuio_j2534_transport* t)
             /* An empty read waits out its timeout, even from a vendor
              * that returns at once, so the loop never spins: on time
              * (precise_wait.h), since that timeout is the way to the
-             * engine's next event. A slice at most, so a stop waits no
-             * longer. */
-            const auto left = std::chrono::milliseconds(timeout_ms) -
-                              (std::chrono::steady_clock::now() - read_start);
-            precise.sleep_for(
-                std::chrono::duration_cast<std::chrono::microseconds>(left));
-            if (t->stop_requested.load()) {
+             * engine's next event. In waits of 20 ms at most with the
+             * stop looked at between them: idle, the timeout is 100 ms,
+             * and a close would otherwise wait it out. */
+            if (precise.sleep_until(read_start +
+                                        std::chrono::milliseconds(timeout_ms),
+                                    t->stop_requested)) {
                 break;
             }
         }

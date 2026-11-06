@@ -73,8 +73,11 @@ inline std::string own_profile(const std::string& sha256)
 }
 
 // A replay:// URI's recording folder: the text between the scheme and
-// the query, or the folder of a path ending ".csv" (core's rule: a path
-// ending .csv is frames.csv itself). false for another scheme or no path
+// the query, or the folder of a path whose last part is frames.csv.
+// Another file ending .csv is a frames file of its own, and its folder's
+// events.log and signals.json aren't its (core's rule,
+// replay_transport.cpp's source_frame_flags): false, as for another
+// scheme or no path
 inline bool replay_folder(const std::string& uri, std::string* folder)
 {
     static const char kScheme[] = "replay://";
@@ -100,8 +103,11 @@ inline bool replay_folder(const std::string& uri, std::string* folder)
         }
         if (tail == ".csv") {
             const size_t slash = path.find_last_of("/\\");
-            path = slash == std::string::npos ? std::string()
-                                              : path.substr(0, slash);
+            if (slash == std::string::npos ||
+                path.compare(slash + 1, std::string::npos, "frames.csv") != 0) {
+                return false;
+            }
+            path = path.substr(0, slash);
         }
     }
     while (path.size() > 1 && (path.back() == '/' || path.back() == '\\')) {
@@ -115,14 +121,16 @@ inline bool replay_folder(const std::string& uri, std::string* folder)
 }
 
 // The URI with profile=<profile> as its one profile: every profile= in
-// the query dropped and the new one added last, the other pairs kept in
-// their order
+// the query dropped and the new one added last, the other pairs kept as
+// given, an empty one too, so a query core refuses (a "?" with nothing
+// after it, "&&") is still refused, as uri_for_profile leaves it
 inline std::string with_profile(const std::string& uri,
                                 const std::string& profile)
 {
     const size_t q = uri.find('?');
     std::string out = uri.substr(0, q);
     std::string query;
+    bool first = true;
     if (q != std::string::npos) {
         size_t at = q + 1;
         while (at <= uri.size()) {
@@ -131,13 +139,14 @@ inline std::string with_profile(const std::string& uri,
                 end = uri.size();
             }
             const std::string pair = uri.substr(at, end - at);
-            if (!pair.empty() && pair.compare(0, 8, "profile=") != 0) {
-                query += (query.empty() ? "" : "&") + pair;
+            if (pair.compare(0, 8, "profile=") != 0) {
+                query += (first ? "" : "&") + pair;
+                first = false;
             }
             at = end + 1;
         }
     }
-    query += (query.empty() ? "" : "&") + std::string("profile=") + profile;
+    query += (first ? "" : "&") + std::string("profile=") + profile;
     return out + "?" + query;
 }
 

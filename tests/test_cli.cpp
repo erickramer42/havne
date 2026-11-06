@@ -1688,8 +1688,13 @@ TEST(CliRecordingSignalsTest, AReplayUrisFolder)
     ASSERT_TRUE(
         cli::replay_folder("replay://C:/r/20261106-0900?speed=max", &folder));
     EXPECT_EQ(folder, "C:/r/20261106-0900");
-    ASSERT_TRUE(cli::replay_folder("REPLAY:///data/r/frames.CSV", &folder));
+    ASSERT_TRUE(cli::replay_folder("REPLAY:///data/r/frames.csv", &folder));
     EXPECT_EQ(folder, "/data/r");
+    // Another .csv is a frames file of its own: its folder's events.log
+    // and signals.json aren't its, as core's source_frame_flags says
+    EXPECT_FALSE(cli::replay_folder("replay:///data/r/other.csv", &folder));
+    EXPECT_FALSE(cli::replay_folder("replay:///data/r/frames.CSV", &folder));
+    EXPECT_FALSE(cli::replay_folder("replay://frames.csv", &folder));
     ASSERT_TRUE(cli::replay_folder("replay:///data/r/", &folder));
     EXPECT_EQ(folder, "/data/r");
     EXPECT_FALSE(cli::replay_folder("mock://demo", &folder));
@@ -1708,6 +1713,12 @@ TEST(CliRecordingSignalsTest, TheUriWithAnotherProfile)
     EXPECT_EQ(
         cli::with_profile("replay://f?speed=2&profile=a&loop=1&profile=b", "c"),
         "replay://f?speed=2&loop=1&profile=c");
+    // An empty pair is kept, so core refuses the query as it would have
+    EXPECT_EQ(cli::with_profile("replay://f?", "c"), "replay://f?&profile=c");
+    EXPECT_EQ(cli::with_profile("replay://f?speed=2&&loop=1", "c"),
+              "replay://f?speed=2&&loop=1&profile=c");
+    EXPECT_EQ(cli::with_profile("replay://f?profile=a", "c"),
+              "replay://f?profile=c");
     EXPECT_EQ(cli::own_profile(std::string(16, '0') + std::string(48, 'f')),
               "rec.0000000000000000");
 }

@@ -18,6 +18,7 @@
 #ifndef ECUIO_PRECISE_WAIT_H
 #define ECUIO_PRECISE_WAIT_H
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 
@@ -90,6 +91,28 @@ public:
         }
 #endif
         std::this_thread::sleep_for(d);
+    }
+
+    /* Waits until `until` in waits of at most `piece`, looking at stop
+     * between them, so a stop is seen within a piece however long the
+     * wait; true when it ended at a stop */
+    bool
+    sleep_until(std::chrono::steady_clock::time_point until,
+                const std::atomic<bool>& stop,
+                std::chrono::microseconds piece = std::chrono::milliseconds(20))
+    {
+        for (;;) {
+            if (stop.load()) {
+                return true;
+            }
+            const auto left = until - std::chrono::steady_clock::now();
+            if (left <= std::chrono::steady_clock::duration::zero()) {
+                return false;
+            }
+            const auto us =
+                std::chrono::duration_cast<std::chrono::microseconds>(left);
+            sleep_for(us < piece ? us : piece);
+        }
     }
 
 private:

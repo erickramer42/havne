@@ -829,17 +829,25 @@ std::string Error::to_string() const
 size_t invisible_length(const char* p, size_t n)
 {
     const auto* u = reinterpret_cast<const unsigned char*>(p);
-    if (n >= 2 && u[0] == 0xC2 && u[1] >= 0x80 && u[1] <= 0x9F) {
-        return 2; /* U+0080 to U+009F */
+    if (n >= 2 && u[0] == 0xC2 &&
+        ((u[1] >= 0x80 && u[1] <= 0x9F) || u[1] == 0xAD)) {
+        return 2; /* U+0080 to U+009F, U+00AD */
+    }
+    if (n >= 2 && u[0] == 0xD8 && u[1] == 0x9C) {
+        return 2; /* U+061C */
     }
     if (n >= 3 && u[0] == 0xE2) {
-        if (u[1] == 0x80 &&
-            (u[2] == 0x8E || u[2] == 0x8F || (u[2] >= 0xA8 && u[2] <= 0xAE))) {
-            return 3; /* U+200E, U+200F, U+2028 to U+202E */
+        if (u[1] == 0x80 && ((u[2] >= 0x8B && u[2] <= 0x8F) ||
+                             (u[2] >= 0xA8 && u[2] <= 0xAE))) {
+            return 3; /* U+200B to U+200F, U+2028 to U+202E */
         }
-        if (u[1] == 0x81 && u[2] >= 0xA6 && u[2] <= 0xA9) {
-            return 3; /* U+2066 to U+2069 */
+        if (u[1] == 0x81 && ((u[2] >= 0xA0 && u[2] <= 0xA4) ||
+                             (u[2] >= 0xA6 && u[2] <= 0xA9))) {
+            return 3; /* U+2060 to U+2064, U+2066 to U+2069 */
         }
+    }
+    if (n >= 3 && u[0] == 0xEF && u[1] == 0xBB && u[2] == 0xBF) {
+        return 3; /* U+FEFF */
     }
     return 0;
 }
