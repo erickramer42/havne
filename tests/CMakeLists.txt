@@ -297,11 +297,55 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
+        # A DID its ECU refuses is named on a refused line (ADR-0051 section
+        # 3): the fake DLL's ECU on Windows, the simulated ECU on vcan0 on
+        # Linux (skipped without it unless ECUIO_VCAN_REQUIRED, and serial:
+        # the simulated ECU answers 0x7E0 for the whole bus)
+        if(WIN32)
+            add_test(NAME CliRefusedRunTest.ADidTheFakeEcuRefusesIsNamed
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        fake $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliRefusedRunTest.ADidTheFakeEcuRefusesIsNamed
+                PROPERTIES TIMEOUT 60)
+            # The refusals come before the bitmap's drops in the report, and
+            # those past its list are counted
+            add_test(NAME CliRefusedRunTest.ARefusalPastTheBitmapsDropsIsNamed
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        fake-bitmap $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            add_test(NAME CliRefusedRunTest.RefusalsPastTheListAreCounted
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        fake-more $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliRefusedRunTest.ARefusalPastTheBitmapsDropsIsNamed
+                CliRefusedRunTest.RefusalsPastTheListAreCounted PROPERTIES TIMEOUT 60)
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        sim $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
+                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
+        # Every path havne-cli takes, under a folder named outside any one
+        # code page: on Windows its arguments come as UTF-16
+        add_test(NAME CliPathTest.ANonAsciiPathWorks
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_paths.py
+                    $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json
+                    ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+        set_tests_properties(CliPathTest.ANonAsciiPathWorks PROPERTIES TIMEOUT 120)
         # A last row cut short is left out and counted (ADR-0049 section 7)
         add_test(NAME CliReplayTest.ATornLastRowIsLeftOut
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_torn.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.ATornLastRowIsLeftOut PROPERTIES TIMEOUT 30)
+        # A replay reads with its recording's own signals.json (ADR-0051
+        # section 4): no --signals, the copy's values; its hash broken, raw
+        add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_replay_signals.py
+                    $<TARGET_FILE:havne-cli> "${_cli_replay}"
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json)
+        set_tests_properties(CliReplayTest.AReplayReadsWithItsOwnSignalFile PROPERTIES TIMEOUT 60)
         # stream --record (ADR-0049): the engine start recorded to its last
         # frame, its folder against tests/golden/recording/ and its frames
         # against the fixture's (rewrite both with the command plus

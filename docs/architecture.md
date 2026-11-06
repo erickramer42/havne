@@ -168,7 +168,22 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   extend `obd2`. Core never opens a path: the app and `havne-cli`
   read the file, so a phone's picked file goes through the same load.
   `havne-cli signals import obdb` converts an OBDb signal set into one
-  (`obdb.h`).
+  (`obdb.h`). A recording holds the file it decoded with as
+  `signals.json`, its hash in `events.log`'s header, and a replay of
+  that recording decodes through that copy when it still matches,
+  under the recorded name or one of its own, so a file edited or
+  removed since doesn't change what the replay shows;
+  `cli/recording_signals.h` reads the header's lines for the app and
+  `havne-cli` alike, through the public headers only.
+- **Refused signals:** a request a negative reply refuses leaves the
+  rotation and goes into its channel's support report
+  (`ecuio_session_get_channel_support`), the refusals listed ahead of
+  the requests a bitmap left out. `cli/refused_signals.h` maps each
+  refusal to the defs that read its reply (on the channel's reply ID,
+  by the reply's service and key) and counts those past the report's
+  list; the app's Live row reads "Refused" with the code's name, and
+  `havne-cli`'s `refused` line names the same. A replay has no support
+  report, so it shows no refusal.
 - **Plugins' data tier** ([ADR-0052](adr/0052-plugin-framework.md),
   `plugin.h`): a package of signal files with one manifest, as a
   folder or packed into one file. Each variant, an ordered list of the

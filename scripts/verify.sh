@@ -22,9 +22,12 @@
 #               --no-devices for a machine without one
 #   cross-arch  J2534Routing, J2534Surrogate, J2534HealthTest and
 #               J2534ConnectTest, against the x86 surrogate and fake
-#               (Windows, needs build-win32; skipped with -R). Fails if the
-#               env-gated routing case skips, since that means the paths
-#               were wrong.
+#               (Windows, needs build-win32; skipped with -R). Its line
+#               names each case that skipped. Fails if the env-gated
+#               routing case skips, since that means the paths were wrong;
+#               any other skip is reported, not failed (the surrogate's
+#               session-log case skips while another checkout's run holds
+#               its fixed log name).
 #
 # --build-only runs win32 and build and stops: fresh binaries without the
 # suite, for a machine that only runs them (the laptop at the car).
@@ -47,7 +50,7 @@ while [ $# -gt 0 ]; do
         --no-cross) cross=0 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
-        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
@@ -94,6 +97,11 @@ ctest_summary() {
     echo "$((total - failed))/$total passed, $skipped skipped"
 }
 
+# The cases a ctest log lists as skipped, one name a line
+skipped_cases() {
+    sed -nE 's/^[[:space:]]+[0-9]+ - (.*) \(Skipped\)[[:space:]]*$/\1/p' "$1"
+}
+
 ctest_failed() {
     line "$1" FAIL "$dur" "$(ctest_summary "$LOGDIR/$1.log"); see $LOGDIR/$1.log"
     sed -n '/The following tests FAILED:/,$p' "$LOGDIR/$1.log" | head -n 25
@@ -134,9 +142,11 @@ if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
         --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\."
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
-    case "$summary" in
-        *", 0 skipped") line cross-arch ok "$dur" "$summary" ;;
-        *) line cross-arch FAIL "$dur" "$summary: the routing case skipped, so the x86 paths are wrong"
-           exit 1 ;;
-    esac
+    skips=$(skipped_cases "$LOGDIR/cross-arch.log" | paste -sd ',' - | sed 's/,/, /g')
+    if skipped_cases "$LOGDIR/cross-arch.log" \
+        | grep -qxF J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips; then
+        line cross-arch FAIL "$dur" "$summary ($skips): the routing case skipped, so the x86 paths are wrong"
+        exit 1
+    fi
+    line cross-arch ok "$dur" "$summary${skips:+: $skips}"
 fi

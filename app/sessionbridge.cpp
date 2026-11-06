@@ -4,6 +4,9 @@
 #include "sessionbridge.h"
 #include "carryover.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
+#include "recording_signals.h" /* cli/: a replay's own signal file */
+#include "signal_file_lines.h" /* cli/: the profile a URI selects */
+#include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
@@ -344,6 +347,10 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return static_cast<int>(e.group);
         case LabelRole:
             return labelOf(e);
+        case RefusedRole:
+            return e.refused;
+        case RefusedCodeRole:
+            return e.refusedCode;
         default: return QVariant();
     }
 }
@@ -365,7 +372,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RowRole, "row"},
             {HiddenRole, "hidden"},
             {GroupRole, "group"},
-            {LabelRole, "label"}};
+            {LabelRole, "label"},
+            {RefusedRole, "refused"},
+            {RefusedCodeRole, "refusedCode"}};
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
@@ -728,11 +737,13 @@ void SignalListModel::judgePlotted()
 {
     // The default: every numeric row, or in a ranked set the
     // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
-    // set's order), so a row Live hides gives its place to the next
+    // set's order), so a row Live hides gives its place to the next. A
+    // refused row never has a value to draw, so it is no default either;
+    // a tick still plots it
     std::vector<int> ranked;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         const Entry& e = m_entries[row];
-        if (e.plotRank != 0 && !e.isText && !e.hidden) {
+        if (e.plotRank != 0 && !e.isText && !e.hidden && e.refused.isEmpty()) {
             ranked.push_back(static_cast<int>(row));
         }
     }
@@ -744,7 +755,7 @@ void SignalListModel::judgePlotted()
         ranked.resize(static_cast<size_t>(DefaultPlotted));
     }
     for (Entry& e : m_entries) {
-        e.plotDefault = !m_ranked && !e.isText;
+        e.plotDefault = !m_ranked && !e.isText && e.refused.isEmpty();
     }
     for (int row : ranked) {
         m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
@@ -800,6 +811,32 @@ void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
         }
     }
     rejudgeHidden();
+}
+
+void SignalListModel::applyRefused(const std::vector<Refusal>& refused)
+{
+    std::vector<Refusal> byRow(m_entries.size());
+    for (const Refusal& r : refused) {
+        const int row = m_rowOfId.value(r.id, -1);
+        if (row >= 0) {
+            byRow[static_cast<size_t>(row)] = r;
+        }
+    }
+    bool changed = false;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        if (e.refused != byRow[row].words || e.refusedCode != byRow[row].code) {
+            e.refused = byRow[row].words;
+            e.refusedCode = byRow[row].code;
+            const QModelIndex i = index(static_cast<int>(row));
+            emit dataChanged(i, i, {RefusedRole, RefusedCodeRole});
+            changed = true;
+        }
+    }
+    // A refused row gives up its place in the default plot
+    if (changed) {
+        judgePlotted();
+    }
 }
 
 void SignalListModel::rejudgeHidden()
@@ -971,6 +1008,12 @@ SessionBridge::~SessionBridge()
     // Only now: no session is left to decode with the files' sets
     m_signalStore.close();
     m_pluginStore.close();
+    for (auto& held : m_replayFiles) {
+        const QByteArray name = held.second.profile.toUtf8();
+        (void)ecuio_profile_unregister(name.constData());
+        ecuio_signal_file_free(held.second.file);
+    }
+    m_replayFiles.clear();
     ecuio_shutdown();
 }
 
@@ -1030,6 +1073,40 @@ QVariantMap SessionBridge::importSignalText(const QString& text)
 QString SessionBridge::signalFileText(const QString& sha) const
 {
     return SignalStore::text(sha);
+}
+
+QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
+{
+    QString words;
+    const QByteArray bytes = SignalStore::bytes(sha, &words);
+    bool written = false;
+    if (!bytes.isEmpty()) {
+        if (url.isLocalFile()) {
+            // Whole or not at all: a failed write leaves what was there
+            QSaveFile out(url.toLocalFile());
+            written = out.open(QIODevice::WriteOnly) &&
+                      out.write(bytes) == bytes.size() && out.commit();
+        } else {
+            // A content:// document the picker just made: QFile writes it
+            // through its provider, where a rename can't
+            QFile out(url.toString());
+            written = out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                      out.write(bytes) == bytes.size() && out.flush();
+        }
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    emit logMessage(
+        written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
+                      .arg(sha.left(12))
+                      .arg(bytes.size())
+                : QStringLiteral("Signal file %1 not saved: %2")
+                      .arg(sha.left(12), words));
+    if (!written) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
+    }
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
 }
 
 QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
@@ -1349,6 +1426,103 @@ QString SessionBridge::replayUriFor(const QString& folder,
     return uri;
 }
 
+QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
+{
+    const std::string uri8 = uri.toStdString();
+    std::string folder8;
+    if (!cli::replay_folder(uri8, &folder8)) {
+        return uri;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::ReadOnly)) {
+        return uri;
+    }
+    // The header alone: its lines up to the blank one (the enum labels'
+    // lines make it longer than a few)
+    while (!events.atEnd()) {
+        QByteArray line = events.readLine(64 * 1024);
+        if (line.endsWith('\n')) {
+            line.chop(1);
+        }
+        if (!recorded.take(line.toStdString())) {
+            break;
+        }
+    }
+    if (!recorded.names_file()) {
+        return uri;
+    }
+    // A URI with no profile= replays raw (ADR-0013), which nothing decodes
+    // wrongly: the copy is for the profile the recording names
+    std::string selected;
+    if (!cli::uri_profile(uri8, &selected)) {
+        return uri;
+    }
+    const QString profile = QString::fromStdString(recorded.profile);
+    const QString own =
+        QString::fromStdString(cli::own_profile(recorded.sha256));
+    const QString chosen = QString::fromStdString(selected);
+    if (chosen != profile && chosen != own) {
+        return uri;
+    }
+    const auto as_loaded = [&](const QString& why) {
+        emit logMessage(QStringLiteral("Replay: the recording's signals.json "
+                                       "%1; decoding with %2 as loaded now")
+                            .arg(why, chosen));
+        return uri;
+    };
+    QFile copy(folder + QStringLiteral("/signals.json"));
+    if (!copy.open(QIODevice::ReadOnly)) {
+        return as_loaded(QStringLiteral("is missing"));
+    }
+    const QByteArray bytes = copy.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+    const QString sha = QString::fromLatin1(
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+    if (sha.toStdString() != recorded.sha256) {
+        return as_loaded(QStringLiteral("doesn't match its hash"));
+    }
+    const auto selecting = [&](const QString& p) {
+        return chosen == p ? uri
+                           : QString::fromStdString(
+                                 cli::with_profile(uri8, p.toStdString()));
+    };
+    // The same bytes in the store: the vehicle's own file, under its name
+    if (m_signalStore.profileOf(sha) == profile) {
+        return selecting(profile);
+    }
+    auto held = m_replayFiles.find(sha);
+    if (held == m_replayFiles.end()) {
+        ecuio_signal_file_t* file = nullptr;
+        if (ecuio_signal_file_load(bytes.constData(),
+                                   static_cast<size_t>(bytes.size()),
+                                   &file) != ECUIO_OK) {
+            return as_loaded(
+                QStringLiteral("doesn't load (%1)")
+                    .arg(QString::fromUtf8(ecuio_last_error_detail())));
+        }
+        const QByteArray name8 = own.toUtf8();
+        const ecuio_status_t rc = ecuio_profile_register(
+            name8.constData(), ecuio_signal_file_set(file), nullptr);
+        if (rc != ECUIO_OK) {
+            ecuio_signal_file_free(file);
+            return as_loaded(
+                QStringLiteral("can't be registered (%1)")
+                    .arg(QString::fromUtf8(ecuio_status_string(rc))));
+        }
+        held = m_replayFiles
+                   .emplace(sha, ReplayFile{file,
+                                            QString::fromUtf8(
+                                                ecuio_signal_file_name(file)),
+                                            own})
+                   .first;
+    }
+    emit logMessage(QStringLiteral("Replay: decoding with the recording's own "
+                                   "signal file, %1 (%2)")
+                        .arg(held->second.name, own));
+    return selecting(own);
+}
+
 QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
@@ -1538,6 +1712,13 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
     }
+    for (ecuio_channel_support_t& s : m_supportReports) {
+        s = ecuio_channel_support_t{};
+    }
+    if (!m_refusedUnnamed.isEmpty()) {
+        m_refusedUnnamed.clear();
+        emit refusedUnnamedChanged();
+    }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
     m_unsupportedRead.assign(m_absentRead.size(), 0);
@@ -1567,7 +1748,7 @@ QString SessionBridge::connectSession(const QString& typed)
 {
     // Spaces around a pasted URI are the field's, not the URI's: core
     // matches the scheme at the first character
-    const QString uri = typed.trimmed();
+    QString uri = typed.trimmed();
     if (m_disconnecting) {
         return QStringLiteral("Disconnect in progress");
     }
@@ -1577,6 +1758,7 @@ QString SessionBridge::connectSession(const QString& typed)
     if (m_readOnce.busy()) {
         return QStringLiteral("Read once is using the adapter");
     }
+    uri = replayUriWithOwnSignals(uri);
 
     QString err = m_streamPreparer ? m_streamPreparer(uri) : QString();
     if (!err.isEmpty()) {
@@ -1600,7 +1782,7 @@ QString SessionBridge::connectSession(const QString& typed)
 
 void SessionBridge::connectSessionAsync(const QString& typed)
 {
-    const QString uri = typed.trimmed(); // as connectSession does
+    QString uri = typed.trimmed(); // as connectSession does
     if (m_connected.load(std::memory_order_acquire) || m_connecting
         || m_disconnecting) {
         return;   // one attempt at a time, none during a teardown; the
@@ -1613,6 +1795,7 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         emit connectResult(uri, err);
         return;
     }
+    uri = replayUriWithOwnSignals(uri);
     // An app-fed stream's link is readied here, on the GUI thread, before
     // core opens it on the connect thread
     const QString unprepared =
@@ -1925,6 +2108,12 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
     const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
     if (file == nullptr) {
         file = m_pluginStore.fileFor(set);
+    }
+    for (auto it = m_replayFiles.begin();
+         file == nullptr && set != nullptr && it != m_replayFiles.end(); ++it) {
+        if (ecuio_signal_file_set(it->second.file) == set) {
+            file = it->second.file;
+        }
     }
     if (file != nullptr) {
         rc = ecuio_recorder_signal_file(recorder, file);
@@ -2528,8 +2717,32 @@ void SessionBridge::pollChannelSupport()
             continue;
         }
         m_supportGeneration[c] = s.generation;
+        m_supportReports[c] = s;
         changed = true;
         emit logMessage(channelSupportText(s));
+    }
+    // Live says which signals their ECU refused, and with what (ADR-0051
+    // section 3): the drops a negative reply made, by the defs they read
+    if (changed) {
+        std::vector<SignalListModel::Refusal> refused;
+        for (const cli::RefusedSignal& r :
+             cli::refused_signals(ecuio_session_signal_set(m_session),
+                                  m_supportReports, m_channelCount)) {
+            refused.push_back({r.id, refusalText(r.request[0], r.nrc),
+                               refusalCode(r.request[0], r.nrc)});
+        }
+        m_signalModel->applyRefused(refused);
+        std::vector<std::pair<uint32_t, uint32_t>> more;
+        for (const cli::RefusedMore& m :
+             cli::refused_unlisted(ecuio_session_signal_set(m_session),
+                                   m_supportReports, m_channelCount)) {
+            more.emplace_back(m.rx_id, m.count);
+        }
+        const QString unnamed = refusedUnnamedText(more);
+        if (unnamed != m_refusedUnnamed) {
+            m_refusedUnnamed = unnamed;
+            emit refusedUnnamedChanged();
+        }
     }
     // Live hides the rows core judges unsupported from the reports
     // (ADR-0039 section 6)
@@ -2574,6 +2787,32 @@ void SessionBridge::pollAbsentSignals()
  * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
  * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
+QString SessionBridge::refusalCode(uint8_t service, uint8_t nrc)
+{
+    return QStringLiteral("7F %1 %2").arg(hexByte(service), hexByte(nrc));
+}
+
+QString SessionBridge::refusalText(uint8_t service, uint8_t nrc)
+{
+    const QString reply = refusalCode(service, nrc);
+    const QString name = QString::fromLatin1(cli::nrc_name(nrc));
+    return name.isEmpty() ? QStringLiteral("Refused: %1").arg(reply)
+                          : QStringLiteral("Refused: %1 (%2)").arg(name, reply);
+}
+
+QString SessionBridge::refusedUnnamedText(
+    const std::vector<std::pair<uint32_t, uint32_t>>& more)
+{
+    QStringList parts;
+    for (const auto& m : more) {
+        parts << QStringLiteral("ECU %1 refused %2 more request%3")
+                     .arg(hexId(m.first))
+                     .arg(m.second)
+                     .arg(m.second == 1 ? QString() : QStringLiteral("s"));
+    }
+    return parts.join(QStringLiteral("; "));
+}
+
 QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
 

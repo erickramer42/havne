@@ -530,3 +530,29 @@ Tests: goldens on a recording written with one of each finding
 raised, the replay fixture, and a folder with no `frames.csv`
 (`CliGoldenTest.Info*`); each line and `--rate-drop`'s forms
 (`CliInfoTest`); the usage errors (`CliUsageTest.Info*`).
+
+## Appendix: 2026-11-06, refused signals
+
+[ADR-0051](0051-signal-files.md) section 3 grows schema 1 by one type.
+With `--values`, `stream` writes a `refused` line whenever the signals
+their ECUs refused change: `signals`, each `{id, request, reply, nrc}`,
+the request and its negative reply in `frames.csv`'s form (`"22 F1 FE"`,
+`"7F 22 31"`) and the code's name from ISO 14229-1 (`"requestOutOfRange"`),
+or null for a code it doesn't name; a list that empties again writes
+`"signals": []`. The signals are read from the channels' support
+reports, which the drain already reads for the DID scan's progress:
+each request a negative reply dropped (`ECUIO_DROP_NOT_SUPPORTED`,
+`_SERVICE`, `_ACCESS`, the first `ECUIO_SUPPORT_MAX_DROPPED` of a
+channel) names the defs on its channel's reply ID keyed by its reply
+(`62 <DID>`, `41 <PID>`). A PID its bitmap left out is unsupported, not
+refused. The rule is `cli/refused_signals.h`, on the public headers, and
+the app's Live says the same from it. `CliRefusedTest` (the rule and
+the line), `CliRefusedRunTest` (`tests/cli_refused.py`: the fake DLL's
+ECU on Windows, the simulated ECU on vcan0 on Linux).
+
+Amended 2026-11-06: past the eight refusals a report lists, the line
+adds `"more": [{"ecu", "refused"}]`, each such ECU's receive ID in
+`frames.csv`'s form and how many more requests it refused, whose
+signals the list can't name; the key is left out when there are none,
+so a line without it reads as before. `CliRefusedTest.RefusalsPastTheListAreCounted`,
+`CliRefusedRunTest.RefusalsPastTheListAreCounted`.

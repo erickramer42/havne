@@ -1327,6 +1327,103 @@ TestCase {
         compare(page.readResult.reply, "62 1E 1C 12 34")
     }
 
+    // A file is saved out as the vehicle has it, byte for byte (a Save
+    // replaces what was at the target), under its profile's name; its
+    // button stays on while a session runs, since it only reads the copy;
+    // a missing copy says so
+    function test_aFileIsSavedOutAsTheVehicleHasIt() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        const f = page.pickedVehicle.signals[0]
+        compare(page.saveFileName(f), "extras.json")
+        const url = Harness.writeScratchFile("saved.json", "x".repeat(2000))
+        verify(page.saveSignalFileTo(f.sha256, url))
+        compare(Harness.readScratchFile(url), signalFileText("Extras"))
+        compare(Harness.readScratchFile(url), Bridge.signalFileText(f.sha256))
+        compare(find(page, "signalNote").text, "Extras saved to the file you chose")
+
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        const own = page.pickedVehicle.signals.find(e => e.sha256 === page.pickedVehicle.own)
+        compare(page.saveFileName(own), "vehicle-1-own.json")
+        const ownUrl = Harness.writeScratchFile("own.json", "")
+        verify(page.saveSignalFileTo(own.sha256, ownUrl))
+        compare(Harness.readScratchFile(ownUrl), Bridge.signalFileText(own.sha256))
+        compare(JSON.parse(Harness.readScratchFile(ownUrl)).signals.map(s => s.name),
+                ["Trans Temp"])
+
+        verify(!page.saveSignalFileTo("a".repeat(64), url))
+        compare(find(page, "signalProblem").text, "Its copy is missing: import the file again")
+        compare(find(page, "signalNote").text, "")
+
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        verify(find(page, "signalSave_0").enabled, "Save reads the copy alone")
+        verify(!find(page, "signalImport").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+    }
+
+    // One request ID to a module: a Save whose typed one differs moves the
+    // module's other signals, and its note names them; a blank one keeps
+    // the module's
+    function test_aModulesRequestIdMovesItsSignalsAndSaysSo() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Gear", "D101")
+        find(page, "formRx").text = "7E9"
+        find(page, "formTx").text = ""
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(find(page, "formNote").text, "Gear saved in Vehicle 1 own")
+        typeSignal(page, "Oil", "D102")
+        find(page, "formRx").text = "7E9"
+        find(page, "formTx").text = "7E2"
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(find(page, "formNote").text, "Oil saved in Vehicle 1 own; 7E9 asks on 7E2 for Gear too")
+        compare(page.ownFile.ecus.map(e => e.tx), ["7E2"])
+        typeSignal(page, "Pressure", "D103")
+        find(page, "formRx").text = "7E9"
+        find(page, "formTx").text = ""
+        press(page, "formSave")
+        compare(find(page, "formNote").text, "Pressure saved in Vehicle 1 own")
+        compare(page.ownFile.ecus.map(e => e.tx), ["7E2"], "blank keeps the module's")
+    }
+
+    // A file's or a plugin's profile is its vehicle's: a pick of another,
+    // or New, puts the field back to Default (its connection kept), so it
+    // never connects, and is remembered, with the last one's signals; a
+    // built-in profile stays
+    function test_aPickLeavesAnotherVehiclesProfileBehind() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const first = page.pickedVehicle.id
+        verify(importFile(page, "extras.json", "Extras"))
+        find(page, "uriField").text = "mock://demo"
+        page.chooseProfile("user.extras")
+        compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
+        press(page, "vehicleNew")
+        compare(find(page, "uriField").text, "mock://demo", "New: Default")
+        compare(page.profileChoice, "default")
+
+        const second = page.pickedVehicle.id
+        press(page, "vehicle_" + first)
+        page.chooseProfile("user.extras")
+        press(page, "vehicleDuplicate")
+        verify(page.pickedVehicle.id !== first && page.pickedVehicle.id !== second)
+        compare(find(page, "uriField").text, "mock://demo?profile=user.extras",
+                "the copy has the file: its profile stays")
+        press(page, "vehicle_" + second)
+        compare(find(page, "uriField").text, "mock://demo", "another's goes")
+
+        page.chooseProfile("raw")
+        press(page, "vehicle_" + first)
+        compare(find(page, "uriField").text, "mock://demo?profile=raw", "a built-in stays")
+    }
+
     // ---- The vehicle's own signals (ADR-0051's form) ----
 
     function typeSignal(page, name, number, bits) {
@@ -1338,6 +1435,32 @@ TestCase {
 
     function ownText(page, i) {
         return find(find(page, "ownSignal_" + i), "ownSignalText").text
+    }
+
+    // Each box is named above it, so a box keeps saying what it holds once
+    // its placeholder has gone
+    function test_theFormsBoxesKeepTheirNamesOnceTyped() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        compare(page.formKind, "number")
+        const caption = name => find(page, name).parent.children[0]
+        const named = { formName: "Name", formRx: "Reply ID", formTx: "Request ID",
+                        formNumber: "DID", formByte: "Byte", formBits: "Bits",
+                        formBit: "Start bit", formScale: "Scale", formOffset: "Offset",
+                        formUnit: "Unit", formDecimals: "Decimals" }
+        press(page, "formService_22")
+        for (const box in named) {
+            find(page, box).text = "1"
+            compare(caption(box).text, named[box], box)
+            verify(caption(box).visible, box)
+        }
+        press(page, "formService_01")
+        compare(caption("formNumber").text, "PID")
+        press(page, "formKind_hex")
+        verify(!caption("formBits").visible, "no bits for a hex field")
+        verify(!caption("formBit").visible)
+        verify(caption("formBytes").visible)
+        compare(caption("formBytes").text, "Bytes")
     }
 
     function test_theFormSavesTheVehiclesOwnSignals() {
@@ -1507,6 +1630,106 @@ TestCase {
         compare(Bridge.signalModel.plottedNames(), ["Throttle Position"], "and the tick")
         tryVerify(() => log.includes("Vehicle: Daily driver"), 5000, "recognized: " + log.join("\n"))
         Bridge.logMessage.disconnect(collect)
+    }
+
+    // A vehicle with no VIN picked on a car another vehicle is saved with:
+    // the VIN picks that one, and the section says the car made the pick
+    // until the user picks
+    function test_theCarsVinPickingAnotherVehicleSaysSo() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        const daily = page.pickedVehicle.id
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.vinKey !== "", 10000, "the VIN is learned")
+        const note = find(page, "vehicleVinPickNote")
+        verify(!note.visible, "learning the VIN isn't a pick")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        const weekend = page.pickedVehicle.id
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
+        verify(note.visible)
+        compare(note.text, "The connected car's VIN picked Daily driver (Weekend car was picked)")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(note.visible, "it stays after the session")
+        press(page, "vehicle_" + weekend)
+        verify(!note.visible, "the user's pick ends it")
+    }
+
+    // A VIN that picks another vehicle during a session leaves the last
+    // vehicle's signal file in the field only while the session runs: at
+    // its end the field reads Default, so the next connect keeps no other
+    // vehicle's file as this one's connection
+    function test_theVinsPickLeavesTheLastVehiclesFileAtTheEnd() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        const daily = page.pickedVehicle.id
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.vinKey !== "", 10000, "the VIN is learned")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        find(page, "uriField").text = uri
+        page.chooseProfile("user.extras")
+        compare(find(page, "uriField").text, uri + "?profile=user.extras")
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
+        compare(find(page, "uriField").text, uri + "?profile=user.extras",
+                "the session's URI stays while it runs")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        compare(find(page, "uriField").text, uri, "Default at the session's end")
+        compare(page.profileChoice, "default")
+
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects again")
+        compare(page.pickedVehicle.id, daily)
+        compare(page.pickedVehicle.uri, uri, "Daily driver keeps no file of Weekend car's")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+    }
+
+    // A vehicle the VIN adds during a session holds no signal file, so its
+    // connection doesn't name the last vehicle's, and neither does the
+    // field once the session ends
+    function test_aVehicleTheVinAddsKeepsNoOtherVehiclesFile() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        const weekend = page.pickedVehicle.id
+        verify(importFile(page, "extras.json", "Extras"))
+        // Another car's VIN: the fake's is no vehicle's yet
+        page.saveVehicles(VehicleBook.change(page.vehicles, v => v.vinKey = "another-cars-key"))
+        find(page, "uriField").text = uri
+        page.chooseProfile("user.extras")
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.id !== weekend, 10000, "the VIN adds a vehicle")
+        compare(page.pickedVehicle.signals, [])
+        compare(page.pickedVehicle.uri, uri, "no profile of Weekend car's file")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        compare(find(page, "uriField").text, uri, "Default at the session's end")
     }
 
     // While a vendor's open blocks, nothing may rewrite the URI field or

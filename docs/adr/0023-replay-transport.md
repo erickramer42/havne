@@ -371,7 +371,10 @@ replay://<path>[?...][&from=<s>][&to=<s>]
   recording through one rule, `core/src/recording_stretch.h`.
 - **The viewer's Replay view** puts the part in view in Settings' URI
   field, as the list's Replay puts the whole recording, and leaves the
-  keys out while the whole recording is in view.
+  keys out while the whole recording is in view. (2026-11-06: the
+  button reads **Replay in Settings**, since on a car run it was taken
+  for one that plays, and it's off while a session runs, as the list's
+  Replay is.)
 
 **Alternatives considered.** Seconds of session time (the stamps a
 replay gives) would match nothing a user sees. A row number, or a

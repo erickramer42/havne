@@ -8,13 +8,13 @@ design and the reasons behind each rule are
 [ADR-0051](adr/0051-signal-files.md); this page is the reference for
 writing one by hand.
 
-> **Status:** the format is decided (ADR-0051), core's loader reads
-> it (`ecuio_signal_file_load`, `signals.h`), `havne-cli` checks and
-> streams a file ("Using a file") and imports an OBDb set ("Importing an
-> OBDb signal set", `ecuio_obdb_import`, `obdb.h`), and a recording
-> holds the file that decoded it. The app's import is v0.5.0's work too.
-> None of it is in a release yet; what isn't settled is marked **Not
-> settled** below.
+> **Status:** in v0.5.0: core's loader (`ecuio_signal_file_load`,
+> `signals.h`), the app's import, its form for a vehicle's own signals
+> and **Read once**, `havne-cli`'s check, stream and OBDb import
+> (`ecuio_obdb_import`, `obdb.h`), and a recording holding the file that
+> decoded it. A replay that decodes with its recording's copy and
+> **Save a copy** come with the next release. What isn't settled is
+> marked **Not settled** below.
 
 ## A first file
 
@@ -48,6 +48,58 @@ and shows it in degrees Celsius, beside every signal of the `obd2` set.
 DID 0xD100 is made up for this page: a real car's DIDs are its manufacturer's,
 found with the DID scan (`?scan=first`, [ADR-0020](adr/0020-uds-generic.md))
 and checked with **Read once** before they're trusted.
+
+## From a scan to a shared file
+
+A walkthrough in the app, for a DID you don't know yet, with the
+`havne-cli` form of each step after it. Every step reads; none writes
+to the car.
+
+1. **Find what a module answers.** In Settings, under **What to read**,
+   pick **uds-generic (DIDs)**, and give the DID field a range, with the
+   module's reply ID before it for any module but the engine's:
+   `7E9:D800-D8FF`. Add `&scan=first` to the URI, so the range is asked
+   before anything is polled, and connect. Each DID that answers joins
+   Live as a row, `0x7E9 DID D8xx`, showing its reply's bytes in hex,
+   and the activity log's `ECU 0x7E9:` line counts the scan
+   (`scan: 256 DIDs, 3 found, 253 refused`). The same with `havne-cli`:
+
+   ```sh
+   havne-cli stream "elm327://COM5?profile=uds-generic&did=7E9:D800-D8FF&scan=first" \
+     --values --until-scanned
+   ```
+
+2. **Watch which bytes move.** With the car doing what the signal
+   should follow (the transmission warming, a gear change), the bytes
+   that follow it are the field. With **Record sessions** on (Settings,
+   **Recording**), the session can be read again in the Recordings
+   viewer.
+3. **Write the signal and check it with Read once.** Disconnect, then
+   under **Your own signals** fill in its name, the module's reply ID,
+   service 22 and the DID, the field (its first byte after the DID
+   echo, and its bits), and the scale, offset and unit. **Read once**
+   asks the module for it once and shows the reply's bytes beside the
+   value the draft decodes to; when that isn't what the car shows,
+   change the field or the scaling and read again. **Save** adds it to
+   the vehicle's own file, `<vehicle> own`.
+4. **Read it in a session.** With the vehicle picked, its file is a
+   profile under **What to read** (`user.daily-driver-own` for the
+   vehicle "Daily driver"), and Live shows the signal by its name, in
+   its unit. A signal the module refuses shows as refused, with the
+   code by name ("Refused: requestOutOfRange (7F 22 31)").
+5. **Record with it.** A recording holds the file as `signals.json`, so
+   a replay decodes the same values, even after the file has changed
+   or gone ("Using a file"). A replay asks nothing, so a signal the
+   module refused shows no value there, not refused; the recording's
+   `events.log` names the refusal in its ECU line.
+6. **Share it.** **Save a copy** writes the file where you choose, as
+   `daily-driver-own.json`. Another machine's app imports it (**Import
+   a signal file**), and `havne-cli` reads it as it is:
+
+   ```sh
+   havne-cli signals check daily-driver-own.json
+   havne-cli stream elm327://COM5 --signals daily-driver-own.json --values
+   ```
 
 ## The file
 
@@ -418,9 +470,19 @@ written, and `signals check` says it won't convert.
   values (`0=Park, 3=Drive`), and a group. **Save** adds the signal to
   the file `<vehicle> own` (`user.<vehicle>-own`), or replaces the one of
   the same name; **Edit** fills the form from a saved signal, and
-  **Remove** takes it out, the file going with its last. The form checks
-  nothing itself: the loader reads the file it makes and says what's
-  wrong in its own words.
+  **Remove** takes it out, the file going with its last. A module has
+  one request ID for all its signals: a typed one is the module's, and
+  the note under the form names the other signals it moves; left empty,
+  the module keeps the one it has, or the standard's when no other
+  signal reads it. The form checks nothing itself: the loader reads the
+  file it makes and says what's wrong in its own words.
+- **Save a copy:** each of the vehicle's files is saved where you
+  choose (the desktop's save dialog, Android's document picker), named
+  for its profile (`daily-driver-own.json`), so it can be shared or
+  given to `havne-cli --signals`. The saved file is the app's copy,
+  byte for byte: what was imported or typed into the form, and nothing
+  about the vehicle (no VIN). A copy that has changed since it was kept
+  isn't saved, and the line under the files says to import it again.
 - **Read once:** with no session connected, the form's signal is asked
   once on the adapter the URI field names (or the vehicle's last), in a
   short session of its own: a Service 22 DID through `uds-generic`, a
@@ -438,12 +500,18 @@ written, and `signals check` says it won't convert.
   says exactly what decoded it: the app copies the vehicle's file, and
   `havne-cli stream --record` the one `--signals` names (with
   `--plugin`, the variant's files merged into one). A replay of the
-  recording with that copy decodes the same values:
+  recording decodes with that copy, the same values, even after the
+  vehicle's file has changed or gone, or on another machine: the app's
+  Replay does when the copy differs from the file loaded now (under a
+  name of its own, `rec.` and the start of its hash, which the activity
+  log names), and so does `havne-cli stream` with no `--signals`:
 
   ```sh
-  havne-cli stream "replay://<the recording's folder>" \
-    --signals "<the recording's folder>/signals.json"
+  havne-cli stream "replay://<the recording's folder>" --values
   ```
+
+  A copy that no longer matches the hash on the header isn't used: the
+  replay decodes with the profile as loaded now and says why.
 
   `havne-cli info <folder>` says on its `opened` line whether the copy
   is there and is still the bytes the header names (`signal_file`).

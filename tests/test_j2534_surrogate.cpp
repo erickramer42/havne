@@ -632,20 +632,22 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
 }
 
 /* A vendor PassThruOpen that blocks (adapter absent) must
- * fail at the handshake timeout with the child ALIVE, not wedge and
+ * fail at the open's timeout with the child ALIVE, not wedge and
  * not require process-death to detect. The child inherits the parent's
  * environment, so arming the fake-side sleep from here works in the
  * cross-arch configuration too (x64 test -> x86 child). */
 TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
 {
     SetEnvironmentVariableA("ECUIO_FAKE_OPEN_DELAY_MS", "60000");
-    /* 2 s, not less: the window covers the child starting as well as
-     * the vendor's open, and a loaded machine started it past 500 ms */
-    SetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS", "2000");
+    /* The open's window only: the child's startup keeps its 8 s, so a
+     * loaded machine's slow start isn't taken for the blocked vendor */
+    SetEnvironmentVariableA("ECUIO_SUR_OPEN_MS", "2000");
     const auto t0 = std::chrono::steady_clock::now();
 
     ecuio_j2534_sur_handle_t* h = nullptr;
+    testing::internal::CaptureStderr();
     const ecuio_status_t rc = ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h);
+    const std::string log = testing::internal::GetCapturedStderr();
     const std::string detail = ecuio_last_error_detail();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -654,7 +656,7 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     /* Restore BEFORE assertions: a failing EXPECT would otherwise leak
      * the knobs into later tests in this process (sequential runs). */
     SetEnvironmentVariableA("ECUIO_FAKE_OPEN_DELAY_MS", nullptr);
-    SetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS", nullptr);
+    SetEnvironmentVariableA("ECUIO_SUR_OPEN_MS", nullptr);
 
     /* The vendor's call never returned: the driver's doing, not the
      * surrogate's. */
@@ -662,9 +664,16 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     EXPECT_EQ(detail, "PassThruOpen didn't return within 2000 ms; the "
                       "driver may be waiting for its adapter");
     EXPECT_EQ(h, nullptr);
-    /* Failed at the SHRUNK window (~2 s), nowhere near the 8 s default:
-     * if this approaches 8 s, an env knob stopped being honored. */
-    EXPECT_LT(elapsed, 5000);
+    /* Each window is judged by the client's own lines, which name the
+     * value each wait used, not by the wall clock, which load stretches:
+     * the startup kept its 8 s, the open took the knob's 2 s */
+    EXPECT_NE(log.find("waiting up to 8000 ms for its pipe"), std::string::npos)
+        << log;
+    EXPECT_NE(log.find("no reply to OP_OPEN after 2000 ms, child alive"),
+              std::string::npos)
+        << log;
+    /* A floor holds under load: the open was waited out, not cut short */
+    EXPECT_GE(elapsed, 2000);
 }
 
 /* Shares read access with the session's writers. "" if it can't open.

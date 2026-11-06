@@ -282,9 +282,15 @@ TestCase {
         compare(r.outcome, "switched", "another saved vehicle's key wins over learning")
         compare(r.doc.picked, "v1")
         compare(VehicleBook.logLine(r), "Vehicle: Daily driver (picked; Weekend car was)")
+        compare(VehicleBook.pickNote(r),
+                "The connected car's VIN picked Daily driver (Weekend car was picked)")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-a", "elm327://COM6")
         compare(VehicleBook.logLine(r), "Vehicle: Daily driver (picked)")
+        compare(VehicleBook.pickNote(r), "The connected car's VIN picked Daily driver")
+        // Only a switch is the car's pick to say
+        compare(VehicleBook.pickNote(VehicleBook.recognize(book(), "key-a", "elm327://COM6")), "")
+        compare(VehicleBook.pickNote(VehicleBook.recognize(book(), "key-c", "elm327://COM6")), "")
 
         r = VehicleBook.recognize(book(), "key-c", "elm327://COM7?profile=raw")
         compare(r.outcome, "new")
@@ -296,5 +302,20 @@ TestCase {
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")
         compare(VehicleBook.logLine(r), "Vehicle: saved as Vehicle 1")
+    }
+
+    // A vehicle a VIN adds holds no signal file or plugin, so the URI it
+    // keeps reads with Default: another vehicle's file or plugin profile
+    // goes, a built-in one and every other key stay
+    function test_aVehicleTheVinAddsKeepsNoOtherVehiclesFile() {
+        let r = VehicleBook.recognize(book(), "key-c",
+                                      "elm327://COM7?baud=38400&profile=user.extras&identify=0")
+        compare(r.outcome, "new")
+        compare(VehicleBook.picked(r.doc).uri, "elm327://COM7?baud=38400&identify=0")
+        r = VehicleBook.recognize(book(), "key-c", "j2534://VX?profile=plugin.example-sim.base")
+        compare(VehicleBook.picked(r.doc).uri, "j2534://VX")
+        r = VehicleBook.recognize(book(), "key-c", "j2534://VX?profile=uds-generic&did=1E1C")
+        compare(VehicleBook.picked(r.doc).uri, "j2534://VX?profile=uds-generic&did=1E1C")
+        compare(VehicleBook.withoutFileProfile("j2534://VX"), "j2534://VX")
     }
 }

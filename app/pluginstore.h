@@ -48,7 +48,9 @@ public:
     // copy of these bytes was there) and replaced (the name of the
     // version it replaced, "" for none). words, when it's refused, are
     // core's ("line 12, column 9: ..."), never a path; an id whose loaded
-    // version a session decodes with is refused, nothing changed
+    // version a session decodes with is refused, nothing changed, and so
+    // is an import whose copy can't be kept. The version it replaces goes
+    // once the import has loaded; one that doesn't is loaded again
     QVariantMap import(const QByteArray& bytes);
 
     // Its profiles unregistered and the plugin freed, then its copy
@@ -69,6 +71,10 @@ public:
     // destroyed: until then a session may decode with one of their sets
     void close();
 
+    // Test seam: the next load of the copy with this hash fails, as a
+    // registration refused would, so a replace's fallback can be reached
+    void failLoadForTesting(const QString& sha) { m_failLoadForTesting = sha; }
+
 private:
     struct Held {
         ecuio_plugin_t* plugin = nullptr;
@@ -88,4 +94,5 @@ private:
     std::map<QString, Held> m_held;       // by the copy's SHA-256
     std::map<QString, QString> m_refused; // copies that didn't load, why
     bool m_loaded = false;
+    QString m_failLoadForTesting; // failLoadForTesting's hash, once
 };

@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -233,10 +234,17 @@ public:
         GroupRole,  /* the def's group (ECUIO_SIGNAL_GROUP_*,
                          * ADR-0050), for Live's filter. Fixed per
                          * signal set. */
-        LabelRole   /* an enum row's label for its newest raw value
+        LabelRole,  /* an enum row's label for its newest raw value
                          * (ADR-0051), from the set's enums; "" for a
                          * value with none, which shows its number, and
                          * for any other kind. Notified with ValueRole. */
+        RefusedRole, /* the words of its ECU's negative reply to the
+                         * request that reads it ("Refused:
+                         * requestOutOfRange (7F 22 31)", applyRefused,
+                         * ADR-0051 section 3); "" while none refused it */
+        RefusedCodeRole /* that reply's bytes alone ("7F 22 31"), for a
+                         * row too narrow for the words; notified with
+                         * RefusedRole */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -271,6 +279,18 @@ public:
     // (ecuio_session_get_absent_signals): those rows are hidden too, and
     // the rest are judged by their support alone. A new set shows all.
     void applyAbsent(const std::vector<uint16_t>& ids);
+    // The signals their ECU refused with a negative reply, each with the
+    // refusal's words (cli/refused_signals.h, from the channels' support
+    // reports): Live shows the words in place of a value, never a blank.
+    // Each call judges every row afresh; a new set refuses none. A
+    // refused row gives its place in the default plot to the next, as a
+    // hidden one does: it never has a value to draw.
+    struct Refusal {
+        uint16_t id = 0;
+        QString words; // "Refused: requestOutOfRange (7F 22 31)"
+        QString code;  // "7F 22 31"
+    };
+    void applyRefused(const std::vector<Refusal>& refused);
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -348,6 +368,8 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        QString refused;          // its ECU's refusal in words, or ""
+        QString refusedCode;      // its reply's bytes, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
         uint8_t group = 0;        // the def's group (ADR-0050)
         // The user's tick or untick; Default follows plotDefault
@@ -375,7 +397,8 @@ private:
     void rejudgeHidden();
     // Each row's default and so its subscribed state, and the plotted
     // count; notifies the rows that changed and the count. Run after
-    // anything that moves the defaults: a new set, hidden rows, choices.
+    // anything that moves the defaults: a new set, hidden or refused
+    // rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
     // An enum row's label for its newest value, "" when it has none
@@ -517,6 +540,11 @@ class SessionBridge : public QObject
     // one), and clearDiagnosticsMoving sends to exactly them
     Q_PROPERTY(QStringList clearMoving READ clearMoving NOTIFY clearMovingChanged)
     Q_PROPERTY(QString clearMovingSpeed READ clearMovingSpeed NOTIFY clearMovingChanged)
+    // The refusals past an ECU's report list, whose signals Live can't name
+    // and so leaves blank (cli/refused_signals.h's refused_unlisted):
+    // "ECU 0x7E8 refused 3 more requests", "" when every refusal is named
+    Q_PROPERTY(
+        QString refusedUnnamed READ refusedUnnamed NOTIFY refusedUnnamedChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -550,6 +578,13 @@ public:
     // for none. Settings composes the file, core's loader judges it
     Q_INVOKABLE QVariantMap importSignalText(const QString& text);
     Q_INVOKABLE QString signalFileText(const QString& sha) const;
+    // A kept copy saved where the user chose (a local file, or Android's
+    // content:// from its document picker, through QFile): the copy's
+    // bytes as imported or as the form wrote them, nothing added, so
+    // havne-cli --signals and another vehicle read the same file. { ok,
+    // words }, words never naming either path; a copy changed since it
+    // was kept is refused, not saved. Logs one line
+    Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,
@@ -600,6 +635,13 @@ public:
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
+    // Live's "Refused: <name> (7F <service> <code>)"
+    static QString refusalText(uint8_t service, uint8_t nrc);
+    // The negative reply alone: "7F 22 31"
+    static QString refusalCode(uint8_t service, uint8_t nrc);
+    // refusedUnnamed's words for each ECU's ID and its refusals past the list
+    static QString
+    refusedUnnamedText(const std::vector<std::pair<uint32_t, uint32_t>>& more);
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
     // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system
@@ -774,6 +816,7 @@ public:
     Q_INVOKABLE void cancelClearMoving();
     QStringList clearMoving() const;
     QString clearMovingSpeed() const;
+    QString refusedUnnamed() const { return m_refusedUnnamed; }
     // One ECU's report as the page shows it: ecu ("0x7E8"); asked,
     // complete; readiness (an outcome: "unasked", "answered", "refused",
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
@@ -813,6 +856,11 @@ public:
     // Test seam: record a replay too, to compare it with its source. The
     // app never records one: it would copy the recording it plays
     void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
+    // Test seam: the next load of the plugin copy with this hash fails
+    void failPluginLoadForTesting(const QString& sha)
+    {
+        m_pluginStore.failLoadForTesting(sha);
+    }
     // Test seam: the session's recorder, for core's internal.h seams
     // (a failed write); nullptr with none
     ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
@@ -866,6 +914,7 @@ signals:
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
+    void refusedUnnamedChanged();
     void readingOnceChanged();
     void readOnceResult(const QVariantMap& result);
 
@@ -1008,6 +1057,15 @@ private:
     // thread (in the async entry and the queued completion), so a plain
     // bool suffices despite the worker's existence.
     QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
+    // A replay:// URI selecting the profile its recording names (or that
+    // copy's own name, rec.<16 hex>), with the recording's signals.json
+    // there and matching its hash: the URI that decodes with those bytes
+    // (ADR-0051 section 4). The recorded profile when the signal store
+    // registers the same bytes under it; otherwise the copy, loaded and
+    // registered as rec.<16 hex> for the bridge's life. Any other URI,
+    // or a copy missing, changed or refused, comes back as given, with a
+    // log line saying why. GUI thread, before the connect.
+    QString replayUriWithOwnSignals(const QString& uri);
     QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
@@ -1030,6 +1088,10 @@ private:
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // Each channel's last report, for the signals their ECUs refused
+    ecuio_channel_support_t m_supportReports[ECUIO_SESSION_INFO_MAX_CHANNELS] =
+        {};
+    QString m_refusedUnnamed;
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
     std::vector<uint16_t> m_unsupportedRead;
@@ -1086,5 +1148,14 @@ private:
     ReadOnce m_readOnce;
     SignalStore m_signalStore;
     PluginStore m_pluginStore;
+    // Recordings' own signal files by their hash, each registered under
+    // its rec.<16 hex> profile until the bridge closes, as the store keeps
+    // its files: the registry keeps the set's pointer
+    struct ReplayFile {
+        ecuio_signal_file_t* file = nullptr;
+        QString name;    // the file's "name"
+        QString profile; // rec.<16 hex>
+    };
+    std::map<QString, ReplayFile> m_replayFiles;
     int m_readOnceWaitMs = 3000;
 };

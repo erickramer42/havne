@@ -947,6 +947,49 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
     EXPECT_EQ(ec, 0u);
 }
 
+/* Two ECUs, each asked at the engine's floor (20 ms send to send), not at
+ * two of Windows' 15.6 ms timer steps: the fake answers at once and its
+ * empty reads return at once, so the worker's waits set the pace, which
+ * end on time only on its high-resolution timer (precise_wait.h). On a
+ * plain sleep each channel's requests came 31 ms apart, about 63 a
+ * second for the two; on the timer 192 to 194 in 2 s (2026-11-06). The
+ * floor's 100 a second bounds it from above. */
+TEST_F(J2534HealthTest, ATwoEcuSessionAsksAtTheEnginesFloor)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(
+        "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0"));
+    ASSERT_TRUE(wait_for_frames(6, 2000)) << "replies didn't arrive";
+
+    /* Judged by the fake's stamps on its recorded writes, not a count in
+     * a wall-clock window that load thins: the two channels take turns,
+     * so write i to write i + 2 is one channel's period, and its median
+     * is the floor's (about 21 ms) whatever a few stalls add; on a
+     * timer's 15.6 ms step it is 31 */
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (fake_control::writes(page) < fake_control::kWriteDepth &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_GE(fake_control::writes(page), fake_control::kWriteDepth);
+    std::vector<uint32_t> stamps;
+    for (uint32_t i = 0; i < fake_control::kWriteDepth; ++i) {
+        fake_control::Write w{};
+        ASSERT_TRUE(fake_control::recorded_write(page, i, &w));
+        stamps.push_back(w.us);
+    }
+    std::vector<uint32_t> periods;
+    for (size_t i = 0; i + 2 < stamps.size(); ++i) {
+        periods.push_back(stamps[i + 2] - stamps[i]);
+    }
+    std::sort(periods.begin(), periods.end());
+    const uint32_t median = periods[periods.size() / 2];
+    RecordProperty("period_median_us", static_cast<int>(median));
+    EXPECT_GE(median, 19000u) << "requests came faster than the floor";
+    EXPECT_LE(median, 26000u)
+        << "requests waited out the timer's step, not the floor";
+}
+
 /* On the VX a call holds its whole timeout unless its batch fills.
  * Reads capped at the 10 ms slice keep requests near the floor's pace
  * whatever the vendor holds; a read held for the 100 ms wait would leave
@@ -1405,6 +1448,28 @@ TEST_F(J2534HealthTest, VxQueuedMessagesComeBackWithoutAHold)
     EXPECT_LT(took, 30) << "a read held past its message";
 }
 
+namespace {
+
+/* How a read past its deadline called the vendor, from the fake's own
+ * record (the control page), not the wall clock, which a loaded machine
+ * stretches past any margin one scheduling slice wide (55 ms on
+ * 2026-11-05 and 70 ms on 2026-11-06, against 55, with other sessions
+ * building on the machine): the stalled
+ * call, then exactly one more, and neither asked to wait 0 ms, which
+ * the VX holds 50 ms */
+void expect_the_stalled_call_then_one_more(fake_control::Page* page)
+{
+    ASSERT_EQ(fake_control::reads(page), 2u)
+        << "the stalled call, then one more after the deadline";
+    for (uint32_t i = 0; i < 2; ++i) {
+        uint32_t timeout_ms = 0;
+        ASSERT_TRUE(fake_control::recorded_read_timeout(page, i, &timeout_ms));
+        EXPECT_NE(timeout_ms, 0u) << "call " << i << " asked to wait 0 ms";
+    }
+}
+
+} // namespace
+
 /* A call that brings only an indication after the read's deadline (the
  * fake's first read stalls 30 ms, the read asks for 10) is followed by
  * one more, which waits 1 ms: the VX holds a call asked to wait 0 ms
@@ -1432,7 +1497,7 @@ TEST_F(J2534HealthTest, VxTheReadAfterAnIndicationPastTheDeadlineStillWaits)
                           .count();
     EXPECT_FALSE(got) << "the indication is no frame";
     EXPECT_GE(took, 30) << "the fake's stall";
-    EXPECT_LT(took, 55) << "a call asked to wait 0 ms";
+    expect_the_stalled_call_then_one_more(page);
 }
 
 /* A loss reported after a read's frame (an indication with
@@ -1495,7 +1560,7 @@ TEST_F(J2534HealthTest,
     ASSERT_TRUE(got) << "the read stopped at its deadline before its last call";
     EXPECT_EQ(f.data[6], 1u);
     EXPECT_GE(took, 30) << "the fake's stall";
-    EXPECT_LT(took, 55) << "a call asked to wait 0 ms";
+    expect_the_stalled_call_then_one_more(page);
 }
 
 /* A loss carried from the read before into a read that fails: the

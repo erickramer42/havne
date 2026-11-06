@@ -42,7 +42,10 @@ def main(argv):
         return 2
     out = argv[1]
 
-    signal_files = sorted(glob.glob(os.path.join(ROOT, "tests/fixtures/signal-files/*.json")))
+    # The signal-file fixtures, the CLI's among them (two ECUs, an enum on
+    # a PID, extends; a misspelled key the loader refuses)
+    signal_files = sorted(glob.glob(os.path.join(ROOT, "tests/fixtures/signal-files/*.json")) +
+                          glob.glob(os.path.join(ROOT, "tests/fixtures/signals/*.json")))
     obdb_sets = sorted(glob.glob(os.path.join(ROOT, "tests/fixtures/obdb/*.json")))
 
     plugin = "plugins/example-sim"
@@ -66,7 +69,9 @@ def main(argv):
     # The signal-file loader: the fixtures, and the plugin's data files
     # (signal files with no name or source, refused late)
     for path in signal_files:
-        write(out, "fuzz_signal_file", os.path.basename(path), read(os.path.relpath(path, ROOT)))
+        folder = os.path.basename(os.path.dirname(path))
+        write(out, "fuzz_signal_file", folder + "_" + os.path.basename(path),
+              read(os.path.relpath(path, ROOT)))
     for path in data_files:
         write(out, "fuzz_signal_file", "plugin_" + os.path.basename(path), read(plugin + "/" + path))
 

@@ -158,6 +158,14 @@ public:
         return QUrl::fromLocalFile(f.fileName());
     }
 
+    // A file's text, as a Save wrote it: "" when it can't be read
+    Q_INVOKABLE QString readScratchFile(const QUrl& url) const
+    {
+        QFile f(url.toLocalFile());
+        return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll())
+                                           : QString();
+    }
+
     // The signal store's copies (SignalStore::root, the test's settings
     // folder), by file name
     Q_INVOKABLE QStringList storedSignalFiles() const

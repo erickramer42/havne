@@ -555,9 +555,14 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
                                 unsigned long* pNumMsgs,
                                 unsigned long Timeout)
 {
-    (void)ChannelID; (void)Timeout;
+    (void)ChannelID;
     if (pMsg == nullptr || pNumMsgs == nullptr) {
         return STATUS_FAILED;
+    }
+    /* Every call and the wait it asked, for a test to read how a read
+     * called the vendor (the VX holds a 0 ms call 50 ms) */
+    if (fake_control::Page* page = fake_control::attach()) {
+        fake_control::record_read(page, static_cast<uint32_t>(Timeout));
     }
 
     /* ECUIO_FAKE_EXIT_ON_READ=1: the vendor DLL crashes mid-session.
@@ -920,7 +925,9 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* Counted on the page, the first kWriteDepth kept whole. */
     if (fake_control::Page* page = fake_control::attach()) {
-        fake_control::record_write(page, pMsg->Data, n, pMsg->TxFlags);
+        fake_control::record_write(
+            page, pMsg->Data, n, pMsg->TxFlags,
+            static_cast<uint32_t>(fake_j2534::now_us() & 0xFFFFFFFFLL));
     }
 
     /* The VX's TX indication for an accepted write: the CAN ID alone,

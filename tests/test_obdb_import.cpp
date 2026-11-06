@@ -677,4 +677,17 @@ TEST(ObdbImportTest, AHiddenCharacterInANameIsASpace)
     const ecuio_signal_def_t* h = im.def("h");
     ASSERT_NE(h, nullptr);
     EXPECT_STREQ(h->name, "A B C");
+
+    // the zero widths and U+061C too, and U+FEFF
+    Imported zw;
+    import(
+        zw,
+        "{\"commands\":[" +
+            one("", "1236",
+                R"({"id":"Z","name":"A\u200BB\u061CC\uFEFFD","fmt":{"len":8,"max":255,"unit":"volts"}})") +
+            "]}");
+    ASSERT_EQ(zw.status, ECUIO_OK) << zw.detail;
+    const ecuio_signal_def_t* z = zw.def("z");
+    ASSERT_NE(z, nullptr);
+    EXPECT_STREQ(z->name, "A B C D");
 }

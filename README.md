@@ -247,8 +247,9 @@ troubleshooting.
 
 ## Status
 
-v0.5.0, your own signals and plugins' data tier with Linux downloads
-for 64-bit ARM, is the latest release. Next:
+v0.5.1, a patch on v0.5.0's own signals (a replay through its
+recording's own signal file, refused signals shown as refused, a signal
+file saved out of the app), is the latest release. Next:
 
 | Version | Plan |
 |---|---|

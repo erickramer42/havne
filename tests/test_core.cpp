@@ -44,6 +44,7 @@ extern "C" {
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
 #include "def_index.h"     /* core/src: the defs a frame can match */
+#include "precise_wait.h"  /* core/src: a requesting worker's waits */
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "surrogate_log_names.h" /* core/src: the surrogate logs pruning keeps */
 #include "new_counter.h"   /* tests: operator new counted per thread */
@@ -2177,6 +2178,114 @@ TEST(CoreTest, MockFramesKeepTheTickInterval)
 
 /* Session time's clock (ADR-0033 section 1) never goes back, nor does its slept
  * count, and while the machine is awake it keeps the waits' pace */
+// ---------------------------------------------------------------------------
+// A requesting worker's waits (core/src/precise_wait.h)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/* The shortest of n waits of d on w, each timed on the steady clock, and
+ * their mean, in microseconds; each must be d or more */
+struct Waited {
+    int64_t shortest_us = INT64_MAX;
+    int64_t mean_us = 0;
+    int64_t median_us = 0; /* what a few preempted waits don't move */
+};
+
+Waited wait_n(ecuio_precise_wait& w, std::chrono::microseconds d, int n)
+{
+    Waited out;
+    int64_t total = 0;
+    std::vector<int64_t> each;
+    for (int i = 0; i < n; ++i) {
+        const auto from = std::chrono::steady_clock::now();
+        w.sleep_for(d);
+        const int64_t us =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - from)
+                .count();
+        out.shortest_us = std::min(out.shortest_us, us);
+        total += us;
+        each.push_back(us);
+    }
+    out.mean_us = total / n;
+    std::sort(each.begin(), each.end());
+    out.median_us = each[each.size() / 2];
+    return out;
+}
+
+} // namespace
+
+/* On Windows the waits run on a high-resolution timer (10 1803 and
+ * later), which ends a 2 ms wait about on time where a plain sleep ends
+ * it at the 15.6 ms step; elsewhere a plain sleep, on time on Linux.
+ * Never shorter than asked either way. The median's bound is a quarter
+ * of the step, a timer that rounds to it fails it. Not on macOS: CI's
+ * runners end a 2 ms sleep 10 to 18 ms late, a plain sleep core can't
+ * shorten, so there only the lower bound is judged. */
+TEST(CoreTest, APreciseWaitEndsOnTime)
+{
+    ecuio_precise_wait w;
+#ifdef _WIN32
+    ASSERT_TRUE(w.high_resolution())
+        << "CreateWaitableTimerExW refused the flag";
+#endif
+    const Waited got = wait_n(w, std::chrono::milliseconds(2), 20);
+    EXPECT_GE(got.shortest_us, 2000) << "a wait ended early";
+#ifndef __APPLE__
+    EXPECT_LT(got.median_us, 4000) << "the waits ended on a timer's step";
+#endif
+    RecordProperty("mean_us", static_cast<int>(got.mean_us));
+    RecordProperty("median_us", static_cast<int>(got.median_us));
+}
+
+/* A wait until a time ends at a stop within a piece: a second's wait
+ * stopped 20 ms in returns long before the second (judged against half
+ * of it, which load stretches only toward the stop), and one never
+ * stopped waits it out, never ending early */
+TEST(CoreTest, APreciseWaitUntilEndsAtAStop)
+{
+    ecuio_precise_wait w;
+    std::atomic<bool> stop{false};
+    const auto from = std::chrono::steady_clock::now();
+    std::thread stopper([&stop] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        stop.store(true);
+    });
+    const bool stopped = w.sleep_until(from + std::chrono::seconds(1), stop);
+    const auto took = std::chrono::steady_clock::now() - from;
+    stopper.join();
+    EXPECT_TRUE(stopped);
+    EXPECT_LT(took, std::chrono::milliseconds(500))
+        << "the stop waited the second out";
+
+    std::atomic<bool> never{false};
+    const auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(w.sleep_until(start + std::chrono::milliseconds(50), never));
+    EXPECT_GE(std::chrono::steady_clock::now() - start,
+              std::chrono::milliseconds(50))
+        << "a wait ended early";
+    EXPECT_TRUE(w.sleep_until(start, stop))
+        << "a stop already set ends it at once";
+}
+
+/* Where the flag is refused (built here by asking for none), the wait is
+ * a plain sleep: at the system's step, never shorter than asked, and
+ * nothing for a wait of nothing */
+TEST(CoreTest, APreciseWaitsFallbackNeverEndsEarly)
+{
+    ecuio_precise_wait w(false);
+    EXPECT_FALSE(w.high_resolution());
+    const Waited got = wait_n(w, std::chrono::milliseconds(2), 5);
+    EXPECT_GE(got.shortest_us, 2000) << "a wait ended early";
+    RecordProperty("mean_us", static_cast<int>(got.mean_us));
+    const auto from = std::chrono::steady_clock::now();
+    w.sleep_for(std::chrono::microseconds(0));
+    w.sleep_for(std::chrono::microseconds(-5));
+    EXPECT_LT(std::chrono::steady_clock::now() - from,
+              std::chrono::milliseconds(1));
+}
+
 TEST(CoreTest, ClockNeverGoesBackAndKeepsPace)
 {
     uint64_t last = ecuio_clock_us();

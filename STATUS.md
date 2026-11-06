@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-06, **Version:** v0.5.0,
+**Updated:** 2026-11-06, **Version:** v0.5.1,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,21 +14,28 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: between releases; v0.6.0 is next.** v0.5.0 is out:
+**Current phase: between releases; v0.6.0 is next.** v0.5.1 is out, a
+patch: a recording replays with its own signal file, a signal its
+module refuses shows as refused, and a vehicle's signal file saves out
+of the app. v0.5.0 brought
 your own signals, as signal files that core reads from bytes and
 refuses at load where they're wrong, written per vehicle in the app
 (with **Read once**) or converted from an OBDb set by `havne-cli`;
 enumerations and computed signals such as boost; plugins' data tier, a
 package of signal files whose variants the car's VIN proposes, checked
 through the simulated ECU in CI; and Linux downloads for 64-bit ARM.
-None of it has yet read a real ECU: each read so far is the simulated
-car's. Changes since then go under
+On the test car
+([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md)),
+a signal written in the form and checked with **Read once**, a signal
+file's DIDs on two modules, a refused DID, an enumeration and boost read
+through the VX and the MX+, in the app and `havne-cli`; plugins have run
+only against the simulated car. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
 bench bus and on one car, from
 [2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md) to
-[2026-11-05](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md): the values
+[2026-11-06](docs/bench-sessions/2026-11-06-own-signals-car.md): the values
 decoded and tracked the cluster, and the request engine, the probe,
 identification, `uds-generic`, the trouble codes, several PIDs per
 request, more than one ECU and a DID scan ran there. The [ELM327 transport](docs/elm327.md)
@@ -156,12 +163,29 @@ background too ([roadmap](#roadmap)).
     BENCH prep #29).
   - **Profiles** chosen by the URI
     ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
-    `obd2` and `uds-generic`. Each signal def states its kind and byte
+    `obd2` and `uds-generic`, and a signal file's or a plugin's
+    (`user.*`, `plugin.*`). Each signal def states its kind and byte
     order ([ADR-0016](docs/adr/0016-signal-definition-layout.md)).
     `uds-generic` scans a `?did=` range with `?scan=first` back to
     back before polling what it found: about 30 DIDs a second on the
     test car through both adapters, a 1,024-DID block in about 30 s
     ([ADR-0020](docs/adr/0020-uds-generic.md)'s appendices).
+  - **Your own signals** ([ADR-0051](docs/adr/0051-signal-files.md)):
+    signal files, JSON that core reads from bytes and refuses at load
+    where it's wrong, holding Service 01 PIDs and Service 22 DIDs on up
+    to four modules, numbers, text, enumerations and computed signals
+    such as boost; written per vehicle in Settings' form (with **Read
+    once**), converted from an OBDb set by `havne-cli signals import
+    obdb`, saved out with **Save a copy**, and read by `havne-cli
+    --signals`. Plugins' data tier
+    ([ADR-0052](docs/adr/0052-plugin-framework.md)): a package of signal
+    files whose variants the car's VIN proposes. A recording holds the
+    file it decoded with and replays through it; a signal its module
+    refuses shows as refused. Verified on the test car through the VX
+    and the MX+
+    ([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md)),
+    plugins against the simulated car only. Left: naming a scanned
+    DID's refusal and a replay's (the backlog), a plugin on a car.
   - **Connects explain themselves:** a failure says why, with the
     vendor's own text
     ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)); a success
@@ -349,11 +373,11 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1238 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 1271 ctest cases on Windows (both trees rebuilt,
   2026-11-06), all passing but three skips (the cross-arch case and
   the real-car recordings' diff, run locally, and a Read once case
   that runs on Linux only), plus the
-  cross-arch subset (101/101); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (102/102); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
@@ -467,6 +491,18 @@ an issue is resolved it is removed, and its number is not reused.
     turns it off (`AT CFC0`). Untried: `STCMM`'s other modes
     (some acknowledge on the bus) and `STM`'s filters. To listen to
     multi-frame replies, use a SocketCAN controller in listen-only mode.
+- **#42. Through the OBDX Pro VX, a second module's reply can be lost
+    while the first module's segmented reply comes in.** On the test
+    car, a session asking the engine (0x7E8) and a second module
+    (0x7E9) lost 22% of the second module's single-frame replies with
+    the engine's `obd2` requests packed, and 1.1% with `?pack=0`; nearly
+    every lost one was due within 30 ms of a 0x7E8 reply of several
+    frames. Each write was accepted and no reply came late; with one DID
+    asked of each module, and through the MX+, none was lost
+    ([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md),
+    BENCH prep #35). The request goes out again on its next turn, so a
+    signal still updates, less often. For a session that asks two
+    modules through the VX, `?pack=0` keeps the losses near 1%.
 
 ## Roadmap
 
@@ -475,6 +511,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
 | v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | Released |
 | v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | Released |
+| v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; the car run of v0.5.0's own signals; the request pace on Windows' high-resolution timer, the charts on the GPU | Released |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -485,53 +522,49 @@ releases are in [CHANGELOG.md](CHANGELOG.md). The planned releases are
 in order and hold about three features each; a release's detail comes
 in here when its work starts.
 
-### v0.5.0: your own signals, and the plugin framework's data tier
+### v0.5.1: v0.5.0's signals on the test car, and what they lacked
 
-A minor release ([ADR-0048](docs/adr/0048-semantic-versioning.md)),
-which breaks the C ABI on purpose where ADR-0051 says.
-- **Signal files** ([ADR-0051](docs/adr/0051-signal-files.md)): a
-  user's own signals as data, JSON read by a strict parser in core from
-  bytes, for the app on every platform and `havne-cli` alike: Service
-  01 PIDs and Service 22 DIDs on up to four modules, numbers, text,
-  enumerations and computed signals; everything a file gets wrong
-  refused at load, one ID width included. Core's limits move with it:
-  256 requests, the set's layout version 4, recording format 3.
-- **The plugin framework** ([ADR-0052](docs/adr/0052-plugin-framework.md)): one package and
-  manifest, the three tiers, the registry and selection by the VIN's
-  manufacturer code and model year, designed whole; v0.5.0 builds the data
-  tier, which is the signal-file format.
-- **Your own signals, per vehicle:** a form under Settings' Vehicle
-  section, with **Read once** showing the raw reply beside the decoded
-  value; `havne-cli stream --signals <file>` and `signals check`.
-- **Bulk import:** an OBDb signal set (CC BY-SA 4.0, its attribution
-  kept in the converted file's `source` block), converted by
-  `havne-cli signals import obdb` and reported field by field where it
-  differs; the app imports the converted file as any signal file.
-- **Computed signals in core:** the simulated car's boost from its MAP
-  and baro, and a user's own, such as boost from `obd2`'s two PIDs in a
-  signal file, each input judged by its own age bound.
-- **The simulated ECU answers a plugin's DIDs** from the same file, so
-  an example plugin for the simulated car runs in CI with no car;
-  `havne-cli plugins list` and `plugins check`.
-- **Linux downloads for 64-bit ARM** (a Raspberry Pi on Raspberry Pi OS
-  13 or Ubuntu 24.04 and newer): built, with the x86_64 downloads'
-  checks, on CI's ARM runners, and the release checks run on a
-  Raspberry Pi 3 ([docs/linux.md](docs/linux.md)); first published with
-  v0.5.0.
-- **Groundwork, built:** the fakes' module DIDs, and the simulated
-  ECU's second module and `pending` fault.
+A patch ([ADR-0048](docs/adr/0048-semantic-versioning.md)): no new ADR
+and no ABI change.
+- **A replay decodes with its recording's own signal file**, in the
+  app and `havne-cli`, so a recording replays as it was recorded after
+  the vehicle's file changed or was removed
+  ([ADR-0051](docs/adr/0051-signal-files.md)'s appendix "a replay
+  reads with its recording's copy").
+- **A refused signal shows as refused**, on Live and in `havne-cli`'s
+  `refused` line, its negative reply's code named; the support report
+  lists the refusals ahead of the bitmap's drops, and past its eight
+  each front end counts the rest (ADR-0051's appendix "a refused signal
+  shown as refused"). A DID the scan finds refused, and a replay's
+  refusals, show no value (the backlog's "Every refusal named").
+- **Save a copy:** a vehicle's signal file saved out of the app, on the
+  desktop and through Android's document picker.
+- **The car run of v0.5.0's own signals**
+  ([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md)):
+  a signal from the form, a file's DIDs on two modules, a refused DID,
+  an enumeration and boost, through the VX and the MX+, in the app and
+  `havne-cli`. It found Known Issue #42 (the VX losing a second
+  module's single-frame reply during the first's segmented one) and the
+  phone and vehicle fixes in CHANGELOG's "Unreleased".
+- **Fixes:** the request pace on Windows' high-resolution timer, the
+  charts drawn on the GPU (a tap on the phone's chart about 50 ms, from
+  150), a plugin replace that keeps the loaded version until the new
+  one loads, numbers read as their nearest double (a plugin with a
+  17-digit scale loads), and `havne-cli` taking non-ASCII paths on
+  Windows.
 
-**Done when:** `havne-cli` loads the example plugin, the simulated car
-answers its DIDs on `vcan0`, the values decode with its scaling and
-enumerations, and its CI examples pass (met:
-[testing.md](docs/testing.md)'s `havne-cli plugins` row,
-`CliPluginRunTest` in CI's `linux-build`); a user's own DID, defined in
-the app and imported from a synthetic OBDb file, reads from the
-simulated car on a second module (met: [testing.md](docs/testing.md)'s
-"done-when on a second module" row, 2026-11-05); boost shows on Live
-from the mock's MAP and baro (met: testing.md's mock rows and its
-"Boost on Live" row, 2026-11-05); the arm64 deb's `havne-cli` and the
-aarch64 AppImage run on the Raspberry Pi from the release's own files.
+**Done when:** a plugin session recorded in the app holds `signals.json`
+and its `plugin` line (met: [testing.md](docs/testing.md)'s plugins
+row); a recording replays through its own copy, in the app and
+`havne-cli`, after its file is removed from the vehicle (met: the car
+run's "After" phase); a file made in the form is saved out on the
+desktop and on the test phone, and `havne-cli signals check` loads it
+(met: testing.md's signal-files row, and the car run's phone copy); a
+DID the simulated car refuses shows as refused on Live and in
+`havne-cli` (met: testing.md's refused-signals row, and TCM DC00 on the
+test car); a two-ECU session against the fake asks at the engine's
+floor, not the timer's step (met: `J2534HealthTest.ATwoEcuSessionAsksAtTheEnginesFloor`,
+`Elm327SessionTest.TwoEcusAreAskedAtTheEnginesFloor`).
 
 ### Waiting on a tester: an iPhone download
 
@@ -588,6 +621,13 @@ less, **M** a few days, **L** a week or more or an ADR first.
 
 - **Custom derived channels (M):** a user's expression per channel, in
   core, on v0.5.0's derived-signal stage.
+- **Every refusal named (M, an ABI addition):** a DID `uds-generic`'s
+  scan finds refused, and any refusal in a replay, show no value where
+  a live session's polled request reads Refused: the scan's refusals
+  are only counted in the support report, and a recording keeps a
+  refusal as a note's words
+  ([ADR-0051](docs/adr/0051-signal-files.md)'s appendix "a refused
+  signal shown as refused").
 - **A scanned DID answered "response pending" on a real adapter (S):**
   tested against the fake only; needs an ECU that sends it (BENCH prep
   #17).

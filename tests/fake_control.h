@@ -13,10 +13,12 @@
 //     environment variable of the same name,
 //   - queues received messages with any RxStatus, and
 //   - reads what the fake publishes: the process that opened it, its
-//     successful writes (counted, the first kWriteDepth kept whole), the
+//     successful writes (counted, the first kWriteDepth kept whole with
+//     the fake's microsecond stamp), the
 //     last connect's parameters, the last filter started and stopped,
-//     and how often it was disconnected and closed by the IDs it handed
-//     out.
+//     how often it was disconnected and closed by the IDs it handed
+//     out, and its PassThruReadMsgs calls (counted, the first
+//     kReadDepth calls' Timeout kept).
 // Fixed-size fields and no pointers, so an x64 test process and an x86
 // child map the same bytes; the size is pinned below and the layout
 // versioned (kLayout).
@@ -38,7 +40,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 /* Raised with any change to Page. A fake whose layout differs (a
  * build-win32 fake older than the tests) ignores the page, as it
  * ignores a wrong magic, and a test sees opener() stay 0. */
-constexpr uint32_t kLayout = 3;
+constexpr uint32_t kLayout = 5;
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
@@ -46,6 +48,7 @@ constexpr uint32_t kInboxDepth = 32;   /* a read's indication cap and more */
 constexpr uint32_t kMsgMax = 64;
 constexpr uint32_t kWriteDepth = 16;   /* the first writes, bytes kept */
 constexpr uint32_t kFilterMax = 12;    /* a filter's mask and pattern */
+constexpr uint32_t kReadDepth = 16;    /* the first reads, Timeout kept */
 
 struct Knob {
     char name[kNameLen];     /* empty: a free slot */
@@ -63,6 +66,8 @@ struct Write {
     uint32_t size;
     uint32_t tx_flags;       /* PASSTHRU_MSG.TxFlags, verbatim */
     uint8_t data[kMsgMax];
+    uint32_t us; /* when the fake took it: its steady clock's
+                                microseconds, low 32 bits */
 };
 
 struct Filter {
@@ -93,9 +98,12 @@ struct Page {
     uint32_t connect_baud;
     Filter last_filter;      /* the last filter started */
     uint32_t last_stopped;   /* the last filter ID stopped; 0 = none */
+    volatile LONG reads;     /* PassThruReadMsgs calls on its channel */
+    uint32_t read_timeouts[kReadDepth]; /* the first reads' Timeout */
 };
 static_assert(sizeof(Page) == 12 + kMaxKnobs * 80 + kInboxDepth * 76 + 20 +
-                                  kWriteDepth * 72 + 12 + 48 + 4,
+                                  kWriteDepth * 76 + 12 + 48 + 4 + 4 +
+                                  kReadDepth * 4,
               "the page's layout must match in x86 and x64 builds");
 
 class Guard {
@@ -258,6 +266,8 @@ inline void reset(Page* p)
     InterlockedExchange(&p->disconnects, 0);
     InterlockedExchange(&p->closes, 0);
     memset(p->recorded, 0, sizeof(p->recorded));
+    InterlockedExchange(&p->reads, 0);
+    memset(p->read_timeouts, 0, sizeof(p->read_timeouts));
     p->connect_protocol = 0;
     p->connect_flags = 0;
     p->connect_baud = 0;
@@ -301,10 +311,10 @@ inline uint32_t take(Page* p, Message* out, uint32_t cap)
     return n;
 }
 
-/* Fake side: a successful write, counted, and its bytes kept while
- * fewer than kWriteDepth are. */
+/* Fake side: a successful write at us, counted, and its bytes and stamp
+ * kept while fewer than kWriteDepth are. */
 inline void record_write(Page* p, const uint8_t* data, uint32_t size,
-                         uint32_t tx_flags)
+                         uint32_t tx_flags, uint32_t us)
 {
     Guard g(p);
     const LONG i = InterlockedCompareExchange(&p->writes, 0, 0);
@@ -313,8 +323,21 @@ inline void record_write(Page* p, const uint8_t* data, uint32_t size,
         w.size = (size < kMsgMax) ? size : kMsgMax;
         w.tx_flags = tx_flags;
         memcpy(w.data, data, w.size);
+        w.us = us;
     }
     InterlockedIncrement(&p->writes);
+}
+
+/* Fake side: a PassThruReadMsgs call and the Timeout it asked, kept
+ * while fewer than kReadDepth are. */
+inline void record_read(Page* p, uint32_t timeout_ms)
+{
+    Guard g(p);
+    const LONG i = InterlockedCompareExchange(&p->reads, 0, 0);
+    if (i >= 0 && static_cast<uint32_t>(i) < kReadDepth) {
+        p->read_timeouts[i] = timeout_ms;
+    }
+    InterlockedIncrement(&p->reads);
 }
 
 /* Fake side: what PassThruConnect was asked, before it judges it. */
@@ -354,6 +377,26 @@ inline void record_filter_stop(Page* p, uint32_t id)
 inline uint32_t writes(Page* p)
 {
     return static_cast<uint32_t>(InterlockedCompareExchange(&p->writes, 0, 0));
+}
+
+/* PassThruReadMsgs calls since the reset */
+inline uint32_t reads(Page* p)
+{
+    return static_cast<uint32_t>(InterlockedCompareExchange(&p->reads, 0, 0));
+}
+
+/* Read i's Timeout since the reset; false past those kept or made */
+inline bool recorded_read_timeout(Page* p, uint32_t i, uint32_t* timeout_ms)
+{
+    Guard g(p);
+    *timeout_ms = 0;
+    if (i >= kReadDepth ||
+        i >= static_cast<uint32_t>(
+                 InterlockedCompareExchange(&p->reads, 0, 0))) {
+        return false;
+    }
+    *timeout_ms = p->read_timeouts[i];
+    return true;
 }
 
 /* Write i since the reset; false (and w zeroed) past those kept. */

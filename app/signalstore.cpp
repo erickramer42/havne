@@ -6,6 +6,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 
@@ -163,6 +164,27 @@ QString SignalStore::text(const QString& sha)
     return QString::fromUtf8(f.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1));
 }
 
+QByteArray SignalStore::bytes(const QString& sha, QString* words)
+{
+    static const QRegularExpression hex(QStringLiteral("^[0-9a-f]{64}$"));
+    if (!hex.match(sha).hasMatch()) {
+        *words = QStringLiteral("No such signal file");
+        return {};
+    }
+    QFile f(pathOf(sha));
+    if (!f.open(QIODevice::ReadOnly)) {
+        *words = QStringLiteral("Its copy is missing: import the file again");
+        return {};
+    }
+    QByteArray b = f.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+    if (shaOf(b) != sha) {
+        *words = QStringLiteral(
+            "Its copy has changed since it was kept: import the file again");
+        return {};
+    }
+    return b;
+}
+
 QVariantList SignalStore::use(const QStringList& shas)
 {
     for (auto it = m_registered.begin(); it != m_registered.end();) {
@@ -235,6 +257,15 @@ SignalStore::fileFor(const ecuio_signal_set_t* set) const
         }
     }
     return nullptr;
+}
+
+QString SignalStore::profileOf(const QString& sha) const
+{
+    if (!m_registered.contains(sha)) {
+        return {};
+    }
+    const auto held = m_held.find(sha);
+    return held != m_held.end() ? held->second.profile : QString();
 }
 
 int SignalStore::deleteUnused(const QStringList& keep)

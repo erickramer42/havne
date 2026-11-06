@@ -44,6 +44,7 @@ which has no bench session):
 | [2026-11-04-socketcan-desk-utc](2026-11-04-socketcan-desk-utc.md) | Desk bus, no car: the simulated ECU on the USB2CAN, each reply's time in the VX's recording against `candump`'s |
 | [2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md) | Vehicle: both ECUs in one session through the VX and the MX+, the recorders on the car, the MX+ and the USB2CAN listening beside the VX |
 | [2026-11-05-two-ecu-car-rerun](2026-11-05-two-ecu-car-rerun.md) | Vehicle: the VX's reply latency after the read fix, and the MX+ listening with `AT CFC0` and six more setups |
+| [2026-11-06-own-signals-car](2026-11-06-own-signals-car.md) | Vehicle: v0.5.0's own signals through the VX and the MX+: a signal from the form, a file's DIDs on two modules, a refused DID, an enumeration and boost, a replay through its own copy |
 
 ## The list
 
@@ -60,6 +61,7 @@ which has no bench session):
 | 9 | **Export names.** Both backends try the spec spelling `PassThruIoctl` (J2534-1_0500 section 7.3.19) first and the legacy `PassThruIoCtl` second, pinned in both directions by the two fakes | RESOLVED | The VX exports the spec spelling ([2026-10-16](2026-10-16.md)) |
 | 10 | **Session info readings** ([ADR-0019](../adr/0019-session-info.md)): each connect asks `READ_VBATT` and `PassThruReadVersion`, and the "Session:" line shows them | CONFIRMED for the VX | The voltage is in millivolts: 0.0 V on USB power alone, within 0.1 V of the ECU's own reading (PID 0x42) on the car; versions `FW:1.0.1.0 HW:1.0.0.0`, DLL `1.8.9586.12845`, API `04.04` ([2026-10-25-vehicle](2026-10-25-vehicle.md)) |
 | 34 | **A busy bus through the surrogate:** a listening J2534 session (`?profile=raw`, no requests) keeps up with a loaded 500 kbit/s bus, several thousand frames a second, through the pipe's batched reads, with no `ERR_BUFFER_OVERFLOW` and no frame flagged lost | STILL UNKNOWN | The fake can't drive such a bus: its control page takes about 190 frames a second, and a listening session through the x64 surrogate kept pace with it (3721 frames in 20 s, 2026-11-05) |
+| 35 | **Two modules' replies through the VX at once:** with requests out to the engine (0x7E8) and a second module (0x7E9), the VX delivers the second module's single-frame reply while the engine's segmented reply is coming in, so each channel gets every reply | REFUTED on the test car; whether the lost replies are on the bus is STILL UNKNOWN | [2026-11-06-own-signals-car](2026-11-06-own-signals-car.md), the VX through `havne-cli`, 60 s each: the second module's DA03 with the engine's `obd2` rows packed, 299 of 1,205 writes never answered (none late), 297 of them within 30 ms of a 0x7E8 segmented reply against 68 % of the answered ones; with `?pack=0` 23 of 2,052, 22 near one of the 55 segmented replies left; with one DID asked of each module, none lost; through the MX+ on the same file, none. Known Issue #42 |
 
 ### ELM327 ([ADR-0026](../adr/0026-elm327-transport.md))
 
@@ -128,6 +130,9 @@ which has no bench session):
   appendix of 2026-11-04), with the ELM327 adapter's session against it.
 - **#19, listening to another tester's multi-frame replies:** the MX+ on the Y-splitter again, with the monitor's setup changed.
 - **#25, a BLE adapter's service:** needs a BLE adapter.
+- **#35, two modules through the VX:** a SocketCAN controller in
+  listen-only mode on the Y-splitter while the VX asks both modules,
+  packed: whether the 0x7E9 replies the VX loses are on the bus.
 - **#34, a busy bus through the surrogate:** a listening session on a
   bus with heavy broadcast traffic (a car's powertrain bus, or a desk
   bus fed by `cangen` through the USB2CAN), its frame count against

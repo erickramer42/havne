@@ -12,7 +12,7 @@ pragma ComponentBehavior: Bound
 
 // The recordings a session saved (ADR-0049), newest first: Open shows one
 // in the viewer, Replay puts its replay:// URI in Settings' field, and the
-// viewer's Replay view the part in view's (?from=&to=). The
+// viewer's Replay in Settings the part in view's (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
@@ -773,13 +773,16 @@ Page {
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
-            // The part in view replayed as a session, Settings' field
-            // filled as the list's Replay fills it
+            // The part in view replayed as a session: Settings' field
+            // filled as the list's Replay fills it, and Connect left to
+            // the user, so the name says where it goes; off while a
+            // session runs, as the list's is
             ThemedButton {
                 objectName: "replayView"
                 visible: recording.state === RecordingView.Open
-                text: qsTr("Replay view")
-                Accessible.name: qsTr("Replay the part in view as a session")
+                enabled: !(Bridge.connected || Bridge.connecting)
+                text: qsTr("Replay in Settings")
+                Accessible.name: qsTr("Put the part in view in Settings, to replay it as a session")
                 onClicked: root.replayRequested(root.stretchUri())
             }
         }

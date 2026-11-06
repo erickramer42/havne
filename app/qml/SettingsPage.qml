@@ -328,6 +328,35 @@ Pane {
         Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
     }
 
+    // A Save out of the app: the copy the vehicle has, byte for byte, where
+    // the user chooses (the desktop's dialog, Android's document picker),
+    // so it can be shared or given to havne-cli --signals. Its name to
+    // start from is the profile's slug
+    property string savingSha: ""
+
+    function saveFileName(f) {
+        const slug = String(f.profile).replace(/^user\./, "")
+        return (slug !== "" ? slug : "signals") + ".json"
+    }
+
+    function saveSignalFileAs(f) {
+        savingSha = f.sha256
+        saveDialog.selectedFile = saveDialog.currentFolder.toString().replace(/\/$/, "")
+                                  + "/" + saveFileName(f)
+        saveDialog.open()
+    }
+
+    function saveSignalFileTo(sha, url) {
+        const f = pickedVehicle !== null ? pickedVehicle.signals.find(e => e.sha256 === sha)
+                                         : undefined
+        const r = Bridge.saveSignalFile(sha, url)
+        signalProblem = r.ok ? "" : r.words
+        signalNote = r.ok ? qsTr("%1 saved to the file you chose")
+                                .arg(f !== undefined ? f.name : qsTr("The signal file"))
+                          : ""
+        return r.ok
+    }
+
     function confirmingFile() {
         if (!confirming.startsWith("removeSignals:") || pickedVehicle === null)
             return null
@@ -363,6 +392,31 @@ Pane {
         signalProblem = ""
         signalNote = ""
         clearForm()
+        dropAnotherVehiclesProfile()
+    }
+
+    // A file's or a plugin's profile in the field is one vehicle's: once
+    // another is picked (or none), the field reads Default, so a connect
+    // never decodes with the last vehicle's signals and remembers them as
+    // this one's. A vehicle with a connection of its own then sets the
+    // field (pickVehicle); a session's URI is left as it is until the
+    // session ends, since a VIN may pick another vehicle while it runs
+    onIdleChanged: {
+        if (idle)
+            dropAnotherVehiclesProfile()
+    }
+
+    function dropAnotherVehiclesProfile() {
+        if (!idle)
+            return
+        const p = profileChoice
+        if (!p.startsWith("user.") && !p.startsWith("plugin."))
+            return
+        const mine = pickedVehicle === null ? []
+            : pickedVehicle.signals.map(f => f.profile)
+                  .concat(pickedVehicle.plugin !== "" ? [pickedVehicle.plugin] : [])
+        if (mine.indexOf(p) < 0)
+            chooseProfile("default")
     }
 
     function clearForm() {
@@ -477,8 +531,14 @@ Pane {
         const base = ownFile !== null ? ownFile
             : SignalForm.emptyFile(pickedVehicle.label,
                                    VehicleBook.ownName(vehicles, pickedVehicle.label))
-        if (!saveOwn(SignalForm.withSignal(base, signal, SignalForm.moduleOf(f), editingKey),
-                     qsTr("%1 saved in %2").arg(signal.name, base.name)))
+        const module = SignalForm.moduleOf(f)
+        // One request ID to a module: a typed one that differs moves the
+        // module's other signals too, and the note names them
+        const move = SignalForm.requestIdMove(base, signal, module, editingKey)
+        const note = move === null ? qsTr("%1 saved in %2").arg(signal.name, base.name)
+            : qsTr("%1 saved in %2; %3 asks on %4 for %5 too")
+                  .arg(signal.name, base.name, move.rx, move.tx, move.names.join(", "))
+        if (!saveOwn(SignalForm.withSignal(base, signal, module, editingKey), note))
             return false
         editingKey = ""   // saved: the Edit is over
         return true
@@ -532,6 +592,7 @@ Pane {
     // like typed text so the profile row and the DID field follow
     function pickVehicle(id) {
         confirming = ""
+        vinPickNote = ""
         saveVehicles(VehicleBook.pick(vehicles, id))
         if (pickedVehicle !== null && pickedVehicle.uri !== "")
             uriField.text = pickedVehicle.uri
@@ -551,6 +612,10 @@ Pane {
                                                   Bridge.signalModel.unplottedNames()))
     }
 
+    // Said beside the vehicles while the car's VIN, not the user, made
+    // the pick (VehicleBook.pickNote); "" once the user picks
+    property string vinPickNote: ""
+
     // The VIN settled which vehicle this is (ADR-0027 section 4)
     function recognizeVehicle() {
         if (!VehicleBook.isAdapterUri(Bridge.currentUri))
@@ -562,6 +627,7 @@ Pane {
         }
         const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
         saveVehicles(r.doc)
+        vinPickNote = VehicleBook.pickNote(r)
         if (r.outcome === "new" && plottedApplied)
             rememberPlotting()
         else if (r.outcome === "switched" && plottedApplied)
@@ -581,6 +647,17 @@ Pane {
         font.pixelSize: 16
         font.weight: Font.DemiBold
         Layout.topMargin: Theme.spacing
+    }
+
+    // A form's box with its name above it: a placeholder alone goes once
+    // something is typed, and the box no longer says what it holds
+    component Captioned: Column {
+        property alias caption: captionText.text
+        spacing: 2
+        Label {
+            id: captionText
+            color: Theme.textDim
+        }
     }
 
     // A caption, then buttons that wrap: a row of them would hold the
@@ -1436,6 +1513,15 @@ Pane {
                     }
                 }
 
+                Label {
+                    objectName: "vehicleVinPickNote"
+                    visible: page.vinPickNote !== ""
+                    text: page.vinPickNote
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
                 Flow {
                     Layout.fillWidth: true
                     spacing: Theme.spacing
@@ -1563,13 +1649,15 @@ Pane {
 
                 Repeater {
                     model: page.pickedVehicle !== null ? page.pickedVehicle.signals : []
-                    RowLayout {
+                    // The file's line at the page's width, its buttons under
+                    // it, so a phone's narrow page never squeezes the line
+                    ColumnLayout {
                         id: fileRow
                         required property var modelData
                         required property int index
                         objectName: "signalFile_" + index
                         Layout.fillWidth: true
-                        spacing: Theme.spacing
+                        spacing: Theme.spacing / 2
 
                         Label {
                             objectName: "signalFileText"
@@ -1579,11 +1667,24 @@ Pane {
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
-                        ThemedButton {
-                            objectName: "signalRemove_" + fileRow.index
-                            text: qsTr("Remove")
-                            enabled: page.idle && page.confirming === ""
-                            onClicked: page.removeSignalFile(fileRow.modelData.sha256)
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing
+                            ThemedButton {
+                                objectName: "signalSave_" + fileRow.index
+                                width: Math.min(implicitWidth, parent.width)
+                                text: qsTr("Save a copy")
+                                // Reads the copy alone, so a session may run
+                                enabled: page.confirming === ""
+                                onClicked: page.saveSignalFileAs(fileRow.modelData)
+                            }
+                            ThemedButton {
+                                objectName: "signalRemove_" + fileRow.index
+                                width: Math.min(implicitWidth, parent.width)
+                                text: qsTr("Remove")
+                                enabled: page.idle && page.confirming === ""
+                                onClicked: page.removeSignalFile(fileRow.modelData.sha256)
+                            }
                         }
                     }
                 }
@@ -1633,6 +1734,15 @@ Pane {
                     nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
                     onAccepted: page.importSignalFile(importDialog.selectedFile)
                 }
+                FileDialog {
+                    id: saveDialog
+                    title: qsTr("Save a copy of the signal file")
+                    fileMode: FileDialog.SaveFile
+                    defaultSuffix: "json"
+                    nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
+                    currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                    onAccepted: page.saveSignalFileTo(page.savingSha, saveDialog.selectedFile)
+                }
 
                 // ---- The app's plugins (ADR-0052): every vehicle's, the
                 // picked one's variant proposed by its VIN ----
@@ -1673,7 +1783,7 @@ Pane {
                     objectName: "pluginsNone"
                     visible: page.pluginList.length === 0
                     text: qsTr("None yet. A plugin (a .havne-plugin.json file) holds signals "
-                               + "for the cars its maker codes and years name")
+                               + "for the cars its manufacturer codes and model years name")
                     color: Theme.textDim
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
@@ -1796,26 +1906,36 @@ Pane {
                     spacing: Theme.spacing
 
                     Flow {
+                        id: formNameRow
                         Layout.fillWidth: true
                         spacing: Theme.spacing
-                        TextField {
-                            id: formName
-                            objectName: "formName"
-                            placeholderText: qsTr("Name")
-                            width: Math.min(parent.width, Theme.controlHeight * 8)
+                        Captioned {
+                            caption: qsTr("Name")
+                            TextField {
+                                id: formName
+                                objectName: "formName"
+                                placeholderText: qsTr("Name")
+                                width: Math.min(formNameRow.width, Theme.controlHeight * 8)
+                            }
                         }
-                        TextField {
-                            id: formRx
-                            objectName: "formRx"
-                            text: "7E8"
-                            placeholderText: qsTr("Reply ID")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Reply ID")
+                            TextField {
+                                id: formRx
+                                objectName: "formRx"
+                                text: "7E8"
+                                placeholderText: qsTr("Reply ID")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formTx
-                            objectName: "formTx"
-                            placeholderText: qsTr("Request ID")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Request ID")
+                            TextField {
+                                id: formTx
+                                objectName: "formTx"
+                                placeholderText: qsTr("Request ID")
+                                width: Theme.controlHeight * 3
+                            }
                         }
                     }
 
@@ -1832,12 +1952,15 @@ Pane {
                                 onClicked: page.formService = modelData.name
                             }
                         }
-                        TextField {
-                            id: formNumber
-                            objectName: "formNumber"
-                            placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
-                                                                       : qsTr("PID, 2 hex digits")
-                            width: Theme.controlHeight * 5
+                        Captioned {
+                            caption: page.formService === "22" ? qsTr("DID") : qsTr("PID")
+                            TextField {
+                                id: formNumber
+                                objectName: "formNumber"
+                                placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
+                                                                           : qsTr("PID, 2 hex digits")
+                                width: Theme.controlHeight * 5
+                            }
                         }
                     }
 
@@ -1859,37 +1982,49 @@ Pane {
                     Flow {
                         Layout.fillWidth: true
                         spacing: Theme.spacing
-                        TextField {
-                            id: formByte
-                            objectName: "formByte"
-                            text: "0"
-                            placeholderText: qsTr("Byte")
-                            width: Theme.controlHeight * 2.5
+                        Captioned {
+                            caption: qsTr("Byte")
+                            TextField {
+                                id: formByte
+                                objectName: "formByte"
+                                text: "0"
+                                placeholderText: qsTr("Byte")
+                                width: Theme.controlHeight * 2.5
+                            }
                         }
-                        TextField {
-                            id: formBits
-                            objectName: "formBits"
+                        Captioned {
+                            caption: qsTr("Bits")
                             visible: page.formKind === "number" || page.formKind === "enum"
-                            text: "8"
-                            placeholderText: qsTr("Bits")
-                            width: Theme.controlHeight * 2.5
+                            TextField {
+                                id: formBits
+                                objectName: "formBits"
+                                text: "8"
+                                placeholderText: qsTr("Bits")
+                                width: Theme.controlHeight * 2.5
+                            }
                         }
-                        TextField {
-                            id: formBit
-                            objectName: "formBit"
-                            visible: formBits.visible
-                            placeholderText: qsTr("Bit")
-                            width: Theme.controlHeight * 2.5
+                        Captioned {
+                            caption: qsTr("Start bit")
+                            visible: page.formKind === "number" || page.formKind === "enum"
+                            TextField {
+                                id: formBit
+                                objectName: "formBit"
+                                placeholderText: qsTr("Bit")
+                                width: Theme.controlHeight * 2.5
+                            }
                         }
-                        TextField {
-                            id: formBytes
-                            objectName: "formBytes"
-                            visible: !formBits.visible
-                            placeholderText: qsTr("Bytes (all)")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Bytes")
+                            visible: !(page.formKind === "number" || page.formKind === "enum")
+                            TextField {
+                                id: formBytes
+                                objectName: "formBytes"
+                                placeholderText: qsTr("Bytes (all)")
+                                width: Theme.controlHeight * 3
+                            }
                         }
                         Repeater {
-                            model: formBits.visible ? ["be", "le"] : []
+                            model: page.formKind === "number" || page.formKind === "enum" ? ["be", "le"] : []
                             ThemedButton {
                                 required property string modelData
                                 objectName: "formOrder_" + modelData
@@ -1910,29 +2045,41 @@ Pane {
                         Layout.fillWidth: true
                         spacing: Theme.spacing
                         visible: page.formKind === "number"
-                        TextField {
-                            id: formScale
-                            objectName: "formScale"
-                            placeholderText: qsTr("Scale (1)")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Scale")
+                            TextField {
+                                id: formScale
+                                objectName: "formScale"
+                                placeholderText: qsTr("Scale (1)")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formOffset
-                            objectName: "formOffset"
-                            placeholderText: qsTr("Offset (0)")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Offset")
+                            TextField {
+                                id: formOffset
+                                objectName: "formOffset"
+                                placeholderText: qsTr("Offset (0)")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formUnit
-                            objectName: "formUnit"
-                            placeholderText: qsTr("Unit")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Unit")
+                            TextField {
+                                id: formUnit
+                                objectName: "formUnit"
+                                placeholderText: qsTr("Unit")
+                                width: Theme.controlHeight * 3
+                            }
                         }
-                        TextField {
-                            id: formDecimals
-                            objectName: "formDecimals"
-                            placeholderText: qsTr("Decimals")
-                            width: Theme.controlHeight * 3
+                        Captioned {
+                            caption: qsTr("Decimals")
+                            TextField {
+                                id: formDecimals
+                                objectName: "formDecimals"
+                                placeholderText: qsTr("Decimals")
+                                width: Theme.controlHeight * 3
+                            }
                         }
                     }
 

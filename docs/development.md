@@ -305,9 +305,12 @@ Full output goes to `Testing/verify/<step>.log` (git-ignored). On a
 failure it prints the compiler errors or the failed test names and
 stops. It fails, rather than passing, when `-R` matches no test, and
 when the env-gated routing case skips in the cross-arch step, since
-that means the x86 paths are wrong. The trees must already be
-configured. Off Windows, or without `build-win32`, the Win32 and
-cross-arch steps are left out.
+that means the x86 paths are wrong. The cross-arch line names each
+case that skipped: any other skip is reported, not failed (the
+surrogate's session-log case skips while another checkout's run holds
+its fixed log name). The trees must already be configured. Off
+Windows, or without `build-win32`, the Win32 and cross-arch steps are
+left out.
 
 For any change touching the surrogate, the fakes, or the J2534
 client/transport: in this order:
@@ -426,7 +429,7 @@ which is read at configure time, never at runtime. A variable under
 any other name is ignored without a word: the routing case skips, the
 other surrogate cases run against the x64 tree's surrogate and pass,
 and the run looks green. Read the skip count, or use
-`scripts/verify.sh`, whose cross-arch step fails on a skip.
+`scripts/verify.sh`, whose cross-arch step fails when that case skips.
 
 **Two ways an env-gated test lies to you** (both hit during the
 2026-10-16 bench pre-flight, both operator error):
@@ -623,11 +626,18 @@ instance's preferences in an ini file under that folder instead, so a
 scripted run neither reads nor changes the user's; `test_qml` keeps
 its own in a scratch folder the same way.
 
-**QML lint:** run `cmake --build build --config Release --target all_qmllint`.
-Warnings don't fail the build. The bridge is the registered `Bridge`
-singleton, so qmllint checks every `Bridge.*` binding; the baseline is
-a few `[unqualified]` warnings on `model.*` roles in LogPage's
-delegate. Check for new warnings in the files you touched.
+**QML lint:** run qmllint over the rsp the app build writes, alone:
+`C:/Qt/6.12.0/msvc2022_64/bin/qmllint.exe @build/app/.rcc/qmllint/app_ui.rsp --json lint.json`
+(it lists every file of the module by its absolute path; build the
+whole app first, so the module's types file exists). The JSON names
+every file linted, warned or not, and holds warnings the text output
+leaves out. Don't name a file after the rsp: qmllint 6.12.0 crashes on
+a file it gets twice under two spellings (`app/qml/X.qml` beside the
+rsp's own). The `all_qmllint` target skips the lint while its stamp is
+current, and then prints nothing because nothing ran. Warnings don't
+fail the build. The bridge is the registered `Bridge` singleton, so
+qmllint checks every `Bridge.*` binding; the baseline is no warnings,
+so any warning is new.
 
 **Compiler warnings:** every first-party target builds with `/W4`
 (MSVC) or `-Wall -Wextra` (GCC, Clang) through

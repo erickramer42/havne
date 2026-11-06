@@ -1909,17 +1909,27 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     }
     out->pids_supported = ecuio_supported_pid_count(ch.supported);
     out->pids_through = ecuio_pids_through(ch.ranges);
-    for (uint32_t i = 0; i < e->count; ++i) {
-        const ecuio_request& r = e->requests[i];
-        if (r.channel != c) {
-            continue;
-        }
-        ++out->requests;
-        if (r.dropped == 0) {
-            continue;
-        }
-        if (out->dropped < ECUIO_SUPPORT_MAX_DROPPED) {
-            ecuio_dropped_request_t& d = out->dropped_list[out->dropped];
+    /* The list takes the refused drops first, then the bitmap's, each
+     * in set order: a bitmap leaves out many PIDs on most cars, and its
+     * drops would otherwise fill the list before the refusals the front
+     * ends name (cli/refused_signals.h) */
+    uint32_t listed = 0;
+    for (int bitmap = 0; bitmap < 2; ++bitmap) {
+        for (uint32_t i = 0; i < e->count; ++i) {
+            const ecuio_request& r = e->requests[i];
+            if (r.channel != c) {
+                continue;
+            }
+            if (bitmap == 0) {
+                ++out->requests;
+                out->dropped += r.dropped != 0 ? 1u : 0u;
+            }
+            if (r.dropped == 0 ||
+                (r.dropped == ECUIO_DROP_BITMAP) != (bitmap == 1) ||
+                listed >= ECUIO_SUPPORT_MAX_DROPPED) {
+                continue;
+            }
+            ecuio_dropped_request_t& d = out->dropped_list[listed++];
             for (uint8_t k = 0; k < r.len; ++k) {
                 d.request[k] = r.bytes[k];
             }
@@ -1927,7 +1937,6 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
             d.reason = r.dropped;
             d.nrc = r.nrc;
         }
-        ++out->dropped;
     }
     for (uint32_t i = 0; i < e->scan_count; ++i) {
         const ecuio_scan_entry& s = e->scan[i];

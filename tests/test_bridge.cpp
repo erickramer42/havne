@@ -2338,6 +2338,9 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::DecimalsRole), QByteArray("decimals"));
     EXPECT_EQ(roles.value(SignalListModel::TextRole), QByteArray("text"));
     EXPECT_EQ(roles.value(SignalListModel::IsTextRole), QByteArray("isText"));
+    EXPECT_EQ(roles.value(SignalListModel::RefusedRole), QByteArray("refused"));
+    EXPECT_EQ(roles.value(SignalListModel::RefusedCodeRole),
+              QByteArray("refusedCode"));
 
     // A row answers only its roles, and only rows that exist answer
     ecuio_signal_def_t defs[2];
@@ -2349,6 +2352,84 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_FALSE(model.data(model.index(0, 0), Qt::DisplayRole).isValid());
     EXPECT_FALSE(
         model.data(model.index(2, 0), SignalListModel::NameRole).isValid());
+}
+
+/* Live's count of the refusals past a report's list: each ECU's, one
+ * request said as one */
+TEST(BridgeTest, TheRefusalsLiveCantNameAreCounted)
+{
+    EXPECT_EQ(SessionBridge::refusedUnnamedText({}), QString());
+    EXPECT_EQ(SessionBridge::refusedUnnamedText({{0x7E8, 3}}),
+              QStringLiteral("ECU 0x7E8 refused 3 more requests"));
+    EXPECT_EQ(SessionBridge::refusedUnnamedText({{0x7E8, 1}, {0x7E9, 2}}),
+              QStringLiteral("ECU 0x7E8 refused 1 more request; "
+                             "ECU 0x7E9 refused 2 more requests"));
+}
+
+/* ADR-0051 section 3: a refused signal's words name the code, with the
+ * reply in frames.csv's form; a code with no name gives the reply alone */
+TEST(BridgeTest, ARefusalNamesItsCode)
+{
+    EXPECT_EQ(SessionBridge::refusalText(0x22, 0x31),
+              QStringLiteral("Refused: requestOutOfRange (7F 22 31)"));
+    EXPECT_EQ(SessionBridge::refusalText(0x22, 0x33),
+              QStringLiteral("Refused: securityAccessDenied (7F 22 33)"));
+    EXPECT_EQ(SessionBridge::refusalText(0x01, 0x12),
+              QStringLiteral("Refused: subFunctionNotSupported (7F 01 12)"));
+    EXPECT_EQ(SessionBridge::refusalText(0x22, 0x99),
+              QStringLiteral("Refused: 7F 22 99"));
+    EXPECT_EQ(SessionBridge::refusalCode(0x22, 0x31),
+              QStringLiteral("7F 22 31"));
+}
+
+/* The model takes each refusal by id, judges every row afresh on each
+ * call, and a new set refuses none */
+TEST(BridgeTest, ARefusedRowSaysSoUntilItIsntRefused)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto refused = [&model](int row) {
+        return model.data(model.index(row, 0), SignalListModel::RefusedRole)
+            .toString();
+    };
+    QList<int> changed;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+                     [&changed](const QModelIndex& first, const QModelIndex&,
+                                const QList<int>& roles) {
+                         if (roles.contains(SignalListModel::RefusedRole)) {
+                             changed << first.row();
+                         }
+                     });
+    const uint16_t second = static_cast<uint16_t>(defs[1].id);
+    model.applyRefused(
+        {{second, QStringLiteral("Refused: 7F 22 31"), QString()},
+         {9999, QStringLiteral("x"), QString()}});
+    EXPECT_EQ(refused(0), QString());
+    EXPECT_EQ(refused(1), QStringLiteral("Refused: 7F 22 31"));
+    EXPECT_EQ(changed, QList<int>{1}) << "only the row that changed";
+    model.applyRefused(
+        {{second, QStringLiteral("Refused: 7F 22 31"), QString()}});
+    EXPECT_EQ(changed, QList<int>{1}) << "the same words change nothing";
+    model.applyRefused({});
+    EXPECT_EQ(refused(1), QString());
+    // The reply's bytes come with the words, for a row too narrow for them
+    const auto code = [&model](int row) {
+        return model.data(model.index(row, 0), SignalListModel::RefusedCodeRole)
+            .toString();
+    };
+    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31"),
+                         QStringLiteral("7F 22 31")}});
+    EXPECT_EQ(code(1), QStringLiteral("7F 22 31"));
+    EXPECT_EQ(code(0), QString());
+    model.setSignalSet(&set);
+    EXPECT_EQ(code(1), QString()) << "a new set's rows carry no code";
+    model.applyRefused(
+        {{second, QStringLiteral("Refused: 7F 22 31"), QString()}});
+    model.setSignalSet(&set);
+    EXPECT_EQ(refused(1), QString()) << "a new set refuses none";
 }
 
 TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
@@ -3403,6 +3484,170 @@ TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* ADR-0051 section 3: a DID the fake ECU holds no reply for (it answers
+ * 7F 22 31) shows on Live as refused, with the code by name, and the one
+ * it answers takes its value; neither is hidden */
+TEST(BridgeTest, LiveSaysWhichDidsTheFakeEcuRefuses)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    const QString uri = QStringLiteral("j2534://"
+                                       "%1?profile=uds-generic&did=1E1C:u16,"
+                                       "F1FE:u16&identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    const auto rowNamed = [model](const QString& name) {
+        for (int r = 0; r < model->rowCount(); ++r) {
+            if (model->data(model->index(r), SignalListModel::NameRole)
+                    .toString() == name) {
+                return r;
+            }
+        }
+        return -1;
+    };
+    const int answered = rowNamed(QStringLiteral("DID 1E1C"));
+    const int refused = rowNamed(QStringLiteral("DID F1FE"));
+    ASSERT_GE(answered, 0);
+    ASSERT_GE(refused, 0);
+    const auto words = [model](int row) {
+        return model->data(model->index(row), SignalListModel::RefusedRole)
+            .toString();
+    };
+    ASSERT_TRUE(spinUntil([&]() { return !words(refused).isEmpty(); }, 5000))
+        << "DID F1FE never refused";
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return model
+                ->data(model->index(answered), SignalListModel::HasValueRole)
+                .toBool();
+        },
+        5000))
+        << "DID 1E1C never answered";
+    EXPECT_EQ(words(refused),
+              QStringLiteral("Refused: requestOutOfRange (7F 22 31)"));
+    EXPECT_EQ(words(answered), QString());
+    EXPECT_EQ(model->hiddenCount(), 0) << "a refused row stays on Live";
+    EXPECT_EQ(bridge.refusedUnnamed(), QString()) << "every refusal named";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* Ten DIDs the fake refuses: the report lists eight, whose rows say so,
+ * and Live's status says the two more it can't name; a new connect
+ * starts with none */
+TEST(BridgeTest, LiveCountsTheRefusalsItCantName)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    QStringList dids;
+    for (int n = 0xF0; n < 0xFA; ++n) {
+        dids << QStringLiteral("F1%1")
+                        .arg(n, 2, 16, QLatin1Char('0'))
+                        .toUpper() +
+                    QStringLiteral(":u16");
+    }
+    const QString uri =
+        QStringLiteral(
+            "j2534://%1?profile=uds-generic&did=%2&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH),
+                 dids.join(QLatin1Char(',')));
+    int changed = 0;
+    QObject::connect(&bridge, &SessionBridge::refusedUnnamedChanged,
+                     [&changed]() { ++changed; });
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.refusedUnnamed().isEmpty(); }, 5000))
+        << "no refusals counted past the list";
+    EXPECT_EQ(bridge.refusedUnnamed(),
+              QStringLiteral("ECU 0x7E8 refused 2 more requests"));
+    EXPECT_GE(changed, 1);
+    SignalListModel* model = bridge.signalModel();
+    int named = 0;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        named += model->data(model->index(r), SignalListModel::RefusedRole)
+                         .toString()
+                         .isEmpty()
+                     ? 0
+                     : 1;
+    }
+    EXPECT_EQ(named, ECUIO_SUPPORT_MAX_DROPPED);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    EXPECT_EQ(bridge.refusedUnnamed(), QString())
+        << "a new session starts with none";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A refusal is the session's: a module that refused a DID in the last
+ * session refuses nothing in the next until it answers. Channel 0 (a
+ * one-DID scan, found at once) reports first in both; in the second the
+ * fake answers refusals with nothing, so the module on 0x7E9 never
+ * reports, and its row must never read refused */
+TEST(BridgeTest, ALastSessionsRefusalIsNotTheNextOnes)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    const QString uri = QStringLiteral("j2534://"
+                                       "%1?profile=uds-generic&did=1E1C-1E1D,"
+                                       "7E9:F1FE&identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    SignalListModel* model = bridge.signalModel();
+    const auto rowNamed = [model](const QString& name) {
+        for (int r = 0; r < model->rowCount(); ++r) {
+            if (model->data(model->index(r), SignalListModel::NameRole)
+                    .toString() == name) {
+                return r;
+            }
+        }
+        return -1;
+    };
+    const auto words = [model](int row) {
+        return row < 0
+                   ? QStringLiteral("no row")
+                   : model
+                         ->data(model->index(row), SignalListModel::RefusedRole)
+                         .toString();
+    };
+    const auto answered = [model](int row) {
+        return row >= 0 &&
+               model->data(model->index(row), SignalListModel::HasValueRole)
+                   .toBool();
+    };
+
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    int found = rowNamed(QStringLiteral("DID 1E1C"));
+    int other = rowNamed(QStringLiteral("0x7E9 DID F1FE"));
+    ASSERT_GE(other, 0);
+    ASSERT_TRUE(spinUntil([&]() { return !words(other).isEmpty(); }, 5000))
+        << "the module on 0x7E9 never refused its DID F1FE";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    FakeEnvArm silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    found = rowNamed(QStringLiteral("DID 1E1C"));
+    other = rowNamed(QStringLiteral("0x7E9 DID F1FE"));
+    ASSERT_GE(other, 0);
+    bool everRefused = false;
+    const auto watch = [&]() {
+        everRefused = everRefused || !words(other).isEmpty();
+        return false;
+    };
+    EXPECT_TRUE(spinUntil(
+        [&]() {
+            (void)watch();
+            return answered(found);
+        },
+        5000))
+        << "channel 0's scan never found DID 1E1C";
+    (void)spinUntil(watch, 1000);
+    EXPECT_FALSE(everRefused)
+        << "the last session's refusal: " << words(other).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -4331,6 +4576,59 @@ TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
     model.applyUnsupported(unsupportedIds(&sparse, 1));
     EXPECT_EQ(plottedRows(model),
               (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}));
+}
+
+/* A refused row never has a value to draw: it gives its place among the
+ * default plotted rows to the next, as a hidden one does, and takes it
+ * back once it isn't refused; a tick still plots it. In a set that ranks
+ * none, it is no default either */
+TEST(BridgeTest, ARefusedRowGivesItsDefaultPlotToTheNext)
+{
+    SignalListModel model;
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    model.setSignalSet(set);
+    const QStringList topSix = plottedRows(model);
+    int oilRow = -1;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (std::strcmp(set->defs[i].name, "Engine Oil Temp") == 0) {
+            oilRow = static_cast<int>(i);
+        }
+    }
+    ASSERT_GE(oilRow, 0);
+    ASSERT_TRUE(topSix.contains(QStringLiteral("Engine Oil Temp")));
+    const SignalListModel::Refusal oil{
+        static_cast<uint16_t>(set->defs[oilRow].id),
+        QStringLiteral("Refused: subFunctionNotSupported (7F 01 12)"),
+        QStringLiteral("7F 01 12")};
+
+    model.applyRefused({oil});
+    QStringList withLoad = topSix;
+    withLoad.removeOne(QStringLiteral("Engine Oil Temp"));
+    withLoad.prepend(QStringLiteral("Engine Load"));
+    EXPECT_EQ(plottedRows(model), withLoad)
+        << "rank 7 takes the refused row's place";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+    model.applyRefused({});
+    EXPECT_EQ(plottedRows(model), topSix) << "and gives it back";
+
+    model.applyRefused({oil});
+    model.toggleSubscribed(oilRow);
+    EXPECT_TRUE(plottedRows(model).contains(QStringLiteral("Engine Oil Temp")))
+        << "a tick plots it all the same";
+
+    SignalListModel plain;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t two;
+    buildTestSignalSet(defs, two);
+    plain.setSignalSet(&two);
+    ASSERT_EQ(plottedRows(plain).size(), 2)
+        << "an unranked set plots every row";
+    plain.applyRefused(
+        {{static_cast<uint16_t>(defs[1].id),
+          QStringLiteral("Refused: requestOutOfRange (7F 22 31)"),
+          QStringLiteral("7F 22 31")}});
+    EXPECT_EQ(plottedRows(plain), QStringList{QStringLiteral("Engine_RPM")});
+    EXPECT_EQ(plain.subscribedCount(), 1);
 }
 
 /* The user's ticks and unticks outlive the defaults moving, and a click
@@ -7415,6 +7713,196 @@ TEST(BridgeTest, SignalFileRecordingHoldsTheStoresCopy)
     EXPECT_FALSE(QFile::exists(second + QStringLiteral("/signals.json")));
 }
 
+namespace {
+
+/* The value Live shows for the signal named name, NaN with no row or no
+ * value yet */
+double liveValue(SessionBridge& bridge, const QString& name)
+{
+    SignalListModel* model = bridge.signalModel();
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r, 0);
+        if (model->data(i, SignalListModel::NameRole).toString() == name) {
+            // ValueRole reads 0 before any value: HasValueRole says whether
+            // one came
+            if (!model->data(i, SignalListModel::HasValueRole).toBool()) {
+                return std::nan("");
+            }
+            return model->data(i, SignalListModel::ValueRole).toDouble();
+        }
+    }
+    return std::nan("");
+}
+
+/* A mock session decoded by the store's file `bytes` (profile
+ * user.recorded), recorded under root until signal A has a value; the
+ * recording's folder */
+QString recordWithSignalFile(SessionBridge& bridge, const QString& root,
+                             const QByteArray& bytes)
+{
+    QTemporaryDir from;
+    const QString sha = sha256Of(bytes);
+    EXPECT_TRUE(
+        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    EXPECT_EQ(bridge.useSignalFiles({sha}).size(), 1);
+    bridge.setRecordingsRootForTesting(root);
+    bridge.setRecording(true);
+    EXPECT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
+            .isEmpty());
+    EXPECT_TRUE(spinUntil(
+        [&bridge]() {
+            return !std::isnan(liveValue(bridge, QStringLiteral("A")));
+        },
+        5000));
+    EXPECT_TRUE(disconnectAndWait(bridge));
+    bridge.setRecording(false);
+    const QStringList folders = recordingFolders(root);
+    EXPECT_EQ(folders.size(), 1);
+    return folders.isEmpty() ? QString()
+                             : root + QLatin1Char('/') + folders.first();
+}
+
+/* The app's Replay of folder, at max speed: connected, and signal A
+ * given a value, or the connect's error */
+QString replayFolder(SessionBridge& bridge, const QString& folder,
+                     bool expectValue = true)
+{
+    const QString uri =
+        SessionBridge::replayUriFor(
+            folder, QStringLiteral("mock://rec?profile=user.recorded")) +
+        QStringLiteral("&speed=max");
+    const QString err = bridge.connectSession(uri);
+    if (err.isEmpty() && expectValue) {
+        EXPECT_TRUE(spinUntil(
+            [&bridge]() {
+                return !std::isnan(liveValue(bridge, QStringLiteral("A")));
+            },
+            5000))
+            << "signal A decoded in the replay";
+    }
+    return err;
+}
+
+} // namespace
+
+/* A replay decodes with the recording's own signals.json (ADR-0051
+ * section 4): under the recorded profile while the store registers the
+ * same bytes there, and as rec.<16 hex> once the vehicle's file has been
+ * removed or changed, so the replay still decodes what was recorded */
+TEST(BridgeTest, ReplayDecodesWithTheRecordingsOwnSignalFile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    QTemporaryDir from;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString sha1 = sha256Of(v1);
+    const QString own = QStringLiteral("rec.") + sha1.left(16);
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+
+    /* The same bytes in the store: its profile, as recorded */
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(
+        QStringLiteral("?profile=user.recorded&speed=max")))
+        << bridge.currentUri().toStdString();
+    EXPECT_FALSE(registered(own.toUtf8().constData()));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    /* The file changed under the same name (another DID, which the
+     * recording's frames don't hold): the copy, under its own name */
+    const QByteArray v2 =
+        signalFile(QStringLiteral("Recorded"), QStringLiteral("D101"));
+    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", v2))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_EQ(bridge.useSignalFiles({sha256Of(v2)}).size(), 1);
+    ASSERT_TRUE(registered("user.recorded"));
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(
+        QStringLiteral("?speed=max&profile=") + own))
+        << bridge.currentUri().toStdString();
+    EXPECT_TRUE(registered(own.toUtf8().constData()));
+    EXPECT_TRUE(
+        log.contains(QStringLiteral("Replay: decoding with the recording's own "
+                                    "signal file, Recorded (") +
+                     own + QLatin1Char(')')))
+        << log.join(QLatin1Char('\n')).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    /* The file removed: the copy again, and a replay of the replay holds
+     * the copy as its own signals.json */
+    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    ASSERT_FALSE(registered("user.recorded"));
+    QTemporaryDir again;
+    ASSERT_TRUE(again.isValid());
+    bridge.setRecordingsRootForTesting(again.path());
+    bridge.setRecordReplaysForTesting(true);
+    bridge.setRecording(true);
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList replayed = recordingFolders(again.path());
+    ASSERT_EQ(replayed.size(), 1);
+    EXPECT_EQ(readFile(again.path() + QLatin1Char('/') + replayed.first() +
+                       QStringLiteral("/signals.json")),
+              v1);
+
+    /* Its own name, as the URI the last replay left in the field */
+    bridge.setRecording(false);
+    const QString err = bridge.connectSession(
+        QStringLiteral("replay://") + QDir::fromNativeSeparators(folder) +
+        QStringLiteral("?profile=") + own + QStringLiteral("&speed=max"));
+    EXPECT_TRUE(err.isEmpty()) << err.toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A copy that no longer matches the hash its recording names isn't
+ * loaded: the replay decodes with the profile as loaded now, and says so */
+TEST(BridgeTest, ReplayOfAChangedSignalFileCopyDecodesAsLoaded)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+    {
+        QFile copy(folder + QStringLiteral("/signals.json"));
+        ASSERT_TRUE(copy.open(QIODevice::Append));
+        copy.write(" ");
+    }
+    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    const QString err = replayFolder(bridge, folder, false);
+    EXPECT_FALSE(err.isEmpty()) << "user.recorded is registered by nothing";
+    EXPECT_FALSE(
+        registered(("rec." + sha256Of(v1).left(16)).toUtf8().constData()));
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "Replay: the recording's signals.json doesn't match its hash; "
+        "decoding with user.recorded as loaded now")))
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    QFile::remove(folder + QStringLiteral("/signals.json"));
+    (void)replayFolder(bridge, folder, false);
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Replay: the recording's signals.json is missing; "
+                       "decoding with user.recorded as loaded now")))
+        << log.join(QLatin1Char('\n')).toStdString();
+}
+
 // ---- The app's plugins (ADR-0052, PluginStore): the example plugin
 // packed, as a phone imports it ----
 
@@ -7576,6 +8064,94 @@ TEST(BridgeTest, PluginOfAnIdLoadedReplacesIt)
     EXPECT_TRUE(registered("plugin.example-sim.base"));
 }
 
+/* A replace whose copy can't be kept (a folder where its file goes)
+ * is refused with the loaded version still loaded, registered and kept,
+ * so a later bridge loads it too */
+TEST(BridgeTest, PluginReplaceWhoseCopyCantBeKeptKeepsTheLoadedOne)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QByteArray newer = packed_plugin::example("1.1.0");
+    {
+        SessionBridge bridge;
+        ASSERT_TRUE(
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes))
+                .value(QStringLiteral("ok"))
+                .toBool());
+        ASSERT_TRUE(QDir().mkpath(PluginStore::root() + QLatin1Char('/') +
+                                  sha256Of(newer) +
+                                  QStringLiteral(".havne-plugin.json")));
+        const QVariantMap r =
+            bridge.importPlugin(writeScratch(from.path(), "b.json", newer));
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+                  "Couldn't keep a copy of the plugin");
+        const QVariantList all = bridge.plugins();
+        ASSERT_EQ(all.size(), 1);
+        EXPECT_EQ(all.at(0)
+                      .toMap()
+                      .value(QStringLiteral("version"))
+                      .toString()
+                      .toStdString(),
+                  "1.0.0");
+        EXPECT_TRUE(registered("plugin.example-sim.base"));
+        EXPECT_EQ(pluginCopies(),
+                  QStringList{sha256Of(bytes) +
+                              QStringLiteral(".havne-plugin.json")});
+    }
+    SessionBridge again;
+    const QVariantList all = again.plugins();
+    ASSERT_EQ(all.size(), 1);
+    EXPECT_TRUE(all.at(0).toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
+/* A replace whose new version doesn't load (the store's seam, as a
+ * registration refused would) gives way to the version it replaced:
+ * loaded again from its copy, registered and kept, so a later bridge
+ * loads it too; the new version's copy goes */
+TEST(BridgeTest, PluginReplaceThatDoesntLoadLoadsTheReplacedOneAgain)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QByteArray newer = packed_plugin::example("1.1.0");
+    const auto onlyVersion = [](const QVariantList& all) {
+        return all.size() == 1 &&
+                       all.at(0).toMap().value(QStringLiteral("ok")).toBool()
+                   ? all.at(0)
+                         .toMap()
+                         .value(QStringLiteral("version"))
+                         .toString()
+                         .toStdString()
+                   : std::string("not one loaded plugin");
+    };
+    {
+        SessionBridge bridge;
+        ASSERT_TRUE(
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes))
+                .value(QStringLiteral("ok"))
+                .toBool());
+        bridge.failPluginLoadForTesting(sha256Of(newer));
+        const QVariantMap r =
+            bridge.importPlugin(writeScratch(from.path(), "b.json", newer));
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+                  "a load failed for the test");
+        EXPECT_EQ(onlyVersion(bridge.plugins()), "1.0.0");
+        EXPECT_TRUE(registered("plugin.example-sim.base"));
+        EXPECT_EQ(pluginCopies(),
+                  QStringList{sha256Of(bytes) +
+                              QStringLiteral(".havne-plugin.json")});
+    }
+    SessionBridge again;
+    EXPECT_EQ(onlyVersion(again.plugins()), "1.0.0");
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
 /* A session on a variant decodes its signals; while it does, the plugin
  * is neither replaced nor removed, and once it has ended both go ahead */
 TEST(BridgeTest, PluginInUseIsNeitherReplacedNorRemoved)
@@ -7607,8 +8183,13 @@ TEST(BridgeTest, PluginInUseIsNeitherReplacedNorRemoved)
     const auto oilValue = [m, oil]() {
         return m->data(m->index(oil), SignalListModel::ValueRole);
     };
-    ASSERT_TRUE(
-        spinUntil([&oilValue]() { return oilValue().isValid(); }, 5000, 10));
+    // ValueRole reads 0 before any value: wait for HasValueRole
+    ASSERT_TRUE(spinUntil(
+        [m, oil]() {
+            return m->data(m->index(oil), SignalListModel::HasValueRole)
+                .toBool();
+        },
+        5000, 10));
     const double first = oilValue().toDouble();
     EXPECT_GE(first, -40.0);
     EXPECT_LE(first, 215.0);
@@ -7846,4 +8427,57 @@ TEST(BridgeTest, AFileThatCantBeReadIsRefusedWithoutItsPath)
         EXPECT_EQ(words.toStdString(), "Couldn't read the file");
         EXPECT_FALSE(words.contains(QStringLiteral("missing")));
     }
+}
+
+/* A Save out of the app writes the store's copy byte for byte, so
+ * havne-cli --signals and another vehicle read the file the vehicle has;
+ * a copy changed since it was kept, a sha that isn't one and a target
+ * that can't be written are each refused in words naming no path, and a
+ * file already at the target is replaced whole */
+TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    // Its own spacing and order, which a writer of its own would change
+    const QByteArray bytes =
+        signalFile(QStringLiteral("Extras")).replace(",", ",\r\n  ");
+    SessionBridge bridge;
+    const QVariantMap r =
+        bridge.importSignalFile(writeScratch(from.path(), "e.json", bytes));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QString sha = r.value(QStringLiteral("sha256")).toString();
+
+    const QString target = out.path() + QStringLiteral("/extras.json");
+    writeScratch(out.path(), "extras.json", QByteArray(5000, 'x'));
+    const QVariantMap saved =
+        bridge.saveSignalFile(sha, QUrl::fromLocalFile(target));
+    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    QFile f(target);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), bytes) << "the copy, byte for byte, and only it";
+    f.close();
+
+    const auto refused = [&](const QString& which, const QUrl& to,
+                             const char* expected) {
+        const QVariantMap no = bridge.saveSignalFile(which, to);
+        EXPECT_FALSE(no.value(QStringLiteral("ok")).toBool()) << expected;
+        const QString words = no.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), expected);
+        EXPECT_FALSE(words.contains(out.path()) || words.contains(dir.store()));
+    };
+    refused(QStringLiteral("../signals/x"), QUrl::fromLocalFile(target),
+            "No such signal file");
+    refused(QString(64, QLatin1Char('a')), QUrl::fromLocalFile(target),
+            "Its copy is missing: import the file again");
+    refused(sha, QUrl::fromLocalFile(out.path()), "Couldn't write the file");
+    writeScratch(dir.store(), sha + QStringLiteral(".json"),
+                 signalFile(QStringLiteral("X")));
+    refused(sha, QUrl::fromLocalFile(out.path() + QStringLiteral("/b.json")),
+            "Its copy has changed since it was kept: import the file again");
+    EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
 }

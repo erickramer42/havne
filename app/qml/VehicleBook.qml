@@ -365,8 +365,34 @@ QtObject {
         const d = add(doc, label)
         picked(d).vinKey = key
         if (isAdapterUri(uri))
-            picked(d).uri = uri
+            picked(d).uri = withoutFileProfile(uri)
         return { doc: d, outcome: "new", label: label, previous: previous }
+    }
+
+    // uri without a profile= that names a signal file or a plugin
+    // (user.*, plugin.*): a vehicle a VIN adds holds neither, so its
+    // connection reads with Default, never with the last vehicle's signals
+    function withoutFileProfile(uri) {
+        const s = String(uri)
+        const q = s.indexOf("?")
+        if (q < 0)
+            return s
+        const kept = s.slice(q + 1).split("&").filter(p => {
+            const v = p.startsWith("profile=") ? p.slice(8) : ""
+            return !v.startsWith("user.") && !v.startsWith("plugin.")
+        })
+        return kept.length === 0 ? s.slice(0, q) : s.slice(0, q + 1) + kept.join("&")
+    }
+
+    // Beside the vehicles, for a recognize() that picked another: the
+    // pick is the car's, not the user's, so the section says so until
+    // the user picks; "" for any other result
+    function pickNote(r) {
+        if (r.outcome !== "switched")
+            return ""
+        return r.previous === ""
+                ? qsTr("The connected car's VIN picked %1").arg(r.label)
+                : qsTr("The connected car's VIN picked %1 (%2 was picked)").arg(r.label, r.previous)
     }
 
     // The activity log's line for a recognize() result

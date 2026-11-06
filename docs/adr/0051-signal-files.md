@@ -494,3 +494,66 @@ the tools around it reach one front end only:
 - **The OBDb import is `havne-cli`'s.** `signals import obdb` writes a
   signal file, which the app then imports as any other; the app has no
   import of its own. It is placed in v0.6.0, whose scope is imports.
+
+## Appendix: a refused signal shown as refused (2026-11-06)
+
+Section 3 says Live and `havne-cli` show a signal its module refuses
+as refused, not blank. Built without an ABI change: each request a
+negative reply dropped is in its channel's support report with its NRC
+(at most `ECUIO_SUPPORT_MAX_DROPPED`, 8, a channel), and
+`cli/refused_signals.h` maps it to the defs it reads (on the channel's
+reply ID, keyed by the reply's service and key: `62 <DID>`,
+`41 <PID>`). Live's row reads "Refused: requestOutOfRange (7F 22 31)"
+and stays listed; `havne-cli stream --values` writes a `refused` line
+([ADR-0031](0031-command-line-client.md)'s appendix of 2026-11-06). A
+bitmap's clear bit is unsupported, not refused, and hides the row as
+before. A ninth refused request on one channel stays blank.
+
+Amended 2026-11-06, for the eight's bound: the report lists the
+refused drops ahead of the bitmap's, each in set order, so a module
+whose bitmaps leave out many PIDs (most cars, under a file that
+extends `obd2`) still has its refusals listed. Past the list,
+`refused_unlisted` (`cli/refused_signals.h`) counts the rest (the
+drops past it less the set's PIDs the bitmaps leave out), and Live's
+status line ("ECU 0x7E8 refused 2 more requests") and the `refused`
+line's `more` say how many, whose signals neither can name. No ABI
+change: the list's layout is the same, its order is what moved.
+
+A DID that `uds-generic`'s scan finds refused (`7F 22 31` to the
+scan's request) is counted in its channel's report (`scan_refused`)
+and is not one of its drops, so its row shows no value, where a polled
+DID with the same reply reads Refused. Naming it needs the scanned DID
+in the report, an ABI addition (STATUS's backlog).
+
+## Appendix: a replay reads with its recording's copy (2026-11-06)
+
+Section 4 says a replay with a recording's `signals.json` decodes the
+same values. Both front ends load that copy themselves, so a
+recording whose file has since been edited or removed, or one from
+another machine, replays as it was recorded:
+
+- **When:** the replay URI selects the profile `events.log`'s header
+  names, or the copy's own name (below), and `signals.json` is there
+  and still the bytes the header's hash names. `havne-cli stream` uses
+  it when the URI selects no profile too, and `--signals` or `--plugin`
+  replaces it. A URI selecting another profile decodes as before. The
+  app's URI with no `profile=` replays raw, as any replay does.
+- **Under which name:** a profile name holds one set (`profile.h`: last
+  wins), so the copy never takes a name another file holds. In the app,
+  the signal store registering the same bytes under the recorded name
+  is the vehicle's own file, and the replay uses it; otherwise the copy
+  registers as `rec.` and the hash's first 16 digits, for the bridge's
+  life as the store keeps its files, and the URI selects that name. The
+  activity log says so. `havne-cli` registers the copy under the profile
+  the URI selects, the recorded one when it selects none: a CLI
+  process registers nothing else under it.
+- **The check:** the app hashes the copy (SHA-256) against the header's
+  line; `havne-cli` takes the reader's MATCH (`ecuio_recording_get_signals`),
+  which costs one pass over `signals.csv` before the replay starts,
+  since the public API has no hash of its own. A copy missing, changed
+  or refused by the loader leaves the URI as given, with a line saying
+  why (the activity log; `havne-cli`'s stderr).
+- **A replay recorded** (the app's test seam, or `havne-cli stream
+  --record`) holds the copy again as its own `signals.json`.
+- **No ABI change:** the header's two lines are read by
+  `cli/recording_signals.h`, which both front ends include.

@@ -135,6 +135,15 @@ TestCase {
         button.clicked()
         compare(replaySpy.signalArguments[2][0], findingsRow.uri + "&from=0&to=4")
         compare(replaySpy.count, 3)
+        compare(button.text, "Replay in Settings", "the name says where it goes")
+
+        // Off while a session runs, as the list's Replay is
+        Bridge.connectSessionAsync("mock://replay-view")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        verify(!button.enabled, "off while connected")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(button.enabled, "on again")
     }
 
     // Open shows the recording: its signal plotted by default, the chart's
@@ -429,6 +438,54 @@ TestCase {
         chart.moving = true
         chart.moving = false
         tryVerify(() => chart.paints > paints, 2000, "drawn again with antialiasing")
+    }
+
+    // The traces are the chart's Shape: each trace's lines, and its bands'
+    // fill and edges, at the layout's points in its row's color; the
+    // page's marks are a Canvas over them
+    function test_theTracesAreTheShapesUnderThePagesMarks() {
+        const page = openFindings()
+        const chart = find(page, "chart")
+        // The samples come after the open: wait for a chart that has them
+        tryVerify(() => chart.drawn && chart.drawn.traces.some(t => t.pieces.length > 0),
+                  5000, "drawn with the samples")
+        const l = chart.drawn
+        const shape = find(chart, "chartTraces")
+        const marks = find(chart, "chartMarks")
+        verify(marks.visible, "the page has marks")
+        const kids = chart.children
+        verify(kids.indexOf(marks) > kids.indexOf(shape), "the marks over the traces")
+        let points = 0
+        for (let i = 0; i < l.traces.length; ++i) {
+            const tr = l.traces[i]
+            const set = chart.tracePaths[i]
+            const lines = tr.pieces.filter(p => !p.band)
+            const bands = tr.pieces.length - lines.length
+            compare(set.line.pathElements[0].paths.length, lines.length, "trace " + i + "'s lines")
+            compare(set.edge.pathElements[0].paths.length, 2 * bands, "trace " + i + "'s band edges")
+            compare(set.fill.pathElements[0].paths.length, bands, "trace " + i + "'s band fills")
+            if (lines.length > 0) {
+                verify(Qt.colorEqual(set.line.strokeColor, Theme.seriesColor(tr.row)),
+                       "trace " + i + " in its row's color")
+                const drawn = set.line.pathElements[0].paths[0]
+                compare(drawn.length, lines[0].points.length)
+                compare(drawn[0].x, lines[0].points[0].x)
+                compare(drawn[0].y, lines[0].points[0].y)
+                points += drawn.length
+            }
+            // A trace bands or not by the chart's width when it draws
+            if (bands > 0) {
+                const band = tr.pieces.filter(p => p.band)[0]
+                verify(Qt.colorEqual(set.edge.strokeColor, Theme.seriesColor(tr.row)),
+                       "trace " + i + "'s band edges in its row's color")
+                const edge = set.edge.pathElements[0].paths[0]
+                compare(edge.length, band.top.length)
+                compare(edge[0].x, band.top[0].x)
+                compare(edge[0].y, band.top[0].y)
+                points += edge.length
+            }
+        }
+        verify(points > 0, "some trace drawn")
     }
 
     // Another recording overlays the first: its signals of the same names

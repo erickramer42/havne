@@ -1160,6 +1160,52 @@ TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
     }
 }
 
+/* Two ECUs asked through one adapter, at the engine's floor (20 ms send
+ * to send on each channel), not at Windows' 15.6 ms timer step: the fake
+ * answers at once, so the worker's wait while no command is out sets the
+ * pace, which ends on time only on its high-resolution timer
+ * (precise_wait.h); 195 and 196 in 2 s (2026-11-06) */
+TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
+{
+    Session s;
+    ASSERT_EQ(
+        s.create(uri(
+            "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0")),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const auto requests = [] {
+        return on_fake<uint32_t>(
+            [](fake_elm327::adapter& a) { return a.requests; });
+    };
+    /* Judged by the fake's stamps on its first requests, not a count in
+     * a wall-clock window that load thins: the two channels take turns,
+     * so request i to request i + 2 is one channel's period, and its
+     * median is the floor's (about 21 ms) whatever a few stalls add; on
+     * a timer's 15.6 ms step it is 31. The upper bound isn't judged on
+     * macOS, whose CI runners end a plain sleep up to 18 ms late (28 ms
+     * there once): the floor, the lower bound, is */
+    static constexpr uint32_t want = 40; /* no capture: MSVC and Clang agree */
+    ASSERT_TRUE(wait_for([&] { return requests() >= want; }, 5000))
+        << "no requests";
+    const std::vector<int64_t> stamps =
+        on_fake<std::vector<int64_t>>([](fake_elm327::adapter& a) {
+            return std::vector<int64_t>(a.request_us, a.request_us + want);
+        });
+    std::vector<int64_t> periods;
+    for (size_t i = 0; i + 2 < stamps.size(); ++i) {
+        periods.push_back(stamps[i + 2] - stamps[i]);
+    }
+    std::sort(periods.begin(), periods.end());
+    const int64_t median = periods[periods.size() / 2];
+    RecordProperty("period_median_us", static_cast<int>(median));
+    EXPECT_GE(median, 19000) << "requests came faster than the floor";
+#ifndef __APPLE__
+    EXPECT_LE(median, 26000)
+        << "requests waited out the timer's step, not the floor";
+#endif
+}
+
 /* 29-bit channels: protocol 7, the priority and header in two commands,
  * the 29-bit receive filter, and frames flagged EXTENDED */
 TEST_F(Elm327SessionTest, TwentyNineBitChannelsUseTheirOwnProtocol)

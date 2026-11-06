@@ -11,6 +11,32 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-06
+
+### Added
+
+- A replay decodes with the signal file its recording holds, so a recording replays as it was recorded after the vehicle's file has changed or been removed, or on another machine: the app's Replay loads the copy under a name of its own when it differs from the file loaded now, and `havne-cli stream replay://` uses it with no `--signals`; a copy that no longer matches its hash isn't used, and the replay says why ([docs/signal-files.md](docs/signal-files.md)).
+- A signal its module refuses shows as refused, not blank ([ADR-0051](docs/adr/0051-signal-files.md) section 3): Live's row reads "Refused: requestOutOfRange (7F 22 31)", the negative reply's code by name, and `havne-cli stream --values` writes a `refused` line naming each such signal with its request, the reply and the code's name. A module that leaves PIDs out of its bitmaps (most cars, with a signal file that extends `obd2`) still has its refusals named, and past the eight a module's report lists, Live's status line says how many more it refused ("ECU 0x7E8 refused 3 more requests") and the `refused` line's `more` counts them. A refused signal gives its place among the chart's default signals to the next.
+- Settings' Vehicle section saves each of a vehicle's signal files out of the app with **Save a copy** ([docs/signal-files.md](docs/signal-files.md)): the desktop's save dialog or Android's document picker, the file named for its profile, written byte for byte as the app keeps it, so a file made in the form can be shared or given to `havne-cli --signals`.
+
+### Changed
+
+- In the form for a vehicle's own signals, a Request ID left empty keeps the one the module has while another of its signals reads it, and a typed one that differs moves the module's other signals too, the note naming them; before, the last signal saved set the module's request ID without a word.
+- Each box in the form for a vehicle's own signals has its name above it (Byte, Bits, Start bit, and the rest), so a box still says what it holds once something is typed; the names were only placeholders before.
+- On a phone, a signal its module refused reads "Refused (7F 22 31)" when the full words don't fit beside its name, and the name keeps its room; before, both were cut short.
+- When the connected car's VIN picks another saved vehicle than the one picked, the Vehicle section says so ("The connected car's VIN picked Daily driver (Weekend car was picked)") until you pick one yourself; before, only the activity log said it.
+- The viewer's **Replay view** is **Replay in Settings**: it fills Settings' field with the part in view for Connect, as the list's Replay does, and it's off while a session runs.
+- Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, and so does the end of a session in which the car's VIN picked another vehicle; a vehicle the VIN adds keeps no signal file or plugin in its connection. So a connect never reads with another vehicle's signals and keeps them as this one's.
+- For programs that use the core library: a channel's support report (`ecuio_channel_support_t`) lists in `dropped_list` the requests a negative reply refused before those its supported-PID bitmaps left out, each in set order; before, all were in set order, so on a module whose bitmaps leave out many PIDs the list filled before it reached a refusal.
+
+### Fixed
+
+- A plugin whose data files hold a number in its shortest 17-digit form, as Python and most tools write one (`1.0212934580499022e-07`), loads; it was refused, its variant "reading back as another set". Every number a signal file, a plugin, an OBDb import or a recording holds reads as the double nearest it, where a 17-digit one could land a unit in its last place off.
+- On Windows, `havne-cli` takes a path with a character outside the system's code page, so a replay, a recording, `view`, `info`, a signal file, an OBDb import and a plugin under a folder named with an accent or in Greek work; such a path failed, or a character came through as `?`, which a URI reads as its query.
+- The charts draw their traces on the GPU: on the test phone, a tap on the Recordings page's chart, given the page with every signal plotted, holds the app for about 50 ms instead of 150, and a drag moves the chart as it goes (about 36 frames in a 600 ms swipe) where it stood still until the drag ended.
+- On Windows, a session that asks waits out the engine's 20 ms floor between two requests to a module on time, instead of at Windows' 15.6 ms timer step: against an adapter whose empty reads return at once, each module was asked about every 31 ms, now about every 21 ms, however many modules. A session through the OBDX Pro VX keeps its pace (about 27 ms), which its own held reads set.
+- Importing a newer version of a plugin that couldn't be kept (its copy not written) left neither version loaded; the version loaded now stays loaded and kept until the new one has loaded in its place.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added
@@ -668,7 +694,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/erickramer42/havne/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/erickramer42/havne/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/erickramer42/havne/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/erickramer42/havne/compare/v0.3.6...v0.4.0

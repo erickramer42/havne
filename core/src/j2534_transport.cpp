@@ -43,6 +43,7 @@ extern "C" const char* const ecuio_j2534_query_keys[] = {
 #include "ecuio/j2534_ptypes.h"    /* FLOW_CONTROL_FILTER, CAN_29BIT_ID,
                                       TX_ISO15765_FRAME_PAD */
 #include "win_utf8.h"              /* ecuio_is_absolute_path */
+#include "precise_wait.h"          /* the wait after an empty read */
 
 namespace {
 
@@ -403,6 +404,9 @@ void j2534_worker(ecuio_j2534_transport* t)
 {
     ecuio_request_engine& e = t->engine;
     const bool requests = e.count > 0 || e.scan_count > 0;
+    /* A requesting worker's waits end on time, not on Windows' 15.6 ms
+     * step (precise_wait.h): the floor between requests is the engine's */
+    ecuio_precise_wait precise(requests);
     link_health h(t->session->last_error, t->session->error_count,
                   t->session->record_link.get());
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
@@ -484,12 +488,14 @@ void j2534_worker(ecuio_j2534_transport* t)
             h.backoff_ms = link_backoff_next(h.backoff_ms);
         } else if (!o.got) {
             /* An empty read waits out its timeout, even from a vendor
-             * that returns at once, so the loop never spins. */
-            const auto waited = std::chrono::duration_cast<
-                std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - read_start).count();
-            if (waited < timeout_ms &&
-                backoff_sleep(t, timeout_ms - static_cast<uint32_t>(waited))) {
+             * that returns at once, so the loop never spins: on time
+             * (precise_wait.h), since that timeout is the way to the
+             * engine's next event. In waits of 20 ms at most with the
+             * stop looked at between them: idle, the timeout is 100 ms,
+             * and a close would otherwise wait it out. */
+            if (precise.sleep_until(read_start +
+                                        std::chrono::milliseconds(timeout_ms),
+                                    t->stop_requested)) {
                 break;
             }
         }
