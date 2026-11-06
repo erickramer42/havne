@@ -60,6 +60,11 @@ public:
     // id, name, variant, profile }; none for text that isn't a VIN
     QVariantList matches(const QString& vin, int latestModelYear) const;
 
+    // The variant whose set is set, as one signal file (its files merged,
+    // the plugin's id, version and variant on its header line), for a
+    // recording's signals.json; nullptr for a set no plugin here holds
+    const ecuio_signal_file_t* fileFor(const ecuio_signal_set_t* set) const;
+
     // Every plugin freed. The bridge calls it once its session is
     // destroyed: until then a session may decode with one of their sets
     void close();

@@ -47,8 +47,10 @@ TestCase {
 
     // The stale age is core's, through the bridge
     function test_staleMsIsCores() {
-        compare(Theme.staleMs, Bridge.valueStaleMs)
-        verify(Theme.staleMs > 0)
+        // ECUIO_VALUE_STALE_US, 3 s: compared with the number, since
+        // Theme.staleMs is bound to Bridge.valueStaleMs
+        compare(Theme.staleMs, 3000)
+        compare(Bridge.valueStaleMs, 3000)
     }
 
     function test_seriesColorsAreDistinct() {

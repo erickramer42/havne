@@ -261,13 +261,63 @@ QtObject {
         })
     }
 
-    // The form's file saved: file replaces the picked vehicle's own; the
-    // document as it was when profileProblem refuses it
     // The picked vehicle's plugin variant, by its profile ("" for none)
     function setPlugin(doc, profile) {
         return change(doc, v => v.plugin = String(profile))
     }
 
+    // Every vehicle's pick of one of profiles undone: a plugin removed
+    function dropPlugin(doc, profiles) {
+        const d = copy(doc)
+        for (const v of d.list) {
+            if (profiles.indexOf(v.plugin) >= 0)
+                v.plugin = ""
+        }
+        return d
+    }
+
+    // The profile core makes of a signal file's name (signal_file.cpp's
+    // profile_of): "user." and the name in lower case, every run of other
+    // characters one '-', none at either end
+    function profileOf(name) {
+        let slug = ""
+        let dash = false
+        for (const c of String(name)) {
+            const lower = c >= "a" && c <= "z" || c >= "0" && c <= "9"
+            const upper = c >= "A" && c <= "Z"
+            if (lower || upper) {
+                if (dash && slug !== "")
+                    slug += "-"
+                dash = false
+                slug += upper ? c.toLowerCase() : c
+            } else {
+                dash = true
+            }
+        }
+        return slug === "" ? "" : "user." + slug
+    }
+
+    // A name for a vehicle's own file whose profile no file in any vehicle
+    // makes: "<label> own", else "<label> own 2" and on. A profile is one
+    // file's (profileProblem), and a label is used again once its vehicle
+    // is renamed, or copied by Duplicate
+    function ownName(doc, label) {
+        const taken = {}
+        for (const v of doc.list) {
+            for (const f of (v.signals || []))
+                taken[f.profile] = true
+        }
+        const base = qsTr("%1 own").arg(String(label).trim())
+        for (let n = 1; n < 100; ++n) {
+            const name = n === 1 ? base : base + " " + n
+            if (!taken[profileOf(name)])
+                return name
+        }
+        return base
+    }
+
+    // The form's file saved: file replaces the picked vehicle's own; the
+    // document as it was when profileProblem refuses it
     function setOwn(doc, file) {
         const v = picked(doc)
         if (v === null || profileProblem(doc, file, v.own || "") !== "")

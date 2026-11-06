@@ -262,7 +262,13 @@ QString ReadOnce::uriFor(const QString& adapterUri, const Request& r,
              << QStringLiteral("identify=0") << QStringLiteral("diagnose=0")
              << QStringLiteral("probe=0");
     } else {
-        keys << QStringLiteral("profile=raw")
+        // ?poll= asks the one PID, nothing else (no rotation, no
+        // identification). On SocketCAN a profile with no channels only
+        // listens and refuses the request keys, so the PID goes through
+        // obd2's, which requests; elsewhere raw takes them as they are
+        const bool socketcan = lower.startsWith(QStringLiteral("socketcan://"));
+        keys << (socketcan ? QStringLiteral("profile=obd2")
+                           : QStringLiteral("profile=raw"))
              << QStringLiteral("poll=0x%1").arg(hexNumber(r.number, 2))
              << QStringLiteral("filter=0x%1").arg(hexId(r.rx))
              << QStringLiteral("txid=0x%1").arg(hexId(r.tx))

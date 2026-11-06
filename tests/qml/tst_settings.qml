@@ -491,15 +491,21 @@ TestCase {
                                  modesSupported: ["listen-only", "one-shot"] }),
                 "CAN interface, one-shot at 250000 bit/s, bus-off, for requests")
 
-        // SocketCAN only listens: uds-generic gives way to the default
-        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16"
+        // SocketCAN asks an ECU through core's ISO-TP under a profile that
+        // requests (ADR-0040): uds-generic stays with its request keys; under
+        // Default, raw there, which only listens, the request keys go
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
         compare(page.profileChoice, "uds-generic")
         mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
-        compare(uri.text, "socketcan://vcan0")
+        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
+        compare(page.profileChoice, "uds-generic")
+        uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")
+        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        compare(uri.text, "socketcan://vcan0?baud=500000")
         press(page, "profile_raw")
         mouseClick(find(list.itemAtIndex(2), "deviceRowArea"))
-        compare(uri.text, "socketcan://can1?profile=raw", "the row's base, the query kept")
+        compare(uri.text, "socketcan://can1?baud=500000&profile=raw", "the row's base, the query kept")
     }
 
     // On a phone the field and Connect are scrolled out of view by the
@@ -978,7 +984,9 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000)
 
-        // A new page (a restart) registers it again from its copy
+        // A new page registers it again (the bridge, which keeps the file
+        // loaded, outlives it; a restart's read from the copy is
+        // BridgeTest.SignalFileUseRegistersItsProfile's)
         page.destroy()
         wait(10)
         page = createPage()
@@ -1104,6 +1112,8 @@ TestCase {
                 "More added: obd2 and 1 of your own, profile user.more")
         compare(field.text, "elm327://COM9")
         compare(find(page, "profile_user.more").text, "More")
+        compare(page.vehicleProfiles.find(p => p.name === "user.more").hint,
+                "Your signal file More: obd2 and 1 of your own", "its own, not obd2's")
         compare(find(page, "profile_user.plus").text, "obd2 + Plus")
 
         // A profile the user picked stays when one is imported
@@ -1183,8 +1193,171 @@ TestCase {
         compare(Harness.storedPlugins(), [])
         tryVerify(() => findChild(page, "profile_plugin.example-sim.my2019") === null, 1000,
                   "a variant no plugin registers isn't offered")
-        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019",
-                "the pick stays the vehicle's")
+        compare(page.pickedVehicle.plugin, "", "a removed plugin's variant is no pick")
+        compare(field.text, "mock://demo", "the field reads Default again")
+    }
+
+
+    // A session's VIN proposes variants (ADR-0052 section 5); nothing that
+    // changes the vehicle is used while it runs, and once it ends its
+    // matches stay to be picked, though the VIN goes with the session. A
+    // pick pressed again is undone, and a button never runs past the page
+    function test_aSessionsVinProposesVariantsPickedOnceItEnds() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(page.importPlugin(Harness.writeExamplePlugin("example.havne-plugin.json")))
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // a 2021 the example covers
+        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "proposed")
+        verify(!find(page, "pluginMatch_0").enabled)
+        verify(!find(page, "signalImport").enabled)
+        verify(!find(page, "formSave").enabled)
+        verify(!find(page, "pluginImport").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        verify(findChild(page, "pluginMatch_0") !== null, "the session's matches stay")
+        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        verify(find(page, "pluginMatch_0").enabled)
+        press(page, "pluginMatch_0")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.base")
+        compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
+        press(page, "pluginMatch_0")
+        compare(page.pickedVehicle.plugin, "", "pressed again, undone")
+        compare(find(page, "uriField").text, "mock://demo")
+
+        // Its row narrower than its text (a phone, a long plugin name)
+        const button = find(page, "pluginMatch_0")
+        button.parent.width = 100
+        verify(button.implicitWidth > 100)
+        verify(button.width <= 100, button.width + " in a row of 100")
+    }
+
+    // A copy's own signals are its own: its own file is copied under a
+    // name of its own, so each vehicle's Save goes ahead (one file to a
+    // profile); and a label used again gets an own file named apart
+    function test_eachVehiclesOwnSignalsSaveApart() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const first = page.pickedVehicle.id
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        press(page, "vehicleDuplicate")
+        verify(page.pickedVehicle.id !== first)
+        verify(page.pickedVehicle.own !== "" && page.pickedVehicle.own !== VehicleBook.find(page.vehicles, first).own,
+               "the copy's own file is a copy")
+        compare(page.ownFile.name, "Vehicle 1 (copy) own")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp"])
+        typeSignal(page, "Gear", "D101")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.length, 2)
+
+        press(page, "vehicle_" + first)
+        compare(page.ownSignals.map(s => s.key), ["trans_temp"], "the first is as it was")
+        typeSignal(page, "Fluid Pressure", "D102")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.length, 2)
+
+        // Renamed, its label is free for New, whose own file is named apart
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleRename")
+        press(page, "vehicleNew")
+        compare(page.pickedVehicle.label, "Vehicle 1")
+        typeSignal(page, "Oil Temp", "D103")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownFile.name, "Vehicle 1 own 2")
+    }
+
+    // The form and the section's words are the picked vehicle's: a pick or
+    // New starts them afresh, an Edit's signal never lands in another
+    // vehicle, and a question asked about one goes with it
+    function test_aPickStartsTheFormAndNotesAfresh() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const first = page.pickedVehicle.id
+        const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
+        verify(!page.importSignalFile(bad))
+        verify(find(page, "signalProblem").text !== "")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        press(page, "vehicleNew")
+        compare(find(page, "signalProblem").text, "", "the other vehicle's refusal goes")
+        const second = page.pickedVehicle.id
+
+        press(page, "vehicle_" + first)
+        press(page, "ownEdit_0")
+        compare(find(page, "formName").text, "Trans Temp")
+        press(page, "vehicle_" + second)
+        compare(find(page, "formName").text, "", "the Edit stays with its vehicle")
+        compare(page.editingKey, "")
+
+        press(page, "vehicle_" + first)
+        press(page, "ownRemove_0")
+        verify(page.confirming !== "", "asked")
+        page.saveVehicles(VehicleBook.pick(page.vehicles, second))   // as a car recognized
+        compare(page.confirming, "", "the question goes with the pick")
+    }
+
+    // Edit then a new name renames the signal; a new signal whose name
+    // makes a saved one's key is refused, not saved over it; the same name
+    // again replaces it, as designed
+    function test_anEditRenamesAndAKeyIsNeverTakenTwice() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        press(page, "ownEdit_0")
+        find(page, "formName").text = "Trans Fluid Temp"
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.name), ["Trans Fluid Temp"])
+
+        page.clearForm()
+        typeSignal(page, "Boost (psi)", "D101")
+        press(page, "formSave")
+        page.clearForm()
+        typeSignal(page, "Boost psi", "D102")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text,
+                "Boost (psi), saved already, has the key boost_psi too: edit it, or give this one another name")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D101"])
+        page.clearForm()
+        typeSignal(page, "Boost (psi)", "D103")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D103"], "the same name replaces")
+
+        // An Edit renamed to another signal's key is refused too
+        press(page, "ownEdit_0")
+        find(page, "formName").text = "Boost psi"
+        press(page, "formSave")
+        verify(find(page, "formProblem").text.startsWith("Boost (psi), saved already"))
+        compare(page.ownSignals.length, 2)
+    }
+
+    // A file the vehicle has already isn't added again; a Read once's
+    // reply shows only on the vehicle it was asked for
+    function test_aFileAgainAndAReplyElsewhereSaySo() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        verify(!importFile(page, "extras.json", "Extras"))
+        compare(find(page, "signalNote").text, "Extras is this vehicle's already")
+        compare(page.pickedVehicle.signals.length, 1)
+
+        const reply = { ok: true, request: "22 1E 1C", reply: "62 1E 1C 12 34",
+                        value: "4660", nrc: 0, words: "" }
+        page.readOnceFor = "another vehicle"
+        Bridge.readOnceResult(reply)
+        compare(page.readResult, null, "asked for another vehicle")
+        page.readOnceFor = page.pickedId
+        Bridge.readOnceResult(reply)
+        compare(page.readResult.reply, "62 1E 1C 12 34")
     }
 
     // ---- The vehicle's own signals (ADR-0051's form) ----
@@ -1234,11 +1407,16 @@ TestCase {
         press(page, "formSave")
         compare(page.ownSignals.map(s => s.read.number), ["1E1D", "D101"])
 
-        // The last signal's Remove takes the file
+        // The last signal's Remove takes the file, once asked: it was
+        // written here and has no copy elsewhere
         press(page, "ownRemove_1")
         compare(page.ownSignals.length, 1)
         compare(find(page, "formNote").text, "Removed from Vehicle 1 own")
         press(page, "ownRemove_0")
+        compare(page.ownSignals.length, 1, "asked first")
+        compare(find(page, "vehicleConfirmText").text,
+                "Remove Vehicle 1 own? It was written here, and no other copy exists")
+        press(page, "vehicleConfirm")
         compare(page.pickedVehicle.signals, [])
         compare(page.pickedVehicle.own, "")
         compare(Harness.storedSignalFiles(), [])

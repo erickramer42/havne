@@ -1964,10 +1964,16 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
                             .arg(QString::fromUtf8(ecuio_last_error_detail())));
         return;
     }
-    // A vehicle's signal file decoding the session goes in as
-    // signals.json, its hash the store copy's name (ADR-0051 section 4)
-    if (const ecuio_signal_file_t* file =
-            m_signalStore.fileFor(ecuio_session_signal_set(session))) {
+    // The signal file decoding the session goes in as signals.json
+    // (ADR-0051 section 4): a vehicle's, its hash the store copy's name,
+    // or a plugin variant's files merged, with the plugin's line
+    // (ADR-0052 section 4), as havne-cli stream --plugin --record does
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
+    if (file == nullptr) {
+        file = m_pluginStore.fileFor(set);
+    }
+    if (file != nullptr) {
         rc = ecuio_recorder_signal_file(recorder, file);
     }
     if (rc == ECUIO_OK) {
