@@ -9,6 +9,7 @@
 #include <ecuio/signals.h>
 #include <ecuio/vin.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -58,7 +59,11 @@ std::string slurp(const std::string& path)
     EXPECT_TRUE(in.good()) << path;
     std::ostringstream s;
     s << in.rdbuf();
-    return s.str();
+    /* A checkout may carry CRLF; the cases below edit the text by its LF
+     * lines, and the loader reads either */
+    std::string text = s.str();
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
 }
 
 /* The example plugin's folder, as its files are on disk */
