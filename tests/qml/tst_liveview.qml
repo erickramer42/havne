@@ -340,6 +340,33 @@ TestCase {
         }
     }
 
+    // ADR-0051 section 3: a DID the ECU refuses says so on its row, the
+    // code by name, and one it answers shows its value
+    function test_aRefusedDidSaysSo() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        const uri = "j2534://" + Harness.fakeDllPath
+                    + "?profile=uds-generic&did=1E1C:u16,F1FE:u16&identify=0&diagnose=0"
+        compare(Bridge.connectSession(uri), "", uri + " connects")
+        const list = findChild(page, "signalList")
+        tryCompare(list, "count", 2, 5000)
+        const valueOf = name => {
+            for (let r = 0; r < list.count; ++r) {
+                list.positionViewAtIndex(r, ListView.Contain)
+                const row = list.itemAtIndex(r)
+                if (row && row.name === name)
+                    return findChild(row, "valueLabel").text
+            }
+            return "no row " + name
+        }
+        tryVerify(() => valueOf("DID F1FE") === "Refused: requestOutOfRange (7F 22 31)", 5000,
+                  "DID F1FE says it was refused: " + valueOf("DID F1FE"))
+        // 0x1234, in the locale's digits
+        tryVerify(() => valueOf("DID 1E1C").replace(/[^0-9]/g, "") === "4660", 5000,
+                  "DID 1E1C shows its value: " + valueOf("DID 1E1C"))
+    }
+
     function test_bannerText_data() {
         return [
             { tag: "quiet", state: "quiet", episodes: 0, code: 0,

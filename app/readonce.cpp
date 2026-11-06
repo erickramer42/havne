@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "ecuio/core.h"
+#include "refused_signals.h" /* cli/: the negative codes' names */
 
 namespace {
 
@@ -295,46 +296,7 @@ bool ReadOnce::answers(const Request& r, uint32_t rx, const uint8_t* data,
 
 QString ReadOnce::nrcName(uint8_t nrc)
 {
-    switch (nrc) {
-    case 0x10:
-        return QStringLiteral("generalReject");
-    case 0x11:
-        return QStringLiteral("serviceNotSupported");
-    case 0x12:
-        return QStringLiteral("subFunctionNotSupported");
-    case 0x13:
-        return QStringLiteral("incorrectMessageLengthOrInvalidFormat");
-    case 0x14:
-        return QStringLiteral("responseTooLong");
-    case 0x21:
-        return QStringLiteral("busyRepeatRequest");
-    case 0x22:
-        return QStringLiteral("conditionsNotCorrect");
-    case 0x24:
-        return QStringLiteral("requestSequenceError");
-    case 0x25:
-        return QStringLiteral("noResponseFromSubnetComponent");
-    case 0x26:
-        return QStringLiteral("failurePreventsExecutionOfRequestedAction");
-    case 0x31:
-        return QStringLiteral("requestOutOfRange");
-    case 0x33:
-        return QStringLiteral("securityAccessDenied");
-    case 0x35:
-        return QStringLiteral("invalidKey");
-    case 0x36:
-        return QStringLiteral("exceededNumberOfAttempts");
-    case 0x37:
-        return QStringLiteral("requiredTimeDelayNotExpired");
-    case 0x78:
-        return QStringLiteral("requestCorrectlyReceivedResponsePending");
-    case 0x7E:
-        return QStringLiteral("subFunctionNotSupportedInActiveSession");
-    case 0x7F:
-        return QStringLiteral("serviceNotSupportedInActiveSession");
-    default:
-        return {};
-    }
+    return QString::fromLatin1(cli::nrc_name(nrc));
 }
 
 QVariantMap ReadOnce::noReply(const Request& r, const QString& words)

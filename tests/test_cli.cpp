@@ -8,6 +8,7 @@
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "plugin_lines.h"
+#include "refused_signals.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
 #include "sim_line.h"
@@ -1644,4 +1645,190 @@ TEST(CliPluginTest, TheCheckedAndRefusedLinesSayWhatHappened)
     const std::string ft = text_of(f);
     EXPECT_NE(ft.find("\"file\":\"a.json\",\"code\":11"), std::string::npos);
     EXPECT_EQ(ft.find("package"), std::string::npos);
+}
+
+// ---- The signals an ECU refuses (cli/refused_signals.h, ADR-0051) ----
+
+namespace {
+
+// A def keyed at the reply's start: key's bytes, first most significant
+ecuio_signal_def_t keyed(uint16_t id, uint32_t rx, uint8_t length, uint32_t key)
+{
+    ecuio_signal_def_t d{};
+    d.id = id;
+    d.message_id = rx;
+    d.mux_offset = 0;
+    d.mux_length = length;
+    d.mux_key = key;
+    return d;
+}
+
+ecuio_dropped_request_t dropped(uint8_t service, uint16_t key, uint8_t length,
+                                uint8_t reason, uint8_t nrc)
+{
+    ecuio_dropped_request_t d{};
+    d.request[0] = service;
+    if (length == 2) {
+        d.request[1] = static_cast<uint8_t>(key);
+    } else {
+        d.request[1] = static_cast<uint8_t>(key >> 8);
+        d.request[2] = static_cast<uint8_t>(key);
+    }
+    d.length = length;
+    d.reason = reason;
+    d.nrc = nrc;
+    return d;
+}
+
+ecuio_channel_support_t
+report(uint32_t rx, std::initializer_list<ecuio_dropped_request_t> drops)
+{
+    ecuio_channel_support_t s{};
+    s.rx_id = rx;
+    s.generation = 1;
+    for (const ecuio_dropped_request_t& d : drops) {
+        s.dropped_list[s.dropped++] = d;
+    }
+    return s;
+}
+
+std::vector<uint16_t> ids_of(const std::vector<cli::RefusedSignal>& r)
+{
+    std::vector<uint16_t> ids;
+    for (const cli::RefusedSignal& s : r) {
+        ids.push_back(s.id);
+    }
+    return ids;
+}
+
+} // namespace
+
+/* A refused request leaves its own signals without values: the defs on
+ * its channel's reply ID keyed by its reply (62 <DID>, 41 <PID>), each
+ * once, in the set's order; another ECU's, another key's, an unkeyed or
+ * a computed def keep theirs, and a PID its bitmap left out is
+ * unsupported, not refused */
+TEST(CliRefusedTest, ARefusedRequestIsItsOwnSignalsAlone)
+{
+    std::vector<ecuio_signal_def_t> defs = {
+        keyed(1, 0x7E8, 3, 0x62F1FE), // refused
+        keyed(2, 0x7E8, 3, 0x621E1C), // answered
+        keyed(3, 0x7E9, 3, 0x62F1FE), // the same DID on another ECU
+        keyed(4, 0x7E8, 2, 0x410C),   // refused by its bitmap
+        keyed(5, 0x7E8, 0, 0),        // unkeyed on the ID
+        keyed(6, 0x7E8, 3, 0x62F1FE), // a second field of the refused reply
+        keyed(7, 0x7E8, 2, 0x410D),   // refused by a negative reply
+        keyed(8, 0x7E8, 3, 0x62F1FF), // refused for its access
+    };
+    ecuio_signal_def_t computed = keyed(9, 0, 0, 0);
+    computed.flags = ECUIO_DEF_FLAG_COMPUTED;
+    defs.push_back(computed);
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = static_cast<uint32_t>(defs.size());
+    set.defs = defs.data();
+    const ecuio_channel_support_t reports[2] = {
+        report(0x7E8, {dropped(0x22, 0xF1FE, 3, ECUIO_DROP_NOT_SUPPORTED, 0x31),
+                       dropped(0x01, 0x0C, 2, ECUIO_DROP_BITMAP, 0),
+                       dropped(0x01, 0x0D, 2, ECUIO_DROP_SERVICE, 0x11),
+                       dropped(0x22, 0xF1FF, 3, ECUIO_DROP_ACCESS, 0x33)}),
+        report(0x7E9, {}),
+    };
+    const std::vector<cli::RefusedSignal> r =
+        cli::refused_signals(&set, reports, 2);
+    EXPECT_EQ(ids_of(r), (std::vector<uint16_t>{1, 6, 7, 8}));
+    ASSERT_EQ(r.size(), 4u);
+    EXPECT_EQ(r[0].request[0], 0x22);
+    EXPECT_EQ(r[0].request[1], 0xF1);
+    EXPECT_EQ(r[0].request[2], 0xFE);
+    EXPECT_EQ(r[0].length, 3);
+    EXPECT_EQ(r[0].nrc, 0x31);
+    EXPECT_EQ(r[2].nrc, 0x11);
+    EXPECT_EQ(r[3].nrc, 0x33);
+    EXPECT_EQ(ids_of(cli::refused_signals(&set, reports, 1)),
+              (std::vector<uint16_t>{1, 6, 7, 8}))
+        << "the channels counted";
+    EXPECT_EQ(ids_of(cli::refused_signals(&set, reports + 1, 1)),
+              std::vector<uint16_t>{})
+        << "the other ECU refused nothing";
+}
+
+/* A report that has learned nothing refuses nothing, only the drops the
+ * report lists count, and no set or no reports refuse nothing */
+TEST(CliRefusedTest, OnlyALearnedReportsListedDropsRefuse)
+{
+    std::vector<ecuio_signal_def_t> defs;
+    for (uint16_t did = 0; did < 10; ++did) {
+        defs.push_back(
+            keyed(static_cast<uint16_t>(100 + did), 0x7E8, 3, 0x62F100u + did));
+    }
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = static_cast<uint32_t>(defs.size());
+    set.defs = defs.data();
+    ecuio_channel_support_t s = report(0x7E8, {});
+    for (uint16_t did = 0; did < ECUIO_SUPPORT_MAX_DROPPED; ++did) {
+        s.dropped_list[did] = dropped(0x22, static_cast<uint16_t>(0xF100 + did),
+                                      3, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    }
+    s.dropped = 10; // two past the list: core keeps the first eight
+    EXPECT_EQ(cli::refused_signals(&set, &s, 1).size(),
+              size_t{ECUIO_SUPPORT_MAX_DROPPED});
+    s.dropped = 3;
+    EXPECT_EQ(ids_of(cli::refused_signals(&set, &s, 1)),
+              (std::vector<uint16_t>{100, 101, 102}))
+        << "a listed slot past the count isn't a drop";
+    s.generation = 0;
+    EXPECT_TRUE(cli::refused_signals(&set, &s, 1).empty());
+    s.generation = 1;
+    EXPECT_TRUE(cli::refused_signals(nullptr, &s, 1).empty());
+    EXPECT_TRUE(cli::refused_signals(&set, nullptr, 1).empty());
+}
+
+/* The refused line: each signal's id, its request and the reply in
+ * frames.csv's form, the code by name, null for one with none; an
+ * emptied list is [] */
+TEST(CliRefusedTest, TheRefusedLineNamesEachSignalsReply)
+{
+    cli::RefusedSignal a;
+    a.id = 30001;
+    a.request[0] = 0x22;
+    a.request[1] = 0xF1;
+    a.request[2] = 0xFE;
+    a.length = 3;
+    a.nrc = 0x31;
+    cli::RefusedSignal b = a;
+    b.id = 12;
+    b.request[0] = 0x01;
+    b.request[1] = 0x0D;
+    b.length = 2;
+    b.nrc = 0x99;
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::refused_line(l, {a, b});
+    EXPECT_EQ(
+        std::string(l.data(), l.size()),
+        "{\"type\":\"refused\",\"signals\":[{\"id\":30001,\"request\":\"22 F1 "
+        "FE\","
+        "\"reply\":\"7F 22 31\",\"nrc\":\"requestOutOfRange\"},{\"id\":12,"
+        "\"request\":\"01 0D\",\"reply\":\"7F 01 99\",\"nrc\":null}]}");
+    cli::Line e(buf, sizeof buf);
+    cli::refused_line(e, {});
+    EXPECT_EQ(std::string(e.data(), e.size()),
+              "{\"type\":\"refused\",\"signals\":[]}");
+    EXPECT_LE(std::string(l.data(), l.size()).size(),
+              cli::refused_line_bytes(2));
+}
+
+/* The code's names, ISO 14229-1's, and "" past them */
+TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
+{
+    EXPECT_STREQ(cli::nrc_name(0x11), "serviceNotSupported");
+    EXPECT_STREQ(cli::nrc_name(0x12), "subFunctionNotSupported");
+    EXPECT_STREQ(cli::nrc_name(0x22), "conditionsNotCorrect");
+    EXPECT_STREQ(cli::nrc_name(0x31), "requestOutOfRange");
+    EXPECT_STREQ(cli::nrc_name(0x33), "securityAccessDenied");
+    EXPECT_STREQ(cli::nrc_name(0x7F), "serviceNotSupportedInActiveSession");
+    EXPECT_STREQ(cli::nrc_name(0x00), "");
+    EXPECT_STREQ(cli::nrc_name(0x99), "");
 }

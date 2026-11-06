@@ -11,6 +11,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- A signal its module refuses shows as refused, not blank ([ADR-0051](docs/adr/0051-signal-files.md) section 3): Live's row reads "Refused: requestOutOfRange (7F 22 31)", the negative reply's code by name, and `havne-cli stream --values` writes a `refused` line naming each such signal with its request, the reply and the code's name.
+
 ## [0.5.0] - 2026-11-06
 
 ### Added

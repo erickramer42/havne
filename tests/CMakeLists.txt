@@ -297,6 +297,23 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
+        # A DID its ECU refuses is named on a refused line (ADR-0051 section
+        # 3): the fake DLL's ECU on Windows, the simulated ECU on vcan0 on
+        # Linux (skipped without it unless ECUIO_VCAN_REQUIRED, and serial:
+        # the simulated ECU answers 0x7E0 for the whole bus)
+        if(WIN32)
+            add_test(NAME CliRefusedRunTest.ADidTheFakeEcuRefusesIsNamed
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        fake $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliRefusedRunTest.ADidTheFakeEcuRefusesIsNamed
+                PROPERTIES TIMEOUT 60)
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        sim $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
+                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
         # A last row cut short is left out and counted (ADR-0049 section 7)
         add_test(NAME CliReplayTest.ATornLastRowIsLeftOut
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_torn.py
