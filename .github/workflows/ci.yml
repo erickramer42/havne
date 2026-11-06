@@ -572,10 +572,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Without recommends: diffoscope's full form recommends a long list
+      # of comparison tools (ghc alone is 79 MB), which a slow archive
+      # mirror took past the job's timeout. reprotest's own recommends
+      # are named instead (its variations' tools), with diffoscope-minimal,
+      # which compares the packages if a build differs
       - name: Install the tools
+        timeout-minutes: 8
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build dpkg-dev systemtap-sdt-dev reprotest diffoscope gdb pkg-config
+          sudo apt-get install -y --no-install-recommends ninja-build dpkg-dev \
+            systemtap-sdt-dev reprotest disorderfs faketime locales-all \
+            diffoscope-minimal gdb pkg-config
 
       - name: Build twice under reprotest
         run: |
