@@ -1,6 +1,6 @@
 # ADR-0051: Signal files: a user's own signals as data
 
-- **Status:** Accepted. To be built in v0.5.0.
+- **Status:** Accepted. Built in v0.5.0.
 - **Date:** 2026-11-05.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI, the URI as provenance);
