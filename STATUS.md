@@ -36,8 +36,8 @@ mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
 background too. v0.5.0 brings your own signals: PIDs and DIDs defined
-or imported in bulk, and computed signals such as boost
-([roadmap](#roadmap)).
+or imported in bulk, computed signals such as boost, and plugins'
+data tier ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -406,8 +406,8 @@ hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
 the VX clock's zero (#5), the VX's serial port on a machine without
 OBDX's software (#11), response pending (#17), the VX's WiFi while
 its USB port is held (#20, in part), a BLE adapter (#25), a real CAN controller that sends with
-one-shot mode (#32), and a sleep on a Linux
-machine (#27). Any other adapter starts the list again.
+one-shot mode (#32), a sleep on a Linux
+machine (#27), and a busy bus through the surrogate (#34). Any other adapter starts the list again.
 
 ## Known issues and technical debt
 
@@ -522,11 +522,15 @@ which breaks the C ABI on purpose where ADR-0051 says.
 
 **Done when:** `havne-cli` loads the example plugin, the simulated car
 answers its DIDs on `vcan0`, the values decode with its scaling and
-enumerations, and its CI examples pass; a user's own DID, defined in
+enumerations, and its CI examples pass (met:
+[testing.md](docs/testing.md)'s `havne-cli plugins` row,
+`CliPluginRunTest` in CI's `linux-build`); a user's own DID, defined in
 the app and imported from a synthetic OBDb file, reads from the
-simulated car on a second module; boost shows on Live from the mock's
-MAP and baro; the arm64 deb's `havne-cli` and the aarch64 AppImage run
-on the Raspberry Pi from the release's own files.
+simulated car on a second module (met: [testing.md](docs/testing.md)'s
+"done-when on a second module" row, 2026-11-05); boost shows on Live
+from the mock's MAP and baro (met: testing.md's mock rows and its
+"Boost on Live" row, 2026-11-05); the arm64 deb's `havne-cli` and the
+aarch64 AppImage run on the Raspberry Pi from the release's own files.
 
 ### Waiting on a tester: an iPhone download
 
