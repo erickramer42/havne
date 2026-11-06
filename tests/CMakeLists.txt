@@ -324,9 +324,15 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${_cli_record} signals $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json)
+        # and through --plugin, its variant's files merged into one
+        # (ADR-0052 section 4)
+        add_test(NAME CliRecordTest.APluginsRecordingHoldsItsVariantsFile
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} plugin $<TARGET_FILE:havne-cli>
+                    ${CMAKE_SOURCE_DIR}/plugins/example-sim)
         set_tests_properties(CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
             CliRecordTest.TypedLinesAreMarkers CliRecordTest.AFolderThatCantBeMadeFails
             CliRecordTest.ARecordingHoldsItsSignalFile
+            CliRecordTest.APluginsRecordingHoldsItsVariantsFile
             PROPERTIES TIMEOUT 60)
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later

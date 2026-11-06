@@ -946,6 +946,7 @@ int run_signals_check(const char* path)
 // its profiles keep their sets, and a session's close can outlive the
 // command's return, so it is never freed, as g_signal_file isn't
 ecuio_plugin_t* g_plugin = nullptr;
+uint32_t g_plugin_variant = 0; // the variant the URI's profile= selects
 
 // Whether path names a folder (a plugin's); otherwise it's read as a file
 bool is_folder(const char* path)
@@ -1067,7 +1068,10 @@ int use_plugin(const char* path, const char* uri)
             const std::string name =
                 cli::plugin_profile(info.id, variant_of(p, v).c_str());
             names += (v > 0 ? ", " : "") + name;
-            known = known || (given && name == selected);
+            if (given && name == selected) {
+                known = true;
+                g_plugin_variant = v;
+            }
         }
         if (!known) {
             std::fprintf(stderr,
@@ -1883,9 +1887,15 @@ bool open_recording(Output& out, ecuio_session_t* session,
                         *detail ? detail : ecuio_status_string(st));
         return false;
     }
-    // The --signals file decoding the session goes in as signals.json
-    if (g_signal_file != nullptr) {
-        st = ecuio_recorder_signal_file(*recorder, g_signal_file);
+    // The signal file decoding the session goes in as signals.json: the
+    // --signals file, or the --plugin variant's files merged into one
+    const ecuio_signal_file_t* file =
+        g_signal_file != nullptr ? g_signal_file
+        : g_plugin != nullptr
+            ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
+            : nullptr;
+    if (file != nullptr) {
+        st = ecuio_recorder_signal_file(*recorder, file);
     }
     if (st == ECUIO_OK) {
         st = ecuio_session_record(session, *recorder);

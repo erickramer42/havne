@@ -435,7 +435,8 @@ written, and `signals check` says it won't convert.
   folder as `signals.json`, byte for byte, with its SHA-256 on
   `events.log`'s header (`signal file  signals.json,<SHA-256>`), so it
   says exactly what decoded it: the app copies the vehicle's file, and
-  `havne-cli stream --record` the one `--signals` names. A replay of the
+  `havne-cli stream --record` the one `--signals` names (with
+  `--plugin`, the variant's files merged into one). A replay of the
   recording with that copy decodes the same values:
 
   ```sh

@@ -530,3 +530,5 @@ Section 4's provenance, as built:
   replay loading the copy reads it as an ordinary signal file (profile
   `user.<the plugin's name>`) and decodes the same values; it names no
   plugin.
+- **`havne-cli stream --plugin --record`** gives the recorder the
+  variant the URI's `profile=` selects, as it gives a `--signals` file.
