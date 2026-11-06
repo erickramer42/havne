@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-05, **Version:** v0.4.1,
+**Updated:** 2026-11-06, **Version:** v0.5.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,13 +14,15 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.5.0, in progress.** v0.4.1 is out, a patch: the
-pages on a phone; both of the test car's ECUs in one session, recorded
-by the app, the phone and `havne-cli`; a J2534 read that ends at its
-reply, which brought the VX's latency per request on the test car to
-16.4 ms packed and 4.6 ms unpacked; and a listening ELM327 session
-that leaves the other tester's flow control alone, through an OBDLink
-MX+ hearing Single Frame replies only. Changes since then go under
+**Current phase: between releases; v0.6.0 is next.** v0.5.0 is out:
+your own signals, as signal files that core reads from bytes and
+refuses at load where they're wrong, written per vehicle in the app
+(with **Read once**) or converted from an OBDb set by `havne-cli`;
+enumerations and computed signals such as boost; plugins' data tier, a
+package of signal files whose variants the car's VIN proposes, checked
+through the simulated ECU in CI; and Linux downloads for 64-bit ARM.
+None of it has yet read a real ECU: each read so far is the simulated
+car's. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -35,9 +37,7 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.5.0 brings your own signals: PIDs and DIDs defined
-or imported in bulk, computed signals such as boost, and plugins'
-data tier ([roadmap](#roadmap)).
+background too ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -349,9 +349,10 @@ data tier ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1018 ctest cases on Windows (both trees rebuilt,
-  2026-11-05), all passing but two env-gated skips (the cross-arch
-  case, and the real-car recordings' diff, run locally), plus the
+- **Tests:** 1238 ctest cases on Windows (both trees rebuilt,
+  2026-11-06), all passing but three skips (the cross-arch case and
+  the real-car recordings' diff, run locally, and a Read once case
+  that runs on Linux only), plus the
   cross-arch subset (101/101); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
@@ -473,7 +474,7 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
 | v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | Released |
-| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | In progress |
+| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | Released |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 

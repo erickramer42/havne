@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-06
+
 ### Added
 
 - Linux downloads for 64-bit ARM, such as a Raspberry Pi 3 or later on the 64-bit Raspberry Pi OS 13 or Ubuntu 24.04 and newer: the app as an AppImage, and `havne-cli` and the core as a deb and a tarball, beside the x86_64 ones, with their checksums, build provenance and SBOM entries ([docs/linux.md](docs/linux.md)).
@@ -666,7 +668,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/erickramer42/havne/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/erickramer42/havne/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/erickramer42/havne/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/erickramer42/havne/compare/v0.3.5...v0.3.6
