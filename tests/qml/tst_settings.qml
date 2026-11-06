@@ -1327,6 +1327,103 @@ TestCase {
         compare(page.readResult.reply, "62 1E 1C 12 34")
     }
 
+    // A file is saved out as the vehicle has it, byte for byte (a Save
+    // replaces what was at the target), under its profile's name; its
+    // button stays on while a session runs, since it only reads the copy;
+    // a missing copy says so
+    function test_aFileIsSavedOutAsTheVehicleHasIt() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        const f = page.pickedVehicle.signals[0]
+        compare(page.saveFileName(f), "extras.json")
+        const url = Harness.writeScratchFile("saved.json", "x".repeat(2000))
+        verify(page.saveSignalFileTo(f.sha256, url))
+        compare(Harness.readScratchFile(url), signalFileText("Extras"))
+        compare(Harness.readScratchFile(url), Bridge.signalFileText(f.sha256))
+        compare(find(page, "signalNote").text, "Extras saved to the file you chose")
+
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        const own = page.pickedVehicle.signals.find(e => e.sha256 === page.pickedVehicle.own)
+        compare(page.saveFileName(own), "vehicle-1-own.json")
+        const ownUrl = Harness.writeScratchFile("own.json", "")
+        verify(page.saveSignalFileTo(own.sha256, ownUrl))
+        compare(Harness.readScratchFile(ownUrl), Bridge.signalFileText(own.sha256))
+        compare(JSON.parse(Harness.readScratchFile(ownUrl)).signals.map(s => s.name),
+                ["Trans Temp"])
+
+        verify(!page.saveSignalFileTo("a".repeat(64), url))
+        compare(find(page, "signalProblem").text, "Its copy is missing: import the file again")
+        compare(find(page, "signalNote").text, "")
+
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        verify(find(page, "signalSave_0").enabled, "Save reads the copy alone")
+        verify(!find(page, "signalImport").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+    }
+
+    // One request ID to a module: a Save whose typed one differs moves the
+    // module's other signals, and its note names them; a blank one keeps
+    // the module's
+    function test_aModulesRequestIdMovesItsSignalsAndSaysSo() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Gear", "D101")
+        find(page, "formRx").text = "7E9"
+        find(page, "formTx").text = ""
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(find(page, "formNote").text, "Gear saved in Vehicle 1 own")
+        typeSignal(page, "Oil", "D102")
+        find(page, "formRx").text = "7E9"
+        find(page, "formTx").text = "7E2"
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(find(page, "formNote").text, "Oil saved in Vehicle 1 own; 7E9 asks on 7E2 for Gear too")
+        compare(page.ownFile.ecus.map(e => e.tx), ["7E2"])
+        typeSignal(page, "Pressure", "D103")
+        find(page, "formRx").text = "7E9"
+        find(page, "formTx").text = ""
+        press(page, "formSave")
+        compare(find(page, "formNote").text, "Pressure saved in Vehicle 1 own")
+        compare(page.ownFile.ecus.map(e => e.tx), ["7E2"], "blank keeps the module's")
+    }
+
+    // A file's or a plugin's profile is its vehicle's: a pick of another,
+    // or New, puts the field back to Default (its connection kept), so it
+    // never connects, and is remembered, with the last one's signals; a
+    // built-in profile stays
+    function test_aPickLeavesAnotherVehiclesProfileBehind() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const first = page.pickedVehicle.id
+        verify(importFile(page, "extras.json", "Extras"))
+        find(page, "uriField").text = "mock://demo"
+        page.chooseProfile("user.extras")
+        compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
+        press(page, "vehicleNew")
+        compare(find(page, "uriField").text, "mock://demo", "New: Default")
+        compare(page.profileChoice, "default")
+
+        const second = page.pickedVehicle.id
+        press(page, "vehicle_" + first)
+        page.chooseProfile("user.extras")
+        press(page, "vehicleDuplicate")
+        verify(page.pickedVehicle.id !== first && page.pickedVehicle.id !== second)
+        compare(find(page, "uriField").text, "mock://demo?profile=user.extras",
+                "the copy has the file: its profile stays")
+        press(page, "vehicle_" + second)
+        compare(find(page, "uriField").text, "mock://demo", "another's goes")
+
+        page.chooseProfile("raw")
+        press(page, "vehicle_" + first)
+        compare(find(page, "uriField").text, "mock://demo?profile=raw", "a built-in stays")
+    }
+
     // ---- The vehicle's own signals (ADR-0051's form) ----
 
     function typeSignal(page, name, number, bits) {

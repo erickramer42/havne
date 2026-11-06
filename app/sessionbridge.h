@@ -561,6 +561,13 @@ public:
     // for none. Settings composes the file, core's loader judges it
     Q_INVOKABLE QVariantMap importSignalText(const QString& text);
     Q_INVOKABLE QString signalFileText(const QString& sha) const;
+    // A kept copy saved where the user chose (a local file, or Android's
+    // content:// from its document picker, through QFile): the copy's
+    // bytes as imported or as the form wrote them, nothing added, so
+    // havne-cli --signals and another vehicle read the same file. { ok,
+    // words }, words never naming either path; a copy changed since it
+    // was kept is refused, not saved. Logs one line
+    Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,

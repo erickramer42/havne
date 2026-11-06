@@ -418,9 +418,19 @@ written, and `signals check` says it won't convert.
   values (`0=Park, 3=Drive`), and a group. **Save** adds the signal to
   the file `<vehicle> own` (`user.<vehicle>-own`), or replaces the one of
   the same name; **Edit** fills the form from a saved signal, and
-  **Remove** takes it out, the file going with its last. The form checks
-  nothing itself: the loader reads the file it makes and says what's
-  wrong in its own words.
+  **Remove** takes it out, the file going with its last. A module has
+  one request ID for all its signals: a typed one is the module's, and
+  the note under the form names the other signals it moves; left empty,
+  the module keeps the one it has, or the standard's when no other
+  signal reads it. The form checks nothing itself: the loader reads the
+  file it makes and says what's wrong in its own words.
+- **Save a copy:** each of the vehicle's files is saved where you
+  choose (the desktop's save dialog, Android's document picker), named
+  for its profile (`daily-driver-own.json`), so it can be shared or
+  given to `havne-cli --signals`. The saved file is the app's copy,
+  byte for byte: what was imported or typed into the form, and nothing
+  about the vehicle (no VIN). A copy that has changed since it was kept
+  isn't saved, and the line under the files says to import it again.
 - **Read once:** with no session connected, the form's signal is asked
   once on the adapter the URI field names (or the vehicle's last), in a
   short session of its own: a Service 22 DID through `uds-generic`, a

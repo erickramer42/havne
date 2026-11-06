@@ -328,6 +328,35 @@ Pane {
         Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
     }
 
+    // A Save out of the app: the copy the vehicle has, byte for byte, where
+    // the user chooses (the desktop's dialog, Android's document picker),
+    // so it can be shared or given to havne-cli --signals. Its name to
+    // start from is the profile's slug
+    property string savingSha: ""
+
+    function saveFileName(f) {
+        const slug = String(f.profile).replace(/^user\./, "")
+        return (slug !== "" ? slug : "signals") + ".json"
+    }
+
+    function saveSignalFileAs(f) {
+        savingSha = f.sha256
+        saveDialog.selectedFile = saveDialog.currentFolder.toString().replace(/\/$/, "")
+                                  + "/" + saveFileName(f)
+        saveDialog.open()
+    }
+
+    function saveSignalFileTo(sha, url) {
+        const f = pickedVehicle !== null ? pickedVehicle.signals.find(e => e.sha256 === sha)
+                                         : undefined
+        const r = Bridge.saveSignalFile(sha, url)
+        signalProblem = r.ok ? "" : r.words
+        signalNote = r.ok ? qsTr("%1 saved to the file you chose")
+                                .arg(f !== undefined ? f.name : qsTr("The signal file"))
+                          : ""
+        return r.ok
+    }
+
     function confirmingFile() {
         if (!confirming.startsWith("removeSignals:") || pickedVehicle === null)
             return null
@@ -363,6 +392,25 @@ Pane {
         signalProblem = ""
         signalNote = ""
         clearForm()
+        dropAnotherVehiclesProfile()
+    }
+
+    // A file's or a plugin's profile in the field is one vehicle's: once
+    // another is picked (or none), the field reads Default, so a connect
+    // never decodes with the last vehicle's signals and remembers them as
+    // this one's. A vehicle with a connection of its own then sets the
+    // field (pickVehicle); a session's URI is left as it is
+    function dropAnotherVehiclesProfile() {
+        if (!idle)
+            return
+        const p = profileChoice
+        if (!p.startsWith("user.") && !p.startsWith("plugin."))
+            return
+        const mine = pickedVehicle === null ? []
+            : pickedVehicle.signals.map(f => f.profile)
+                  .concat(pickedVehicle.plugin !== "" ? [pickedVehicle.plugin] : [])
+        if (mine.indexOf(p) < 0)
+            chooseProfile("default")
     }
 
     function clearForm() {
@@ -477,8 +525,14 @@ Pane {
         const base = ownFile !== null ? ownFile
             : SignalForm.emptyFile(pickedVehicle.label,
                                    VehicleBook.ownName(vehicles, pickedVehicle.label))
-        if (!saveOwn(SignalForm.withSignal(base, signal, SignalForm.moduleOf(f), editingKey),
-                     qsTr("%1 saved in %2").arg(signal.name, base.name)))
+        const module = SignalForm.moduleOf(f)
+        // One request ID to a module: a typed one that differs moves the
+        // module's other signals too, and the note names them
+        const move = SignalForm.requestIdMove(base, signal, module, editingKey)
+        const note = move === null ? qsTr("%1 saved in %2").arg(signal.name, base.name)
+            : qsTr("%1 saved in %2; %3 asks on %4 for %5 too")
+                  .arg(signal.name, base.name, move.rx, move.tx, move.names.join(", "))
+        if (!saveOwn(SignalForm.withSignal(base, signal, module, editingKey), note))
             return false
         editingKey = ""   // saved: the Edit is over
         return true
@@ -1563,13 +1617,15 @@ Pane {
 
                 Repeater {
                     model: page.pickedVehicle !== null ? page.pickedVehicle.signals : []
-                    RowLayout {
+                    // The file's line at the page's width, its buttons under
+                    // it, so a phone's narrow page never squeezes the line
+                    ColumnLayout {
                         id: fileRow
                         required property var modelData
                         required property int index
                         objectName: "signalFile_" + index
                         Layout.fillWidth: true
-                        spacing: Theme.spacing
+                        spacing: Theme.spacing / 2
 
                         Label {
                             objectName: "signalFileText"
@@ -1579,11 +1635,24 @@ Pane {
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
-                        ThemedButton {
-                            objectName: "signalRemove_" + fileRow.index
-                            text: qsTr("Remove")
-                            enabled: page.idle && page.confirming === ""
-                            onClicked: page.removeSignalFile(fileRow.modelData.sha256)
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing
+                            ThemedButton {
+                                objectName: "signalSave_" + fileRow.index
+                                width: Math.min(implicitWidth, parent.width)
+                                text: qsTr("Save a copy")
+                                // Reads the copy alone, so a session may run
+                                enabled: page.confirming === ""
+                                onClicked: page.saveSignalFileAs(fileRow.modelData)
+                            }
+                            ThemedButton {
+                                objectName: "signalRemove_" + fileRow.index
+                                width: Math.min(implicitWidth, parent.width)
+                                text: qsTr("Remove")
+                                enabled: page.idle && page.confirming === ""
+                                onClicked: page.removeSignalFile(fileRow.modelData.sha256)
+                            }
                         }
                     }
                 }
@@ -1632,6 +1701,15 @@ Pane {
                     title: qsTr("Import a signal file")
                     nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
                     onAccepted: page.importSignalFile(importDialog.selectedFile)
+                }
+                FileDialog {
+                    id: saveDialog
+                    title: qsTr("Save a copy of the signal file")
+                    fileMode: FileDialog.SaveFile
+                    defaultSuffix: "json"
+                    nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
+                    currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                    onAccepted: page.saveSignalFileTo(page.savingSha, saveDialog.selectedFile)
                 }
 
                 // ---- The app's plugins (ADR-0052): every vehicle's, the

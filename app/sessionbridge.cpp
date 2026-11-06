@@ -1063,6 +1063,40 @@ QString SessionBridge::signalFileText(const QString& sha) const
     return SignalStore::text(sha);
 }
 
+QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
+{
+    QString words;
+    const QByteArray bytes = SignalStore::bytes(sha, &words);
+    bool written = false;
+    if (!bytes.isEmpty()) {
+        if (url.isLocalFile()) {
+            // Whole or not at all: a failed write leaves what was there
+            QSaveFile out(url.toLocalFile());
+            written = out.open(QIODevice::WriteOnly) &&
+                      out.write(bytes) == bytes.size() && out.commit();
+        } else {
+            // A content:// document the picker just made: QFile writes it
+            // through its provider, where a rename can't
+            QFile out(url.toString());
+            written = out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                      out.write(bytes) == bytes.size() && out.flush();
+        }
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    emit logMessage(
+        written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
+                      .arg(sha.left(12))
+                      .arg(bytes.size())
+                : QStringLiteral("Signal file %1 not saved: %2")
+                      .arg(sha.left(12), words));
+    if (!written) {
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
+    }
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
+}
+
 QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
 {
     const QVariantList used = m_signalStore.use(shas);

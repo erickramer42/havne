@@ -58,6 +58,12 @@ public:
     // which the form adds to and saves again through import()
     static QString text(const QString& sha);
 
+    // A kept copy's bytes, as imported, for a Save out of the app: empty,
+    // with words why, for a sha that isn't one, no copy, or a copy that
+    // no longer hashes to its name (changed since, so not the file the
+    // vehicle has); the words never name a path
+    static QByteArray bytes(const QString& sha, QString* words);
+
     // The loaded file whose set this is (a session's,
     // ecuio_session_signal_set), or nullptr for a set no file of the
     // store's holds: what a recording copies as signals.json (ADR-0051
