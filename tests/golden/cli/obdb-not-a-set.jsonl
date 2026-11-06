@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 11, "detail": "line 1, column 1: this isn't an OBDb signal set: it has no \"commands\" list", "message": "invalid argument", "type": "error"}

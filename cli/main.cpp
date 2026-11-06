@@ -31,7 +31,9 @@
 //          lines UNIT (CliInfoTest); signals check and stream --signals
 //          (ADR-0051): golden runs on tests/fixtures/signals/, their usage
 //          errors (CliUsageTest), the lines UNIT (CliSignalFileTest), sim
-//          --signals on vcan0 by hand;
+//          --signals on vcan0 by hand; signals import obdb: golden runs on
+//          tests/fixtures/obdb/, the converted file against a committed one,
+//          its usage errors (CliUsageTest);
 //          main's catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
@@ -53,6 +55,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
+#include "ecuio/obdb.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/serial.h"
@@ -745,14 +748,14 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
 // (an interrupt while it hangs), so it is never freed
 ecuio_signal_file_t* g_signal_file = nullptr;
 
-// Reads and loads a signal file. On failure, the status and why for an
-// error line, never the path: the reason it can't be read, or core's
-// words, which name the line and column
-ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
-                                std::string* why)
+// A file's bytes, read whole up to one byte past max, so the reader they
+// go to refuses a larger file in its own words. false with why, in words
+// of its own and never the path ("the <what> can't be read: ..."):
+// strerror isn't thread-safe, and its words differ by platform
+bool read_whole(const char* path, size_t max, const char* what,
+                std::string* bytes, std::string* why)
 {
-    *file = nullptr;
-    std::string bytes;
+    bytes->clear();
     FILE* f = nullptr;
 #ifdef _WIN32
     int e = fopen_s(&f, path, "rb");
@@ -762,30 +765,82 @@ ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
 #endif
     bool failed = f == nullptr;
     if (f != nullptr) {
-        // Up to one byte past the loader's bound, so it refuses a larger
-        // file in its own words
         char chunk[64 * 1024];
         size_t n = 0;
-        while (bytes.size() <= ECUIO_SIGNAL_FILE_MAX_BYTES &&
+        while (bytes->size() <= max &&
                (n = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
-            bytes.append(chunk, n);
+            bytes->append(chunk, n);
         }
         failed = std::ferror(f) != 0;
         e = errno;
         std::fclose(f);
-        if (bytes.size() > ECUIO_SIGNAL_FILE_MAX_BYTES + 1) {
-            bytes.resize(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+        if (bytes->size() > max + 1) {
+            bytes->resize(max + 1);
         }
     }
     if (failed) {
-        // In words of its own: strerror isn't thread-safe, and its
-        // words differ by platform
-        *why = e == ENOENT   ? "the signal file can't be read: there's no "
-                               "such file"
-               : e == EACCES ? "the signal file can't be read: permission "
-                               "denied"
-                             : "the signal file can't be read: error " +
-                                   std::to_string(e);
+        *why = std::string("the ") + what + " can't be read: " +
+               (e == ENOENT   ? std::string("there's no such file")
+                : e == EACCES ? std::string("permission denied")
+                              : "error " + std::to_string(e));
+        return false;
+    }
+    return true;
+}
+
+// Writes a file whole, or not at all: into <path>.partial beside it, then
+// renamed over path, so a failed write never leaves half a file at the
+// user's path. false with why, never the path
+bool write_whole(const char* path, const std::string& bytes, std::string* why)
+{
+    const std::string partial = std::string(path) + ".partial";
+    FILE* f = nullptr;
+#ifdef _WIN32
+    int e = fopen_s(&f, partial.c_str(), "wb");
+#else
+    f = std::fopen(partial.c_str(), "wb");
+    int e = errno;
+#endif
+    bool failed = f == nullptr;
+    if (f != nullptr) {
+        failed =
+            std::fwrite(bytes.data(), 1, bytes.size(), f) != bytes.size() ||
+            std::fflush(f) != 0;
+        e = errno;
+        failed = std::fclose(f) != 0 || failed;
+    }
+    if (!failed) {
+#ifdef _WIN32
+        failed = MoveFileExA(partial.c_str(), path,
+                             MOVEFILE_REPLACE_EXISTING |
+                                 MOVEFILE_WRITE_THROUGH) == 0;
+        e = failed && GetLastError() == ERROR_ACCESS_DENIED ? EACCES : e;
+#else
+        failed = std::rename(partial.c_str(), path) != 0;
+        e = errno;
+#endif
+    }
+    if (failed) {
+        std::remove(partial.c_str());
+        *why = std::string("the converted file can't be written: ") +
+               (e == ENOENT   ? std::string("there's no such folder")
+                : e == EACCES ? std::string("permission denied")
+                              : "error " + std::to_string(e));
+        return false;
+    }
+    return true;
+}
+
+// Reads and loads a signal file. On failure, the status and why for an
+// error line, never the path: the reason it can't be read, or core's
+// words, which name the line and column
+ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
+                                std::string* why)
+{
+    *file = nullptr;
+    std::string bytes;
+    if (!read_whole(path, ECUIO_SIGNAL_FILE_MAX_BYTES, "signal file", &bytes,
+                    why)) {
         return ECUIO_ERR_LOAD_FAILED;
     }
     const ecuio_status_t st =
@@ -832,23 +887,11 @@ int use_signal_file(const char* path, const char* uri, std::string* opened)
     return kExitConnect;
 }
 
-// signals check <file> (ADR-0051 section 3): what the loader read, or why
-// it refused the file. start, signal_file, a signal_def line for each of
-// the file's own signals, then a unit line for each unit that never
-// converts; refused, start and an error line, exit 3. No end line (a
-// list, as view's)
-int run_signals_check(const char* path)
+// signals check's lines for a loaded file: signal_file, a signal_def line
+// for each of the file's own signals, then a unit line for each unit that
+// never converts
+void write_check_lines(Output& out, const ecuio_signal_file_t* file)
 {
-    Output out;
-    write_start(out);
-    std::string why;
-    ecuio_signal_file_t* file = nullptr;
-    const ecuio_status_t st = load_signal_file(path, &file, &why);
-    if (st != ECUIO_OK) {
-        write_error(out, st, why.c_str());
-        out.flush();
-        return kExitConnect;
-    }
     const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
     {
         BigLine b(1024 + size_t{set.channel_count} * 64);
@@ -871,7 +914,105 @@ int run_signals_check(const char* path)
             write_line(out, l);
         }
     }
+}
+
+// signals check <file> (ADR-0051 section 3): what the loader read, or why
+// it refused the file. start, signal_file, a signal_def line for each of
+// the file's own signals, then a unit line for each unit that never
+// converts; refused, start and an error line, exit 3. No end line (a
+// list, as view's)
+int run_signals_check(const char* path)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_signal_file_t* file = nullptr;
+    const ecuio_status_t st = load_signal_file(path, &file, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    write_check_lines(out, file);
     ecuio_signal_file_free(file);
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+struct ImportArgs {
+    const char* file = nullptr; // the OBDb set
+    const char* out = nullptr;  // --out: the signal file written
+    ecuio_obdb_options_t options{};
+};
+
+// What an import's note callback shares: the output and each kind's count
+struct ImportNotes {
+    Output* out = nullptr;
+    uint64_t counts[4] = {};
+};
+
+int write_import_note(const ecuio_obdb_note_t* n, void* user)
+{
+    auto* notes = static_cast<ImportNotes*>(user);
+    if (n->what < 4) {
+        ++notes->counts[n->what];
+    }
+    BigLine b(cli::note_line_bytes(*n));
+    cli::import_note_line(b.line, *n);
+    write_line(*notes->out, b.line);
+    return 0;
+}
+
+// signals import obdb <file> --out <file> (ADR-0051 section 7, obdb.h):
+// start, an import_note line for each of core's notes, the converted file
+// written to --out whole or not at all, imported with the counts, then
+// signals check's lines for the file written. A set that can't be read or
+// isn't OBDb's: start and an error line, exit 3; an --out that can't be
+// written: its error line, exit 1. No end line
+int run_signals_import(const ImportArgs& args)
+{
+    Output out;
+    write_start(out);
+    std::string bytes;
+    std::string why;
+    if (!read_whole(args.file, ECUIO_OBDB_MAX_BYTES, "OBDb file", &bytes,
+                    &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    ImportNotes notes;
+    notes.out = &out;
+    char* json = nullptr;
+    size_t length = 0;
+    const ecuio_status_t st =
+        ecuio_obdb_import(bytes.data(), bytes.size(), &args.options,
+                          write_import_note, &notes, &json, &length);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    const std::string text(json, length);
+    ecuio_obdb_free(json);
+    if (!write_whole(args.out, text, &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitFailed;
+    }
+    {
+        char buf[256];
+        cli::Line l(buf, sizeof buf);
+        cli::imported_line(l, notes.counts[ECUIO_OBDB_NOTE_CONVERTED],
+                           notes.counts[ECUIO_OBDB_NOTE_CHANGED],
+                           notes.counts[ECUIO_OBDB_NOTE_SKIPPED]);
+        write_line(out, l);
+    }
+    ecuio_signal_file_t* file = nullptr;
+    if (ecuio_signal_file_load(text.data(), text.size(), &file) == ECUIO_OK) {
+        write_check_lines(out, file);
+        ecuio_signal_file_free(file);
+    }
     out.flush();
     return out.ok() ? kExitOk : kExitFailed;
 }
@@ -987,6 +1128,8 @@ void usage(FILE* to)
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
         "       havne-cli signals check <file>\n"
+        "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
+        "                      [--name N] [--url U] [--commit C] [--alone]\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -1044,6 +1187,11 @@ void usage(FILE* to)
         "signals  check reads a signal file as a session would: what it\n"
         "         holds, each unit that never converts, or why it's "
         "refused.\n"
+        "         import obdb converts an OBDb signal set to a signal file at\n"
+        "         --out, saying field by field what differs and what's left\n"
+        "         out; --year takes the commands for that model year, --name,\n"
+        "         --url and --commit go in the file, and --alone leaves\n"
+        "         obd2 out of it.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -1054,7 +1202,7 @@ void usage(FILE* to)
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
         "      3 the connect, a recording's open or its check failed, or a\n"
-        "        signal file was refused.\n");
+        "        signal file or OBDb set was refused.\n");
 }
 
 bool parse_count(const char* text, uint64_t& out)
@@ -2642,12 +2790,55 @@ int run(int argc, char** argv)
         return run_sim(sim);
     }
     if (command == "signals") {
-        if (argc != 4 || std::string(argv[2]) != "check") {
-            std::fprintf(stderr, "havne-cli: signals takes check <file>\n");
-            usage(stderr);
-            return kExitUsage;
+        const std::string word = argc > 2 ? argv[2] : "";
+        if (word == "check" && argc == 4) {
+            return run_signals_check(argv[3]);
         }
-        return run_signals_check(argv[3]);
+        if (word == "import" && argc > 4 && std::string(argv[3]) == "obdb") {
+            ImportArgs im;
+            im.file = argv[4];
+            for (int i = 5; i < argc; ++i) {
+                const std::string a = argv[i];
+                const bool has_value = i + 1 < argc;
+                if (a == "--out" && has_value) {
+                    im.out = argv[++i];
+                } else if (a == "--year" && has_value) {
+                    uint64_t year = 0;
+                    if (!parse_count(argv[++i], year) || year < 1980 ||
+                        year > 2100) {
+                        std::fprintf(stderr, "havne-cli: --year takes a model "
+                                             "year, 1980 to 2100\n");
+                        return kExitUsage;
+                    }
+                    im.options.model_year = static_cast<uint32_t>(year);
+                } else if (a == "--name" && has_value) {
+                    im.options.name = argv[++i];
+                } else if (a == "--url" && has_value) {
+                    im.options.url = argv[++i];
+                } else if (a == "--commit" && has_value) {
+                    im.options.commit = argv[++i];
+                } else if (a == "--alone") {
+                    im.options.flags |= ECUIO_OBDB_ALONE;
+                } else {
+                    std::fprintf(stderr, "havne-cli: unexpected '%s'\n",
+                                 argv[i]);
+                    usage(stderr);
+                    return kExitUsage;
+                }
+            }
+            if (im.out == nullptr || *im.out == '\0') {
+                std::fprintf(
+                    stderr,
+                    "havne-cli: signals import obdb needs --out <file>\n");
+                usage(stderr);
+                return kExitUsage;
+            }
+            return run_signals_import(im);
+        }
+        std::fprintf(stderr, "havne-cli: signals takes check <file>, or import "
+                             "obdb <file> --out <file>\n");
+        usage(stderr);
+        return kExitUsage;
     }
     if (command != "stream") {
         usage(stderr);

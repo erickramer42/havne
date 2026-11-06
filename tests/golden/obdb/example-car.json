@@ -1,0 +1,26 @@
+{
+  "havne_signals": 1,
+  "name": "Example car",
+  "notes": "Converted from an OBDb signal set",
+  "source": {
+    "name": "OBDb editors and contributors",
+    "url": "https://example.org/obdb/Example-Car",
+    "commit": "0000000",
+    "license": "CC-BY-SA-4.0",
+    "modified": "Converted to Havne's signal-file format"
+  },
+  "extends": "obd2",
+  "ecus": [
+    {"id":"engine","rx":"7E8","tx":"7E0"},
+    {"id":"transmission","rx":"7E9","tx":"7E1"}
+  ],
+  "signals": [
+    {"key":"example_speed","name":"Road speed","ecu":"engine","read":{"service":"01","number":"0D"},"field":{"byte":0,"bits":8},"unit":"km/h","group":"vehicle"},
+    {"key":"example_tft","name":"Fluid temperature","ecu":"transmission","read":{"service":"22","number":"D101"},"field":{"byte":0,"bits":16},"scale":0.25,"offset":-40,"unit":"°C","decimals":2,"group":"vehicle","notes":"Made up for Havne's tests"},
+    {"key":"example_gear","name":"Gear","ecu":"transmission","read":{"service":"22","number":"D101"},"field":{"byte":2,"bits":4,"bit":4,"order":"le"},"kind":"enum","values":{"0":"Park","1":"Reverse","2":"Neutral","3":"Drive"},"group":"vehicle"},
+    {"key":"example_lockup","name":"Converter lockup","ecu":"transmission","read":{"service":"22","number":"D101"},"field":{"byte":2,"bits":1,"bit":3,"order":"le"},"kind":"enum","values":{"0":"Open","1":"Locked"},"group":"vehicle"},
+    {"key":"example_line_pressure","name":"Line pressure","ecu":"transmission","read":{"service":"22","number":"D102"},"field":{"byte":0,"bits":16,"order":"le"},"scale":0.1,"unit":"kPa","decimals":1,"group":"vehicle"},
+    {"key":"example_boost_target","name":"Boost target","ecu":"engine","read":{"service":"22","number":"D200"},"field":{"byte":0,"bits":8},"unit":"kPa","group":"engine"},
+    {"key":"example_tft_per_speed","name":"Fluid temp per speed","kind":"computed","expr":"example_tft / example_speed","decimals":2,"group":"vehicle"}
+  ]
+}

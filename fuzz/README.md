@@ -24,6 +24,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_json` | The strict JSON reader that signal files go through (`core/src/json.h`, [ADR-0051](../docs/adr/0051-signal-files.md) section 1): arbitrary bytes, the first byte picking the depth bound (1 to 64) and, with its top bit, a size bound at half the input. A refusal has one line of words and a position within the input's lines (none only for the size bound) and leaves the value null; a document stays within the depth bound, holds only valid UTF-8 (checked apart from the reader's own check), finite numbers, an exact `int64_t` only for an integer, no key twice in an object, and positions that move forward in document order; written back out and read again it is the same document; two parses agree. |
 | `fuzz_signal_file` | The signal-file loader (`ecuio_signal_file_load`, [ADR-0051](../docs/adr/0051-signal-files.md)): arbitrary bytes, best seeded with real files (`tests/fixtures/signal-files/`). Two loads agree, status and words; a refusal leaves no file and one line of words; a loaded file's set passes the validator, its profile name registers, and every def decodes a payload carrying its own key through the decoder its kind takes. |
 | `fuzz_plugin_manifest` | The plugin loader (`ecuio_plugin_load`, [ADR-0052](../docs/adr/0052-plugin-framework.md)): the first byte picks the form, even for a packed package, odd for a folder whose manifest and files are the rest cut at 0x1E bytes, served in the order the loader asks. Best seeded with the example plugin (`plugins/example-sim/`). Two loads agree; a refusal leaves no plugin and one line of words; no path the loader asks for has an empty, `.` or `..` part; each variant's set passes the validator, registers as `plugin.<id>.<variant>` and is the set the registry hands back, and the plugin frees. |
+| `fuzz_obdb_import` | The OBDb import (`ecuio_obdb_import`, `obdb.h`, [ADR-0051](../docs/adr/0051-signal-files.md) section 7): the first byte picks the options (a model year, alone or extending obd2), the rest is the set, best seeded with one in OBDb's shape (`tests/fixtures/obdb/`). Two imports agree, status, words and notes; a refusal leaves no file and one line of words, never the converted file refused; an import's file is NUL-terminated and loads, with as many own signals as converted notes, and every note's strings are one line. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -41,7 +42,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -55,7 +56,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

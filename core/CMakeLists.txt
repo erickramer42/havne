@@ -4,6 +4,7 @@ add_library(ecuio-core STATIC
     src/dtc_titles.cpp
     src/host_clock.cpp
     src/json.cpp
+    src/obdb_import.cpp
     src/profile_registry.cpp
     src/recorder.cpp
     src/recording_check.cpp
@@ -82,6 +83,7 @@ if(NOT ANDROID AND NOT IOS)
     install(FILES
             include/ecuio/core.h
             include/ecuio/j2534.h
+            include/ecuio/obdb.h
             include/ecuio/plugin.h
             include/ecuio/profile.h
             include/ecuio/recording.h

@@ -5,7 +5,8 @@
 //          runs (tests/golden/cli/signals-*.jsonl and stream-signals.jsonl,
 //          on tests/fixtures/signals/)
 //
-// What `havne-cli signals check`, `stream --signals` and `sim --signals`
+// What `havne-cli signals check`, `signals import obdb`, `stream --signals`
+// and `sim --signals`
 // need besides core's loader (signals.h): the profile a URI selects, and
 // the lines that say what the loader read. A file's own signals are its
 // defs from ECUIO_USER_SIG_ID_BASE up (signal_sets.h); the defs below
@@ -17,6 +18,7 @@
 #include "jsonl.h"
 #include "view_lines.h" /* labels_object, labels_bytes */
 
+#include "ecuio/obdb.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 
@@ -304,6 +306,68 @@ inline void unit_line(Line& l, const ecuio_signal_def_t& d)
     l.string(d.unit, sizeof d.unit);
     l.key("converts");
     l.raw("false}");
+}
+
+// An import note's kind as a word: converted, changed, skipped or file
+// (obdb.h's ECUIO_OBDB_NOTE_*); "unknown" for one this CLI doesn't know
+inline const char* note_word(uint32_t what)
+{
+    switch (what) {
+    case ECUIO_OBDB_NOTE_CONVERTED:
+        return "converted";
+    case ECUIO_OBDB_NOTE_CHANGED:
+        return "changed";
+    case ECUIO_OBDB_NOTE_SKIPPED:
+        return "skipped";
+    case ECUIO_OBDB_NOTE_FILE:
+        return "file";
+    default:
+        return "unknown";
+    }
+}
+
+// The bytes a note's line takes at most
+inline size_t note_line_bytes(const ecuio_obdb_note_t& n)
+{
+    return 256 + 6 * (std::strlen(n.signal) + std::strlen(n.key) +
+                      std::strlen(n.field) + std::strlen(n.text));
+}
+
+// {"type":"import_note", what, line, signal, key, field, text}: one of the
+// importer's notes, field by field (obdb.h); signal, key and field "" where
+// the note has none
+inline void import_note_line(Line& l, const ecuio_obdb_note_t& n)
+{
+    const char* what = note_word(n.what);
+    l.raw("{\"type\":\"import_note\"");
+    l.key("what");
+    l.string(what, std::strlen(what));
+    l.key("line");
+    l.u64(n.line);
+    l.key("signal");
+    l.string(n.signal, std::strlen(n.signal));
+    l.key("key");
+    l.string(n.key, std::strlen(n.key));
+    l.key("field");
+    l.string(n.field, std::strlen(n.field));
+    l.key("text");
+    l.string(n.text, std::strlen(n.text));
+    l.ch('}');
+}
+
+// {"type":"imported", converted, changed, skipped}: the notes of each kind
+// an import gave, the signals in the file being the converted
+inline void imported_line(Line& l, uint64_t converted, uint64_t changed,
+                          uint64_t skipped)
+{
+    l.raw("{\"type\":\"imported\"");
+    l.key("converted");
+    l.u64(converted);
+    l.key("changed");
+    l.u64(changed);
+    l.key("skipped");
+    l.u64(skipped);
+    l.ch('}');
 }
 
 } // namespace cli
