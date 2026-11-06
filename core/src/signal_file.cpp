@@ -310,9 +310,8 @@ struct entry {
 class compiler {
 public:
     compiler(const Value& at, const std::string& text,
-             const std::vector<entry>& entries, const ecuio_signal_set_t* base,
-             const std::vector<ecuio_signal_def_t>& defs)
-        : at_(at), s_(text), entries_(entries), base_(base), defs_(defs)
+             const std::vector<entry>& entries, const ecuio_signal_set_t* base)
+        : at_(at), s_(text), entries_(entries), base_(base)
     {
     }
 
@@ -547,7 +546,6 @@ private:
     const std::string& s_;
     const std::vector<entry>& entries_;
     const ecuio_signal_set_t* base_;
-    const std::vector<ecuio_signal_def_t>& defs_;
     ecuio_computed_t p_{};
     std::vector<std::string> names_;
     size_t pos_ = 0;
@@ -1039,7 +1037,7 @@ void build(const parts& in, ecuio_signal_file& f)
                 refuse(s, what + " is computed and needs an \"expr\"");
             }
             expect(*expr, Type::string, what + "'s expr");
-            compiler c(*expr, expr->text, entries, base, f.defs);
+            compiler c(*expr, expr->text, entries, base);
             std::vector<std::string> names;
             ecuio_computed_t p = c.compile(&names);
             if (const Value* ages = s.find("max_age")) {
