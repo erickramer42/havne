@@ -1228,9 +1228,31 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     const fs::path folder = fs::u8path(buf);
     ecuio_recorder_test_add_slept(rec, 5000000); /* before attach */
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    /* The recording's zero is read inside the attach */
+    const uint64_t attach_from = ecuio_clock_us();
     ASSERT_EQ(ecuio_session_record(s, rec), ECUIO_OK);
+    const uint64_t attach_to = ecuio_clock_us();
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    /* The sleep goes in just after a wake has taken its look, so the next
+     * look is most of a wake away: a writer that stamped a wake late
+     * couldn't pass. The writer counts a wake before it looks, so the
+     * test lets 5 ms more go by, spinning: a sleep_for's own lateness
+     * (15.6 ms on Windows) would eat into the wake */
+    const uint64_t woke = ecuio_recorder_test_wakes(rec);
+    const auto give_up =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (ecuio_recorder_test_wakes(rec) == woke &&
+           std::chrono::steady_clock::now() < give_up) {
+        std::this_thread::yield();
+    }
+    const auto looked =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+    while (std::chrono::steady_clock::now() < looked) {
+        std::this_thread::yield();
+    }
+    const uint64_t added_from = ecuio_clock_us();
     ecuio_recorder_test_add_slept(rec, 2340000);
+    const uint64_t added_to = ecuio_clock_us();
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     ecuio_recorder_test_add_slept(rec, 600000); /* under a second */
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -1243,10 +1265,22 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     const std::vector<EventLine> sleeps = events_of(events, "asleep");
     ASSERT_EQ(sleeps.size(), 1u) << events;
     EXPECT_EQ(sleeps[0].text, "Asleep for 2.3 s: nothing was read meanwhile");
-    /* Stamped at the wake that saw it: after the attach's 150 ms, within
-     * the next 250 */
-    EXPECT_GE(sleeps[0].ms, 140u) << events;
-    EXPECT_LE(sleeps[0].ms, 500u) << events;
+    /* Stamped at the wake that saw it, on the test's own clock: no
+     * earlier than the sleep went in, no later than one idle wake after,
+     * and a late wake's margin, kept under a wake so that a stamp a wake
+     * late fails. Both from the recording's zero, somewhere in the attach;
+     * the stamp is whole ms */
+    constexpr uint64_t kWakeUs = 100000;  /* the writer's idle wake */
+    constexpr uint64_t kMarginUs = 90000; /* a timer firing late */
+    const uint64_t earliest_ms = (added_from - attach_to) / 1000;
+    const uint64_t latest_ms =
+        (added_to + kWakeUs + kMarginUs - attach_from) / 1000 + 1;
+    ::testing::Test::RecordProperty("asleep_ms", std::to_string(sleeps[0].ms));
+    ::testing::Test::RecordProperty("asleep_window_ms",
+                                    std::to_string(earliest_ms) + "-" +
+                                        std::to_string(latest_ms));
+    EXPECT_GE(sleeps[0].ms, earliest_ms) << events;
+    EXPECT_LE(sleeps[0].ms, latest_ms) << events;
 }
 
 /* The writer wakes every 100 ms while idle, so an idle recording costs a
