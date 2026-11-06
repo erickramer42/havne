@@ -28,6 +28,7 @@
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
 #include "recording_check.h" /* core/src */
+#include "temp_name.h"
 
 /* test_core.cpp's: operator new calls on this thread (new_counter.h) */
 unsigned long news_on_this_thread();
@@ -45,11 +46,8 @@ struct Folder {
         if (tmp == nullptr) {
             tmp = std::getenv("TMPDIR");
         }
-        path =
-            fs::path(tmp != nullptr ? tmp : "/tmp") /
-            (std::string("ecuio-check-") +
-             ::testing::UnitTest::GetInstance()->current_test_info()->name() +
-             tag);
+        path = fs::path(tmp != nullptr ? tmp : "/tmp") /
+               (temp_name("ecuio-check") + tag);
         std::error_code ec;
         fs::remove_all(path, ec);
         fs::create_directories(path, ec);

@@ -37,6 +37,7 @@
 #include "ecuio/core.h"
 #include "fake_diagnostics.h"
 #include "fake_ecu.h"
+#include "temp_name.h"
 
 #include <cmath>
 #include <cstdio>
@@ -5681,8 +5682,8 @@ struct ScratchCsv {
         if (dir == nullptr) {
             dir = std::getenv("TMPDIR");
         }
-        path = std::string(dir != nullptr ? dir : "/tmp") + "/ecuio-" + name +
-               ".csv";
+        path = std::string(dir != nullptr ? dir : "/tmp") + "/" +
+               temp_name(std::string("ecuio-") + name) + ".csv";
         FILE* f = std::fopen(path.c_str(), "wb");
         EXPECT_NE(f, nullptr) << path;
         if (f != nullptr) {
