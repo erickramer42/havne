@@ -56,7 +56,8 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_signal_file.cpp)
+add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_signal_file.cpp
+    test_plugin.cpp)
 
 # test_signal_tables.cpp checks computed.h, the programs' checker and
 # stack machine, which are internal
@@ -68,6 +69,9 @@ target_link_libraries(test_signals PRIVATE
     ecuio-core
     GTest::gtest_main
 )
+# test_plugin.cpp loads the repository's example plugin
+target_compile_definitions(test_signals PRIVATE
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins")
 
 app_enable_warnings(test_signals)
 gtest_discover_tests(test_signals)

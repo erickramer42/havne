@@ -3,9 +3,11 @@
 //          names fail, register overwrites, registration validates,
 //          reports the validator's result, refuses a set with more
 //          requests than the engine's table holds, protects the
-//          built-ins, unregister
+//          built-ins, unregister; PluginTest: the use counts (a
+//          set in use isn't unregistered with its plugin)
 
 #include "ecuio/profile.h"
+#include "profile_hold.h"
 #include "request_engine.h"
 #include "session.h"
 #include "uds_generic.h"
@@ -47,6 +49,13 @@ std::mutex& registry_mutex()
 {
     static std::mutex m;
     return m;
+}
+
+/* Each set's uses (profile_hold.h), under registry_mutex */
+std::unordered_map<const ecuio_signal_set_t*, uint32_t>& uses()
+{
+    static std::unordered_map<const ecuio_signal_set_t*, uint32_t> u;
+    return u;
 }
 
 bool is_built_in(const char* name)
@@ -175,6 +184,81 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
 }
+
+} // extern "C"
+
+ecuio_status_t ecuio_profile_acquire(const char* name,
+                                     const ecuio_signal_set_t** out_set)
+{
+    if (name == nullptr || out_set == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    try {
+        std::lock_guard<std::mutex> lock(registry_mutex());
+        auto it = registry().find(std::string(name));
+        if (it == registry().end()) {
+            return ECUIO_ERR_UNKNOWN_PROFILE;
+        }
+        if (it->second != nullptr) {
+            ++uses()[it->second];
+        }
+        *out_set = it->second;
+        return ECUIO_OK;
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+void ecuio_profile_release(const ecuio_signal_set_t* set) noexcept
+{
+    if (set == nullptr) {
+        return;
+    }
+    try {
+        std::lock_guard<std::mutex> lock(registry_mutex());
+        auto it = uses().find(set);
+        if (it != uses().end() && --it->second == 0) {
+            uses().erase(it);
+        }
+    } catch (...) {
+        /* A lock that fails (std::system_error) leaves the use counted:
+         * the set's owner is then told it's in use, never freed under a
+         * reader */
+        return;
+    }
+}
+
+ecuio_status_t
+ecuio_profile_unregister_unused(const char* const* names,
+                                const ecuio_signal_set_t* const* sets,
+                                size_t count)
+{
+    if (count > 0 && (names == nullptr || sets == nullptr)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    try {
+        std::lock_guard<std::mutex> lock(registry_mutex());
+        for (size_t i = 0; i < count; ++i) {
+            if (sets[i] != nullptr && uses().count(sets[i]) != 0) {
+                return ECUIO_ERR_IN_USE;
+            }
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if (names[i] == nullptr || is_built_in(names[i])) {
+                continue;
+            }
+            auto it = registry().find(std::string(names[i]));
+            if (it != registry().end() && it->second == sets[i]) {
+                registry().erase(it);
+            }
+        }
+        return ECUIO_OK;
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+extern "C" {
 
 const ecuio_signal_set_t* ecuio_session_signal_set(ecuio_session_t* session)
 {

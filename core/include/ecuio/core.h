@@ -150,6 +150,9 @@ typedef enum {
     ECUIO_ERR_CANCELED = 19,          /* the caller's progress callback
                                          stopped a long call (a recording's
                                          open, ADR-0049) */
+    ECUIO_ERR_IN_USE = 20,            /* a session or a simulated ECU still
+                                         decodes with what was to be freed
+                                         (a plugin, ADR-0052) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;

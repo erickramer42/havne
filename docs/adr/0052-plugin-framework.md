@@ -1,6 +1,6 @@
 # ADR-0052: The plugin framework: one package, three tiers, data first
 
-- **Status:** Accepted. The data tier to be built in v0.5.0.
+- **Status:** Accepted. The data tier's core built in v0.5.0 (the appendix).
 - **Date:** 2026-11-05.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary);
@@ -422,3 +422,48 @@ void ecuio_plugin_free(ecuio_plugin_t* plugin);
 - The signal-file format's next version is spoken for: a maker's
   trouble-code titles come first in format 2.
 - The repository never holds a make's plugin; an example stands in.
+
+## Appendix: the data tier's core as built (2026-11-05)
+
+`core/src/plugin.cpp` and `ecuio/plugin.h` build section 11, and settle
+what it left open:
+
+- **One build for both loaders.** A variant's signals, merged from its
+  files by key, go through the signal-file loader's own rules
+  (`core/src/signal_file_build.h`), so a plugin's signal is refused for
+  exactly what a signal file's would be.
+- **The free returns a status.** Section 11 declared
+  `ecuio_plugin_free` `void` and refused it in use; it returns
+  `ecuio_status_t`, `ECUIO_ERR_IN_USE` (20, new) with nothing changed
+  while a session or a simulated ECU decodes with one of its sets. The
+  registry counts each set's uses from the lookup that hands it out to
+  the session's or the simulator's destroy, under its own lock, so no
+  connect can come between the check and the unregister. A profile
+  name registered to another set since is left alone.
+- **Accessors for the CLI and the checks:** `ecuio_plugin_fixture` and
+  the info's `fixture_count` (a folder's fixtures; `plugins check`
+  reads them), and `ecuio_plugin_variant_set` and `_variant_find` (a
+  variant's merged set, its def by key).
+- **Variant ids** are 1 to 24 of `a`-`z`, `0`-`9` and `-`, a letter or
+  digit at each end, so `plugin.<id>.<variant>` fits a profile name's
+  63; a plugin's id is the same alphabet, 1 to 31.
+- **A data file** declares no `ecus` (it names the manifest's by id);
+  its `name` and `source` are optional, the manifest's `source` being
+  the plugin's. Only a variant's first file `extends` a set. A key given
+  twice in one file is refused; across a variant's files the later one
+  replaces the earlier in its place.
+- **The packed form** carries no `fixtures`, and every file under
+  `files` must be in a variant; a folder's manifest takes no `files`.
+- **Bounds:** 16 fixtures and 32 `match` entries of up to 64
+  manufacturer codes each, beside section 2's; a data file is at most a
+  signal file's 1 MiB.
+- **Model years** in `match` and a variant's `years` run 1980 to 2039,
+  `ecuio_vin_decode`'s range; a range never covers model year 0.
+- **A refusal's words:** for a folder, the file's name in the package,
+  then `line L, column C: ` and why; for a packed package, whose lines
+  are one file's, the line and column alone. A file the host can't give
+  is refused at the path in the manifest that names it.
+- **`requires.core`** is compared with the core's own X.Y.Z, which on
+  `dev` is the last release's until the release commit; the example
+  plugin names the version its tree builds as, and the release commit
+  raises it with the project's.

@@ -23,6 +23,7 @@ add_library(ecuio-core STATIC
     src/socketcan_transport.cpp
     src/signals.cpp
     src/signal_file.cpp
+    src/plugin.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
@@ -81,6 +82,7 @@ if(NOT ANDROID AND NOT IOS)
     install(FILES
             include/ecuio/core.h
             include/ecuio/j2534.h
+            include/ecuio/plugin.h
             include/ecuio/profile.h
             include/ecuio/recording.h
             include/ecuio/serial.h

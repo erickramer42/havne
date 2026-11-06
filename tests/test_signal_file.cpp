@@ -113,6 +113,7 @@ TEST(SignalFileTest, TheAdrsExampleLoadsIntoItsSet)
     ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
     EXPECT_STREQ(ecuio_signal_file_name(f.get()), "Daily driver extras");
     EXPECT_STREQ(ecuio_signal_file_profile(f.get()), "user.daily-driver-extras");
+    EXPECT_STREQ(ecuio_signal_file_extends(f.get()), "obd2");
     const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
     ASSERT_EQ(set->count, obd2->count + 4) << "the base's, then the file's";
@@ -207,6 +208,8 @@ TEST(SignalFileTest, AFieldTakesItsDefaults)
     ASSERT_EQ(set->channel_count, 1u);
     EXPECT_EQ(set->channels[0].tx_id, 0x7E0u);
     EXPECT_STREQ(ecuio_signal_file_profile(f.get()), "user.t");
+    EXPECT_STREQ(ecuio_signal_file_extends(f.get()), "") << "extends none";
+    EXPECT_STREQ(ecuio_signal_file_extends(nullptr), "");
 
     /* A signed little-endian bit field, scaled */
     File g = load(one(R"({"key":"b","name":"B","read":{"service":"01","number":"5C"},)"
