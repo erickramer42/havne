@@ -100,6 +100,11 @@ QVariantMap PluginStore::entryOf(const QString& sha, const Held& h)
 bool PluginStore::take(const QString& sha, const QByteArray& bytes,
                        QString* words)
 {
+    if (!m_failLoadForTesting.isEmpty() && sha == m_failLoadForTesting) {
+        m_failLoadForTesting.clear();
+        *words = QStringLiteral("a load failed for the test");
+        return false;
+    }
     Held h;
     h.plugin = loadPackage(bytes, words);
     if (h.plugin == nullptr) {

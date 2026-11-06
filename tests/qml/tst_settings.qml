@@ -1666,6 +1666,72 @@ TestCase {
         verify(!note.visible, "the user's pick ends it")
     }
 
+    // A VIN that picks another vehicle during a session leaves the last
+    // vehicle's signal file in the field only while the session runs: at
+    // its end the field reads Default, so the next connect keeps no other
+    // vehicle's file as this one's connection
+    function test_theVinsPickLeavesTheLastVehiclesFileAtTheEnd() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        const daily = page.pickedVehicle.id
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.vinKey !== "", 10000, "the VIN is learned")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        find(page, "uriField").text = uri
+        page.chooseProfile("user.extras")
+        compare(find(page, "uriField").text, uri + "?profile=user.extras")
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
+        compare(find(page, "uriField").text, uri + "?profile=user.extras",
+                "the session's URI stays while it runs")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        compare(find(page, "uriField").text, uri, "Default at the session's end")
+        compare(page.profileChoice, "default")
+
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects again")
+        compare(page.pickedVehicle.id, daily)
+        compare(page.pickedVehicle.uri, uri, "Daily driver keeps no file of Weekend car's")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+    }
+
+    // A vehicle the VIN adds during a session holds no signal file, so its
+    // connection doesn't name the last vehicle's, and neither does the
+    // field once the session ends
+    function test_aVehicleTheVinAddsKeepsNoOtherVehiclesFile() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        const weekend = page.pickedVehicle.id
+        verify(importFile(page, "extras.json", "Extras"))
+        // Another car's VIN: the fake's is no vehicle's yet
+        page.saveVehicles(VehicleBook.change(page.vehicles, v => v.vinKey = "another-cars-key"))
+        find(page, "uriField").text = uri
+        page.chooseProfile("user.extras")
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.id !== weekend, 10000, "the VIN adds a vehicle")
+        compare(page.pickedVehicle.signals, [])
+        compare(page.pickedVehicle.uri, uri, "no profile of Weekend car's file")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        compare(find(page, "uriField").text, uri, "Default at the session's end")
+    }
+
     // While a vendor's open blocks, nothing may rewrite the URI field or
     // start another connect: the device rows lock like every other control
     function test_controlsLockWhileAConnectIsInFlight() {

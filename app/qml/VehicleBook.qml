@@ -365,8 +365,23 @@ QtObject {
         const d = add(doc, label)
         picked(d).vinKey = key
         if (isAdapterUri(uri))
-            picked(d).uri = uri
+            picked(d).uri = withoutFileProfile(uri)
         return { doc: d, outcome: "new", label: label, previous: previous }
+    }
+
+    // uri without a profile= that names a signal file or a plugin
+    // (user.*, plugin.*): a vehicle a VIN adds holds neither, so its
+    // connection reads with Default, never with the last vehicle's signals
+    function withoutFileProfile(uri) {
+        const s = String(uri)
+        const q = s.indexOf("?")
+        if (q < 0)
+            return s
+        const kept = s.slice(q + 1).split("&").filter(p => {
+            const v = p.startsWith("profile=") ? p.slice(8) : ""
+            return !v.startsWith("user.") && !v.startsWith("plugin.")
+        })
+        return kept.length === 0 ? s.slice(0, q) : s.slice(0, q + 1) + kept.join("&")
     }
 
     // Beside the vehicles, for a recognize() that picked another: the

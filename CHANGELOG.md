@@ -14,7 +14,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Added
 
 - A replay decodes with the signal file its recording holds, so a recording replays as it was recorded after the vehicle's file has changed or been removed, or on another machine: the app's Replay loads the copy under a name of its own when it differs from the file loaded now, and `havne-cli stream replay://` uses it with no `--signals`; a copy that no longer matches its hash isn't used, and the replay says why ([docs/signal-files.md](docs/signal-files.md)).
-- A signal its module refuses shows as refused, not blank ([ADR-0051](docs/adr/0051-signal-files.md) section 3): Live's row reads "Refused: requestOutOfRange (7F 22 31)", the negative reply's code by name, and `havne-cli stream --values` writes a `refused` line naming each such signal with its request, the reply and the code's name.
+- A signal its module refuses shows as refused, not blank ([ADR-0051](docs/adr/0051-signal-files.md) section 3): Live's row reads "Refused: requestOutOfRange (7F 22 31)", the negative reply's code by name, and `havne-cli stream --values` writes a `refused` line naming each such signal with its request, the reply and the code's name. A refused signal gives its place among the chart's default signals to the next.
 - Settings' Vehicle section saves each of a vehicle's signal files out of the app with **Save a copy** ([docs/signal-files.md](docs/signal-files.md)): the desktop's save dialog or Android's document picker, the file named for its profile, written byte for byte as the app keeps it, so a file made in the form can be shared or given to `havne-cli --signals`.
 
 ### Changed
@@ -24,7 +24,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - On a phone, a signal its module refused reads "Refused (7F 22 31)" when the full words don't fit beside its name, and the name keeps its room; before, both were cut short.
 - When the connected car's VIN picks another saved vehicle than the one picked, the Vehicle section says so ("The connected car's VIN picked Daily driver (Weekend car was picked)") until you pick one yourself; before, only the activity log said it.
 - The viewer's **Replay view** is **Replay in Settings**: it fills Settings' field with the part in view for Connect, as the list's Replay does, and it's off while a session runs.
-- Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, so a connect never reads with another vehicle's signals and keeps them as this one's.
+- Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, and so does the end of a session in which the car's VIN picked another vehicle; a vehicle the VIN adds keeps no signal file or plugin in its connection. So a connect never reads with another vehicle's signals and keeps them as this one's.
 
 ### Fixed
 

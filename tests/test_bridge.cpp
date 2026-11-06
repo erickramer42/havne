@@ -3520,6 +3520,74 @@ TEST(BridgeTest, LiveSaysWhichDidsTheFakeEcuRefuses)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* A refusal is the session's: a module that refused a DID in the last
+ * session refuses nothing in the next until it answers. Channel 0 (a
+ * one-DID scan, found at once) reports first in both; in the second the
+ * fake answers refusals with nothing, so the module on 0x7E9 never
+ * reports, and its row must never read refused */
+TEST(BridgeTest, ALastSessionsRefusalIsNotTheNextOnes)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    const QString uri = QStringLiteral("j2534://"
+                                       "%1?profile=uds-generic&did=1E1C-1E1D,"
+                                       "7E9:F1FE&identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    SignalListModel* model = bridge.signalModel();
+    const auto rowNamed = [model](const QString& name) {
+        for (int r = 0; r < model->rowCount(); ++r) {
+            if (model->data(model->index(r), SignalListModel::NameRole)
+                    .toString() == name) {
+                return r;
+            }
+        }
+        return -1;
+    };
+    const auto words = [model](int row) {
+        return row < 0
+                   ? QStringLiteral("no row")
+                   : model
+                         ->data(model->index(row), SignalListModel::RefusedRole)
+                         .toString();
+    };
+    const auto answered = [model](int row) {
+        return row >= 0 &&
+               model->data(model->index(row), SignalListModel::HasValueRole)
+                   .toBool();
+    };
+
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    int found = rowNamed(QStringLiteral("DID 1E1C"));
+    int other = rowNamed(QStringLiteral("0x7E9 DID F1FE"));
+    ASSERT_GE(other, 0);
+    ASSERT_TRUE(spinUntil([&]() { return !words(other).isEmpty(); }, 5000))
+        << "the module on 0x7E9 never refused its DID F1FE";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    FakeEnvArm silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    found = rowNamed(QStringLiteral("DID 1E1C"));
+    other = rowNamed(QStringLiteral("0x7E9 DID F1FE"));
+    ASSERT_GE(other, 0);
+    bool everRefused = false;
+    const auto watch = [&]() {
+        everRefused = everRefused || !words(other).isEmpty();
+        return false;
+    };
+    EXPECT_TRUE(spinUntil(
+        [&]() {
+            (void)watch();
+            return answered(found);
+        },
+        5000))
+        << "channel 0's scan never found DID 1E1C";
+    (void)spinUntil(watch, 1000);
+    EXPECT_FALSE(everRefused)
+        << "the last session's refusal: " << words(other).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -4448,6 +4516,59 @@ TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
     model.applyUnsupported(unsupportedIds(&sparse, 1));
     EXPECT_EQ(plottedRows(model),
               (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}));
+}
+
+/* A refused row never has a value to draw: it gives its place among the
+ * default plotted rows to the next, as a hidden one does, and takes it
+ * back once it isn't refused; a tick still plots it. In a set that ranks
+ * none, it is no default either */
+TEST(BridgeTest, ARefusedRowGivesItsDefaultPlotToTheNext)
+{
+    SignalListModel model;
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    model.setSignalSet(set);
+    const QStringList topSix = plottedRows(model);
+    int oilRow = -1;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (std::strcmp(set->defs[i].name, "Engine Oil Temp") == 0) {
+            oilRow = static_cast<int>(i);
+        }
+    }
+    ASSERT_GE(oilRow, 0);
+    ASSERT_TRUE(topSix.contains(QStringLiteral("Engine Oil Temp")));
+    const SignalListModel::Refusal oil{
+        static_cast<uint16_t>(set->defs[oilRow].id),
+        QStringLiteral("Refused: subFunctionNotSupported (7F 01 12)"),
+        QStringLiteral("7F 01 12")};
+
+    model.applyRefused({oil});
+    QStringList withLoad = topSix;
+    withLoad.removeOne(QStringLiteral("Engine Oil Temp"));
+    withLoad.prepend(QStringLiteral("Engine Load"));
+    EXPECT_EQ(plottedRows(model), withLoad)
+        << "rank 7 takes the refused row's place";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+    model.applyRefused({});
+    EXPECT_EQ(plottedRows(model), topSix) << "and gives it back";
+
+    model.applyRefused({oil});
+    model.toggleSubscribed(oilRow);
+    EXPECT_TRUE(plottedRows(model).contains(QStringLiteral("Engine Oil Temp")))
+        << "a tick plots it all the same";
+
+    SignalListModel plain;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t two;
+    buildTestSignalSet(defs, two);
+    plain.setSignalSet(&two);
+    ASSERT_EQ(plottedRows(plain).size(), 2)
+        << "an unranked set plots every row";
+    plain.applyRefused(
+        {{static_cast<uint16_t>(defs[1].id),
+          QStringLiteral("Refused: requestOutOfRange (7F 22 31)"),
+          QStringLiteral("7F 22 31")}});
+    EXPECT_EQ(plottedRows(plain), QStringList{QStringLiteral("Engine_RPM")});
+    EXPECT_EQ(plain.subscribedCount(), 1);
 }
 
 /* The user's ticks and unticks outlive the defaults moving, and a click
@@ -7920,6 +8041,50 @@ TEST(BridgeTest, PluginReplaceWhoseCopyCantBeKeptKeepsTheLoadedOne)
     const QVariantList all = again.plugins();
     ASSERT_EQ(all.size(), 1);
     EXPECT_TRUE(all.at(0).toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
+/* A replace whose new version doesn't load (the store's seam, as a
+ * registration refused would) gives way to the version it replaced:
+ * loaded again from its copy, registered and kept, so a later bridge
+ * loads it too; the new version's copy goes */
+TEST(BridgeTest, PluginReplaceThatDoesntLoadLoadsTheReplacedOneAgain)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QByteArray newer = packed_plugin::example("1.1.0");
+    const auto onlyVersion = [](const QVariantList& all) {
+        return all.size() == 1 &&
+                       all.at(0).toMap().value(QStringLiteral("ok")).toBool()
+                   ? all.at(0)
+                         .toMap()
+                         .value(QStringLiteral("version"))
+                         .toString()
+                         .toStdString()
+                   : std::string("not one loaded plugin");
+    };
+    {
+        SessionBridge bridge;
+        ASSERT_TRUE(
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes))
+                .value(QStringLiteral("ok"))
+                .toBool());
+        bridge.failPluginLoadForTesting(sha256Of(newer));
+        const QVariantMap r =
+            bridge.importPlugin(writeScratch(from.path(), "b.json", newer));
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+                  "a load failed for the test");
+        EXPECT_EQ(onlyVersion(bridge.plugins()), "1.0.0");
+        EXPECT_TRUE(registered("plugin.example-sim.base"));
+        EXPECT_EQ(pluginCopies(),
+                  QStringList{sha256Of(bytes) +
+                              QStringLiteral(".havne-plugin.json")});
+    }
+    SessionBridge again;
+    EXPECT_EQ(onlyVersion(again.plugins()), "1.0.0");
     EXPECT_TRUE(registered("plugin.example-sim.base"));
 }
 

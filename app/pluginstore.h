@@ -71,6 +71,10 @@ public:
     // destroyed: until then a session may decode with one of their sets
     void close();
 
+    // Test seam: the next load of the copy with this hash fails, as a
+    // registration refused would, so a replace's fallback can be reached
+    void failLoadForTesting(const QString& sha) { m_failLoadForTesting = sha; }
+
 private:
     struct Held {
         ecuio_plugin_t* plugin = nullptr;
@@ -90,4 +94,5 @@ private:
     std::map<QString, Held> m_held;       // by the copy's SHA-256
     std::map<QString, QString> m_refused; // copies that didn't load, why
     bool m_loaded = false;
+    QString m_failLoadForTesting; // failLoadForTesting's hash, once
 };

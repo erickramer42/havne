@@ -737,11 +737,13 @@ void SignalListModel::judgePlotted()
 {
     // The default: every numeric row, or in a ranked set the
     // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
-    // set's order), so a row Live hides gives its place to the next
+    // set's order), so a row Live hides gives its place to the next. A
+    // refused row never has a value to draw, so it is no default either;
+    // a tick still plots it
     std::vector<int> ranked;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         const Entry& e = m_entries[row];
-        if (e.plotRank != 0 && !e.isText && !e.hidden) {
+        if (e.plotRank != 0 && !e.isText && !e.hidden && e.refused.isEmpty()) {
             ranked.push_back(static_cast<int>(row));
         }
     }
@@ -753,7 +755,7 @@ void SignalListModel::judgePlotted()
         ranked.resize(static_cast<size_t>(DefaultPlotted));
     }
     for (Entry& e : m_entries) {
-        e.plotDefault = !m_ranked && !e.isText;
+        e.plotDefault = !m_ranked && !e.isText && e.refused.isEmpty();
     }
     for (int row : ranked) {
         m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
@@ -820,6 +822,7 @@ void SignalListModel::applyRefused(const std::vector<Refusal>& refused)
             byRow[static_cast<size_t>(row)] = r;
         }
     }
+    bool changed = false;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
         if (e.refused != byRow[row].words || e.refusedCode != byRow[row].code) {
@@ -827,7 +830,12 @@ void SignalListModel::applyRefused(const std::vector<Refusal>& refused)
             e.refusedCode = byRow[row].code;
             const QModelIndex i = index(static_cast<int>(row));
             emit dataChanged(i, i, {RefusedRole, RefusedCodeRole});
+            changed = true;
         }
+    }
+    // A refused row gives up its place in the default plot
+    if (changed) {
+        judgePlotted();
     }
 }
 
