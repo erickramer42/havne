@@ -3,11 +3,16 @@
 //          QmlTest.recordings (test_qml); Manual smoke
 
 import QtQuick
+import QtQuick.Shapes
 import App
 
 // A strip chart: what ChartLayout.layout returns for the series its
-// fetch() gives, stroked on a Canvas. Live and the Recordings page each
-// make one. Traces take Theme.seriesColor and Theme.seriesDash by row, so
+// fetch() gives. Live and the Recordings page each make one. The Canvas
+// draws the background, the grid, the captions and the labels; the traces
+// are a Shape over it, which the scene graph draws on the GPU (rasterized
+// on the Canvas, a phone's full-resolution strokes and bands held the GUI
+// thread about 150 ms a paint), and a page's marks a Canvas over that.
+// Traces take Theme.seriesColor and Theme.seriesDash by row, so
 // a page's list rows can be its legend (a series' own dash, when it has
 // one, in place of its row's). A Canvas paints an image at its
 // own size, which Main.qml's zoom would stretch: this one is Theme.zoom
@@ -27,17 +32,18 @@ Canvas {
     // The last layout drawn, null for none: a page places its own marks
     // (a cursor, markers) by its plotW, top and plotH
     property var drawn: null
-    // Called after the traces, before the labels: decorate(ctx, layout)
+    // A page's marks, drawn over the traces: decorate(ctx, layout)
     property var decorate: null
     // What drawing has cost since the page last zeroed them: paints, and
     // their total and longest time in ms (onPaint's own, to the ms)
     property int paints: 0
     property real paintMs: 0
     property real paintMaxMs: 0
-    // Set while a page moves the view: drawn without antialiasing, most of
-    // a crowded chart's cost on the CPU (a dense hour's pan on the test
-    // phone, 21 charts a second with it, 62 without; ADR-0049's appendix
-    // "the viewer"), then once more with it when the view rests
+    // Set while a page moves the view: the Canvases draw without
+    // antialiasing, then once more with it when the view rests (the
+    // traces, on the GPU, keep theirs). On the CPU it was most of a crowded
+    // chart's cost (a dense hour's pan on the test phone, 21 charts a
+    // second with it, 62 without; ADR-0049's appendix "the viewer")
     property bool moving: false
     antialiasing: !moving
     onMovingChanged: if (!moving) requestPaint()
@@ -54,9 +60,111 @@ Canvas {
     // once the view stops a chart it has left stays up until later frames
     renderStrategy: Canvas.Immediate
 
+    // The traces: per trace a ShapePath of its lines, one of its bands'
+    // fill and one of their edges, made as traces first need them and kept
+    property var tracePaths: []
+    Shape {
+        id: traceShape
+        objectName: "chartTraces"
+        width: chart.shownW
+        height: chart.shownH
+        scale: chart.zoom
+        transformOrigin: Item.TopLeft
+        preferredRendererType: Shape.CurveRenderer
+    }
+    // A page's marks over the traces: a Canvas of its own above the Shape,
+    // which holds only what decorate draws and is painted in the same
+    // frame as the chart, from the layout the chart drew
+    Canvas {
+        id: marks
+        objectName: "chartMarks"
+        visible: chart.decorate !== null
+        width: chart.width
+        height: chart.height
+        antialiasing: chart.antialiasing
+        renderStrategy: Canvas.Immediate
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            ctx.scale(chart.zoom, chart.zoom)
+            if (chart.drawn && chart.decorate)
+                chart.decorate(ctx, chart.drawn)
+        }
+    }
+    Component {
+        id: tracePath
+        ShapePath {
+            fillColor: "transparent"
+            strokeColor: "transparent"
+            strokeWidth: 0
+            capStyle: ShapePath.FlatCap
+            joinStyle: ShapePath.MiterJoin
+            PathMultiline { paths: [] }
+        }
+    }
+
+    function pathsFor(i) {
+        while (tracePaths.length <= i) {
+            const set = { line: tracePath.createObject(traceShape),
+                          fill: tracePath.createObject(traceShape),
+                          edge: tracePath.createObject(traceShape) }
+            traceShape.data.push(set.fill)
+            traceShape.data.push(set.line)
+            traceShape.data.push(set.edge)
+            tracePaths.push(set)
+        }
+        return tracePaths[i]
+    }
+
+    // A Canvas dash (px) as a pen's, in units of its width
+    function stroke(path, color, width, dash, lines) {
+        path.strokeColor = lines.length > 0 ? color : "transparent"
+        path.strokeWidth = width
+        path.strokeStyle = dash.length > 0 ? ShapePath.DashLine : ShapePath.SolidLine
+        if (dash.length > 0)
+            path.dashPattern = dash.map(d => d / width)
+        path.pathElements[0].paths = lines
+    }
+
+    function setTraces(traces) {
+        const pts = list => list.map(p => Qt.point(p.x, p.y))
+        for (let i = 0; i < traces.length; ++i) {
+            const tr = traces[i]
+            const set = pathsFor(i)
+            const color = Theme.seriesColor(tr.row)
+            const dash = tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row)
+            const lines = [], fills = [], edges = []
+            for (const piece of tr.pieces) {
+                if (!piece.band) {
+                    lines.push(pts(piece.points))
+                    continue
+                }
+                fills.push(pts(piece.top.concat(piece.bottom.slice().reverse())))
+                edges.push(pts(piece.top))
+                edges.push(pts(piece.bottom))
+            }
+            stroke(set.line, color, ChartLayout.lineW, dash, lines)
+            stroke(set.edge, color, ChartLayout.bandEdgeW, dash, edges)
+            const c = Qt.color(color)
+            set.fill.fillColor = fills.length > 0 ? Qt.rgba(c.r, c.g, c.b, chart.bandAlpha)
+                                                  : "transparent"
+            set.fill.pathElements[0].paths = fills
+        }
+        for (let i = traces.length; i < tracePaths.length; ++i) {
+            for (const path of [tracePaths[i].line, tracePaths[i].fill, tracePaths[i].edge]) {
+                path.strokeColor = "transparent"
+                path.fillColor = "transparent"
+                path.pathElements[0].paths = []
+            }
+        }
+    }
+
     onPaint: {
         const begun = Date.now()
         draw()
+        if (marks.visible)
+            marks.requestPaint()
         const took = Date.now() - begun
         paints += 1
         paintMs += took
@@ -73,6 +181,7 @@ Canvas {
         const series = chart.fetch(Math.ceil(shownW))
         if (!series || series.length === 0) {
             chart.drawn = null
+            setTraces([])
             ctx.fillStyle = Theme.textDim
             ctx.font = "12px sans-serif"
             ctx.textAlign = "center"
@@ -86,7 +195,10 @@ Canvas {
             opts[k] = chart.layoutOpts[k]
         const l = ChartLayout.layout(series, shownW, shownH, opts)
         chart.drawn = l
-        if (!l) return
+        if (!l) {
+            setTraces([])
+            return
+        }
 
         // Grid: quarter lines, and one vertical per time tick
         ctx.strokeStyle = Theme.bg
@@ -111,43 +223,9 @@ Canvas {
             ctx.fillText(tick.caption, tick.x, l.top + l.plotH + 3)
         }
 
-        // Traces, each piece its own stroke (a gap is a break);
-        // a band filled faintly, then its two edges
-        const polyline = pts => {
-            ctx.moveTo(pts[0].x, pts[0].y)
-            for (let i = 1; i < pts.length; ++i)
-                ctx.lineTo(pts[i].x, pts[i].y)
-        }
-        for (const tr of l.traces) {
-            const color = Theme.seriesColor(tr.row)
-            ctx.strokeStyle = color
-            ctx.fillStyle = color
-            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row))
-            for (const piece of tr.pieces) {
-                if (!piece.band) {
-                    ctx.lineWidth = ChartLayout.lineW
-                    ctx.beginPath()
-                    polyline(piece.points)
-                    ctx.stroke()
-                    continue
-                }
-                ctx.globalAlpha = chart.bandAlpha
-                ctx.beginPath()
-                polyline(piece.top.concat(piece.bottom.slice().reverse()))
-                ctx.closePath()
-                ctx.fill()
-                ctx.globalAlpha = 1
-                ctx.lineWidth = ChartLayout.bandEdgeW
-                ctx.beginPath()
-                polyline(piece.top)
-                polyline(piece.bottom)
-                ctx.stroke()
-            }
-        }
-        ctx.setLineDash([])
-
-        if (chart.decorate)
-            chart.decorate(ctx, l)
+        // Traces, each piece its own polyline (a gap is a break); a band
+        // filled faintly, then its two edges: the Shape over the Canvas
+        setTraces(l.traces)
 
         // Value labels, each starting with a sample of its
         // trace's stroke, so dashed rows read apart from solid;

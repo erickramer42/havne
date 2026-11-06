@@ -88,6 +88,34 @@ TestCase {
         compare(bandsOf(wide.traces[0]).length, 0, "40 points over 1200 px")
     }
 
+    // A StripChart draws a band on its Shape: the trace's fill, faint in
+    // its row's color, and its two edges, beside its lines
+    Component {
+        id: stripChart
+        StripChart { shownW: 400; shownH: 200 }
+    }
+
+    function test_aBandIsTheChartsFillAndItsTwoEdges() {
+        const chart = createTemporaryObject(stripChart, this, {
+            fetch: w => [series(0, zigzag(360), 2)], layoutOpts: opts({}) })
+        verify(chart)
+        tryVerify(() => chart.drawn !== null, 2000, "drawn")
+        const tr = chart.drawn.traces[0]
+        const bands = bandsOf(tr).length
+        verify(bands > 0, "the trace bands")
+        const set = chart.tracePaths[0]
+        compare(set.fill.pathElements[0].paths.length, bands, "a fill per band")
+        compare(set.edge.pathElements[0].paths.length, 2 * bands, "two edges per band")
+        compare(set.line.pathElements[0].paths.length, linesOf(tr).length, "the lines beside it")
+        const b = bandsOf(tr)[0]
+        compare(set.fill.pathElements[0].paths[0].length, b.top.length + b.bottom.length,
+                "the fill runs along the top and back along the bottom")
+        const c = Qt.color(Theme.seriesColor(0))
+        near(set.fill.fillColor.a, chart.bandAlpha, 0.01, "the fill's alpha")
+        near(set.fill.fillColor.r, c.r, 0.01, "the fill's red")
+        verify(Qt.colorEqual(set.edge.strokeColor, Theme.seriesColor(0)), "the edges in the row's color")
+    }
+
     // A swing whose reversals fall on the column edges (a point every
     // column) still bands: the swing counts over a column's neighbors
     function test_aSwingAtTheColumnsPitchBands() {
