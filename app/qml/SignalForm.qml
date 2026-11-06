@@ -135,10 +135,42 @@ QtObject {
         return file
     }
 
+    // The key a Save replaces: an Edit's, else the signal's own
+    function replacedKey(signal, replacing) {
+        return replacing !== undefined && replacing !== "" ? replacing : signal.key
+    }
+
+    // The other signals of file that read module's rx, a Save of signal
+    // aside: they share its request ID (one to a module, the format's)
+    function othersOn(file, signal, module, replacing) {
+        const ecu = file.ecus.find(e => String(e.rx).toUpperCase() === module.rx)
+        const old = replacedKey(signal, replacing)
+        return ecu === undefined ? []
+            : file.signals.filter(x => x.ecu === ecu.id && x.key !== old)
+    }
+
+    // What a Save's typed request ID changes for the module's other
+    // signals: { rx, tx, names } when it differs from the module's, else
+    // null. A blank one changes nothing for them (withSignal)
+    function requestIdMove(file, signal, module, replacing) {
+        if (module.tx === undefined)
+            return null
+        const ecu = file.ecus.find(e => String(e.rx).toUpperCase() === module.rx)
+        const others = othersOn(file, signal, module, replacing)
+        if (ecu === undefined || others.length === 0
+                || String(ecu.tx === undefined ? "" : ecu.tx).toUpperCase() === module.tx)
+            return null
+        return { rx: module.rx, tx: module.tx, names: others.map(x => x.name) }
+    }
+
     // file with signal on module: the module joins the ecus once ("m" and
     // its rx), and a signal of the same key is replaced in its place, or
-    // the one keyed replacing (an Edit that renamed it)
+    // the one keyed replacing (an Edit that renamed it). A typed request
+    // ID is the module's, for every signal on it (requestIdMove says
+    // which); a blank one keeps the module's while another signal reads
+    // it, and is the standard's (no tx) once none does
     function withSignal(file, signal, module, replacing) {
+        const others = othersOn(file, signal, module, replacing)
         const d = copy(file)
         let ecu = d.ecus.find(e => String(e.rx).toUpperCase() === module.rx)
         if (ecu === undefined) {
@@ -147,11 +179,11 @@ QtObject {
         }
         if (module.tx !== undefined)
             ecu.tx = module.tx
-        else
+        else if (others.length === 0)
             delete ecu.tx
         const s = copy(signal)
         s.ecu = ecu.id
-        const old = replacing !== undefined && replacing !== "" ? replacing : s.key
+        const old = replacedKey(s, replacing)
         const at = d.signals.findIndex(x => x.key === old)
         if (at < 0)
             d.signals.push(s)

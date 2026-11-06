@@ -8132,3 +8132,56 @@ TEST(BridgeTest, AFileThatCantBeReadIsRefusedWithoutItsPath)
         EXPECT_FALSE(words.contains(QStringLiteral("missing")));
     }
 }
+
+/* A Save out of the app writes the store's copy byte for byte, so
+ * havne-cli --signals and another vehicle read the file the vehicle has;
+ * a copy changed since it was kept, a sha that isn't one and a target
+ * that can't be written are each refused in words naming no path, and a
+ * file already at the target is replaced whole */
+TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    // Its own spacing and order, which a writer of its own would change
+    const QByteArray bytes =
+        signalFile(QStringLiteral("Extras")).replace(",", ",\r\n  ");
+    SessionBridge bridge;
+    const QVariantMap r =
+        bridge.importSignalFile(writeScratch(from.path(), "e.json", bytes));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QString sha = r.value(QStringLiteral("sha256")).toString();
+
+    const QString target = out.path() + QStringLiteral("/extras.json");
+    writeScratch(out.path(), "extras.json", QByteArray(5000, 'x'));
+    const QVariantMap saved =
+        bridge.saveSignalFile(sha, QUrl::fromLocalFile(target));
+    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    QFile f(target);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), bytes) << "the copy, byte for byte, and only it";
+    f.close();
+
+    const auto refused = [&](const QString& which, const QUrl& to,
+                             const char* expected) {
+        const QVariantMap no = bridge.saveSignalFile(which, to);
+        EXPECT_FALSE(no.value(QStringLiteral("ok")).toBool()) << expected;
+        const QString words = no.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), expected);
+        EXPECT_FALSE(words.contains(out.path()) || words.contains(dir.store()));
+    };
+    refused(QStringLiteral("../signals/x"), QUrl::fromLocalFile(target),
+            "No such signal file");
+    refused(QString(64, QLatin1Char('a')), QUrl::fromLocalFile(target),
+            "Its copy is missing: import the file again");
+    refused(sha, QUrl::fromLocalFile(out.path()), "Couldn't write the file");
+    writeScratch(dir.store(), sha + QStringLiteral(".json"),
+                 signalFile(QStringLiteral("X")));
+    refused(sha, QUrl::fromLocalFile(out.path() + QStringLiteral("/b.json")),
+            "Its copy has changed since it was kept: import the file again");
+    EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
+}

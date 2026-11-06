@@ -15,6 +15,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - A replay decodes with the signal file its recording holds, so a recording replays as it was recorded after the vehicle's file has changed or been removed, or on another machine: the app's Replay loads the copy under a name of its own when it differs from the file loaded now, and `havne-cli stream replay://` uses it with no `--signals`; a copy that no longer matches its hash isn't used, and the replay says why ([docs/signal-files.md](docs/signal-files.md)).
 - A signal its module refuses shows as refused, not blank ([ADR-0051](docs/adr/0051-signal-files.md) section 3): Live's row reads "Refused: requestOutOfRange (7F 22 31)", the negative reply's code by name, and `havne-cli stream --values` writes a `refused` line naming each such signal with its request, the reply and the code's name.
+- Settings' Vehicle section saves each of a vehicle's signal files out of the app with **Save a copy** ([docs/signal-files.md](docs/signal-files.md)): the desktop's save dialog or Android's document picker, the file named for its profile, written byte for byte as the app keeps it, so a file made in the form can be shared or given to `havne-cli --signals`.
+
+### Changed
+
+- In the form for a vehicle's own signals, a Request ID left empty keeps the one the module has while another of its signals reads it, and a typed one that differs moves the module's other signals too, the note naming them; before, the last signal saved set the module's request ID without a word.
+- Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, so a connect never reads with another vehicle's signals and keeps them as this one's.
 
 ### Fixed
 

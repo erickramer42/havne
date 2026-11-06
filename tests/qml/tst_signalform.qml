@@ -95,6 +95,35 @@ TestCase {
         compare(file.signals.length, 2, "the file given is unchanged")
     }
 
+    // One request ID to a module (the format's): a typed one is the
+    // module's for every signal on it, and requestIdMove names those it
+    // moves; a blank one keeps the module's while another signal reads it,
+    // and is the standard's once none does
+    function test_aModulesRequestIdIsItsSignalsOne() {
+        let file = SignalForm.emptyFile("Daily driver")
+        const a = SignalForm.draft(fields({ name: "A", number: "D100" }))
+        const b = SignalForm.draft(fields({ name: "B", number: "D101" }))
+        const c = SignalForm.draft(fields({ name: "C", number: "D102" }))
+        compare(SignalForm.requestIdMove(file, a, { rx: "7E9", tx: "7E2" }), null, "a new module")
+        file = SignalForm.withSignal(file, a, { rx: "7E9", tx: "7E2" })
+        compare(SignalForm.requestIdMove(file, b, { rx: "7E9" }), null, "blank moves nothing")
+        file = SignalForm.withSignal(file, b, { rx: "7E9" })
+        compare(file.ecus, [{ id: "m7e9", rx: "7E9", tx: "7E2" }], "blank keeps the module's")
+        compare(SignalForm.requestIdMove(file, c, { rx: "7E9", tx: "7E2" }), null, "the same one")
+        compare(SignalForm.requestIdMove(file, c, { rx: "7E9", tx: "7E3" }),
+                { rx: "7E9", tx: "7E3", names: ["A", "B"] })
+        file = SignalForm.withSignal(file, c, { rx: "7E9", tx: "7E3" })
+        compare(file.ecus[0].tx, "7E3", "typed, the module's")
+        compare(file.signals.map(s => s.ecu), ["m7e9", "m7e9", "m7e9"])
+
+        // The module's one signal, edited: nothing else moves, and a blank
+        // request ID is the standard's again
+        let one = SignalForm.withSignal(SignalForm.emptyFile("X"), a, { rx: "7E9", tx: "7E2" })
+        compare(SignalForm.requestIdMove(one, a, { rx: "7E9", tx: "7E3" }, "a"), null)
+        one = SignalForm.withSignal(one, a, { rx: "7E9" }, "a")
+        compare(one.ecus, [{ id: "m7e9", rx: "7E9" }])
+    }
+
     function test_aSignalBackIntoTheForm() {
         const f = fields({ name: "Trim", service: "01", number: "06", byte: "1", bits: "16",
                            order: "le", bit: "3", signed: true, scale: "0.5", offset: "-40",
