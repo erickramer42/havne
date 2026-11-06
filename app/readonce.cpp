@@ -4,10 +4,12 @@
 
 #include "readonce.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
 #include <QStringList>
 
 #include <chrono>
-#include <cmath>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -42,6 +44,26 @@ QString requestText(const ReadOnce::Request& r)
     return hexPairs(bytes, 2);
 }
 
+QString hexId(uint32_t id)
+{
+    return QString::number(id, 16).toUpper();
+}
+
+// The loader's words about the draft, as the form's: no line and column
+// of a file the user never sees, and the module and signal by what they are
+QString draftWords(QString words)
+{
+    words.remove(
+        QRegularExpression(QStringLiteral("^line \\d+, column \\d+: ")));
+    words.replace(QStringLiteral("signal 'read_once'"),
+                  QStringLiteral("the signal"));
+    words.replace(QStringLiteral("ecu 'module'"), QStringLiteral("the module"));
+    if (!words.isEmpty()) {
+        words[0] = words[0].toUpper();
+    }
+    return words;
+}
+
 // A hex ID of 1 to 8 digits, no prefix, at most 29 bits
 bool parseId(const QVariant& v, uint32_t* out)
 {
@@ -58,29 +80,6 @@ bool parseId(const QVariant& v, uint32_t* out)
     return true;
 }
 
-// A whole number from QML (a double) or JSON text, within [lo, hi]
-bool wholeIn(const QVariant& v, int lo, int hi, int* out)
-{
-    bool ok = false;
-    const double d = v.toDouble(&ok);
-    if (!ok || !(d >= lo && d <= hi) || d != std::floor(d)) {
-        return false;
-    }
-    *out = static_cast<int>(d);
-    return true;
-}
-
-bool copyText(const QString& s, char* out, size_t cap)
-{
-    const QByteArray u = s.toUtf8();
-    if (static_cast<size_t>(u.size()) >= cap) {
-        return false;
-    }
-    std::memcpy(out, u.constData(), static_cast<size_t>(u.size()));
-    out[u.size()] = '\0';
-    return true;
-}
-
 // The keys that say what a session asks for, which Read once sets itself
 bool isRequestKey(const QString& key)
 {
@@ -94,10 +93,6 @@ bool isRequestKey(const QString& key)
     return keys.contains(key);
 }
 
-QString hexId(uint32_t id)
-{
-    return QString::number(id, 16).toUpper();
-}
 
 QString hexNumber(uint32_t n, int digits)
 {
@@ -182,116 +177,49 @@ bool ReadOnce::requestFrom(const QVariantMap& signal, const QVariantMap& module,
     }
     r.number = static_cast<uint16_t>(n);
 
-    ecuio_signal_def_t& d = r.def;
-    d.id = 1;
-    d.message_id = r.rx;
-    d.mux_offset = 0;
-    d.mux_length = r.service == 0x22 ? 3 : 2;
-    d.mux_key =
-        r.service == 0x22 ? (0x620000u | r.number) : (0x4100u | r.number);
-    const int echo = d.mux_length;
-
-    const QString name = signal.value(QStringLiteral("name")).toString();
-    if (name.trimmed().isEmpty() || !copyText(name, d.name, sizeof(d.name))) {
-        return refuse(QStringLiteral("A name is 1 to 31 bytes"));
-    }
-
     const QString kind =
         signal.value(QStringLiteral("kind"), QStringLiteral("number"))
             .toString();
-    const QVariantMap field = signal.value(QStringLiteral("field")).toMap();
-    int byte = 0;
-    if (!wholeIn(field.value(QStringLiteral("byte")), 0,
-                 ECUIO_FRAME_DATA_MAX - 1 - echo, &byte)) {
-        return refuse(QStringLiteral(
-            "The field needs its first byte, 0 for the first data byte"));
+    if (signal.value(QStringLiteral("name")).toString().trimmed().isEmpty()) {
+        return refuse(QStringLiteral("A signal needs a name"));
     }
-    d.start_byte = static_cast<uint16_t>(echo + byte);
-
-    if (kind == QStringLiteral("text") || kind == QStringLiteral("hex")) {
-        int bytes = 0;
-        if (field.contains(QStringLiteral("bytes")) &&
-            !wholeIn(field.value(QStringLiteral("bytes")), 0,
-                     ECUIO_FRAME_DATA_MAX, &bytes)) {
-            return refuse(QStringLiteral(
-                "A text field's bytes is a count, 0 for the rest"));
-        }
-        d.kind =
-            kind == QStringLiteral("text") ? ECUIO_VALUE_TEXT : ECUIO_VALUE_HEX;
-        d.byte_order = ECUIO_BYTE_ORDER_BE;
-        d.byte_length = static_cast<uint16_t>(bytes);
-        d.scale = 1.0;
-    } else if (kind == QStringLiteral("number") ||
-               kind == QStringLiteral("enum")) {
-        int bits = 0;
-        int bit = 0;
-        if (!wholeIn(field.value(QStringLiteral("bits")), 1, 32, &bits)) {
-            return refuse(
-                QStringLiteral("The field's bits is a width from 1 to 32"));
-        }
-        if (field.contains(QStringLiteral("bit")) &&
-            !wholeIn(field.value(QStringLiteral("bit")), 0, 7, &bit)) {
-            return refuse(QStringLiteral("The field's bit is 0 to 7"));
-        }
-        const QString order =
-            field.value(QStringLiteral("order"), QStringLiteral("be"))
-                .toString();
-        if (order != QStringLiteral("be") && order != QStringLiteral("le")) {
-            return refuse(QStringLiteral("The field's order is be or le"));
-        }
-        const bool big = order == QStringLiteral("be");
-        if (big && (bits % 8 != 0 || bit != 0)) {
-            return refuse(QStringLiteral(
-                "A big-endian field is whole bytes: a narrower one is le"));
-        }
-        const bool isSigned =
-            field.value(QStringLiteral("signed"), false).toBool();
-        d.byte_order = big ? ECUIO_BYTE_ORDER_BE : ECUIO_BYTE_ORDER_LE;
-        d.bit_offset = static_cast<uint8_t>(bit);
-        d.bit_length = static_cast<uint8_t>(bits);
-        if (kind == QStringLiteral("enum")) {
-            if (isSigned) {
-                return refuse(QStringLiteral("An enum's field is unsigned"));
-            }
-            d.kind = ECUIO_VALUE_ENUM;
-            d.scale = 1.0;
-            r.labels = signal.value(QStringLiteral("values")).toMap();
-        } else {
-            d.kind = isSigned ? ECUIO_VALUE_INT : ECUIO_VALUE_UINT;
-            ok = false;
-            d.scale = signal.value(QStringLiteral("scale"), 1.0).toDouble(&ok);
-            if (!ok || !std::isfinite(d.scale) || d.scale == 0.0) {
-                return refuse(
-                    QStringLiteral("The scale is a number other than 0"));
-            }
-            d.offset =
-                signal.value(QStringLiteral("offset"), 0.0).toDouble(&ok);
-            if (!ok || !std::isfinite(d.offset)) {
-                return refuse(QStringLiteral("The offset is a number"));
-            }
-            if (!copyText(signal.value(QStringLiteral("unit")).toString(),
-                          d.unit, sizeof(d.unit))) {
-                return refuse(QStringLiteral("A unit is at most 15 bytes"));
-            }
-            int decimals = 0;
-            if (signal.contains(QStringLiteral("decimals")) &&
-                !wholeIn(signal.value(QStringLiteral("decimals")), 0, 3,
-                         &decimals)) {
-                return refuse(QStringLiteral("Decimals is 0 to 3"));
-            }
-            d.decimal_places = static_cast<uint8_t>(decimals);
-        }
-    } else {
+    if (kind == QStringLiteral("computed")) {
         return refuse(
             QStringLiteral("Read once reads a number, text, hex or enum"));
     }
 
-    const int rc = ecuio_validate_signal(&d);
-    if (rc != ECUIO_VALIDATE_OK) {
-        return refuse(
-            QStringLiteral("Core refuses the signal (validator code %1)")
-                .arg(rc));
+    // The draft as a one-signal file, which core's loader reads as it reads
+    // any: its rules and its words are the only check, and the def it
+    // makes is the one a session would decode with
+    QVariantMap draft = signal;
+    draft.insert(QStringLiteral("key"), QStringLiteral("read_once"));
+    draft.insert(QStringLiteral("ecu"), QStringLiteral("module"));
+    const QVariantMap ecu{{QStringLiteral("id"), QStringLiteral("module")},
+                          {QStringLiteral("rx"), hexId(r.rx)},
+                          {QStringLiteral("tx"), hexId(r.tx)}};
+    const QByteArray bytes =
+        QByteArrayLiteral("{\"havne_signals\":1,\"name\":\"Read once\","
+                          "\"source\":{\"name\":\"Read once\"},\"ecus\":[") +
+        QJsonDocument(QJsonObject::fromVariantMap(ecu))
+            .toJson(QJsonDocument::Compact) +
+        QByteArrayLiteral("],\"signals\":[") +
+        QJsonDocument(QJsonObject::fromVariantMap(draft))
+            .toJson(QJsonDocument::Compact) +
+        QByteArrayLiteral("]}");
+    ecuio_signal_file_t* file = nullptr;
+    if (ecuio_signal_file_load(bytes.constData(),
+                               static_cast<size_t>(bytes.size()),
+                               &file) != ECUIO_OK) {
+        return refuse(draftWords(QString::fromUtf8(ecuio_last_error_detail())));
     }
+    const ecuio_signal_def_t* def = ecuio_signal_file_find(file, "read_once");
+    if (def == nullptr) {
+        ecuio_signal_file_free(file);
+        return refuse(QStringLiteral("Core made no signal of the draft"));
+    }
+    r.def = *def;
+    ecuio_signal_file_free(file);
+    r.labels = signal.value(QStringLiteral("values")).toMap();
     *out = r;
     return true;
 }

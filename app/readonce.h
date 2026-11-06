@@ -10,9 +10,11 @@
 // before saving. The session only reads while no other runs: a short
 // session of its own on the vehicle's adapter, Service 22 through
 // uds-generic's ?did= and Service 01 through the raw profile's ?poll=,
-// closed after the first reply or the wait. Core decodes the reply with
-// a def built from the draft (ecuio_decode_signal, ecuio_decode_text);
-// the app only builds the def and words what came back.
+// closed after the first reply or the wait. The draft is read by core's
+// signal-file loader as a one-signal file, so its rules and words are the
+// only check and the def is the one a session would decode with; core
+// decodes the reply with it (ecuio_decode_signal, ecuio_decode_text), and
+// the app words what came back.
 
 #pragma once
 
@@ -42,9 +44,11 @@ public:
 
     // The draft as a signal file holds a signal (docs/signal-files.md):
     // { name, kind, read: { service, number }, field: { byte, bits, bit,
-    // order, signed, bytes }, scale, offset, unit, decimals, values },
-    // and the module as its ecus entry, { rx, tx }. False with *why
-    // naming the first key that's wrong.
+    // order, signed, bytes }, scale, offset, unit, decimals, group,
+    // values }, and the module as its ecus entry, { rx, tx }. False with
+    // *why the first thing wrong: the module's IDs and the request here,
+    // the rest in the loader's words, without the line and column of a
+    // file the user never sees.
     static bool requestFrom(const QVariantMap& signal,
                             const QVariantMap& module, Request* out,
                             QString* why);

@@ -57,6 +57,10 @@ public:
     // (its profile then isn't offered).
     QVariantList use(const QStringList& shas);
 
+    // A kept copy's text, "" when there's none: the vehicle's own file,
+    // which the form adds to and saves again through import()
+    static QString text(const QString& sha);
+
     // Unregisters, then deletes, every copy that keep doesn't name; the
     // folder too when it ends empty. Returns how many copies went.
     int deleteUnused(const QStringList& keep);

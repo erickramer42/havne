@@ -402,6 +402,27 @@ written, and `signals check` says it won't convert.
   (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
   vehicle's files with the rest of it. **Remove** takes a file from the
   vehicle.
+- **The app's form:** under **Your own signals**, the same section
+  writes a vehicle's own file, one signal at a time: its name, the
+  module's reply ID (and its request ID where the standard gives none),
+  the service and number, the field, then the scale, offset, unit and
+  decimals, or the bytes of a text or hex field, or an enumeration's
+  values (`0=Park, 3=Drive`), and a group. **Save** adds the signal to
+  the file `<vehicle> own` (`user.<vehicle>-own`), or replaces the one of
+  the same name; **Edit** fills the form from a saved signal, and
+  **Remove** takes it out, the file going with its last. The form checks
+  nothing itself: the loader reads the file it makes and says what's
+  wrong in its own words.
+- **Read once:** with no session connected, the form's signal is asked
+  once on the adapter the URI field names (or the vehicle's last), in a
+  short session of its own: a Service 22 DID through `uds-generic`, a
+  Service 01 PID through `raw`'s `?poll=`. It shows the request and the
+  reply's bytes in hex beside the value the draft decodes to, or the
+  ECU's refusal by its ISO 14229 name (`requestOutOfRange (7F 22 31)`),
+  so the field and the scaling are checked before the signal is saved.
+  The draft goes through the loader first, so a mistake is named before
+  anything is sent. A DID is asked only of a module whose request ID
+  follows the reply ID's rule (rx - 8, or the swapped 29-bit pair).
 - **A recording** copies the file into its folder (`signals.json`) with
   its SHA-256, so it says exactly what decoded it, and a replay with
   that file decodes the same.
@@ -426,10 +447,7 @@ it when the original moves or the phone's picker loses access to it:
   changed, or no longer loads is shown with why, and its profile isn't
   offered.
 
-**Not settled:** the form under Settings' Vehicle section that writes a
-vehicle's own file, with **Read once** showing a signal's raw reply
-bytes beside its decoded value, so the scaling is checked before it's
-trusted.
+**Not settled:** whether Read once reads while a session is connected.
 
 ## Checking one with no car
 

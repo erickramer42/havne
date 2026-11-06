@@ -557,6 +557,11 @@ public:
     // join (VehicleBook.profileProblem), then useSignalFiles registers
     // the files the book references. Each logs one line.
     Q_INVOKABLE QVariantMap importSignalFile(const QUrl& url);
+    // The form's file (ADR-0051's form): its text into the store as an
+    // import's bytes, the same result; and a kept copy's text back, ""
+    // for none. Settings composes the file, core's loader judges it
+    Q_INVOKABLE QVariantMap importSignalText(const QString& text);
+    Q_INVOKABLE QString signalFileText(const QString& sha) const;
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,
