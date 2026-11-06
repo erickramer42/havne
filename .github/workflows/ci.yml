@@ -739,14 +739,18 @@ jobs:
   ios-build:
     if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The iOS kit is the largest cache entry (about 3.6 GB): a copy
+      # per branch takes the repository past the Actions cache's 10 GB
+      # and evicts the other kits, so only main saves and restores it,
+      # and other branches install it from the mirrors each run
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
@@ -828,10 +832,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Cached on main only, as ios-build's kit
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
