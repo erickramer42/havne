@@ -412,7 +412,7 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     const std::string events = rec.file("events.log");
     const std::vector<std::string> ev = lines_of(events);
     ASSERT_GE(ev.size(), 10u) << events;
-    EXPECT_EQ(ev[0], "ecuio session recording, format 2 (ADR-0049)");
+    EXPECT_EQ(ev[0], "ecuio session recording, format 3 (ADR-0049)");
     EXPECT_EQ(ev[1].rfind("started  ", 0), 0u);
     EXPECT_EQ(ev[2].rfind("utc  ", 0), 0u);
     EXPECT_EQ(ev[2].back(), 'Z');
@@ -440,6 +440,137 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     EXPECT_EQ(marks[0], "host_us,label");
     EXPECT_NE(marks[1].find(",\"launch, hard\""), std::string::npos)
         << marks[1];
+}
+
+/* Format 3 (ADR-0049's appendix of 2026-11-05): an enum's raw number in
+ * signals.csv and its labels on label lines after its signal line, read
+ * back through the reader. A label's comma and quotes are CSV-quoted, a
+ * line break in one is a space; only the first def of a name writes
+ * labels (the reader keeps that one's signal line), and an enum with no
+ * entries or a number writes none. */
+constexpr uint32_t kEnumId = 0x110;
+ecuio_signal_def_t kEnumDefs[4];
+ecuio_enum_entry_t kEnumEntries[4];
+ecuio_signal_set_t kEnumSet;
+
+ecuio_enum_entry_t entry(uint32_t raw, const char* label)
+{
+    ecuio_enum_entry_t e{};
+    e.raw = raw;
+    std::strcpy(e.label, label);
+    return e;
+}
+
+void register_enum_profile()
+{
+    static bool done = false;
+    if (done)
+        return;
+    std::memset(kEnumDefs, 0, sizeof kEnumDefs);
+    for (int i = 0; i < 4; ++i) {
+        ecuio_signal_def_t& d = kEnumDefs[i];
+        d.id = static_cast<uint16_t>(i + 1);
+        d.message_id = kEnumId + static_cast<uint32_t>(i);
+        d.kind = ECUIO_VALUE_ENUM;
+        d.bit_length = 8;
+        d.scale = 1.0;
+    }
+    std::strcpy(kEnumDefs[0].name, "Fuel, System");
+    kEnumDefs[0].table_first = 0;
+    kEnumDefs[0].table_count = 3;
+    kEnumDefs[0].plot_rank = 1;
+    kEnumDefs[0].group = ECUIO_SIGNAL_GROUP_FUEL;
+    std::strcpy(kEnumDefs[1].name, "Fuel, System"); /* its labels unwritten */
+    kEnumDefs[1].table_first = 3;
+    kEnumDefs[1].table_count = 1;
+    std::strcpy(kEnumDefs[2].name, "Mode"); /* no entries */
+    kEnumDefs[3].kind = ECUIO_VALUE_UINT;
+    std::strcpy(kEnumDefs[3].name, "Count");
+    kEnumEntries[0] = entry(1, "Open loop, cold");
+    kEnumEntries[1] = entry(2, "Closed \"loop\"");
+    kEnumEntries[2] = entry(4294967295u, "Two\nlines");
+    kEnumEntries[3] = entry(9, "Other");
+    kEnumSet = ecuio_signal_set_t{};
+    kEnumSet.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    kEnumSet.count = 4;
+    kEnumSet.defs = kEnumDefs;
+    kEnumSet.enum_count = 4;
+    kEnumSet.enums = kEnumEntries;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("rec-enum", &kEnumSet, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    done = true;
+}
+
+TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
+{
+    register_enum_profile();
+    Root root;
+    Recording rec(root, "mock://enum?profile=rec-enum");
+    ASSERT_NE(rec.recorder, nullptr);
+    dispatch(rec.session, kEnumId, std::string("\x02", 1));
+    dispatch(rec.session, kEnumId, std::string("\x03", 1)); /* no label */
+    dispatch(rec.session, kEnumId + 3, std::string("\x07", 1));
+    const std::string folder = rec.folder;
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+
+    const std::vector<std::string> values = lines_of(rec.file("signals.csv"));
+    ASSERT_EQ(values.size(), 4u);
+    EXPECT_NE(values[1].find(",\"Fuel, System\",2,"), std::string::npos)
+        << values[1];
+    EXPECT_NE(values[2].find(",\"Fuel, System\",3,"), std::string::npos)
+        << values[2];
+    EXPECT_NE(values[3].find(",Count,7,"), std::string::npos) << values[3];
+
+    const std::string events = rec.file("events.log");
+    EXPECT_EQ(events.rfind("ecuio session recording, format 3 (ADR-0049)\n", 0),
+              0u);
+    EXPECT_NE(events.find("\nsignal  \"Fuel, System\",enum,,0,1,3\n"
+                          "label  \"Fuel, System\",1,\"Open loop, cold\"\n"
+                          "label  \"Fuel, System\",2,\"Closed \"\"loop\"\"\"\n"
+                          "label  \"Fuel, System\",4294967295,Two lines\n"
+                          "signal  \"Fuel, System\",enum,,0,0,0\n"
+                          "signal  Mode,enum,,0,0,0\n"
+                          "signal  Count,number,,0,0,0\n"),
+              std::string::npos)
+        << events;
+    EXPECT_EQ(events.find(",9,Other"), std::string::npos) << events;
+
+    /* Read back: the number as a number, the word beside it */
+    ecuio_recording_t* r = nullptr;
+    ASSERT_EQ(ecuio_recording_open(folder.c_str(), nullptr, nullptr, &r),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_info_t info{};
+    ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
+    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_ENUMS);
+    ASSERT_EQ(info.signal_count, 3u) << "one signal a name";
+    ecuio_recording_signal_t fuel{};
+    ASSERT_EQ(ecuio_recording_get_signal(r, 0, &fuel), ECUIO_OK);
+    EXPECT_STREQ(fuel.name, "Fuel, System");
+    EXPECT_EQ(fuel.flags, ECUIO_RECORDING_SIGNAL_ENUM);
+    EXPECT_EQ(fuel.samples, 2u);
+    EXPECT_EQ(fuel.lowest, 2.0);
+    EXPECT_EQ(fuel.highest, 3.0);
+    ecuio_enum_entry_t got[4] = {};
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_recording_get_labels(r, 0, got, 4, &count), ECUIO_OK);
+    ASSERT_EQ(count, 3u);
+    EXPECT_EQ(got[0].raw, 1u);
+    EXPECT_STREQ(got[0].label, "Open loop, cold");
+    EXPECT_STREQ(got[1].label, "Closed \"loop\"");
+    EXPECT_EQ(got[2].raw, 4294967295u);
+    EXPECT_STREQ(got[2].label, "Two lines");
+    EXPECT_STREQ(ecuio_recording_enum_label(r, 0, 2), "Closed \"loop\"");
+    ecuio_recording_signal_t mode{};
+    ASSERT_EQ(ecuio_recording_get_signal(r, 1, &mode), ECUIO_OK);
+    EXPECT_EQ(mode.flags, ECUIO_RECORDING_SIGNAL_ENUM);
+    EXPECT_EQ(ecuio_recording_get_labels(r, 1, nullptr, 0, &count), ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+    ecuio_recording_signal_t plain{};
+    ASSERT_EQ(ecuio_recording_get_signal(r, 2, &plain), ECUIO_OK);
+    EXPECT_EQ(plain.flags, 0u);
+    ecuio_recording_close(r);
 }
 
 /* A value is written with a '.' whatever LC_NUMERIC says, as a Qt
@@ -1070,7 +1201,7 @@ TEST(RecorderTest, NothingIsWrittenBeforeASessionAttaches)
             }
             continue;
         }
-        EXPECT_EQ(events.rfind("ecuio session recording, format 2", 0), 0u)
+        EXPECT_EQ(events.rfind("ecuio session recording, format 3", 0), 0u)
             << events;
         EXPECT_NE(events.find("\ncaller  app  Havne test\n"), std::string::npos)
             << events;
@@ -1110,7 +1241,7 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
 
     const std::string events = read_text(folder / "events.log");
-    EXPECT_EQ(events.rfind("ecuio session recording, format 2", 0), 0u)
+    EXPECT_EQ(events.rfind("ecuio session recording, format 3", 0), 0u)
         << "the header first, though attach came past the writer's wake";
     const std::vector<EventLine> sleeps = events_of(events, "asleep");
     ASSERT_EQ(sleeps.size(), 1u) << events;

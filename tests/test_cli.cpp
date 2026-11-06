@@ -1017,6 +1017,10 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
               "\"duration_us\":30000000,\"utc_start_us\":null,\"signals\":2,"
               "\"markers\":0,\"summary\":false,\"rows_torn\":1,"
               "\"records_dropped\":4,\"notes_dropped\":0}");
+    EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
+        << "format 3 is core's, its enums on their signal lines";
+    EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_CORE), "core");
+    EXPECT_STREQ(cli::format_word(99), "unknown");
 
     ecuio_recording_signal_t s{};
     std::strcpy(s.name, "RPM");
@@ -1061,6 +1065,45 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     EXPECT_NE(std::string(t.data(), t.size()).find("\"rate_hz\":null"),
               std::string::npos)
         << "one sample has no rate";
+
+    /* An enum (format 3): "enum" and its labels after "text", a signal
+     * file's "values" shape, then the rest as a number's; a label's
+     * quotes escaped, as any string's */
+    ecuio_recording_signal_t fuel{};
+    std::strcpy(fuel.name, "Fuel");
+    fuel.flags = ECUIO_RECORDING_SIGNAL_ENUM;
+    fuel.samples = 2;
+    fuel.lowest = 1;
+    fuel.highest = 4;
+    fuel.first_us = 100;
+    fuel.last_us = 200;
+    ecuio_enum_entry_t labels[2] = {};
+    labels[0].raw = 1;
+    std::strcpy(labels[0].label, "Open loop, cold");
+    labels[1].raw = 4294967295u;
+    std::strcpy(labels[1].label, "Say \"fault\"");
+    cli::Line en(buf, sizeof buf);
+    cli::signal_line(en, 0, 5, fuel, labels, 2);
+    EXPECT_EQ(std::string(en.data(), en.size()),
+              "{\"type\":\"signal\",\"recording\":0,\"index\":5,\"name\":\"Fuel\","
+              "\"unit\":\"\",\"text\":false,\"enum\":true,\"labels\":{\"1\":"
+              "\"Open loop, cold\",\"4294967295\":\"Say \\\"fault\\\"\"},"
+              "\"decimals\":0,\"rank\":0,\"group\":\"Other\",\"samples\":2,"
+              "\"lowest\":1,\"highest\":4,\"first_us\":100,\"last_us\":200,"
+              "\"rate_hz\":10000}");
+    cli::Line bare(buf, sizeof buf);
+    cli::signal_line(bare, 0, 5, fuel);
+    EXPECT_NE(std::string(bare.data(), bare.size())
+                  .find("\"enum\":true,\"labels\":{},\"decimals\""),
+              std::string::npos)
+        << "an enum with no labels has an empty object";
+    cli::Line number(buf, sizeof buf);
+    cli::signal_line(number, 0, 3, s);
+    EXPECT_EQ(std::string(number.data(), number.size()).find("enum"),
+              std::string::npos)
+        << "a number's line is as it was";
+    EXPECT_GE(cli::labels_bytes(256), 256u * (12 + 6 * 27))
+        << "room for 256 labels, every byte escaped";
 
     cli::Line al(buf, sizeof buf);
     cli::align_line(al, 1, "rise:RPM:4000", true, 24600000, -24600000);

@@ -406,6 +406,61 @@ TEST(RecordingRowsTest, EventsLogsLinesParse)
         rows::parse_end(bad_end.data(), bad_end.size(), &records, &notes));
 }
 
+/* Format 3's label line, and the enum kind on a signal line */
+TEST(RecordingRowsTest, LabelLinesParse)
+{
+    rows::header_signal s;
+    const char* why = nullptr;
+    const std::string sig = "Fuel,enum,,0,1,3";
+    ASSERT_TRUE(rows::parse_header_signal(sig.data(), sig.size(), s, &why));
+    EXPECT_TRUE(s.enumeration);
+    EXPECT_FALSE(s.text);
+    const std::string num = "RPM,number,rpm,0,1";
+    ASSERT_TRUE(rows::parse_header_signal(num.data(), num.size(), s, &why));
+    EXPECT_FALSE(s.enumeration);
+
+    rows::header_label l;
+    const std::string line = "\"Fuel, 1\",4294967295,\"Open loop, \"\"cold\"\"\"";
+    ASSERT_TRUE(rows::parse_header_label(line.data(), line.size(), l, &why))
+        << why;
+    EXPECT_EQ(l.signal, "Fuel, 1");
+    EXPECT_EQ(l.raw, 4294967295u);
+    EXPECT_EQ(l.label, "Open loop, \"cold\"");
+    const std::string longest = "Fuel,0," + std::string(27, 'x');
+    ASSERT_TRUE(
+        rows::parse_header_label(longest.data(), longest.size(), l, &why));
+    EXPECT_EQ(l.raw, 0u);
+    struct Bad {
+        std::string line;
+        const char* why;
+    };
+    const Bad bad[] = {
+        {"Fuel,1", "the label line isn't signal,raw,label"},
+        {"Fuel,1,a,b", "the label line isn't signal,raw,label"},
+        {",1,a", "the label's signal name is empty or longer than 31 bytes"},
+        {std::string(32, 'N') + ",1,a",
+         "the label's signal name is empty or longer than 31 bytes"},
+        {"Fuel,4294967296,a", "the label's raw value isn't 0 to 4294967295"},
+        {"Fuel,-1,a", "the label's raw value isn't 0 to 4294967295"},
+        {"Fuel,,a", "the label's raw value isn't 0 to 4294967295"},
+        {"Fuel,1,", "the label is empty or longer than 27 bytes"},
+        {"Fuel,1," + std::string(28, 'x'),
+         "the label is empty or longer than 27 bytes"},
+        {std::string("Fuel,1,a\0b", 10), nullptr},
+    };
+    for (const Bad& b : bad) {
+        why = nullptr;
+        EXPECT_FALSE(
+            rows::parse_header_label(b.line.data(), b.line.size(), l, &why))
+            << b.line;
+        if (b.why != nullptr) {
+            EXPECT_STREQ(why, b.why) << b.line;
+        } else {
+            EXPECT_NE(why, nullptr) << "a NUL is refused with words";
+        }
+    }
+}
+
 // ---- The reader -----------------------------------------------------------
 
 TEST(RecordingTest, AFolderTheRecorderWroteOpensWithItsHeader)
@@ -453,7 +508,7 @@ TEST(RecordingTest, AFolderTheRecorderWroteOpensWithItsHeader)
     Reader r(folder);
     ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
     const ecuio_recording_info_t info = r.info();
-    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_CORE);
+    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_ENUMS);
     EXPECT_EQ(info.flags, 0u) << "the summary is there";
     EXPECT_GT(info.utc_start_us, 1700000000000000ull);
     EXPECT_EQ(info.rows_torn, 0u);
@@ -965,7 +1020,7 @@ TEST(RecordingTest, ABadRowIsRefusedWithItsLineNumber)
          "signals.csv's header row isn't host_us,signal,value,unit"},
         {ev, "", "signals.csv has no header row"},
         {events_v2({"RPM,number,rpm,0,1", "Bad,count,x,0,0"}), head,
-         "events.log line 9: the signal's kind isn't number or text"},
+         "events.log line 9: the signal's kind isn't number, text or enum"},
     };
     for (const Case& c : cases) {
         Folder f;
@@ -981,6 +1036,181 @@ TEST(RecordingTest, ABadRowIsRefusedWithItsLineNumber)
     markers.write("markers.csv", "host_us,label\nlater,a\n");
     EXPECT_EQ(open_detail(markers.utf8(), ECUIO_ERR_LOAD_FAILED),
               "markers.csv line 2: host_us isn't a decimal count");
+}
+
+/* events.log in format 3 with these header lines (signal and label lines,
+ * their keys included) and a summary */
+std::string events_v3(const std::vector<std::string>& header_lines)
+{
+    std::string s = std::string(rows::kFormat3) +
+                    "\nstarted  2026-11-05 12:00:00.000 (local time)\n"
+                    "utc  2026-11-05T18:00:00.000Z\ncore  0.5.0\n"
+                    "uri  mock://x\nprofile  test\nframe flags  complete\n";
+    for (const std::string& l : header_lines) {
+        s += l + "\n";
+    }
+    return s + "columns  local time, seconds since the recording started\n\n"
+               "\n12:00:10.000  +10.000  end  the test ended: 0 frames, 0 "
+               "values, 0 records dropped, 0 notes dropped\n";
+}
+
+/* Format 3 (ADR-0049's appendix of 2026-11-05): an enum reads as a number
+ * with its labels beside it; a format 2 recording still reads as one */
+TEST(RecordingTest, AFormat3EnumHasItsLabelsAndFormat2StillReads)
+{
+    Folder f;
+    f.write("events.log",
+            events_v3({"signal  Fuel,enum,,0,1,3",
+                       "label  Fuel,1,\"Open loop, cold\"",
+                       "label  Fuel,2,Closed loop", "label  Fuel,4,Fault",
+                       "signal  RPM,number,rpm,0,2,1",
+                       "signal  Mode,enum,,0,0,0", "signal  VIN,text,,0,0,0"}));
+    f.write("signals.csv", std::string(kBom) + rows::kSignalsHeader +
+                               "\n10,Fuel,1,\n20,Fuel,2,\n30,Fuel,4,\n"
+                               "40,Fuel,3,\n50,RPM,800,rpm\n");
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.info().format, ECUIO_RECORDING_FORMAT_ENUMS);
+    const uint32_t fuel = r.index_of("Fuel");
+    const uint32_t rpm = r.index_of("RPM");
+    const uint32_t mode = r.index_of("Mode");
+    const uint32_t vin = r.index_of("VIN");
+    const ecuio_recording_signal_t s = r.signal(fuel);
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNAL_ENUM);
+    EXPECT_EQ(s.samples, 4u);
+    EXPECT_EQ(s.lowest, 1.0);
+    EXPECT_EQ(s.highest, 4.0);
+    EXPECT_EQ(s.plot_rank, 1);
+    EXPECT_EQ(s.group, 3);
+    EXPECT_EQ(r.signal(mode).flags, ECUIO_RECORDING_SIGNAL_ENUM);
+    EXPECT_EQ(r.signal(rpm).flags, 0u);
+    EXPECT_EQ(r.signal(vin).flags, ECUIO_RECORDING_SIGNAL_TEXT);
+
+    /* The serial ports' contract: all counted, the first capacity copied */
+    uint32_t count = 99;
+    ASSERT_EQ(ecuio_recording_get_labels(r.r, fuel, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 3u);
+    ecuio_enum_entry_t two[3] = {};
+    two[2].raw = 77;
+    ASSERT_EQ(ecuio_recording_get_labels(r.r, fuel, two, 2, &count), ECUIO_OK);
+    EXPECT_EQ(count, 3u);
+    EXPECT_EQ(two[0].raw, 1u);
+    EXPECT_STREQ(two[0].label, "Open loop, cold");
+    EXPECT_EQ(two[1].raw, 2u);
+    EXPECT_STREQ(two[1].label, "Closed loop");
+    EXPECT_EQ(two[2].raw, 77u) << "past the capacity, untouched";
+    for (uint32_t other : {rpm, mode, vin}) {
+        count = 99;
+        EXPECT_EQ(ecuio_recording_get_labels(r.r, other, two, 3, &count),
+                  ECUIO_OK);
+        EXPECT_EQ(count, 0u) << other;
+    }
+    EXPECT_EQ(ecuio_recording_get_labels(r.r, fuel, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recording_get_labels(r.r, fuel, two, 3, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recording_get_labels(nullptr, fuel, two, 3, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recording_get_labels(r.r, 4, two, 3, &count),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    EXPECT_STREQ(ecuio_recording_enum_label(r.r, fuel, 1), "Open loop, cold");
+    EXPECT_STREQ(ecuio_recording_enum_label(r.r, fuel, 4), "Fault");
+    EXPECT_EQ(ecuio_recording_enum_label(r.r, fuel, 3), nullptr)
+        << "a number with no label: a UI shows the number";
+    EXPECT_EQ(ecuio_recording_enum_label(r.r, fuel, 0), nullptr);
+    EXPECT_EQ(ecuio_recording_enum_label(r.r, fuel, 5), nullptr);
+    EXPECT_EQ(ecuio_recording_enum_label(r.r, rpm, 1), nullptr);
+    EXPECT_EQ(ecuio_recording_enum_label(r.r, 4, 1), nullptr);
+    EXPECT_EQ(ecuio_recording_enum_label(nullptr, fuel, 1), nullptr);
+
+    /* The same recording in format 2, with no enum: its kinds as before */
+    Folder older("-v2");
+    older.write("events.log", events_v2({"Fuel,number,,0,1,3",
+                                         "RPM,number,rpm,0,2,1",
+                                         "VIN,text,,0,0,0"}));
+    older.write("signals.csv", std::string(kBom) + rows::kSignalsHeader +
+                                   "\n10,Fuel,1,\n50,RPM,800,rpm\n");
+    Reader two_r(older.utf8());
+    ASSERT_EQ(two_r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(two_r.info().format, ECUIO_RECORDING_FORMAT_CORE);
+    EXPECT_EQ(two_r.signal(two_r.index_of("Fuel")).flags, 0u);
+    EXPECT_EQ(two_r.signal(two_r.index_of("VIN")).flags,
+              ECUIO_RECORDING_SIGNAL_TEXT);
+    EXPECT_EQ(ecuio_recording_get_labels(two_r.r, 0, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+}
+
+/* A label line a writer never makes is refused with its line, as a bad
+ * signal line is; format 2 has neither enum signals nor label lines */
+TEST(RecordingTest, ALabelLineIsRefusedWithItsLineNumber)
+{
+    const std::string head = std::string(kBom) + rows::kSignalsHeader + "\n";
+    const std::string fuel = "signal  Fuel,enum,,0,0,0";
+    std::vector<std::string> many = {fuel};
+    for (int i = 0; i <= 256; ++i) {
+        many.push_back("label  Fuel," + std::to_string(i) + ",L" +
+                       std::to_string(i));
+    }
+    struct Case {
+        std::vector<std::string> lines;
+        const char* detail;
+    };
+    const Case cases[] = {
+        {{fuel, "label  Gone,1,a"},
+         "events.log line 9: the label names no enum signal above it"},
+        {{"label  Fuel,1,a", fuel},
+         "events.log line 8: the label names no enum signal above it"},
+        {{"signal  RPM,number,rpm,0,0", "label  RPM,1,a"},
+         "events.log line 9: the label names no enum signal above it"},
+        {{fuel, "label  Fuel,2,a", "label  Fuel,1,b"},
+         "events.log line 10: the signal's labels aren't in ascending raw "
+         "order"},
+        {{fuel, "label  Fuel,2,a", "label  Fuel,2,b"},
+         "events.log line 10: the signal's labels aren't in ascending raw "
+         "order"},
+        {{fuel, "label  Fuel,1," + std::string(28, 'x')},
+         "events.log line 9: the label is empty or longer than 27 bytes"},
+        {many, "events.log line 265: the signal has more labels than an "
+               "enum holds"},
+    };
+    for (const Case& c : cases) {
+        Folder f;
+        f.write("events.log", events_v3(c.lines));
+        f.write("signals.csv", head);
+        EXPECT_EQ(open_detail(f.utf8(), ECUIO_ERR_LOAD_FAILED), c.detail);
+    }
+    /* 256 labels, a def's most, open */
+    many.pop_back();
+    Folder full;
+    full.write("events.log", events_v3(many));
+    full.write("signals.csv", head);
+    Reader r(full.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_recording_get_labels(r.r, 0, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 256u);
+
+    Folder v2("-v2");
+    v2.write("events.log", events_v2({"Fuel,enum,,0,0,0"}));
+    v2.write("signals.csv", head);
+    EXPECT_EQ(open_detail(v2.utf8(), ECUIO_ERR_LOAD_FAILED),
+              "events.log line 8: format 2 has no enum signals");
+    /* A label line in format 2 is a header line it doesn't know: read past */
+    std::string unknown = events_v2({"Fuel,number,,0,0,0"});
+    const std::string cols = "columns  ";
+    unknown.insert(unknown.find(cols), "label  Fuel,1,a\n");
+    Folder ignored("-ignored");
+    ignored.write("events.log", unknown);
+    ignored.write("signals.csv", head);
+    Reader ri(ignored.utf8());
+    ASSERT_EQ(ri.rc, ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_recording_get_labels(ri.r, 0, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u);
 }
 
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)

@@ -705,6 +705,39 @@ TEST(RecordingCheckTest, ReassembledPayloadsSkipTheIsotpKindAndSayWhy)
     EXPECT_EQ(bare.summary.duration_us, 360000u);
 }
 
+/* Format 3 (ADR-0049's appendix of 2026-11-05) keeps format 2's lines:
+ * one events.log under either first line gives the same findings, its
+ * frame flags, link and asleep lines read alike */
+TEST(RecordingCheckTest, AFormat3EventsLogReadsAsFormat2s)
+{
+    std::vector<Row> rows;
+    every(rows, 0x7E8, 0, 100000, 100);
+    Folder f;
+    f.write("frames.csv", frames_csv(rows));
+    const std::string v2 =
+        events_v2("complete",
+                  event_at(3000000, "asleep  Asleep for 1.5 s: nothing was "
+                                    "read meanwhile") +
+                      event_at(5000000, "link  vehicle not responding "
+                                        "(state 8, 2 episodes)"));
+    f.write("events.log", v2);
+    const Checked two(f.utf8());
+    ASSERT_EQ(two.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(two.summary.counts[ECUIO_CHECK_ASLEEP], 1u);
+    EXPECT_EQ(two.summary.counts[ECUIO_CHECK_LINK], 1u);
+    EXPECT_EQ(two.summary.flags & ECUIO_CHECK_ISOTP_FLAGS_UNKNOWN, 0u);
+    const std::string first = "ecuio session recording, format 2 (ADR-0049)";
+    ASSERT_EQ(v2.rfind(first, 0), 0u);
+    std::string v3 = v2;
+    v3.replace(0, first.size(),
+               "ecuio session recording, format 3 (ADR-0049)");
+    f.write("events.log", v3);
+    const Checked three(f.utf8());
+    ASSERT_EQ(three.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(three.found, two.found);
+    EXPECT_EQ(three.summary.flags, two.summary.flags);
+}
+
 TEST(RecordingCheckTest, AnOlderRecordingsSleepLineKeepsItFromBeingAGap)
 {
     std::vector<Row> rows;

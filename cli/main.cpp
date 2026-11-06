@@ -277,6 +277,23 @@ void write_line(Output& out, cli::Line& l)
     }
 }
 
+// A recording's signal line (view's and info's), an enum's labels on it
+void write_signal_line(Output& out, const ecuio_recording_t* r,
+                       uint32_t recording, uint32_t index,
+                       const ecuio_recording_signal_t& s)
+{
+    uint32_t count = 0;
+    std::vector<ecuio_enum_entry_t> labels;
+    if (ecuio_recording_get_labels(r, index, nullptr, 0, &count) == ECUIO_OK &&
+        count > 0) {
+        labels.resize(count);
+        ecuio_recording_get_labels(r, index, labels.data(), count, &count);
+    }
+    BigLine b(2048 + cli::labels_bytes(count));
+    cli::signal_line(b.line, recording, index, s, labels.data(), count);
+    write_line(out, b.line);
+}
+
 void write_start(Output& out)
 {
     char buf[256];
@@ -1755,9 +1772,7 @@ int run_view(const ViewArgs& args)
         cli::opened_line(l, i, v.info);
         write_line(out, l);
         for (uint32_t k = 0; k < v.signals.size(); ++k) {
-            cli::Line s(buf, sizeof buf);
-            cli::signal_line(s, i, k, v.signals[k]);
-            write_line(out, s);
+            write_signal_line(out, v.r.get(), i, k, v.signals[k]);
         }
         for (uint32_t k = 0; k < v.info.marker_count; ++k) {
             ecuio_recording_marker_t m{};
@@ -2203,9 +2218,7 @@ int run_info(const InfoArgs& args)
         for (uint32_t k = 0; k < info.signal_count; ++k) {
             ecuio_recording_signal_t s{};
             ecuio_recording_get_signal(r.get(), k, &s);
-            cli::Line sl(buf, sizeof buf);
-            cli::signal_line(sl, 0, k, s);
-            write_line(out, sl);
+            write_signal_line(out, r.get(), 0, k, s);
         }
         for (uint32_t k = 0; k < info.marker_count; ++k) {
             ecuio_recording_marker_t m{};
