@@ -29,9 +29,10 @@ TestCase {
             list: [
                 { id: "v1", label: "Daily driver", vinKey: "key-a",
                   uri: "elm327://COM6?profile=obd2", plotted: ["Timing Advance"],
-                  unplotted: ["Intake Air Temp"], signals: [fileA()], own: "" },
+                  unplotted: ["Intake Air Temp"], signals: [fileA()], own: "",
+                  plugin: "plugin.example-sim.base" },
                 { id: "v2", label: "Weekend car", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], signals: [], own: "" }
+                  unplotted: [], signals: [], own: "", plugin: "" }
             ]
         }
     }
@@ -49,6 +50,25 @@ TestCase {
         const d = VehicleBook.parse(JSON.stringify(old))
         compare(d.list[0].plotted, [])
         compare(d.list[0].unplotted, ["Intake Air Temp"])
+    }
+
+    // An entry stored before plugins existed has none picked; a plugin
+    // that isn't text drops the document, as any bad field does; the
+    // picked vehicle's is set by its profile, and Duplicate copies it
+    function test_aVehiclesPluginVariant() {
+        const old = book()
+        delete old.list[0].plugin
+        compare(VehicleBook.parse(JSON.stringify(old)).list[0].plugin, "")
+        const bad = book()
+        bad.list[1].plugin = 7
+        compare(VehicleBook.parse(JSON.stringify(bad)), VehicleBook.empty())
+
+        const d = VehicleBook.setPlugin(VehicleBook.pick(book(), "v2"), "plugin.example-sim.my2019")
+        compare(VehicleBook.picked(d).plugin, "plugin.example-sim.my2019")
+        compare(VehicleBook.find(d, "v1").plugin, "plugin.example-sim.base", "the others unchanged")
+        compare(VehicleBook.picked(VehicleBook.setPlugin(d, "")).plugin, "")
+        compare(VehicleBook.picked(VehicleBook.duplicate(book(), "Copy")).plugin,
+                "plugin.example-sim.base")
     }
 
     // An entry stored before signal files existed has none
@@ -144,7 +164,7 @@ TestCase {
         compare(added.picked, "v3")
         compare(VehicleBook.picked(added),
                 { id: "v3", label: "Track day", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], signals: [], own: "" })
+                  unplotted: [], signals: [], own: "", plugin: "" })
 
         const copied = VehicleBook.duplicate(d, "Daily driver (copy)")
         const c = VehicleBook.picked(copied)
@@ -279,7 +299,7 @@ TestCase {
         compare(VehicleBook.picked(r.doc),
                 { id: "v3", label: "Vehicle 1", vinKey: "key-c",
                   uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [],
-                  signals: [], own: "" })
+                  signals: [], own: "", plugin: "" })
         compare(VehicleBook.logLine(r), "Vehicle: not Daily driver (its VIN differs); saved as Vehicle 1")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")

@@ -278,6 +278,74 @@ Pane {
         return true
     }
 
+    // ---- The app's plugins (ADR-0052) ----
+    // The bridge's list (PluginStore): each loaded plugin with its
+    // variants, or a copy that no longer loads; the variants its VIN
+    // proposes for the car (the session's VIN or the one the lookup holds,
+    // never stored); and what the last import or removal said
+    property var pluginList: []
+    property var pluginMatches: []
+    property string pluginProblem: ""
+    property string pluginNote: ""
+
+    function loadPlugins() {
+        pluginList = Bridge.plugins()
+        refreshMatches()
+    }
+
+    function refreshMatches() {
+        pluginMatches = Bridge.pluginMatches(vinLookupField.text)
+    }
+
+    function pluginText(p) {
+        return p.ok ? qsTr("%1 %2: %3").arg(p.name, p.version, p.variants.join(", "))
+                    : p.words
+    }
+
+    function importPlugin(url) {
+        pluginNote = ""
+        const r = Bridge.importPlugin(url)
+        if (!r.ok) {
+            pluginProblem = r.words
+            return false
+        }
+        pluginProblem = ""
+        pluginNote = r.replaced !== ""
+            ? qsTr("%1 %2 replaces %3").arg(r.name, r.version, r.replaced)
+            : qsTr("%1 %2 added: %3").arg(r.name, r.version, r.profiles.join(", "))
+        loadPlugins()
+        return true
+    }
+
+    function removePlugin(sha) {
+        pluginNote = ""
+        const r = Bridge.removePlugin(sha)
+        pluginProblem = r.ok ? "" : r.words
+        loadPlugins()
+    }
+
+    // The user's pick for this vehicle (ADR-0052 section 5: the VIN only
+    // proposes): kept in its entry, and read through the URI's profile=
+    function pickPluginVariant(profile) {
+        saveVehicles(VehicleBook.setPlugin(vehicles, profile))
+        chooseProfile(profile)
+    }
+
+    // The picked vehicle's variant as What to read offers it: null for
+    // none, or one no plugin loaded registers
+    function pluginChoice() {
+        if (pickedVehicle === null || pickedVehicle.plugin === "")
+            return null
+        for (const p of pluginList) {
+            const at = p.ok ? p.profiles.indexOf(pickedVehicle.plugin) : -1
+            if (at >= 0)
+                return { name: p.profiles[at], label: qsTr("%1: %2").arg(p.name, p.variants[at]),
+                         hint: qsTr("The plugin %1 %2, its variant %3, picked for this vehicle")
+                                   .arg(p.name, p.version, p.variants[at]) }
+        }
+        return null
+    }
+
     // The vehicle's own file was written here and has no copy anywhere
     // else, so its removal asks first
     function removeSignalFile(sha) {
@@ -638,7 +706,12 @@ Pane {
     // vehicle's signal files that loaded (ADR-0051). "default" is the
     // scheme's own profile, so it adds no profile= key. A typed name
     // outside the list highlights no button; core judges it at connect.
-    readonly property var profiles: builtInProfiles.concat(vehicleProfiles)
+    readonly property var profiles: builtInProfiles.concat(vehicleProfiles, pluginProfiles)
+    // The vehicle's plugin variant, when one is picked and loaded
+    readonly property var pluginProfiles: {
+        const choice = pluginChoice()
+        return choice === null ? [] : [choice]
+    }
     readonly property var vehicleProfiles: pickedVehicle === null ? []
         : pickedVehicle.signals.filter(f => signalOk(f.sha256)
                                             && (standIn === null || f.sha256 !== standIn.sha256))
@@ -871,6 +944,7 @@ Pane {
         vehicles = VehicleBook.parse(vehicleStore.document)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         useSignalFiles()
+        loadPlugins()
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Adapter first opens
         // Set like typed text, so the profile row and the DID field read
@@ -906,10 +980,12 @@ Pane {
         function onConnectedChanged() {
             if (!Bridge.connected)
                 page.plottedApplied = false
+            page.refreshMatches()   // a new session reads its VIN again
         }
 
         function onVehicleIdentified() {
             page.recognizeVehicle()
+            page.refreshMatches()
         }
 
         function onRecordingChanged() {
@@ -1520,6 +1596,118 @@ Pane {
                     onAccepted: page.importSignalFile(importDialog.selectedFile)
                 }
 
+                // ---- The app's plugins (ADR-0052): every vehicle's, the
+                // picked one's variant proposed by its VIN ----
+                Label {
+                    objectName: "pluginsTitle"
+                    text: qsTr("Plugins")
+                    color: Theme.text
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: page.pluginList
+                    RowLayout {
+                        id: pluginRow
+                        required property var modelData
+                        required property int index
+                        objectName: "plugin_" + index
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "pluginText"
+                            text: page.pluginText(pluginRow.modelData)
+                            color: pluginRow.modelData.ok ? Theme.text : Theme.warning
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "pluginRemove_" + pluginRow.index
+                            text: qsTr("Remove")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.removePlugin(pluginRow.modelData.sha256)
+                        }
+                    }
+                }
+
+                Label {
+                    objectName: "pluginsNone"
+                    visible: page.pluginList.length === 0
+                    text: qsTr("None yet. A plugin (a .havne-plugin.json file) holds signals "
+                               + "for the cars its maker codes and years name")
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ThemedButton {
+                        objectName: "pluginImport"
+                        text: qsTr("Import a plugin")
+                        enabled: page.idle && page.confirming === ""
+                        onClicked: pluginDialog.open()
+                    }
+                }
+
+                Label {
+                    objectName: "pluginProblem"
+                    visible: text !== ""
+                    text: page.pluginProblem
+                    color: Theme.warning
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    objectName: "pluginNote"
+                    visible: text !== ""
+                    text: page.pluginNote
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                // The variants the VIN proposes for the picked vehicle; the
+                // user picks one (ADR-0052 section 5)
+                Label {
+                    objectName: "pluginMatchesText"
+                    visible: page.pickedVehicle !== null && page.pluginList.length > 0
+                    text: page.pluginMatches.length > 0
+                        ? qsTr("For this car, by its VIN:")
+                        : qsTr("No match yet: plugins are proposed once the car's VIN is "
+                               + "read, or one is typed in the VIN lookup")
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Flow {
+                    visible: page.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Repeater {
+                        model: page.pickedVehicle !== null ? page.pluginMatches : []
+                        ThemedButton {
+                            required property var modelData
+                            required property int index
+                            objectName: "pluginMatch_" + index
+                            text: qsTr("%1: %2").arg(modelData.name, modelData.variant)
+                            highlighted: page.pickedVehicle !== null
+                                         && page.pickedVehicle.plugin === modelData.profile
+                            enabled: page.idle
+                            onClicked: page.pickPluginVariant(modelData.profile)
+                        }
+                    }
+                }
+
+                FileDialog {
+                    id: pluginDialog
+                    title: qsTr("Import a plugin")
+                    nameFilters: [qsTr("Plugins (*.havne-plugin.json)"), qsTr("All files (*)")]
+                    onAccepted: page.importPlugin(pluginDialog.selectedFile)
+                }
+
                 // ---- The vehicle's own signals (ADR-0051's form) ----
                 Label {
                     objectName: "ownSignalsTitle"
@@ -1790,6 +1978,8 @@ Pane {
                         maximumLength: 32
                         placeholderText: qsTr("17 characters")
                         inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                        // A typed VIN proposes plugins too (ADR-0052 section 5)
+                        onTextChanged: page.refreshMatches()
                     }
                 }
 

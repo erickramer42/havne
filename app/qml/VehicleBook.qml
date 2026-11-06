@@ -6,7 +6,8 @@
 //          adapter sessions only, and the VIN key settling the vehicle
 //          (each row of ADR-0027 section 4's table, with its log line);
 //          a vehicle's signal files kept through every change, copied by
-//          Duplicate, and a clashing profile refused (ADR-0051).
+//          Duplicate, and a clashing profile refused (ADR-0051); a
+//          vehicle's plugin variant kept, copied by Duplicate (ADR-0052).
 //          SettingsPage.qml wires it (tests/qml/tst_settings.qml).
 
 pragma Singleton
@@ -14,7 +15,7 @@ import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
 // { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted,
-// signals, own }] }:
+// signals, own, plugin }] }:
 // plotted and unplotted are the rows ticked past Live's default and
 // unticked from it (ADR-0039 section 8); a stored entry without
 // plotted reads as none.
@@ -25,6 +26,9 @@ import QtQml
 // signals. An entry stored before them has none. Two files making one
 // profile are refused (profileProblem), so a profile names one file
 // wherever it's chosen; the same file in two vehicles is one file.
+// plugin is the profile of the plugin variant picked for the vehicle
+// (plugin.<id>.<variant>, ADR-0052 section 5), "" for none; the
+// plugins themselves are the app's, not a vehicle's.
 // every function takes the document and returns a new one, never
 // changing what it was given, so SettingsPage stores what comes back
 // and the rules test without a page.
@@ -66,7 +70,8 @@ QtObject {
                         && (!Array.isArray(v.plotted) || !v.plotted.every(isString)))
                     || (v.signals !== undefined
                         && (!Array.isArray(v.signals) || !v.signals.every(isFile)))
-                    || (v.own !== undefined && !isString(v.own)))
+                    || (v.own !== undefined && !isString(v.own))
+                    || (v.plugin !== undefined && !isString(v.plugin)))
                 return empty()
             ids[v.id] = true
         }
@@ -94,7 +99,8 @@ QtObject {
         const own = v.own !== undefined && files.some(f => f.sha256 === v.own) ? v.own : ""
         return { id: v.id, label: v.label, vinKey: v.vinKey, uri: v.uri,
                  plotted: v.plotted === undefined ? [] : v.plotted.slice(),
-                 unplotted: v.unplotted.slice(), signals: files, own: own }
+                 unplotted: v.unplotted.slice(), signals: files, own: own,
+                 plugin: v.plugin === undefined ? "" : v.plugin }
     }
 
     function copy(doc) {
@@ -169,7 +175,7 @@ QtObject {
         const d = copy(doc)
         const id = nextId(d)
         d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
-                      plotted: [], unplotted: [], signals: [], own: "" })
+                      plotted: [], unplotted: [], signals: [], own: "", plugin: "" })
         d.picked = id
         return d
     }
@@ -187,6 +193,7 @@ QtObject {
         v.unplotted = from.unplotted.slice()
         v.signals = entry(from).signals
         v.own = from.own
+        v.plugin = from.plugin
         return d
     }
 
@@ -256,6 +263,11 @@ QtObject {
 
     // The form's file saved: file replaces the picked vehicle's own; the
     // document as it was when profileProblem refuses it
+    // The picked vehicle's plugin variant, by its profile ("" for none)
+    function setPlugin(doc, profile) {
+        return change(doc, v => v.plugin = String(profile))
+    }
+
     function setOwn(doc, file) {
         const v = picked(doc)
         if (v === null || profileProblem(doc, file, v.own || "") !== "")
