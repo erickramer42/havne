@@ -1,8 +1,5 @@
 // File/layer: tests/test_signal_file.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, the signal-file loader (ADR-0051,
-//          core/src/signal_file.cpp): the ADR's example into its set, each
-//          field's default, the expression compiler and obd2's keys, every
-//          refusal with its line, column and words
+// Testing: UNIT: SignalFileTest (test_signals)
 
 #include <gtest/gtest.h>
 #include <ecuio/profile.h>
@@ -485,4 +482,55 @@ TEST(SignalFileTest, NullsAndTheLoadersBounds)
     File g = load(one(R"({"key":"a","name":"A","notes":"n","x-tool":{"any":[1,2]},)"
                       R"("read":{"service":"22","number":"D100"},"field":{"byte":0}})"));
     EXPECT_NE(g, nullptr) << ecuio_last_error_detail();
+}
+
+// An expression reads a signal listed after it: its inputs are the ids
+// the later signals get
+TEST(SignalFileTest, AnExpressionReadsASignalListedAfterIt)
+{
+    File f = load(one(
+        std::string(
+            R"({"key":"sum","name":"Sum","kind":"computed","expr":"a - b"},)") +
+        kNumber +
+        R"(,{"key":"b","name":"B","read":{"service":"22","number":"D101"},"field":{"byte":0}})"));
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    ASSERT_EQ(set->computed_count, 1u);
+    EXPECT_EQ(set->computed[0].input_count, 2u);
+    EXPECT_EQ(set->computed[0].input_ids[0], ECUIO_USER_SIG_ID_BASE + 1);
+    EXPECT_EQ(set->computed[0].input_ids[1], ECUIO_USER_SIG_ID_BASE + 2);
+}
+
+// A field must end within the 4096 bytes a reply holds; one ending at the
+// last byte loads
+TEST(SignalFileTest, AFieldEndingPastTheReplyIsRefused)
+{
+    const auto signal = [](const std::string& kind, const std::string& field) {
+        return one(R"({"key":"a","name":"A",)" + kind +
+                   R"("read":{"service":"22","number":"D100"},"field":)" +
+                   field + "}");
+    };
+    const std::string enumeration = R"("kind":"enum","values":{"1":"One"},)";
+    const std::string text = R"("kind":"text",)";
+    for (const std::string& fits :
+         {signal("", R"({"byte":4092})"),
+          signal("", R"({"byte":4091,"bits":16})"),
+          signal("", R"({"byte":4092,"bits":4,"bit":4,"order":"le"})"),
+          signal(enumeration, R"({"byte":4092})"),
+          signal(text, R"({"byte":4090,"bytes":3})")}) {
+        EXPECT_NE(load(fits), nullptr) << ecuio_last_error_detail() << "\n"
+                                       << fits;
+    }
+    for (const std::string& past :
+         {signal("", R"({"byte":4092,"bits":16})"),
+          signal("", R"({"byte":4092,"bits":4,"bit":6,"order":"le"})"),
+          signal(enumeration, R"({"byte":4092,"bits":16})"),
+          signal(text, R"({"byte":4090,"bytes":4})")}) {
+        const std::string why = refusal(past);
+        EXPECT_NE(
+            why.find(
+                "signal 'a''s field ends past the 4096 bytes a reply holds"),
+            std::string::npos)
+            << why;
+    }
 }

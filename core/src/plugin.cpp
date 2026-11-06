@@ -1,8 +1,6 @@
 // File/layer: core/src/plugin.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest (test_signals), each variant's merged text
-//          read back (PluginTest.AVariantIsOneSignalFile*); HARNESS:
-//          RecorderTest.APluginVariantsRecording* (test_core); FUZZ:
-//          fuzz_plugin_manifest
+// Testing: UNIT: PluginTest (test_signals); HARNESS: RecorderTest
+//          (test_core); FUZZ: fuzz_plugin_manifest
 //
 // The plugin loader's data tier (ADR-0052): a manifest (json.h, the
 // signal-file loader's rules for unknown keys and words) and its data
@@ -355,6 +353,19 @@ private:
             refuse(root, "the manifest needs a \"name\"");
         }
         p.name = text_of(*name, 1, 63, "\"name\"");
+        /* Each variant's signal file takes its profile name from it */
+        const std::string profile = ecuio_sf::profile_of(p.name);
+        if (profile.empty()) {
+            refuse(*name, "\"name\" " + q(p.name) +
+                              " holds no letter or digit, which a variant's "
+                              "signal file makes its profile name from");
+        }
+        if (profile.size() > ECUIO_PROFILE_NAME_MAX) {
+            refuse(*name, "\"name\" makes a variant's signal file a profile "
+                          "name longer than " +
+                              std::to_string(ECUIO_PROFILE_NAME_MAX) +
+                              " characters");
+        }
 
         const Value* version = root.find("version");
         if (version == nullptr) {
@@ -739,16 +750,24 @@ private:
         out.file.reset(new ecuio_signal_file());
         ecuio_sf::build(parts, *out.file);
         out.file->plugin = p.id + "," + p.version + "," + out.id;
-        out.file->bytes = variant_json(p, out, parts);
+        std::string why;
+        out.file->bytes = variant_json(p, out, parts, &why);
+        if (out.file->bytes.empty()) {
+            refuse(at, "variant " + q(out.id) +
+                           "'s files don't make one signal file, which a "
+                           "recording copies: " +
+                           why);
+        }
     }
 
     /* The variant as one signal file, what a recording copies as
      * signals.json: the plugin's name, the manifest's source and ECUs,
-     * the first file's extends, the merged signals in their order. Empty
-     * when the text doesn't read back to the set just built, so a
-     * recording never holds a copy that decodes otherwise. */
+     * the first file's extends, the merged signals in their order. Empty,
+     * with why, when the text doesn't read back to the set just built, so
+     * a recording never holds a copy that decodes otherwise. */
     std::string variant_json(const ecuio_plugin& p, const variant& v,
-                             const ecuio_sf::parts& parts) const
+                             const ecuio_sf::parts& parts,
+                             std::string* why) const
     {
         Value doc;
         doc.type = Type::object;
@@ -793,6 +812,14 @@ private:
         const bool read =
             ecuio_signal_file_load(json.data(), json.size(), &back) == ECUIO_OK;
         const bool same = read && same_set(back->set, v.file->set);
+        if (!read) {
+            /* The loader's words, past the place in the written text */
+            const std::string words = ecuio_last_error_detail();
+            const size_t colon = words.find(": ");
+            *why = colon == std::string::npos ? words : words.substr(colon + 2);
+        } else if (!same) {
+            *why = "it reads back as another set";
+        }
         ecuio_signal_file_free(back);
         ecuio_detail_clear();
         return same ? json : std::string();
@@ -1144,16 +1171,15 @@ ecuio_status_t ecuio_plugin_free(ecuio_plugin_t* plugin)
         return ECUIO_OK;
     }
     try {
-        std::vector<const char*> names;
+        /* Every variant's set, registered by ecuio_plugin_register or
+         * under a name of the caller's */
         std::vector<const ecuio_signal_set_t*> sets;
+        sets.reserve(plugin->variants.size());
         for (const variant& v : plugin->variants) {
-            if (v.registered) {
-                names.push_back(v.profile.c_str());
-                sets.push_back(ecuio_signal_file_set(v.file.get()));
-            }
+            sets.push_back(ecuio_signal_file_set(v.file.get()));
         }
-        const ecuio_status_t rc = ecuio_profile_unregister_unused(
-            names.data(), sets.data(), names.size());
+        const ecuio_status_t rc =
+            ecuio_profile_unregister_unused(sets.data(), sets.size());
         if (rc != ECUIO_OK) {
             if (rc == ECUIO_ERR_IN_USE) {
                 ecuio_detail_set(

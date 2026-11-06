@@ -1,15 +1,7 @@
 // File/layer: core/src/recorder.cpp | C++17, Qt-free; the recorder
 //             (ADR-0049 sections 1 to 4)
-// Testing: HARNESS: RecorderTest (test_core): the mock and the replay
-//          fixture recorded, the CSV files against the app's
-//          (BridgeTest's round trip), the seams in internal.h for drops,
-//          failed writes, a held writer and syncs, the statuses; link
-//          transitions and reply timing with the test as the worker, and
-//          through the fake ELM327 (Elm327SessionTest.ARecordingHolds*);
-//          a sleep's line and the writer's wakes through the seams;
-//          nothing written before an attach, however late; a signal
-//          file's copy and its hash, only for the session it decodes
-//          (RecorderTest.ASignalFile*, .AReplayWithTheRecordingsFile*)
+// Testing: UNIT: RecorderTest (test_core); BRIDGE: BridgeTest (test_bridge);
+//          HARNESS: Elm327SessionTest (test_elm327)
 //
 // The worker copies each frame and its values, its link transitions and
 // its reply timing into a byte ring (single producer, single consumer);
@@ -138,11 +130,16 @@ bool is_text_kind(uint8_t kind)
 }
 
 /* A CSV field, quoted only when it has to be, as the app's recorder
- * quotes it */
+ * quotes it; a line break, which no line or row may hold, a space */
 std::string csv_quoted(const char* text, size_t len)
 {
     std::string f(text, len);
-    if (f.find_first_of(",\"\n") == std::string::npos) {
+    for (char& c : f) {
+        if (c == '\r' || c == '\n') {
+            c = ' ';
+        }
+    }
+    if (f.find_first_of(",\"") == std::string::npos) {
         return f;
     }
     std::string q = "\"";
@@ -248,33 +245,24 @@ std::string one_line(const char* text)
  * An enum def's label lines for events.log's header (format 3): "label
  * <name>,<raw>,<label>" per entry, raw values ascending as the set holds
  * them. The name and the label are CSV-quoted, so a comma or a quote in
- * either reads back; a line break, which no line may hold, is a space,
- * as one_line makes it in a note, keeping the label within its 27
- * bytes. A label can't
- * start a formula: the set's validator refuses one that would
- * (ADR-0049 section 8), so none reaches a file. Only the first def of a
- * name writes its labels, since the reader keeps the first signal line
- * of a name; name is the CSV-quoted name, and labeled the names written.
+ * either reads back, and a line break is a space, keeping the label
+ * within its 27 bytes. A label can't start a formula: the set's
+ * validator refuses one that would (ADR-0049 section 8), so none reaches
+ * a file. The caller writes them only for the first def of a name, since
+ * the reader keeps the first signal line of a name; name is the
+ * CSV-quoted name.
  */
 std::string label_lines(const ecuio_signal_set_t* set,
-                        const ecuio_signal_def_t& d, const std::string& name,
-                        std::vector<std::string>& labeled)
+                        const ecuio_signal_def_t& d, const std::string& name)
 {
     if (d.kind != ECUIO_VALUE_ENUM || set->enums == nullptr ||
-        uint32_t{d.table_first} + d.table_count > set->enum_count ||
-        std::find(labeled.begin(), labeled.end(), name) != labeled.end()) {
+        uint32_t{d.table_first} + d.table_count > set->enum_count) {
         return {};
     }
-    labeled.push_back(name);
     std::string lines;
     for (uint32_t k = 0; k < d.table_count; ++k) {
         const ecuio_enum_entry_t& e = set->enums[d.table_first + k];
-        std::string label(e.label, strnlen(e.label, sizeof e.label));
-        for (char& c : label) {
-            if (c == '\r' || c == '\n') {
-                c = ' ';
-            }
-        }
+        const std::string label(e.label, strnlen(e.label, sizeof e.label));
         lines += "label  " + name + "," + std::to_string(e.raw) + "," +
                  csv_quoted(label.data(), label.size()) + "\n";
     }
@@ -1593,7 +1581,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       ? "from an older recording"
                       : session->source_frame_flags.c_str();
         header += "\n";
-        std::vector<std::string> labeled; /* names whose labels are written */
+        std::vector<std::string> named; /* the names signal lines wrote */
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
@@ -1608,7 +1596,10 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       std::to_string(d.decimal_places) + "," +
                       std::to_string(d.plot_rank) + "," +
                       std::to_string(d.group) + "\n";
-            header += label_lines(set, d, name, labeled);
+            if (std::find(named.begin(), named.end(), name) == named.end()) {
+                header += label_lines(set, d, name);
+                named.push_back(name);
+            }
         }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;

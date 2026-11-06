@@ -532,3 +532,11 @@ Section 4's provenance, as built:
   plugin.
 - **`havne-cli stream --plugin --record`** gives the recorder the
   variant the URI's `profile=` selects, as it gives a `--signals` file.
+
+> **Note of 2026-11-05, a variant with no one file.** A variant whose
+> merged text doesn't read back to its set (past 1 MiB written out, say)
+> no longer loads without a copy: the plugin is refused, naming the
+> variant and the loader's reason, so every variant a plugin loads has
+> one. A manifest `name` with no letter or digit, or one making a
+> profile name past 63 characters, is refused at the name, since each
+> variant's file takes its profile name from it.

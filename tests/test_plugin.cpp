@@ -1,5 +1,5 @@
 // File/layer: tests/test_plugin.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest, the plugin loader (ADR-0052, core/src/plugin.cpp)
+// Testing: UNIT: PluginTest (test_signals)
 
 #include <gtest/gtest.h>
 #include <ecuio/core.h>
@@ -781,4 +781,60 @@ TEST(PluginTest, AVariantIsOneSignalFileThatReadsBackAsItsSet)
         EXPECT_EQ(t->scale, i == 0 ? 0.1 : 0.01);
         ecuio_signal_file_free(back);
     }
+}
+
+// A name a variant's signal file can't make a profile name from is
+// refused at the manifest, where it stands
+TEST(PluginTest, ANameThatMakesNoProfileIsRefused)
+{
+    for (const std::string& name : {std::string("!!!"), std::string(60, 'a')}) {
+        std::string head = kHead;
+        head.replace(head.find("\"name\": \"P\""), 11,
+                     "\"name\": \"" + name + "\"");
+        const std::string why = packed_refusal(packed(head, kData));
+        EXPECT_NE(why.find("\"name\""), std::string::npos) << why;
+        EXPECT_NE(why.find("profile name"), std::string::npos) << why;
+        EXPECT_EQ(why.find("variant 'base'"), std::string::npos)
+            << "refused at the name, not by a variant's copy: " << why;
+    }
+}
+
+// A variant whose merged files a recording can't copy as one signal file
+// (past 1 MiB written out) is refused, never loaded with no copy
+TEST(PluginTest, AVariantThatMakesNoOneSignalFileIsRefused)
+{
+    const std::string pad(600 * 1024, 'x');
+    const auto file = [&pad](const char* key, const char* did) {
+        return std::string(R"({"havne_signals": 1, "signals": [{"key": ")") +
+               key + R"(", "name": "N", "ecu": "pcm", "x-pad": ")" + pad +
+               R"(", "read": {"service": "22", "number": ")" + did +
+               R"("}, "field": {"byte": 0}}]})";
+    };
+    const std::string why = packed_refusal(
+        packed(kHead, file("one", "F40D"),
+               R"([{"id": "base", "files": ["a.json", "b.json"]}])",
+               ", \"b.json\": " + file("two", "F40E")));
+    EXPECT_NE(why.find("variant 'base''s files don't make one signal file"),
+              std::string::npos)
+        << why;
+}
+
+// A session on a variant's set registered under the caller's own name
+// keeps the plugin from being freed; once it's gone, the free takes that
+// name too, so none is left pointing at a freed set
+TEST(PluginTest, AFreeWaitsForASessionOnASetRegisteredByHand)
+{
+    Plugin p = load_packed(packed(kHead, kData));
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_profile_register(
+                  "by-hand", ecuio_plugin_variant_set(p.get(), 0), nullptr),
+              ECUIO_OK);
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://x?profile=by-hand", &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_plugin_free(p.get()), ECUIO_ERR_IN_USE);
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_plugin_free(p.release()), ECUIO_OK);
+    const ecuio_signal_set_t* set = nullptr;
+    EXPECT_EQ(ecuio_profile_lookup("by-hand", &set), ECUIO_ERR_UNKNOWN_PROFILE);
 }

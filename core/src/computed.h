@@ -1,7 +1,5 @@
 // File/layer: core/src/computed.h | C++17, Qt-free, every platform, pure
-// Testing: UNIT: ComputedTest (test_signals): the checker's refusals, the
-//          stack machine's results, division by zero and non-finite
-//          results; the worker's use in CoreTest.Computed*
+// Testing: UNIT: ComputedTest (test_signals); CoreTest (test_core)
 //
 // A computed def's program (ADR-0051 section 5, ecuio_computed_t in
 // signals.h): the checker the validator runs once, and the stack
@@ -137,9 +135,14 @@ inline bool ecuio_computed_run(const ecuio_computed_t& program,
             r = a * b;
             break;
         default:
-            /* A zero b gives an infinity or a NaN, refused below */
             r = a / b;
             break;
+        }
+        /* A step that isn't finite (a division by zero, an overflow)
+         * gives no value, even where a later step would make it finite
+         * again: 1 / (1 / 0) is no value, not 0 */
+        if (!isfinite(r)) {
+            return false;
         }
         stack[depth - 1] = r;
     }

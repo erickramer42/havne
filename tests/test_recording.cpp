@@ -1,12 +1,5 @@
 // File/layer: tests/test_recording.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: RecordingRowsTest: recording_rows.h's parsers; HARNESS:
-//          RecordingTest: the reader (ADR-0049 section 5) on a folder the
-//          recorder wrote (the replay fixture, with a marker), on an
-//          hour of the fixture's own values at their own times, and on
-//          folders written by hand (an older recording, torn and refused
-//          rows, no summary); every query checked against a scan of the
-//          rows the test wrote, from several threads too, and the memory
-//          bound and the cache through the seams in internal.h
+// Testing: UNIT: RecordingRowsTest, RecordingTest (test_core)
 //
 // Each case writes into a folder of its own under TEMP/TMPDIR, removed at
 // the end.
@@ -1438,4 +1431,44 @@ TEST(RecordingTest, TheReaderRefusesWhatItMust)
     EXPECT_EQ(ecuio_recording_find(r.r, &bad, 0, &at), ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(r.find(fd, 0), ECUIO_RECORDING_NONE) << "found nothing is OK";
     ecuio_recording_close(nullptr);
+}
+
+// Past a double's range or under half its least, a value is infinite or
+// 0 whatever its digits: the edges either side still read as strtod's
+TEST(RecordingRowsTest, AnExponentFarPastTheRangeIsZeroOrInfinite)
+{
+    double v = 1;
+    ASSERT_TRUE(rows::parse_number("1e-999999", 9, &v));
+    EXPECT_EQ(v, 0.0);
+    EXPECT_FALSE(std::signbit(v));
+    ASSERT_TRUE(rows::parse_number("-1e-999999", 10, &v));
+    EXPECT_TRUE(v == 0.0 && std::signbit(v));
+    ASSERT_TRUE(rows::parse_number("1e999999", 8, &v));
+    EXPECT_TRUE(std::isinf(v) && v > 0);
+    for (const char* s : {"4.9e-324", "9999999999999999999e-342", "1e308",
+                          "1.7976931348623157e308"}) {
+        ASSERT_TRUE(rows::parse_number(s, std::strlen(s), &v)) << s;
+        EXPECT_GT(v, 0.0) << s;
+        EXPECT_FALSE(std::isinf(v)) << s;
+    }
+
+    /* Each far exponent at once, never a loop of a step a power of ten:
+     * about what an ordinary number costs */
+    const auto seconds = [](const char* s) {
+        double x = 0;
+        const size_t n = std::strlen(s);
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < 20000; ++i) {
+            EXPECT_TRUE(rows::parse_number(s, n, &x));
+        }
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                             start)
+            .count();
+    };
+    const double plain = seconds("1.2345e+9");
+    for (const char* far : {"1e999999", "1e-999999"}) {
+        const double t = seconds(far);
+        EXPECT_LT(t, 10 * plain + 0.05)
+            << far << ": " << t << " s against " << plain;
+    }
 }

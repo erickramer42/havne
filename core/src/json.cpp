@@ -494,7 +494,7 @@ private:
     /* Four hex digits after a "\u" at p_ (the backslash), or -1 */
     long u_escape() const
     {
-        if (end_ - p_ < 6 || p_[1] != 'u') {
+        if (end_ - p_ < 6 || p_[0] != '\\' || p_[1] != 'u') {
             return -1;
         }
         long v = 0;
@@ -826,6 +826,24 @@ std::string Error::to_string() const
            std::to_string(column) + ": " + words;
 }
 
+size_t invisible_length(const char* p, size_t n)
+{
+    const auto* u = reinterpret_cast<const unsigned char*>(p);
+    if (n >= 2 && u[0] == 0xC2 && u[1] >= 0x80 && u[1] <= 0x9F) {
+        return 2; /* U+0080 to U+009F */
+    }
+    if (n >= 3 && u[0] == 0xE2) {
+        if (u[1] == 0x80 &&
+            (u[2] == 0x8E || u[2] == 0x8F || (u[2] >= 0xA8 && u[2] <= 0xAE))) {
+            return 3; /* U+200E, U+200F, U+2028 to U+202E */
+        }
+        if (u[1] == 0x81 && u[2] >= 0xA6 && u[2] <= 0xA9) {
+            return 3; /* U+2066 to U+2069 */
+        }
+    }
+    return 0;
+}
+
 std::string quoted(std::string_view text)
 {
     constexpr size_t kChars = 32;
@@ -837,9 +855,14 @@ std::string quoted(std::string_view text)
             break;
         }
         const auto c = static_cast<unsigned char>(text[i]);
+        const size_t hidden =
+            invisible_length(text.data() + i, text.size() - i);
         if (c < 0x20 || c == 0x7F) {
             out += '?';
             ++i;
+        } else if (hidden > 0) {
+            out += '?';
+            i += hidden;
         } else if (c < 0x80) {
             out += static_cast<char>(c);
             ++i;

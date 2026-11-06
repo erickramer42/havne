@@ -1,10 +1,5 @@
 // File/layer: core/src/profile_registry.cpp | C++17, Qt-free
-// Testing: UNIT: lookup semantics (null set is a success), unknown
-//          names fail, register overwrites, registration validates,
-//          reports the validator's result, refuses a set with more
-//          requests than the engine's table holds, protects the
-//          built-ins, unregister; PluginTest: the use counts (a
-//          set in use isn't unregistered with its plugin)
+// Testing: UNIT: CoreTest (test_core); PluginTest (test_signals)
 
 #include "ecuio/profile.h"
 #include "profile_hold.h"
@@ -12,7 +7,9 @@
 #include "session.h"
 #include "uds_generic.h"
 
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -229,11 +226,10 @@ void ecuio_profile_release(const ecuio_signal_set_t* set) noexcept
 }
 
 ecuio_status_t
-ecuio_profile_unregister_unused(const char* const* names,
-                                const ecuio_signal_set_t* const* sets,
+ecuio_profile_unregister_unused(const ecuio_signal_set_t* const* sets,
                                 size_t count)
 {
-    if (count > 0 && (names == nullptr || sets == nullptr)) {
+    if (count > 0 && sets == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     try {
@@ -243,14 +239,11 @@ ecuio_profile_unregister_unused(const char* const* names,
                 return ECUIO_ERR_IN_USE;
             }
         }
-        for (size_t i = 0; i < count; ++i) {
-            if (names[i] == nullptr || is_built_in(names[i])) {
-                continue;
-            }
-            auto it = registry().find(std::string(names[i]));
-            if (it != registry().end() && it->second == sets[i]) {
-                registry().erase(it);
-            }
+        for (auto it = registry().begin(); it != registry().end();) {
+            const bool mine =
+                it->second != nullptr && !is_built_in(it->first.c_str()) &&
+                std::find(sets, sets + count, it->second) != sets + count;
+            it = mine ? registry().erase(it) : std::next(it);
         }
         return ECUIO_OK;
     } catch (...) {

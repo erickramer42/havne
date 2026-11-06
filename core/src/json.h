@@ -1,9 +1,5 @@
 // File/layer: core/src/json.h | internal, C++17, Qt-free; ALL platforms
-// Testing: UNIT: JsonTest (test_core): every accepted form, each node's
-//          line and column, every refusal with its position and words,
-//          the bounds at their edges, numbers under a comma locale; what
-//          write writes read back the same (JsonTest.Written*, .What*,
-//          .ANumber*); FUZZ: fuzz_json
+// Testing: UNIT: JsonTest (test_core); FUZZ: fuzz_json
 //
 // A strict JSON reader (RFC 8259) for the files core reads: signal files
 // (ADR-0051 section 1) and what their loader and importers build on. Not
@@ -132,9 +128,17 @@ std::string write(const Value& v);
  * does), with a '.' whatever the locale */
 std::string number_text(double v);
 
+/* The bytes of the character at p (n bytes left) that a line shows as
+ * nothing or that moves the text around it: a C1 control (U+0080 to
+ * U+009F), the line and paragraph separators (U+2028, U+2029), or a
+ * direction mark, embedding, override or isolate (U+200E, U+200F,
+ * U+202A to U+202E, U+2066 to U+2069); 0 for any other */
+size_t invisible_length(const char* p, size_t n);
+
 /* Text from the input shown in words: single-quoted, control characters
- * as '?', cut to 32 characters with "..." after. For keys and strings
- * (valid UTF-8), so a message stays one line of reasonable length. */
+ * and the characters invisible_length finds as '?', cut to 32 characters
+ * with "..." after. For keys and strings (valid UTF-8), so a message
+ * stays one line of reasonable length that shows what it quotes. */
 std::string quoted(std::string_view text);
 
 }  // namespace ecuio_json

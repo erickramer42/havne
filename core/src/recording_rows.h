@@ -1,8 +1,7 @@
 // File/layer: core/src/recording_rows.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
-// Testing: UNIT: RecordingRowsTest (test_core): each parser's accepted and
-//          refused forms; HARNESS: RecordingTest (test_core) through the
-//          reader; FUZZ: fuzz_recording_rows
+// Testing: UNIT: RecordingRowsTest, RecordingTest (test_core); JsonTest
+//          (test_core); FUZZ: fuzz_recording, fuzz_json
 //
 // The rows of a recording as the reader parses them (ADR-0049 section 5):
 // signals.csv's and markers.csv's CSV rows, events.log's header lines and
@@ -168,6 +167,16 @@ inline bool parse_number(const char* p, size_t n, double* out)
     double v = static_cast<double>(mantissa);
     if (v != 0.0) {
         int e = exponent;
+        /* The mantissa is under 1e19, so past these the value is past a
+         * double's range or under half its least, whatever its digits:
+         * no loop below runs more than a few steps */
+        if (e > 330) {
+            v = std::numeric_limits<double>::infinity();
+            e = 0;
+        } else if (e < -350) {
+            v = 0.0;
+            e = 0;
+        }
         while (e > 22) {
             v *= 1e22;
             e -= 22;

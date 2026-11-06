@@ -1,8 +1,5 @@
 // File/layer: tests/test_signal_tables.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalTablesTest (an enum def's decode and labels, a
-//          computed def's shape, the set validator's table checks) and
-//          ComputedTest (computed.h: the program checker and the stack
-//          machine), ADR-0051
+// Testing: UNIT: SignalTablesTest, ComputedTest (test_signals)
 
 #include <gtest/gtest.h>
 #include <ecuio/signals.h>
@@ -459,4 +456,42 @@ TEST(ComputedTest, ADivisionByZeroOrAnInfinityGivesNoValue)
     const double boost[4] = {140.0, 101.0, 0.0, 0.0};
     ASSERT_TRUE(ecuio_computed_run(c, boost, &out));
     EXPECT_DOUBLE_EQ(out, 39.0) << "the second from the top minus the top";
+}
+
+// A step that isn't finite gives no value, though a later step would make
+// it finite again
+TEST(ComputedTest, AStepThatIsntFiniteGivesNoValue)
+{
+    const auto program = [](std::initializer_list<uint8_t> steps) {
+        ecuio_computed_t p{};
+        p.input_ids[0] = 1;
+        p.input_count = 1;
+        p.constant_count = 1;
+        p.constants[0] = 1.0;
+        p.step_count = static_cast<uint8_t>(steps.size());
+        size_t k = 0;
+        for (const uint8_t s : steps) {
+            p.steps[k++] = s;
+        }
+        EXPECT_TRUE(ecuio_computed_check(p));
+        return p;
+    };
+    const uint8_t one = ECUIO_COMPUTED_PUSH_CONSTANT | 0u;
+    const uint8_t a = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+    /* 1 / (1 / a) */
+    const ecuio_computed_t inverse =
+        program({one, one, a, ECUIO_COMPUTED_DIVIDE, ECUIO_COMPUTED_DIVIDE});
+    /* 1 / (a * a) */
+    const ecuio_computed_t square =
+        program({one, a, a, ECUIO_COMPUTED_MULTIPLY, ECUIO_COMPUTED_DIVIDE});
+    double out = -1.0;
+    const double zero[4] = {0.0, 0.0, 0.0, 0.0};
+    EXPECT_FALSE(ecuio_computed_run(inverse, zero, &out)) << out;
+    const double huge[4] = {1e200, 0.0, 0.0, 0.0};
+    EXPECT_FALSE(ecuio_computed_run(square, huge, &out)) << out;
+    const double two[4] = {2.0, 0.0, 0.0, 0.0};
+    ASSERT_TRUE(ecuio_computed_run(inverse, two, &out));
+    EXPECT_DOUBLE_EQ(out, 2.0);
+    ASSERT_TRUE(ecuio_computed_run(square, two, &out));
+    EXPECT_DOUBLE_EQ(out, 0.25);
 }

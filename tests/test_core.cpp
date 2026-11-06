@@ -5740,3 +5740,66 @@ TEST(VinTest, OnlyAVinIsDecoded)
     EXPECT_EQ(ecuio_vin_decode("1FAFAKE10M0000001", 0, nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
 }
+
+// A packed reply decodes each def once: the defs keyed by a record's PID
+// from their records, every other def on its ID (unkeyed, or keyed
+// otherwise) from the reply whole, so a batch never holds more values
+// than the set has defs
+TEST(CoreTest, APackedReplyDecodesEachDefOnce)
+{
+    static ecuio_signal_def_t defs[3];
+    std::memset(defs, 0, sizeof defs);
+    defs[0].id = 1;
+    defs[0].message_id = ECUIO_OBD2_ECU_ARB_ID;
+    defs[0].mux_length = 2;
+    defs[0].mux_key = 0x410C;
+    defs[0].kind = ECUIO_VALUE_UINT;
+    defs[0].byte_order = ECUIO_BYTE_ORDER_BE;
+    defs[0].start_byte = 2;
+    defs[0].bit_length = 16;
+    defs[0].scale = 0.25;
+    std::strcpy(defs[0].name, "Rpm");
+    defs[1].id = 2;
+    defs[1].message_id = ECUIO_OBD2_ECU_ARB_ID;
+    defs[1].kind = ECUIO_VALUE_UINT;
+    defs[1].bit_length = 8;
+    defs[1].scale = 1;
+    std::strcpy(defs[1].name, "First byte");
+    defs[2].id = 3;
+    defs[2].message_id = ECUIO_OBD2_ECU_ARB_ID;
+    defs[2].mux_length = 1;
+    defs[2].mux_key = 0x41;
+    defs[2].kind = ECUIO_VALUE_UINT;
+    defs[2].start_byte = 1;
+    defs[2].bit_length = 8;
+    defs[2].scale = 1;
+    std::strcpy(defs[2].name, "Second byte");
+    static ecuio_signal_set_t set;
+    set = ecuio_signal_set_t{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 3;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_profile_register("packed-each-once", &set, nullptr),
+              ECUIO_OK);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://p?profile=packed-each-once", &session),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+
+    const ecuio_frame_t packed = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x1A, 0xF8, 0x0D, 0x20});
+    ecuio_session_dispatch_callbacks(session, &packed);
+    ASSERT_EQ(cap.count(), 1u);
+    EXPECT_EQ(id_values(cap.batches[0]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {1, 1726.0}, {2, 65.0}, {3, 12.0}}))
+        << "the record's def, then the others from the reply whole";
+    EXPECT_EQ(unsplit(session), 0u);
+
+    ecuio_session_destroy(session);
+    (void)ecuio_profile_unregister("packed-each-once");
+}
