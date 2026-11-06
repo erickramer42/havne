@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-06
+
 ### Added
 
 - A replay decodes with the signal file its recording holds, so a recording replays as it was recorded after the vehicle's file has changed or been removed, or on another machine: the app's Replay loads the copy under a name of its own when it differs from the file loaded now, and `havne-cli stream replay://` uses it with no `--signals`; a copy that no longer matches its hash isn't used, and the replay says why ([docs/signal-files.md](docs/signal-files.md)).
@@ -692,7 +694,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/erickramer42/havne/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/erickramer42/havne/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/erickramer42/havne/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/erickramer42/havne/compare/v0.3.6...v0.4.0

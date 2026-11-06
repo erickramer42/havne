@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-06, **Version:** v0.5.0,
+**Updated:** 2026-11-06, **Version:** v0.5.1,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,8 +14,10 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.5.1, a patch, in progress; v0.6.0 after it.**
-v0.5.0 is out:
+**Current phase: between releases; v0.6.0 is next.** v0.5.1 is out, a
+patch: a recording replays with its own signal file, a signal its
+module refuses shows as refused, and a vehicle's signal file saves out
+of the app. v0.5.0 brought
 your own signals, as signal files that core reads from bytes and
 refuses at load where they're wrong, written per vehicle in the app
 (with **Read once**) or converted from an OBDb set by `havne-cli`;
@@ -509,7 +511,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
 | v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | Released |
 | v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | Released |
-| v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; the car run of v0.5.0's own signals; the request pace on Windows' high-resolution timer, the charts on the GPU | In progress |
+| v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; the car run of v0.5.0's own signals; the request pace on Windows' high-resolution timer, the charts on the GPU | Released |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
