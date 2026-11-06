@@ -731,7 +731,14 @@ workflow's `env`); the cases that share a fixed resource are
 install it through `install-qt-action` keep it in the Actions cache,
 except the iOS kit (about 3.6 GB, the largest entry): only `main`'s
 runs cache it, so the repository stays under the cache's 10 GB, and
-other branches install it from the mirrors.
+other branches install it from the mirrors. The other downloads that
+have failed a run with a 504 come from the cache too, saved by
+`main`'s pushes only (one copy each, which every other ref and
+`release.yml`'s tags read): the Windows kit (`win-build` saves it,
+keyed on the version, arch and aqtinstall's commit), Gradle's
+distribution and the Android build's dependencies (keyed on the Qt
+version, whose template pins them), and linuxdeploy's pinned files
+(keyed on `make-appimage.sh`). A miss downloads as before.
 Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
