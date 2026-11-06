@@ -24,6 +24,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- The charts draw their traces on the GPU: on the test phone, a tap on the Recordings page's chart, given the page with every signal plotted, holds the app for about 50 ms instead of 150, and a drag moves the chart as it goes (about 36 frames in a 600 ms swipe) where it stood still until the drag ended.
 - On Windows, a session that asks waits out the engine's 20 ms floor between two requests to a module on time, instead of at Windows' 15.6 ms timer step: against an adapter whose empty reads return at once, each module was asked about every 31 ms, now about every 21 ms, however many modules. A session through the OBDX Pro VX keeps its pace (about 27 ms), which its own held reads set.
 - Importing a newer version of a plugin that couldn't be kept (its copy not written) left neither version loaded; the version loaded now stays loaded and kept until the new one has loaded in its place.
 
