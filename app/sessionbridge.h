@@ -648,6 +648,13 @@ public:
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
     Q_INVOKABLE void forceFrameCountForTesting(int count);
+    // Test seam: the VIN a session's identification would read, and its
+    // vehicleIdentified, for the QML tests (the fakes' VIN is no real one)
+    Q_INVOKABLE void identifyForTesting(const QString& vin)
+    {
+        m_vin = vin;
+        emit vehicleIdentified();
+    }
 
     // J2534 device discovery (Windows; empty list elsewhere). One map per
     // installed Pass-Thru interface driver: { vendorName, dllPath,

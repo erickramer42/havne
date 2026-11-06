@@ -25,6 +25,14 @@ QString shaOf(const QByteArray& bytes)
         QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
 }
 
+// Whether the copy at path already holds bytes, as the signal store
+// judges its own: a copy changed since is written again
+bool holds(const QString& path, const QByteArray& bytes)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) && f.read(bytes.size() + 1) == bytes;
+}
+
 // Core's words: the detail, else the status
 QString coreWords(ecuio_status_t rc)
 {
@@ -221,7 +229,7 @@ QVariantMap PluginStore::import(const QByteArray& bytes)
     QVariantMap out = entryOf(sha, m_held.at(sha));
     out.insert(QStringLiteral("replaced"), replaced);
     const QString path = pathOf(sha);
-    if (QFile::exists(path)) {
+    if (holds(path, bytes)) {
         out.insert(QStringLiteral("kept"), true);
         return out;
     }
@@ -298,6 +306,23 @@ QVariantList PluginStore::matches(const QString& vin, int latestModelYear) const
         }
     }
     return out;
+}
+
+const ecuio_signal_file_t*
+PluginStore::fileFor(const ecuio_signal_set_t* set) const
+{
+    if (set == nullptr) {
+        return nullptr;
+    }
+    for (const auto& held : m_held) {
+        const auto count = static_cast<uint32_t>(held.second.variants.size());
+        for (uint32_t i = 0; i < count; ++i) {
+            if (ecuio_plugin_variant_set(held.second.plugin, i) == set) {
+                return ecuio_plugin_variant_file(held.second.plugin, i);
+            }
+        }
+    }
+    return nullptr;
 }
 
 void PluginStore::close()

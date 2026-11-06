@@ -108,9 +108,11 @@ QtObject {
         return m
     }
 
-    // A new vehicle's own file
-    function emptyFile(label) {
-        return { havne_signals: 1, name: qsTr("%1 own").arg(String(label).trim()),
+    // A new vehicle's own file, named "<label> own" or name when given
+    // (VehicleBook.ownName: one no other file's profile has)
+    function emptyFile(label, name) {
+        return { havne_signals: 1,
+                 name: name !== undefined ? String(name) : qsTr("%1 own").arg(String(label).trim()),
                  source: { name: "Written in Havne" }, ecus: [], signals: [] }
     }
 
@@ -139,8 +141,9 @@ QtObject {
     }
 
     // file with signal on module: the module joins the ecus once ("m" and
-    // its rx), and a signal of the same key is replaced in its place
-    function withSignal(file, signal, module) {
+    // its rx), and a signal of the same key is replaced in its place, or
+    // the one keyed replacing (an Edit that renamed it)
+    function withSignal(file, signal, module, replacing) {
         const d = copy(file)
         let ecu = d.ecus.find(e => String(e.rx).toUpperCase() === module.rx)
         if (ecu === undefined) {
@@ -153,7 +156,8 @@ QtObject {
             delete ecu.tx
         const s = copy(signal)
         s.ecu = ecu.id
-        const at = d.signals.findIndex(x => x.key === s.key)
+        const old = replacing !== undefined && replacing !== "" ? replacing : s.key
+        const at = d.signals.findIndex(x => x.key === old)
         if (at < 0)
             d.signals.push(s)
         else

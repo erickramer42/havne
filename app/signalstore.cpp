@@ -22,6 +22,15 @@ QString shaOf(const QByteArray& bytes)
         QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
 }
 
+// Whether the copy at path already holds bytes: named by their hash, it
+// should, but one changed since (an editor, a disk fault) holds others,
+// and an import of the right bytes is what repairs it
+bool holds(const QString& path, const QByteArray& bytes)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) && f.read(bytes.size() + 1) == bytes;
+}
+
 // The loader's or the registry's words: the detail, else the status
 QString coreWords(ecuio_status_t rc)
 {
@@ -105,9 +114,8 @@ QVariantMap SignalStore::import(const QByteArray& bytes)
                 {QStringLiteral("words"), words}};
     }
     QVariantMap out = entryOf(sha, m_held.at(sha));
-    // Named by its hash, a copy already there holds these bytes
     const QString path = pathOf(sha);
-    if (QFile::exists(path)) {
+    if (holds(path, bytes)) {
         out.insert(QStringLiteral("kept"), true);
         return out;
     }

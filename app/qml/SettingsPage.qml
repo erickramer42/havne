@@ -262,6 +262,10 @@ Pane {
             return false
         }
         signalProblem = ""
+        if (pickedVehicle.signals.some(e => e.sha256 === r.sha256)) {
+            signalNote = qsTr("%1 is this vehicle's already").arg(r.name)
+            return false
+        }
         saveVehicles(VehicleBook.addSignals(vehicles, file))
         signalNote = r.extends === "obd2"
             ? qsTr("%1 added: obd2 and %2 of your own, profile %3").arg(r.name).arg(r.own)
@@ -319,16 +323,32 @@ Pane {
         return true
     }
 
+    // A removed plugin's variants are no vehicle's pick any more, and the
+    // field reads Default when it named one
     function removePlugin(sha) {
         pluginNote = ""
+        const entry = pluginList.find(p => p.sha256 === sha)
+        const profiles = entry !== undefined && entry.ok ? entry.profiles : []
         const r = Bridge.removePlugin(sha)
         pluginProblem = r.ok ? "" : r.words
+        if (r.ok && profiles.length > 0) {
+            saveVehicles(VehicleBook.dropPlugin(vehicles, profiles))
+            if (profiles.indexOf(profileChoice) >= 0)
+                chooseProfile("default")
+        }
         loadPlugins()
     }
 
     // The user's pick for this vehicle (ADR-0052 section 5: the VIN only
-    // proposes): kept in its entry, and read through the URI's profile=
+    // proposes): kept in its entry, and read through the URI's profile=.
+    // The pick pressed again is undone
     function pickPluginVariant(profile) {
+        if (pickedVehicle !== null && pickedVehicle.plugin === profile) {
+            saveVehicles(VehicleBook.setPlugin(vehicles, ""))
+            if (profileChoice === profile)
+                chooseProfile("default")
+            return
+        }
         saveVehicles(VehicleBook.setPlugin(vehicles, profile))
         chooseProfile(profile)
     }
@@ -385,6 +405,26 @@ Pane {
     property string formProblem: ""
     property string formNote: ""
     property var readResult: null
+    // The key of the signal Edit filled the form with, "" for a new one:
+    // its Save replaces that signal, renamed or not, and ends the Edit
+    property string editingKey: ""
+    // The vehicle a Read once was asked for: its reply shows only there
+    property string readOnceFor: ""
+
+    // The form and the section's notes are the picked vehicle's: a pick,
+    // New, Duplicate, Forget or a car recognized starts them afresh, and a
+    // question asked about the last one goes with it
+    readonly property string pickedId: pickedVehicle !== null ? pickedVehicle.id : ""
+    onPickedIdChanged: {
+        confirming = ""
+        signalProblem = ""
+        signalNote = ""
+        clearForm()
+    }
+
+    function clearForm() {
+        fillForm(SignalForm.emptyFields())
+    }
 
     function readForm() {
         return { name: formName.text, rx: formRx.text, tx: formTx.text, service: formService,
@@ -417,6 +457,7 @@ Pane {
         formProblem = ""
         formNote = ""
         readResult = null
+        editingKey = ""
     }
 
     // The adapter Read once asks on: the field's, when it names one, else
@@ -433,6 +474,7 @@ Pane {
         formNote = ""
         readResult = null
         const f = readForm()
+        readOnceFor = pickedId
         const why = Bridge.readOnce(readOnceAdapter(), SignalForm.draft(f), SignalForm.moduleOf(f))
         if (why !== "")
             formProblem = why
@@ -471,8 +513,10 @@ Pane {
         return true
     }
 
-    // The form's signal into the own file, made with the first; a signal
-    // of the same name's key replaced
+    // The form's signal into the own file, made with the first under a
+    // name no other file's profile has; the signal Edit filled the form
+    // with replaced, or a new one's of the same name. Another signal whose
+    // name makes the same key is not overwritten: the form says so
     function saveDraft() {
         formNote = ""
         readResult = null
@@ -480,22 +524,56 @@ Pane {
             return false
         const f = readForm()
         const signal = SignalForm.draft(f)
-        const base = ownFile !== null ? ownFile : SignalForm.emptyFile(pickedVehicle.label)
-        return saveOwn(SignalForm.withSignal(base, signal, SignalForm.moduleOf(f)),
-                       qsTr("%1 saved in %2").arg(signal.name, base.name))
+        const clash = ownSignals.find(s => s.key === signal.key && s.key !== editingKey
+                                           && (editingKey !== "" || s.name !== signal.name))
+        if (clash !== undefined) {
+            formProblem = qsTr("%1, saved already, has the key %2 too: edit it, or give "
+                               + "this one another name").arg(clash.name, signal.key)
+            return false
+        }
+        const base = ownFile !== null ? ownFile
+            : SignalForm.emptyFile(pickedVehicle.label,
+                                   VehicleBook.ownName(vehicles, pickedVehicle.label))
+        if (!saveOwn(SignalForm.withSignal(base, signal, SignalForm.moduleOf(f), editingKey),
+                     qsTr("%1 saved in %2").arg(signal.name, base.name)))
+            return false
+        editingKey = ""   // saved: the Edit is over
+        return true
     }
 
     function editOwnSignal(key) {
         const s = ownSignals.find(x => x.key === key)
-        if (s !== undefined)
+        if (s !== undefined) {
             fillForm(SignalForm.fieldsOf(ownFile, s))
+            editingKey = key
+        }
     }
 
-    // The last signal's removal takes the file with it
+    // A copy of the picked vehicle; its own file is copied under a name of
+    // its own, so each vehicle's own signals change apart (one file to a
+    // profile). Its copy unreadable, the new vehicle starts with none
+    function duplicateVehicle() {
+        const from = pickedVehicle
+        let doc = VehicleBook.duplicate(vehicles, copyLabel)
+        if (from !== null && from.own !== "") {
+            const own = SignalForm.parseFile(Bridge.signalFileText(from.own))
+            const r = own === null ? { ok: false } : (() => {
+                own.name = VehicleBook.ownName(doc, VehicleBook.picked(doc).label)
+                return Bridge.importSignalText(JSON.stringify(own, null, 2))
+            })()
+            doc = r.ok ? VehicleBook.setOwn(doc, { sha256: r.sha256, name: r.name,
+                                                   profile: r.profile })
+                       : VehicleBook.removeSignals(doc, from.own)
+        }
+        changeVehicles(doc)
+    }
+
+    // The last signal's removal takes the file with it, once asked: it
+    // was written here and has no copy elsewhere
     function removeOwnSignal(key) {
         const doc = SignalForm.withoutSignal(ownFile, key)
         if (doc.signals.length === 0) {
-            dropSignalFile(pickedVehicle.own)
+            removeSignalFile(pickedVehicle.own)
             return
         }
         saveOwn(doc, qsTr("Removed from %1").arg(doc.name))
@@ -719,7 +797,10 @@ Pane {
                                             && (standIn === null || f.sha256 !== standIn.sha256))
               .map(f => ({
               name: f.profile, label: f.name,
-              hint: signalInfo[f.sha256].count === 1
+              hint: signalInfo[f.sha256].extends === "obd2"
+                    ? qsTr("Your signal file %1: obd2 and %2 of your own").arg(f.name)
+                          .arg(signalInfo[f.sha256].own)
+                    : signalInfo[f.sha256].count === 1
                     ? qsTr("Your signal file %1: 1 signal").arg(f.name)
                     : qsTr("Your signal file %1: %2 signals").arg(f.name)
                           .arg(signalInfo[f.sha256].count) }))
@@ -852,8 +933,12 @@ Pane {
                   "pack", "scan", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
                    "pack", "scan", "profile", "did"],
-        "socketcan": ["profile", "did", "baud", "filter"]
+        "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
+                      "diagnose", "pack", "scan"]
     })
+    // What a SocketCAN session that only listens takes: Default is raw
+    // there, and core refuses it the keys that ask an ECU
+    readonly property var socketcanListenKeys: ["profile", "did", "baud", "filter"]
 
     function schemeOf(text) {
         const i = text.indexOf("://")
@@ -876,9 +961,11 @@ Pane {
             pairs = pairs.filter(p => keys.indexOf(p[0]) >= 0)
             if (profileChoice === "mock" && (scheme === "j2534" || scheme === "elm327"))
                 profileChoice = "default"
-            // SocketCAN only listens: a profile that requests is refused there
-            if (profileChoice === "uds-generic" && scheme === "socketcan")
-                profileChoice = "default"
+            // SocketCAN asks an ECU through core's ISO-TP (ADR-0040) under a
+            // profile that requests (uds-generic, a file's); one that only
+            // listens takes no request key
+            if (scheme === "socketcan" && ["default", "raw", "mock"].indexOf(profileChoice) >= 0)
+                pairs = pairs.filter(p => socketcanListenKeys.indexOf(p[0]) >= 0)
         }
         setUri(composeUri(base, pairs))
     }
@@ -962,7 +1049,8 @@ Pane {
         target: Bridge
 
         function onReadOnceResult(result) {
-            page.readResult = result
+            if (page.readOnceFor === page.pickedId)
+                page.readResult = result
         }
         function onConnectResult(uri, error) {
             errorLabel.text = error
@@ -984,7 +1072,10 @@ Pane {
         function onConnectedChanged() {
             if (!Bridge.connected)
                 page.plottedApplied = false
-            page.refreshMatches()   // a new session reads its VIN again
+            // A new session reads its VIN again; at its end the matches
+            // the VIN proposed stay to be picked (the VIN goes with it)
+            if (Bridge.connected)
+                page.refreshMatches()
         }
 
         function onVehicleIdentified() {
@@ -1425,7 +1516,7 @@ Pane {
                         text: qsTr("Duplicate")
                         enabled: page.idle && page.pickedVehicle !== null
                                  && VehicleBook.labelProblem(page.vehicles, page.copyLabel, "") === ""
-                        onClicked: page.changeVehicles(VehicleBook.duplicate(page.vehicles, page.copyLabel))
+                        onClicked: page.duplicateVehicle()
                     }
                     ThemedButton {
                         objectName: "vehicleRename"
@@ -1696,6 +1787,7 @@ Pane {
                             required property var modelData
                             required property int index
                             objectName: "pluginMatch_" + index
+                            width: Math.min(implicitWidth, parent.width)
                             text: qsTr("%1: %2").arg(modelData.name, modelData.variant)
                             highlighted: page.pickedVehicle !== null
                                          && page.pickedVehicle.plugin === modelData.profile
@@ -1941,7 +2033,7 @@ Pane {
                         ThemedButton {
                             objectName: "formClear"
                             text: qsTr("Clear")
-                            onClicked: page.fillForm(SignalForm.emptyFields())
+                            onClicked: page.clearForm()
                         }
                     }
 

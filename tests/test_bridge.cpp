@@ -6403,7 +6403,7 @@ TEST(ReadOnceTest, TheUriKeepsTheAdaptersKeysAndAsksForTheOneRequest)
                                body, &why)
                   .toStdString(),
               "socketcan://"
-              "can0?baud=500000&profile=raw&poll=0x0C&filter=0x7B8&txid=0x7B0"
+              "can0?baud=500000&profile=obd2&poll=0x0C&filter=0x7B8&txid=0x7B0"
               "&probe=0");
     // uds-generic's own rule addresses an 11-bit module off the default
     const ReadOnce::Request bodyDid =
@@ -7612,4 +7612,172 @@ TEST(BridgeTest, PluginMatchesProposeVariantsByTheVin)
               "Example: the simulated car");
     EXPECT_EQ(first.value(QStringLiteral("variant")).toString().toStdString(),
               "base");
+}
+
+/* Read once asks a PID on SocketCAN through a profile that requests: a
+ * profile with no channels only listens there and is refused the request
+ * keys (BAD_URI before the link is looked at, so the URI is judged with
+ * or without vcan0) */
+TEST(ReadOnceTest, APidsUriIsOneSocketCanTakes)
+{
+#if !defined(__linux__) || defined(__ANDROID__)
+    GTEST_SKIP() << "socketcan:// is Linux's";
+#else
+    QString why;
+    const ReadOnce::Request pid =
+        request(pidSignal(QStringLiteral("0C"), field(0, 16)));
+    const QString uri =
+        ReadOnce::uriFor(QStringLiteral("socketcan://vcan0"), pid, &why);
+    ASSERT_FALSE(uri.isEmpty()) << why.toStdString();
+    ecuio_session_t* session = nullptr;
+    const ecuio_status_t rc =
+        ecuio_session_create(uri.toUtf8().constData(), &session);
+    EXPECT_NE(rc, ECUIO_ERR_BAD_URI) << ecuio_last_error_detail();
+    if (session != nullptr) {
+        ecuio_session_destroy(session);
+    }
+#endif
+}
+
+/* A copy whose bytes changed since it was kept is written again by an
+ * import of the right bytes, so the next launch loads it: the words that
+ * refused it say to import it again */
+TEST(BridgeTest, SignalFileImportRepairsAChangedCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    const QByteArray good = signalFile(QStringLiteral("Extras"));
+    const QString sha = sha256Of(good);
+    writeScratch(dir.store(), sha + QStringLiteral(".json"),
+                 signalFile(QStringLiteral("X")));
+    QTemporaryDir from;
+    {
+        SessionBridge bridge;
+        const QVariantList before = bridge.useSignalFiles({sha});
+        ASSERT_EQ(before.size(), 1);
+        EXPECT_EQ(before[0]
+                      .toMap()
+                      .value(QStringLiteral("words"))
+                      .toString()
+                      .toStdString(),
+                  "Its copy has changed: import the file again");
+        const QVariantMap r =
+            bridge.importSignalFile(writeScratch(from.path(), "e.json", good));
+        EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool())
+            << "a copy that held other bytes is written, not kept";
+    }
+    SessionBridge later;
+    const QVariantList used = later.useSignalFiles({sha});
+    ASSERT_EQ(used.size(), 1);
+    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool())
+        << used[0]
+               .toMap()
+               .value(QStringLiteral("words"))
+               .toString()
+               .toStdString();
+    EXPECT_TRUE(registered("user.extras"));
+}
+
+TEST(BridgeTest, PluginImportRepairsAChangedCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QString sha = sha256Of(bytes);
+    ASSERT_TRUE(QDir().mkpath(PluginStore::root()));
+    {
+        QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
+                   QStringLiteral(".havne-plugin.json"));
+        ASSERT_TRUE(copy.open(QIODevice::WriteOnly));
+        copy.write(QByteArray(bytes).replace("Oil Temp", "Oil Tamp"));
+    }
+    {
+        SessionBridge bridge;
+        const QVariantList all = bridge.plugins();
+        ASSERT_EQ(all.size(), 1);
+        EXPECT_FALSE(all.at(0).toMap().value(QStringLiteral("ok")).toBool());
+        const QVariantMap r =
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes));
+        EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool());
+    }
+    SessionBridge later;
+    const QVariantList all = later.plugins();
+    ASSERT_EQ(all.size(), 1);
+    EXPECT_TRUE(all.at(0).toMap().value(QStringLiteral("ok")).toBool())
+        << all.at(0)
+               .toMap()
+               .value(QStringLiteral("words"))
+               .toString()
+               .toStdString();
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
+/* A session a plugin variant decodes records the variant's files merged
+ * as signals.json, with the plugin's line (ADR-0052 section 4), as
+ * havne-cli stream --plugin --record does; the mock answers the variant's
+ * DIDs */
+TEST(BridgeTest, PluginRecordingHoldsTheVariantsFile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge
+                    .importPlugin(writeScratch(from.path(), "a.json",
+                                               packed_plugin::example()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://rec?profile=plugin.example-sim.base"))
+                    .isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString folder = root.path() + QStringLiteral("/") + folders[0];
+    QFile copy(folder + QStringLiteral("/signals.json"));
+    ASSERT_TRUE(copy.open(QIODevice::ReadOnly)) << "no signals.json";
+    const QByteArray text = copy.readAll();
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(text.constData(),
+                                     static_cast<size_t>(text.size()), &file),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_NE(ecuio_signal_file_find(file, "oil_temp"), nullptr);
+    ecuio_signal_file_free(file);
+    QFile events(folder + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QByteArray log = events.readAll();
+    EXPECT_TRUE(log.contains("\nplugin  example-sim,1.0.0,base\n"))
+        << log.left(600).toStdString();
+    EXPECT_TRUE(log.contains(
+        ("\nsignal file  signals.json," + sha256Of(text) + "\n").toUtf8()));
+}
+
+/* The bridge's own refusal of a file it can't read names no path: the
+ * folder can hold the account's name */
+TEST(BridgeTest, AFileThatCantBeReadIsRefusedWithoutItsPath)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QUrl missing = QUrl::fromLocalFile(
+        from.path() + QStringLiteral("/missing-extras.json"));
+    SessionBridge bridge;
+    for (const QVariantMap& r :
+         {bridge.importSignalFile(missing), bridge.importPlugin(missing)}) {
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+        const QString words = r.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), "Couldn't read the file");
+        EXPECT_FALSE(words.contains(QStringLiteral("missing")));
+    }
 }
