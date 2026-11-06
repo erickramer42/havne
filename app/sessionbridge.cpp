@@ -990,6 +990,7 @@ SessionBridge::~SessionBridge()
     }
     // Only now: no session is left to decode with the files' sets
     m_signalStore.close();
+    m_pluginStore.close();
     ecuio_shutdown();
 }
 
@@ -1060,6 +1061,59 @@ QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
 int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
 {
     return m_signalStore.deleteUnused(keep);
+}
+
+QVariantList SessionBridge::plugins()
+{
+    return m_pluginStore.all();
+}
+
+QVariantMap SessionBridge::importPlugin(const QUrl& url)
+{
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    QVariantMap result;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("Couldn't read the file")}};
+    } else if (file.size() > static_cast<qint64>(ECUIO_PLUGIN_PACKAGE_MAX)) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("The file is over %1 MiB, a plugin's most")
+                       .arg(ECUIO_PLUGIN_PACKAGE_MAX / (1024 * 1024))}};
+    } else {
+        result = m_pluginStore.import(file.read(ECUIO_PLUGIN_PACKAGE_MAX + 1));
+    }
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin: %1 %2 (%3)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("version")).toString(),
+                       result.value(QStringLiteral("profiles"))
+                           .toStringList()
+                           .join(QStringLiteral(", ")))
+            : QStringLiteral("Plugin refused: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantMap SessionBridge::removePlugin(const QString& sha)
+{
+    const QVariantMap result = m_pluginStore.remove(sha);
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin removed")
+            : QStringLiteral("Plugin not removed: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantList SessionBridge::pluginMatches(const QString& typedVin) const
+{
+    return m_pluginStore.matches(typedVin.trimmed().isEmpty() ? m_vin
+                                                              : typedVin,
+                                 QDate::currentDate().year() + 1);
 }
 
 QString SessionBridge::readOnce(const QString& adapterUri,

@@ -4,7 +4,9 @@
 //          and a relay whose adapter opens at once (Relay); clicks
 //          with stamps of their own (Harness.clickStamped); signal files
 //          to import from a scratch folder, and the store's copies
-//          (Harness.writeScratchFile, .storedSignalFiles).
+//          (Harness.writeScratchFile, .storedSignalFiles); the example
+//          plugin packed and the plugin store's copies
+//          (.writeExamplePlugin, .storedPlugins).
 //          ctest runs each file in its own process (QmlTest.<name>).
 
 #include <QCoreApplication>
@@ -22,6 +24,8 @@
 #include <QUrl>
 #include <QtQuickTest>
 
+#include "packed_plugin.h"
+#include "pluginstore.h"
 #include "signalstore.h"
 
 #include <cstdio>
@@ -167,6 +171,24 @@ public:
     Q_INVOKABLE QStringList storedSignalFiles() const
     {
         return QDir(SignalStore::root()).entryList(QDir::Files, QDir::Name);
+    }
+
+    // The repository's example plugin, packed as a phone imports it
+    // (tests/packed_plugin.h), written as a scratch file named name: its
+    // URL, empty when it can't be; version replaces its own when given
+    Q_INVOKABLE QUrl writeExamplePlugin(const QString& name,
+                                        const QString& version = QString())
+    {
+        const QByteArray bytes = packed_plugin::example(version.toUtf8());
+        return bytes.isEmpty()
+                   ? QUrl()
+                   : writeScratchFile(name, QString::fromUtf8(bytes));
+    }
+
+    // The plugin store's copies, by file name
+    Q_INVOKABLE QStringList storedPlugins() const
+    {
+        return QDir(PluginStore::root()).entryList(QDir::Files, QDir::Name);
     }
 
     Q_INVOKABLE void clearFakeKnobs()

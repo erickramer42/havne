@@ -33,6 +33,8 @@ qt_add_library(app_ui STATIC
     carryover.h
     readonce.cpp
     readonce.h
+    pluginstore.cpp
+    pluginstore.h
     signalstore.cpp
     signalstore.h
     recordingview.cpp

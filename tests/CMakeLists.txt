@@ -581,6 +581,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
         ../app/readonce.cpp
+        ../app/pluginstore.cpp
         ../app/signalstore.cpp
         ../app/signalfilter.cpp
         ../app/blepicker.cpp
@@ -606,6 +607,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_compile_definitions(test_bridge PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -635,6 +637,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         bench_bridge.cpp
         ../app/sessionbridge.cpp
         ../app/readonce.cpp
+        ../app/pluginstore.cpp
         ../app/signalstore.cpp
         ../app/signalfilter.cpp
         ../app/carryover.cpp
@@ -681,6 +684,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

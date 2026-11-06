@@ -34,6 +34,7 @@
 #include <QVariantMap>
 
 #include "readonce.h"
+#include "pluginstore.h"
 #include "signalstore.h"
 #include "signalfilter.h"
 #include <QTimer>
@@ -568,6 +569,22 @@ public:
     // first; the files themselves stay loaded until the bridge closes,
     // since a session may still decode with one
     Q_INVOKABLE int deleteUnusedSignalFiles(const QStringList& keep);
+    // The app's plugins (ADR-0052, PluginStore): every kept one loaded
+    // and its variants registered at the first call, then the list, one
+    // entry a plugin { sha256, ok, words, id, name, version, variants,
+    // profiles }. Import reads a packed plugin (<id>.havne-plugin.json)
+    // at url as importSignalFile reads a file and keeps a copy when core
+    // loads it (the entry, kept, replaced: the version it replaced, or
+    // ""); Remove frees it and deletes its copy. Both refuse, with
+    // words, an id a session decodes with. Each logs one line.
+    Q_INVOKABLE QVariantList plugins();
+    Q_INVOKABLE QVariantMap importPlugin(const QUrl& url);
+    Q_INVOKABLE QVariantMap removePlugin(const QString& sha);
+    // The variants the plugins propose for a car (ADR-0052 section 5):
+    // the VIN typed, or with "" the session's, which stays here (ADR-0027
+    // section 3); { sha256, id, name, variant, profile } each, none
+    // without a VIN. A proposal only: the user picks
+    Q_INVOKABLE QVariantList pluginMatches(const QString& typedVin) const;
     QVariantMap gaugeSignals() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
@@ -1075,5 +1092,6 @@ private:
         m_streamPreparer; // none: nothing to ready
     ReadOnce m_readOnce;
     SignalStore m_signalStore;
+    PluginStore m_pluginStore;
     int m_readOnceWaitMs = 3000;
 };

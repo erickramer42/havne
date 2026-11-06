@@ -88,6 +88,8 @@ TestCase {
         Harness.clearFakeKnobs()
         Bridge.vehicleLabel = ""
         Bridge.deleteUnusedSignalFiles([])   // the store starts empty too
+        for (const p of Bridge.plugins())     // and so do the plugins
+            Bridge.removePlugin(p.sha256)
     }
 
     function find(within, name) {
@@ -1108,6 +1110,70 @@ TestCase {
         field.text = "mock://demo"
         compare(find(page, "profile_user.third").text, "Third")
         verify(find(page, "profile_default"))
+    }
+
+    // ---- The app's plugins (ADR-0052) ----
+
+    // A packed plugin imported is listed with its variants; the VIN
+    // (typed in the lookup here: the mock has none) proposes the variants
+    // it covers for the picked vehicle, and the one picked is kept in the
+    // vehicle, read through the URI's profile, offered under What to read
+    // and connected; removed, it goes from the list and the row. An
+    // import of its id replaces it, and a package core refuses says so
+    function test_aPluginIsImportedMatchedByTheVinAndConnected() {
+        const page = createPage()
+        verify(find(page, "pluginsNone").visible)
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        compare(find(page, "pluginNote").text,
+                "Example: the simulated car 1.0.0 added: plugin.example-sim.base, "
+                + "plugin.example-sim.my2019")
+        compare(find(find(page, "plugin_0"), "pluginText").text,
+                "Example: the simulated car 1.0.0: base, my2019")
+        verify(!find(page, "pluginsNone").visible)
+        compare(Harness.storedPlugins().length, 1)
+
+        press(page, "vehicleNew")
+        verify(find(page, "pluginMatchesText").text.startsWith("No match yet"))
+        verify(findChild(page, "pluginMatch_0") === null)
+        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"   // 2021
+        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginMatch_1").text, "Example: the simulated car: my2019")
+        find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016
+        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "before my2019")
+        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"
+
+        const field = find(page, "uriField")
+        field.text = "mock://demo"
+        press(page, "pluginMatch_1")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
+        compare(field.text, "mock://demo?profile=plugin.example-sim.my2019")
+        verify(find(page, "pluginMatch_1").highlighted)
+        const choice = find(page, "profile_plugin.example-sim.my2019")
+        compare(choice.text, "Example: the simulated car: my2019")
+        verify(choice.highlighted)
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
+        compare(find(page, "errorLabel").text, "")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+
+        // Its id again replaces it; a package core refuses says why
+        verify(page.importPlugin(Harness.writeExamplePlugin("newer.havne-plugin.json", "1.1.0")))
+        compare(find(page, "pluginNote").text, "Example: the simulated car 1.1.0 replaces 1.0.0")
+        compare(Harness.storedPlugins().length, 1)
+        verify(!page.importPlugin(Harness.writeScratchFile("bad.havne-plugin.json", "{}")))
+        const words = find(page, "pluginProblem").text
+        verify(words.includes("line") && !words.includes("bad.havne"), words)
+
+        press(page, "pluginRemove_0")
+        compare(find(page, "pluginProblem").text, "")
+        verify(find(page, "pluginsNone").visible)
+        compare(Harness.storedPlugins(), [])
+        tryVerify(() => findChild(page, "profile_plugin.example-sim.my2019") === null, 1000,
+                  "a variant no plugin registers isn't offered")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019",
+                "the pick stays the vehicle's")
     }
 
     // ---- The vehicle's own signals (ADR-0051's form) ----
