@@ -531,7 +531,9 @@ simulated car on a second module (met: [testing.md](docs/testing.md)'s
 "done-when on a second module" row, 2026-11-05); boost shows on Live
 from the mock's MAP and baro (met: testing.md's mock rows and its
 "Boost on Live" row, 2026-11-05); the arm64 deb's `havne-cli` and the
-aarch64 AppImage run on the Raspberry Pi from the release's own files.
+aarch64 AppImage run on the Raspberry Pi from the release's own files
+(met: [docs/linux.md](docs/linux.md)'s "What has run where",
+2026-11-06).
 
 ### Waiting on a tester: an iPhone download
 

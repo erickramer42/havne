@@ -151,6 +151,7 @@ Dates are commit dates.
 | 2026-11-05 | Linux test platforms: on an x86_64 desktop, the app's suite; on a Raspberry Pi 3 (ARM64), the core's; on both, the simulated bus over `vcan0` and `havne-cli` end to end ([linux.md](linux.md#what-has-run-where)) | `d0d47d6` |
 | 2026-11-05 | On a tall page, the viewer's cursor values go in a band below the chart, so the plot keeps the page's width | `4f3b7a5` |
 | 2026-11-05 | The viewer's cursor lands on the nearest sample of the first signal plotted, and a dot marks each value's sample: between samples it read the earlier one while the line had moved on, found on the test phone | `5e98a3d` |
+| 2026-11-06 | v0.5.0: your own signals (signal files, the app's form with Read once, the OBDb conversion, enumerations and computed signals), plugins' data tier, the simulated ECU's second module, and Linux downloads for 64-bit ARM | `d5210dd` |
 
 ## Lessons learned
 
@@ -1238,3 +1239,23 @@ wait 0 ms, so the 1 ms call passed and held 10 ms on the car. A
 behavior the fake takes from the fix's own reasoning is a guess until
 the adapter shows it, and the run that checks the fix should measure
 the guess too: the frame log's held time per vendor call did.
+
+**2026-11-06: v0.5.0's review.** (1) **A parser's edge is settled by a
+probe, not a read.** Three independent reads of core's new parsers
+listed candidates, and each was kept only once a throwaway test failed
+on it at the reviewed commit: a 1 MiB file of numbers with a huge
+negative exponent took 13.7 s to parse, a computed signal listed before
+its inputs was refused with no word of why, and a name with a line
+break made its recording unopenable. (2) **An unseeded fuzzer tests
+the first parser it meets.** From nothing, each structured harness
+spent CI's 60 s at about the JSON reader's coverage, and one committed
+fixture as a seed tripled it; the seeds are built from the fixtures in
+each harness's own form, a leading options byte included. (3) **The
+run a release names finds what its tests don't.** The done-when run on
+the simulated car showed an imported gear as 3, not Drive: every tier
+checked that the enum decoded with its label, and none that Live showed
+it. (4) **A warning one compiler gives is the gate for all of them.**
+An unused private field passed MSVC, GCC and clang-tidy locally and
+failed the release PR's macOS, iOS, Android and fuzz builds, where
+Clang treats it as an error; a local Clang build with warnings as
+errors now runs before the PR.
