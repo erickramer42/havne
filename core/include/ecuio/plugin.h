@@ -102,6 +102,15 @@ const ecuio_signal_def_t*
 ecuio_plugin_variant_find(const ecuio_plugin_t* plugin, uint32_t index,
                           const char* key);
 
+/* Variant index's merged set as a signal file (NULL past the count),
+ * valid until the plugin is freed and never passed to
+ * ecuio_signal_file_free: what ecuio_recorder_signal_file copies into a
+ * recording (the variant's files merged and written as one signal file,
+ * with the plugin's id, version and variant on its own header line), and
+ * what ecuio_signal_file_name, _profile ("plugin.<id>.<variant>"), _find
+ * and _extends read */
+const ecuio_signal_file_t*
+ecuio_plugin_variant_file(const ecuio_plugin_t* plugin, uint32_t index);
 /* A value fixture (ADR-0052 section 8): a variant's numeric signal and
  * the value its field must decode to when the simulated ECU answers it.
  * The pointer goes last, so the offsets are the same on every width. */

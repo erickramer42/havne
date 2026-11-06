@@ -41,6 +41,7 @@ target_link_libraries(test_core PRIVATE
 target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     ECUIO_SIGNAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals"
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
 )
 
 app_enable_warnings(test_core)

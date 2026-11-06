@@ -41,6 +41,10 @@ constexpr const char* kFormat1End = "session recording (ADR-0017)";
 constexpr const char* kSignalFileKey = "signal file  ";
 constexpr const char* kSignalFileName = "signals.json";
 constexpr size_t kSha256Hex = 64;
+/* "plugin  <id>,<version>,<variant>" after it (ADR-0052 section 4): the
+ * plugin variant that decoded the recording, whose merged set the
+ * signal file is */
+constexpr const char* kPluginKey = "plugin  ";
 
 /* A UTF-8 byte-order mark's length at the start of a header row, or 0 */
 inline size_t bom_length(const char* p, size_t n)

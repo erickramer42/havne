@@ -6,9 +6,12 @@
 //          stays within its depth bound, holds only valid UTF-8 and
 //          finite numbers, no duplicate key, and positions that move
 //          forward in document order; written back out and read again it
-//          is the same document; two parses agree.
+//          is the same document, and so is what core's writer writes
+//          (json.h's write), each number of its kind and sign and exact
+//          where its shortest text reads back; two parses agree.
 
 #include "json.h"
+#include "recording_rows.h" /* parse_number: what number_text checks */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -254,6 +257,51 @@ bool same(const Value& a, const Value& b, bool positions)
     return false;
 }
 
+/* A number 15 significant digits hold: the reader reads those exactly */
+bool fifteen_digits(double x)
+{
+    char buf[40];
+    const int n = snprintf(buf, sizeof buf, "%.15g", x);
+    double read = 0;
+    return n > 0 && static_cast<size_t>(n) < sizeof buf &&
+           ecuio_recording_rows::parse_number(buf, static_cast<size_t>(n),
+                                              &read) &&
+           read == x;
+}
+
+/* core's writer kept each number's kind and sign, and its value where 15
+ * digits hold it */
+bool same_kind(const Value& a, const Value& b)
+{
+    if (a.type != b.type) {
+        return false;
+    }
+    if (a.type == Type::number) {
+        if (a.integer != b.integer || a.in_int64 != b.in_int64 ||
+            std::signbit(a.number) != std::signbit(b.number)) {
+            return false;
+        }
+        const bool exact =
+            a.in_int64 || (!a.integer && fifteen_digits(a.number));
+        return !exact || a.number == b.number;
+    }
+    if (a.items.size() != b.items.size() ||
+        a.members.size() != b.members.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.items.size(); ++i) {
+        if (!same_kind(a.items[i], b.items[i])) {
+            return false;
+        }
+    }
+    for (size_t i = 0; i < a.members.size(); ++i) {
+        if (!same_kind(a.members[i].value, b.members[i].value)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -316,5 +364,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     Error eb;
     check(ecuio_json::parse(out.data(), out.size(), &back, &eb, roomy));
     check(same(v, back, false));
+
+    /* core's writer: indented, so longer than the input, never deeper */
+    const std::string pretty = ecuio_json::write(v);
+    roomy.max_bytes = pretty.size();
+    Value written;
+    check(
+        ecuio_json::parse(pretty.data(), pretty.size(), &written, &eb, roomy));
+    check(same(v, written, false));
+    check(same_kind(v, written));
     return 0;
 }

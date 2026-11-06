@@ -505,6 +505,28 @@ and `sim --plugin`, build section 5's CLI and section 8's check:
 - **The exits:** a package refused is exit 3, as a refused signal file
   is; a fixture failed or a fixture file refused is exit 1; `plugins
   list` goes on past a refused package and exits 3 at the end.
-- **A plugin variant's recording** holds no `signals.json` yet: the
-  merged set has no file of its own to copy, which needs a writer from
-  a set back to a signal file.
+## Appendix: a variant's recording (2026-11-05)
+
+Section 4's provenance, as built:
+
+- **A variant is one signal file too.** `ecuio_plugin_variant_file`
+  gives it as an `ecuio_signal_file_t` (valid until the plugin is freed,
+  never freed itself), so `ecuio_signal_file_name`, `_profile`
+  (`plugin.<id>.<variant>`), `_find` and `_extends` read it and
+  `ecuio_recorder_signal_file` copies it into a recording, the
+  attach's check that its set is the session's unchanged.
+- **Its text** is written at load: the plugin's `name`, a `notes` line
+  naming the plugin, its version and the variant, the manifest's
+  `source` and `ecus`, the first file's `extends` and the merged
+  signals in their order, through `ecuio_json::write` (each value as it
+  was read: a number keeps its kind and sign, and its value wherever 15
+  significant digits hold it). The text is read back through the
+  signal-file loader and kept only when the set it builds equals the
+  variant's, table by table; otherwise the variant has no text and a
+  recording of it holds no `signals.json`, so a copy never decodes
+  otherwise. The fuzzer requires every variant it loads to have one.
+- **The recording** holds that text as `signals.json`, with ADR-0051's
+  `signal file` line and after it `plugin  <id>,<version>,<variant>`. A
+  replay loading the copy reads it as an ordinary signal file (profile
+  `user.<the plugin's name>`) and decodes the same values; it names no
+  plugin.

@@ -30,10 +30,14 @@ struct ecuio_signal_file {
     std::vector<ecuio_computed_t> computed;
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */
     ecuio_signal_set_t set{};
-    /* The bytes ecuio_signal_file_load read, which a recording copies as
-     * signals.json (ADR-0051 section 4); empty for a plugin variant's,
-     * built from several files */
+    /* The bytes a recording copies as signals.json (ADR-0051 section 4):
+     * those ecuio_signal_file_load read, or a plugin variant's files
+     * merged and written as one file (plugin.cpp); empty when that text
+     * doesn't read back to this set */
     std::string bytes;
+    /* A plugin variant's "<id>,<version>,<variant>", a recording's plugin
+     * line (ADR-0052 section 4); "" for a file loaded alone */
+    std::string plugin;
 };
 
 namespace ecuio_sf {
@@ -82,7 +86,7 @@ const std::string& text_of(const ecuio_json::Value& v, size_t lo, size_t hi,
 int64_t whole_of(const ecuio_json::Value& v, int64_t lo, int64_t hi,
                  const std::string& what);
 
-/* The file's bytes as loaded, "" for one built from several files */
+/* The bytes a recording copies, "" for none */
 inline const std::string& bytes_of(const ecuio_signal_file& f)
 {
     return f.bytes;

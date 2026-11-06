@@ -11,6 +11,7 @@
 
 #include "recording_rows.h"
 
+#include <clocale>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -663,6 +664,157 @@ const Value* Value::find(std::string_view key) const
         }
     }
     return nullptr;
+}
+
+std::string number_text(double v)
+{
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): reads the decimal point only
+    const char* point = std::localeconv()->decimal_point;
+    const char p = (point != nullptr && point[0] != '\0') ? point[0] : '.';
+    std::string best;
+    for (int digits = 15; digits <= 17; ++digits) {
+        char buf[40];
+        const int n = std::snprintf(buf, sizeof buf, "%.*g", digits, v);
+        if (n <= 0 || static_cast<size_t>(n) >= sizeof buf) {
+            continue;
+        }
+        best.assign(buf, static_cast<size_t>(n));
+        for (char& c : best) {
+            if (c == p) {
+                c = '.';
+            }
+        }
+        double back = 0;
+        if (ecuio_recording_rows::parse_number(best.data(), best.size(),
+                                               &back) &&
+            back == v) {
+            break;
+        }
+    }
+    return best;
+}
+
+namespace {
+
+void write_string(std::string& out, const std::string& s)
+{
+    static const char digits[] = "0123456789abcdef";
+    out += '"';
+    for (const char ch : s) {
+        const auto c = static_cast<unsigned char>(ch);
+        switch (c) {
+        case '"':
+            out += "\\\"";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        case '\b':
+            out += "\\b";
+            break;
+        case '\f':
+            out += "\\f";
+            break;
+        default:
+            if (c < 0x20) {
+                out += "\\u00";
+                out += digits[c >> 4];
+                out += digits[c & 0xF];
+            } else {
+                out += ch;
+            }
+        }
+    }
+    out += '"';
+}
+
+void write_value(std::string& out, const Value& v, size_t depth)
+{
+    const std::string indent(2 * (depth + 1), ' ');
+    const std::string close(2 * depth, ' ');
+    switch (v.type) {
+    case Type::null:
+        out += "null";
+        break;
+    case Type::boolean:
+        out += v.boolean ? "true" : "false";
+        break;
+    case Type::number:
+        if (v.in_int64) {
+            /* "-0" is a whole number whose double keeps the sign */
+            if (v.whole == 0 && std::signbit(v.number)) {
+                out += '-';
+            }
+            out += std::to_string(v.whole);
+        } else if (v.integer) {
+            /* Past int64: its double's digits, still a whole number */
+            char buf[400];
+            const int n = std::snprintf(buf, sizeof buf, "%.0f", v.number);
+            out.append(buf, n > 0 ? static_cast<size_t>(n) : 0);
+        } else {
+            /* A number written with a fraction or an exponent keeps
+             * one, so it reads back as no integer and -0.0 as -0.0: ".0"
+             * within the 15 digits the reader reads exactly, "e0" past
+             * them, which adds no digit */
+            const std::string n = number_text(v.number);
+            out += n;
+            if (!v.integer && n.find_first_of(".e") == std::string::npos) {
+                const size_t digits = n.size() - (n[0] == '-' ? 1 : 0);
+                out += digits < 15 ? ".0" : "e0";
+            }
+        }
+        break;
+    case Type::string:
+        write_string(out, v.text);
+        break;
+    case Type::array:
+        if (v.items.empty()) {
+            out += "[]";
+            break;
+        }
+        out += "[\n";
+        for (size_t i = 0; i < v.items.size(); ++i) {
+            out += indent;
+            write_value(out, v.items[i], depth + 1);
+            out += i + 1 < v.items.size() ? ",\n" : "\n";
+        }
+        out += close + "]";
+        break;
+    case Type::object:
+        if (v.members.empty()) {
+            out += "{}";
+            break;
+        }
+        out += "{\n";
+        for (size_t i = 0; i < v.members.size(); ++i) {
+            out += indent;
+            write_string(out, v.members[i].key);
+            out += ": ";
+            write_value(out, v.members[i].value, depth + 1);
+            out += i + 1 < v.members.size() ? ",\n" : "\n";
+        }
+        out += close + "}";
+        break;
+    }
+}
+
+} // namespace
+
+std::string write(const Value& v)
+{
+    std::string out;
+    write_value(out, v, 0);
+    out += '\n';
+    return out;
 }
 
 std::string Error::to_string() const

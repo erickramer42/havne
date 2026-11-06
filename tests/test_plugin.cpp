@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "signal_file_build.h" /* core/src: a variant's bytes */
+
 #ifndef ECUIO_PLUGINS_DIR
 #error                                                                         \
     "tests/CMakeLists.txt defines ECUIO_PLUGINS_DIR, the repository's plugins/"
@@ -727,4 +729,56 @@ TEST(PluginTest, EveryFixtureRefusalSaysWhy)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_plugin_values(p.get(), "{}", 2, nullptr, 0, nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
+}
+/* Each variant is one signal file: its merged signals written as the
+ * file a recording copies, which reads back to the variant's own set,
+ * with the plugin's id, version and variant for the recording's header
+ * (ADR-0052 section 4) */
+TEST(PluginTest, AVariantIsOneSignalFileThatReadsBackAsItsSet)
+{
+    Folder f = example_folder();
+    Plugin p = load_folder(f);
+    ASSERT_TRUE(p);
+    EXPECT_EQ(ecuio_plugin_variant_file(nullptr, 0), nullptr);
+    EXPECT_EQ(ecuio_plugin_variant_file(p.get(), 2), nullptr);
+    for (uint32_t i = 0; i < 2; ++i) {
+        const std::string id = variant_id(p.get(), i);
+        const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p.get(), i);
+        ASSERT_NE(file, nullptr) << id;
+        EXPECT_EQ(ecuio_signal_file_set(file),
+                  ecuio_plugin_variant_set(p.get(), i));
+        EXPECT_STREQ(ecuio_signal_file_profile(file),
+                     ("plugin.example-sim." + id).c_str());
+        EXPECT_STREQ(ecuio_signal_file_extends(file), "obd2");
+        EXPECT_EQ(file->plugin, "example-sim,1.0.0," + id);
+
+        const std::string& json = ecuio_sf::bytes_of(*file);
+        ASSERT_FALSE(json.empty()) << id << ": the text reads back";
+        EXPECT_NE(json.find("\"notes\": \"Plugin example-sim 1.0.0, variant " +
+                            id + ": its files' signals merged\""),
+                  std::string::npos)
+            << json.substr(0, 300);
+        ecuio_signal_file_t* back = nullptr;
+        ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &back),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        const ecuio_signal_set_t& a = *ecuio_signal_file_set(back);
+        const ecuio_signal_set_t& b = *ecuio_signal_file_set(file);
+        ASSERT_EQ(a.count, b.count);
+        ASSERT_EQ(a.channel_count, b.channel_count);
+        ASSERT_EQ(a.enum_count, b.enum_count);
+        ASSERT_EQ(a.computed_count, b.computed_count);
+        EXPECT_EQ(std::memcmp(a.defs, b.defs, sizeof *a.defs * a.count), 0);
+        EXPECT_EQ(std::memcmp(a.channels, b.channels,
+                              sizeof *a.channels * a.channel_count),
+                  0);
+        EXPECT_EQ(std::memcmp(a.enums, b.enums, sizeof *a.enums * a.enum_count),
+                  0);
+        /* The later file's signal in the earlier's place */
+        const ecuio_signal_def_t* t =
+            ecuio_signal_file_find(back, "trans_temp");
+        ASSERT_NE(t, nullptr);
+        EXPECT_EQ(t->scale, i == 0 ? 0.1 : 0.01);
+        ecuio_signal_file_free(back);
+    }
 }

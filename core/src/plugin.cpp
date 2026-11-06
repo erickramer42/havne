@@ -1,5 +1,8 @@
 // File/layer: core/src/plugin.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest (test_signals); FUZZ: fuzz_plugin_manifest
+// Testing: UNIT: PluginTest (test_signals), each variant's merged text
+//          read back (PluginTest.AVariantIsOneSignalFile*); HARNESS:
+//          RecorderTest.APluginVariantsRecording* (test_core); FUZZ:
+//          fuzz_plugin_manifest
 //
 // The plugin loader's data tier (ADR-0052): a manifest (json.h, the
 // signal-file loader's rules for unknown keys and words) and its data
@@ -735,6 +738,83 @@ private:
         }
         out.file.reset(new ecuio_signal_file());
         ecuio_sf::build(parts, *out.file);
+        out.file->plugin = p.id + "," + p.version + "," + out.id;
+        out.file->bytes = variant_json(p, out, parts);
+    }
+
+    /* The variant as one signal file, what a recording copies as
+     * signals.json: the plugin's name, the manifest's source and ECUs,
+     * the first file's extends, the merged signals in their order. Empty
+     * when the text doesn't read back to the set just built, so a
+     * recording never holds a copy that decodes otherwise. */
+    std::string variant_json(const ecuio_plugin& p, const variant& v,
+                             const ecuio_sf::parts& parts) const
+    {
+        Value doc;
+        doc.type = Type::object;
+        auto add = [&doc](const char* key, Value value) {
+            Member m;
+            m.key = key;
+            m.value = std::move(value);
+            doc.members.push_back(std::move(m));
+        };
+        Value format;
+        format.type = Type::number;
+        format.integer = true;
+        format.in_int64 = true;
+        format.whole = ECUIO_SIGNAL_FILE_FORMAT;
+        format.number = ECUIO_SIGNAL_FILE_FORMAT;
+        add("havne_signals", format);
+        Value text;
+        text.type = Type::string;
+        text.text = p.name;
+        add("name", text);
+        text.text = "Plugin " + p.id + " " + p.version + ", variant " + v.id +
+                    ": its files' signals merged";
+        add("notes", text);
+        if (const Value* source = manifest_.find("source")) {
+            add("source", *source);
+        }
+        if (parts.extends != nullptr) {
+            add("extends", *parts.extends);
+        }
+        if (parts.ecus != nullptr) {
+            add("ecus", *parts.ecus);
+        }
+        Value list;
+        list.type = Type::array;
+        for (const Value* s : parts.signals) {
+            list.items.push_back(*s);
+        }
+        add("signals", std::move(list));
+        std::string json = ecuio_json::write(doc);
+
+        ecuio_signal_file_t* back = nullptr;
+        const bool read =
+            ecuio_signal_file_load(json.data(), json.size(), &back) == ECUIO_OK;
+        const bool same = read && same_set(back->set, v.file->set);
+        ecuio_signal_file_free(back);
+        ecuio_detail_clear();
+        return same ? json : std::string();
+    }
+
+    /* Two sets decode alike: every count and table equal, byte for byte */
+    static bool same_set(const ecuio_signal_set_t& a,
+                         const ecuio_signal_set_t& b)
+    {
+        auto same = [](const void* x, const void* y, size_t n) {
+            return n == 0 || std::memcmp(x, y, n) == 0;
+        };
+        return a.layout_version == b.layout_version && a.count == b.count &&
+               a.channel_count == b.channel_count &&
+               a.enum_count == b.enum_count &&
+               a.computed_count == b.computed_count &&
+               same(a.defs, b.defs, sizeof *a.defs * a.count) &&
+               same(a.channels, b.channels,
+                    sizeof *a.channels * a.channel_count) &&
+               same(a.enums, b.enums, sizeof *a.enums * a.enum_count) &&
+               same(a.computed, b.computed,
+                    sizeof *a.computed * a.computed_count);
     }
 
     const char* bytes_;
@@ -947,6 +1027,15 @@ const ecuio_signal_set_t* ecuio_plugin_variant_set(const ecuio_plugin_t* plugin,
         return nullptr;
     }
     return ecuio_signal_file_set(plugin->variants[index].file.get());
+}
+
+const ecuio_signal_file_t*
+ecuio_plugin_variant_file(const ecuio_plugin_t* plugin, uint32_t index)
+{
+    if (plugin == nullptr || index >= plugin->variants.size()) {
+        return nullptr;
+    }
+    return plugin->variants[index].file.get();
 }
 
 const ecuio_signal_def_t*
