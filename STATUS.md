@@ -21,8 +21,12 @@ refuses at load where they're wrong, written per vehicle in the app
 enumerations and computed signals such as boost; plugins' data tier, a
 package of signal files whose variants the car's VIN proposes, checked
 through the simulated ECU in CI; and Linux downloads for 64-bit ARM.
-None of it has yet read a real ECU: each read so far is the simulated
-car's. Changes since then go under
+On the test car
+([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md)),
+a signal written in the form and checked with **Read once**, a signal
+file's DIDs on two modules, a refused DID, an enumeration and boost read
+through the VX and the MX+, in the app and `havne-cli`; plugins have run
+only against the simulated car. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -467,6 +471,18 @@ an issue is resolved it is removed, and its number is not reused.
     turns it off (`AT CFC0`). Untried: `STCMM`'s other modes
     (some acknowledge on the bus) and `STM`'s filters. To listen to
     multi-frame replies, use a SocketCAN controller in listen-only mode.
+- **#42. Through the OBDX Pro VX, a second module's reply can be lost
+    while the first module's segmented reply comes in.** On the test
+    car, a session asking the engine (0x7E8) and a second module
+    (0x7E9) lost 22% of the second module's single-frame replies with
+    the engine's `obd2` requests packed, and 1.1% with `?pack=0`; nearly
+    every lost one was due within 30 ms of a 0x7E8 reply of several
+    frames. Each write was accepted and no reply came late; with one DID
+    asked of each module, and through the MX+, none was lost
+    ([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md),
+    BENCH prep #35). The request goes out again on its next turn, so a
+    signal still updates, less often. For a session that asks two
+    modules through the VX, `?pack=0` keeps the losses near 1%.
 
 ## Roadmap
 

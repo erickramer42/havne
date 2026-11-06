@@ -89,7 +89,9 @@ to the car.
    code by name ("Refused: requestOutOfRange (7F 22 31)").
 5. **Record with it.** A recording holds the file as `signals.json`, so
    a replay decodes the same values, even after the file has changed
-   or gone ("Using a file").
+   or gone ("Using a file"). A replay asks nothing, so a signal the
+   module refused shows no value there, not refused; the recording's
+   `events.log` names the refusal in its ECU line.
 6. **Share it.** **Save a copy** writes the file where you choose, as
    `daily-driver-own.json`. Another machine's app imports it (**Import
    a signal file**), and `havne-cli` reads it as it is:
