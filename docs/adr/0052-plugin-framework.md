@@ -552,3 +552,33 @@ simulated ECU on a Linux virtual bus, which `havne-cli plugins check
 --on <vcan>` drives, so a plugin is checked with `havne-cli` before the
 app imports it. The app takes only the packed form, which carries no
 fixtures (the appendix "the data tier's core as built").
+
+## Appendix: the JSON Schemas (2026-11-06)
+
+`schema/plugin-manifest.schema.json` describes the manifest, a folder's
+or packed, with a data file as its `#/$defs/dataFile` (a packed one's
+`files`, a folder's files its variants name), and `schema/plugin-fixtures.schema.json`
+the value-fixture files; both take ADR-0051's signals, source and ECUs
+from `schema/signal-file.schema.json` by reference (that ADR's appendix
+"the JSON Schema"):
+
+- **What they check:** each object's keys as `only_keys` takes them,
+  the required keys and types, the ids' and versions' patterns
+  (`X.Y.Z`, each 0 to 65535 with no leading zero), `tiers` as
+  `["data"]`, manufacturer codes and model years 1980-2039, paths in the
+  package (relative, forward slashes, no empty, `.` or `..` part, 1 to
+  127 printable ASCII characters but backslash and colon), the counts
+  (32 match rules of 1 to 64 codes, 1 to 32 variants, 1 to 64 files a
+  variant, 64 in `files`, 16 fixtures, 1 to 4096 values), no data file
+  with `ecus`, and `files` and `fixtures` never both.
+- **What stays the loader's:** which form a manifest is (`files`
+  required in a packed one), every packed file in a variant and every
+  variant's file found, `requires.core` against the core reading it, a
+  year range in order, variant ids given once, `extends` in a variant's
+  first file only, a key once in each data file, the merged variant's
+  signal-file rules, a value fixture's variant and signal; the
+  schemas' `$comment`s list them.
+- **Kept in step** by the same two tests as ADR-0051's schema:
+  `SchemaFixturesTest` validates every committed plugin, its data files
+  and fixture files, and runs the manifest's edge cases through
+  `havne-cli plugins check` too.
