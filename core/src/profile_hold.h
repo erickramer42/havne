@@ -23,12 +23,11 @@ ecuio_status_t ecuio_profile_acquire(const char* name,
 /* One use fewer; NULL is a no-op */
 void ecuio_profile_release(const ecuio_signal_set_t* set) noexcept;
 
-/* Removes each names[i] still registered to sets[i] (one registered to
- * another set since is left alone), or none at all with
+/* Removes every name registered to one of the sets (a name registered
+ * to another set since is left alone), or none at all with
  * ECUIO_ERR_IN_USE when any of the sets has a use. */
 ecuio_status_t
-ecuio_profile_unregister_unused(const char* const* names,
-                                const ecuio_signal_set_t* const* sets,
+ecuio_profile_unregister_unused(const ecuio_signal_set_t* const* sets,
                                 size_t count);
 
 /* A use held for an object's life: released when it's destroyed */

@@ -1,11 +1,5 @@
 // File/layer: tests/test_recorder.cpp | test_core, Qt-free, C++17
-// Testing: HARNESS: RecorderTest: the recorder (ADR-0049 sections 1 to
-//          4) against sessions fed by hand through
-//          ecuio_session_dispatch_callbacks (never started, so every
-//          frame is the test's) and against the mock and the replay
-//          fixture; the seams in internal.h for a held writer, a failed
-//          write, the syncs, a sleep and the writer's wakes; the link
-//          and timing records with the test as the worker
+// Testing: UNIT: RecorderTest (test_core)
 //
 // Each case records into a folder of its own under TEMP/TMPDIR, removed
 // at the end.
@@ -1808,4 +1802,73 @@ TEST(RecorderTest, APluginVariantsRecordingHoldsItsMergedFile)
     EXPECT_EQ(read_text(fs::u8path(second) / "events.log").find("\nplugin  "),
               std::string::npos)
         << "a file loaded alone names no plugin";
+}
+
+namespace {
+
+/* A one-ECU signal file of signals, recorded on the mock and opened: the
+ * reader's words when it can't open it, else its events.log */
+std::string recorded_header(const std::string& name, const std::string& signals)
+{
+    const std::string text = R"({"havne_signals":1,"name":")" + name +
+                             R"(","source":{"name":"t"},)"
+                             R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)" +
+                             signals + "]}";
+    ecuio_signal_file_t* f = nullptr;
+    EXPECT_EQ(ecuio_signal_file_load(text.data(), text.size(), &f), ECUIO_OK)
+        << ecuio_last_error_detail();
+    if (f == nullptr) {
+        return "not loaded";
+    }
+    const std::string profile = ecuio_signal_file_profile(f);
+    EXPECT_EQ(ecuio_profile_register(profile.c_str(), ecuio_signal_file_set(f),
+                                     nullptr),
+              ECUIO_OK);
+    std::string out;
+    {
+        Root root;
+        FileRecording rec(root, "mock://x?profile=" + profile, f);
+        EXPECT_EQ(rec.attached, ECUIO_OK);
+        EXPECT_EQ(rec.finish(), ECUIO_OK);
+        ecuio_recording_t* r = nullptr;
+        out = ecuio_recording_open(rec.folder.c_str(), nullptr, nullptr, &r) ==
+                      ECUIO_OK
+                  ? read_text(rec.path("events.log"))
+                  : std::string("not opened: ") + ecuio_last_error_detail();
+        ecuio_recording_close(r);
+    }
+    (void)ecuio_profile_unregister(profile.c_str());
+    ecuio_signal_file_free(f);
+    return out;
+}
+
+} // namespace
+
+// A number and an enum of one name: the reader keeps the first signal
+// line of a name, so the enum's labels, under the number's, are left out
+TEST(RecorderTest, ANumberAndAnEnumOfOneNameOpen)
+{
+    const std::string events = recorded_header(
+        "Recorder gear",
+        R"({"key":"g1","name":"Gear","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+        R"({"key":"g2","name":"Gear","read":{"service":"22","number":"D101"},"field":{"byte":0},)"
+        R"("kind":"enum","values":{"1":"First","2":"Second"}},)"
+        R"({"key":"m","name":"Mode","read":{"service":"22","number":"D102"},"field":{"byte":0},)"
+        R"("kind":"enum","values":{"1":"Eco"}})");
+    EXPECT_NE(events.find("\nsignal  Gear,number,"), std::string::npos)
+        << events;
+    EXPECT_EQ(events.find("\nlabel  Gear,"), std::string::npos) << events;
+    EXPECT_NE(events.find("\nlabel  Mode,1,Eco\n"), std::string::npos)
+        << events;
+}
+
+// A line break in a name or unit is a space on the header and in the
+// rows, which no line may break
+TEST(RecorderTest, ALineBreakInANameOrUnitIsASpace)
+{
+    const std::string events = recorded_header(
+        "Recorder breaks",
+        R"({"key":"g","name":"Gear\nX","unit":"k\r\nPa","read":{"service":"22","number":"D100"},"field":{"byte":0}})");
+    EXPECT_NE(events.find("\nsignal  Gear X,number,k  Pa,"), std::string::npos)
+        << events;
 }

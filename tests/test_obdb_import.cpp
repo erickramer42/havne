@@ -1,9 +1,5 @@
 // File/layer: tests/test_obdb_import.cpp | GTest, UNIT tier, Qt-free (test_core)
-// Testing: ObdbImportTest: the OBDb import (obdb.h, core/src/obdb_import.*,
-//          ADR-0051 section 7): the year and field rules, each mapping and
-//          its note over sets written here in OBDb's shape (synthetic, for
-//          Havne: no OBDb data), every output loaded by
-//          ecuio_signal_file_load and read back def by def
+// Testing: UNIT: ObdbImportTest (test_core)
 
 #include <gtest/gtest.h>
 
@@ -608,4 +604,77 @@ TEST(ObdbImportTest, ANoteIsOneLineWhateverTheSetHolds)
     ASSERT_NE(k, nullptr);
     EXPECT_EQ(k->text,
               "its command is on x y, a K-line protocol Havne doesn't read");
+}
+
+// A request or reply ID of 000 is no module's: that command alone is left
+// out, with why
+TEST(ObdbImportTest, ARequestOrReplyIdOf0LeavesOutItsCommandAlone)
+{
+    for (const char* ids :
+         {R"("hdr":"000","rax":"7E9")", R"("hdr":"7E1","rax":"000")"}) {
+        const std::string bad = std::string("{") + ids +
+                                R"(,"cmd":{"22":"1234"},"freq":1,"signals":[)" +
+                                sig("BAD", kByte) + "]}";
+        Imported im;
+        import(im, "{\"commands\":[" + bad + "," +
+                       one("", "1235", sig("GOOD", kByte)) + "]}");
+        ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+        EXPECT_NE(im.def("good"), nullptr);
+        EXPECT_EQ(im.def("bad"), nullptr);
+        EXPECT_NE(im.note("BAD", ECUIO_OBDB_NOTE_SKIPPED), nullptr) << ids;
+    }
+}
+
+// Every formula start goes, spaces between them too, from a name and a
+// label alike
+TEST(ObdbImportTest, AFormulaStartAfterASpaceGoesToo)
+{
+    Imported im;
+    import(
+        im,
+        "{\"commands\":[" +
+            one("", "1235",
+                R"({"id":"V5","name":"+ +5V ref","fmt":{"len":8,"max":255,"unit":"volts"}},)"
+                R"({"id":"MODE","name":"Mode","fmt":{"len":8,"map":{"1":"= =y","2":"- @z"}}})") +
+            "]}");
+    ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+    const ecuio_signal_def_t* v5 = im.def("v5");
+    ASSERT_NE(v5, nullptr);
+    EXPECT_STREQ(v5->name, "5V ref");
+    const ecuio_signal_def_t* mode = im.def("mode");
+    ASSERT_NE(mode, nullptr);
+    EXPECT_EQ(labels_of(im.set(), *mode), "1=y;2=z;");
+}
+
+// A signed field converts signed
+TEST(ObdbImportTest, ASignedFieldConvertsSigned)
+{
+    Imported im;
+    import(im,
+           "{\"commands\":[" +
+               one("", "1235",
+                   sig("S16", R"({"len":16,"sign":true,"unit":"scalar"})")) +
+               "]}");
+    ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+    const ecuio_signal_def_t* s = im.def("s16");
+    ASSERT_NE(s, nullptr);
+    EXPECT_EQ(s->kind, ECUIO_VALUE_INT);
+    EXPECT_NE(im.json.find("\"signed\":true"), std::string::npos) << im.json;
+}
+
+// A character a line hides, or one that moves the text around it, is a
+// space in a converted name
+TEST(ObdbImportTest, AHiddenCharacterInANameIsASpace)
+{
+    Imported im;
+    import(
+        im,
+        "{\"commands\":[" +
+            one("", "1235",
+                R"({"id":"H","name":"A\u202EB\u0085C","fmt":{"len":8,"max":255,"unit":"volts"}})") +
+            "]}");
+    ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+    const ecuio_signal_def_t* h = im.def("h");
+    ASSERT_NE(h, nullptr);
+    EXPECT_STREQ(h->name, "A B C");
 }

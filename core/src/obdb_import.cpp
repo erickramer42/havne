@@ -1,9 +1,5 @@
 // File/layer: core/src/obdb_import.cpp | C++17, Qt-free, core: ecuio_obdb_import (obdb.h, ADR-0051 section 7)
-// Testing: UNIT: ObdbImportTest (test_core, tests/test_obdb_import.cpp):
-//          each rule below and its note, over sets written in the test and
-//          the synthetic fixture in tests/fixtures/obdb/, every output
-//          loaded by ecuio_signal_file_load; fuzz_obdb_import (any input:
-//          an output always loads)
+// Testing: UNIT: ObdbImportTest (test_core); FUZZ: fuzz_obdb_import
 //
 // Reads an OBDb signal set (the shape of OBDb's .schemas signals.json, the
 // semantics of its python/can/ decoder) and writes a signal file
@@ -181,14 +177,23 @@ void add_string(std::string& out, const std::string& s)
     out += '"';
 }
 
-/* Text with every control character a space, cut to max bytes at a whole
+/* Text with every control character a space, and every character
+ * ecuio_json::invisible_length finds, cut to max bytes at a whole
  * character; *cut says whether it was cut */
 std::string clean(const std::string& s, size_t max, bool* cut)
 {
-    std::string t = s;
-    for (char& c : t) {
-        if (static_cast<unsigned char>(c) < 0x20) {
-            c = ' ';
+    std::string t;
+    t.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        const auto c = static_cast<unsigned char>(s[i]);
+        const size_t hidden =
+            ecuio_json::invisible_length(s.data() + i, s.size() - i);
+        if (c < 0x20 || c == 0x7F || hidden > 0) {
+            t += ' ';
+            i += hidden > 0 ? hidden : 1;
+        } else {
+            t += s[i];
+            ++i;
         }
     }
     *cut = t.size() > max;
@@ -203,16 +208,20 @@ std::string clean(const std::string& s, size_t max, bool* cut)
 }
 
 /* Text a spreadsheet won't run as a formula (ADR-0049 section 8): its
- * leading '=', '+', '-' and '@' dropped; true when any was */
+ * leading '=', '+', '-' and '@' dropped, with the spaces between them,
+ * so what's left starts with neither; true when any was */
 bool unformula(std::string* s)
 {
     size_t n = 0;
-    while (n < s->size() && std::strchr("=+-@", (*s)[n]) != nullptr &&
-           (*s)[n] != '\0') {
+    bool any = false;
+    while (
+        n < s->size() && (*s)[n] != '\0' &&
+        (std::strchr("=+-@", (*s)[n]) != nullptr || (any && (*s)[n] == ' '))) {
+        any = any || (*s)[n] != ' ';
         ++n;
     }
     s->erase(0, n);
-    return n > 0;
+    return any;
 }
 
 /* Text without its leading and trailing spaces */
@@ -548,7 +557,8 @@ struct importer {
             skip_signals(c, "29-bit IDs aren't imported");
             return;
         }
-        if (!hex_of(hdr_text, 3, &tx) || hdr_text.size() != 3 || tx > 0x7FF) {
+        if (!hex_of(hdr_text, 3, &tx) || hdr_text.size() != 3 || tx == 0 ||
+            tx > 0x7FF) {
             skip_signals(c, "its command has no 11-bit request ID (\"hdr\")");
             return;
         }
@@ -561,7 +571,7 @@ struct importer {
         uint32_t rx = 0;
         const std::string rax = text_at(c, "rax");
         if (!rax.empty()) {
-            if (!hex_of(rax, 3, &rx) || rx > 0x7FF) {
+            if (!hex_of(rax, 3, &rx) || rx == 0 || rx > 0x7FF) {
                 skip_signals(c, "its reply ID (\"rax\" " + rax +
                                     ") isn't an 11-bit one");
                 return;

@@ -1,14 +1,12 @@
 // File/layer: tests/test_json.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: JsonTest: core/src/json.h's reader: every type and its
-//          position, key order, escapes and UTF-8, numbers (int64's edges,
-//          the double range, a comma locale), each refusal with its line,
-//          column and words, and the two bounds at their edges
+// Testing: UNIT: JsonTest (test_core)
 //
 // Inputs are written as C++ strings; a non-ASCII byte in one is on
 // purpose.
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <clocale>
 #include <cmath>
 #include <cstdint>
@@ -608,4 +606,67 @@ TEST(JsonTest, ANumberIsItsShortestTextThatReadsBack)
     const std::string w16 = ecuio_json::write(whole16);
     EXPECT_EQ(w16, "9000000000000001e0\n");
     EXPECT_FALSE(ok(w16).integer);
+}
+
+// A high surrogate takes a low one in an escape of its own: a byte in
+// place of its backslash is refused, never dropped
+TEST(JsonTest, ALowSurrogateNeedsItsOwnBackslash)
+{
+    refused(R"("\uD83DxuDE00")", 1, 2, "a lone surrogate");
+    refused(R"("\uD83D\\uDE00")", 1, 2, "a lone surrogate");
+}
+
+// An exponent far past a double's range reads as 0 (or is refused past
+// it) at once: a 1 MiB list of them costs about what any numbers do
+TEST(JsonTest, AHugeExponentCostsWhatAnyNumberDoes)
+{
+    EXPECT_EQ(ok("1e-999999").number, 0.0);
+    EXPECT_TRUE(std::signbit(ok("-1e-999999").number));
+    refused("1e999999", 1, 1, "past the range of a double");
+
+    const auto seconds = [](const char* item) {
+        std::string text = "[";
+        const size_t room = ecuio_json::Limits{}.max_bytes - 1;
+        while (text.size() + std::strlen(item) + 1 < room) {
+            text += item;
+            text += ',';
+        }
+        text.back() = ']';
+        ecuio_json::Value v;
+        ecuio_json::Error e;
+        const auto start = std::chrono::steady_clock::now();
+        EXPECT_TRUE(ecuio_json::parse(text.data(), text.size(), &v, &e))
+            << e.to_string();
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                             start)
+            .count();
+    };
+    const double plain = seconds("1.2345e-9");
+    const double huge = seconds("1e-999999");
+    EXPECT_LT(huge, 10 * plain + 0.05)
+        << huge << " s against " << plain << " s for ordinary numbers";
+}
+
+// Words show the characters a line hides or that move the text around
+// them as '?': C1 controls, the separators, direction marks and overrides
+TEST(JsonTest, QuotedTextShowsWhatALineHides)
+{
+    EXPECT_EQ(ecuio_json::quoted("a\xC2\x85"
+                                 "b"),
+              "'a?b'");
+    EXPECT_EQ(ecuio_json::quoted("a\xE2\x80\xA8"
+                                 "b"),
+              "'a?b'");
+    EXPECT_EQ(ecuio_json::quoted("a\xE2\x80\xAE"
+                                 "b\xE2\x81\xA6"
+                                 "c"),
+              "'a?b?c'");
+    EXPECT_EQ(ecuio_json::quoted("a\xE2\x80\x8F"
+                                 "b"),
+              "'a?b'");
+    EXPECT_EQ(ecuio_json::quoted("\xC3\xB8l \xE2\x82\xAC \xC2\xB0"
+                                 "C"),
+              "'\xC3\xB8l \xE2\x82\xAC \xC2\xB0"
+              "C'")
+        << "other characters past ASCII stay";
 }

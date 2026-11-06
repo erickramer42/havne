@@ -1,8 +1,5 @@
 // File/layer: core/src/signal_file.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest (test_signals): every key and its
-//          default, every refusal and its words, the expression compiler,
-//          the obd2 keys, the set it builds against the decoder;
-//          FUZZ: fuzz_signal_file
+// Testing: UNIT: SignalFileTest (test_signals); FUZZ: fuzz_signal_file
 //
 // The signal-file loader (ADR-0051): a file's JSON (json.h) into a
 // signal set the validator passes, everything a file can get wrong
@@ -413,7 +410,10 @@ private:
             if (e->kind == "text" || e->kind == "hex") {
                 fail(at, "reads " + q(name) + ", which is text");
             }
-            id = defs_[e->def].id;
+            /* The id build gives the entry's def (its place in the
+             * list), set or not yet: a later signal's is not */
+            id = static_cast<uint16_t>(ECUIO_USER_SIG_ID_BASE +
+                                       (e - entries_.data()));
         }
         for (uint32_t k = 0; k < p_.input_count; ++k) {
             if (p_.input_ids[k] == id) {
@@ -744,6 +744,11 @@ void read_field(const Value& s, const std::string& kind,
         if (const Value* bytes = field->find("bytes")) {
             d.byte_length = static_cast<uint16_t>(
                 whole_of(*bytes, 0, ECUIO_FRAME_DATA_MAX, what + "'s bytes"));
+            if (uint32_t{d.start_byte} + d.byte_length > ECUIO_FRAME_DATA_MAX) {
+                refuse(*field, what + "'s field ends past the " +
+                                   std::to_string(ECUIO_FRAME_DATA_MAX) +
+                                   " bytes a reply holds");
+            }
         }
         d.kind = static_cast<uint8_t>(kind == "hex" ? ECUIO_VALUE_HEX : ECUIO_VALUE_TEXT);
         d.byte_order = ECUIO_BYTE_ORDER_BE;
@@ -771,6 +776,12 @@ void read_field(const Value& s, const std::string& kind,
         refuse(*field, what + "'s field is big-endian, so whole bytes: bits a "
                               "multiple of 8 and no bit (\"order\": \"le\" for a "
                               "bit field)");
+    }
+    if (uint32_t{d.start_byte} + (d.bit_offset + d.bit_length + 7u) / 8u >
+        ECUIO_FRAME_DATA_MAX) {
+        refuse(*field, what + "'s field ends past the " +
+                           std::to_string(ECUIO_FRAME_DATA_MAX) +
+                           " bytes a reply holds");
     }
     bool is_signed = false;
     if (const Value* sv = field->find("signed")) {

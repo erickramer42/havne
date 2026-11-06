@@ -1,27 +1,7 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest: session create (routing, the query split,
-//          profiles and every refusal), start, close and destroy,
-//          callbacks and their snapshot dispatch (every callback at any
-//          list length, the list as it stood, no allocation up to
-//          four), the decoded values (CoreTest.Values*: the batch
-//          against direct decodes, a text slot each, the frame
-//          callbacks first; the defs each frame is checked against:
-//          DefIndexTest; enum labels and computed values with their
-//          ages: CoreTest.Computed*, .AComputedInputAtItsBoundStillCounts),
-//          the absent signals
-//          (CoreTest.AFieldPastEveryReplyIsAbsent), the identity
-//          report's VIN (CoreTest.TheVinIsService09sThenF190s), the
-//          unsupported signals
-//          (PidSupportTest, test_obd2; the call's contract:
-//          CoreTest.TheMockHasNoUnsupportedSignals), a packed reply's
-//          records (CoreTest.APacked*), the error strings, a clear's refusals
-//          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
-//          the monitors' names (DiagnosticsTest, test_obd2); the
-//          inspection verdict (InspectionTest, test_obd2);
-//          HARNESS: the J2534 suites and Elm327SessionTest through
-//          create; test_c_abi links the public functions; the USDT
-//          probes: ProbeNotesTest (their notes) and CI's bpftrace step;
-//          the timing report (CoreTest.ASessionWithNoRotationHasNoTimingRows)
+// Testing: UNIT: CoreTest, DefIndexTest (test_core); PidSupportTest,
+//          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
+//          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
 
 #include "ecuio/version.h"
 #include "ecuio/core.h"
@@ -266,12 +246,16 @@ namespace {
         }
     }
 
+    /* Which defs decode_frame decodes: every one, only those keyed by a
+     * Service 01 PID (a packed reply's records), or every other */
+    enum class defs_of { all, records, rest };
+
     /* Decodes frame (len bytes of it) against set into the session's
      * buffers from value n and text slot slot on, each def in the set's
      * order; only the defs the index finds for the frame are checked */
     void decode_frame(ecuio_session_t* session, const ecuio_signal_set_t* set,
                       const ecuio_frame_t* frame, uint16_t len, uint32_t& n,
-                      uint32_t& slot)
+                      uint32_t& slot, defs_of which = defs_of::all)
     {
         uint32_t* found = session->def_found.data();
         const uint32_t count =
@@ -279,6 +263,10 @@ namespace {
         for (uint32_t k = 0; k < count; ++k) {
             const uint32_t i = found[k];
             const ecuio_signal_def_t& def = set->defs[i];
+            if (which != defs_of::all &&
+                ecuio_service01_keyed(def) != (which == defs_of::records)) {
+                continue;
+            }
             if (!ecuio_def_applies_to_frame(&def, frame)) {
                 continue;
             }
@@ -362,7 +350,8 @@ namespace {
     /* Decodes frame against the session's set into its buffers
      * (ADR-0024 section 4): the number of values, in the set's order, or for a
      * packed Service 01 reply record by record (ADR-0039 Appendix A),
-     * each record a frame of its own in record_frame, so each def
+     * each record a frame of its own in record_frame for the defs keyed
+     * by its PID, every other def from the reply whole, so each def
      * decodes at most once. Each text value takes the next slot, from
      * the first again each frame; create gave the session a slot for
      * every text value a frame can decode to. */
@@ -401,8 +390,10 @@ namespace {
                     memcpy(r.data + 2, frame->data + records[k].start,
                            records[k].bytes);
                     r.data_length = static_cast<uint16_t>(2 + records[k].bytes);
-                    decode_frame(session, set, &r, r.data_length, n, slot);
+                    decode_frame(session, set, &r, r.data_length, n, slot,
+                                 defs_of::records);
                 }
+                decode_frame(session, set, frame, len, n, slot, defs_of::rest);
                 compute_values(session, set, frame, n);
                 return n;
             }

@@ -1,6 +1,6 @@
 // File/layer: core/src/signal_file_build.h | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest (test_signals); HARNESS:
-//          RecorderTest.ASignalFile* (test_core: the bytes a load keeps)
+// Testing: UNIT: SignalFileTest, PluginTest (test_signals); RecorderTest
+//          (test_core)
 //
 // The signal-file loader's inside (ADR-0051), shared with the plugin
 // loader (ADR-0052): a set built from parts, so a signal file and a
@@ -81,6 +81,10 @@ void expect(const ecuio_json::Value& v, ecuio_json::Type t,
 void only_keys(const ecuio_json::Value& obj,
                std::initializer_list<const char*> allowed,
                const std::string& context);
+/* "user." and name's letters and digits in lower case, every run of
+ * other characters one '-'; "" when there are none */
+std::string profile_of(const std::string& name);
+
 const std::string& text_of(const ecuio_json::Value& v, size_t lo, size_t hi,
                            const std::string& what);
 int64_t whole_of(const ecuio_json::Value& v, int64_t lo, int64_t hi,

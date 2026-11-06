@@ -147,8 +147,10 @@ jobs:
   # this job runs them. The fuzzer and sanitizer runtimes come from
   # libclang-rt-<major>-dev, installed for the image's clang and proved
   # by a one-line link before the build. Not ctest tests: the suite
-  # stays deterministic. A committed seed corpus (the recorder's
-  # frames.csv is the natural source) is future work.
+  # stays deterministic. The harnesses that read a structured format
+  # (JSON, signal files, plugins, OBDb sets) start from the seeds
+  # fuzz/seeds.py builds from the committed fixtures: from nothing, 60 s
+  # barely leaves the JSON reader. The others start empty.
   fuzz:
     if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
@@ -190,13 +192,15 @@ jobs:
           cmake --build build-fuzz --target $FUZZERS
 
       # Each harness runs 60 s on one core, as many at once as the runner
-      # has cores, each into its own log. Every log is printed in its own
-      # group, and the step fails if any harness found something.
+      # has cores, each into its own log, from its corpus folder (the
+      # seeds, or empty). Every log is printed in its own group, and the
+      # step fails if any harness found something.
       - name: Run the fuzzers (60 s each)
         run: |
           mkdir -p artifacts fuzz-logs
+          python3 fuzz/seeds.py corpus
           printf '%s\n' $FUZZERS | xargs -P "$(nproc)" -I{} sh -c \
-            './build-fuzz/fuzz/{} -max_total_time=60 -timeout=25 -rss_limit_mb=2560 \
+            'mkdir -p corpus/{} && ./build-fuzz/fuzz/{} corpus/{} -max_total_time=60 -timeout=25 -rss_limit_mb=2560 \
                -artifact_prefix=artifacts/{}- -print_final_stats=1 > fuzz-logs/{}.log 2>&1 \
              || echo {} >> fuzz-logs/failed'
           for f in $FUZZERS; do
