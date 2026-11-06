@@ -540,6 +540,11 @@ class SessionBridge : public QObject
     // one), and clearDiagnosticsMoving sends to exactly them
     Q_PROPERTY(QStringList clearMoving READ clearMoving NOTIFY clearMovingChanged)
     Q_PROPERTY(QString clearMovingSpeed READ clearMovingSpeed NOTIFY clearMovingChanged)
+    // The refusals past an ECU's report list, whose signals Live can't name
+    // and so leaves blank (cli/refused_signals.h's refused_unlisted):
+    // "ECU 0x7E8 refused 3 more requests", "" when every refusal is named
+    Q_PROPERTY(
+        QString refusedUnnamed READ refusedUnnamed NOTIFY refusedUnnamedChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -634,6 +639,9 @@ public:
     static QString refusalText(uint8_t service, uint8_t nrc);
     // The negative reply alone: "7F 22 31"
     static QString refusalCode(uint8_t service, uint8_t nrc);
+    // refusedUnnamed's words for each ECU's ID and its refusals past the list
+    static QString
+    refusedUnnamedText(const std::vector<std::pair<uint32_t, uint32_t>>& more);
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
     // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system
@@ -808,6 +816,7 @@ public:
     Q_INVOKABLE void cancelClearMoving();
     QStringList clearMoving() const;
     QString clearMovingSpeed() const;
+    QString refusedUnnamed() const { return m_refusedUnnamed; }
     // One ECU's report as the page shows it: ecu ("0x7E8"); asked,
     // complete; readiness (an outcome: "unasked", "answered", "refused",
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
@@ -905,6 +914,7 @@ signals:
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
+    void refusedUnnamedChanged();
     void readingOnceChanged();
     void readOnceResult(const QVariantMap& result);
 
@@ -1081,6 +1091,7 @@ private:
     // Each channel's last report, for the signals their ECUs refused
     ecuio_channel_support_t m_supportReports[ECUIO_SESSION_INFO_MAX_CHANNELS] =
         {};
+    QString m_refusedUnnamed;
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
     std::vector<uint16_t> m_unsupportedRead;

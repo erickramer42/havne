@@ -933,6 +933,45 @@ TEST(RequestEngineTest, ProbeWalksTheBitmapsBeforeTheRotation) {
     EXPECT_EQ(s.dropped_list[1].length, 2u);
 }
 
+/* The report's list takes the refused drops before the bitmap's: a car's
+ * bitmaps leave out many PIDs, and their drops would otherwise fill the
+ * list before a refusal the front ends name. Ten bitmap drops, then a
+ * refused DID, then one more refused: both refusals listed first, in set
+ * order, then the bitmap drops in theirs; every drop counted. */
+TEST(RequestEngineTest, TheReportListsRefusalsBeforeBitmapDrops)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(
+        &e, {0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0A, 0x0B, 0x0E, 0x0F}));
+    const uint8_t did[3] = {0x22, 0xF1, 0xFE};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
+    const uint8_t pid[2] = {0x01, 0x11};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
+    ASSERT_EQ(e.count, 12u);
+    for (uint32_t i = 0; i < 10; ++i) {
+        ecuio_engine_drop(&e, i, ECUIO_DROP_BITMAP, 0);
+    }
+    ecuio_engine_drop(&e, 10, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    ecuio_engine_drop(&e, 11, ECUIO_DROP_ACCESS, 0x33);
+
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.requests, 12u);
+    EXPECT_EQ(s.dropped, 12u);
+    EXPECT_EQ(s.dropped_list[0].length, 3u);
+    EXPECT_EQ(s.dropped_list[0].request[1], 0xF1u);
+    EXPECT_EQ(s.dropped_list[0].request[2], 0xFEu);
+    EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_NOT_SUPPORTED);
+    EXPECT_EQ(s.dropped_list[0].nrc, 0x31u);
+    EXPECT_EQ(s.dropped_list[1].request[1], 0x11u);
+    EXPECT_EQ(s.dropped_list[1].reason, ECUIO_DROP_ACCESS);
+    const uint8_t bitmap[6] = {0x01, 0x03, 0x04, 0x05, 0x06, 0x07};
+    for (uint32_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(s.dropped_list[2 + i].request[1], bitmap[i]) << i;
+        EXPECT_EQ(s.dropped_list[2 + i].reason, ECUIO_DROP_BITMAP) << i;
+    }
+}
+
 /* The first vehicle's own bitmaps (docs/bench-sessions/2026-10-22-vehicle.md),
  * read off the bytes by J1979's layout there: of the obd2 set's first
  * ten, every PID is supported but 0x5C, so the walk drops only that one

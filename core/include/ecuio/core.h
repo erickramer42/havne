@@ -482,8 +482,11 @@ typedef struct ecuio_channel_support {
     /* The bitmaps as the replies carry them: PID p is bit
      * 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8, set when supported. */
     uint8_t pid_bitmap[32];
-    ecuio_dropped_request_t dropped_list[ECUIO_SUPPORT_MAX_DROPPED];   /* the
-                                 first ones dropped, in set order */
+    ecuio_dropped_request_t dropped_list[ECUIO_SUPPORT_MAX_DROPPED]; /* the
+                                 first ones dropped: those a negative
+                                 reply refused, then those the bitmaps
+                                 left out (ECUIO_DROP_BITMAP), each in
+                                 set order */
     /* The DID scan (ADR-0020), when the session's URI asked for one on
      * this channel: each DID of a range is asked once. Found ones joined
      * the rotation when its table had room (polled); refused ones were

@@ -1,6 +1,6 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
-//          CliReplayTest, CliRecordTest, CliViewRunTest (ctest);
+//          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
 //          CliViewTest, CliInfoTest, CliSignalFileTest (test_cli); BENCH
 //
@@ -663,28 +663,38 @@ void poll_absent(Output& out, ecuio_session_t* session,
     write_line(out, l);
 }
 
-// A refused line whenever the signals their ECUs refused change
-// (cli/refused_signals.h, ADR-0051 section 3), from the channels' reports
-// poll_scan read; an emptied list writes []. With --values only, as the
-// signals they name.
+// A refused line whenever the signals their ECUs refused change, or the
+// refusals past a report's list (cli/refused_signals.h, ADR-0051 section
+// 3), from the channels' reports poll_scan read; an emptied list writes
+// []. With --values only, as the signals they name.
 void poll_refused(Output& out, const ecuio_signal_set_t* set,
                   const ecuio_channel_support_t* reports, uint32_t channels,
-                  std::vector<cli::RefusedSignal>& last)
+                  std::vector<cli::RefusedSignal>& last,
+                  std::vector<cli::RefusedMore>& last_more)
 {
     std::vector<cli::RefusedSignal> now =
         cli::refused_signals(set, reports, channels);
+    std::vector<cli::RefusedMore> more =
+        cli::refused_unlisted(set, reports, channels);
     const auto same = [](const cli::RefusedSignal& a,
                          const cli::RefusedSignal& b) {
         return a.id == b.id && a.length == b.length && a.nrc == b.nrc &&
                std::equal(a.request, a.request + sizeof a.request, b.request);
     };
+    const auto same_more = [](const cli::RefusedMore& a,
+                              const cli::RefusedMore& b) {
+        return a.rx_id == b.rx_id && a.count == b.count;
+    };
     if (now.size() == last.size() &&
-        std::equal(now.begin(), now.end(), last.begin(), same)) {
+        std::equal(now.begin(), now.end(), last.begin(), same) &&
+        more.size() == last_more.size() &&
+        std::equal(more.begin(), more.end(), last_more.begin(), same_more)) {
         return;
     }
     last = std::move(now);
-    BigLine b(cli::refused_line_bytes(last.size()));
-    cli::refused_line(b.line, last);
+    last_more = std::move(more);
+    BigLine b(cli::refused_line_bytes(last.size(), last_more.size()));
+    cli::refused_line(b.line, last, last_more);
     write_line(out, b.line);
 }
 
@@ -745,6 +755,24 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
 // (an interrupt while it hangs), so it is never freed
 ecuio_signal_file_t* g_signal_file = nullptr;
 
+#ifdef _WIN32
+// A UTF-8 path (the arguments arrive as UTF-16 and are converted, core's
+// paths are UTF-8) as Windows' own form, for the CLI's own file calls;
+// empty when it isn't UTF-8, which then names no file
+std::wstring wide(const char* utf8)
+{
+    const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1,
+                                      nullptr, 0);
+    if (n <= 0) {
+        return std::wstring();
+    }
+    std::wstring w(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, &w[0], n);
+    w.resize(static_cast<size_t>(n - 1));
+    return w;
+}
+#endif
+
 // A file's bytes, read whole up to one byte past max, so the reader they
 // go to refuses a larger file in its own words. false with why, in words
 // of its own and never the path ("the <what> can't be read: ..."):
@@ -755,7 +783,7 @@ bool read_whole(const char* path, size_t max, const char* what,
     bytes->clear();
     FILE* f = nullptr;
 #ifdef _WIN32
-    int e = fopen_s(&f, path, "rb");
+    int e = _wfopen_s(&f, wide(path).c_str(), L"rb");
 #else
     f = std::fopen(path, "rb");
     int e = errno;
@@ -800,7 +828,7 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
     std::string words; /* a Windows error errno doesn't name */
     FILE* f = nullptr;
 #ifdef _WIN32
-    int e = fopen_s(&f, partial.c_str(), "wb");
+    int e = _wfopen_s(&f, wide(partial.c_str()).c_str(), L"wb");
 #else
     f = std::fopen(partial.c_str(), "wb");
     int e = errno;
@@ -815,7 +843,7 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
     }
     if (!failed) {
 #ifdef _WIN32
-        failed = MoveFileExA(partial.c_str(), path,
+        failed = MoveFileExW(wide(partial.c_str()).c_str(), wide(path).c_str(),
                              MOVEFILE_REPLACE_EXISTING |
                                  MOVEFILE_WRITE_THROUGH) == 0;
         if (failed) {
@@ -832,7 +860,11 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
 #endif
     }
     if (failed) {
+#ifdef _WIN32
+        _wremove(wide(partial.c_str()).c_str());
+#else
         std::remove(partial.c_str());
+#endif
         *why = std::string("the converted file can't be written: ") +
                (!words.empty() ? words
                 : e == ENOENT  ? std::string("there's no such folder")
@@ -1051,7 +1083,7 @@ uint32_t g_plugin_variant = 0; // the variant the URI's profile= selects
 bool is_folder(const char* path)
 {
 #ifdef _WIN32
-    const DWORD a = GetFileAttributesA(path);
+    const DWORD a = GetFileAttributesW(wide(path).c_str());
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
 #else
     struct stat st{};
@@ -2171,6 +2203,7 @@ int run_stream(const StreamArgs& args)
                                                                 : 0u);
     std::vector<uint16_t> absent_last;
     std::vector<cli::RefusedSignal> refused_last;
+    std::vector<cli::RefusedMore> refused_more_last;
     cli::TimingSnapshots timing_snaps;
     std::vector<ecuio_request_timing_t> timing_rows(ECUIO_PROFILE_MAX_REQUESTS);
     if (args.values) {
@@ -2252,7 +2285,8 @@ int run_stream(const StreamArgs& args)
         poll_scan(out, session, channels, scan_seen, scan_reports);
         poll_absent(out, session, absent_read, absent_last);
         if (args.values) {
-            poll_refused(out, set, scan_reports, channels, refused_last);
+            poll_refused(out, set, scan_reports, channels, refused_last,
+                         refused_more_last);
         }
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
@@ -3659,6 +3693,34 @@ int run(int argc, char** argv)
 
 } // namespace
 
+#ifdef _WIN32
+// Windows hands the arguments over as UTF-16 here; main's char** would be
+// the ANSI code page's, where a path with a character outside it (an
+// accented user name's folder in another code page, Greek, CJK) comes as
+// '?'. Each is UTF-8 from here on, as core's paths are.
+int wmain(int argc, wchar_t** wargv)
+{
+    try {
+        std::vector<std::string> args(static_cast<size_t>(argc));
+        std::vector<char*> argv(static_cast<size_t>(argc) + 1, nullptr);
+        for (int i = 0; i < argc; ++i) {
+            const int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr,
+                                              0, nullptr, nullptr);
+            if (n > 0) {
+                args[i].resize(static_cast<size_t>(n));
+                WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, &args[i][0], n,
+                                    nullptr, nullptr);
+                args[i].resize(static_cast<size_t>(n - 1));
+            }
+            argv[i] = &args[i][0];
+        }
+        return run(argc, argv.data());
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "havne-cli: %s\n", e.what());
+        return kExitFailed;
+    }
+}
+#else
 int main(int argc, char** argv)
 {
     // What throws (an allocation, a thread that won't start) ends as the
@@ -3671,3 +3733,4 @@ int main(int argc, char** argv)
         return kExitFailed;
     }
 }
+#endif

@@ -157,7 +157,9 @@ example-sim/
   on the car's year at connect.
 - **Bounds**: 1 MiB a manifest, 16 MiB a package, 64 data files, 32
   variants. A path is relative, forward slashes, no `..`, no leading
-  `/`, at most 127 bytes.
+  `/`, at most 127 bytes. A variant's files, merged and written out as
+  one signal file (the one its recordings copy), fit a signal file's
+  1 MiB, or the plugin is refused, naming the size.
 
 ### 3. The data tier is ADR-0051's format
 

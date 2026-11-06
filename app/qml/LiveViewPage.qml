@@ -96,12 +96,15 @@ Page {
         if (!Bridge.connected) return qsTr("Connect a session to stream decoded values")
         if (Bridge.liveSignalModel.shownCount === 0)
             return qsTr("This profile decodes no signals; its frames are on the Log page")
+        // Refusals past an ECU's report list leave their rows blank: say
+        // how many, since the rows can't
+        const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
         if (Bridge.liveSignalModel.filter.active)
             return qsTr("Showing %1 of %2 signals · plotting %3")
                        .arg(signalList.count).arg(Bridge.liveSignalModel.shownCount)
-                       .arg(Bridge.signalModel.subscribedCount)
+                       .arg(Bridge.signalModel.subscribedCount) + unnamed
         return qsTr("Plotting %1 of %2 signals · values update at 10 Hz")
-                   .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount)
+                   .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
     }
 
     // The link-health banner's message. Unknown states read as degraded,

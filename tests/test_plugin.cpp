@@ -819,6 +819,29 @@ TEST(PluginTest, AVariantThatMakesNoOneSignalFileIsRefused)
         << why;
 }
 
+// A scale and offset in their shortest 17-digit text (a tool's, as
+// Python writes a double) load, and the variant reads back as its set:
+// each number read is the double nearest it, which the writer's 17
+// digits give back
+TEST(PluginTest, ASeventeenDigitScaleReadsBackAsItsSet)
+{
+    const std::string data =
+        R"({"havne_signals": 1, "signals": [{"key": "oil", "name": "Oil", "ecu": "pcm",)"
+        R"( "read": {"service": "22", "number": "F40D"}, "field": {"byte": 0, "bits": 16},)"
+        R"( "scale": 1.0212934580499022e-07, "offset": -40.000000000000014}]})";
+    ecuio_status_t s = ECUIO_ERR_INVALID_ARGUMENT;
+    Plugin p = load_packed(packed(kHead, data), &s);
+    ASSERT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p.get(), 0);
+    ASSERT_NE(file, nullptr);
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(file);
+    ASSERT_NE(set, nullptr);
+    ASSERT_EQ(set->count, 1u);
+    EXPECT_EQ(set->defs[0].scale,
+              std::strtod("1.0212934580499022e-07", nullptr));
+    EXPECT_EQ(set->defs[0].offset, std::strtod("-40.000000000000014", nullptr));
+}
+
 // A session on a variant's set registered under the caller's own name
 // keeps the plugin from being freed; once it's gone, the free takes that
 // name too, so none is left pointing at a freed set
