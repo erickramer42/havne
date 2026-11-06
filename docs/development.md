@@ -695,11 +695,17 @@ on MSVC is not necessarily portable:
 
 ## CI
 
-`ci.yml` runs on every push to `main` and `dev`, on every pull
-request to `main`, and on demand (Actions > CI > Run workflow, on any
-branch, or `gh workflow run ci.yml --ref <branch>`). A feature branch
-gets no run of its own: it is checked locally (`scripts/verify.sh`)
-and merged into `dev`, whose push run is the gate. A manual run
+`ci.yml` runs on every pull request to `main`, on every push to
+`main`, and on demand (Actions > CI > Run workflow, on any branch, or
+`gh workflow run ci.yml --ref <branch>`). The PR is the gate: the one
+PR per release from `dev`, or a `hotfix/*` PR, and a push to its
+branch cancels the PR's run it supersedes. The push its merge makes to
+`main` runs again, and that run is the one the release job reads.
+Pushes to `dev` and feature branches get no run: a feature branch is
+checked locally (`scripts/verify.sh`, the cross-arch subset, WSL where
+it applies) and merged into `dev`, and a manual run on `dev` checks the
+platforms only CI has (macOS, iOS, Android, the sanitizers) between
+releases. `codeql.yml` follows the same PRs and pushes. A manual run
 leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f smoke_only=true` runs it with `core-and-tests` alone.
@@ -966,11 +972,14 @@ provenance over every file.
    name. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware,
    and give the release key's certificate fingerprint.
-2. Push that commit to `main` and wait for its CI run to pass: the
-   release job refuses a commit whose CI hasn't. A tag pushed first
-   fails the job at its CI gate; once CI on the commit passes, rerun
-   the failed job (`gh run rerun <run id>`), which keeps the tag's
-   ref and so the provenance's signer.
+2. Make that commit on `dev`, after the review's fixes and the docs,
+   and push it; open the PR from `dev` to `main` (or push to the open
+   one). Once the PR's CI run passes, merge it with a merge commit, and
+   wait for the merge's CI run on `main` to pass: the release job
+   refuses a commit whose CI hasn't. A tag pushed first fails the job
+   at its CI gate; once CI on the commit passes, rerun the failed job
+   (`gh run rerun <run id>`), which keeps the tag's ref and so the
+   provenance's signer.
    For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
    workflow publishes a pre-release. Download its zip, run it on a PC
    without Visual Studio if one is available, install its APK on a
@@ -989,7 +998,8 @@ provenance over every file.
   anything builds. An `-rcN` tag publishes as a pre-release with the
   same notes.
 - **`gate`: CI.** ci.yml never runs on tags, so the job reads the newest
-  `push` run of ci.yml on the tagged commit (`gh run list --commit`)
+  `push` run of ci.yml on the tagged commit (`gh run list --commit`),
+  the merge's run on `main`,
   and fails unless it has completed with `success`: a tag pushed
   before CI finished, or on a commit whose CI failed, publishes
   nothing.

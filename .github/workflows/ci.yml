@@ -1,13 +1,17 @@
 name: CI
 
+# The PR to main (the one PR per release from dev, or a hotfix/* PR) is
+# the gate, and the push its merge makes to main is the run the release
+# job's CI gate reads (and the only one that saves the iOS kit's cache).
+# Pushes to dev and feature branches get no run of their own: they are
+# checked locally, and a manual run on dev checks one between releases.
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main]
   # Actions > CI > Run workflow, or: gh workflow run ci.yml --ref <branch>
-  # [-f ios_smoke=true | -f smoke_only=true]. Feature branches get no run
-  # of their own (dev's push run is the gate). A manual run skips the
+  # [-f ios_smoke=true | -f smoke_only=true]. A manual run skips the
   # 20-minute iOS simulator smoke unless
   # asked: ios_smoke adds it to the whole run, smoke_only runs it with
   # core-and-tests alone. [ios-smoke] in a pushed commit's message also
@@ -40,6 +44,13 @@ on:
 
 permissions:
   contents: read
+
+# A push to a PR's branch cancels the PR's run it supersedes: the newer
+# run tests everything the older one would have. main's runs and manual
+# runs are never canceled.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every `cmake --build` and every ctest run (coverage.sh's too) runs this
 # many jobs at once: without it Make builds one file at a time, MSBuild one

@@ -13,7 +13,8 @@ name: Release
 # .intoto.jsonl); one SPDX SBOM lists what each download contains,
 # attested over them.
 # A tag with -rcN publishes a pre-release, for a dry run.
-# The tagged commit must already have passed CI (ci.yml's push run).
+# The tagged commit must already have passed CI (ci.yml's push run on
+# main, which the release PR's merge starts).
 #
 #   git tag v0.3.1 && git push origin v0.3.1
 #
@@ -83,9 +84,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # The build jobs run no tests: ci.yml ran them when the commit was
-      # pushed to main or dev (it never runs on tags). So the newest of
-      # those push runs must have finished green, or a tag pushed early,
-      # or on a red commit, would publish an untested build.
+      # pushed to main, the release PR's merge (it never runs on tags). So
+      # the newest push run must have finished green, or a tag pushed
+      # early, or on a red commit, would publish an untested build.
       - name: Check CI passed on the tagged commit
         run: |
           sha=$(git rev-parse HEAD)
@@ -93,7 +94,7 @@ jobs:
             --json status,conclusion,url \
             --jq '.[0] // empty | "\(.status) \(if (.conclusion // "") == "" then "none" else .conclusion end) \(.url)"')
           if [ -z "$run" ]; then
-            echo "::error::ci.yml has no push run on $sha: push the commit to main or dev and let CI finish before tagging"
+            echo "::error::ci.yml has no push run on $sha: merge it to main (or run ci.yml on it by hand) and let CI finish before tagging"
             exit 1
           fi
           read -r status conclusion url <<< "$run"
