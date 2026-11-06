@@ -30,15 +30,19 @@ Instantiator {
     model: Bridge.signalModel
     delegate: Entry {}
 
+    // The signal hands each object over as a QtObject: each is the
+    // delegate's Entry, which says so to the type checker
     onObjectAdded: (index, object) => {
+        const entry = object as Entry
         const m = Object.assign({}, hub.byId)
-        m[object.id] = object
+        m[entry.id] = entry
         hub.byId = m
     }
     onObjectRemoved: (index, object) => {
-        if (hub.byId[object.id] !== object) return
+        const entry = object as Entry
+        if (hub.byId[entry.id] !== entry) return
         const m = Object.assign({}, hub.byId)
-        delete m[object.id]
+        delete m[entry.id]
         hub.byId = m
     }
 
