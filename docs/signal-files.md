@@ -8,11 +8,11 @@ design and the reasons behind each rule are
 [ADR-0051](adr/0051-signal-files.md); this page is the reference for
 writing one by hand.
 
-> **Status:** the format is decided (ADR-0051) and core's loader reads
-> it (`ecuio_signal_file_load`, `signals.h`). `havne-cli signals check`,
-> `stream --signals` and the app's import are v0.5.0's work and not in a
-> release yet; what they haven't settled is marked **Not settled**
-> below.
+> **Status:** the format is decided (ADR-0051), core's loader reads
+> it (`ecuio_signal_file_load`, `signals.h`) and `havne-cli` checks and
+> streams a file ("Using a file"). The app's import is v0.5.0's work too.
+> None of it is in a release yet; what isn't settled is marked **Not
+> settled** below.
 
 ## A first file
 
@@ -378,11 +378,22 @@ written, and `signals check` says it won't convert.
 
 ## Using a file
 
-- **`havne-cli`:** `havne-cli signals check <file>` prints each problem
-  on a line of its own and exits by the result;
-  `havne-cli stream <uri> --signals <file>` loads it and reads, for
-  example `havne-cli stream "elm327://COM5?profile=user.daily-driver-extras"
-  --signals extras.json --values`.
+- **`havne-cli signals check <file>`** reads the file as a session
+  would and says what it read, one JSON line each: the file's name,
+  profile and modules (`signal_file`), each of its signals in the file's
+  own terms (`signal_def`: the service and number, the byte after the
+  echo, the field, an enumeration's labels, a computed signal's inputs
+  with their age bounds), then each unit that never converts (`unit`).
+  A refused file is an `error` line with the loader's words and exit 3.
+- **`havne-cli stream <uri> --signals <file>`** loads the file,
+  registers its profile and reads through it: a URI that names no
+  profile takes the file's (`?profile=user.<name>` added), and one that
+  names another is a usage error. For example `havne-cli stream
+  elm327://COM5 --signals extras.json --values`; the `signals` line
+  carries each enumeration's labels and marks each computed signal.
+- **`havne-cli sim <uri> --on <vcan> --signals <file>`** does the same
+  for the simulated ECU, which then answers the file's Service 22 DIDs
+  ("Checking one with no car").
 - **The app:** in Settings' Vehicle section, **Import a signal file**
   adds a file to the picked vehicle. A file the loader refuses shows its
   words, and so does one whose profile another file makes already, in
@@ -415,10 +426,10 @@ it when the original moves or the phone's picker loses access to it:
   changed, or no longer loads is shown with why, and its profile isn't
   offered.
 
-**Not settled:** the options' exact spelling; the form under Settings'
-Vehicle section that writes a vehicle's own file, with **Read once**
-showing a signal's raw reply bytes beside its decoded value, so the
-scaling is checked before it's trusted.
+**Not settled:** the form under Settings' Vehicle section that writes a
+vehicle's own file, with **Read once** showing a signal's raw reply
+bytes beside its decoded value, so the scaling is checked before it's
+trusted.
 
 ## Checking one with no car
 

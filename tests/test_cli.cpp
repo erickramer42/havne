@@ -9,7 +9,9 @@
 //          scan's line and --until-scanned's end (CliScanTest, ADR-0020);
 //          the lines typed into stream --record (CliMarkLinesTest, ADR-0049);
 //          view's grammar, axis and lines (CliViewTest, ADR-0049);
-//          info's lines and --rate-drop (CliInfoTest, ADR-0049).
+//          info's lines and --rate-drop (CliInfoTest, ADR-0049);
+//          a signal file's lines and a URI's profile (CliSignalFileTest,
+//          ADR-0051), the file loaded through core.
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
@@ -20,6 +22,7 @@
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "scan_line.h"
+#include "signal_file_lines.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
@@ -1264,4 +1267,161 @@ TEST(CliInfoTest, TheLinesCarryWhatTheCheckFound)
                           "\"code\":7,\"message\":\"") +
                   ecuio_status_string(ECUIO_ERR_LOAD_FAILED) +
                   "\",\"detail\":\"the folder has no signals.csv\"}");
+}
+
+// A URI's profile= is the last one in its query, as core reads it, and
+// only that key: one that ends in profile isn't it
+TEST(CliSignalFileTest, AUrisProfileIsItsLastProfileKey)
+{
+    std::string p;
+    EXPECT_FALSE(cli::uri_profile("mock://x", &p));
+    EXPECT_FALSE(cli::uri_profile("mock://x?myprofile=a", &p));
+    ASSERT_TRUE(cli::uri_profile("mock://x?profile=obd2", &p));
+    EXPECT_EQ(p, "obd2");
+    ASSERT_TRUE(
+        cli::uri_profile("replay://a?speed=max&profile=a&profile=b", &p));
+    EXPECT_EQ(p, "b");
+    ASSERT_TRUE(cli::uri_profile("mock://x?profile=", &p));
+    EXPECT_EQ(p, "");
+}
+
+// A loaded file's profile is added to a URI that names none, kept where
+// the URI names it, and a URI naming another is refused
+TEST(CliSignalFileTest, TheFilesProfileIsTheUrisWhenItNamesNone)
+{
+    std::string out;
+    ASSERT_TRUE(cli::uri_for_profile("mock://x", "user.a", &out));
+    EXPECT_EQ(out, "mock://x?profile=user.a");
+    ASSERT_TRUE(cli::uri_for_profile("replay://p?speed=max", "user.a", &out));
+    EXPECT_EQ(out, "replay://p?speed=max&profile=user.a");
+    ASSERT_TRUE(
+        cli::uri_for_profile("mock://x?profile=user.a", "user.a", &out));
+    EXPECT_EQ(out, "mock://x?profile=user.a");
+    EXPECT_FALSE(cli::uri_for_profile("mock://x?profile=obd2", "user.a", &out));
+    EXPECT_FALSE(cli::uri_for_profile("mock://x?profile=", "user.a", &out));
+}
+
+// The kind words are a signal file's, and a unit line is a file's own
+// signal's unit that never converts
+TEST(CliSignalFileTest, KindsAndUnitsAreTheFilesWords)
+{
+    ecuio_signal_def_t d{};
+    d.kind = ECUIO_VALUE_UINT;
+    EXPECT_STREQ(cli::kind_word(d), "number");
+    d.kind = ECUIO_VALUE_INT;
+    EXPECT_STREQ(cli::kind_word(d), "number");
+    d.kind = ECUIO_VALUE_TEXT;
+    EXPECT_STREQ(cli::kind_word(d), "text");
+    d.kind = ECUIO_VALUE_HEX;
+    EXPECT_STREQ(cli::kind_word(d), "hex");
+    d.kind = ECUIO_VALUE_ENUM;
+    EXPECT_STREQ(cli::kind_word(d), "enum");
+    d.kind = ECUIO_VALUE_UINT;
+    d.flags = ECUIO_DEF_FLAG_COMPUTED;
+    EXPECT_STREQ(cli::kind_word(d), "computed");
+
+    ecuio_signal_def_t u{};
+    u.id = ECUIO_USER_SIG_ID_BASE;
+    std::strcpy(u.unit, "km/h");
+    EXPECT_TRUE(cli::unit_converts(u));
+    EXPECT_FALSE(cli::unit_kept(u));
+    std::strcpy(u.unit, "kph");
+    EXPECT_FALSE(cli::unit_converts(u));
+    EXPECT_TRUE(cli::unit_kept(u));
+    std::strcpy(u.unit, "%");
+    EXPECT_TRUE(cli::unit_kept(u));
+    u.unit[0] = '\0';
+    EXPECT_FALSE(cli::unit_kept(u)) << "no unit, nothing to convert";
+    std::strcpy(u.unit, "%");
+    u.id = ECUIO_USER_SIG_ID_BASE - 1;
+    EXPECT_FALSE(cli::unit_kept(u)) << "the base set's, not the file's";
+}
+
+// Each line says what the loader read, in the file's own terms: a reply's
+// echo split back into service and number, the byte after it, the field,
+// an enum's labels, a computed signal's inputs with the stale age where
+// the file gives none
+TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
+{
+    const std::string json =
+        "{\"havne_signals\":1,\"name\":\"Unit test\","
+        "\"source\":{\"name\":\"test\"},"
+        "\"ecus\":[{\"id\":\"tcm\",\"rx\":\"7E9\"}],\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Temp\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":1,\"bits\":16,\"signed\":true},"
+        "\"scale\":0.5,\"offset\":-40,\"unit\":\"kph\",\"decimals\":1,"
+        "\"group\":\"engine\",\"plot\":2},"
+        "{\"key\":\"gear\",\"name\":\"Gear\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"01\",\"number\":\"A4\"},"
+        "\"field\":{\"byte\":0,\"bits\":4,\"bit\":2,\"order\":\"le\"},"
+        "\"kind\":\"enum\",\"values\":{\"1\":\"First\",\"2\":\"Second\"},"
+        "\"group\":\"vehicle\"},"
+        "{\"key\":\"part\",\"name\":\"Part\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"F187\"},"
+        "\"field\":{\"byte\":0,\"bytes\":5},\"kind\":\"hex\"},"
+        "{\"key\":\"half\",\"name\":\"Half\",\"kind\":\"computed\","
+        "\"expr\":\"temp / 2\",\"unit\":\"kph\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    ASSERT_EQ(set.count, 4u);
+    char buf[4096];
+    auto text = [&](auto write) {
+        cli::Line l(buf, sizeof buf);
+        write(l);
+        return std::string(l.data(), l.size());
+    };
+    EXPECT_EQ(text([&](cli::Line& l) {
+                  cli::signal_file_line(l, ecuio_signal_file_name(file),
+                                        ecuio_signal_file_profile(file), set);
+              }),
+              "{\"type\":\"signal_file\",\"name\":\"Unit test\","
+              "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
+              "\"ecus\":[{\"rx\":\"0x7E9\",\"tx\":\"0x7E1\"}]}");
+    const std::string other = ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_OTHER);
+    const std::string expected[] = {
+        "{\"type\":\"signal_def\",\"id\":30000,\"name\":\"Temp\","
+        "\"kind\":\"number\",\"unit\":\"kph\",\"decimals\":1,"
+        "\"group\":\"Engine\",\"rank\":2,\"rx\":\"0x7E9\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},\"byte\":1,"
+        "\"bits\":16,\"order\":\"be\",\"signed\":true,\"scale\":0.5,"
+        "\"offset\":-40}",
+        "{\"type\":\"signal_def\",\"id\":30001,\"name\":\"Gear\","
+        "\"kind\":\"enum\",\"unit\":\"\",\"decimals\":0,"
+        "\"group\":\"Vehicle\",\"rank\":0,\"rx\":\"0x7E9\","
+        "\"read\":{\"service\":\"01\",\"number\":\"A4\"},\"byte\":0,"
+        "\"bits\":4,\"bit\":2,\"order\":\"le\",\"signed\":false,"
+        "\"labels\":{\"1\":\"First\",\"2\":\"Second\"}}",
+        "{\"type\":\"signal_def\",\"id\":30002,\"name\":\"Part\","
+        "\"kind\":\"hex\",\"unit\":\"\",\"decimals\":0,\"group\":\"" +
+            other +
+            "\",\"rank\":0,\"rx\":\"0x7E9\","
+            "\"read\":{\"service\":\"22\",\"number\":\"F187\"},\"byte\":0,"
+            "\"bytes\":5}",
+        "{\"type\":\"signal_def\",\"id\":30003,\"name\":\"Half\","
+        "\"kind\":\"computed\",\"unit\":\"kph\",\"decimals\":0,\"group\":\"" +
+            other +
+            "\",\"rank\":0,\"inputs\":[{\"id\":30000,\"max_age_us\":3000000}]}",
+    };
+    for (uint32_t i = 0; i < 4; ++i) {
+        SCOPED_TRACE(i);
+        EXPECT_TRUE(cli::own_signal(set.defs[i]));
+        EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
+        EXPECT_EQ(
+            text([&](cli::Line& l) { cli::def_line(l, set, set.defs[i]); }),
+            expected[i]);
+    }
+    EXPECT_EQ(text([&](cli::Line& l) { cli::unit_line(l, set.defs[0]); }),
+              "{\"type\":\"unit\",\"id\":30000,\"name\":\"Temp\","
+              "\"unit\":\"kph\",\"converts\":false}");
+    uint32_t n = 0;
+    EXPECT_EQ(cli::def_labels(set, set.defs[0], &n), nullptr);
+    EXPECT_EQ(n, 0u) << "a number has no labels";
+    ASSERT_NE(cli::def_labels(set, set.defs[1], &n), nullptr);
+    EXPECT_EQ(n, 2u);
+    EXPECT_EQ(cli::def_program(set, set.defs[0]), nullptr);
+    EXPECT_NE(cli::def_program(set, set.defs[3]), nullptr);
+    ecuio_signal_file_free(file);
 }

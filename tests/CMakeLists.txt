@@ -324,6 +324,27 @@ if(TARGET havne-cli)
         set(_cli_pulls ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording)
         app_cli_golden(ViewShowsWhatARecordingHolds view-one.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early --columns 12)
+        # Signal files (ADR-0051), synthetic: what signals check reads
+        # from one (each of its signals, the units that never convert),
+        # one it refuses and one that isn't there, each with the
+        # loader's words and never the path; then the replay fixture
+        # through a file that extends obd2, its profile added to the URI:
+        # its own numbers, an enum's label and a computed value among
+        # obd2's, and a refused file ending stream as a connect would
+        set(_cli_signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals)
+        app_cli_golden(SignalsCheckReadsAFile signals-check.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/extras.json)
+        app_cli_golden(SignalsCheckRefusesAFile signals-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
+        app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/none.json)
+        app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
+               --signals ${_cli_signals}/extras.json --values --count 40)
+        app_cli_golden(StreamRefusesABadSignalFile stream-signals-refused.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max"
+               --signals ${_cli_signals}/refused.json --values)
         # A format 3 recording (written by hand): an enum's line carries its
         # labels, its columns its raw numbers
         app_cli_golden(ViewShowsAnEnumsLabels view-enum.jsonl
@@ -394,6 +415,14 @@ if(TARGET havne-cli)
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
+    app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
+    app_cli_usage(SignalsForAnotherProfileIsUsage
+        "stream|mock://x?profile=obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
+    app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
+    app_cli_usage(SignalsWithoutCheckIsUsage "signals")
+    app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
+    app_cli_usage(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json")
+    app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")

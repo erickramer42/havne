@@ -1,0 +1,16 @@
+{
+  "havne_signals": 1,
+  "name": "Desk typo",
+  "notes": "Synthetic: its signal misspells scale, which the loader refuses",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "pedal",
+      "name": "Throttle Share",
+      "read": { "service": "01", "number": "11" },
+      "field": { "byte": 0 },
+      "scael": 0.392157, "unit": "%", "decimals": 1
+    }
+  ]
+}

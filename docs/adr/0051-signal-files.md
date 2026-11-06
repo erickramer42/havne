@@ -382,3 +382,22 @@ its kin in `signals.h`) settles what section 2 left open:
   refuses more.
 - **A refusal's words** are `line L, column C: ` and why, the value at
   fault named and the file's path never.
+
+## Appendix: havne-cli as built (2026-11-05)
+
+`havne-cli` reads a signal file's path as section 4 says, and settles:
+
+- **`signals check <file>`** writes what the loader read before any
+  problem: the file's name, profile and modules, then each of its own
+  signals in the file's terms (the service and number, the byte after
+  the echo, the field, an enumeration's labels, a computed signal's
+  inputs and their age bounds), then a line for each unit that never
+  converts (section 3). A refused file is one `error` line with the
+  loader's words and exit 3, the code of a check that fails.
+- **`stream --signals` and `sim --signals`:** a URI that names no
+  profile takes the file's, so the file isn't named twice; a URI that
+  names another is a usage error, since the session would decode
+  through a set the file isn't. `sim` takes one so the simulated ECU
+  answers the file's DIDs from `havne-cli` too.
+- **The `signals` line** marks each computed signal and carries each
+  enumeration's labels, as a recording's signal line does in format 3.
