@@ -1751,7 +1751,7 @@ Pane {
                     objectName: "pluginsNone"
                     visible: page.pluginList.length === 0
                     text: qsTr("None yet. A plugin (a .havne-plugin.json file) holds signals "
-                               + "for the cars its maker codes and years name")
+                               + "for the cars its manufacturer codes and model years name")
                     color: Theme.textDim
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true

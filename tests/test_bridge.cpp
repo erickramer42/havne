@@ -7861,6 +7861,50 @@ TEST(BridgeTest, PluginOfAnIdLoadedReplacesIt)
     EXPECT_TRUE(registered("plugin.example-sim.base"));
 }
 
+/* A replace whose copy can't be kept (a folder where its file goes)
+ * is refused with the loaded version still loaded, registered and kept,
+ * so a later bridge loads it too */
+TEST(BridgeTest, PluginReplaceWhoseCopyCantBeKeptKeepsTheLoadedOne)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QByteArray newer = packed_plugin::example("1.1.0");
+    {
+        SessionBridge bridge;
+        ASSERT_TRUE(
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes))
+                .value(QStringLiteral("ok"))
+                .toBool());
+        ASSERT_TRUE(QDir().mkpath(PluginStore::root() + QLatin1Char('/') +
+                                  sha256Of(newer) +
+                                  QStringLiteral(".havne-plugin.json")));
+        const QVariantMap r =
+            bridge.importPlugin(writeScratch(from.path(), "b.json", newer));
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+                  "Couldn't keep a copy of the plugin");
+        const QVariantList all = bridge.plugins();
+        ASSERT_EQ(all.size(), 1);
+        EXPECT_EQ(all.at(0)
+                      .toMap()
+                      .value(QStringLiteral("version"))
+                      .toString()
+                      .toStdString(),
+                  "1.0.0");
+        EXPECT_TRUE(registered("plugin.example-sim.base"));
+        EXPECT_EQ(pluginCopies(),
+                  QStringList{sha256Of(bytes) +
+                              QStringLiteral(".havne-plugin.json")});
+    }
+    SessionBridge again;
+    const QVariantList all = again.plugins();
+    ASSERT_EQ(all.size(), 1);
+    EXPECT_TRUE(all.at(0).toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
 /* A session on a variant decodes its signals; while it does, the plugin
  * is neither replaced nor removed, and once it has ended both go ahead */
 TEST(BridgeTest, PluginInUseIsNeitherReplacedNorRemoved)
