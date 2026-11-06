@@ -911,7 +911,7 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     const QByteArray events =
         readFile(dir + QStringLiteral("/events.log")).replace("\r\n", "\n");
     for (const char* expected :
-         {"ecuio session recording, format 2 (ADR-0049)\n",
+         {"ecuio session recording, format 3 (ADR-0049)\n",
           "\nuri  mock://rec\n", "\nsignal  RPM,", "\ncaller  Havne ",
           "\ncaller  surrogate frame logging  ",
           "  note  Connected: mock://rec\n",

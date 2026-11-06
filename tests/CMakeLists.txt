@@ -324,6 +324,10 @@ if(TARGET havne-cli)
         set(_cli_pulls ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording)
         app_cli_golden(ViewShowsWhatARecordingHolds view-one.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early --columns 12)
+        # A format 3 recording (written by hand): an enum's line carries its
+        # labels, its columns its raw numbers
+        app_cli_golden(ViewShowsAnEnumsLabels view-enum.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/fuel-status --columns 4)
         app_cli_golden(ViewAlignsTwoRecordingsOnARise view-rise.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
                ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500

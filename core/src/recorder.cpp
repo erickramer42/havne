@@ -21,6 +21,7 @@
 #include "recorder.h"
 
 #include "error_detail.h"
+#include "recording_rows.h" /* kFormat3, the first line */
 #include "session.h"
 
 #include "ecuio/internal.h"
@@ -236,6 +237,43 @@ std::string one_line(const char* text)
         }
     }
     return s;
+}
+
+/*
+ * An enum def's label lines for events.log's header (format 3): "label
+ * <name>,<raw>,<label>" per entry, raw values ascending as the set holds
+ * them. The name and the label are CSV-quoted, so a comma or a quote in
+ * either reads back; a line break, which no line may hold, is a space,
+ * as one_line makes it in a note, keeping the label within its 27
+ * bytes. A label can't
+ * start a formula: the set's validator refuses one that would
+ * (ADR-0049 section 8), so none reaches a file. Only the first def of a
+ * name writes its labels, since the reader keeps the first signal line
+ * of a name; name is the CSV-quoted name, and labeled the names written.
+ */
+std::string label_lines(const ecuio_signal_set_t* set,
+                        const ecuio_signal_def_t& d, const std::string& name,
+                        std::vector<std::string>& labeled)
+{
+    if (d.kind != ECUIO_VALUE_ENUM || set->enums == nullptr ||
+        uint32_t{d.table_first} + d.table_count > set->enum_count ||
+        std::find(labeled.begin(), labeled.end(), name) != labeled.end()) {
+        return {};
+    }
+    labeled.push_back(name);
+    std::string lines;
+    for (uint32_t k = 0; k < d.table_count; ++k) {
+        const ecuio_enum_entry_t& e = set->enums[d.table_first + k];
+        std::string label(e.label, strnlen(e.label, sizeof e.label));
+        for (char& c : label) {
+            if (c == '\r' || c == '\n') {
+                c = ' ';
+            }
+        }
+        lines += "label  " + name + "," + std::to_string(e.raw) + "," +
+                 csv_quoted(label.data(), label.size()) + "\n";
+    }
+    return lines;
 }
 
 /* ADR-0027 section 2's rule, in core: ASCII letters and digits, space,
@@ -1401,7 +1439,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     try {
         link = std::make_shared<ecuio_record_link>();
         const ecuio_signal_set_t* set = session->active_signal_set;
-        header = "ecuio session recording, format 2 (ADR-0049)\n";
+        header = std::string(ecuio_recording_rows::kFormat3) + "\n";
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
@@ -1453,16 +1491,22 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       ? "from an older recording"
                       : session->source_frame_flags.c_str();
         header += "\n";
+        std::vector<std::string> labeled; /* names whose labels are written */
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
-            header += "signal  " +
-                      csv_quoted(d.name, strnlen(d.name, sizeof d.name)) +
-                      (is_text_kind(d.kind) ? ",text," : ",number,") +
+            const bool enumeration = d.kind == ECUIO_VALUE_ENUM;
+            const std::string name =
+                csv_quoted(d.name, strnlen(d.name, sizeof d.name));
+            header += "signal  " + name +
+                      (is_text_kind(d.kind) ? ",text,"
+                       : enumeration        ? ",enum,"
+                                            : ",number,") +
                       csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)) + "," +
                       std::to_string(d.decimal_places) + "," +
                       std::to_string(d.plot_rank) + "," +
                       std::to_string(d.group) + "\n";
+            header += label_lines(set, d, name, labeled);
         }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;

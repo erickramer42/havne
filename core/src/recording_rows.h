@@ -31,6 +31,10 @@ constexpr size_t kUnitMax = 15;
 constexpr const char* kSignalsHeader = "host_us,signal,value,unit";
 constexpr const char* kMarkersHeader = "host_us,label";
 constexpr const char* kFormat2 = "ecuio session recording, format 2 (ADR-0049)";
+/* Format 2's shape, its signal lines' kind also "enum" and each enum
+ * signal's labels on label lines (ADR-0049's appendix of 2026-11-05) */
+constexpr const char* kFormat3 = "ecuio session recording, format 3 (ADR-0049)";
+constexpr size_t kLabelMax = 27; /* ECUIO_ENUM_LABEL_MAX */
 constexpr const char* kFormat1End = "session recording (ADR-0017)";
 
 /* A UTF-8 byte-order mark's length at the start of a header row, or 0 */
@@ -311,13 +315,14 @@ inline bool parse_marker_row(const char* line, size_t n, uint64_t* host_us,
     return true;
 }
 
-/* events.log's "signal  <name>,<number|text>,<unit>,<decimals>,<rank>"
- * and then ",<group>" (ADR-0050), which a recording from before groups
- * leaves out */
+/* events.log's "signal  <name>,<number|text|enum>,<unit>,<decimals>,
+ * <rank>" and then ",<group>" (ADR-0050), which a recording from before
+ * groups leaves out; "enum" is format 3's, a number shown as a word */
 struct header_signal {
     std::string name;
     std::string unit;
     bool text = false;
+    bool enumeration = false;
     uint8_t decimal_places = 0;
     uint8_t plot_rank = 0;
     uint8_t group = 0;
@@ -344,12 +349,10 @@ inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
     if (!next_field(p, end, field, &last) || last) {
         return false;
     }
-    if (field == "text") {
-        s.text = true;
-    } else if (field == "number") {
-        s.text = false;
-    } else {
-        *why = "the signal's kind isn't number or text";
+    s.text = field == "text";
+    s.enumeration = field == "enum";
+    if (!s.text && !s.enumeration && field != "number") {
+        *why = "the signal's kind isn't number, text or enum";
         return false;
     }
     if (!next_field(p, end, s.unit, &last) || last) {
@@ -381,6 +384,52 @@ inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
         return false;
     }
     s.group = static_cast<uint8_t>(v);
+    return true;
+}
+
+/* events.log's "label  <signal>,<raw>,<label>" (format 3): one of an enum
+ * signal's labels, the signal and the label CSV-quoted as a signal line's
+ * name is, the raw value a decimal uint32_t */
+struct header_label {
+    std::string signal;
+    uint32_t raw = 0;
+    std::string label;
+};
+
+inline bool parse_header_label(const char* text, size_t n, header_label& l,
+                               const char** why)
+{
+    if (holds_nul(text, n, why)) {
+        return false;
+    }
+    const char* p = text;
+    const char* end = text + n;
+    bool last = false;
+    std::string field;
+    *why = "the label line isn't signal,raw,label";
+    if (!next_field(p, end, l.signal, &last) || last) {
+        return false;
+    }
+    if (l.signal.empty() || l.signal.size() > kNameMax) {
+        *why = "the label's signal name is empty or longer than 31 bytes";
+        return false;
+    }
+    if (!next_field(p, end, field, &last) || last) {
+        return false;
+    }
+    uint64_t v = 0;
+    if (!parse_count(field.data(), field.size(), &v) || v > UINT32_MAX) {
+        *why = "the label's raw value isn't 0 to 4294967295";
+        return false;
+    }
+    l.raw = static_cast<uint32_t>(v);
+    if (!next_field(p, end, l.label, &last) || !last) {
+        return false;
+    }
+    if (l.label.empty() || l.label.size() > kLabelMax) {
+        *why = "the label is empty or longer than 27 bytes";
+        return false;
+    }
     return true;
 }
 

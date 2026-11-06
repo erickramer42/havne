@@ -101,7 +101,9 @@ void read_events(const std::string& folder, bool* complete,
             p += bom;
             n -= bom;
             const size_t m = std::strlen(rows::kFormat1End);
-            if (rows::equals(p, n, rows::kFormat2)) {
+            /* Format 3 keeps format 2's shape for every line read here */
+            if (rows::equals(p, n, rows::kFormat2) ||
+                rows::equals(p, n, rows::kFormat3)) {
                 format = ECUIO_RECORDING_FORMAT_CORE;
                 in_header = true;
                 continue;

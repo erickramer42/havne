@@ -2,10 +2,13 @@
 // Testing: FUZZ: a recording's files (ADR-0049 section 5), the first byte
 //          picking one: each line through every parser of
 //          core/src/recording_rows.h (signals.csv's and markers.csv's
-//          rows, events.log's signal, utc and activity lines, the
+//          rows, events.log's signal, label, utc and activity lines, the
 //          summary and the drop lines; a parsed name within 31 bytes, a
-//          unit within 15, decimals 0 to 3; two parses agree, NaN bits
-//          included), or a folder: the input cut at 0x1E bytes into
+//          unit within 15, decimals 0 to 3, a label 1 to 27, one kind;
+//          two parses agree, NaN bits included), or a folder ('F', or
+//          '3' with format 3's first line ahead of events.log, and an
+//          enum's labels at most 256, ascending, terminated and found
+//          again by raw value): the input cut at 0x1E bytes into
 //          events.log, signals.csv, markers.csv and frames.csv, written to
 //          a scratch folder in TEMP / TMPDIR, opened through
 //          ecuio_recording_open and checked through ecuio_recording_check
@@ -92,6 +95,21 @@ void one_line(const char* p, size_t n)
     if (rows::parse_header_signal(p, n, s, &why)) {
         if (s.name.empty() || s.name.size() > rows::kNameMax ||
             s.unit.size() > rows::kUnitMax || s.decimal_places > 3) {
+            abort();
+        }
+    } else if (why == nullptr) {
+        abort();
+    }
+    if (s.text && s.enumeration) {
+        abort(); /* one kind */
+    }
+
+    /* Format 3's label line: a name within 31 bytes, a label of 1 to 27 */
+    rows::header_label hl;
+    why = nullptr;
+    if (rows::parse_header_label(p, n, hl, &why)) {
+        if (hl.signal.empty() || hl.signal.size() > rows::kNameMax ||
+            hl.label.empty() || hl.label.size() > rows::kLabelMax) {
             abort();
         }
     } else if (why == nullptr) {
@@ -224,6 +242,29 @@ opened open_and_query()
             memchr(s.unit, '\0', sizeof s.unit) == nullptr ||
             s.decimal_places > 3) {
             abort();
+        }
+        /* Labels only on an enum, at most a def's, raw ascending, each
+         * terminated and found again by its raw value */
+        uint32_t nl = UINT32_MAX;
+        static ecuio_enum_entry_t labels[ECUIO_ENUM_MAX_ENTRIES + 1];
+        if (ecuio_recording_get_labels(r, k, labels, ECUIO_ENUM_MAX_ENTRIES + 1,
+                                       &nl) != ECUIO_OK ||
+            nl > ECUIO_ENUM_MAX_ENTRIES ||
+            (nl > 0 && (s.flags & ECUIO_RECORDING_SIGNAL_ENUM) == 0) ||
+            (s.flags & ECUIO_RECORDING_SIGNAL_ENUM &&
+             s.flags & ECUIO_RECORDING_SIGNAL_TEXT)) {
+            abort();
+        }
+        for (uint32_t i = 0; i < nl; ++i) {
+            const void* end = memchr(labels[i].label, '\0', sizeof labels[i].label);
+            if (end == nullptr || end == labels[i].label ||
+                (i > 0 && labels[i].raw <= labels[i - 1].raw)) {
+                abort();
+            }
+            const char* found = ecuio_recording_enum_label(r, k, labels[i].raw);
+            if (found == nullptr || strcmp(found, labels[i].label) != 0) {
+                abort();
+            }
         }
         if (s.samples == 0) {
             if (s.first_us != ECUIO_RECORDING_NONE) {
@@ -369,7 +410,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     if (size == 0 || size > 262144) {
         return 0;
     }
-    if (data[0] != 'F') {
+    /* 'F' a folder; '3' a folder whose events.log starts with format 3's
+     * first line, so its header's label lines are reached */
+    const bool format3 = data[0] == '3';
+    if (data[0] != 'F' && !format3) {
         each_line(data + 1, size - 1);
         return 0;
     }
@@ -386,6 +430,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             ++count;
             start = i + 1;
         }
+    }
+    std::string events;
+    if (format3 && count > 0) {
+        events = std::string(rows::kFormat3) + "\n" +
+                 std::string(reinterpret_cast<const char*>(parts[0]), lens[0]);
+        parts[0] = reinterpret_cast<const uint8_t*>(events.data());
+        lens[0] = events.size();
     }
     write_file("events.log", parts[0], lens[0], count > 0);
     write_file("signals.csv", parts[1], lens[1], count > 1);

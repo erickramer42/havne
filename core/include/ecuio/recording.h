@@ -5,6 +5,7 @@
 #ifndef ECUIO_RECORDING_H
 #define ECUIO_RECORDING_H
 #include "ecuio/core.h" /* ecuio_status_t, ecuio_session_t */
+#include "ecuio/signals.h" /* ecuio_enum_entry_t */
 #include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
@@ -173,6 +174,8 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
 #define ECUIO_RECORDING_FORMAT_OLDER   1u /* ADR-0017's: kinds and decimal
                                              places inferred, no UTC */
 #define ECUIO_RECORDING_FORMAT_CORE    2u /* ADR-0049's */
+#define ECUIO_RECORDING_FORMAT_ENUMS   3u /* ADR-0049's with enum signals'
+                                             labels (ADR-0051) */
 
 typedef struct ecuio_recording_info {
     uint32_t flags;           /* ECUIO_RECORDING_INFO_* */
@@ -199,6 +202,10 @@ _Static_assert(sizeof(ecuio_recording_info_t) == 96,
 
 /* ecuio_recording_signal_t.flags */
 #define ECUIO_RECORDING_SIGNAL_TEXT 0x1u /* a text kind: counts, no range */
+#define ECUIO_RECORDING_SIGNAL_ENUM 0x2u /* a number shown as a word
+                                            (format 3): read as a number,
+                                            its labels from
+                                            ecuio_recording_get_labels */
 
 typedef struct ecuio_recording_signal {
     char name[32];          /* as ecuio_signal_def_t holds them */
@@ -336,6 +343,28 @@ ecuio_status_t ecuio_recording_get_signal(const ecuio_recording_t* r,
 ecuio_status_t ecuio_recording_get_marker(const ecuio_recording_t* r,
                                           uint32_t index,
                                           ecuio_recording_marker_t* out);
+
+/*
+ * An enum signal's labels (ECUIO_RECORDING_SIGNAL_ENUM), raw values
+ * ascending, as ecuio_signal_set_t's enums hold them: *count gets them
+ * all and the first capacity are copied to entries (capacity 0 with
+ * entries NULL for the count). Any other signal has none, count 0.
+ * ECUIO_ERR_NULL_ARGUMENT for NULL entries with a capacity.
+ */
+ecuio_status_t ecuio_recording_get_labels(const ecuio_recording_t* r,
+                                          uint32_t signal,
+                                          ecuio_enum_entry_t* entries,
+                                          uint32_t capacity,
+                                          uint32_t* count);
+
+/*
+ * An enum signal's label for a raw value, as ecuio_enum_label gives one:
+ * NULL for a raw value with no label, a signal that isn't an enum or
+ * past the count, or a NULL handle (a UI shows the number). Valid until
+ * ecuio_recording_close.
+ */
+const char* ecuio_recording_enum_label(const ecuio_recording_t* r,
+                                       uint32_t signal, uint32_t raw);
 
 /*
  * Fills column_count columns over [t0_us, t1_us) for each of the

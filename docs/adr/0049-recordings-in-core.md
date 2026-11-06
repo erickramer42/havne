@@ -1281,3 +1281,34 @@ recordings to format 3: an enum signal's raw number in `signals.csv`,
 its labels in `events.log`, and a session decoded by a signal file
 holds a copy of it (`signals.json`) with its SHA-256 on an `events.log`
 header line. The reader keeps reading formats 1 and 2.
+
+> **Note of 2026-11-05, the lines.** The first line is `ecuio session
+> recording, format 3 (ADR-0049)`; format 2's shape stays. A `signal`
+> line's kind is `number`, `text` or `enum`, and each entry of an enum
+> def follows its `signal` line as `label  <signal>,<raw>,<label>`: the
+> name and the label CSV-quoted as the `signal` line's name is (a label
+> holds commas: "Open loop, cold"), the raw value a decimal `uint32_t`,
+> raw values ascending as the set's enum table holds them. A line an
+> entry, rather than the labels on the `signal` line, keeps that line's
+> fields as format 2 has them and each label on a line of its own. A
+> label is at most `ECUIO_ENUM_LABEL_MAX` (27) bytes, and a line break in
+> one is written as a space, as a note's is. No label reaches a file a
+> spreadsheet opens (`signals.csv` holds the raw number), and the set's
+> validator refuses one that would start a formula (section 8) anyway.
+> Only the first def of a name writes labels, since the reader keeps the
+> first `signal` line of a name.
+>
+> The reader gives format 3 as `ECUIO_RECORDING_FORMAT_ENUMS` (3) and an
+> enum signal `ECUIO_RECORDING_SIGNAL_ENUM`, read as a number (counts and
+> a range); `ecuio_recording_get_labels` copies its labels as
+> `ecuio_enum_entry_t`s (the serial ports' contract), and
+> `ecuio_recording_enum_label` gives one by raw value, NULL with none.
+> `ecuio_recording_signal_t` is unchanged. It refuses, with the line, a
+> label line naming no enum signal above it, raw values out of order or
+> repeated, a label past 27 bytes, more than 256 labels a signal, and an
+> `enum` kind in format 2, where a `label` line is a key it doesn't know
+> and reads past. The frames check reads format 3 as format 2.
+> `havne-cli view` and `info` keep `"format": "core"` for it; an enum's
+> `signal` line adds `"enum": true` and `"labels"`, raw value to label,
+> a signal file's `values` shape. `signals.json` and its hash come with
+> the signal-file loader.
