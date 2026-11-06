@@ -135,6 +135,15 @@ TestCase {
         button.clicked()
         compare(replaySpy.signalArguments[2][0], findingsRow.uri + "&from=0&to=4")
         compare(replaySpy.count, 3)
+        compare(button.text, "Replay in Settings", "the name says where it goes")
+
+        // Off while a session runs, as the list's Replay is
+        Bridge.connectSessionAsync("mock://replay-view")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        verify(!button.enabled, "off while connected")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(button.enabled, "on again")
     }
 
     // Open shows the recording: its signal plotted by default, the chart's

@@ -586,6 +586,7 @@ Pane {
     // like typed text so the profile row and the DID field follow
     function pickVehicle(id) {
         confirming = ""
+        vinPickNote = ""
         saveVehicles(VehicleBook.pick(vehicles, id))
         if (pickedVehicle !== null && pickedVehicle.uri !== "")
             uriField.text = pickedVehicle.uri
@@ -605,6 +606,10 @@ Pane {
                                                   Bridge.signalModel.unplottedNames()))
     }
 
+    // Said beside the vehicles while the car's VIN, not the user, made
+    // the pick (VehicleBook.pickNote); "" once the user picks
+    property string vinPickNote: ""
+
     // The VIN settled which vehicle this is (ADR-0027 section 4)
     function recognizeVehicle() {
         if (!VehicleBook.isAdapterUri(Bridge.currentUri))
@@ -616,6 +621,7 @@ Pane {
         }
         const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
         saveVehicles(r.doc)
+        vinPickNote = VehicleBook.pickNote(r)
         if (r.outcome === "new" && plottedApplied)
             rememberPlotting()
         else if (r.outcome === "switched" && plottedApplied)
@@ -1499,6 +1505,15 @@ Pane {
                             onClicked: page.pickVehicle(vehicle.id)
                         }
                     }
+                }
+
+                Label {
+                    objectName: "vehicleVinPickNote"
+                    visible: page.vinPickNote !== ""
+                    text: page.vinPickNote
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
                 }
 
                 Flow {

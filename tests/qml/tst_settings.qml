@@ -1632,6 +1632,40 @@ TestCase {
         Bridge.logMessage.disconnect(collect)
     }
 
+    // A vehicle with no VIN picked on a car another vehicle is saved with:
+    // the VIN picks that one, and the section says the car made the pick
+    // until the user picks
+    function test_theCarsVinPickingAnotherVehicleSaysSo() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        const daily = page.pickedVehicle.id
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.vinKey !== "", 10000, "the VIN is learned")
+        const note = find(page, "vehicleVinPickNote")
+        verify(!note.visible, "learning the VIN isn't a pick")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        const weekend = page.pickedVehicle.id
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
+        verify(note.visible)
+        compare(note.text, "The connected car's VIN picked Daily driver (Weekend car was picked)")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(note.visible, "it stays after the session")
+        press(page, "vehicle_" + weekend)
+        verify(!note.visible, "the user's pick ends it")
+    }
+
     // While a vendor's open blocks, nothing may rewrite the URI field or
     // start another connect: the device rows lock like every other control
     function test_controlsLockWhileAConnectIsInFlight() {

@@ -369,6 +369,17 @@ QtObject {
         return { doc: d, outcome: "new", label: label, previous: previous }
     }
 
+    // Beside the vehicles, for a recognize() that picked another: the
+    // pick is the car's, not the user's, so the section says so until
+    // the user picks; "" for any other result
+    function pickNote(r) {
+        if (r.outcome !== "switched")
+            return ""
+        return r.previous === ""
+                ? qsTr("The connected car's VIN picked %1").arg(r.label)
+                : qsTr("The connected car's VIN picked %1 (%2 was picked)").arg(r.label, r.previous)
+    }
+
     // The activity log's line for a recognize() result
     function logLine(r) {
         switch (r.outcome) {
