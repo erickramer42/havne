@@ -1,0 +1,15 @@
+{
+  "havne_signals": 1,
+  "name": "Schema missing key",
+  "notes": "Synthetic: it has no source, which every signal file needs",
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "road_speed",
+      "name": "Road Speed",
+      "read": { "service": "01", "number": "0D" },
+      "field": { "byte": 0, "bits": 8 },
+      "unit": "km/h"
+    }
+  ]
+}

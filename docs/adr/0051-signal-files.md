@@ -557,3 +557,37 @@ another machine, replays as it was recorded:
   --record`) holds the copy again as its own `signals.json`.
 - **No ABI change:** the header's two lines are read by
   `cli/recording_signals.h`, which both front ends include.
+
+## Appendix: the JSON Schema (2026-11-06)
+
+`schema/signal-file.schema.json` (JSON Schema draft 2020-12) describes
+format 1 for editors, which complete and check a file against it, and
+for other repositories, which lint their files with it in CI:
+
+- **What it checks:** each object's keys as the loader's `only_keys`
+  takes them (`notes` a string and `x-` keys free in every one, any
+  other key refused), each kind's own keys (a signal's `kind` picks its
+  branch), the required keys, the types, the ranges (bits 1-32, bit
+  0-7, decimals 0-3, plot 0-255, 1 to 1024 signals, at most 4 ECUs and
+  256 enum values, `max_age` 0.1-60 s), the word lists (kinds, groups,
+  services, byte orders, `extends`), the patterns (keys and ECU ids, IDs
+  in hex from 1 to 1FFFFFFF, a PID's 2 digits and a DID's 4, an enum's
+  decimal raw values, the formula guard on names, units and labels, an
+  expression's characters), a big-endian field's whole bytes and a tx
+  where the standard gives none.
+- **What stays the loader's:** the rules one value can't show alone,
+  which the schema's `$comment` lists: `havne_signals` first, lengths
+  in bytes (the schema counts characters), whole numbers written with
+  no fraction, ids and keys given once, one ID width with the base
+  set's, a signal's ECU listed, a field's end, an enum's raw values
+  within its bits, an expression's grammar and inputs, the set's
+  validator and the request table.
+- **Kept in step:** `SchemaKeysTest` (`tests/schema_keys.py`) compares
+  each object's keys with its `only_keys` call, and the word lists with
+  the loader's, so a key added on one side alone fails;
+  `SchemaFixturesTest` (`tests/schema_fixtures.py`, the `jsonschema`
+  package) validates every committed signal file, refuses
+  `tests/fixtures/schema/`'s, and runs edge cases through the schema and
+  `havne-cli signals check`, which must give each one verdict.
+- **Naming it:** a file can't carry `"$schema"`, an unknown key, so an
+  editor maps the schema to files by name or folder.

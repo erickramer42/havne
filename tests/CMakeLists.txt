@@ -202,6 +202,11 @@ if(Python3_Interpreter_FOUND)
     # scripts/dtc_titles.py, the trouble-code titles' generator (ADR-0044)
     add_test(NAME DtcTitlesTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/dtc_titles.py --selftest)
+    # schema/'s objects against the loaders' only_keys sets and word lists
+    # (ADR-0051, ADR-0052): a key on one side alone fails
+    add_test(NAME SchemaKeysTest.EachObjectsKeysAreItsLoaders
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_keys.py
+                ${CMAKE_SOURCE_DIR})
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -440,6 +445,16 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream
                "mock://x?profile=plugin.example-sim.base"
                --plugin ${_cli_example} --values --count 6)
+        # schema/ (ADR-0051, ADR-0052) through the jsonschema package:
+        # every committed signal file, manifest, data file and fixture file
+        # validates, tests/fixtures/schema/'s refused ones fail it and
+        # havne-cli's check alike, and edge cases get one verdict from
+        # both; skipped without jsonschema unless ECUIO_SCHEMA_REQUIRED
+        add_test(NAME SchemaFixturesTest.TheSchemasAndTheLoadersAgree
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_fixtures.py
+                    ${CMAKE_SOURCE_DIR} $<TARGET_FILE:havne-cli>)
+        set_tests_properties(SchemaFixturesTest.TheSchemasAndTheLoadersAgree
+            PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
         # Every plugin in the repository with its fixtures answered by the
         # simulated ECU on vcan0 and decoded back (ADR-0052 section 8), and
         # a test plugin giving one signal a value in each of two files;

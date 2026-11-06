@@ -79,15 +79,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # jsonschema for SchemaFixturesTest (schema/ against the committed
+      # fixtures), the hash-pinned wheels in
+      # .github/jsonschema-requirements.txt, bumped by hand. A venv, since
+      # the image's Python is externally managed; the configure below
+      # takes it as the tests' Python.
+      - name: Install jsonschema
+        run: |
+          python3 -m venv "$RUNNER_TEMP/schema"
+          "$RUNNER_TEMP/schema/bin/python" -m pip install --require-hashes -r .github/jsonschema-requirements.txt
+
       # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
       # (ADR-0034 section 4) and ProbeNotesTest runs
       - name: Build core + tests (no Qt present)
         run: |
           sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DHAVNE_BUILD_CORE_ONLY=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DHAVNE_BUILD_CORE_ONLY=ON \
+            -DPython3_EXECUTABLE="$RUNNER_TEMP/schema/bin/python"
           cmake --build build
 
+      # ECUIO_SCHEMA_REQUIRED: SchemaFixturesTest fails rather than skips
+      # without jsonschema
       - name: Run tests
+        env:
+          ECUIO_SCHEMA_REQUIRED: '1'
         run: |
           ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
