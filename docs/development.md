@@ -626,11 +626,18 @@ instance's preferences in an ini file under that folder instead, so a
 scripted run neither reads nor changes the user's; `test_qml` keeps
 its own in a scratch folder the same way.
 
-**QML lint:** run `cmake --build build --config Release --target all_qmllint`.
-Warnings don't fail the build. The bridge is the registered `Bridge`
-singleton, so qmllint checks every `Bridge.*` binding; the baseline is
-a few `[unqualified]` warnings on `model.*` roles in LogPage's
-delegate. Check for new warnings in the files you touched.
+**QML lint:** run qmllint over the rsp the app build writes, alone:
+`C:/Qt/6.12.0/msvc2022_64/bin/qmllint.exe @build/app/.rcc/qmllint/app_ui.rsp --json lint.json`
+(it lists every file of the module by its absolute path; build the
+whole app first, so the module's types file exists). The JSON names
+every file linted, warned or not, and holds warnings the text output
+leaves out. Don't name a file after the rsp: qmllint 6.12.0 crashes on
+a file it gets twice under two spellings (`app/qml/X.qml` beside the
+rsp's own). The `all_qmllint` target skips the lint while its stamp is
+current, and then prints nothing because nothing ran. Warnings don't
+fail the build. The bridge is the registered `Bridge` singleton, so
+qmllint checks every `Bridge.*` binding; the baseline is no warnings,
+so any warning is new.
 
 **Compiler warnings:** every first-party target builds with `/W4`
 (MSVC) or `-Wall -Wextra` (GCC, Clang) through
