@@ -163,6 +163,7 @@ int main(void)
     uint32_t folder_len = 0;
     ecuio_recording_t* reading = NULL;
     ecuio_recording_info_t reading_info;
+    ecuio_recording_signals_t reading_signals;
     ecuio_recording_signal_t reading_signal;
     ecuio_recording_marker_t reading_marker;
     ecuio_recording_column_t reading_column;
@@ -333,13 +334,20 @@ int main(void)
         offsetof(ecuio_recording_marker_t, label_utf8) != 32 ||
         sizeof(ecuio_recording_column_t) != 24 ||
         offsetof(ecuio_recording_find_t, label_utf8) != 64 ||
-        ECUIO_ERR_CANCELED != 19 || ECUIO_RECORDING_NONE != UINT64_MAX ||
-        ECUIO_ERR_IN_USE != 20 || ecuio_plugin_free(NULL) != ECUIO_OK ||
+        sizeof(ecuio_recording_signals_t) != 128 ||
+        offsetof(ecuio_recording_signals_t, length) != 8 ||
+        offsetof(ecuio_recording_signals_t, sha256) != 16 ||
+        ECUIO_RECORDING_SIGNALS_MATCH != 0x4u || ECUIO_ERR_CANCELED != 19 ||
+        ECUIO_RECORDING_NONE != UINT64_MAX || ECUIO_ERR_IN_USE != 20 ||
+        ecuio_plugin_free(NULL) != ECUIO_OK ||
         ecuio_recording_open(NULL, NULL, NULL, &reading) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         reading != NULL ||
         ecuio_recording_get_info(NULL, &reading_info) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_get_signals(NULL, &reading_signals) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_signal(NULL, 0, &reading_signal) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_marker(NULL, 0, &reading_marker) !=

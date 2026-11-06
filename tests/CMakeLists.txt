@@ -23,7 +23,7 @@ endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_check.cpp)
+    test_recorder.cpp test_recording.cpp test_recording_check.cpp test_sha256.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -36,9 +36,11 @@ target_link_libraries(test_core PRIVATE
     GTest::gtest_main
 )
 
-# The scrubbed real-bus recording replay:// plays (ADR-0023)
+# The scrubbed real-bus recording replay:// plays (ADR-0023), and the
+# signal file a recording copies (ADR-0051 section 4)
 target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+    ECUIO_SIGNAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals"
 )
 
 app_enable_warnings(test_core)
@@ -314,8 +316,16 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${_cli_record} marks $<TARGET_FILE:havne-cli>)
         add_test(NAME CliRecordTest.AFolderThatCantBeMadeFails
             COMMAND ${Python3_EXECUTABLE} ${_cli_record} fails $<TARGET_FILE:havne-cli>)
+        # A recording through --signals holds the file as signals.json, and
+        # a replay of it through that copy decodes the same (ADR-0051
+        # section 4)
+        add_test(NAME CliRecordTest.ARecordingHoldsItsSignalFile
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} signals $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json)
         set_tests_properties(CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
             CliRecordTest.TypedLinesAreMarkers CliRecordTest.AFolderThatCantBeMadeFails
+            CliRecordTest.ARecordingHoldsItsSignalFile
             PROPERTIES TIMEOUT 60)
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later

@@ -201,6 +201,20 @@ QVariantList SignalStore::use(const QStringList& shas)
     return out;
 }
 
+const ecuio_signal_file_t*
+SignalStore::fileFor(const ecuio_signal_set_t* set) const
+{
+    if (set == nullptr) {
+        return nullptr;
+    }
+    for (const auto& held : m_held) {
+        if (ecuio_signal_file_set(held.second.file) == set) {
+            return held.second.file;
+        }
+    }
+    return nullptr;
+}
+
 int SignalStore::deleteUnused(const QStringList& keep)
 {
     QDir dir(root());

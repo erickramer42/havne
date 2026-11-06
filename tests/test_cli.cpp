@@ -1013,13 +1013,38 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     info.signal_count = 2;
     info.rows_torn = 1;
     info.records_dropped = 4;
+    const ecuio_recording_signals_t no_file{};
     cli::Line o(buf, sizeof buf);
-    cli::opened_line(o, 1, info);
+    cli::opened_line(o, 1, info, no_file);
     EXPECT_EQ(std::string(o.data(), o.size()),
               "{\"type\":\"opened\",\"recording\":1,\"format\":\"older\","
               "\"duration_us\":30000000,\"utc_start_us\":null,\"signals\":2,"
               "\"markers\":0,\"summary\":false,\"rows_torn\":1,"
-              "\"records_dropped\":4,\"notes_dropped\":0}");
+              "\"records_dropped\":4,\"notes_dropped\":0,"
+              "\"signal_file\":null}");
+    /* The header's file: its hash, there and the same; or there unnamed */
+    ecuio_recording_signals_t named{};
+    named.flags = ECUIO_RECORDING_SIGNALS_NAMED |
+                  ECUIO_RECORDING_SIGNALS_PRESENT |
+                  ECUIO_RECORDING_SIGNALS_MATCH;
+    std::memset(named.sha256, 'a', 64);
+    cli::Line f(buf, sizeof buf);
+    cli::opened_line(f, 1, info, named);
+    const std::string line(f.data(), f.size());
+    EXPECT_NE(line.find(",\"signal_file\":{\"sha256\":\"" +
+                        std::string(64, 'a') +
+                        "\",\"present\":true,\"matches\":true}}"),
+              std::string::npos)
+        << line;
+    ecuio_recording_signals_t unnamed{};
+    unnamed.flags = ECUIO_RECORDING_SIGNALS_PRESENT;
+    cli::Line u(buf, sizeof buf);
+    cli::opened_line(u, 1, info, unnamed);
+    const std::string unnamed_line(u.data(), u.size());
+    EXPECT_NE(unnamed_line.find(",\"signal_file\":{\"sha256\":null,\"present\":"
+                                "true,\"matches\":false}}"),
+              std::string::npos)
+        << unnamed_line;
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
         << "format 3 is core's, its enums on their signal lines";
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_CORE), "core");

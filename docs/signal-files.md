@@ -11,8 +11,8 @@ writing one by hand.
 > **Status:** the format is decided (ADR-0051), core's loader reads
 > it (`ecuio_signal_file_load`, `signals.h`), `havne-cli` checks and
 > streams a file ("Using a file") and imports an OBDb set ("Importing an
-> OBDb signal set", `ecuio_obdb_import`, `obdb.h`). The app's import is
-> v0.5.0's work too.
+> OBDb signal set", `ecuio_obdb_import`, `obdb.h`), and a recording
+> holds the file that decoded it. The app's import is v0.5.0's work too.
 > None of it is in a release yet; what isn't settled is marked **Not
 > settled** below.
 
@@ -425,9 +425,20 @@ written, and `signals check` says it won't convert.
   The draft goes through the loader first, so a mistake is named before
   anything is sent. A DID is asked only of a module whose request ID
   follows the reply ID's rule (rx - 8, or the swapped 29-bit pair).
-- **A recording** copies the file into its folder (`signals.json`) with
-  its SHA-256, so it says exactly what decoded it, and a replay with
-  that file decodes the same.
+- **A recording** of a session the file decodes copies it into its
+  folder as `signals.json`, byte for byte, with its SHA-256 on
+  `events.log`'s header (`signal file  signals.json,<SHA-256>`), so it
+  says exactly what decoded it: the app copies the vehicle's file, and
+  `havne-cli stream --record` the one `--signals` names. A replay of the
+  recording with that copy decodes the same values:
+
+  ```sh
+  havne-cli stream "replay://<the recording's folder>" \
+    --signals "<the recording's folder>/signals.json"
+  ```
+
+  `havne-cli info <folder>` says on its `opened` line whether the copy
+  is there and is still the bytes the header names (`signal_file`).
 
 ### Where Havne keeps them
 

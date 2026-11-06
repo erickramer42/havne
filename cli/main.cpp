@@ -1333,7 +1333,13 @@ bool open_recording(Output& out, ecuio_session_t* session,
                         *detail ? detail : ecuio_status_string(st));
         return false;
     }
-    st = ecuio_session_record(session, *recorder);
+    // The --signals file decoding the session goes in as signals.json
+    if (g_signal_file != nullptr) {
+        st = ecuio_recorder_signal_file(*recorder, g_signal_file);
+    }
+    if (st == ECUIO_OK) {
+        st = ecuio_session_record(session, *recorder);
+    }
     if (st != ECUIO_OK) {
         ecuio_recorder_close(*recorder, "the session couldn't be recorded");
         *recorder = nullptr;
@@ -1901,6 +1907,7 @@ struct RecordingCloser {
 struct Viewed {
     std::unique_ptr<ecuio_recording_t, RecordingCloser> r;
     ecuio_recording_info_t info{};
+    ecuio_recording_signals_t signal_file{};
     std::vector<ecuio_recording_signal_t> signals;
     std::vector<uint32_t> shown;
     bool aligned = true;
@@ -1940,6 +1947,7 @@ int run_view(const ViewArgs& args)
         Viewed& v = views[i];
         v.r.reset(r);
         ecuio_recording_get_info(r, &v.info);
+        ecuio_recording_get_signals(r, &v.signal_file);
         v.signals.resize(v.info.signal_count);
         for (uint32_t k = 0; k < v.info.signal_count; ++k) {
             ecuio_recording_get_signal(r, k, &v.signals[k]);
@@ -2088,7 +2096,7 @@ int run_view(const ViewArgs& args)
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, i, v.info);
+        cli::opened_line(l, i, v.info, v.signal_file);
         write_line(out, l);
         for (uint32_t k = 0; k < v.signals.size(); ++k) {
             write_signal_line(out, v.r.get(), i, k, v.signals[k]);
@@ -2531,8 +2539,10 @@ int run_info(const InfoArgs& args)
     if (open_rc == ECUIO_OK) {
         ecuio_recording_info_t info{};
         ecuio_recording_get_info(r.get(), &info);
+        ecuio_recording_signals_t signal_file{};
+        ecuio_recording_get_signals(r.get(), &signal_file);
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, 0, info);
+        cli::opened_line(l, 0, info, signal_file);
         write_line(out, l);
         for (uint32_t k = 0; k < info.signal_count; ++k) {
             ecuio_recording_signal_t s{};

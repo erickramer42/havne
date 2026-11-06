@@ -19,6 +19,7 @@
 #include "ecuio/recording.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 
@@ -73,5 +74,18 @@ void ecuio_record_timing(ecuio_record_link* link,
                          const ecuio_session_timing_t& timing,
                          const ecuio_request_timing_t* rows, uint32_t count,
                          bool final);
+
+/* Before attach, on the caller's thread: set is what will decode the
+ * session, and bytes (length of them) the signal file it came from,
+ * which attach checks against the session's set and the writer copies
+ * into the folder as signals.json, its SHA-256 on events.log's header
+ * (ADR-0051 section 4). ecuio_recorder_signal_file passes a loaded
+ * file's; length 0 is a set no one file holds, checked and not copied.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL recorder or set, or NULL bytes with
+ * a length; ECUIO_ERR_INVALID_ARGUMENT once attached, on a second call,
+ * or past ECUIO_SIGNAL_FILE_MAX_BYTES; ECUIO_ERR_OUT_OF_MEMORY. */
+ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
+                                           const ecuio_signal_set_t* set,
+                                           const char* bytes, size_t length);
 
 #endif /* ECUIO_RECORDER_H */

@@ -1874,7 +1874,15 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
                             .arg(QString::fromUtf8(ecuio_last_error_detail())));
         return;
     }
-    rc = ecuio_session_record(session, recorder);
+    // A vehicle's signal file decoding the session goes in as
+    // signals.json, its hash the store copy's name (ADR-0051 section 4)
+    if (const ecuio_signal_file_t* file =
+            m_signalStore.fileFor(ecuio_session_signal_set(session))) {
+        rc = ecuio_recorder_signal_file(recorder, file);
+    }
+    if (rc == ECUIO_OK) {
+        rc = ecuio_session_record(session, recorder);
+    }
     if (rc != ECUIO_OK) {
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");

@@ -36,6 +36,11 @@ constexpr const char* kFormat2 = "ecuio session recording, format 2 (ADR-0049)";
 constexpr const char* kFormat3 = "ecuio session recording, format 3 (ADR-0049)";
 constexpr size_t kLabelMax = 27; /* ECUIO_ENUM_LABEL_MAX */
 constexpr const char* kFormat1End = "session recording (ADR-0017)";
+/* Format 3's "signal file  signals.json,<SHA-256>" (ADR-0051 section
+ * 4): the signal file the recording was decoded with, copied beside it */
+constexpr const char* kSignalFileKey = "signal file  ";
+constexpr const char* kSignalFileName = "signals.json";
+constexpr size_t kSha256Hex = 64;
 
 /* A UTF-8 byte-order mark's length at the start of a header row, or 0 */
 inline size_t bom_length(const char* p, size_t n)
@@ -443,6 +448,26 @@ inline int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
     const unsigned doy = (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1;
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
+/* A signal file line's value, "signals.json," and 64 lowercase hex
+ * digits: the digits into hex */
+inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
+{
+    const size_t name = std::strlen(kSignalFileName);
+    if (n != name + 1 + kSha256Hex ||
+        std::memcmp(p, kSignalFileName, name) != 0 || p[name] != ',') {
+        return false;
+    }
+    const char* digits = p + name + 1;
+    for (size_t i = 0; i < kSha256Hex; ++i) {
+        const char c = digits[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return false;
+        }
+    }
+    hex->assign(digits, kSha256Hex);
+    return true;
 }
 
 /* "yyyy-MM-ddTHH:mm:ss.zzzZ" as microseconds since 1970 UTC */

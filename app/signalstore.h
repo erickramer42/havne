@@ -61,6 +61,12 @@ public:
     // which the form adds to and saves again through import()
     static QString text(const QString& sha);
 
+    // The loaded file whose set this is (a session's,
+    // ecuio_session_signal_set), or nullptr for a set no file of the
+    // store's holds: what a recording copies as signals.json (ADR-0051
+    // section 4). Valid until close().
+    const ecuio_signal_file_t* fileFor(const ecuio_signal_set_t* set) const;
+
     // Unregisters, then deletes, every copy that keep doesn't name; the
     // folder too when it ends empty. Returns how many copies went.
     int deleteUnused(const QStringList& keep);

@@ -437,3 +437,38 @@ questions:
   converted with its key, each field that differs, each signal left out
   with why, and the set's own keys (`freq`, `diagnosticLevel`,
   `signalGroups`) once.
+
+## Appendix: a recording's signal file as built (2026-11-05)
+
+Section 4's provenance, and how it settles:
+
+- **No format 4.** Format 3 had reached no release, and the reader reads
+  past a header key it doesn't know, so format 3 gains one optional
+  line after `profile`: `signal file  signals.json,<SHA-256>`, the hash
+  as 64 lowercase hex digits. A plugin's line (ADR-0052 section 4) goes
+  beside it as `plugin  <id>,<version>,<variant>`.
+- **The file is given, not found:** `ecuio_recorder_signal_file(recorder,
+  file)` before `ecuio_session_record`, with the loaded file. Attach
+  refuses (`ECUIO_ERR_INVALID_ARGUMENT`, the session's profile in the
+  detail) a file whose set isn't the one decoding the session, so a
+  recording never names a file that didn't decode it. The loaded file
+  keeps the bytes it was read from, and the writer copies them as they
+  are (binary on every platform, so the hash holds), before the header
+  line naming them; a write that fails fails the recording as any does.
+- **The reader** gives `ecuio_recording_get_signals`: whether the header
+  names a file, whether `signals.json` is in the folder, and whether its
+  SHA-256, taken at open, is the header's, with its length. A caller
+  reads the bytes from the folder itself. `havne-cli view` and `info`
+  put it on the `opened` line as `signal_file` (null, or `sha256`,
+  `present`, `matches`).
+- **The front ends:** `havne-cli stream --record` with `--signals` gives
+  its file; the app gives the vehicle's copy in its store, the file
+  whose set the session uses, so the hash a recording names is the
+  copy's name.
+- **A replay** of such a recording, with its `signals.json` loaded,
+  decodes the same values in the same order (`RecorderTest`, and
+  `CliRecordTest` through `havne-cli`).
+- **Not yet:** a plugin variant's set is merged from several files and
+  has no one file's bytes, so a recording of one holds no `signals.json`
+  until a writer turns a set back into a signal file's JSON; the
+  plugin's line names what decoded it meanwhile.

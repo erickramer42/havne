@@ -5,7 +5,7 @@
 #ifndef ECUIO_RECORDING_H
 #define ECUIO_RECORDING_H
 #include "ecuio/core.h" /* ecuio_status_t, ecuio_session_t */
-#include "ecuio/signals.h" /* ecuio_enum_entry_t */
+#include "ecuio/signals.h" /* ecuio_enum_entry_t, ecuio_signal_file_t */
 #include <stddef.h>
 #include <stdint.h>
 #ifdef __cplusplus
@@ -96,6 +96,18 @@ _Static_assert(sizeof(ecuio_recorder_state_t) == 200,
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
                                    ecuio_recorder_t** out);
 
+/*
+ * The signal file that will decode the session (ADR-0051 section 4),
+ * given before ecuio_session_record: attach checks that its set is the
+ * session's, and the recording holds a copy of the file's bytes as
+ * signals.json, its SHA-256 on events.log's header (format 3's
+ * "signal file" line), so a replay loading that copy decodes the same
+ * values. file must outlive the call only. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL recorder or file; ECUIO_ERR_INVALID_ARGUMENT once a session has
+ * attached or on a second call; ECUIO_ERR_OUT_OF_MEMORY.
+ */
+ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
+                                          const ecuio_signal_file_t* file);
 /*
  * Attaches recorder to session, after create and before start: copies
  * the session's defs (name, unit, kind, decimal places, plot rank),
@@ -311,6 +323,37 @@ _Static_assert(offsetof(ecuio_recording_find_t, label_utf8) == 64,
 typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
                                      uint64_t bytes_total, void* user_data);
 
+/* ecuio_recording_signals_t.flags: NAMED, events.log's header names
+ * signals.json and its SHA-256 (format 3); PRESENT, signals.json is in
+ * the folder; MATCH, named and present, and its SHA-256 the header's */
+#define ECUIO_RECORDING_SIGNALS_NAMED   0x1u
+#define ECUIO_RECORDING_SIGNALS_PRESENT 0x2u
+#define ECUIO_RECORDING_SIGNALS_MATCH   0x4u
+
+/* The signal file a recording was decoded with (ADR-0051 section 4):
+ * copied into its folder as signals.json, its hash on events.log's
+ * header, so a replay loading it decodes the same values */
+typedef struct ecuio_recording_signals {
+    uint32_t flags;       /* ECUIO_RECORDING_SIGNALS_* */
+    uint32_t reserved0;   /* zero */
+    uint64_t length;      /* signals.json's bytes; 0 when it's absent */
+    char sha256[72];      /* the header's, 64 lowercase hex digits; ""
+                              when it names none */
+    uint64_t reserved[5]; /* zero; ABI growth space */
+} ecuio_recording_signals_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_recording_signals_t) == 128,
+              "ecuio_recording_signals_t size is ABI");
+static_assert(offsetof(ecuio_recording_signals_t, sha256) == 16,
+              "recording signals sha256 offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_recording_signals_t) == 128,
+               "ecuio_recording_signals_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_signals_t, sha256) == 16,
+               "recording signals sha256 offset is ABI");
+#endif
+
 /*
  * Opens the recording in folder_utf8 (the folder holding its
  * signals.csv), reading it once. *out is NULL on every failure, which
@@ -337,6 +380,12 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
  */
 ecuio_status_t ecuio_recording_get_info(const ecuio_recording_t* r,
                                         ecuio_recording_info_t* out);
+/* The signal file it was decoded with, as the open found it: signals.json
+ * is hashed then, so MATCH says the bytes there now are the ones that
+ * decoded it (a caller reads them from <folder>/signals.json, and a
+ * caller that finds them changed since sees the hash differ) */
+ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
+                                           ecuio_recording_signals_t* out);
 ecuio_status_t ecuio_recording_get_signal(const ecuio_recording_t* r,
                                           uint32_t index,
                                           ecuio_recording_signal_t* out);

@@ -7252,3 +7252,50 @@ TEST(BridgeTest, SignalFileTextGoesInAndComesBack)
                     .contains(QStringLiteral("bitz")));
     EXPECT_EQ(storeFiles(dir.store()).size(), 1);
 }
+
+/* A recording of a session a vehicle's file decodes holds the store's
+ * copy as signals.json, named by the copy's hash on events.log's header;
+ * a session no file decodes has none (ADR-0051 section 4) */
+TEST(BridgeTest, SignalFileRecordingHoldsTheStoresCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    const QByteArray bytes = signalFile(QStringLiteral("Recorded"));
+    const QString sha = sha256Of(bytes);
+    ASSERT_TRUE(
+        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    ASSERT_EQ(bridge.useSignalFiles({sha}).size(), 1);
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
+            .isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://plain")).isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 2);
+    folders.sort();
+    const QString first = root.path() + QStringLiteral("/") + folders[0];
+    const QString second = root.path() + QStringLiteral("/") + folders[1];
+    QFile copy(first + QStringLiteral("/signals.json"));
+    ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
+    EXPECT_EQ(copy.readAll(), bytes);
+    QFile events(first + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::ReadOnly | QIODevice::Text));
+    EXPECT_TRUE(events.readAll().contains(
+        ("\nsignal file  signals.json," + sha + "\n").toUtf8()));
+    EXPECT_FALSE(QFile::exists(second + QStringLiteral("/signals.json")));
+}

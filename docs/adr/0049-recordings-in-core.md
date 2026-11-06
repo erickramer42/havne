@@ -1312,3 +1312,13 @@ header line. The reader keeps reading formats 1 and 2.
 > `signal` line adds `"enum": true` and `"labels"`, raw value to label,
 > a signal file's `values` shape. `signals.json` and its hash come with
 > the signal-file loader.
+>
+> **Note of 2026-11-05, the signal file line.** After `profile`, a
+> session a signal file decodes has `signal file  signals.json,<SHA-256>`
+> (64 lowercase hex digits), and the folder holds the file's bytes as
+> `signals.json` ([ADR-0051](0051-signal-files.md)'s appendix "a
+> recording's signal file as built"). The line is optional, so format 3
+> stays format 3. The reader takes it in format 3 only (format 2 reads
+> past it), refuses one of another shape with its line, and gives it
+> with `ecuio_recording_get_signals` (`ecuio_recording_signals_t`, 128
+> bytes); the frames check reads past it.

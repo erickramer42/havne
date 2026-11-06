@@ -210,9 +210,12 @@ inline void signed_us(Line& l, int64_t us)
 
 // What a recording holds: {"type":"opened", recording, format,
 // duration_us, utc_start_us|null, signals, markers, summary, rows_torn,
-// records_dropped, notes_dropped}
+// records_dropped, notes_dropped, signal_file}; signal_file is null when
+// the header names none and the folder holds none, else {sha256 (the
+// header's, or null), present, matches} (ADR-0051 section 4)
 inline void opened_line(Line& l, uint32_t recording,
-                        const ecuio_recording_info_t& i)
+                        const ecuio_recording_info_t& i,
+                        const ecuio_recording_signals_t& sf)
 {
     l.raw("{\"type\":\"opened\"");
     l.key("recording");
@@ -239,6 +242,25 @@ inline void opened_line(Line& l, uint32_t recording,
     l.u64(i.records_dropped);
     l.key("notes_dropped");
     l.u64(i.notes_dropped);
+    l.key("signal_file");
+    if (sf.flags == 0) {
+        l.raw("null");
+    } else {
+        l.ch('{');
+        l.key("sha256");
+        if ((sf.flags & ECUIO_RECORDING_SIGNALS_NAMED) != 0) {
+            l.string(sf.sha256, sizeof sf.sha256);
+        } else {
+            l.raw("null");
+        }
+        l.key("present");
+        l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_PRESENT) != 0 ? "true"
+                                                                : "false");
+        l.key("matches");
+        l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_MATCH) != 0 ? "true"
+                                                              : "false");
+        l.ch('}');
+    }
     l.ch('}');
 }
 

@@ -1,5 +1,6 @@
 // File/layer: core/src/signal_file_build.h | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest (test_signals)
+// Testing: UNIT: SignalFileTest, PluginTest (test_signals); HARNESS:
+//          RecorderTest.ASignalFile* (test_core: the bytes a load keeps)
 //
 // The signal-file loader's inside (ADR-0051), shared with the plugin
 // loader (ADR-0052): a set built from parts, so a signal file and a
@@ -29,6 +30,10 @@ struct ecuio_signal_file {
     std::vector<ecuio_computed_t> computed;
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */
     ecuio_signal_set_t set{};
+    /* The bytes ecuio_signal_file_load read, which a recording copies as
+     * signals.json (ADR-0051 section 4); empty for a plugin variant's,
+     * built from several files */
+    std::string bytes;
 };
 
 namespace ecuio_sf {
@@ -76,6 +81,12 @@ const std::string& text_of(const ecuio_json::Value& v, size_t lo, size_t hi,
                            const std::string& what);
 int64_t whole_of(const ecuio_json::Value& v, int64_t lo, int64_t hi,
                  const std::string& what);
+
+/* The file's bytes as loaded, "" for one built from several files */
+inline const std::string& bytes_of(const ecuio_signal_file& f)
+{
+    return f.bytes;
+}
 
 } // namespace ecuio_sf
 

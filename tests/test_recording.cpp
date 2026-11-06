@@ -36,6 +36,7 @@
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 #include "recording_rows.h" /* core/src */
+#include "sha256.h"         /* core/src */
 #include "recording_hour.h"
 #include "temp_name.h"
 
@@ -456,6 +457,35 @@ TEST(RecordingRowsTest, LabelLinesParse)
         } else {
             EXPECT_NE(why, nullptr) << "a NUL is refused with words";
         }
+    }
+}
+
+TEST(RecordingRowsTest, ASignalFileLineIsItsNameAndAHash)
+{
+    const std::string sha(64, 'a');
+    std::string hex;
+    const std::string ok = "signals.json," + sha;
+    ASSERT_TRUE(rows::parse_signal_file(ok.data(), ok.size(), &hex));
+    EXPECT_EQ(hex, sha);
+    const std::string digits = "signals.json,0123456789abcdef0123456789abcdef"
+                               "0123456789abcdef0123456789abcdef";
+    ASSERT_TRUE(rows::parse_signal_file(digits.data(), digits.size(), &hex));
+    EXPECT_EQ(hex, digits.substr(13));
+    const std::string bad[] = {
+        "signals.json," + std::string(63, 'a'),
+        "signals.json," + std::string(65, 'a'),
+        "signals.json," + std::string(63, 'a') + "A",
+        "signals.json," + std::string(63, 'a') + "g",
+        "signals.json;" + sha,
+        "signals.jsoo," + sha,
+        "other.json," + sha,
+        "",
+    };
+    for (const std::string& line : bad) {
+        hex = "kept";
+        EXPECT_FALSE(rows::parse_signal_file(line.data(), line.size(), &hex))
+            << line;
+        EXPECT_EQ(hex, "kept");
     }
 }
 
@@ -1209,6 +1239,69 @@ TEST(RecordingTest, ALabelLineIsRefusedWithItsLineNumber)
     ASSERT_EQ(ecuio_recording_get_labels(ri.r, 0, nullptr, 0, &count),
               ECUIO_OK);
     EXPECT_EQ(count, 0u);
+}
+
+/* Format 3's signal file line names signals.json's hash; one that isn't
+ * that is refused with its line, and format 2 reads past it as a line it
+ * doesn't know. signals.json is looked at whatever the header says. */
+TEST(RecordingTest, ASignalFileLineIsReadInFormat3Only)
+{
+    const std::string head = std::string(kBom) + rows::kSignalsHeader + "\n";
+    const std::string json = "{\"havne_signals\": 1}\n";
+    const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+    auto signals = [](const std::string& folder) {
+        Reader r(folder);
+        EXPECT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        ecuio_recording_signals_t s{};
+        EXPECT_EQ(ecuio_recording_get_signals(r.r, &s), ECUIO_OK);
+        return s;
+    };
+
+    Folder named;
+    named.write("events.log", events_v3({"signal file  signals.json," + sha}));
+    named.write("signals.csv", head);
+    named.write("signals.json", json);
+    ecuio_recording_signals_t s = signals(named.utf8());
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_NAMED |
+                           ECUIO_RECORDING_SIGNALS_PRESENT |
+                           ECUIO_RECORDING_SIGNALS_MATCH);
+    EXPECT_EQ(s.length, json.size());
+    EXPECT_EQ(std::string(s.sha256), sha);
+
+    /* Another file's hash: present, not the bytes named */
+    Folder other("-other");
+    other.write("events.log", events_v3({"signal file  signals.json," +
+                                         std::string(64, '0')}));
+    other.write("signals.csv", head);
+    other.write("signals.json", json);
+    s = signals(other.utf8());
+    EXPECT_EQ(s.flags,
+              ECUIO_RECORDING_SIGNALS_NAMED | ECUIO_RECORDING_SIGNALS_PRESENT);
+
+    /* No line: a file there is present, named by nothing */
+    Folder unnamed("-unnamed");
+    unnamed.write("events.log", events_v3({}));
+    unnamed.write("signals.csv", head);
+    unnamed.write("signals.json", json);
+    s = signals(unnamed.utf8());
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_PRESENT);
+    EXPECT_STREQ(s.sha256, "");
+
+    Folder bad("-bad");
+    bad.write("events.log", events_v3({"signal file  signals.json,ABC"}));
+    bad.write("signals.csv", head);
+    EXPECT_EQ(open_detail(bad.utf8(), ECUIO_ERR_LOAD_FAILED),
+              "events.log line 8: the signal file line isn't signals.json "
+              "and its SHA-256");
+
+    std::string v2 = events_v2({"RPM,number,rpm,0,0"});
+    v2.insert(v2.find("columns  "), "signal file  signals.json," + sha + "\n");
+    Folder older("-v2");
+    older.write("events.log", v2);
+    older.write("signals.csv", head);
+    s = signals(older.utf8());
+    EXPECT_EQ(s.flags, 0u);
+    EXPECT_STREQ(s.sha256, "");
 }
 
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)

@@ -31,7 +31,9 @@
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 #include "link_health.h" /* core/src: a worker's link transitions */
+#include "recorder.h"    /* core/src: the signal file's bytes */
 #include "session.h"     /* core/src: the session's record link */
+#include "sha256.h"      /* core/src: the file's hash */
 #include "temp_name.h"
 
 namespace fs = std::filesystem;
@@ -1349,4 +1351,335 @@ TEST(RecorderTest, TheWriterSyncsEveryTwoSeconds)
     EXPECT_TRUE(eventually(
         [&] { return ecuio_recorder_test_syncs(rec.recorder) >= 1; }, 3500));
     EXPECT_LE(ecuio_recorder_test_syncs(rec.recorder), 2u);
+}
+
+namespace {
+
+/* A file's bytes as they are */
+std::string read_bytes(const fs::path& p)
+{
+    std::ifstream f(p, std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+/* The signal-file fixture loaded and registered as its profile,
+ * unregistered and freed at the end */
+struct LoadedFile {
+    std::string bytes;
+    ecuio_signal_file_t* file = nullptr;
+    std::string profile;
+
+    explicit LoadedFile(const std::string& path)
+        : bytes(read_bytes(fs::u8path(path)))
+    {
+        EXPECT_EQ(ecuio_signal_file_load(bytes.data(), bytes.size(), &file),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        if (file != nullptr) {
+            profile = ecuio_signal_file_profile(file);
+            EXPECT_EQ(ecuio_profile_register(profile.c_str(),
+                                             ecuio_signal_file_set(file),
+                                             nullptr),
+                      ECUIO_OK);
+        }
+    }
+    ~LoadedFile()
+    {
+        if (file != nullptr) {
+            (void)ecuio_profile_unregister(profile.c_str());
+        }
+        ecuio_signal_file_free(file);
+    }
+    const ecuio_signal_set_t* set() const
+    {
+        return ecuio_signal_file_set(file);
+    }
+};
+
+const std::string kExtras = std::string(ECUIO_SIGNAL_FIXTURES) + "/extras.json";
+
+/* A recorder opened under root and given file (ecuio_recorder_signal_file)
+ * before the session on uri attaches; with no file, set alone, as a set
+ * no one file holds */
+struct FileRecording {
+    ecuio_session_t* session = nullptr;
+    ecuio_recorder_t* recorder = nullptr;
+    std::string folder;
+    ecuio_status_t attached = ECUIO_ERR_NULL_ARGUMENT;
+
+    FileRecording(const Root& root, const std::string& uri,
+                  const ecuio_signal_file_t* file,
+                  const ecuio_signal_set_t* set = nullptr)
+    {
+        EXPECT_EQ(ecuio_session_create(uri.c_str(), &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_record_options_t o{};
+        const std::string keep = root.utf8();
+        o.root_utf8 = keep.c_str();
+        EXPECT_EQ(ecuio_recorder_open(&o, &recorder), ECUIO_OK);
+        if (recorder == nullptr || session == nullptr) {
+            return;
+        }
+        char buf[1024];
+        uint32_t len = 0;
+        (void)ecuio_recorder_get_folder(recorder, buf, sizeof buf, &len);
+        folder = buf;
+        EXPECT_EQ(file != nullptr
+                      ? ecuio_recorder_signal_file(recorder, file)
+                      : ecuio_recorder_take_signals(recorder, set, nullptr, 0),
+                  ECUIO_OK);
+        attached = ecuio_session_record(session, recorder);
+    }
+    ecuio_status_t finish()
+    {
+        ecuio_session_destroy(session);
+        session = nullptr;
+        const ecuio_status_t st = ecuio_recorder_close(recorder, "done");
+        recorder = nullptr;
+        return st;
+    }
+    ~FileRecording()
+    {
+        ecuio_session_destroy(session);
+        ecuio_recorder_close(recorder, nullptr);
+    }
+    fs::path path(const char* name) const { return fs::u8path(folder) / name; }
+};
+
+ecuio_recording_signals_t signals_of(const std::string& folder)
+{
+    ecuio_recording_signals_t s{};
+    ecuio_recording_t* r = nullptr;
+    EXPECT_EQ(ecuio_recording_open(folder.c_str(), nullptr, nullptr, &r),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_recording_get_signals(r, &s), ECUIO_OK);
+    ecuio_recording_close(r);
+    return s;
+}
+
+/* signals.csv's rows without their host_us: what was decoded, in order */
+std::vector<std::string> decoded_rows(const fs::path& csv)
+{
+    std::vector<std::string> out;
+    const std::vector<std::string> rows = lines_of(read_text(csv));
+    for (size_t i = 1; i < rows.size(); ++i) {
+        out.push_back(rows[i].substr(rows[i].find(',') + 1));
+    }
+    return out;
+}
+
+} // namespace
+
+/* The signal file that decodes a session is copied into its recording
+ * byte for byte, its SHA-256 on the header after the profile, and the
+ * reader says whether the bytes there are still those (ADR-0051 section
+ * 4) */
+TEST(RecorderTest, ASignalFileIsCopiedWithItsHashOnTheHeader)
+{
+    LoadedFile f(kExtras);
+    ASSERT_NE(f.file, nullptr);
+    Root root;
+    FileRecording rec(root, "mock://x?profile=" + f.profile, f.file);
+    ASSERT_EQ(rec.attached, ECUIO_OK);
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+
+    EXPECT_EQ(read_bytes(rec.path("signals.json")), f.bytes);
+    const std::string sha =
+        ecuio_sha256::hex_of(f.bytes.data(), f.bytes.size());
+    EXPECT_NE(read_text(rec.path("events.log"))
+                  .find("\nprofile  " + f.profile +
+                        "\nsignal file  signals.json," + sha + "\n"),
+              std::string::npos);
+
+    ecuio_recording_signals_t s = signals_of(rec.folder);
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_NAMED |
+                           ECUIO_RECORDING_SIGNALS_PRESENT |
+                           ECUIO_RECORDING_SIGNALS_MATCH);
+    EXPECT_EQ(s.length, f.bytes.size());
+    EXPECT_EQ(std::string(s.sha256), sha);
+
+    /* One byte changed: there, but not the bytes that decoded it */
+    {
+        std::ofstream out(rec.path("signals.json"), std::ios::binary);
+        out << f.bytes << ' ';
+    }
+    s = signals_of(rec.folder);
+    EXPECT_EQ(s.flags,
+              ECUIO_RECORDING_SIGNALS_NAMED | ECUIO_RECORDING_SIGNALS_PRESENT);
+    EXPECT_EQ(s.length, f.bytes.size() + 1);
+    EXPECT_EQ(std::string(s.sha256), sha);
+
+    /* Gone: named only */
+    fs::remove(rec.path("signals.json"));
+    s = signals_of(rec.folder);
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_NAMED);
+    EXPECT_EQ(s.length, 0u);
+}
+
+/* A recording of a session no file decodes has neither the file nor the
+ * line, and the reader names none; nor does one given a set no one file
+ * holds (length 0) */
+TEST(RecorderTest, ASessionNoFileDecodesNamesNone)
+{
+    register_profile();
+    Root root;
+    {
+        Recording rec(root, "mock://x?profile=rec-test");
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        EXPECT_FALSE(fs::exists(fs::u8path(rec.folder) / "signals.json"));
+        EXPECT_EQ(rec.file("events.log").find("signal file"),
+                  std::string::npos);
+        const ecuio_recording_signals_t s = signals_of(rec.folder);
+        EXPECT_EQ(s.flags, 0u);
+        EXPECT_STREQ(s.sha256, "");
+    }
+    FileRecording rec(root, "mock://y?profile=rec-test", nullptr, &kSet);
+    ASSERT_EQ(rec.attached, ECUIO_OK);
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+    EXPECT_FALSE(fs::exists(rec.path("signals.json")));
+    EXPECT_EQ(read_text(rec.path("events.log")).find("signal file"),
+              std::string::npos);
+}
+
+/* The file is taken once, before attach, and only for the session it
+ * decodes: one whose set the session doesn't use refuses the attach */
+TEST(RecorderTest, AFileIsTakenOnlyForTheSessionItDecodes)
+{
+    register_profile();
+    LoadedFile f(kExtras);
+    ASSERT_NE(f.file, nullptr);
+    Root root;
+    {
+        FileRecording rec(root, "mock://x?profile=rec-test", f.file);
+        EXPECT_EQ(rec.attached, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_NE(std::string(ecuio_last_error_detail())
+                      .find("the signal file isn't what decodes the session "
+                            "(its profile is rec-test)"),
+                  std::string::npos)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_recorder_close(rec.recorder, nullptr), ECUIO_OK);
+        rec.recorder = nullptr;
+    }
+
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* r = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &r), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_signal_file(nullptr, f.file),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_take_signals(nullptr, f.set(), "x", 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_take_signals(r, nullptr, "x", 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_take_signals(r, f.set(), nullptr, 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    const std::string big(ECUIO_SIGNAL_FILE_MAX_BYTES + 1, ' ');
+    EXPECT_EQ(ecuio_recorder_take_signals(r, f.set(), big.data(), big.size()),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, f.file), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, f.file),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_session_t* s = nullptr;
+    const std::string uri = "mock://z?profile=" + f.profile;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(s, r), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, f.file),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_recorder_close(r, nullptr), ECUIO_OK);
+}
+
+/* A signals.json that can't be written fails the recording as any write
+ * does */
+TEST(RecorderTest, ASignalFileThatCantBeWrittenFailsTheRecording)
+{
+    LoadedFile f(kExtras);
+    ASSERT_NE(f.file, nullptr);
+    Root root;
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* r = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &r), ECUIO_OK);
+    ecuio_recorder_test_fail_writes(r);
+    ASSERT_EQ(ecuio_recorder_signal_file(r, f.file), ECUIO_OK);
+    ecuio_session_t* s = nullptr;
+    const std::string uri = "mock://z?profile=" + f.profile;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(s, r), ECUIO_OK);
+    ecuio_recorder_state_t st{};
+    EXPECT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(r, &st);
+            return st.state == ECUIO_RECORDING_FAILED;
+        },
+        2000));
+    EXPECT_STREQ(st.reason, "the disk is full");
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_recorder_close(r, nullptr), ECUIO_ERR_RECORDING_FAILED);
+}
+
+/* A replay of a recording with the file it holds decodes the same values
+ * in the same order, and its own recording names the same bytes */
+TEST(RecorderTest, AReplayWithTheRecordingsFileDecodesTheSame)
+{
+    const std::string source =
+        std::string(ECUIO_REPLAY_FIXTURES) + "/2026-10-25-engine-start";
+    const size_t frames =
+        lines_of(read_text(fs::u8path(source) / "frames.csv")).size() - 1;
+    Root root;
+
+    auto record = [&](const std::string& from, const LoadedFile& f) {
+        FileRecording rec(
+            root, "replay://" + from + "?speed=max&profile=" + f.profile,
+            f.file);
+        EXPECT_EQ(rec.attached, ECUIO_OK);
+        std::atomic<size_t> seen{0};
+        auto count = [](const ecuio_frame_t*, void* user) {
+            static_cast<std::atomic<size_t>*>(user)->fetch_add(1);
+        };
+        EXPECT_EQ(ecuio_register_frame_callback(rec.session, count, &seen),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+        EXPECT_TRUE(eventually([&] { return seen.load() >= frames; }, 20000))
+            << seen.load();
+        ecuio_recorder_state_t st{};
+        ecuio_recorder_get_state(rec.recorder, &st);
+        EXPECT_EQ(st.records_dropped, 0u);
+        EXPECT_EQ(rec.finish(), ECUIO_OK);
+        return rec.folder;
+    };
+
+    std::string first;
+    {
+        LoadedFile f(kExtras);
+        ASSERT_NE(f.file, nullptr);
+        first = record(source, f);
+    }
+    std::string second;
+    {
+        LoadedFile again(first + "/signals.json");
+        ASSERT_NE(again.file, nullptr);
+        second = record(first, again);
+    }
+    const std::vector<std::string> a =
+        decoded_rows(fs::u8path(first) / "signals.csv");
+    const std::vector<std::string> b =
+        decoded_rows(fs::u8path(second) / "signals.csv");
+    ASSERT_GT(a.size(), 100u);
+    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv").find(",Road Speed,"),
+              std::string::npos);
+    ASSERT_EQ(a.size(), b.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+        ASSERT_EQ(a[i], b[i]) << "row " << i + 1;
+    }
+    const ecuio_recording_signals_t s1 = signals_of(first);
+    const ecuio_recording_signals_t s2 = signals_of(second);
+    EXPECT_EQ(s2.flags, s1.flags);
+    EXPECT_STREQ(s2.sha256, s1.sha256);
 }

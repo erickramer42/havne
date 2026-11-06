@@ -7,7 +7,9 @@
 //          transitions and reply timing with the test as the worker, and
 //          through the fake ELM327 (Elm327SessionTest.ARecordingHolds*);
 //          a sleep's line and the writer's wakes through the seams;
-//          nothing written before an attach, however late
+//          nothing written before an attach, however late; a signal
+//          file's copy and its hash, only for the session it decodes
+//          (RecorderTest.ASignalFile*, .AReplayWithTheRecordingsFile*)
 //
 // The worker copies each frame and its values, its link transitions and
 // its reply timing into a byte ring (single producer, single consumer);
@@ -23,6 +25,8 @@
 #include "error_detail.h"
 #include "recording_rows.h" /* kFormat3, the first line */
 #include "session.h"
+#include "sha256.h"
+#include "signal_file_build.h" /* a loaded file's bytes */
 
 #include "ecuio/internal.h"
 #include "ecuio/signals.h"
@@ -125,6 +129,7 @@ struct item {
     item_kind kind;
     uint64_t host_us;
     std::string text;
+    std::string bytes; /* begin's: signals.json, empty for none */
 };
 
 bool is_text_kind(uint8_t kind)
@@ -402,6 +407,29 @@ FILE* open_file(const std::string& path)
 }
 #endif
 
+/* Writes bytes to path as they are (binary, so its hash holds on every
+ * platform); false with errno set on a failure */
+bool write_bytes(const std::string& path, const std::string& bytes)
+{
+#ifdef _WIN32
+    const std::wstring w = wide(path);
+    FILE* f = w.empty() ? nullptr : _wfsopen(w.c_str(), L"wb", _SH_DENYWR);
+#else
+    FILE* f = std::fopen(path.c_str(), "wb");
+#endif
+    if (f == nullptr) {
+        return false;
+    }
+    const bool wrote =
+        std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    const int e = errno;
+    const bool closed = std::fclose(f) == 0;
+    if (!wrote) {
+        errno = e;
+    }
+    return wrote && closed;
+}
+
 /* Creates every missing folder of root; false with the OS's reason */
 bool make_root(const std::string& root, std::string* why)
 {
@@ -620,6 +648,13 @@ struct ecuio_recorder {
     bool link_pending = false;
     link_body pending_link{};
     uint64_t timing_next_us = kTimingEveryUs;
+
+    /* The signal file decoding the session to come, set before attach
+     * (ecuio_recorder_signal_file): the set it must be, its bytes and
+     * their SHA-256 */
+    const ecuio_signal_set_t* signals_set = nullptr;
+    std::string signals_json;
+    std::string signals_sha;
 
     /* Fixed at attach */
     std::shared_ptr<ecuio_record_link> link;
@@ -983,6 +1018,18 @@ struct ecuio_recorder {
         for (const item& it : taken) {
             switch (it.kind) {
             case item_kind::begin:
+                /* The file before the header line naming its hash */
+                if (!it.bytes.empty() && !failed()) {
+                    errno = 0;
+                    if (fail_next.exchange(false)) {
+                        fail(ENOSPC);
+                    } else if (!write_bytes(
+                                   folder + "/" +
+                                       ecuio_recording_rows::kSignalFileName,
+                                   it.bytes)) {
+                        fail(errno != 0 ? errno : EIO);
+                    }
+                }
                 event_out += it.text;
                 frame_out += "host_us,timestamp_us,id,flags,data\n";
                 /* A byte-order mark, so a spreadsheet reads the units'
@@ -1314,6 +1361,31 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
     r->head.store(h + size, std::memory_order_release);
 }
 
+ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
+                                           const ecuio_signal_set_t* set,
+                                           const char* bytes, size_t length)
+{
+    if (recorder == nullptr || set == nullptr ||
+        (bytes == nullptr && length > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (recorder->attached.load(std::memory_order_acquire) ||
+        recorder->signals_set != nullptr ||
+        length > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    try {
+        std::string json(bytes != nullptr ? bytes : "", length);
+        recorder->signals_sha = ecuio_sha256::hex_of(json.data(), json.size());
+        recorder->signals_json = std::move(json);
+    } catch (...) {
+        recorder->signals_sha.clear();
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    recorder->signals_set = set;
+    return ECUIO_OK;
+}
+
 extern "C" {
 
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
@@ -1408,7 +1480,7 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
             caller += "caller  " + one_line(options->header_lines[i]) + "\n";
         }
     }
-    r->items.push_back(item{item_kind::begin, 0, caller});
+    r->items.push_back(item{item_kind::begin, 0, caller, {}});
 
     try {
         r->writer = std::thread([rec = r.get()] { rec->run(); });
@@ -1417,6 +1489,17 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
     }
     *out = r.release();
     return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
+                                          const ecuio_signal_file_t* file)
+{
+    if (recorder == nullptr || file == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const std::string& bytes = ecuio_sf::bytes_of(*file);
+    return ecuio_recorder_take_signals(recorder, &file->set, bytes.data(),
+                                       bytes.size());
 }
 
 ecuio_status_t ecuio_session_record(ecuio_session_t* session,
@@ -1430,6 +1513,13 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     }
     if (session->started || session->record_link != nullptr ||
         recorder->attached.load()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (recorder->signals_set != nullptr &&
+        recorder->signals_set != session->active_signal_set) {
+        ecuio_detail_set("the signal file isn't what decodes the session "
+                         "(its profile is %s)",
+                         session->info.profile);
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
 
@@ -1483,6 +1573,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         header += std::string("core  ") + ecuio_version_string() + "\n";
         header += "uri  " + one_line(session->uri.c_str()) + "\n";
         header += std::string("profile  ") + session->info.profile + "\n";
+        if (!recorder->signals_json.empty()) {
+            header += std::string(ecuio_recording_rows::kSignalFileKey) +
+                      ecuio_recording_rows::kSignalFileName + "," +
+                      recorder->signals_sha + "\n";
+        }
         /* A replay's frames carry its source's flags, so it writes its
          * source's line, which a recording from before ADR-0049 lacks */
         header += "frame flags  ";
@@ -1516,6 +1611,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         std::lock_guard<std::mutex> g(recorder->note_m);
         /* The caller's lines open() queued, then the columns */
         item& begin = recorder->items.front();
+        begin.bytes = std::move(recorder->signals_json);
         begin.text = header + begin.text +
                      "columns  local time, seconds since the recording started "
                      "(host_us / 1e6 in the CSV files), kind, text\n\n";
@@ -1556,7 +1652,7 @@ ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
             return ECUIO_OK;
         }
         recorder->items.push_back(
-            item{item_kind::note, host_us, std::move(line)});
+            item{item_kind::note, host_us, std::move(line), {}});
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -1586,7 +1682,7 @@ ecuio_status_t ecuio_recorder_mark(ecuio_recorder_t* recorder,
             return ECUIO_OK;
         }
         recorder->items.push_back(
-            item{item_kind::mark, host_us, std::move(label)});
+            item{item_kind::mark, host_us, std::move(label), {}});
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }

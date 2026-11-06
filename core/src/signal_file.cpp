@@ -1158,6 +1158,9 @@ ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
         }
         std::unique_ptr<ecuio_signal_file> f(new ecuio_signal_file());
         ecuio_sf::read_file(root, *f);
+        if (length > 0) {
+            f->bytes.assign(bytes, length);
+        }
         *out = f.release();
         return ECUIO_OK;
     } catch (const refused& r) {
