@@ -6492,38 +6492,39 @@ TEST(ReadOnceTest, TheDraftsMistakesAreNamed)
          engineEcu(), "A DID is four hex digits"},
         {"a PID of three digits", pidSignal(QStringLiteral("00C"), f16),
          engineEcu(), "A PID is two hex digits"},
-        {"a blank name", noName, engineEcu(), "A name is 1 to 31 bytes"},
+        {"a blank name", noName, engineEcu(), "A signal needs a name"},
         {"a name of 32 bytes", longName, engineEcu(),
-         "A name is 1 to 31 bytes"},
+         "The signal's name is 32 bytes; it takes 1 to 31"},
         {"no first byte", noByte, engineEcu(),
-         "The field needs its first byte"},
-        {"no bits", didSignal(d, field(0, 0)), engineEcu(), "The field's bits"},
+         "The signal's field needs \"byte\""},
+        {"no bits", didSignal(d, field(0, 0)), engineEcu(),
+         "The signal's bits takes a whole number from 1 to 32"},
         {"33 bits", didSignal(d, field(0, 33)), engineEcu(),
-         "The field's bits"},
+         "The signal's bits takes a whole number from 1 to 32"},
         {"half a bit",
          didSignal(d, field(0, 8,
                             {{QStringLiteral("bit"), 0.5},
                              {QStringLiteral("order"), QStringLiteral("le")}})),
-         engineEcu(), "The field's bit is 0 to 7"},
+         engineEcu(), "The signal's bit takes a whole number from 0 to 7"},
         {"bit 8",
          didSignal(d, field(0, 1,
                             {{QStringLiteral("bit"), 8},
                              {QStringLiteral("order"), QStringLiteral("le")}})),
-         engineEcu(), "The field's bit is 0 to 7"},
+         engineEcu(), "The signal's bit takes a whole number from 0 to 7"},
         {"a big-endian 12 bits", didSignal(d, field(0, 12)), engineEcu(),
-         "A big-endian field is whole bytes"},
+         "The signal's field is big-endian, so whole bytes"},
         {"another order",
          didSignal(
              d, field(0, 8, {{QStringLiteral("order"), QStringLiteral("me")}})),
-         engineEcu(), "The field's order is be or le"},
+         engineEcu(), "The signal's order 'me' isn't \"be\" or \"le\""},
         {"scale 0", didSignal(d, f16, {{QStringLiteral("scale"), 0}}),
-         engineEcu(), "The scale is a number other than 0"},
+         engineEcu(), "The signal's scale is 0"},
         {"a unit of 16 bytes",
          didSignal(d, f16,
                    {{QStringLiteral("unit"), QString(16, QLatin1Char('u'))}}),
-         engineEcu(), "A unit is at most 15 bytes"},
+         engineEcu(), "The signal's unit is 16 bytes; it takes 0 to 15"},
         {"4 decimals", didSignal(d, f16, {{QStringLiteral("decimals"), 4}}),
-         engineEcu(), "Decimals is 0 to 3"},
+         engineEcu(), "The signal's decimals takes a whole number from 0 to 3"},
         {"a computed signal",
          didSignal(d, f16,
                    {{QStringLiteral("kind"), QStringLiteral("computed")}}),
@@ -6531,11 +6532,12 @@ TEST(ReadOnceTest, TheDraftsMistakesAreNamed)
         {"a signed enum",
          didSignal(d, field(0, 8, {{QStringLiteral("signed"), true}}),
                    {{QStringLiteral("kind"), QStringLiteral("enum")}}),
-         engineEcu(), "An enum's field is unsigned"},
+         engineEcu(), "Unknown key 'signed' in the signal's field"},
         {"a formula's name",
          didSignal(d, f16,
                    {{QStringLiteral("name"), QStringLiteral("=SUM(A1)")}}),
-         engineEcu(), "Core refuses the signal (validator code 18)"},
+         engineEcu(),
+         "The signal's name '=SUM(A1)' starts as a spreadsheet formula"},
     };
     for (const Case& c : cases) {
         ReadOnce::Request r;
@@ -6723,12 +6725,14 @@ TEST(BridgeTest, ReadOnceRefusesWhatItCantAsk)
                       engineEcu())
             .toStdString(),
         "Read once needs an adapter: j2534://, elm327:// or socketcan://");
-    EXPECT_EQ(bridge
-                  .readOnce(QStringLiteral("elm327://COM6"),
-                            didSignal(QStringLiteral("1E1C"), field(0, 12)),
-                            engineEcu())
-                  .toStdString(),
-              "A big-endian field is whole bytes: a narrower one is le");
+    EXPECT_EQ(
+        bridge
+            .readOnce(QStringLiteral("elm327://COM6"),
+                      didSignal(QStringLiteral("1E1C"), field(0, 12)),
+                      engineEcu())
+            .toStdString(),
+        "The signal's field is big-endian, so whole bytes: bits a multiple "
+        "of 8 and no bit (\"order\": \"le\" for a bit field)");
     EXPECT_FALSE(bridge.readingOnce());
 }
 
@@ -7215,4 +7219,36 @@ TEST(BridgeTest, SignalFileIsDeletedOnlyOnceItsProfileIsUnregistered)
     EXPECT_EQ(bridge.deleteUnusedSignalFiles({}), 1);
     EXPECT_FALSE(registered("user.body"));
     EXPECT_FALSE(QDir(dir.store()).exists()) << "the folder with the last copy";
+}
+
+/* The form's file goes in as text and comes back as text; a refusal is
+ * the loader's, nothing kept */
+TEST(BridgeTest, SignalFileTextGoesInAndComesBack)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString text = QString::fromUtf8(signalFile(QStringLiteral("Mine")));
+    const QVariantMap r = bridge.importSignalText(text);
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QString sha = r.value(QStringLiteral("sha256")).toString();
+    EXPECT_EQ(sha, sha256Of(text.toUtf8()));
+    EXPECT_EQ(bridge.signalFileText(sha), text);
+    EXPECT_TRUE(bridge.signalFileText(QString(64, QLatin1Char('e'))).isEmpty());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Signal file saved: Mine (user.mine, 1 signals)")))
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    QString bad = text;
+    bad.replace(QStringLiteral("\"bits\""), QStringLiteral("\"bitz\""));
+    const QVariantMap refused = bridge.importSignalText(bad);
+    EXPECT_FALSE(refused.value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(refused.value(QStringLiteral("words"))
+                    .toString()
+                    .contains(QStringLiteral("bitz")));
+    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
 }

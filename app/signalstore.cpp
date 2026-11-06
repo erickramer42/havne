@@ -132,6 +132,15 @@ const SignalStore::Held* SignalStore::load(const QString& sha, QString* words)
     return &m_held.at(sha);
 }
 
+QString SignalStore::text(const QString& sha)
+{
+    QFile f(pathOf(sha));
+    if (!f.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return QString::fromUtf8(f.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1));
+}
+
 QVariantList SignalStore::use(const QStringList& shas)
 {
     for (auto it = m_registered.begin(); it != m_registered.end();) {

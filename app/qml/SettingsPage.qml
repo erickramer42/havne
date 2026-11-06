@@ -52,7 +52,13 @@
 //          for the vehicle's own file) and Forget deleting the copies no
 //          vehicle keeps, a new page registering them again; the store
 //          itself: BridgeTest.SignalFile*. Manual: the file dialog, and
-//          Android's content:// through it.
+//          Android's content:// through it (the test phone, 2026-11-05).
+//          The vehicle's own signals (ADR-0051's form, SignalForm): Save
+//          writing its own file and the file a profile, a second Save
+//          adding to it and Edit's replacing a signal, Remove, the
+//          loader's words for a draft it refuses; Read once refused
+//          while connected or with no adapter, and (Windows, the fake)
+//          a DID's reply bytes and value beside the form.
 
 import QtCore
 import QtQuick
@@ -280,6 +286,135 @@ Pane {
             return null
         const sha = confirming.substring("removeSignals:".length)
         return pickedVehicle.signals.find(f => f.sha256 === sha) || null
+    }
+
+    // ---- The vehicle's own signals (ADR-0051's form) ----
+    // The own file as a document (SignalForm), null for none; the form's
+    // choices that aren't text; what Read once last said
+    readonly property var ownFile: pickedVehicle === null || pickedVehicle.own === "" ? null
+        : SignalForm.parseFile(Bridge.signalFileText(pickedVehicle.own))
+    readonly property var ownSignals: ownFile === null ? [] : ownFile.signals
+    property string formService: "22"
+    property string formOrder: "be"
+    property string formKind: "number"
+    property string formGroup: ""
+    property string formProblem: ""
+    property string formNote: ""
+    property var readResult: null
+
+    function readForm() {
+        return { name: formName.text, rx: formRx.text, tx: formTx.text, service: formService,
+                 number: formNumber.text, byte: formByte.text, bits: formBits.text,
+                 bit: formBit.text, order: formOrder, signed: formSigned.checked,
+                 bytes: formBytes.text, scale: formScale.text, offset: formOffset.text,
+                 unit: formUnit.text, decimals: formDecimals.text, group: formGroup,
+                 kind: formKind, values: formValues.text }
+    }
+
+    function fillForm(f) {
+        formName.text = f.name
+        formRx.text = f.rx
+        formTx.text = f.tx
+        formService = f.service
+        formNumber.text = f.number
+        formByte.text = f.byte
+        formBits.text = f.bits
+        formBit.text = f.bit
+        formOrder = f.order
+        formSigned.checked = f.signed
+        formBytes.text = f.bytes
+        formScale.text = f.scale
+        formOffset.text = f.offset
+        formUnit.text = f.unit
+        formDecimals.text = f.decimals
+        formGroup = f.group
+        formKind = f.kind
+        formValues.text = f.values
+        formProblem = ""
+        formNote = ""
+        readResult = null
+    }
+
+    // The adapter Read once asks on: the field's, when it names one, else
+    // the vehicle's last
+    function readOnceAdapter() {
+        const typed = uriField.text.trim()
+        if (/^(j2534|elm327|socketcan):\/\//i.test(typed))
+            return typed
+        return pickedVehicle !== null ? pickedVehicle.uri : ""
+    }
+
+    function readOnceDraft() {
+        formProblem = ""
+        formNote = ""
+        readResult = null
+        const f = readForm()
+        const why = Bridge.readOnce(readOnceAdapter(), SignalForm.draft(f), SignalForm.moduleOf(f))
+        if (why !== "")
+            formProblem = why
+    }
+
+    function readResultText(r) {
+        if (r === null)
+            return ""
+        if (r.ok)
+            return qsTr("Asked %1, got %2: %3").arg(r.request, r.reply, r.value)
+        return r.reply !== "" ? qsTr("Asked %1, got %2: %3").arg(r.request, r.reply, r.words)
+                              : qsTr("Asked %1: %2").arg(r.request, r.words)
+    }
+
+    // doc as the vehicle's own file, in place of the one before. The
+    // loader's words when it refuses it, without a line and column of a
+    // file the user never sees; the book's when another file makes its
+    // profile. True when saved
+    function saveOwn(doc, note) {
+        const r = Bridge.importSignalText(JSON.stringify(doc, null, 2))
+        if (!r.ok) {
+            formProblem = String(r.words).replace(/^line \d+, column \d+: /, "")
+            return false
+        }
+        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
+        const problem = VehicleBook.profileProblem(vehicles, file, pickedVehicle.own)
+        if (problem !== "") {
+            formProblem = problem
+            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+            return false
+        }
+        saveVehicles(VehicleBook.setOwn(vehicles, file))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+        formProblem = ""
+        formNote = note
+        return true
+    }
+
+    // The form's signal into the own file, made with the first; a signal
+    // of the same name's key replaced
+    function saveDraft() {
+        formNote = ""
+        readResult = null
+        if (pickedVehicle === null)
+            return false
+        const f = readForm()
+        const signal = SignalForm.draft(f)
+        const base = ownFile !== null ? ownFile : SignalForm.emptyFile(pickedVehicle.label)
+        return saveOwn(SignalForm.withSignal(base, signal, SignalForm.moduleOf(f)),
+                       qsTr("%1 saved in %2").arg(signal.name, base.name))
+    }
+
+    function editOwnSignal(key) {
+        const s = ownSignals.find(x => x.key === key)
+        if (s !== undefined)
+            fillForm(SignalForm.fieldsOf(ownFile, s))
+    }
+
+    // The last signal's removal takes the file with it
+    function removeOwnSignal(key) {
+        const doc = SignalForm.withoutSignal(ownFile, key)
+        if (doc.signals.length === 0) {
+            dropSignalFile(pickedVehicle.own)
+            return
+        }
+        saveOwn(doc, qsTr("Removed from %1").arg(doc.name))
     }
 
     // Forget and Forget all: the copies no vehicle keeps go with them
@@ -712,6 +847,9 @@ Pane {
     Connections {
         target: Bridge
 
+        function onReadOnceResult(result) {
+            page.readResult = result
+        }
         function onConnectResult(uri, error) {
             errorLabel.text = error
             errorLabel.visible = (error !== "")
@@ -1344,6 +1482,265 @@ Pane {
                     title: qsTr("Import a signal file")
                     nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
                     onAccepted: page.importSignalFile(importDialog.selectedFile)
+                }
+
+                // ---- The vehicle's own signals (ADR-0051's form) ----
+                Label {
+                    objectName: "ownSignalsTitle"
+                    visible: page.pickedVehicle !== null
+                    text: qsTr("Your own signals")
+                    color: Theme.text
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: page.ownSignals
+                    RowLayout {
+                        id: ownRow
+                        required property var modelData
+                        required property int index
+                        objectName: "ownSignal_" + index
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "ownSignalText"
+                            text: qsTr("%1: %2").arg(ownRow.modelData.name,
+                                                     SignalForm.describe(page.ownFile, ownRow.modelData))
+                            color: Theme.text
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "ownEdit_" + ownRow.index
+                            text: qsTr("Edit")
+                            enabled: page.confirming === ""
+                            onClicked: page.editOwnSignal(ownRow.modelData.key)
+                        }
+                        ThemedButton {
+                            objectName: "ownRemove_" + ownRow.index
+                            text: qsTr("Remove")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.removeOwnSignal(ownRow.modelData.key)
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    objectName: "signalForm"
+                    visible: page.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        TextField {
+                            id: formName
+                            objectName: "formName"
+                            placeholderText: qsTr("Name")
+                            width: Math.min(parent.width, Theme.controlHeight * 8)
+                        }
+                        TextField {
+                            id: formRx
+                            objectName: "formRx"
+                            text: "7E8"
+                            placeholderText: qsTr("Reply ID")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formTx
+                            objectName: "formTx"
+                            placeholderText: qsTr("Request ID")
+                            width: Theme.controlHeight * 3
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        Repeater {
+                            model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
+                            ThemedButton {
+                                required property var modelData
+                                objectName: "formService_" + modelData.name
+                                text: modelData.label
+                                highlighted: page.formService === modelData.name
+                                onClicked: page.formService = modelData.name
+                            }
+                        }
+                        TextField {
+                            id: formNumber
+                            objectName: "formNumber"
+                            placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
+                                                                       : qsTr("PID, 2 hex digits")
+                            width: Theme.controlHeight * 5
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        Repeater {
+                            model: SignalForm.kinds
+                            ThemedButton {
+                                required property string modelData
+                                objectName: "formKind_" + modelData
+                                text: modelData
+                                highlighted: page.formKind === modelData
+                                onClicked: page.formKind = modelData
+                            }
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        TextField {
+                            id: formByte
+                            objectName: "formByte"
+                            text: "0"
+                            placeholderText: qsTr("Byte")
+                            width: Theme.controlHeight * 2.5
+                        }
+                        TextField {
+                            id: formBits
+                            objectName: "formBits"
+                            visible: page.formKind === "number" || page.formKind === "enum"
+                            text: "8"
+                            placeholderText: qsTr("Bits")
+                            width: Theme.controlHeight * 2.5
+                        }
+                        TextField {
+                            id: formBit
+                            objectName: "formBit"
+                            visible: formBits.visible
+                            placeholderText: qsTr("Bit")
+                            width: Theme.controlHeight * 2.5
+                        }
+                        TextField {
+                            id: formBytes
+                            objectName: "formBytes"
+                            visible: !formBits.visible
+                            placeholderText: qsTr("Bytes (all)")
+                            width: Theme.controlHeight * 3
+                        }
+                        Repeater {
+                            model: formBits.visible ? ["be", "le"] : []
+                            ThemedButton {
+                                required property string modelData
+                                objectName: "formOrder_" + modelData
+                                text: modelData
+                                highlighted: page.formOrder === modelData
+                                onClicked: page.formOrder = modelData
+                            }
+                        }
+                        CheckBox {
+                            id: formSigned
+                            objectName: "formSigned"
+                            visible: page.formKind === "number"
+                            text: qsTr("Signed")
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        visible: page.formKind === "number"
+                        TextField {
+                            id: formScale
+                            objectName: "formScale"
+                            placeholderText: qsTr("Scale (1)")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formOffset
+                            objectName: "formOffset"
+                            placeholderText: qsTr("Offset (0)")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formUnit
+                            objectName: "formUnit"
+                            placeholderText: qsTr("Unit")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formDecimals
+                            objectName: "formDecimals"
+                            placeholderText: qsTr("Decimals")
+                            width: Theme.controlHeight * 3
+                        }
+                    }
+
+                    TextField {
+                        id: formValues
+                        objectName: "formValues"
+                        visible: page.formKind === "enum"
+                        placeholderText: qsTr("Values: 0=Park, 1=Reverse, 2=Neutral")
+                        Layout.fillWidth: true
+                    }
+
+                    LabeledFlow {
+                        label: qsTr("Group:")
+                        Repeater {
+                            model: SignalForm.groups
+                            ThemedButton {
+                                required property string modelData
+                                objectName: "formGroup_" + (modelData === "" ? "other" : modelData)
+                                text: modelData === "" ? qsTr("other") : modelData
+                                highlighted: page.formGroup === modelData
+                                onClicked: page.formGroup = modelData
+                            }
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        ThemedButton {
+                            objectName: "formReadOnce"
+                            text: Bridge.readingOnce ? qsTr("Reading...") : qsTr("Read once")
+                            enabled: page.idle && !Bridge.readingOnce && page.confirming === ""
+                            onClicked: page.readOnceDraft()
+                        }
+                        ThemedButton {
+                            objectName: "formSave"
+                            text: qsTr("Save")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.saveDraft()
+                        }
+                        ThemedButton {
+                            objectName: "formClear"
+                            text: qsTr("Clear")
+                            onClicked: page.fillForm(SignalForm.emptyFields())
+                        }
+                    }
+
+                    Label {
+                        objectName: "formReadResult"
+                        visible: text !== ""
+                        text: page.readResultText(page.readResult)
+                        color: page.readResult !== null && page.readResult.ok ? Theme.text : Theme.warning
+                        wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "formProblem"
+                        visible: text !== ""
+                        text: page.formProblem
+                        color: Theme.warning
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "formNote"
+                        visible: text !== ""
+                        text: page.formNote
+                        color: Theme.textDim
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
                 }
 
                 // ---- A VIN looked up (ADR-0043): decoded here, never kept ----

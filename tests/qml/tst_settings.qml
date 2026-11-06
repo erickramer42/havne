@@ -1043,6 +1043,113 @@ TestCase {
         verify(!findChild(page, "profile_user.body"))
     }
 
+    // ---- The vehicle's own signals (ADR-0051's form) ----
+
+    function typeSignal(page, name, number, bits) {
+        find(page, "formName").text = name
+        find(page, "formNumber").text = number
+        if (bits !== undefined)
+            find(page, "formBits").text = bits
+    }
+
+    function ownText(page, i) {
+        return find(find(page, "ownSignal_" + i), "ownSignalText").text
+    }
+
+    function test_theFormSavesTheVehiclesOwnSignals() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(find(page, "signalForm").visible)
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(find(page, "formNote").text, "Trans Temp saved in Vehicle 1 own")
+        compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Vehicle 1 own: 1 signals, profile user.vehicle-1-own")
+        verify(findChild(page, "profile_user.vehicle-1-own"), "a profile under What to read")
+        compare(page.pickedVehicle.own, page.pickedVehicle.signals[0].sha256)
+        compare(Harness.storedSignalFiles().length, 1)
+
+        // A second signal joins the file; the last copy goes
+        page.fillForm(SignalForm.emptyFields())
+        typeSignal(page, "Gear", "D101")
+        press(page, "formKind_enum")
+        find(page, "formValues").text = "0=Park, 3=Drive"
+        press(page, "formSave")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp", "gear"])
+        compare(page.ownSignals[1].values, { "0": "Park", "3": "Drive" })
+        compare(Harness.storedSignalFiles().length, 1, "one copy: the file's newest")
+
+        // Edit fills the form; Save replaces the signal of that name
+        press(page, "ownEdit_0")
+        compare(find(page, "formName").text, "Trans Temp")
+        compare(find(page, "formBits").text, "16")
+        compare(page.formKind, "number")
+        find(page, "formNumber").text = "1E1D"
+        press(page, "formSave")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1D", "D101"])
+
+        // The last signal's Remove takes the file
+        press(page, "ownRemove_1")
+        compare(page.ownSignals.length, 1)
+        compare(find(page, "formNote").text, "Removed from Vehicle 1 own")
+        press(page, "ownRemove_0")
+        compare(page.pickedVehicle.signals, [])
+        compare(page.pickedVehicle.own, "")
+        compare(Harness.storedSignalFiles(), [])
+    }
+
+    function test_theFormShowsTheLoadersWords() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Bad", "1E1C", "12")
+        press(page, "formSave")
+        const words = find(page, "formProblem").text
+        verify(words.includes("big-endian"), words)
+        verify(!/^line \d/.test(words), "no line and column: " + words)
+        compare(page.ownSignals, [])
+        compare(Harness.storedSignalFiles(), [])
+
+        // Read once checks the draft first, then needs an adapter
+        find(page, "uriField").text = "mock://demo"
+        press(page, "formReadOnce")
+        verify(find(page, "formProblem").text.includes("big-endian"))
+        find(page, "formBits").text = "16"
+        press(page, "formReadOnce")
+        compare(find(page, "formProblem").text,
+                "Read once needs an adapter: j2534://, elm327:// or socketcan://")
+        find(page, "formRx").text = "7B8"
+        press(page, "formReadOnce")
+        compare(find(page, "formProblem").text,
+                "The module needs its request ID: only 7E8 to 7EF and 18DAF1xx have one by rule")
+
+        // No Read once while a session holds the adapter
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000)
+        verify(!find(page, "formReadOnce").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+    }
+
+    // The fake DLL's ECU answers 1E1C with 12 34
+    function test_readOnceShowsTheRepliesBytesAndValue() {
+        if (Harness.fakeDllPath === "")
+            skip("the fake J2534 DLL is Windows only")
+        const page = createPage()
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath + "?profile=obd2"
+        typeSignal(page, "Test", "1E1C", "16")
+        find(page, "formScale").text = "0.1"
+        find(page, "formUnit").text = "kPa"
+        find(page, "formDecimals").text = "1"
+        press(page, "formReadOnce")
+        compare(find(page, "formProblem").text, "")
+        tryVerify(() => page.readResult !== null, 15000, "the read ends")
+        compare(find(page, "formReadResult").text, "Asked 22 1E 1C, got 62 1E 1C 12 34: 466.0 kPa")
+        verify(!Bridge.connected, "no session left behind")
+    }
+
     function test_pickingAVehicleFillsItsConnection() {
         const page = createPage()
         press(page, "vehicleNew")

@@ -1023,6 +1023,25 @@ QVariantMap SessionBridge::importSignalFile(const QUrl& url)
     return result;
 }
 
+QVariantMap SessionBridge::importSignalText(const QString& text)
+{
+    const QVariantMap result = m_signalStore.import(text.toUtf8());
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Signal file saved: %1 (%2, %3 signals)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("profile")).toString())
+                  .arg(result.value(QStringLiteral("count")).toInt())
+            : QStringLiteral("Signal file not saved: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QString SessionBridge::signalFileText(const QString& sha) const
+{
+    return SignalStore::text(sha);
+}
+
 QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
 {
     const QVariantList used = m_signalStore.use(shas);

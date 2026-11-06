@@ -44,7 +44,8 @@ qt_add_library(app_ui STATIC
     latencystats.h
 )
 
-set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml PROPERTIES
+set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
+                            qml/SignalForm.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -69,6 +70,7 @@ qt_add_qml_module(app_ui
         qml/ChartLayout.qml
         qml/StripChart.qml
         qml/VehicleBook.qml
+        qml/SignalForm.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml
         qml/GaugeArc.qml
