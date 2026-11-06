@@ -200,8 +200,10 @@ TEST(Obd2SetTest, GroupsEachSignalByThePartOfTheCarItReads)
     const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
     for (uint32_t i = 0; i < mock->count; ++i) {
         const ecuio_signal_def_t& m = mock->defs[i];
-        uint8_t expected =
-            ECUIO_SIGNAL_GROUP_OXYGEN; /* Lambda: obd2 has none */
+        /* obd2 has neither: Lambda reads a wideband, boost is computed */
+        uint8_t expected = std::strcmp(m.name, "Boost") == 0
+                               ? ECUIO_SIGNAL_GROUP_AIR
+                               : ECUIO_SIGNAL_GROUP_OXYGEN;
         for (uint32_t k = 0; k < obd2->count; ++k) {
             if (std::strcmp(obd2->defs[k].name, m.name) == 0) {
                 expected = obd2->defs[k].group;

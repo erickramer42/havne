@@ -8,7 +8,8 @@
 //     rpm neither sits still nor steps, the engine stopped aside;
 //     CoreTest.MockDriveCycleEachLoopStartsWithTheEngineStopped the
 //     key-on phase and the start; CoreTest.MockFramesDecodeAgainstMockSignalSet
-//     covers the worker.
+//     covers the worker, CoreTest.MockBoostIsMapMinusBaro the boost its
+//     MAP and baro give.
 
 #ifndef ECUIO_MOCK_DRIVE_CYCLE_H
 #define ECUIO_MOCK_DRIVE_CYCLE_H
@@ -67,7 +68,8 @@ namespace ecuio_mock {
  * 4.5 L. No car has been logged at WOT or on the limiter through
  * Havne; those states follow the model's physics and the usual
  * signatures (fuel cut leaves airflow up and lambda lean, a NA engine's
- * intake air stays near ambient at speed). So do the warm temperatures:
+ * intake air stays near ambient at speed). So does the manifold's
+ * pressure, worked out from load (manifold_kpa). So do the warm temperatures:
  * a thermostat that opens at 84 C, coolant climbing past 210 F on a hard
  * run until the fan cuts in, and oil at what an NA engine without an
  * oil cooler reaches on a track.
@@ -178,6 +180,16 @@ constexpr float kQuarterMileM = 402.336f;
 constexpr float kGradeMax = 0.012f;
 constexpr float kGradeLengthM = 150.0f;
 
+/* Pressures, kPa (manifold_kpa): the outside air near sea level, what
+ * the exhaust leaves in a cylinder (a fill of none still reads this
+ * much), the intake's loss at a flow near the WOT peak, and the rpm
+ * from which the engine pumps a full vacuum. */
+constexpr float kBaroKpa = 101.3f;
+constexpr float kMapResidualKpa = 15.0f;
+constexpr float kIntakeLossKpa = 3.0f;
+constexpr float kIntakeLossAtGs = 250.0f;
+constexpr float kMapPumpRpm = 600.0f;
+
 /* The driver's pedal, percent per tick: a stab to WOT and a lift are
  * quick, anything else about half the travel a second. */
 constexpr float kPedalStabPct = 20.0f;
@@ -282,6 +294,25 @@ inline float airflow_frac(float blade, float rpm)
     return closed + (1.0f - closed) * h;
 }
 
+/* Manifold pressure, kPa (PID 0x0B). The cylinders fill in proportion
+ * to the manifold's pressure above what the exhaust left in them, so a
+ * load (the fill over WOT's) reads kMapResidualKpa plus that share of
+ * WOT's pressure: the outside air less the intake's loss, which grows
+ * with the square of the flow. A stopped engine pumps nothing, so its
+ * manifold reads the outside air; one turning slower than an idle (the
+ * starter, a run-down) pulls part of the vacuum. Naturally aspirated:
+ * never above the outside air, so boost is a vacuum or zero. */
+inline float manifold_kpa(float baro_kpa, float rpm, float load_pct,
+                          float maf_gs)
+{
+    const float flow = maf_gs / kIntakeLossAtGs;
+    const float wot = baro_kpa - kIntakeLossKpa * flow * flow;
+    const float fill = clampf(load_pct / 100.0f, 0.0f, 1.0f);
+    const float filled = kMapResidualKpa + (wot - kMapResidualKpa) * fill;
+    const float pumping = clampf(rpm / kMapPumpRpm, 0.0f, 1.0f);
+    return clampf(baro_kpa + pumping * (filled - baro_kpa), 0.0f, baro_kpa);
+}
+
 /* Torque with fuel cut: friction and pumping, rising with rpm. */
 inline float fuel_cut_drag_nm(float rpm)
 {
@@ -371,6 +402,8 @@ struct DriveCycle {
     float maf_gs = 0.0f;
     float oil_c = kColdStartC;
     float lambda = kLambdaLean; /* no exhaust: the sensor reads air */
+    float map_kpa = kBaroKpa;   /* PID 0x0B: stopped, the outside air */
+    float baro_kpa = kBaroKpa;  /* PID 0x33 */
     /* The engine turning on its own: false stopped or cranking */
     bool running = false;
 
@@ -859,6 +892,7 @@ private:
         const float noise = (0.005f + 0.015f * airflow) * tick_noise(tick, 3);
         load_pct = clampf(airflow * (1.0f + 0.5f * noise) * 100.0f, 0.0f, 100.0f);
         maf_gs = maf_wot_gs(rpm) * airflow * (1.0f + noise);
+        map_kpa = manifold_kpa(baro_kpa, rpm, load_pct, maf_gs);
         throttle_pct = kTpClosedPct + (kTpWotPct - kTpClosedPct) * blade;
 
         update_lambda(lambda_cmd);
@@ -1069,6 +1103,9 @@ inline uint16_t clamp_u16(float v)
  *   [7..8]   MAF      LE uint16, scale 0.01 g/s
  *   [9]      oil      uint8, offset -40
  *   [10..11] lambda   LE uint16, scale 1/32768 (J1979's equivalence ratio)
+ *   [12]     MAP      uint8, kPa
+ *   [13]     baro     uint8, kPa
+ *   [14..15] zero, to CAN FD's 16-byte length
  * The transport never decodes (rule 2); the tests round-trip every
  * tick of the cycle through ecuio_mock_signal_set(). */
 inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN])
@@ -1092,6 +1129,11 @@ inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY
     const uint16_t lambda_raw = clamp_u16(s.lambda * 32768.0f);
     out[10] = static_cast<uint8_t>(lambda_raw & 0xFF);
     out[11] = static_cast<uint8_t>((lambda_raw >> 8) & 0xFF);
+
+    out[12] = clamp_u8(s.map_kpa);
+    out[13] = clamp_u8(s.baro_kpa);
+    out[14] = 0;
+    out[15] = 0;
 }
 
 } // namespace ecuio_mock

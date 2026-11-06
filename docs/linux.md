@@ -160,7 +160,7 @@ through Havne yet.
 ```sh
 sudo modprobe vcan
 sudo ip link add dev vcan0 type vcan
-sudo ip link set vcan0 mtu 72        # CAN FD: the simulated car's frames are 12 bytes
+sudo ip link set vcan0 mtu 72        # CAN FD: the simulated car's frames are 16 bytes
 sudo ip link set up vcan0
 havne-cli play mock://demo --to vcan0 &
 havne-cli stream "socketcan://vcan0?profile=mock" --values

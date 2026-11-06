@@ -430,7 +430,7 @@ jobs:
           cmake --build build
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
-      # frames (the mock's 12-byte telemetry), whatever the kernel's
+      # frames (the mock's 16-byte telemetry), whatever the kernel's
       # default; it's set before the link goes up, as vcan requires
       - name: Bring up vcan0
         run: |
