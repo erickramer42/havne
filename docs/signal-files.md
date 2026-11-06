@@ -8,13 +8,13 @@ design and the reasons behind each rule are
 [ADR-0051](adr/0051-signal-files.md); this page is the reference for
 writing one by hand.
 
-> **Status:** the format is decided (ADR-0051), core's loader reads
-> it (`ecuio_signal_file_load`, `signals.h`), `havne-cli` checks and
-> streams a file ("Using a file") and imports an OBDb set ("Importing an
-> OBDb signal set", `ecuio_obdb_import`, `obdb.h`), and a recording
-> holds the file that decoded it. The app's import is v0.5.0's work too.
-> None of it is in a release yet; what isn't settled is marked **Not
-> settled** below.
+> **Status:** in v0.5.0: core's loader (`ecuio_signal_file_load`,
+> `signals.h`), the app's import, its form for a vehicle's own signals
+> and **Read once**, `havne-cli`'s check, stream and OBDb import
+> (`ecuio_obdb_import`, `obdb.h`), and a recording holding the file that
+> decoded it. A replay that decodes with its recording's copy and
+> **Save a copy** come with the next release. What isn't settled is
+> marked **Not settled** below.
 
 ## A first file
 
@@ -48,6 +48,56 @@ and shows it in degrees Celsius, beside every signal of the `obd2` set.
 DID 0xD100 is made up for this page: a real car's DIDs are its manufacturer's,
 found with the DID scan (`?scan=first`, [ADR-0020](adr/0020-uds-generic.md))
 and checked with **Read once** before they're trusted.
+
+## From a scan to a shared file
+
+A walkthrough in the app, for a DID you don't know yet, with the
+`havne-cli` form of each step after it. Every step reads; none writes
+to the car.
+
+1. **Find what a module answers.** In Settings, under **What to read**,
+   pick **uds-generic (DIDs)**, and give the DID field a range, with the
+   module's reply ID before it for any module but the engine's:
+   `7E9:D800-D8FF`. Add `&scan=first` to the URI, so the range is asked
+   before anything is polled, and connect. Each DID that answers joins
+   Live as a row, `0x7E9 DID D8xx`, showing its reply's bytes in hex,
+   and the activity log's `ECU 0x7E9:` line counts the scan
+   (`scan: 256 DIDs, 3 found, 253 refused`). The same with `havne-cli`:
+
+   ```sh
+   havne-cli stream "elm327://COM5?profile=uds-generic&did=7E9:D800-D8FF&scan=first" \
+     --values --until-scanned
+   ```
+
+2. **Watch which bytes move.** With the car doing what the signal
+   should follow (the transmission warming, a gear change), the bytes
+   that follow it are the field. With **Record sessions** on (Settings,
+   **Recording**), the session can be read again in the Recordings
+   viewer.
+3. **Write the signal and check it with Read once.** Disconnect, then
+   under **Your own signals** fill in its name, the module's reply ID,
+   service 22 and the DID, the field (its first byte after the DID
+   echo, and its bits), and the scale, offset and unit. **Read once**
+   asks the module for it once and shows the reply's bytes beside the
+   value the draft decodes to; when that isn't what the car shows,
+   change the field or the scaling and read again. **Save** adds it to
+   the vehicle's own file, `<vehicle> own`.
+4. **Read it in a session.** With the vehicle picked, its file is a
+   profile under **What to read** (`user.daily-driver-own` for the
+   vehicle "Daily driver"), and Live shows the signal by its name, in
+   its unit. A signal the module refuses shows as refused, with the
+   code by name ("Refused: requestOutOfRange (7F 22 31)").
+5. **Record with it.** A recording holds the file as `signals.json`, so
+   a replay decodes the same values, even after the file has changed
+   or gone ("Using a file").
+6. **Share it.** **Save a copy** writes the file where you choose, as
+   `daily-driver-own.json`. Another machine's app imports it (**Import
+   a signal file**), and `havne-cli` reads it as it is:
+
+   ```sh
+   havne-cli signals check daily-driver-own.json
+   havne-cli stream elm327://COM5 --signals daily-driver-own.json --values
+   ```
 
 ## The file
 
