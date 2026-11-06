@@ -234,8 +234,11 @@ Pane {
         const e = signalInfo[f.sha256]
         if (e === undefined)
             return f.name
-        return e.ok ? qsTr("%1: %2 signals, profile %3").arg(f.name).arg(e.count).arg(f.profile)
-                    : qsTr("%1: %2").arg(f.name, e.words)
+        if (!e.ok)
+            return qsTr("%1: %2").arg(f.name, e.words)
+        return e.extends === "obd2"
+            ? qsTr("%1: obd2 and %2 of your own, profile %3").arg(f.name).arg(e.own).arg(f.profile)
+            : qsTr("%1: %2 signals, profile %3").arg(f.name).arg(e.count).arg(f.profile)
     }
 
     // A file the user picked, into the picked vehicle: refused with the
@@ -259,8 +262,19 @@ Pane {
         }
         signalProblem = ""
         saveVehicles(VehicleBook.addSignals(vehicles, file))
-        signalNote = qsTr("%1 added: %2 signals, profile %3")
-                         .arg(r.name).arg(r.count).arg(r.profile)
+        signalNote = r.extends === "obd2"
+            ? qsTr("%1 added: obd2 and %2 of your own, profile %3").arg(r.name).arg(r.own)
+                  .arg(r.profile)
+            : qsTr("%1 added: %2 signals, profile %3").arg(r.name).arg(r.count).arg(r.profile)
+        // The field on an adapter reading Default, obd2, with no profile=
+        // of its own: the file that now stands in for obd2 is read
+        // instead, and the note says so. A profile the user picked stays
+        if (standIn !== null && standIn.sha256 === r.sha256 && profileChoice === "default"
+                && queryValue(splitUri(uriField.text).pairs, "profile") === undefined) {
+            chooseProfile(r.profile)
+            signalNote = qsTr("%1 added: now reading obd2 + %1, profile %2")
+                             .arg(r.name).arg(r.profile)
+        }
         return true
     }
 
@@ -626,14 +640,36 @@ Pane {
     // outside the list highlights no button; core judges it at connect.
     readonly property var profiles: builtInProfiles.concat(vehicleProfiles)
     readonly property var vehicleProfiles: pickedVehicle === null ? []
-        : pickedVehicle.signals.filter(f => signalOk(f.sha256)).map(f => ({
+        : pickedVehicle.signals.filter(f => signalOk(f.sha256)
+                                            && (standIn === null || f.sha256 !== standIn.sha256))
+              .map(f => ({
               name: f.profile, label: f.name,
               hint: qsTr("Your signal file %1: %2 signals").arg(f.name)
                         .arg(signalInfo[f.sha256].count) }))
-    readonly property var builtInProfiles: [
-        { name: "default", label: qsTr("Default"),
-          hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
-                     + "CAN interface, the demo set on mock://") },
+
+    // On an adapter, Default is obd2, and a file that extends obd2 reads
+    // all of obd2 and more, so it takes obd2's place there (ADR-0052):
+    // the first such file the picked vehicle has, null for none or on
+    // another scheme, where Default isn't obd2. Default's button stays
+    // only while the field reads it, so the row always shows the URI's
+    readonly property bool adapterUri: VehicleBook.isAdapterUri(uriField.text)
+    readonly property var standIn: !adapterUri || pickedVehicle === null ? null
+        : pickedVehicle.signals.find(f => signalOk(f.sha256)
+                                          && signalInfo[f.sha256].extends === "obd2") || null
+    readonly property var defaultProfile: ({
+        name: "default", label: qsTr("Default"),
+        hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
+                   + "CAN interface, the demo set on mock://") })
+    // The stand-in's entry, built in the same binding as the list, so the
+    // two never disagree mid-update
+    function standInProfile(f) {
+        return { name: f.profile, label: qsTr("obd2 + %1").arg(f.name),
+                 hint: qsTr("obd2's signals and %1 of your own, from your signal file %2")
+                           .arg(signalInfo[f.sha256].own).arg(f.name) }
+    }
+    readonly property var builtInProfiles: (standIn === null ? [defaultProfile]
+        : profileChoice === "default" ? [defaultProfile, standInProfile(standIn)]
+        : [standInProfile(standIn)]).concat([
         { name: "raw", label: qsTr("raw (log only)"),
           hint: qsTr("No decode: frames reach the Log page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
@@ -641,7 +677,7 @@ Pane {
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
           hint: qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
                      + "once and the DIDs the ECU answers join the polling") }
-    ]
+    ])
 
     // True while a typed URI is being read into the choices, so the DID
     // field's change doesn't recompose the URI that set it; and true

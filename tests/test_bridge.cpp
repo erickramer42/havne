@@ -7053,6 +7053,53 @@ TEST(BridgeTest, SignalFileImportKeepsACopyByItsHash)
     EXPECT_EQ(storeFiles(dir.store()).size(), 1);
 }
 
+/* A file says the built-in set it extends and how many of its signals
+ * are its own, at import and in use: the page offers one extending obd2
+ * in obd2's place (ADR-0052) */
+TEST(BridgeTest, SignalFileSaysWhatItExtendsAndHowManyAreItsOwn)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QByteArray extending = signalFile(QStringLiteral("Plus"));
+    extending.replace(R"("source":{"name":"t"},)",
+                      R"("source":{"name":"t"},"extends":"obd2",)");
+    const QByteArray alone = signalFile(QStringLiteral("Alone"));
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    const int base = static_cast<int>(obd2->count);
+
+    QVariantMap r = bridge.importSignalFile(
+        writeScratch(from.path(), "plus.json", extending));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(),
+              "obd2");
+    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), base + 1);
+    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 1);
+    r = bridge.importSignalFile(writeScratch(from.path(), "alone.json", alone));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(), "");
+    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 1);
+
+    const QVariantList used =
+        bridge.useSignalFiles({sha256Of(extending), sha256Of(alone)});
+    ASSERT_EQ(used.size(), 2);
+    for (const QVariant& v : used) {
+        const QVariantMap e = v.toMap();
+        ASSERT_TRUE(e.value(QStringLiteral("ok")).toBool());
+        const bool plus =
+            e.value(QStringLiteral("sha256")).toString() == sha256Of(extending);
+        EXPECT_EQ(e.value(QStringLiteral("extends")).toString().toStdString(),
+                  plus ? "obd2" : "");
+        EXPECT_EQ(e.value(QStringLiteral("own")).toInt(), 1);
+        EXPECT_EQ(e.value(QStringLiteral("count")).toInt(),
+                  plus ? base + 1 : 1);
+    }
+    bridge.useSignalFiles({});
+}
+
 /* A refusal is the loader's words, never the path it came from; nothing
  * is kept */
 TEST(BridgeTest, SignalFileRefusalNamesNoPath)

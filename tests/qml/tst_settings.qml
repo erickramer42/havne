@@ -1043,6 +1043,73 @@ TestCase {
         verify(!findChild(page, "profile_user.body"))
     }
 
+    function importExtending(page, fileName, name) {
+        const doc = JSON.parse(signalFileText(name))
+        doc.extends = "obd2"
+        const url = Harness.writeScratchFile(fileName, JSON.stringify(doc))
+        verify(url.toString() !== "", "the scratch file is written")
+        return page.importSignalFile(url)
+    }
+
+    // A file that extends obd2 takes obd2's place on an adapter, where
+    // Default is obd2 (ADR-0052): its button reads "obd2 + <name>" and
+    // Default's goes once the field reads another profile. Imported while
+    // the field reads Default with no profile= of its own, it's read
+    // instead, and the note says so; a profile the user picked stays, a
+    // second such file keeps a button of its own, and on mock:// Default
+    // isn't obd2, so nothing stands in
+    function test_aFileExtendingObd2TakesItsPlaceOnAnAdapter() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const field = find(page, "uriField")
+        field.text = "elm327://COM9"
+        compare(page.profileChoice, "default")
+        verify(importExtending(page, "plus.json", "Plus"))
+        compare(find(page, "signalNote").text,
+                "Plus added: now reading obd2 + Plus, profile user.plus")
+        compare(field.text, "elm327://COM9?profile=user.plus")
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Plus: obd2 and 1 of your own, profile user.plus")
+        const plus = find(page, "profile_user.plus")
+        compare(plus.text, "obd2 + Plus")
+        verify(plus.highlighted)
+        compare(page.profiles.filter(p => p.name === "user.plus").length, 1,
+                "one button for the file: the stand-in")
+        tryVerify(() => findChild(page, "profile_default") === null, 1000,
+                  "the file reads all of obd2: Default goes")
+        compare(find(page, "profileHint").text,
+                "obd2's signals and 1 of your own, from your signal file Plus")
+
+        // Typed back to Default, both show, so the row is the URI's
+        field.text = "elm327://COM9"
+        verify(find(page, "profile_default").highlighted)
+        verify(!find(page, "profile_user.plus").highlighted)
+
+        // A second such file keeps its own button; Default stays read
+        verify(importExtending(page, "more.json", "More"))
+        compare(find(page, "signalNote").text,
+                "More added: obd2 and 1 of your own, profile user.more")
+        compare(field.text, "elm327://COM9")
+        compare(find(page, "profile_user.more").text, "More")
+        compare(find(page, "profile_user.plus").text, "obd2 + Plus")
+
+        // A profile the user picked stays when one is imported
+        press(page, "vehicleNew")
+        field.text = "elm327://COM9?profile=raw"
+        verify(importExtending(page, "third.json", "Third"))
+        compare(field.text, "elm327://COM9?profile=raw")
+        compare(page.profileChoice, "raw")
+        compare(find(page, "signalNote").text,
+                "Third added: obd2 and 1 of your own, profile user.third")
+        compare(find(page, "profile_user.third").text, "obd2 + Third")
+        tryVerify(() => findChild(page, "profile_default") === null, 1000)
+
+        // On mock://, Default isn't obd2: the file is a choice of its own
+        field.text = "mock://demo"
+        compare(find(page, "profile_user.third").text, "Third")
+        verify(find(page, "profile_default"))
+    }
+
     // ---- The vehicle's own signals (ADR-0051's form) ----
 
     function typeSignal(page, name, number, bits) {

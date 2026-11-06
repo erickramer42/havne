@@ -552,7 +552,8 @@ public:
     // The vehicles' signal files (ADR-0051, SignalStore). Import reads
     // the file at url (a local file, or Android's content:// through
     // QFile) and keeps a copy when core's loader reads it: { ok, words,
-    // sha256, name, profile, count, kept }, words never naming the path.
+    // sha256, name, profile, extends, count, own, kept }, words never
+    // naming the path.
     // It registers nothing; the vehicle book says whether the file may
     // join (VehicleBook.profileProblem), then useSignalFiles registers
     // the files the book references. Each logs one line.

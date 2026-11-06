@@ -9,6 +9,8 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 
+#include <algorithm>
+
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 
@@ -59,7 +61,9 @@ QVariantMap SignalStore::entryOf(const QString& sha, const Held& h)
             {QStringLiteral("words"), QString()},
             {QStringLiteral("name"), h.name},
             {QStringLiteral("profile"), h.profile},
-            {QStringLiteral("count"), h.count}};
+            {QStringLiteral("extends"), h.extends},
+            {QStringLiteral("count"), h.count},
+            {QStringLiteral("own"), h.own}};
 }
 
 bool SignalStore::take(const QString& sha, const QByteArray& bytes,
@@ -76,8 +80,18 @@ bool SignalStore::take(const QString& sha, const QByteArray& bytes,
     h.file = file;
     h.name = QString::fromUtf8(ecuio_signal_file_name(file));
     h.profile = QString::fromUtf8(ecuio_signal_file_profile(file));
+    h.extends = QString::fromUtf8(ecuio_signal_file_extends(file));
     const ecuio_signal_set_t* set = ecuio_signal_file_set(file);
     h.count = set != nullptr ? static_cast<int>(set->count) : 0;
+    // The file's own signals: the set holds the base's first
+    h.own = h.count;
+    const QByteArray baseName = h.extends.toUtf8();
+    const ecuio_signal_set_t* base = nullptr;
+    if (!baseName.isEmpty() &&
+        ecuio_profile_lookup(baseName.constData(), &base) == ECUIO_OK &&
+        base != nullptr) {
+        h.own = std::max(0, h.count - static_cast<int>(base->count));
+    }
     m_held.emplace(sha, h);
     return true;
 }
