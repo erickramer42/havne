@@ -37,6 +37,7 @@
 #include "ecuio/signals.h"
 #include "recording_rows.h" /* core/src */
 #include "recording_hour.h"
+#include "temp_name.h"
 
 namespace fs = std::filesystem;
 namespace rows = ecuio_recording_rows;
@@ -69,11 +70,8 @@ struct Folder {
         if (tmp == nullptr) {
             tmp = std::getenv("TMPDIR");
         }
-        path =
-            fs::path(tmp != nullptr ? tmp : "/tmp") /
-            (std::string("ecuio-recording-") +
-             ::testing::UnitTest::GetInstance()->current_test_info()->name() +
-             tag);
+        path = fs::path(tmp != nullptr ? tmp : "/tmp") /
+               (temp_name("ecuio-recording") + tag);
         std::error_code ec;
         fs::remove_all(path, ec);
         fs::create_directories(path, ec);

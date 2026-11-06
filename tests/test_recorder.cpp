@@ -32,6 +32,7 @@
 #include "ecuio/signals.h"
 #include "link_health.h" /* core/src: a worker's link transitions */
 #include "session.h"     /* core/src: the session's record link */
+#include "temp_name.h"
 
 namespace fs = std::filesystem;
 
@@ -57,10 +58,8 @@ struct Root {
         const char* tmp = std::getenv("TEMP");
         if (tmp == nullptr)
             tmp = std::getenv("TMPDIR");
-        path =
-            fs::path(tmp != nullptr ? tmp : "/tmp") /
-            (std::string("ecuio-recorder-") +
-             ::testing::UnitTest::GetInstance()->current_test_info()->name());
+        path = fs::path(tmp != nullptr ? tmp : "/tmp") /
+               temp_name("ecuio-recorder");
         std::error_code ec;
         fs::remove_all(path, ec);
     }
@@ -266,9 +265,7 @@ TEST(RecorderTest, TheFolderKeepsTheRootAsTheCallerSpelledIt)
     EXPECT_EQ(parent_of_folder(root.utf8() + "/real/./x/../y"),
               root.path / "real" / "y");
 
-    const std::string relative =
-        std::string("ecuio-recorder-relative-") +
-        ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    const std::string relative = temp_name("ecuio-recorder-relative");
     const fs::path cwd = fs::current_path();
     EXPECT_EQ(parent_of_folder(relative), cwd / relative);
     fs::remove_all(cwd / relative, ec);

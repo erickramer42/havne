@@ -31,6 +31,7 @@
 #include "fake_diagnostics.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
+#include "temp_name.h"
 
 #include <algorithm>
 #include <atomic>
@@ -819,7 +820,8 @@ TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
  * its last record, is latency.csv's rows under the channel's ECU */
 TEST_F(Elm327SessionTest, ARecordingHoldsTheLinksTransitionsAndReplyTiming)
 {
-    const fs::path root = fs::temp_directory_path() / "ecuio-elm327-recording";
+    const fs::path root =
+        fs::temp_directory_path() / temp_name("ecuio-elm327-recording");
     std::error_code ec;
     fs::remove_all(root, ec);
     set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });

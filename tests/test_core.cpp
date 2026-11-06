@@ -47,6 +47,7 @@ extern "C" {
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "surrogate_log_names.h" /* core/src: the surrogate logs pruning keeps */
 #include "new_counter.h"   /* tests: operator new counted per thread */
+#include "temp_name.h"     /* tests: a scratch name of this process's own */
 
 /* new_counter's count for the binary's other files, which can't include
  * the header that replaces operator new (test_recording_check.cpp) */
@@ -2653,6 +2654,20 @@ TEST(CoreTest, MockAnswersTheSessionsDids) {
 
 namespace {
 
+/* A scratch name carries this process's id besides the test's name, so
+ * runs of one case from two checkouts at once never share a file or a
+ * folder (tests/temp_name.h) */
+TEST(TempNameTest, TheNameCarriesThisProcessAndTheTest)
+{
+#ifdef _WIN32
+    const long pid = _getpid();
+#else
+    const long pid = static_cast<long>(getpid());
+#endif
+    EXPECT_EQ(temp_name("ecuio-x"), "ecuio-x-" + std::to_string(pid) +
+                                        "-TheNameCarriesThisProcessAndTheTest");
+}
+
 /* A scratch recording in the temp folder, named for the running test and
  * removed at the end. path is absolute and uses forward slashes, which
  * the replay path accepts on every platform. */
@@ -2673,9 +2688,7 @@ struct TempRecording {
         }
         while (base.size() > 1 && base.back() == '/')
             base.pop_back();
-        const std::string name =
-            std::string("ecuio-replay-") +
-            ::testing::UnitTest::GetInstance()->current_test_info()->name();
+        const std::string name = temp_name("ecuio-replay");
         if (as_folder) {
             dir = base + "/" + name;
 #ifdef _WIN32
@@ -2845,7 +2858,7 @@ TEST(CoreTest, WorkersAllocateNothingPerFrameWhileRecording)
         tmp = std::getenv("TMPDIR");
     const std::filesystem::path root =
         std::filesystem::path(tmp != nullptr ? tmp : "/tmp") /
-        "ecuio-core-recording-news";
+        temp_name("ecuio-core-recording-news");
     const std::string root8 = root.generic_u8string();
     struct Case {
         const char* uri;
