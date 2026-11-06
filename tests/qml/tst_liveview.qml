@@ -365,6 +365,24 @@ TestCase {
         // 0x1234, in the locale's digits
         tryVerify(() => valueOf("DID 1E1C").replace(/[^0-9]/g, "") === "4660", 5000,
                   "DID 1E1C shows its value: " + valueOf("DID 1E1C"))
+
+        // A phone's width: the words don't fit beside the name, so the
+        // row reads the reply alone, and the name stays whole
+        page.width = 360
+        tryVerify(() => valueOf("DID F1FE") === "Refused (7F 22 31)", 5000,
+                  "a narrow row's refusal: " + valueOf("DID F1FE"))
+        let name = null
+        for (let r = 0; r < list.count; ++r) {
+            const row = list.itemAtIndex(r)
+            if (row && row.name === "DID F1FE")
+                name = row
+        }
+        verify(name !== null)
+        const label = findChild(name, "valueLabel")
+        verify(!label.truncated, "the short form fits")
+        page.width = 1000
+        tryVerify(() => valueOf("DID F1FE") === "Refused: requestOutOfRange (7F 22 31)", 5000,
+                  "wide again, the words: " + valueOf("DID F1FE"))
     }
 
     function test_bannerText_data() {

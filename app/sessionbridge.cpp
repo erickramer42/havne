@@ -349,6 +349,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return labelOf(e);
         case RefusedRole:
             return e.refused;
+        case RefusedCodeRole:
+            return e.refusedCode;
         default: return QVariant();
     }
 }
@@ -371,7 +373,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {HiddenRole, "hidden"},
             {GroupRole, "group"},
             {LabelRole, "label"},
-            {RefusedRole, "refused"}};
+            {RefusedRole, "refused"},
+            {RefusedCodeRole, "refusedCode"}};
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
@@ -808,21 +811,22 @@ void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
     rejudgeHidden();
 }
 
-void SignalListModel::applyRefused(
-    const std::vector<std::pair<uint16_t, QString>>& refused)
+void SignalListModel::applyRefused(const std::vector<Refusal>& refused)
 {
-    std::vector<QString> words(m_entries.size());
-    for (const auto& r : refused) {
-        const int row = m_rowOfId.value(r.first, -1);
+    std::vector<Refusal> byRow(m_entries.size());
+    for (const Refusal& r : refused) {
+        const int row = m_rowOfId.value(r.id, -1);
         if (row >= 0) {
-            words[static_cast<size_t>(row)] = r.second;
+            byRow[static_cast<size_t>(row)] = r;
         }
     }
     for (size_t row = 0; row < m_entries.size(); ++row) {
-        if (m_entries[row].refused != words[row]) {
-            m_entries[row].refused = words[row];
+        Entry& e = m_entries[row];
+        if (e.refused != byRow[row].words || e.refusedCode != byRow[row].code) {
+            e.refused = byRow[row].words;
+            e.refusedCode = byRow[row].code;
             const QModelIndex i = index(static_cast<int>(row));
-            emit dataChanged(i, i, {RefusedRole});
+            emit dataChanged(i, i, {RefusedRole, RefusedCodeRole});
         }
     }
 }
@@ -2708,11 +2712,12 @@ void SessionBridge::pollChannelSupport()
     // Live says which signals their ECU refused, and with what (ADR-0051
     // section 3): the drops a negative reply made, by the defs they read
     if (changed) {
-        std::vector<std::pair<uint16_t, QString>> refused;
+        std::vector<SignalListModel::Refusal> refused;
         for (const cli::RefusedSignal& r :
              cli::refused_signals(ecuio_session_signal_set(m_session),
                                   m_supportReports, m_channelCount)) {
-            refused.emplace_back(r.id, refusalText(r.request[0], r.nrc));
+            refused.push_back({r.id, refusalText(r.request[0], r.nrc),
+                               refusalCode(r.request[0], r.nrc)});
         }
         m_signalModel->applyRefused(refused);
     }
@@ -2759,10 +2764,14 @@ void SessionBridge::pollAbsentSignals()
  * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
  * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
+QString SessionBridge::refusalCode(uint8_t service, uint8_t nrc)
+{
+    return QStringLiteral("7F %1 %2").arg(hexByte(service), hexByte(nrc));
+}
+
 QString SessionBridge::refusalText(uint8_t service, uint8_t nrc)
 {
-    const QString reply =
-        QStringLiteral("7F %1 %2").arg(hexByte(service), hexByte(nrc));
+    const QString reply = refusalCode(service, nrc);
     const QString name = QString::fromLatin1(cli::nrc_name(nrc));
     return name.isEmpty() ? QStringLiteral("Refused: %1").arg(reply)
                           : QStringLiteral("Refused: %1 (%2)").arg(name, reply);

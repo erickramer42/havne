@@ -2339,6 +2339,8 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::TextRole), QByteArray("text"));
     EXPECT_EQ(roles.value(SignalListModel::IsTextRole), QByteArray("isText"));
     EXPECT_EQ(roles.value(SignalListModel::RefusedRole), QByteArray("refused"));
+    EXPECT_EQ(roles.value(SignalListModel::RefusedCodeRole),
+              QByteArray("refusedCode"));
 
     // A row answers only its roles, and only rows that exist answer
     ecuio_signal_def_t defs[2];
@@ -2364,6 +2366,8 @@ TEST(BridgeTest, ARefusalNamesItsCode)
               QStringLiteral("Refused: subFunctionNotSupported (7F 01 12)"));
     EXPECT_EQ(SessionBridge::refusalText(0x22, 0x99),
               QStringLiteral("Refused: 7F 22 99"));
+    EXPECT_EQ(SessionBridge::refusalCode(0x22, 0x31),
+              QStringLiteral("7F 22 31"));
 }
 
 /* The model takes each refusal by id, judges every row afresh on each
@@ -2388,16 +2392,30 @@ TEST(BridgeTest, ARefusedRowSaysSoUntilItIsntRefused)
                          }
                      });
     const uint16_t second = static_cast<uint16_t>(defs[1].id);
-    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31")},
-                        {9999, QStringLiteral("x")}});
+    model.applyRefused(
+        {{second, QStringLiteral("Refused: 7F 22 31"), QString()},
+         {9999, QStringLiteral("x"), QString()}});
     EXPECT_EQ(refused(0), QString());
     EXPECT_EQ(refused(1), QStringLiteral("Refused: 7F 22 31"));
     EXPECT_EQ(changed, QList<int>{1}) << "only the row that changed";
-    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31")}});
+    model.applyRefused(
+        {{second, QStringLiteral("Refused: 7F 22 31"), QString()}});
     EXPECT_EQ(changed, QList<int>{1}) << "the same words change nothing";
     model.applyRefused({});
     EXPECT_EQ(refused(1), QString());
-    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31")}});
+    // The reply's bytes come with the words, for a row too narrow for them
+    const auto code = [&model](int row) {
+        return model.data(model.index(row, 0), SignalListModel::RefusedCodeRole)
+            .toString();
+    };
+    model.applyRefused({{second, QStringLiteral("Refused: 7F 22 31"),
+                         QStringLiteral("7F 22 31")}});
+    EXPECT_EQ(code(1), QStringLiteral("7F 22 31"));
+    EXPECT_EQ(code(0), QString());
+    model.setSignalSet(&set);
+    EXPECT_EQ(code(1), QString()) << "a new set's rows carry no code";
+    model.applyRefused(
+        {{second, QStringLiteral("Refused: 7F 22 31"), QString()}});
     model.setSignalSet(&set);
     EXPECT_EQ(refused(1), QString()) << "a new set refuses none";
 }

@@ -21,6 +21,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - In the form for a vehicle's own signals, a Request ID left empty keeps the one the module has while another of its signals reads it, and a typed one that differs moves the module's other signals too, the note naming them; before, the last signal saved set the module's request ID without a word.
 - Each box in the form for a vehicle's own signals has its name above it (Byte, Bits, Start bit, and the rest), so a box still says what it holds once something is typed; the names were only placeholders before.
+- On a phone, a signal its module refused reads "Refused (7F 22 31)" when the full words don't fit beside its name, and the name keeps its room; before, both were cut short.
+- When the connected car's VIN picks another saved vehicle than the one picked, the Vehicle section says so ("The connected car's VIN picked Daily driver (Weekend car was picked)") until you pick one yourself; before, only the activity log said it.
+- The viewer's **Replay view** is **Replay in Settings**: it fills Settings' field with the part in view for Connect, as the list's Replay does, and it's off while a session runs.
 - Picking another vehicle, or New, puts **What to read** back to Default when it named the last vehicle's signal file or plugin, so a connect never reads with another vehicle's signals and keeps them as this one's.
 
 ### Fixed

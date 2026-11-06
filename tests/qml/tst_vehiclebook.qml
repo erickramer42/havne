@@ -282,9 +282,15 @@ TestCase {
         compare(r.outcome, "switched", "another saved vehicle's key wins over learning")
         compare(r.doc.picked, "v1")
         compare(VehicleBook.logLine(r), "Vehicle: Daily driver (picked; Weekend car was)")
+        compare(VehicleBook.pickNote(r),
+                "The connected car's VIN picked Daily driver (Weekend car was picked)")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-a", "elm327://COM6")
         compare(VehicleBook.logLine(r), "Vehicle: Daily driver (picked)")
+        compare(VehicleBook.pickNote(r), "The connected car's VIN picked Daily driver")
+        // Only a switch is the car's pick to say
+        compare(VehicleBook.pickNote(VehicleBook.recognize(book(), "key-a", "elm327://COM6")), "")
+        compare(VehicleBook.pickNote(VehicleBook.recognize(book(), "key-c", "elm327://COM6")), "")
 
         r = VehicleBook.recognize(book(), "key-c", "elm327://COM7?profile=raw")
         compare(r.outcome, "new")

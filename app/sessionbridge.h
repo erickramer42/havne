@@ -238,10 +238,13 @@ public:
                          * (ADR-0051), from the set's enums; "" for a
                          * value with none, which shows its number, and
                          * for any other kind. Notified with ValueRole. */
-        RefusedRole /* the words of its ECU's negative reply to the
+        RefusedRole, /* the words of its ECU's negative reply to the
                          * request that reads it ("Refused:
                          * requestOutOfRange (7F 22 31)", applyRefused,
                          * ADR-0051 section 3); "" while none refused it */
+        RefusedCodeRole /* that reply's bytes alone ("7F 22 31"), for a
+                         * row too narrow for the words; notified with
+                         * RefusedRole */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -280,7 +283,12 @@ public:
     // refusal's words (cli/refused_signals.h, from the channels' support
     // reports): Live shows the words in place of a value, never a blank.
     // Each call judges every row afresh; a new set refuses none.
-    void applyRefused(const std::vector<std::pair<uint16_t, QString>>& refused);
+    struct Refusal {
+        uint16_t id = 0;
+        QString words; // "Refused: requestOutOfRange (7F 22 31)"
+        QString code;  // "7F 22 31"
+    };
+    void applyRefused(const std::vector<Refusal>& refused);
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -359,6 +367,7 @@ private:
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
         QString refused;          // its ECU's refusal in words, or ""
+        QString refusedCode;      // its reply's bytes, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
         uint8_t group = 0;        // the def's group (ADR-0050)
         // The user's tick or untick; Default follows plotDefault
@@ -620,6 +629,8 @@ public:
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     // Live's "Refused: <name> (7F <service> <code>)"
     static QString refusalText(uint8_t service, uint8_t nrc);
+    // The negative reply alone: "7F 22 31"
+    static QString refusalCode(uint8_t service, uint8_t nrc);
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
     // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system

@@ -250,6 +250,7 @@ Page {
                 required property string text          // a text row's value
                 required property string label         // an enum value's word
                 required property string refused       // its ECU's refusal in words, or ""
+                required property string refusedCode   // that reply's bytes ("7F 22 31"), or ""
                 required property bool isText
                 required property bool subscribed
                 required property bool hasValue
@@ -297,18 +298,42 @@ Page {
                         opacity: signalDelegate.subscribed ? 1.0 : 0.5
                     }
                     Label {
+                        id: nameLabel
                         text: signalDelegate.name
                         color: Theme.text
                         Layout.fillWidth: true
+                        // A long value (a refusal's words, a text) leaves
+                        // the name a third of the row
+                        Layout.minimumWidth: Math.min(implicitWidth,
+                                                      Math.round(signalDelegate.width / 3))
                         elide: Text.ElideRight
                     }
+                    // The refusal's words at the value's font: on a row
+                    // too narrow for them beside the name (a phone), the
+                    // value is "Refused (7F 22 31)" instead
+                    TextMetrics {
+                        id: refusedWords
+                        font: valueLabel.font
+                        text: signalDelegate.refused
+                    }
                     Label {
+                        id: valueLabel
                         objectName: "valueLabel"
+                        // Room past the whole name (its x is the checkbox's and
+                        // the swatch's), within the value's cap below
+                        readonly property bool refusedFits:
+                            refusedWords.advanceWidth
+                            <= Math.min(Math.round(signalDelegate.width * 0.6),
+                                        signalDelegate.width - 24 - nameLabel.x
+                                        - nameLabel.implicitWidth - 12)
                         // A signal its ECU refused says so, with the code
                         // by name (ADR-0051 section 3); one not yet
                         // answered renders "—", not a fabricated 0.
                         text: !Bridge.connected ? qsTr("—")
-                              : signalDelegate.refused !== "" ? signalDelegate.refused
+                              : signalDelegate.refused !== ""
+                                ? (refusedFits || signalDelegate.refusedCode === ""
+                                   ? signalDelegate.refused
+                                   : qsTr("Refused (%1)").arg(signalDelegate.refusedCode))
                               : !signalDelegate.hasValue ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
                               : signalDelegate.label !== "" ? signalDelegate.label
