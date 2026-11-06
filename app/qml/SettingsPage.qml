@@ -45,11 +45,19 @@
 //          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
 //          BridgeTest.UnitSystem*. The relay's line beside its button at
 //          a phone's width: tst_phone.qml; the relay itself:
-//          BridgeTest.Relay*.
+//          BridgeTest.Relay*. The vehicle's signal files (ADR-0051):
+//          Import by URL (importSignalFile) adding the file, its words on
+//          a refusal or a clashing profile, the file's profile among the
+//          choices composing ?profile=user.<slug>, Remove (asking first
+//          for the vehicle's own file) and Forget deleting the copies no
+//          vehicle keeps, a new page registering them again; the store
+//          itself: BridgeTest.SignalFile*. Manual: the file dialog, and
+//          Android's content:// through it.
 
 import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Shapes
 
@@ -192,6 +200,92 @@ Pane {
         vehicles = doc
         vehicleStore.document = VehicleBook.serialize(doc)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
+        useSignalFiles()
+    }
+
+    // ---- The vehicles' signal files (ADR-0051) ----
+    // The store's word on each file the book references, by its sha256:
+    // { ok, words, name, profile, count }. Every referenced file is
+    // registered (VehicleBook.profileProblem keeps one file to a
+    // profile), so a URI typed with any vehicle's profile connects.
+    property var signalInfo: ({})
+    property string signalProblem: ""
+    property string signalNote: ""
+
+    function useSignalFiles() {
+        const info = {}
+        for (const e of Bridge.useSignalFiles(VehicleBook.referencedFiles(vehicles)))
+            info[e.sha256] = e
+        signalInfo = info
+    }
+
+    function signalOk(sha) {
+        const e = signalInfo[sha]
+        return e !== undefined && e.ok
+    }
+
+    function signalFileText(f) {
+        const e = signalInfo[f.sha256]
+        if (e === undefined)
+            return f.name
+        return e.ok ? qsTr("%1: %2 signals, profile %3").arg(f.name).arg(e.count).arg(f.profile)
+                    : qsTr("%1: %2").arg(f.name, e.words)
+    }
+
+    // A file the user picked, into the picked vehicle: refused with the
+    // loader's words, or the book's when another file makes its profile
+    // (its copy then goes, unless a vehicle keeps it). True when added
+    function importSignalFile(url) {
+        signalNote = ""
+        if (pickedVehicle === null)
+            return false
+        const r = Bridge.importSignalFile(url)
+        if (!r.ok) {
+            signalProblem = r.words
+            return false
+        }
+        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
+        const problem = VehicleBook.profileProblem(vehicles, file, "")
+        if (problem !== "") {
+            signalProblem = problem
+            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+            return false
+        }
+        signalProblem = ""
+        saveVehicles(VehicleBook.addSignals(vehicles, file))
+        signalNote = qsTr("%1 added: %2 signals, profile %3")
+                         .arg(r.name).arg(r.count).arg(r.profile)
+        return true
+    }
+
+    // The vehicle's own file was written here and has no copy anywhere
+    // else, so its removal asks first
+    function removeSignalFile(sha) {
+        if (pickedVehicle !== null && pickedVehicle.own === sha)
+            confirming = "removeSignals:" + sha
+        else
+            dropSignalFile(sha)
+    }
+
+    function dropSignalFile(sha) {
+        confirming = ""
+        signalProblem = ""
+        signalNote = ""
+        saveVehicles(VehicleBook.removeSignals(vehicles, sha))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+    }
+
+    function confirmingFile() {
+        if (!confirming.startsWith("removeSignals:") || pickedVehicle === null)
+            return null
+        const sha = confirming.substring("removeSignals:".length)
+        return pickedVehicle.signals.find(f => f.sha256 === sha) || null
+    }
+
+    // Forget and Forget all: the copies no vehicle keeps go with them
+    function forgetVehicles(all) {
+        changeVehicles(all ? VehicleBook.forgetAll(vehicles) : VehicleBook.forget(vehicles))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
     }
 
     // Picking fills the field with the vehicle's connection, read back
@@ -391,10 +485,17 @@ Pane {
     // The choices live only while the app runs.
     property string profileChoice: "default"
 
-    // The profiles the row offers (ADR-0013, ADR-0020). "default" is the
+    // The profiles the row offers (ADR-0013, ADR-0020), then the picked
+    // vehicle's signal files that loaded (ADR-0051). "default" is the
     // scheme's own profile, so it adds no profile= key. A typed name
     // outside the list highlights no button; core judges it at connect.
-    readonly property var profiles: [
+    readonly property var profiles: builtInProfiles.concat(vehicleProfiles)
+    readonly property var vehicleProfiles: pickedVehicle === null ? []
+        : pickedVehicle.signals.filter(f => signalOk(f.sha256)).map(f => ({
+              name: f.profile, label: f.name,
+              hint: qsTr("Your signal file %1: %2 signals").arg(f.name)
+                        .arg(signalInfo[f.sha256].count) }))
+    readonly property var builtInProfiles: [
         { name: "default", label: qsTr("Default"),
           hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
                      + "CAN interface, the demo set on mock://") },
@@ -598,6 +699,7 @@ Pane {
         }
         vehicles = VehicleBook.parse(vehicleStore.document)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
+        useSignalFiles()
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Adapter first opens
         // Set like typed text, so the profile row and the DID field read
@@ -1133,24 +1235,115 @@ Pane {
                     Label {
                         objectName: "vehicleConfirmText"
                         text: page.confirming === "forgetAll" ? qsTr("Forget all vehicles?")
+                            : page.confirmingFile() !== null
+                              ? qsTr("Remove %1? It was written here, and no other copy exists")
+                                    .arg(page.confirmingFile().name)
                             : page.pickedVehicle !== null ? qsTr("Forget %1?").arg(page.pickedVehicle.label)
                             : ""
                         color: Theme.text
+                        wrapMode: Text.Wrap
+                        width: Math.min(implicitWidth, parent.width)
                     }
                     ThemedButton {
                         objectName: "vehicleConfirm"
-                        text: qsTr("Forget")
+                        text: page.confirmingFile() !== null ? qsTr("Remove") : qsTr("Forget")
                         highlighted: true
                         enabled: page.idle
-                        onClicked: page.changeVehicles(page.confirming === "forgetAll"
-                                                       ? VehicleBook.forgetAll(page.vehicles)
-                                                       : VehicleBook.forget(page.vehicles))
+                        onClicked: {
+                            const file = page.confirmingFile()
+                            if (file !== null)
+                                page.dropSignalFile(file.sha256)
+                            else
+                                page.forgetVehicles(page.confirming === "forgetAll")
+                        }
                     }
                     ThemedButton {
                         objectName: "vehicleCancel"
                         text: qsTr("Cancel")
                         onClicked: page.confirming = ""
                     }
+                }
+
+                // ---- The picked vehicle's signal files (ADR-0051) ----
+                Label {
+                    objectName: "signalFilesTitle"
+                    visible: page.pickedVehicle !== null
+                    text: qsTr("Signal files")
+                    color: Theme.text
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: page.pickedVehicle !== null ? page.pickedVehicle.signals : []
+                    RowLayout {
+                        id: fileRow
+                        required property var modelData
+                        required property int index
+                        objectName: "signalFile_" + index
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "signalFileText"
+                            text: page.signalFileText(fileRow.modelData)
+                            color: page.signalOk(fileRow.modelData.sha256) ? Theme.text
+                                                                           : Theme.warning
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "signalRemove_" + fileRow.index
+                            text: qsTr("Remove")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.removeSignalFile(fileRow.modelData.sha256)
+                        }
+                    }
+                }
+
+                Label {
+                    objectName: "signalFilesNone"
+                    visible: page.pickedVehicle !== null && page.pickedVehicle.signals.length === 0
+                    text: qsTr("None yet. Import adds a file of your own signals, each "
+                               + "then a profile under What to read")
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Flow {
+                    visible: page.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ThemedButton {
+                        objectName: "signalImport"
+                        text: qsTr("Import a signal file")
+                        enabled: page.idle && page.confirming === ""
+                        onClicked: importDialog.open()
+                    }
+                }
+
+                Label {
+                    objectName: "signalProblem"
+                    visible: text !== ""
+                    text: page.signalProblem
+                    color: Theme.warning
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    objectName: "signalNote"
+                    visible: text !== ""
+                    text: page.signalNote
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                FileDialog {
+                    id: importDialog
+                    title: qsTr("Import a signal file")
+                    nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
+                    onAccepted: page.importSignalFile(importDialog.selectedFile)
                 }
 
                 // ---- A VIN looked up (ADR-0043): decoded here, never kept ----

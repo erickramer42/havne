@@ -988,7 +988,59 @@ SessionBridge::~SessionBridge()
         (void)ecuio_recorder_close(m_recorder, "the app closed");
         m_recorder = nullptr;
     }
+    // Only now: no session is left to decode with the files' sets
+    m_signalStore.close();
     ecuio_shutdown();
+}
+
+QVariantMap SessionBridge::importSignalFile(const QUrl& url)
+{
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    QVariantMap result;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("Couldn't read the file")}};
+    } else if (file.size() > static_cast<qint64>(ECUIO_SIGNAL_FILE_MAX_BYTES)) {
+        result = {
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("words"),
+             QStringLiteral("The file is over %1 KiB, a signal file's most")
+                 .arg(ECUIO_SIGNAL_FILE_MAX_BYTES / 1024)}};
+    } else {
+        result =
+            m_signalStore.import(file.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1));
+    }
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Signal file: %1 (%2, %3 signals)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("profile")).toString())
+                  .arg(result.value(QStringLiteral("count")).toInt())
+            : QStringLiteral("Signal file refused: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
+{
+    const QVariantList used = m_signalStore.use(shas);
+    for (const QVariant& v : used) {
+        const QVariantMap e = v.toMap();
+        if (!e.value(QStringLiteral("ok")).toBool()) {
+            emit logMessage(
+                QStringLiteral("Signal file %1 not offered: %2")
+                    .arg(e.value(QStringLiteral("sha256")).toString().left(12),
+                         e.value(QStringLiteral("words")).toString()));
+        }
+    }
+    return used;
+}
+
+int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
+{
+    return m_signalStore.deleteUnused(keep);
 }
 
 QString SessionBridge::readOnce(const QString& adapterUri,

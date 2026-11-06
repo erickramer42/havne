@@ -87,6 +87,7 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
         Bridge.vehicleLabel = ""
+        Bridge.deleteUnusedSignalFiles([])   // the store starts empty too
     }
 
     function find(within, name) {
@@ -930,6 +931,116 @@ TestCase {
         compare(find(page, "vehicleConfirmText").text, "Forget all vehicles?")
         press(page, "vehicleConfirm")
         compare(page.vehicles, VehicleBook.empty())
+    }
+
+    // ---- The vehicle's signal files (ADR-0051) ----
+
+    // A signal file of one DID on the engine ECU
+    function signalFileText(name, did) {
+        return JSON.stringify({
+            havne_signals: 1, name: name, source: { name: "t" },
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "a", name: "A", read: { service: "22", number: did || "D100" },
+                        field: { byte: 0, bits: 8 } }]
+        })
+    }
+
+    function importFile(page, fileName, name, did) {
+        const url = Harness.writeScratchFile(fileName, signalFileText(name, did))
+        verify(url.toString() !== "", "the scratch file is written")
+        return page.importSignalFile(url)
+    }
+
+    function test_anImportedFileIsTheVehiclesAndAProfile() {
+        let page = createPage()
+        verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")
+        press(page, "vehicleNew")
+        verify(find(page, "signalFilesNone").visible)
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(page.pickedVehicle.signals.length, 1)
+        compare(page.pickedVehicle.signals[0].profile, "user.extras")
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Extras: 1 signals, profile user.extras")
+        compare(find(page, "signalNote").text, "Extras added: 1 signals, profile user.extras")
+        verify(!find(page, "signalFilesNone").visible)
+        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
+
+        // The file's profile is a choice under What to read
+        find(page, "uriField").text = "mock://demo"
+        press(page, "profile_user.extras")
+        compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
+        compare(find(page, "errorLabel").text, "")
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "a session decodes with it")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+
+        // A new page (a restart) registers it again from its copy
+        page.destroy()
+        wait(10)
+        page = createPage()
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Extras: 1 signals, profile user.extras")
+        verify(findChild(page, "profile_user.extras"), "still a choice")
+    }
+
+    function test_aRefusedOrClashingFileIsNotAdded() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
+        verify(!page.importSignalFile(bad))
+        const words = find(page, "signalProblem").text
+        verify(words.includes("bitz") && words.includes("line"), words)
+        verify(!words.includes("bad.json"), "never the path")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles(), [])
+
+        verify(importFile(page, "a.json", "Extras"))
+        compare(find(page, "signalProblem").text, "", "a good import clears the last refusal")
+        press(page, "vehicleNew")
+        verify(!importFile(page, "b.json", "Extras", "D101"), "another file making user.extras")
+        compare(find(page, "signalProblem").text,
+                "user.extras is made by another file already (Extras, in Vehicle 1)")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles().length, 1, "the refused copy went")
+
+        verify(importFile(page, "a2.json", "Extras"), "the same file in another vehicle is shared")
+        compare(Harness.storedSignalFiles().length, 1)
+    }
+
+    // A copy goes when no vehicle keeps it; the vehicle's own file asks first
+    function test_removeAndForgetDeleteTheCopiesNoVehicleKeeps() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "a.json", "Extras"))
+        press(page, "vehicleDuplicate")
+        compare(page.pickedVehicle.signals.length, 1, "Duplicate copies the files")
+        press(page, "signalRemove_0")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles().length, 1, "the first vehicle keeps it")
+        page.pickVehicle("v1")
+        press(page, "signalRemove_0")
+        compare(Harness.storedSignalFiles(), [], "no vehicle keeps it now")
+
+        verify(importFile(page, "own.json", "Mine"))
+        const own = page.pickedVehicle.signals[0]
+        page.saveVehicles(VehicleBook.setOwn(page.vehicles, own))
+        press(page, "signalRemove_0")
+        compare(find(page, "vehicleConfirmText").text,
+                "Remove Mine? It was written here, and no other copy exists")
+        compare(find(page, "vehicleConfirm").text, "Remove")
+        press(page, "vehicleCancel")
+        compare(page.pickedVehicle.signals.length, 1, "Cancel keeps it")
+        press(page, "signalRemove_0")
+        press(page, "vehicleConfirm")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles(), [])
+
+        verify(importFile(page, "c.json", "Body"))
+        press(page, "vehicleForgetAll")
+        press(page, "vehicleConfirm")
+        compare(Harness.storedSignalFiles(), [], "Forget all takes the copies")
+        verify(!findChild(page, "profile_user.body"))
     }
 
     function test_pickingAVehicleFillsItsConnection() {

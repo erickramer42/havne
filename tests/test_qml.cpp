@@ -2,10 +2,14 @@
 // Testing: runs tests/qml/tst_*.qml against the app's App module
 //          and a real bridge, the one its Bridge singleton serves,
 //          and a relay whose adapter opens at once (Relay); clicks
-//          with stamps of their own (Harness.clickStamped).
+//          with stamps of their own (Harness.clickStamped); signal files
+//          to import from a scratch folder, and the store's copies
+//          (Harness.writeScratchFile, .storedSignalFiles).
 //          ctest runs each file in its own process (QmlTest.<name>).
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QObject>
 #include <QQmlEngine>
 #include <QQmlExtensionPlugin>
@@ -15,7 +19,10 @@
 #include <QSettings>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtQuickTest>
+
+#include "signalstore.h"
 
 #include <cstdio>
 #include <cstring>
@@ -143,6 +150,25 @@ public:
                             stampMs + 1);
     }
 
+    // A file of text in a scratch folder of the harness's own, as a URL a
+    // file dialog would give; an empty URL when it can't be written
+    Q_INVOKABLE QUrl writeScratchFile(const QString& name, const QString& text)
+    {
+        QFile f(m_scratch.path() + QLatin1Char('/') + name);
+        if (!m_scratch.isValid() || !f.open(QIODevice::WriteOnly)) {
+            return {};
+        }
+        f.write(text.toUtf8());
+        return QUrl::fromLocalFile(f.fileName());
+    }
+
+    // The signal store's copies (SignalStore::root, the test's settings
+    // folder), by file name
+    Q_INVOKABLE QStringList storedSignalFiles() const
+    {
+        return QDir(SignalStore::root()).entryList(QDir::Files, QDir::Name);
+    }
+
     Q_INVOKABLE void clearFakeKnobs()
     {
 #ifdef _WIN32
@@ -155,6 +181,7 @@ public:
 
 private:
     QStringList m_armed;
+    QTemporaryDir m_scratch;
 };
 
 // The relay's adapter as main() makes it on the phone, opening at once:
@@ -190,6 +217,9 @@ public slots:
         QCoreApplication::setOrganizationName(QStringLiteral("Havne"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
+        // The vehicles' signal files there too (SignalStore::root), as
+        // HAVNE_SETTINGS_DIR puts a second instance's
+        qputenv("HAVNE_SETTINGS_DIR", m_settingsDir.path().toUtf8());
         QQuickStyle::setStyle(QStringLiteral("Basic"));   // as main() sets it
 
         m_bridge = std::make_unique<SessionBridge>();

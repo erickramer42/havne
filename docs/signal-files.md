@@ -383,15 +383,42 @@ written, and `signals check` says it won't convert.
   `havne-cli stream <uri> --signals <file>` loads it and reads, for
   example `havne-cli stream "elm327://COM5?profile=user.daily-driver-extras"
   --signals extras.json --values`.
-- **The app:** Settings' Vehicle section imports a file and keeps a copy
-  with the vehicle; **Read once** shows a signal's raw reply bytes beside
-  its decoded value, so the scaling is checked before it's trusted.
+- **The app:** in Settings' Vehicle section, **Import a signal file**
+  adds a file to the picked vehicle. A file the loader refuses shows its
+  words, and so does one whose profile another file makes already, in
+  any vehicle: one profile names one file. Each file the vehicle has is
+  then a profile under **What to read**, named as the file's profile
+  (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
+  vehicle's files with the rest of it. **Remove** takes a file from the
+  vehicle.
 - **A recording** copies the file into its folder (`signals.json`) with
   its SHA-256, so it says exactly what decoded it, and a replay with
   that file decodes the same.
 
-**Not settled:** the options' exact spelling, and how the app lists a
-vehicle's files.
+### Where Havne keeps them
+
+The app keeps a copy of each file it imports, so the vehicle still has
+it when the original moves or the phone's picker loses access to it:
+
+- **The folder:** `signals/` in the app's data folder (Windows
+  `%APPDATA%\Havne\Havne\signals`, Linux `~/.local/share/Havne/Havne/signals`,
+  macOS `~/Library/Application Support/Havne/Havne/signals`, and the
+  app's own storage on a phone), or `signals/` under
+  `HAVNE_SETTINGS_DIR` when that's set.
+- **The name:** `<sha256>.json`, the SHA-256 of the file's bytes in
+  lower-case hex, the bytes as imported. Two vehicles with the same file
+  share one copy, and the hash is the one a recording names.
+- **Which vehicle has which:** the vehicle list in the app's preferences
+  names each vehicle's files by their hash; the copies are only read.
+- **When a copy goes:** when no vehicle has its file any more (Remove,
+  Forget, Forget all), its profile first. A copy that is missing, has
+  changed, or no longer loads is shown with why, and its profile isn't
+  offered.
+
+**Not settled:** the options' exact spelling; the form under Settings'
+Vehicle section that writes a vehicle's own file, with **Read once**
+showing a signal's raw reply bytes beside its decoded value, so the
+scaling is checked before it's trusted.
 
 ## Checking one with no car
 

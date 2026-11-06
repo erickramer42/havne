@@ -512,6 +512,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
         ../app/readonce.cpp
+        ../app/signalstore.cpp
         ../app/signalfilter.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
@@ -565,6 +566,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         bench_bridge.cpp
         ../app/sessionbridge.cpp
         ../app/readonce.cpp
+        ../app/signalstore.cpp
         ../app/signalfilter.cpp
         ../app/carryover.cpp
     )

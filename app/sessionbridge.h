@@ -21,7 +21,8 @@
 //          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession);
 //          Read once (ADR-0051's form) against the fake DLL's ECU
 //          (BridgeTest.ReadOnce*) and the stale age from core
-//          (BridgeTest.TheStaleAgeIsCores)
+//          (BridgeTest.TheStaleAgeIsCores); the vehicles' signal files
+//          (ADR-0051, SignalStore: BridgeTest.SignalFile*)
 
 #pragma once
 
@@ -33,6 +34,7 @@
 #include <QVariantMap>
 
 #include "readonce.h"
+#include "signalstore.h"
 #include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
@@ -547,6 +549,19 @@ public:
     Q_INVOKABLE QString readOnce(const QString& adapterUri,
                                  const QVariantMap& signal,
                                  const QVariantMap& module);
+    // The vehicles' signal files (ADR-0051, SignalStore). Import reads
+    // the file at url (a local file, or Android's content:// through
+    // QFile) and keeps a copy when core's loader reads it: { ok, words,
+    // sha256, name, profile, count, kept }, words never naming the path.
+    // It registers nothing; the vehicle book says whether the file may
+    // join (VehicleBook.profileProblem), then useSignalFiles registers
+    // the files the book references. Each logs one line.
+    Q_INVOKABLE QVariantMap importSignalFile(const QUrl& url);
+    Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
+    // Removes every copy keep doesn't name, each profile unregistered
+    // first; the files themselves stay loaded until the bridge closes,
+    // since a session may still decode with one
+    Q_INVOKABLE int deleteUnusedSignalFiles(const QStringList& keep);
     QVariantMap gaugeSignals() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
@@ -1053,5 +1068,6 @@ private:
     std::function<QString(const QString&)>
         m_streamPreparer; // none: nothing to ready
     ReadOnce m_readOnce;
+    SignalStore m_signalStore;
     int m_readOnceWaitMs = 3000;
 };
