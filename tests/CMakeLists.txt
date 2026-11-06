@@ -22,8 +22,8 @@ if(MSVC)
 endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_core test_core.cpp test_recorder.cpp test_recording.cpp
-    test_recording_check.cpp)
+add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
+    test_recorder.cpp test_recording.cpp test_recording_check.cpp test_sha256.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -36,9 +36,12 @@ target_link_libraries(test_core PRIVATE
     GTest::gtest_main
 )
 
-# The scrubbed real-bus recording replay:// plays (ADR-0023)
+# The scrubbed real-bus recording replay:// plays (ADR-0023), and the
+# signal file a recording copies (ADR-0051 section 4)
 target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+    ECUIO_SIGNAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals"
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
 )
 
 app_enable_warnings(test_core)
@@ -56,12 +59,22 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp)
+add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_signal_file.cpp
+    test_plugin.cpp)
+
+# test_signal_tables.cpp checks computed.h, the programs' checker and
+# stack machine, which are internal
+target_include_directories(test_signals PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+)
 
 target_link_libraries(test_signals PRIVATE
     ecuio-core
     GTest::gtest_main
 )
+# test_plugin.cpp loads the repository's example plugin
+target_compile_definitions(test_signals PRIVATE
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins")
 
 app_enable_warnings(test_signals)
 gtest_discover_tests(test_signals)
@@ -304,8 +317,22 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${_cli_record} marks $<TARGET_FILE:havne-cli>)
         add_test(NAME CliRecordTest.AFolderThatCantBeMadeFails
             COMMAND ${Python3_EXECUTABLE} ${_cli_record} fails $<TARGET_FILE:havne-cli>)
+        # A recording through --signals holds the file as signals.json, and
+        # a replay of it through that copy decodes the same (ADR-0051
+        # section 4)
+        add_test(NAME CliRecordTest.ARecordingHoldsItsSignalFile
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} signals $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json)
+        # and through --plugin, its variant's files merged into one
+        # (ADR-0052 section 4)
+        add_test(NAME CliRecordTest.APluginsRecordingHoldsItsVariantsFile
+            COMMAND ${Python3_EXECUTABLE} ${_cli_record} plugin $<TARGET_FILE:havne-cli>
+                    ${CMAKE_SOURCE_DIR}/plugins/example-sim)
         set_tests_properties(CliRecordTest.AReplayIsRecordedAsCoreRecordsIt
             CliRecordTest.TypedLinesAreMarkers CliRecordTest.AFolderThatCantBeMadeFails
+            CliRecordTest.ARecordingHoldsItsSignalFile
+            CliRecordTest.APluginsRecordingHoldsItsVariantsFile
             PROPERTIES TIMEOUT 60)
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later
@@ -318,6 +345,94 @@ if(TARGET havne-cli)
         set(_cli_pulls ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording)
         app_cli_golden(ViewShowsWhatARecordingHolds view-one.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early --columns 12)
+        # Signal files (ADR-0051), synthetic: what signals check reads
+        # from one (each of its signals, the units that never convert),
+        # one it refuses and one that isn't there, each with the
+        # loader's words and never the path; then the replay fixture
+        # through a file that extends obd2, its profile added to the URI:
+        # its own numbers, an enum's label and a computed value among
+        # obd2's, and a refused file ending stream as a connect would
+        set(_cli_signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals)
+        app_cli_golden(SignalsCheckReadsAFile signals-check.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/extras.json)
+        app_cli_golden(SignalsCheckRefusesAFile signals-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
+        app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/none.json)
+        app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
+               --signals ${_cli_signals}/extras.json --values --count 40)
+        app_cli_golden(StreamRefusesABadSignalFile stream-signals-refused.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max"
+               --signals ${_cli_signals}/refused.json --values)
+        # Plugins (ADR-0052): the example and the test packages listed,
+        # checked with their fixtures unrun (the vcan run is
+        # CliPluginRunTest's), the variants a made-up VIN proposes, and the
+        # example's base variant read from the mock
+        set(_cli_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+        set(_cli_plugins ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/plugins)
+        app_cli_golden(PluginsListSaysWhatEachHolds plugins-list.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> plugins list ${_cli_example}
+               ${_cli_plugins}/packed.json ${_cli_plugins}/none)
+        app_cli_golden(PluginsCheckReadsTheExample plugins-check.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_example})
+        app_cli_golden(PluginsCheckWarnsOfNoFixtures plugins-check-packed.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/packed.json)
+        app_cli_golden(PluginsCheckSaysALongInterfacesName plugins-check-long-on.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/packed.json
+               --on vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv)
+        app_cli_golden(PluginsCheckNamesARefusedFixtureFile
+            plugins-check-bad-fixture.jsonl --exit 1
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)
+        app_cli_golden(PluginsCheckRefusesWhatIsntAPlugin plugins-refused.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_signals}/extras.json)
+        app_cli_golden(PluginsMatchProposesTheVariants plugins-match.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins match ${_cli_example}
+               --vin ZZZFAKE11K0000001)
+        app_cli_golden(StreamReadsThroughAPluginsVariant stream-plugin.jsonl
+            --ignore t_us
+            -- $<TARGET_FILE:havne-cli> stream
+               "mock://x?profile=plugin.example-sim.base"
+               --plugin ${_cli_example} --values --count 6)
+        # Every plugin in the repository with its fixtures answered by the
+        # simulated ECU on vcan0 and decoded back (ADR-0052 section 8), and
+        # a test plugin giving one signal a value in each of two files;
+        # skipped without vcan0 unless ECUIO_VCAN_REQUIRED, and serial, as
+        # test_vcan is: the simulated ECU answers 0x7E0 for the whole bus
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliPluginRunTest.EveryPluginsFixturesPass
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_check.py
+                        $<TARGET_FILE:havne-cli> ${CMAKE_SOURCE_DIR}/plugins
+                        ${_cli_plugins}/repeat)
+            set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
+        # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
+        # model year, its notes and the file written whole, beside nothing
+        # else, against committed ones; an --out that can't be written
+        # writes nothing and names no path; a file that isn't a set refused
+        set(_cli_obdb ${CMAKE_CURRENT_SOURCE_DIR}/cli_obdb_import.py)
+        set(_obdb_set ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json)
+        add_test(NAME CliObdbImportTest.ASetConvertsToTheCommittedFile
+            COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} convert $<TARGET_FILE:havne-cli>
+                    ${_obdb_set} ${_cli_golden}/obdb-import.jsonl
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/obdb/example-car.json)
+        add_test(NAME CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing
+            COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} unwritable
+                    $<TARGET_FILE:havne-cli> ${_obdb_set})
+        set_tests_properties(CliObdbImportTest.ASetConvertsToTheCommittedFile
+            CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing PROPERTIES TIMEOUT 60)
+        app_cli_golden(SignalsImportRefusesWhatIsntAnObdbSet obdb-not-a-set.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> signals import obdb ${_cli_signals}/extras.json
+               --out never-written.json)
+        # A format 3 recording (written by hand): an enum's line carries its
+        # labels, its columns its raw numbers
+        app_cli_golden(ViewShowsAnEnumsLabels view-enum.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/fuel-status --columns 4)
         app_cli_golden(ViewAlignsTwoRecordingsOnARise view-rise.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
                ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
@@ -384,6 +499,44 @@ if(TARGET havne-cli)
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
+    app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
+    app_cli_usage(SignalsForAnotherProfileIsUsage
+        "stream|mock://x?profile=obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
+    app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
+    app_cli_usage(SignalsWithoutCheckIsUsage "signals")
+    app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
+    app_cli_usage(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json")
+    app_cli_usage(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json")
+    app_cli_usage(SignalsImportFromAnotherFormatIsUsage
+        "signals|import|dbc|a.json|--out|b.json")
+    app_cli_usage(SignalsImportAYearBeforeOBDIIIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--year|1979")
+    app_cli_usage(SignalsImportAnUnknownOptionIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--fast")
+    app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
+    set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+    app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
+    app_cli_usage(PluginsAnUnknownWordIsUsage "plugins|lint|x")
+    app_cli_usage(PluginsListWithoutAPackageIsUsage "plugins|list")
+    app_cli_usage(PluginsListAnOptionIsUsage "plugins|list|x|--fast")
+    app_cli_usage(PluginsCheckWithoutAPackageIsUsage "plugins|check")
+    app_cli_usage(PluginsCheckAnUnknownOptionIsUsage "plugins|check|x|--of|vcan0")
+    app_cli_usage(PluginsCheckOnWithoutAnInterfaceIsUsage "plugins|check|x|--on")
+    app_cli_usage(PluginsCheckAFlagForThePackageIsUsage "plugins|check|--on")
+    app_cli_usage(PluginsCheckHelpForThePackageIsUsage "plugins|check|--help")
+    app_cli_usage(PluginsMatchAFlagForThePackageIsUsage
+        "plugins|match|--x|--vin|ZZZFAKE11K0000001")
+    app_cli_usage(PluginsMatchWithoutAVinIsUsage "plugins|match|x")
+    app_cli_usage(PluginsMatchNotAVinIsUsage "plugins|match|x|--vin|FAKEJ2534VIN00001")
+    app_cli_usage(PluginWithoutAPackageIsUsage "stream|mock://x|--plugin")
+    app_cli_usage(PluginWithoutItsVariantIsUsage
+        "stream|mock://x|--plugin|${_usage_example}")
+    app_cli_usage(PluginForAnotherProfileIsUsage
+        "stream|mock://x?profile=obd2|--plugin|${_usage_example}")
+    app_cli_usage(PluginAndSignalsIsUsage
+        "stream|mock://x?profile=plugin.example-sim.base|--plugin|${_usage_example}|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
+    app_cli_usage(SimPluginWithoutItsVariantIsUsage
+        "sim|mock://sim|--on|vcan0|--plugin|${_usage_example}")
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
@@ -501,6 +654,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
+        ../app/readonce.cpp
+        ../app/pluginstore.cpp
+        ../app/signalstore.cpp
         ../app/signalfilter.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
@@ -525,6 +681,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_compile_definitions(test_bridge PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -546,13 +703,18 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         )
     endif()
 
-    gtest_discover_tests(test_bridge)
+    # Listing its cases loads Qt's DLLs first, which on a loaded machine
+    # took past the default 5 s and failed the build
+    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60)
 
     # The GUI thread's cost per frame by profile size, a measurement for
     # docs/testing.md; built with the tests, never run by ctest
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/readonce.cpp
+        ../app/pluginstore.cpp
+        ../app/signalstore.cpp
         ../app/signalfilter.cpp
         ../app/carryover.cpp
     )
@@ -598,6 +760,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

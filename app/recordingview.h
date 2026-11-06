@@ -1,11 +1,5 @@
 // File/layer: app/recordingview.h | Qt6 Core, app layer, C++17
-// Testing: UNIT: test_bridge (tests/test_recording_view.cpp,
-//          RecordingViewTest.*) on tests/fixtures/recording/: the open
-//          and check off the GUI thread, a cancel, a refusal, the
-//          signals in display units and the default plotted ones,
-//          columns (a window from before the start too), the values at a
-//          time and the sample nearest one, markers and findings,
-//          the alignment finds
+// Testing: BRIDGE: RecordingViewTest (test_bridge)
 
 #pragma once
 

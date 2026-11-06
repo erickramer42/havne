@@ -1,8 +1,10 @@
 # ADR-0046: The simulated ECU as a product: `havne-cli sim` answers as the mock's engine ECU or a recording's on a virtual CAN bus, through core's ISO-TP, with periodic faults
 
 - **Status:** Accepted. Built: the mock's car (sections 1 to 6), a
-  recording as the ECU (section 7) and the desk bus (the appendix of
-  2026-11-03).
+  recording as the ECU (section 7), the desk bus (the appendix of
+  2026-11-03), a second module and "response pending" (the appendix of
+  2026-11-04), and DIDs from a signal set (the appendix of
+  2026-11-05).
 - **Date:** 2026-11-01.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) and
   [ADR-0040](0040-socketcan-requests-isotp.md) (SocketCAN, requests
@@ -257,3 +259,123 @@ the diagnostics, the inspection line and the drive cycle's values,
 packed, every reply acknowledged and none unflowed, `can0` error-active
 with no error counted. One frame on 0x7E8 from another socket
 ended it `yielded`. BENCH prep #33 is confirmed for that controller.
+
+## Appendix: 2026-11-04, a second module and "response pending"
+
+Two things a session against the sim couldn't meet: a car with more
+than one ECU answering, which the test car is (an engine ECU on
+0x7E0/0x7E8 and a second on 0x7E1/0x7E9) and which v0.5.0's own
+signals on a second module need; and an ECU that answers
+`7F <service> 78` before its reply, which BENCH prep #17 waits for.
+
+- **`modules=2`, on `mock://`:** a second module, on 0x7E1, answering as
+  0x7E9, besides the engine ECU. Section 3's URI says what answers, the
+  simulated car, and a second module is part of that car, so it is a
+  key there; the desk bus's appendix kept its option out of the URI
+  because that option says *where* the sim may answer, which a saved
+  URI mustn't carry. `modules=1` (the default) is the engine ECU alone,
+  so every session, test and run sheet that names `mock://sim` meets
+  the same car as before. `replay://` doesn't take the key: a recording
+  keeps the engine ECU's replies (section 7), and a recording's other
+  modules are a later step.
+- **What the module answers:** Service 22 from three DIDs of its own,
+  made up for the simulated car and no maker's (D100 a fluid
+  temperature, A - 40, reading 90 deg C; D101 the gear, 3; D102 the
+  module's name, `TCM-HavneSim`, a segmented reply); `7F 22 31` for a
+  DID it lacks; `7F <service> 11` for every other service, Service 01
+  included. To a functional request (0x7DF) it answers its DIDs and
+  keeps its refusals to itself, as section 4's ECU does.
+- **Each module its own ISO-TP:** each has its own receiver, sender and
+  reply under way, so a functional request answered by both, or a
+  segmented reply from each, never share a message's state; the
+  tester's Flow Control for the module's reply comes on 0x7E1. A frame
+  from another node on either reply ID silences both (the desk bus's
+  appendix).
+- **`pending:<n>`, a fault on both sources:** every Nth reply goes out
+  as `7F <service> 78` at once and the reply itself 300 ms later, whole.
+  300 ms is past the request engine's 100 ms wait and an ELM327's
+  `AT ST` timeout (`ATST19`, 100 ms), well inside P2* (5 s), so only a
+  tester that keeps waiting after the 78 gets the answer. Each module
+  counts its replies apart, so a period is that module's own.
+  `ecuio_sim_stats_t` gains `pending` in its reserved room (offset 80;
+  the size stays 96), and `havne-cli sim`'s `sim_stats` and `end` lines
+  a `pending` field.
+- **Testing:** the module's answers and refusals, the key, and pending's
+  period per module on every platform (`SimEcuTest.TheSecondModule*`,
+  `.PendingIsEveryNthReplyAndEachModuleCountsItsOwn`); on `vcan0`, one
+  `uds-generic` session asking both ECUs, the second module opt-in, a
+  pending reply waited for (no request timing out, the slowest reply
+  past 250 ms) and the module's pending replies arriving
+  (`SimBusTest.OneSessionAsksBothModules`, `.TheSecondModuleIsOptIn`,
+  `.AResponsePendingIsWaitedFor`, `.TheSecondModulesPendingRepliesArrive`).
+  BENCH prep #17 itself, an ELM327 adapter keeping on listening after a
+  78, is a desk run: the sim on the desk bus with `faults=pending:<n>`
+  and the adapter's session against it.
+
+Alternatives considered:
+
+- **A command-line option (`--modules 2`):** the car's shape would live
+  outside the URI that `sim`'s line reports, unlike its values and
+  faults.
+- **The second module always there:** every existing session would meet
+  an ECU on 0x7E9 it never asked for, and the default car would no
+  longer be the one the desk run confirmed.
+- **Pending as a value of `late`:** a late reply and a pending one test
+  different things (a wait that runs out, a wait that is extended), and
+  the stats count them apart.
+
+## Appendix: 2026-11-05, DIDs from a signal set
+
+v0.5.0's own signals and plugins (ADR-0051, and the plugin framework
+after it) describe a maker's DIDs as a signal set; checking one with no
+car needs an ECU that answers those DIDs as the set reads them.
+
+- **`profile=<name>`, on `mock://`:** a registered profile
+  (`ecuio_profile_register`) whose set's Service 22 DIDs the simulated
+  car answers. Like `modules=2`, it says what the car is, so it is a key
+  of section 3's URI. It is looked up at create, after the URI and
+  before the platform and the interface, so its refusals are the same
+  on every platform: a name not registered is
+  `ECUIO_ERR_UNKNOWN_PROFILE`. The set must stay valid while the sim
+  runs, as for a session (profile.h's lifetime). Not with `modules=2`:
+  the profile's channels are its modules.
+- **The modules are the set's channels:** a channel on 0x7E0 to 0x7E8
+  is the engine ECU, which answers the set's DIDs as well as everything
+  section 4 lists; a set with no channels puts its DIDs there too, where
+  a session's default channel asks. Each other channel is a module of
+  its own, with its own ISO-TP as the second module's, answering the
+  set's DIDs alone (`7F 22 31` for another, `7F <service> 11` for
+  another service, a functional request's refusals unsaid). 11-bit IDs
+  only, as the sim's socket hears; a 29-bit channel, one on 0x7DF, or
+  one sharing an ID with the engine ECU's pair but not the pair itself
+  is `ECUIO_ERR_INVALID_ARGUMENT`.
+- **Each field inverted from its def:** every def keyed `62 <DID>` at
+  offset 0 on a module's reply ID is a field of that DID's reply, and
+  every field of one DID shares the reply. The raw value is (value -
+  offset) / scale rounded to the nearest, written in the def's width,
+  signedness, byte order, start byte and bit offset; a FLOAT is its
+  binary32. A text or hex def's field holds its name. An enumeration's
+  def (ADR-0051) is answered by its raw number, as an integer field.
+- **The values:** raw 0 until given one, then the value
+  `ecuio_sim_set_value(sim, signal_id, value)` set, from any thread and
+  while the sim answers; a value the field can't hold, a text field, or
+  a signal that isn't one of the set's DIDs is refused
+  (`ECUIO_ERR_INVALID_ARGUMENT`) and changes nothing.
+- **Testing:** every kind and byte order through the decoder, the
+  field's range, the refusals, the modules from the channels and the
+  key, on every platform (`SimDidsTest`,
+  `SimTest.TheProfileIsLookedUpBeforeTheInterface`); on `vcan0`, a
+  session on the same profile reading the given values from the engine
+  ECU and from the set's own module, a segmented text reply among them,
+  and a value given mid-session
+  (`SimBusTest.ASessionReadsTheValuesTheProfilesDidsWereGiven`,
+  `.ASimWithNoProfileTakesNoValue`).
+
+Alternatives considered:
+
+- **A set passed to a new create function:** no registry lookup, but a
+  sim's car would then hold something its URI doesn't name, and
+  `havne-cli sim` would need a second way to say it.
+- **Values from a range (the field's midpoint):** no call to make, but a
+  test could check no value it chose, and a plugin's value fixtures
+  name theirs.

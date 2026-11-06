@@ -1,35 +1,5 @@
 // File/layer: tests/test_j2534_health.cpp | GTest, HARNESS tier
-// Testing: the J2534 worker against the fake inside the surrogate
-//          child (this tree's x64 one, or the x86 one in the cross-arch
-//          run). The link-health machine: hard and quiet
-//          reads, episode counting, recovery through the continued
-//          request probe, untouched vendor counts, the write latch, its
-//          priority and its step-down when reads recover, a write
-//          reported with nothing written, unmatched frames, backoff
-//          growth, its end at a clean read and its restart; and the
-//          same machine against the fake's VX mode (ECUIO_FAKE_VX): a
-//          quiet bus whose empty reads are ERR_BUFFER_EMPTY after their
-//          timeout, answered requests, and the no-ACK bus. TX and
-//          first-frame indications are skipped without ending a read,
-//          so a reply comes back before the next request; a read ends
-//          at its reply and answers with it at once (no call for the
-//          rest of a batch, which the VX holds about 10 ms), never asks
-//          the vendor to wait 0 ms, and carries a loss seen after its
-//          last frame to the next. The request
-//          engine's pacing (ADR-0015): the floor, the wait, negative
-//          and pending replies, two channels at once; and the drain in
-//          passive mode. Frames carry session time, not the vendor's
-//          stamps. With nothing left to ask, empty reads go quiet as
-//          in passive mode. A vendor DLL that crashes ends only its
-//          child. Replies longer than a CAN-FD frame arrive
-//          whole, up to ISO 15765-2's longest; a longer one is cut and
-//          marked. Frames lost (ERR_BUFFER_OVERFLOW with or without a
-//          message, v05.00's BUFFER_OVERFLOW bit) flag the next frame
-//          dispatched with the link unchanged; an ERROR_INDICATION is
-//          no frame. Diagnostics (ADR-0037) fill the fake ECU's report
-//          through either surrogate.
-//          The backend setup and the fake's control page are in
-//          j2534_backend_fixture.h.
+// Testing: HARNESS: J2534HealthTest (test_j2534_health); Cross-arch
 
 #include <gtest/gtest.h>
 

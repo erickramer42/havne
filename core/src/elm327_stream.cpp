@@ -1,9 +1,5 @@
 // File/layer: core/src/elm327_stream.cpp | C++17, Qt-free, every platform
-// Testing: HARNESS: Elm327StreamTest (test_elm327): a session through a
-//          registered stream with a pump thread as the app, its failure
-//          and reopen, the open's refusals and its wait, the registry's
-//          rules, the buffer's overflow; UNIT: test_c_abi: stream.h as
-//          strict C; Vehicle: the MX+ through Android (ADR-0028 section 4)
+// Testing: UNIT: c_abi; HARNESS: Elm327StreamTest (test_elm327); Vehicle
 
 #include "elm327_stream.h"
 #include "elm327_port.h" /* ELM327_PORT_NAME_MAX */

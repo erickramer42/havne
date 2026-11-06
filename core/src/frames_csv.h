@@ -1,10 +1,6 @@
 // File/layer: core/src/frames_csv.h | internal, C++17, Qt-free, header-only;
 //             ALL platforms
-// Testing: UNIT: CoreTest.Replay* (replay_transport.cpp's reader: the
-//          refusals with their line numbers, either line ending, a
-//          whole-message payload, a torn last row dropped);
-//          SimRecordingTest (test_obd2: the simulated ECU's recording,
-//          sim_recording.h, a torn last row dropped); FUZZ:
+// Testing: UNIT: CoreTest (test_core); SimRecordingTest (test_obd2); FUZZ:
 //          fuzz_replay_file
 //
 // Reading a recording's frames.csv (ADR-0017): its header row, one row at

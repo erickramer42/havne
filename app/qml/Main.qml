@@ -1,24 +1,6 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: manual smoke: navigation, sidebar <-> TabBar at 720px, header
-//          pill elides at 400 px, keyboard focus rings, the window opens
-//          within a 1280 x 720 screen, zoom steps with Ctrl + / Ctrl - /
-//          Ctrl 0 and Settings' Display row and survives a restart, as
-//          does the unit system (2026-10-24) and developer mode
-//          (2026-10-27); Home's Connect... opens Settings with Adapter
-//          unfolded (2026-10-28); the Recordings page's Replay putting its
-//          URI in Settings' field, and seven tabs inside 384 px (2026-11-03);
-//          the header's Mark while recording, inside a phone's width:
-//          tests/qml/tst_phone.qml. The frame-rate badge in developer
-//          mode: tests/qml/tst_phone.qml (shown, counting, above the
-//          tab bar), the rates
-//          on the phone in its run.
-//          The safe area's margins (Android's system
-//          bars), the window filling a phone's screen after it turns,
-//          and the "Display:" line a phone logs in developer mode:
-//          BENCH, the phone run sheet.
-//          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
-//          each page's link surfaces in every link state, finding the
-//          pages and the pill by objectName
+// Testing: QML: QmlTest.phone, QmlTest.linkhealth (test_qml); BENCH, Manual
+//          smoke
 
 import QtCore
 import QtQuick

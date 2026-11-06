@@ -1,10 +1,6 @@
 // File/layer: core/src/recording_check.cpp | C++17, Qt-free; the frames
 //             check (ADR-0049 section 6)
-// Testing: HARNESS: RecordingCheckTest (test_core): folders written by
-//          hand and the replay fixture with a finding of each kind put in
-//          it, checked through ecuio_recording_check, its refusals, a stop
-//          from either callback, its allocations the same for the fixture
-//          looped ten times as once; FUZZ: fuzz_recording (a folder)
+// Testing: UNIT: RecordingCheckTest (test_core); FUZZ: fuzz_recording
 //
 // One pass: events.log first (whether its frame flags are complete, and
 // its link and asleep lines, which are few), then frames.csv a row at a
@@ -101,7 +97,9 @@ void read_events(const std::string& folder, bool* complete,
             p += bom;
             n -= bom;
             const size_t m = std::strlen(rows::kFormat1End);
-            if (rows::equals(p, n, rows::kFormat2)) {
+            /* Format 3 keeps format 2's shape for every line read here */
+            if (rows::equals(p, n, rows::kFormat2) ||
+                rows::equals(p, n, rows::kFormat3)) {
                 format = ECUIO_RECORDING_FORMAT_CORE;
                 in_header = true;
                 continue;

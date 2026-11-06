@@ -1,10 +1,6 @@
 // File/layer: core/src/isotp.h | internal, C++17, Qt-free, header-only;
 //             no platform headers
-// Testing: UNIT: IsoTpTest (tests/test_isotp.cpp, in test_socketcan):
-//          each frame kind's bytes, reassembly in order and interleaved,
-//          every way a message ends unfinished, N_Cr, the Flow Control
-//          frame, and the sender's block size, STmin, wait frames,
-//          overflow and N_Bs
+// Testing: UNIT: IsoTpTest (test_socketcan)
 //
 // ISO 15765-2 on classic CAN (ADR-0040 section 1): a message of up to
 // 4095 bytes in CAN frames, each frame's first byte or two its Protocol

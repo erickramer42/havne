@@ -1,0 +1,49 @@
+{
+  "havne_signals": 1,
+  "name": "Daily driver extras",
+  "notes": "TFT checked against the gauge",
+  "source": { "name": "Written by hand for the daily driver" },
+  "extends": "obd2",
+  "ecus": [
+    { "id": "pcm", "rx": "7E8" },
+    { "id": "tcm", "rx": "7E9" }
+  ],
+  "signals": [
+    {
+      "key": "tft",
+      "name": "Trans Fluid Temp",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "1E1C" },
+      "field": { "byte": 0, "bits": 16, "order": "be", "signed": false },
+      "scale": 1, "offset": -40,
+      "unit": "°C", "decimals": 0, "group": "engine"
+    },
+    {
+      "key": "fuel_status",
+      "name": "Fuel System 1",
+      "ecu": "pcm",
+      "read": { "service": "01", "number": "03" },
+      "field": { "byte": 0, "bits": 8 },
+      "kind": "enum",
+      "values": { "1": "Open loop, cold", "2": "Closed loop", "4": "Open loop, load" },
+      "group": "fuel"
+    },
+    {
+      "key": "cal_id",
+      "name": "TCM Calibration",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F188" },
+      "field": { "byte": 0 },
+      "kind": "text",
+      "group": "diagnostics"
+    },
+    {
+      "key": "boost",
+      "name": "Boost",
+      "kind": "computed",
+      "expr": "obd2.map - obd2.baro",
+      "max_age": { "obd2.baro": 30 },
+      "unit": "kPa", "decimals": 0, "group": "air", "plot": 1
+    }
+  ]
+}

@@ -1,31 +1,6 @@
 // File/layer: app/qml/LogPage.qml | Qt Quick, UI layer
-// Testing: test_qml (tests/qml/tst_log.qml): the activity log takes the
-//          bridge's lines stamped, bounded to its newest lines, alone
-//          with developer mode off; the Activity | Frames switch and the
-//          frame table only in developer mode, back to the activity log
-//          when it goes off; the switch in the same place in either
-//          view; either order button, and Latest, at the newest
-//          row from a scrolled view (the top newest-first, the end
-//          oldest-first); a row selected by a tap and a range by a
-//          shift-click, copied by Copy (test_selectedFramesAreCopied)
-//          and by Ctrl+C (test_ctrlCCopiesTheSelectedFrames); the model's
-//          side, BridgeTest.FrameLogSelectionFollowsItsFrames; the paused status with and without a
-//          recording under way (test_pausedSaysWhereNewFramesGo); the link lines in each link state
-//          (tests/qml/tst_linkhealth.qml). The frame table: render
-//          verified manually; the arbId column by the smoke
-//          recipe's "Frames + arbId column" row (docs/testing.md). The
-//          role names this delegate binds are pinned by
-//          BridgeTest.FrameRoleNamesMatchLogPageBindings, Pause's
-//          bridge side by BridgeTest.LogPauseStopsFrameLogNotDecode, and
-//          the row order (arrival; a connect empties the table) by
-//          BridgeTest.FrameLogOrdersByArrivalNotTimestamp and
-//          .ConnectStartsAnEmptyFrameLog.
-//          Oldest-first follow: manual smoke while mock:// streams,
-//          scroll up by drag, wheel and scroll bar (the view holds), then
-//          "Latest" or scrolling to the end resumes following. A phone's
-//          width: the Frames view inside 320 px (tst_log.qml's
-//          test_theFramesFitAPhonesWidth) and inside the app's window at
-//          the test phone's size (tests/qml/tst_phone.qml).
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.log,
+//          QmlTest.linkhealth, QmlTest.phone (test_qml); Manual smoke
 
 import QtQuick
 import QtQuick.Controls

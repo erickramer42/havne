@@ -1,14 +1,5 @@
 // File/layer: tests/qml/tst_dashboard.qml | Qt Quick Test, QML tier
-// Testing: SignalHub's lookup by def ID over the bridge's signal
-//          model, including a profile switch, and the Dashboard's Taps:
-//          which signal each gauge reads (by ID: a set that names every
-//          def otherwise still drives each gauge) and the note it shows with no
-//          session, before the first value, with a value, and when the
-//          profile lacks the signal (?profile=raw); imperial units on the
-//          gauges, their scales and zones, the peaks cleared on a
-//          change of units, and a peak held from inside a window (the
-//          engine-start fixture replayed); on a phone on its side
-//          (500 x 300 beside the sidebar) a whole dial fits the page.
+// Testing: QML: QmlTest.dashboard (test_qml)
 
 import QtQuick
 import QtTest

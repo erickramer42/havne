@@ -1,36 +1,8 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
-// Testing: HARNESS: golden runs of the program (CliGoldenTest, against
-//          tests/golden/cli/: the replay fixture, mock:// with its
-//          diagnostics line, the refusals, --until-scanned with nothing
-//          to scan),
-//          its usage errors (CliUsageTest), the connect's deadline
-//          (CliConnectTest, Windows, the fake DLL) and, on POSIX, SIGINT and
-//          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
-//          tests/cli_absent.py); the formatting, the ring and the
-//          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
-//          (BENCH prep #27);
-//          the timing lines UNIT (CliTimingTest) and by hand against the fake
-//          DLL (docs/testing.md); the vin command in the golden run and
-//          CliUsageTest, the vin and identity lines UNIT (CliVinTest),
-//          stream's identity line by hand against the fake DLL; the dtc
-//          command in the golden run and CliUsageTest; the sim
-//          command's lines UNIT (CliSimTest), its usage errors
-//          (CliUsageTest), on vcan0 by hand (ADR-0046); stream
-//          --record (ADR-0049): the replay fixture's folder against
-//          tests/golden/recording/ and marks typed on standard input
-//          (CliRecordTest, tests/cli_record.py), a close held past an
-//          interrupt (Windows, the fake DLL's slow disconnect), the line
-//          splitting UNIT (CliMarkLinesTest), a console's typing by hand;
-//          view (ADR-0049 section 5): golden runs on
-//          tests/fixtures/recording/, every sample counted once and the
-//          aligned pulls equal (CliViewRunTest, tests/cli_view.py), its
-//          usage errors (CliUsageTest), its grammar, axis and lines UNIT
-//          (CliViewTest); info (ADR-0049 section 6): golden runs on
-//          tests/fixtures/recording/findings, the replay fixture and a
-//          folder with no frames.csv, its usage errors (CliUsageTest), its
-//          lines UNIT (CliInfoTest);
-//          main's catch by reading and clang-tidy
-//          (bugprone-exception-escape)
+// Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
+//          CliReplayTest, CliRecordTest, CliViewRunTest (ctest);
+//          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
+//          CliViewTest, CliInfoTest, CliSignalFileTest (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
 
@@ -43,12 +15,16 @@
 #include "jsonl.h"
 #include "line_ring.h"
 #include "mark_lines.h"
+#include "plugin_lines.h"
 #include "scan_line.h"
+#include "signal_file_lines.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
 
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
+#include "ecuio/obdb.h"
+#include "ecuio/plugin.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/serial.h"
@@ -81,7 +57,8 @@
 #include <io.h>
 #include <windows.h>
 #else
-#include <unistd.h> /* read: the marks typed into stream --record */
+#include <sys/stat.h> /* stat: a plugin's folder */
+#include <unistd.h>   /* read: the marks typed into stream --record */
 #endif
 
 // play writes to a SocketCAN interface: Linux only, as socketcan:// is
@@ -275,6 +252,23 @@ void write_line(Output& out, cli::Line& l)
     if (l.finish()) {
         out.write(l.data(), l.size());
     }
+}
+
+// A recording's signal line (view's and info's), an enum's labels on it
+void write_signal_line(Output& out, const ecuio_recording_t* r,
+                       uint32_t recording, uint32_t index,
+                       const ecuio_recording_signal_t& s)
+{
+    uint32_t count = 0;
+    std::vector<ecuio_enum_entry_t> labels;
+    if (ecuio_recording_get_labels(r, index, nullptr, 0, &count) == ECUIO_OK &&
+        count > 0) {
+        labels.resize(count);
+        ecuio_recording_get_labels(r, index, labels.data(), count, &count);
+    }
+    BigLine b(2048 + cli::labels_bytes(count));
+    cli::signal_line(b.line, recording, index, s, labels.data(), count);
+    write_line(out, b.line);
 }
 
 void write_start(Output& out)
@@ -667,10 +661,19 @@ void poll_absent(Output& out, ecuio_session_t* session,
     write_line(out, l);
 }
 
+// The session's signals: each def's id, name, unit, decimals and group,
+// then for an enum "enum":true and its "labels" ({"<raw>": label}, as a
+// signal file's "values"), for a computed def "computed":true
 void write_signals(Output& out, const ecuio_signal_set_t* set)
 {
     const uint32_t count = set ? set->count : 0;
-    BigLine b(256 + size_t{count} * 512);
+    size_t bytes = 256 + size_t{count} * 512;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t labels = 0;
+        cli::def_labels(*set, set->defs[i], &labels);
+        bytes += cli::labels_bytes(labels);
+    }
+    BigLine b(bytes);
     cli::Line& l = b.line;
     l.raw("{\"type\":\"signals\"");
     l.key("signals");
@@ -692,11 +695,849 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         l.key("group");
         const char* group = ecuio_signal_group_name(d.group);
         l.string(group, std::strlen(group));
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            l.key("computed");
+            l.raw("true");
+        } else if (d.kind == ECUIO_VALUE_ENUM) {
+            uint32_t n = 0;
+            const ecuio_enum_entry_t* labels = cli::def_labels(*set, d, &n);
+            l.key("enum");
+            l.raw("true");
+            l.key("labels");
+            cli::labels_object(l, labels, n);
+        }
         l.ch('}');
     }
     l.ch(']');
     l.ch('}');
     write_line(out, l);
+}
+
+// A signal file loaded for the process's life: the profile it registers
+// keeps its set, and a session's close can outlive the command's return
+// (an interrupt while it hangs), so it is never freed
+ecuio_signal_file_t* g_signal_file = nullptr;
+
+// A file's bytes, read whole up to one byte past max, so the reader they
+// go to refuses a larger file in its own words. false with why, in words
+// of its own and never the path ("the <what> can't be read: ..."):
+// strerror isn't thread-safe, and its words differ by platform
+bool read_whole(const char* path, size_t max, const char* what,
+                std::string* bytes, std::string* why)
+{
+    bytes->clear();
+    FILE* f = nullptr;
+#ifdef _WIN32
+    int e = fopen_s(&f, path, "rb");
+#else
+    f = std::fopen(path, "rb");
+    int e = errno;
+#endif
+    bool failed = f == nullptr;
+    if (f != nullptr) {
+        char chunk[64 * 1024];
+        size_t n = 0;
+        while (bytes->size() <= max &&
+               (n = std::fread(chunk, 1, sizeof chunk, f)) > 0) {
+            bytes->append(chunk, n);
+        }
+        failed = std::ferror(f) != 0;
+        e = errno;
+        std::fclose(f);
+        if (bytes->size() > max + 1) {
+            bytes->resize(max + 1);
+        }
+    }
+    if (failed) {
+        *why = std::string("the ") + what + " can't be read: " +
+               (e == ENOENT   ? std::string("there's no such file")
+                : e == EACCES ? std::string("permission denied")
+                              : "error " + std::to_string(e));
+        return false;
+    }
+    return true;
+}
+
+bool is_folder(const char* path);
+
+// Writes a file whole, or not at all: into <path>.partial beside it, then
+// renamed over path, so a failed write never leaves half a file at the
+// user's path, and never over a folder. false with why, never the path
+bool write_whole(const char* path, const std::string& bytes, std::string* why)
+{
+    if (is_folder(path)) {
+        *why = "the converted file can't be written: it's a folder";
+        return false;
+    }
+    const std::string partial = std::string(path) + ".partial";
+    std::string words; /* a Windows error errno doesn't name */
+    FILE* f = nullptr;
+#ifdef _WIN32
+    int e = fopen_s(&f, partial.c_str(), "wb");
+#else
+    f = std::fopen(partial.c_str(), "wb");
+    int e = errno;
+#endif
+    bool failed = f == nullptr;
+    if (f != nullptr) {
+        failed =
+            std::fwrite(bytes.data(), 1, bytes.size(), f) != bytes.size() ||
+            std::fflush(f) != 0;
+        e = errno;
+        failed = std::fclose(f) != 0 || failed;
+    }
+    if (!failed) {
+#ifdef _WIN32
+        failed = MoveFileExA(partial.c_str(), path,
+                             MOVEFILE_REPLACE_EXISTING |
+                                 MOVEFILE_WRITE_THROUGH) == 0;
+        if (failed) {
+            const DWORD w = GetLastError();
+            if (w == ERROR_ACCESS_DENIED) {
+                e = EACCES;
+            } else {
+                words = "Windows error " + std::to_string(w);
+            }
+        }
+#else
+        failed = std::rename(partial.c_str(), path) != 0;
+        e = errno;
+#endif
+    }
+    if (failed) {
+        std::remove(partial.c_str());
+        *why = std::string("the converted file can't be written: ") +
+               (!words.empty() ? words
+                : e == ENOENT  ? std::string("there's no such folder")
+                : e == EACCES  ? std::string("permission denied")
+                               : "error " + std::to_string(e));
+        return false;
+    }
+    return true;
+}
+
+// Reads and loads a signal file. On failure, the status and why for an
+// error line, never the path: the reason it can't be read, or core's
+// words, which name the line and column
+ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
+                                std::string* why)
+{
+    *file = nullptr;
+    std::string bytes;
+    if (!read_whole(path, ECUIO_SIGNAL_FILE_MAX_BYTES, "signal file", &bytes,
+                    why)) {
+        return ECUIO_ERR_LOAD_FAILED;
+    }
+    const ecuio_status_t st =
+        ecuio_signal_file_load(bytes.data(), bytes.size(), file);
+    if (st != ECUIO_OK) {
+        *why = ecuio_last_error_detail();
+    }
+    return st;
+}
+
+// --signals for stream and sim: loads the file, registers its profile
+// for the process's life (g_signal_file) and gives the URI to open, the
+// file's profile added when it selects none. -1 to go on; else the exit
+// code: a file that can't be read or is refused is start and an error
+// line (3), a URI that selects another profile a usage error (2)
+int use_signal_file(const char* path, const char* uri, std::string* opened)
+{
+    std::string why;
+    ecuio_signal_file_t* file = nullptr;
+    ecuio_status_t st = load_signal_file(path, &file, &why);
+    if (st == ECUIO_OK) {
+        const char* profile = ecuio_signal_file_profile(file);
+        if (!cli::uri_for_profile(uri, profile, opened)) {
+            std::fprintf(stderr,
+                         "havne-cli: the URI's profile= isn't the signal "
+                         "file's, %s\n",
+                         profile);
+            ecuio_signal_file_free(file);
+            return kExitUsage;
+        }
+        st = ecuio_profile_register(profile, ecuio_signal_file_set(file),
+                                    nullptr);
+        if (st == ECUIO_OK) {
+            g_signal_file = file;
+            return -1;
+        }
+        why = ecuio_last_error_detail();
+        ecuio_signal_file_free(file);
+    }
+    Output out;
+    write_start(out);
+    write_error(out, st, why.c_str());
+    out.flush();
+    return kExitConnect;
+}
+
+// signals check's lines for a loaded file: signal_file, a signal_def line
+// for each of the file's own signals, then a unit line for each unit that
+// never converts
+void write_check_lines(Output& out, const ecuio_signal_file_t* file)
+{
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    {
+        BigLine b(1024 + size_t{set.channel_count} * 64);
+        cli::signal_file_line(b.line, ecuio_signal_file_name(file),
+                              ecuio_signal_file_profile(file), set);
+        write_line(out, b.line);
+    }
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (cli::own_signal(set.defs[i])) {
+            BigLine b(cli::def_line_bytes(set, set.defs[i]));
+            cli::def_line(b.line, set, set.defs[i]);
+            write_line(out, b.line);
+        }
+    }
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (cli::unit_kept(set.defs[i])) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::unit_line(l, set.defs[i]);
+            write_line(out, l);
+        }
+    }
+}
+
+// signals check <file> (ADR-0051 section 3): what the loader read, or why
+// it refused the file. start, signal_file, a signal_def line for each of
+// the file's own signals, then a unit line for each unit that never
+// converts; refused, start and an error line, exit 3. No end line (a
+// list, as view's)
+int run_signals_check(const char* path)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_signal_file_t* file = nullptr;
+    const ecuio_status_t st = load_signal_file(path, &file, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    write_check_lines(out, file);
+    ecuio_signal_file_free(file);
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A plugin loaded for the process's life (stream --plugin, sim --plugin):
+// its profiles keep their sets, and a session's close can outlive the
+// command's return, so it is never freed, as g_signal_file isn't
+ecuio_plugin_t* g_plugin = nullptr;
+uint32_t g_plugin_variant = 0; // the variant the URI's profile= selects
+
+// Whether path names a folder (a plugin's); otherwise it's read as a file
+bool is_folder(const char* path)
+{
+#ifdef _WIN32
+    const DWORD a = GetFileAttributesA(path);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
+    struct stat st{};
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+// A folder package's files for ecuio_plugin_load, read beside its
+// manifest; a file that can't be read is refused by core at the path the
+// manifest names it by
+struct PackageFolder {
+    std::string root;
+    std::string bytes;
+
+    static int read(void* user, const char* path, const char** bytes,
+                    size_t* length)
+    {
+        auto* self = static_cast<PackageFolder*>(user);
+        std::string why;
+        if (!read_whole((self->root + "/" + path).c_str(),
+                        ECUIO_SIGNAL_FILE_MAX_BYTES, "file", &self->bytes,
+                        &why)) {
+            return 1;
+        }
+        *bytes = self->bytes.data();
+        *length = self->bytes.size();
+        return 0;
+    }
+};
+
+// Reads and loads a package: a folder holding manifest.json, or a packed
+// plugin's file. On failure the status and why for an error line, never
+// the path: the reason it can't be read, or core's words, which name the
+// file in the package, the line and the column
+ecuio_status_t load_package(const char* path, ecuio_plugin_t** out,
+                            std::string* why)
+{
+    *out = nullptr;
+    std::string bytes;
+    ecuio_status_t st = ECUIO_OK;
+    if (is_folder(path)) {
+        PackageFolder folder;
+        folder.root = path;
+        if (!read_whole((folder.root + "/manifest.json").c_str(),
+                        ECUIO_PLUGIN_MANIFEST_MAX, "plugin's manifest.json",
+                        &bytes, why)) {
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        st = ecuio_plugin_load(bytes.data(), bytes.size(), &PackageFolder::read,
+                               &folder, out);
+    } else {
+        if (!read_whole(path, ECUIO_PLUGIN_PACKAGE_MAX, "plugin", &bytes,
+                        why)) {
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        st = ecuio_plugin_load(bytes.data(), bytes.size(), nullptr, nullptr,
+                               out);
+    }
+    if (st != ECUIO_OK) {
+        *why = ecuio_last_error_detail();
+    }
+    return st;
+}
+
+ecuio_plugin_info_t plugin_info(const ecuio_plugin_t* p)
+{
+    ecuio_plugin_info_t info{};
+    info.struct_size = sizeof info;
+    ecuio_plugin_info(p, &info);
+    return info;
+}
+
+std::string variant_of(const ecuio_plugin_t* p, uint32_t index)
+{
+    char id[ECUIO_PLUGIN_VARIANT_ID_MAX + 1] = {};
+    ecuio_plugin_variant(p, index, id, sizeof id);
+    return id;
+}
+
+// Registers every variant's profile: ECUIO_OK, or the first refusal's
+// status with why
+ecuio_status_t register_variants(ecuio_plugin_t* p, std::string* why)
+{
+    const ecuio_plugin_info_t info = plugin_info(p);
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_status_t st = ecuio_plugin_register(p, v, nullptr, 0);
+        if (st != ECUIO_OK) {
+            *why = ecuio_last_error_detail();
+            return st;
+        }
+    }
+    return ECUIO_OK;
+}
+
+// --plugin for stream and sim: loads the package and registers its
+// variants for the process's life (g_plugin); the URI must select one of
+// them by profile=, never a guess (ADR-0052 section 5). -1 to go on; else
+// the exit code: a package that can't be read or is refused is start and
+// an error line (3), a URI that selects none of its variants a usage
+// error (2)
+int use_plugin(const char* path, const char* uri)
+{
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    ecuio_status_t st = load_package(path, &p, &why);
+    if (st == ECUIO_OK) {
+        const ecuio_plugin_info_t info = plugin_info(p);
+        std::string selected;
+        const bool given = cli::uri_profile(uri, &selected);
+        std::string names;
+        bool known = false;
+        for (uint32_t v = 0; v < info.variant_count; ++v) {
+            const std::string name =
+                cli::plugin_profile(info.id, variant_of(p, v).c_str());
+            names += (v > 0 ? ", " : "") + name;
+            if (given && name == selected) {
+                known = true;
+                g_plugin_variant = v;
+            }
+        }
+        if (!known) {
+            std::fprintf(stderr,
+                         "havne-cli: --plugin needs the URI's profile= to "
+                         "name one of its variants: %s\n",
+                         names.c_str());
+            ecuio_plugin_free(p);
+            return kExitUsage;
+        }
+        st = register_variants(p, &why);
+        if (st == ECUIO_OK) {
+            g_plugin = p;
+            return -1;
+        }
+        ecuio_plugin_free(p);
+    }
+    Output out;
+    write_start(out);
+    write_error(out, st, why.c_str());
+    out.flush();
+    return kExitConnect;
+}
+
+// plugins list <pkg>... (ADR-0052): start, then a plugin line for each
+// package, or a refused line saying why and going on; exit 3 when any was
+// refused. No end line (a list)
+int run_plugins_list(const std::vector<const char*>& paths)
+{
+    Output out;
+    write_start(out);
+    bool refused = false;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        std::string why;
+        ecuio_plugin_t* p = nullptr;
+        const ecuio_status_t st = load_package(paths[i], &p, &why);
+        const auto index = static_cast<uint32_t>(i);
+        BigLine b(4096 + why.size() * 6);
+        if (st != ECUIO_OK) {
+            refused = true;
+            cli::refused_line(b.line, "refused", nullptr, index, st,
+                              why.c_str());
+        } else {
+            cli::plugin_line(b.line, index, p, plugin_info(p));
+            ecuio_plugin_free(p);
+        }
+        write_line(out, b.line);
+    }
+    out.flush();
+    if (!out.ok()) {
+        return kExitFailed;
+    }
+    return refused ? kExitConnect : kExitOk;
+}
+
+// plugins match <pkg> --vin <VIN> (ADR-0052 section 5): the variants the
+// VIN's manufacturer code and model year fall in, a proposal only. The
+// VIN is taken as vin takes it, and never written. start, plugin, match;
+// a package refused is start and an error line, exit 3
+int run_plugins_match(const char* path, const char* typed)
+{
+    std::string vin;
+    for (const char* c = typed; *c != '\0'; ++c) {
+        if (*c != ' ') {
+            vin += (*c >= 'a' && *c <= 'z') ? static_cast<char>(*c - 'a' + 'A')
+                                            : *c;
+        }
+    }
+    ecuio_vin_info_t decoded{};
+    if (ecuio_vin_decode(vin.c_str(), latest_model_year(), &decoded) !=
+        ECUIO_OK) {
+        std::fprintf(stderr,
+                     "havne-cli: not a VIN: 49 CFR 565 takes 17 digits and "
+                     "capital letters, never I, O or Q\n");
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    const ecuio_status_t st = load_package(path, &p, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    const ecuio_plugin_info_t info = plugin_info(p);
+    uint32_t indices[ECUIO_PLUGIN_MAX_VARIANTS] = {};
+    uint32_t count = 0;
+    ecuio_plugin_match(p, &decoded, indices, ECUIO_PLUGIN_MAX_VARIANTS, &count);
+    {
+        BigLine b(4096);
+        cli::plugin_line(b.line, 0, p, info);
+        write_line(out, b.line);
+    }
+    {
+        BigLine b(4096);
+        cli::match_line(b.line, p, info, decoded, indices,
+                        std::min<uint32_t>(count, ECUIO_PLUGIN_MAX_VARIANTS));
+        write_line(out, b.line);
+    }
+    ecuio_plugin_free(p);
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A fixture entry and what its run found
+struct FixtureRun {
+    std::string file;
+    ecuio_plugin_value_t value{};
+    cli::FixtureResult result = cli::FixtureResult::not_run;
+    bool have = false;
+    double got = 0;
+    std::string why;
+};
+
+// The newest decoded value of each signal a round's fixtures name,
+// filled on the worker without a lock or a wait: the ids are fixed
+// before start, and each slot is an atomic the main thread reads
+struct FixtureValues {
+    explicit FixtureValues(const std::vector<uint16_t>& signal_ids)
+        : ids(signal_ids), values(new std::atomic<double>[signal_ids.size()]),
+          have(new std::atomic<bool>[signal_ids.size()])
+    {
+        for (size_t k = 0; k < ids.size(); ++k) {
+            values[k].store(0.0);
+            have[k].store(false);
+        }
+    }
+
+    static void on_values(const ecuio_value_batch_t* batch, void* user)
+    {
+        auto* self = static_cast<FixtureValues*>(user);
+        for (uint32_t i = 0; i < batch->count; ++i) {
+            const ecuio_value_t& v = batch->values[i];
+            for (size_t k = 0; k < self->ids.size(); ++k) {
+                if (self->ids[k] == v.signal_id) {
+                    self->values[k].store(v.value);
+                    self->have[k].store(true);
+                }
+            }
+        }
+    }
+
+    bool all() const
+    {
+        for (size_t k = 0; k < ids.size(); ++k) {
+            if (!have[k].load()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    const std::vector<uint16_t> ids;
+    std::unique_ptr<std::atomic<double>[]> values;
+    std::unique_ptr<std::atomic<bool>[]> have;
+};
+
+// How long a variant's fixtures wait for their values: the probe's walk
+// and the rotation over the base set's PIDs share the bus with them
+constexpr int kFixtureWaitMs = 20000;
+
+// Runs one round of a variant's fixtures, each signal at most once in it,
+// against the simulated ECU on interface on: the sim answers the
+// variant's DIDs with the fixtures' values, a socketcan:// session
+// decodes them through the variant's own profile, and each must come back
+// within half its field's step. ECUIO_OK, or the status and why of a sim
+// or session that wouldn't start
+ecuio_status_t run_fixture_round(const std::string& profile, const char* on,
+                                 const std::vector<FixtureRun*>& mine,
+                                 std::string* why)
+{
+    const std::string sim_uri = "mock://check?profile=" + profile;
+    ecuio_sim_t* sim = nullptr;
+    ecuio_status_t st = ecuio_sim_create(sim_uri.c_str(), on, &sim);
+    if (st != ECUIO_OK) {
+        *why = ecuio_last_error_detail();
+        return st;
+    }
+    std::vector<FixtureRun*> asked;
+    std::vector<uint16_t> ids;
+    for (FixtureRun* r : mine) {
+        if (ecuio_sim_set_value(sim, r->value.def->id, r->value.value) !=
+            ECUIO_OK) {
+            r->result = cli::FixtureResult::failed;
+            r->why = "the simulated ECU can't answer it: it answers a "
+                     "Service 22 DID's field, and only a value the field "
+                     "holds";
+            continue;
+        }
+        asked.push_back(r);
+        ids.push_back(r->value.def->id);
+    }
+    FixtureValues got(ids);
+    if (!asked.empty()) {
+        const std::string uri = std::string("socketcan://") + on +
+                                "?profile=" + profile +
+                                "&identify=0&diagnose=0";
+        ecuio_session_t* s = nullptr;
+        st = ecuio_session_create(uri.c_str(), &s);
+        if (st == ECUIO_OK) {
+            st = ecuio_register_values_callback(s, &FixtureValues::on_values,
+                                                &got);
+        }
+        if (st == ECUIO_OK) {
+            st = ecuio_session_start(s);
+        }
+        if (st != ECUIO_OK) {
+            *why = ecuio_last_error_detail();
+            ecuio_session_destroy(s);
+            ecuio_sim_destroy(sim);
+            return st;
+        }
+        const auto until = std::chrono::steady_clock::now() +
+                           std::chrono::milliseconds(kFixtureWaitMs);
+        while (!got.all() && !g_interrupted.load() &&
+               std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        ecuio_session_close(s);
+        ecuio_session_destroy(s);
+    }
+    ecuio_sim_destroy(sim);
+    for (size_t k = 0; k < asked.size(); ++k) {
+        FixtureRun& r = *asked[k];
+        r.have = got.have[k].load();
+        r.got = got.values[k].load();
+        if (!r.have) {
+            r.result = cli::FixtureResult::failed;
+            r.why = g_interrupted.load()
+                        ? "interrupted before its value came"
+                        : "no value came within " +
+                              std::to_string(kFixtureWaitMs / 1000) + " s";
+        } else if (cli::fixture_passes(*r.value.def, r.value.value, r.got)) {
+            r.result = cli::FixtureResult::passed;
+        } else {
+            r.result = cli::FixtureResult::failed;
+            r.why = "the decoded value is past half the field's step";
+        }
+    }
+    return ECUIO_OK;
+}
+
+// Runs variant index's fixtures (the runs whose value.variant is index)
+// in rounds, a signal given in two fixture files being in a later round
+// than its first: the simulated ECU answers one value per signal at a time
+ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
+                                    const char* on,
+                                    std::vector<FixtureRun>& runs,
+                                    std::string* why)
+{
+    std::vector<FixtureRun*> left;
+    for (FixtureRun& r : runs) {
+        if (r.value.variant == index) {
+            left.push_back(&r);
+        }
+    }
+    while (!left.empty()) {
+        std::vector<FixtureRun*> round;
+        std::vector<FixtureRun*> later;
+        for (FixtureRun* r : left) {
+            const bool taken =
+                std::any_of(round.begin(), round.end(), [r](FixtureRun* o) {
+                    return o->value.def == r->value.def;
+                });
+            (taken ? later : round).push_back(r);
+        }
+        const ecuio_status_t st = run_fixture_round(profile, on, round, why);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+        left.swap(later);
+    }
+    return ECUIO_OK;
+}
+
+// plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
+// package as a session would, then reads its value fixtures. start,
+// plugin, for each variant a variant line and its own signals'
+// signal_def lines, a fixture_refused line for each fixture file that
+// can't be read or that core refused, a fixture line for each entry (with
+// --on, run through the simulated ECU on that interface, Linux's vcan;
+// else not run), then checked. A package refused is start and an error
+// line, exit 3, as is a sim or session that won't start; a fixture failed
+// or a file refused, exit 1. No end line
+int run_plugins_check(const char* path, const char* on)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    ecuio_status_t st = load_package(path, &p, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    const ecuio_plugin_info_t info = plugin_info(p);
+    {
+        BigLine b(4096);
+        cli::plugin_line(b.line, 0, p, info);
+        write_line(out, b.line);
+    }
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
+        const std::string id = variant_of(p, v);
+        {
+            BigLine b(1024 + size_t{set.channel_count} * 64);
+            cli::variant_line(b.line, id.c_str(),
+                              cli::plugin_profile(info.id, id.c_str()), set);
+            write_line(out, b.line);
+        }
+        for (uint32_t i = 0; i < set.count; ++i) {
+            if (cli::own_signal(set.defs[i])) {
+                BigLine b(cli::def_line_bytes(set, set.defs[i]));
+                cli::def_line(b.line, set, set.defs[i]);
+                write_line(out, b.line);
+            }
+        }
+    }
+
+    cli::FixtureCounts counts;
+    std::vector<FixtureRun> runs;
+    for (uint32_t f = 0; f < info.fixture_count; ++f) {
+        char name[ECUIO_PLUGIN_PATH_MAX + 1] = {};
+        ecuio_plugin_fixture(p, f, name, sizeof name);
+        std::string bytes;
+        st = read_whole((std::string(path) + "/" + name).c_str(),
+                        ECUIO_SIGNAL_FILE_MAX_BYTES, "fixture file", &bytes,
+                        &why)
+                 ? ECUIO_OK
+                 : ECUIO_ERR_LOAD_FAILED;
+        uint32_t count = 0;
+        if (st == ECUIO_OK) {
+            st = ecuio_plugin_values(p, bytes.data(), bytes.size(), nullptr, 0,
+                                     &count);
+            why = ecuio_last_error_detail();
+        }
+        std::vector<ecuio_plugin_value_t> values(count);
+        if (st == ECUIO_OK) {
+            st = ecuio_plugin_values(p, bytes.data(), bytes.size(),
+                                     values.data(), count, &count);
+            why = ecuio_last_error_detail();
+        }
+        if (st != ECUIO_OK) {
+            ++counts.files_refused;
+            BigLine b(1024 + why.size() * 6);
+            cli::refused_line(b.line, "fixture_refused", name, 0, st,
+                              why.c_str());
+            write_line(out, b.line);
+            continue;
+        }
+        for (const ecuio_plugin_value_t& v : values) {
+            FixtureRun r;
+            r.file = name;
+            r.value = v;
+            r.why = "no --on interface: the simulated ECU answers on one";
+            runs.push_back(r);
+        }
+    }
+
+    if (on != nullptr && !runs.empty()) {
+        st = register_variants(p, &why);
+        for (uint32_t v = 0; st == ECUIO_OK && v < info.variant_count; ++v) {
+            const std::string profile =
+                cli::plugin_profile(info.id, variant_of(p, v).c_str());
+            st = run_variant_fixtures(profile, v, on, runs, &why);
+        }
+        if (st != ECUIO_OK) {
+            write_error(out, st, why.c_str());
+            out.flush();
+            ecuio_plugin_free(p);
+            return kExitConnect;
+        }
+    }
+    for (const FixtureRun& r : runs) {
+        switch (r.result) {
+        case cli::FixtureResult::passed:
+            ++counts.passed;
+            break;
+        case cli::FixtureResult::failed:
+            ++counts.failed;
+            break;
+        default:
+            ++counts.not_run;
+        }
+        const std::string variant = variant_of(p, r.value.variant);
+        BigLine b(1024 + r.why.size() * 6);
+        cli::fixture_line(
+            b.line, r.file.c_str(), variant.c_str(), r.value, r.result, r.have,
+            r.got,
+            r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
+        write_line(out, b.line);
+    }
+    {
+        BigLine b(512 + (on != nullptr ? std::strlen(on) * 6 : 0));
+        cli::checked_line(b.line, counts, on, info.fixture_count);
+        write_line(out, b.line);
+    }
+    ecuio_plugin_free(p);
+    out.flush();
+    if (!out.ok()) {
+        return kExitFailed;
+    }
+    return counts.failed > 0 || counts.files_refused > 0 ? kExitFailed
+                                                         : kExitOk;
+}
+
+struct ImportArgs {
+    const char* file = nullptr; // the OBDb set
+    const char* out = nullptr;  // --out: the signal file written
+    ecuio_obdb_options_t options{};
+};
+
+// What an import's note callback shares: the output and each kind's count
+struct ImportNotes {
+    Output* out = nullptr;
+    uint64_t counts[4] = {};
+};
+
+int write_import_note(const ecuio_obdb_note_t* n, void* user)
+{
+    auto* notes = static_cast<ImportNotes*>(user);
+    if (n->what < 4) {
+        ++notes->counts[n->what];
+    }
+    BigLine b(cli::note_line_bytes(*n));
+    cli::import_note_line(b.line, *n);
+    write_line(*notes->out, b.line);
+    return 0;
+}
+
+// signals import obdb <file> --out <file> (ADR-0051 section 7, obdb.h):
+// start, an import_note line for each of core's notes, the converted file
+// written to --out whole or not at all, imported with the counts, then
+// signals check's lines for the file written. A set that can't be read or
+// isn't OBDb's: start and an error line, exit 3; an --out that can't be
+// written: its error line, exit 1. No end line
+int run_signals_import(const ImportArgs& args)
+{
+    Output out;
+    write_start(out);
+    std::string bytes;
+    std::string why;
+    if (!read_whole(args.file, ECUIO_OBDB_MAX_BYTES, "OBDb file", &bytes,
+                    &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    ImportNotes notes;
+    notes.out = &out;
+    char* json = nullptr;
+    size_t length = 0;
+    const ecuio_status_t st =
+        ecuio_obdb_import(bytes.data(), bytes.size(), &args.options,
+                          write_import_note, &notes, &json, &length);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    const std::string text(json, length);
+    ecuio_obdb_free(json);
+    if (!write_whole(args.out, text, &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitFailed;
+    }
+    {
+        char buf[256];
+        cli::Line l(buf, sizeof buf);
+        cli::imported_line(l, notes.counts[ECUIO_OBDB_NOTE_CONVERTED],
+                           notes.counts[ECUIO_OBDB_NOTE_CHANGED],
+                           notes.counts[ECUIO_OBDB_NOTE_SKIPPED]);
+        write_line(out, l);
+    }
+    ecuio_signal_file_t* file = nullptr;
+    if (ecuio_signal_file_load(text.data(), text.size(), &file) == ECUIO_OK) {
+        write_check_lines(out, file);
+        ecuio_signal_file_free(file);
+    }
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
 }
 
 // What the callbacks share with the main thread
@@ -763,7 +1604,16 @@ void on_values(const ecuio_value_batch_t* batch, void* user)
         l.ch('{');
         l.key("id");
         l.u64(v.signal_id);
-        if (v.text) {
+        if (v.kind == ECUIO_VALUE_ENUM) {
+            // The raw number, and its label when the set has one
+            // (ADR-0051): the label is at most ECUIO_ENUM_LABEL_MAX bytes
+            l.key("value");
+            l.number(v.value);
+            if (v.text) {
+                l.key("label");
+                l.string(v.text, v.text_len, ECUIO_ENUM_LABEL_MAX);
+            }
+        } else if (v.text) {
             l.key("text");
             // Room for ,"cut":true}]}\n after a cut text
             const size_t limit = l.room() > 32 ? l.room() - 32 : 0;
@@ -790,14 +1640,22 @@ void usage(FILE* to)
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
+        "                         [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
+        "       havne-cli signals check <file>\n"
+        "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
+        "                      [--name N] [--url U] [--commit C] [--alone]\n"
+        "       havne-cli plugins list <pkg>...\n"
+        "       havne-cli plugins check <pkg> [--on <vcan>]\n"
+        "       havne-cli plugins match <pkg> --vin <VIN>\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -818,20 +1676,29 @@ void usage(FILE* to)
         "         (frames.csv, signals.csv, events.log), named for when it\n"
         "         started and the --label; each line typed meanwhile marks "
         "it.\n"
+        "         --signals loads a signal file (stream and sim alike): its\n"
+        "         profile, user.<name>, is the URI's when it names none.\n"
+        "         --plugin loads a plugin (a folder or a packed file) and\n"
+        "         registers its variants as plugin.<id>.<variant>; the URI's\n"
+        "         profile= names the one to read.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
         "sim      (Linux) answers OBD-II requests on a virtual CAN interface\n"
         "         as an engine ECU: the simulated car's, "
         "mock://sim[?values=drive|\n"
-        "         canned][&vin=<VIN>][&faults=silent:<n>,...], or a "
-        "recording's,\n"
-        "         replay://<absolute path>[?loop=1][&from=S][&to=S]\n"
-        "         [&vin=<VIN>][&faults=...]; from and to in view's seconds.\n"
+        "         canned][&modules=2][&vin=<VIN>][&faults=silent:<n>,...], or "
+        "a\n"
+        "         recording's, replay://<absolute path>[?loop=1][&from=S]\n"
+        "         [&to=S][&vin=<VIN>][&faults=...]; from and to in view's\n"
+        "         seconds. modules=2 adds a second module on 0x7E1/0x7E9\n"
+        "         with Service 22 DIDs D100, D101 and D102. faults: silent,\n"
+        "         late, pending (7F xx 78, then the reply), bad_sequence,\n"
+        "         stalled, each every <n>th reply.\n"
         "         --desk-bus answers on a real CAN controller too (up, not\n"
         "         listen-only), only on a desk bus with no car. Ends at\n"
         "         Ctrl+C, after S seconds, or once another node sends on\n"
-        "         0x7E8.\n"
+        "         its reply ID (0x7E8, or 0x7E9 with modules=2).\n"
         "view     reads recordings offline (the folders stream --record and\n"
         "         the app write): what each holds, then each signal's lowest,\n"
         "         highest and count in N columns (100) from --from to --to\n"
@@ -846,6 +1713,20 @@ void usage(FILE* to)
         "         interval passed --rate-drop times its median (10), ID first\n"
         "         seen over --settle seconds in (2), overflow, broken ISO-TP\n"
         "         sequence, link change and sleep, then a summary.\n"
+        "signals  check reads a signal file as a session would: what it\n"
+        "         holds, each unit that never converts, or why it's "
+        "refused.\n"
+        "         import obdb converts an OBDb signal set to a signal file at\n"
+        "         --out, saying field by field what differs and what's left\n"
+        "         out; --year takes the commands for that model year, --name,\n"
+        "         --url and --commit go in the file, and --alone leaves\n"
+        "         obd2 out of it.\n"
+        "plugins  list says what each package holds, or why it's refused.\n"
+        "         check reads one as a session would, then its value\n"
+        "         fixtures: with --on (Linux), each answered by the\n"
+        "         simulated ECU on that interface and decoded back.\n"
+        "         match lists the variants a VIN's manufacturer code and\n"
+        "         model year fall in: the choice stays yours.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -855,7 +1736,8 @@ void usage(FILE* to)
         "\n"
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
-        "      3 the connect, a recording's open or its check failed.\n");
+        "      3 the connect, a recording's open or its check failed, or a\n"
+        "        signal file or OBDb set was refused.\n");
 }
 
 bool parse_count(const char* text, uint64_t& out)
@@ -881,6 +1763,8 @@ struct StreamArgs {
     bool until_scanned = false;
     const char* record = nullptr; // --record's folder
     const char* label = nullptr;
+    const char* signals = nullptr; // --signals' file
+    const char* plugin = nullptr;  // --plugin's package
 };
 
 // The markers typed into stream --record (ADR-0049 section 4): a thread
@@ -985,7 +1869,19 @@ bool open_recording(Output& out, ecuio_session_t* session,
                         *detail ? detail : ecuio_status_string(st));
         return false;
     }
-    st = ecuio_session_record(session, *recorder);
+    // The signal file decoding the session goes in as signals.json: the
+    // --signals file, or the --plugin variant's files merged into one
+    const ecuio_signal_file_t* file =
+        g_signal_file != nullptr ? g_signal_file
+        : g_plugin != nullptr
+            ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
+            : nullptr;
+    if (file != nullptr) {
+        st = ecuio_recorder_signal_file(*recorder, file);
+    }
+    if (st == ECUIO_OK) {
+        st = ecuio_session_record(session, *recorder);
+    }
     if (st != ECUIO_OK) {
         ecuio_recorder_close(*recorder, "the session couldn't be recorded");
         *recorder = nullptr;
@@ -1364,6 +2260,8 @@ struct SimArgs {
     const char* on = nullptr;
     uint64_t seconds = 0;
     bool desk_bus = false; /* --desk-bus: a real controller too */
+    const char* signals = nullptr; /* --signals' file */
+    const char* plugin = nullptr;  /* --plugin's package */
 };
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
@@ -1552,6 +2450,7 @@ struct RecordingCloser {
 struct Viewed {
     std::unique_ptr<ecuio_recording_t, RecordingCloser> r;
     ecuio_recording_info_t info{};
+    ecuio_recording_signals_t signal_file{};
     std::vector<ecuio_recording_signal_t> signals;
     std::vector<uint32_t> shown;
     bool aligned = true;
@@ -1591,6 +2490,7 @@ int run_view(const ViewArgs& args)
         Viewed& v = views[i];
         v.r.reset(r);
         ecuio_recording_get_info(r, &v.info);
+        ecuio_recording_get_signals(r, &v.signal_file);
         v.signals.resize(v.info.signal_count);
         for (uint32_t k = 0; k < v.info.signal_count; ++k) {
             ecuio_recording_get_signal(r, k, &v.signals[k]);
@@ -1739,12 +2639,10 @@ int run_view(const ViewArgs& args)
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, i, v.info);
+        cli::opened_line(l, i, v.info, v.signal_file);
         write_line(out, l);
         for (uint32_t k = 0; k < v.signals.size(); ++k) {
-            cli::Line s(buf, sizeof buf);
-            cli::signal_line(s, i, k, v.signals[k]);
-            write_line(out, s);
+            write_signal_line(out, v.r.get(), i, k, v.signals[k]);
         }
         for (uint32_t k = 0; k < v.info.marker_count; ++k) {
             ecuio_recording_marker_t m{};
@@ -2184,15 +3082,15 @@ int run_info(const InfoArgs& args)
     if (open_rc == ECUIO_OK) {
         ecuio_recording_info_t info{};
         ecuio_recording_get_info(r.get(), &info);
+        ecuio_recording_signals_t signal_file{};
+        ecuio_recording_get_signals(r.get(), &signal_file);
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, 0, info);
+        cli::opened_line(l, 0, info, signal_file);
         write_line(out, l);
         for (uint32_t k = 0; k < info.signal_count; ++k) {
             ecuio_recording_signal_t s{};
             ecuio_recording_get_signal(r.get(), k, &s);
-            cli::Line sl(buf, sizeof buf);
-            cli::signal_line(sl, 0, k, s);
-            write_line(out, sl);
+            write_signal_line(out, r.get(), 0, k, s);
         }
         for (uint32_t k = 0; k < info.marker_count; ++k) {
             ecuio_recording_marker_t m{};
@@ -2411,6 +3309,10 @@ int run(int argc, char** argv)
                 sim.on = argv[++i];
             } else if (a == "--desk-bus") {
                 sim.desk_bus = true;
+            } else if (a == "--signals" && i + 1 < argc) {
+                sim.signals = argv[++i];
+            } else if (a == "--plugin" && i + 1 < argc) {
+                sim.plugin = argv[++i];
             } else if (a == "--seconds" && i + 1 < argc) {
                 if (!parse_count(argv[++i], sim.seconds)) {
                     std::fprintf(
@@ -2432,7 +3334,118 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
+        if (sim.signals != nullptr && sim.plugin != nullptr) {
+            std::fprintf(stderr, "havne-cli: --signals and --plugin each "
+                                 "give the profile: one at a time\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (sim.plugin != nullptr) {
+            const int rc = use_plugin(sim.plugin, sim.uri);
+            if (rc >= 0) {
+                return rc;
+            }
+        }
+        std::string opened;
+        if (sim.signals != nullptr) {
+            const int rc = use_signal_file(sim.signals, sim.uri, &opened);
+            if (rc >= 0) {
+                return rc;
+            }
+            sim.uri = opened.c_str();
+        }
         return run_sim(sim);
+    }
+    if (command == "plugins") {
+        const std::string word = argc > 2 ? argv[2] : "";
+        if (word == "list" && argc > 3) {
+            std::vector<const char*> paths;
+            for (int i = 3; i < argc; ++i) {
+                if (argv[i][0] == '-' && argv[i][1] == '-') {
+                    std::fprintf(stderr, "havne-cli: unexpected '%s'\n",
+                                 argv[i]);
+                    usage(stderr);
+                    return kExitUsage;
+                }
+                paths.push_back(argv[i]);
+            }
+            return run_plugins_list(paths);
+        }
+        const bool package =
+            argc > 3 && std::string(argv[3]).rfind("--", 0) != 0;
+        if (word == "check" && package && (argc == 4 || argc == 6)) {
+            const char* on = nullptr;
+            if (argc == 6) {
+                if (std::string(argv[4]) != "--on" || *argv[5] == '\0') {
+                    std::fprintf(stderr, "havne-cli: plugins check takes "
+                                         "<pkg> [--on <vcan>]\n");
+                    usage(stderr);
+                    return kExitUsage;
+                }
+                on = argv[5];
+            }
+            return run_plugins_check(argv[3], on);
+        }
+        if (word == "match" && package && argc == 6 &&
+            std::string(argv[4]) == "--vin") {
+            return run_plugins_match(argv[3], argv[5]);
+        }
+        std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check "
+                             "<pkg> [--on <vcan>], or match <pkg> --vin "
+                             "<VIN>\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (command == "signals") {
+        const std::string word = argc > 2 ? argv[2] : "";
+        if (word == "check" && argc == 4) {
+            return run_signals_check(argv[3]);
+        }
+        if (word == "import" && argc > 4 && std::string(argv[3]) == "obdb") {
+            ImportArgs im;
+            im.file = argv[4];
+            for (int i = 5; i < argc; ++i) {
+                const std::string a = argv[i];
+                const bool has_value = i + 1 < argc;
+                if (a == "--out" && has_value) {
+                    im.out = argv[++i];
+                } else if (a == "--year" && has_value) {
+                    uint64_t year = 0;
+                    if (!parse_count(argv[++i], year) || year < 1980 ||
+                        year > 2100) {
+                        std::fprintf(stderr, "havne-cli: --year takes a model "
+                                             "year, 1980 to 2100\n");
+                        return kExitUsage;
+                    }
+                    im.options.model_year = static_cast<uint32_t>(year);
+                } else if (a == "--name" && has_value) {
+                    im.options.name = argv[++i];
+                } else if (a == "--url" && has_value) {
+                    im.options.url = argv[++i];
+                } else if (a == "--commit" && has_value) {
+                    im.options.commit = argv[++i];
+                } else if (a == "--alone") {
+                    im.options.flags |= ECUIO_OBDB_ALONE;
+                } else {
+                    std::fprintf(stderr, "havne-cli: unexpected '%s'\n",
+                                 argv[i]);
+                    usage(stderr);
+                    return kExitUsage;
+                }
+            }
+            if (im.out == nullptr || *im.out == '\0') {
+                std::fprintf(
+                    stderr,
+                    "havne-cli: signals import obdb needs --out <file>\n");
+                usage(stderr);
+                return kExitUsage;
+            }
+            return run_signals_import(im);
+        }
+        std::fprintf(stderr, "havne-cli: signals takes check <file>, or import "
+                             "obdb <file> --out <file>\n");
+        usage(stderr);
+        return kExitUsage;
     }
     if (command != "stream") {
         usage(stderr);
@@ -2467,6 +3480,10 @@ int run(int argc, char** argv)
             }
         } else if (a == "--label" && i + 1 < argc) {
             args.label = argv[++i];
+        } else if (a == "--signals" && i + 1 < argc) {
+            args.signals = argv[++i];
+        } else if (a == "--plugin" && i + 1 < argc) {
+            args.plugin = argv[++i];
         } else if (a.rfind("--", 0) == 0 || args.uri) {
             std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
             usage(stderr);
@@ -2484,6 +3501,26 @@ int run(int argc, char** argv)
         std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
         usage(stderr);
         return kExitUsage;
+    }
+    if (args.signals != nullptr && args.plugin != nullptr) {
+        std::fprintf(stderr, "havne-cli: --signals and --plugin each give "
+                             "the profile: one at a time\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.plugin != nullptr) {
+        const int rc = use_plugin(args.plugin, args.uri);
+        if (rc >= 0) {
+            return rc;
+        }
+    }
+    std::string opened;
+    if (args.signals != nullptr) {
+        const int rc = use_signal_file(args.signals, args.uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        args.uri = opened.c_str();
     }
     return run_stream(args);
 }

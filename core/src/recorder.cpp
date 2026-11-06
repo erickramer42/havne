@@ -1,13 +1,7 @@
 // File/layer: core/src/recorder.cpp | C++17, Qt-free; the recorder
 //             (ADR-0049 sections 1 to 4)
-// Testing: HARNESS: RecorderTest (test_core): the mock and the replay
-//          fixture recorded, the CSV files against the app's
-//          (BridgeTest's round trip), the seams in internal.h for drops,
-//          failed writes, a held writer and syncs, the statuses; link
-//          transitions and reply timing with the test as the worker, and
-//          through the fake ELM327 (Elm327SessionTest.ARecordingHolds*);
-//          a sleep's line and the writer's wakes through the seams;
-//          nothing written before an attach, however late
+// Testing: UNIT: RecorderTest (test_core); BRIDGE: BridgeTest (test_bridge);
+//          HARNESS: Elm327SessionTest (test_elm327)
 //
 // The worker copies each frame and its values, its link transitions and
 // its reply timing into a byte ring (single producer, single consumer);
@@ -21,7 +15,10 @@
 #include "recorder.h"
 
 #include "error_detail.h"
+#include "recording_rows.h" /* kFormat3, the first line */
 #include "session.h"
+#include "sha256.h"
+#include "signal_file_build.h" /* a loaded file's bytes */
 
 #include "ecuio/internal.h"
 #include "ecuio/signals.h"
@@ -124,6 +121,7 @@ struct item {
     item_kind kind;
     uint64_t host_us;
     std::string text;
+    std::string bytes; /* begin's: signals.json, empty for none */
 };
 
 bool is_text_kind(uint8_t kind)
@@ -132,11 +130,16 @@ bool is_text_kind(uint8_t kind)
 }
 
 /* A CSV field, quoted only when it has to be, as the app's recorder
- * quotes it */
+ * quotes it; a line break, which no line or row may hold, a space */
 std::string csv_quoted(const char* text, size_t len)
 {
     std::string f(text, len);
-    if (f.find_first_of(",\"\n") == std::string::npos) {
+    for (char& c : f) {
+        if (c == '\r' || c == '\n') {
+            c = ' ';
+        }
+    }
+    if (f.find_first_of(",\"") == std::string::npos) {
         return f;
     }
     std::string q = "\"";
@@ -236,6 +239,34 @@ std::string one_line(const char* text)
         }
     }
     return s;
+}
+
+/*
+ * An enum def's label lines for events.log's header (format 3): "label
+ * <name>,<raw>,<label>" per entry, raw values ascending as the set holds
+ * them. The name and the label are CSV-quoted, so a comma or a quote in
+ * either reads back, and a line break is a space, keeping the label
+ * within its 27 bytes. A label can't start a formula: the set's
+ * validator refuses one that would (ADR-0049 section 8), so none reaches
+ * a file. The caller writes them only for the first def of a name, since
+ * the reader keeps the first signal line of a name; name is the
+ * CSV-quoted name.
+ */
+std::string label_lines(const ecuio_signal_set_t* set,
+                        const ecuio_signal_def_t& d, const std::string& name)
+{
+    if (d.kind != ECUIO_VALUE_ENUM || set->enums == nullptr ||
+        uint32_t{d.table_first} + d.table_count > set->enum_count) {
+        return {};
+    }
+    std::string lines;
+    for (uint32_t k = 0; k < d.table_count; ++k) {
+        const ecuio_enum_entry_t& e = set->enums[d.table_first + k];
+        const std::string label(e.label, strnlen(e.label, sizeof e.label));
+        lines += "label  " + name + "," + std::to_string(e.raw) + "," +
+                 csv_quoted(label.data(), label.size()) + "\n";
+    }
+    return lines;
 }
 
 /* ADR-0027 section 2's rule, in core: ASCII letters and digits, space,
@@ -363,6 +394,29 @@ FILE* open_file(const std::string& path)
     return std::fopen(path.c_str(), "w");
 }
 #endif
+
+/* Writes bytes to path as they are (binary, so its hash holds on every
+ * platform); false with errno set on a failure */
+bool write_bytes(const std::string& path, const std::string& bytes)
+{
+#ifdef _WIN32
+    const std::wstring w = wide(path);
+    FILE* f = w.empty() ? nullptr : _wfsopen(w.c_str(), L"wb", _SH_DENYWR);
+#else
+    FILE* f = std::fopen(path.c_str(), "wb");
+#endif
+    if (f == nullptr) {
+        return false;
+    }
+    const bool wrote =
+        std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    const int e = errno;
+    const bool closed = std::fclose(f) == 0;
+    if (!wrote) {
+        errno = e;
+    }
+    return wrote && closed;
+}
 
 /* Creates every missing folder of root; false with the OS's reason */
 bool make_root(const std::string& root, std::string* why)
@@ -582,6 +636,14 @@ struct ecuio_recorder {
     bool link_pending = false;
     link_body pending_link{};
     uint64_t timing_next_us = kTimingEveryUs;
+
+    /* The signal file decoding the session to come, set before attach
+     * (ecuio_recorder_signal_file): the set it must be, its bytes and
+     * their SHA-256 */
+    const ecuio_signal_set_t* signals_set = nullptr;
+    std::string signals_json;
+    std::string signals_sha;
+    std::string signals_plugin; /* "<id>,<version>,<variant>" or "" */
 
     /* Fixed at attach */
     std::shared_ptr<ecuio_record_link> link;
@@ -945,6 +1007,18 @@ struct ecuio_recorder {
         for (const item& it : taken) {
             switch (it.kind) {
             case item_kind::begin:
+                /* The file before the header line naming its hash */
+                if (!it.bytes.empty() && !failed()) {
+                    errno = 0;
+                    if (fail_next.exchange(false)) {
+                        fail(ENOSPC);
+                    } else if (!write_bytes(
+                                   folder + "/" +
+                                       ecuio_recording_rows::kSignalFileName,
+                                   it.bytes)) {
+                        fail(errno != 0 ? errno : EIO);
+                    }
+                }
                 event_out += it.text;
                 frame_out += "host_us,timestamp_us,id,flags,data\n";
                 /* A byte-order mark, so a spreadsheet reads the units'
@@ -1276,6 +1350,33 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
     r->head.store(h + size, std::memory_order_release);
 }
 
+ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
+                                           const ecuio_signal_set_t* set,
+                                           const char* bytes, size_t length,
+                                           const char* plugin)
+{
+    if (recorder == nullptr || set == nullptr || plugin == nullptr ||
+        (bytes == nullptr && length > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (recorder->attached.load(std::memory_order_acquire) ||
+        recorder->signals_set != nullptr ||
+        length > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    try {
+        std::string json(bytes != nullptr ? bytes : "", length);
+        recorder->signals_sha = ecuio_sha256::hex_of(json.data(), json.size());
+        recorder->signals_plugin = one_line(plugin);
+        recorder->signals_json = std::move(json);
+    } catch (...) {
+        recorder->signals_sha.clear();
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    recorder->signals_set = set;
+    return ECUIO_OK;
+}
+
 extern "C" {
 
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
@@ -1370,7 +1471,7 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
             caller += "caller  " + one_line(options->header_lines[i]) + "\n";
         }
     }
-    r->items.push_back(item{item_kind::begin, 0, caller});
+    r->items.push_back(item{item_kind::begin, 0, caller, {}});
 
     try {
         r->writer = std::thread([rec = r.get()] { rec->run(); });
@@ -1379,6 +1480,17 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
     }
     *out = r.release();
     return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
+                                          const ecuio_signal_file_t* file)
+{
+    if (recorder == nullptr || file == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const std::string& bytes = ecuio_sf::bytes_of(*file);
+    return ecuio_recorder_take_signals(recorder, &file->set, bytes.data(),
+                                       bytes.size(), file->plugin.c_str());
 }
 
 ecuio_status_t ecuio_session_record(ecuio_session_t* session,
@@ -1394,6 +1506,13 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         recorder->attached.load()) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
+    if (recorder->signals_set != nullptr &&
+        recorder->signals_set != session->active_signal_set) {
+        ecuio_detail_set("the signal file isn't what decodes the session "
+                         "(its profile is %s)",
+                         session->info.profile);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
 
     std::shared_ptr<ecuio_record_link> link;
     std::vector<def_entry> defs;
@@ -1401,7 +1520,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     try {
         link = std::make_shared<ecuio_record_link>();
         const ecuio_signal_set_t* set = session->active_signal_set;
-        header = "ecuio session recording, format 2 (ADR-0049)\n";
+        header = std::string(ecuio_recording_rows::kFormat3) + "\n";
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
@@ -1445,6 +1564,15 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         header += std::string("core  ") + ecuio_version_string() + "\n";
         header += "uri  " + one_line(session->uri.c_str()) + "\n";
         header += std::string("profile  ") + session->info.profile + "\n";
+        if (!recorder->signals_json.empty()) {
+            header += std::string(ecuio_recording_rows::kSignalFileKey) +
+                      ecuio_recording_rows::kSignalFileName + "," +
+                      recorder->signals_sha + "\n";
+        }
+        if (!recorder->signals_plugin.empty()) {
+            header += std::string(ecuio_recording_rows::kPluginKey) +
+                      recorder->signals_plugin + "\n";
+        }
         /* A replay's frames carry its source's flags, so it writes its
          * source's line, which a recording from before ADR-0049 lacks */
         header += "frame flags  ";
@@ -1453,16 +1581,25 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       ? "from an older recording"
                       : session->source_frame_flags.c_str();
         header += "\n";
+        std::vector<std::string> named; /* the names signal lines wrote */
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
-            header += "signal  " +
-                      csv_quoted(d.name, strnlen(d.name, sizeof d.name)) +
-                      (is_text_kind(d.kind) ? ",text," : ",number,") +
+            const bool enumeration = d.kind == ECUIO_VALUE_ENUM;
+            const std::string name =
+                csv_quoted(d.name, strnlen(d.name, sizeof d.name));
+            header += "signal  " + name +
+                      (is_text_kind(d.kind) ? ",text,"
+                       : enumeration        ? ",enum,"
+                                            : ",number,") +
                       csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)) + "," +
                       std::to_string(d.decimal_places) + "," +
                       std::to_string(d.plot_rank) + "," +
                       std::to_string(d.group) + "\n";
+            if (std::find(named.begin(), named.end(), name) == named.end()) {
+                header += label_lines(set, d, name);
+                named.push_back(name);
+            }
         }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
@@ -1472,6 +1609,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         std::lock_guard<std::mutex> g(recorder->note_m);
         /* The caller's lines open() queued, then the columns */
         item& begin = recorder->items.front();
+        begin.bytes = std::move(recorder->signals_json);
         begin.text = header + begin.text +
                      "columns  local time, seconds since the recording started "
                      "(host_us / 1e6 in the CSV files), kind, text\n\n";
@@ -1512,7 +1650,7 @@ ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
             return ECUIO_OK;
         }
         recorder->items.push_back(
-            item{item_kind::note, host_us, std::move(line)});
+            item{item_kind::note, host_us, std::move(line), {}});
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -1542,7 +1680,7 @@ ecuio_status_t ecuio_recorder_mark(ecuio_recorder_t* recorder,
             return ECUIO_OK;
         }
         recorder->items.push_back(
-            item{item_kind::mark, host_us, std::move(label)});
+            item{item_kind::mark, host_us, std::move(label), {}});
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }

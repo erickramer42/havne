@@ -59,6 +59,7 @@ which has no bench session):
 | 8 | **Vendor ioctl, filter and timeout behavior** | OBSERVED for the VX | Reads run their full timeout unless the batch fills. With nothing on the bus to acknowledge them, writes sent with timeout 0 are accepted three deep, each with a `TX_INDICATION`; the fourth and every later one blocks about 0.5 s and returns `ERR_FAILED` until a new connect. Filter start and stop and disconnect return status 0 at once ([2026-10-22](2026-10-22.md)). On a vehicle every write returns 0, the ignition off too. After the laptop resumed from hibernation, writes and reads failed with 27 (vendor-specific) until a new connect ([2026-10-25-vehicle](2026-10-25-vehicle.md)). The one ioctl the transport issues, `READ_VBATT`, is #10 |
 | 9 | **Export names.** Both backends try the spec spelling `PassThruIoctl` (J2534-1_0500 section 7.3.19) first and the legacy `PassThruIoCtl` second, pinned in both directions by the two fakes | RESOLVED | The VX exports the spec spelling ([2026-10-16](2026-10-16.md)) |
 | 10 | **Session info readings** ([ADR-0019](../adr/0019-session-info.md)): each connect asks `READ_VBATT` and `PassThruReadVersion`, and the "Session:" line shows them | CONFIRMED for the VX | The voltage is in millivolts: 0.0 V on USB power alone, within 0.1 V of the ECU's own reading (PID 0x42) on the car; versions `FW:1.0.1.0 HW:1.0.0.0`, DLL `1.8.9586.12845`, API `04.04` ([2026-10-25-vehicle](2026-10-25-vehicle.md)) |
+| 34 | **A busy bus through the surrogate:** a listening J2534 session (`?profile=raw`, no requests) keeps up with a loaded 500 kbit/s bus, several thousand frames a second, through the pipe's batched reads, with no `ERR_BUFFER_OVERFLOW` and no frame flagged lost | STILL UNKNOWN | The fake can't drive such a bus: its control page takes about 190 frames a second, and a listening session through the x64 surrogate kept pace with it (3721 frames in 20 s, 2026-11-05) |
 
 ### ELM327 ([ADR-0026](../adr/0026-elm327-transport.md))
 
@@ -121,9 +122,16 @@ which has no bench session):
   time counts from the first frame.
 - **#11, a machine without OBDX's INF:** whether the VX's port appears
   there.
-- **#17, response pending:** needs an ECU that answers `7F xx 78`.
+- **#17, response pending:** needs an ECU that answers `7F xx 78`: the
+  simulated ECU's `faults=pending:<n>` on the desk bus
+  (`havne-cli sim --desk-bus`, [ADR-0046](../adr/0046-simulated-ecu.md)'s
+  appendix of 2026-11-04), with the ELM327 adapter's session against it.
 - **#19, listening to another tester's multi-frame replies:** the MX+ on the Y-splitter again, with the monitor's setup changed.
 - **#25, a BLE adapter's service:** needs a BLE adapter.
+- **#34, a busy bus through the surrogate:** a listening session on a
+  bus with heavy broadcast traffic (a car's powertrain bus, or a desk
+  bus fed by `cangen` through the USB2CAN), its frame count against
+  `candump`'s.
 - **#32, a real CAN controller sending:** an adapter whose driver
   offers one-shot mode, on the desk bus first (does its echo wait for
   an acknowledgement?), then the car.

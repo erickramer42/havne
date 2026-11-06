@@ -1,9 +1,6 @@
 // File/layer: app/btstream.h | Qt6 Core/Bluetooth, app layer, C++17;
 //             built on Android only (APP_BLUETOOTH)
-// Testing: CI's android-build compiles it; the BLE service choice is
-//          blepicker.h's, UNIT-tested; BENCH: the phone (ADR-0028 section 4);
-//          Vehicle: the MX+ through Android's classic Bluetooth. BLE is
-//          fake-tested in core only, until a BLE adapter is on hand
+// Testing: CI android-build (compiles it); BENCH, Vehicle (the test phone)
 
 #pragma once
 

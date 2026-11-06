@@ -1,20 +1,7 @@
 // File/layer: tests/test_elm327_session.cpp | GTest, HARNESS tier,
 //             headless CI job (every platform)
-// Testing: HARNESS: the ELM327 transport (core/src/elm327_transport.cpp,
-//          ADR-0026) end to end against the fake ELM327
-//          (tests/fake_elm327.h) behind the port opener (internal.h):
-//          Elm327SessionTest pins the URI and its refusals, the setup,
-//          the session info, the requests, multi-frame replies,
-//          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
-//          the signals core lists unsupported (ADR-0039 section 6),
-//          link health and recovery, a recording's link lines and
-//          latency.csv (ADR-0049), and that the worker allocates
-//          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
-//          against the fake on a pseudo-terminal; Elm327TcpTest (every
-//          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
-//          the fake behind a loopback listener; Elm327StreamTest (every
-//          platform) runs an app-fed stream (core/src/elm327_stream.cpp,
-//          ADR-0028) with a pump thread as the app. Qt-free.
+// Testing: HARNESS: Elm327SessionTest, Elm327LogTest, Elm327PortTest,
+//          Elm327TcpTest, Elm327StreamTest (test_elm327)
 
 #include <gtest/gtest.h>
 
@@ -31,6 +18,7 @@
 #include "fake_diagnostics.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
+#include "temp_name.h"
 
 #include <algorithm>
 #include <atomic>
@@ -819,7 +807,8 @@ TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
  * its last record, is latency.csv's rows under the channel's ECU */
 TEST_F(Elm327SessionTest, ARecordingHoldsTheLinksTransitionsAndReplyTiming)
 {
-    const fs::path root = fs::temp_directory_path() / "ecuio-elm327-recording";
+    const fs::path root =
+        fs::temp_directory_path() / temp_name("ecuio-elm327-recording");
     std::error_code ec;
     fs::remove_all(root, ec);
     set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
@@ -1128,6 +1117,46 @@ TEST_F(Elm327SessionTest, EachChannelIsAskedUnderItsOwnHeader)
                         (header.empty() && i == setup.size()))
                 << sent[i] << " at " << i;
         }
+    }
+}
+
+/* Two ECUs in one session answer each its own: the engine ECU's 1E1C
+ * on 0x7E8, a module's (fake_ecu's table) D801 on 0x7E9, through one
+ * adapter taking turns */
+TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
+{
+    struct Module {
+        Module() { EXPECT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12")); }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    Session s;
+    ASSERT_EQ(
+        s.create(uri(
+            "?profile=uds-generic&did=1E1C,7E9:D801&identify=0&diagnose=0")),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> engine = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    const std::vector<uint8_t> mod = {0x62, 0xD8, 0x01, 0x00, 0x12};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int a = 0;
+            int b = 0;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a += f.id == 0x7E8u && f.data == engine;
+                b += f.id == 0x7E9u && f.data == mod;
+            }
+            return a >= 3 && b >= 3;
+        },
+        5000))
+        << "three of each ECU's own replies";
+    std::lock_guard<std::mutex> g(s.cap.m);
+    for (const Capture::Frame& f : s.cap.frames) {
+        EXPECT_TRUE((f.id == 0x7E8u && f.data == engine) ||
+                    (f.id == 0x7E9u && f.data == mod))
+            << "a reply on 0x" << std::hex << f.id << " of " << std::dec
+            << f.data.size() << " bytes";
     }
 }
 

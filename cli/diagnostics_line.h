@@ -1,9 +1,5 @@
 // File/layer: cli/diagnostics_line.h | havne-cli, an ECU's diagnostics as a line (ADR-0037)
-// Testing: UNIT (tests/test_cli.cpp, CliDiagnosticsTest: every outcome, a
-//          cut list, the freeze frame's values, this drive cycle's
-//          monitors, each code's title); the mock's line in the golden run
-//          (tests/golden/cli/mock.jsonl); the dtc line (CliDtcTest,
-//          ADR-0044); the inspection line (CliInspectionTest, ADR-0045)
+// Testing: UNIT: CliDiagnosticsTest, CliDtcTest, CliInspectionTest (test_cli)
 //
 // One ECU's report once a read has completed: readiness (the MIL, the
 // confirmed-code count and each monitor by name, with this drive cycle's

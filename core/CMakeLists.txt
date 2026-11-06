@@ -3,6 +3,8 @@ add_library(ecuio-core STATIC
     src/core.cpp
     src/dtc_titles.cpp
     src/host_clock.cpp
+    src/json.cpp
+    src/obdb_import.cpp
     src/profile_registry.cpp
     src/recorder.cpp
     src/recording_check.cpp
@@ -21,6 +23,8 @@ add_library(ecuio-core STATIC
     src/socketcan_interfaces.cpp
     src/socketcan_transport.cpp
     src/signals.cpp
+    src/signal_file.cpp
+    src/plugin.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
@@ -79,6 +83,8 @@ if(NOT ANDROID AND NOT IOS)
     install(FILES
             include/ecuio/core.h
             include/ecuio/j2534.h
+            include/ecuio/obdb.h
+            include/ecuio/plugin.h
             include/ecuio/profile.h
             include/ecuio/recording.h
             include/ecuio/serial.h

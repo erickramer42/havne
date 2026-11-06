@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# File/layer: packaging/linux/make-appimage.sh | release packaging, Linux x86_64
+# File/layer: packaging/linux/make-appimage.sh | release packaging, Linux x86_64 and aarch64
 # Testing: run by .github/workflows/ci.yml's linux-appimage job, and by
 #          hand in WSL (docs/development.md, "Linux: the AppImage")
 #
 # Packs a built Release tree into an AppImage and checks it:
-#   dist/havne-<version>-linux-x86_64.AppImage
-#   dist/havne-<version>-linux-x86_64.AppImage.components.json, what it
+#   dist/havne-<version>-linux-<arch>.AppImage, <arch> the build
+#     machine's: x86_64 or aarch64
+#   dist/havne-<version>-linux-<arch>.AppImage.components.json, what it
 #     bundles, for the release's SBOM (packaging/sbom.py, ADR-0035 section 5)
-# linuxdeploy and its Qt plugin (pinned releases, checked against their
-# SHA-256) gather the app, the Qt libraries, plugins and QML modules it
+# linuxdeploy and its Qt plugin (pinned releases, the build machine's
+# architecture's, checked against their SHA-256) gather the app, the Qt libraries, plugins and QML modules it
 # loads, and the desktop entry and icon. The checks:
 #   - no QML debugging ships (qmltooling plugins: a Debug build's);
 #   - the AppImage starts and is still running after SMOKE_SECONDS (10)
 #     on the offscreen platform, which a missing Qt plugin or QML module
 #     would stop at once.
 # The AppImage runs on distributions whose glibc is at least the build
-# machine's: build it on the oldest one to support (CI: Ubuntu 24.04).
+# machine's: build it on the oldest one to support (CI: Ubuntu 24.04,
+# on x86_64 and on ARM runners).
 # Two builds of one commit make the same bytes when both carry its time
 # (ADR-0035 section 4): rcc records each embedded file's modification time,
 # which a checkout sets, unless QT_RCC_SOURCE_DATE_OVERRIDE is set when
@@ -51,6 +53,19 @@ fi
 [ -n "${QMAKE:-}" ] && [ -x "$QMAKE" ] || die "no qmake: set QMAKE to the Qt kit's bin/qmake"
 export QMAKE
 
+# The build machine's architecture names the tools, the AppImage and
+# the libraries' folder
+arch=$(uname -m)
+case $arch in
+    x86_64)  multiarch=x86_64-linux-gnu debarch=amd64
+             linuxdeploy_sum=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
+             plugin_sum=15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724 ;;
+    aarch64) multiarch=aarch64-linux-gnu debarch=arm64
+             linuxdeploy_sum=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
+             plugin_sum=bf1c24aff6d749b5cf423afad6f15abd4440f81dec1aab95706b25f6667cdcf1 ;;
+    *) die "no AppImage for $arch: x86_64 and aarch64 only" ;;
+esac
+
 # The tools: pinned releases, checked before they run
 tools=${LINUXDEPLOY_DIR:-$HOME/.cache/havne-linuxdeploy}
 mkdir -p "$tools"
@@ -64,12 +79,12 @@ fetch() {
         chmod +x "$tools/$name"
     fi
 }
-fetch linuxdeploy-x86_64.AppImage \
-    https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
-    c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
-fetch linuxdeploy-plugin-qt-x86_64.AppImage \
-    https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage \
-    15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724
+fetch "linuxdeploy-$arch.AppImage" \
+    "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-$arch.AppImage" \
+    "$linuxdeploy_sum"
+fetch "linuxdeploy-plugin-qt-$arch.AppImage" \
+    "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-$arch.AppImage" \
+    "$plugin_sum"
 export PATH="$tools:$PATH"
 # The tools are AppImages themselves: run them extracted, so the build
 # machine needs no FUSE
@@ -84,13 +99,13 @@ export SOURCE_DATE_EPOCH
 appdir=$build/AppDir
 rm -rf "$appdir"
 mkdir -p "$out"
-name="havne-$version-linux-x86_64.AppImage"
+name="havne-$version-linux-$arch.AppImage"
 # The QML the app loads, for the plugin's import scan; offscreen for
 # the smoke below, xcb (X11 and XWayland) for everyone
 export QML_SOURCES_PATHS=$PWD/app/qml
 export EXTRA_PLATFORM_PLUGINS=libqoffscreen.so
 export OUTPUT=$out/$name
-linuxdeploy-x86_64.AppImage --appdir "$appdir" \
+"linuxdeploy-$arch.AppImage" --appdir "$appdir" \
     --executable "$app" \
     --desktop-file packaging/linux/havne.desktop \
     --icon-file packaging/icons/app.svg --icon-filename havne \
@@ -123,12 +138,12 @@ owner() {   # the package that installed a library; dpkg knows it by the
 for lib in "$appdir"/usr/lib/*.so*; do
     base=$(basename "$lib")
     [ -e "$qt_libs/$base" ] && continue
-    pkg=$(owner "/usr/lib/x86_64-linux-gnu/$base") \
+    pkg=$(owner "/usr/lib/$multiarch/$base") \
         || die "$base isn't from the Qt kit or a system package"
     printf '%s\t%s\t%s\n' "${pkg%%:*}" "$(dpkg-query -W -f='${Version}' "$pkg")" "$base"
 done > "$build/appimage-system-libs.tsv"
 QT_VERSION=$("$QMAKE" -query QT_VERSION) APPDIR=$appdir NAME=$name \
-SYSTEM_LIBS=$build/appimage-system-libs.tsv LINUXDEPLOY=1-alpha-20251107-1 \
+SYSTEM_LIBS=$build/appimage-system-libs.tsv LINUXDEPLOY=1-alpha-20251107-1 DEBARCH=$debarch \
 python3 - > "$out/$name.components.json" <<'EOF'
 import json, os, re
 from collections import defaultdict
@@ -158,7 +173,7 @@ if icu:
                        "comment": "from the Qt kit"})
 for (pkg, ver), v in sorted(system.items()):
     components.append({"name": pkg, "version": ver, "files": v["files"],
-                       "purl": f"pkg:deb/ubuntu/{pkg}@{ver}?arch=amd64"})
+                       "purl": f"pkg:deb/ubuntu/{pkg}@{ver}?arch={os.environ['DEBARCH']}"})
 print(json.dumps({"download": os.environ["NAME"], "components": components}, indent=1, sort_keys=True))
 EOF
 echo "components: $(grep -c '"name"' "$out/$name.components.json") listed"

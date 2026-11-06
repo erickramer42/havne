@@ -3,8 +3,9 @@ name: Release
 # A version tag publishes a release with these downloads: a Windows x64
 # zip (the app, the x86 and x64 J2534 surrogates, the Qt runtime and the
 # Visual C++ runtime, running without Qt or Visual Studio), an Android
-# arm64-v8a APK signed with the release key (ADR-0030), a Linux x86_64
-# AppImage, and core alone for Linux as a deb and a tarball (ADR-0035);
+# arm64-v8a APK signed with the release key (ADR-0030), a Linux AppImage,
+# and core alone for Linux as a deb and a tarball (ADR-0035), each Linux
+# file for x86_64 and for aarch64 (arm64);
 # beside them the Windows executables' PDBs in a zip of their own
 # (ADR-0034) and havne-cli's Linux debug info as a -dbgsym deb and a
 # -debug tarball. Each comes with its SHA-256, and one signed build
@@ -12,7 +13,8 @@ name: Release
 # .intoto.jsonl); one SPDX SBOM lists what each download contains,
 # attested over them.
 # A tag with -rcN publishes a pre-release, for a dry run.
-# The tagged commit must already have passed CI (ci.yml's push run).
+# The tagged commit must already have passed CI (ci.yml's push run on
+# main, which the release PR's merge starts).
 #
 #   git tag v0.3.1 && git push origin v0.3.1
 #
@@ -82,9 +84,9 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # The build jobs run no tests: ci.yml ran them when the commit was
-      # pushed to main or dev (it never runs on tags). So the newest of
-      # those push runs must have finished green, or a tag pushed early,
-      # or on a red commit, would publish an untested build.
+      # pushed to main, the release PR's merge (it never runs on tags). So
+      # the newest push run must have finished green, or a tag pushed
+      # early, or on a red commit, would publish an untested build.
       - name: Check CI passed on the tagged commit
         run: |
           sha=$(git rev-parse HEAD)
@@ -92,7 +94,7 @@ jobs:
             --json status,conclusion,url \
             --jq '.[0] // empty | "\(.status) \(if (.conclusion // "") == "" then "none" else .conclusion end) \(.url)"')
           if [ -z "$run" ]; then
-            echo "::error::ci.yml has no push run on $sha: push the commit to main or dev and let CI finish before tagging"
+            echo "::error::ci.yml has no push run on $sha: merge it to main (or run ci.yml on it by hand) and let CI finish before tagging"
             exit 1
           fi
           read -r status conclusion url <<< "$run"
@@ -117,7 +119,11 @@ jobs:
       - name: Install aqtinstall (pinned master commit)
         run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
 
+      # A mirror that stops answering fails the step at 10 minutes (an
+      # install takes about half of one), not the job at 30, so a re-run
+      # of the failed job can follow soon after
       - name: Install Qt 6.12.0
+        timeout-minutes: 10
         run: |
           $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
           New-Item -ItemType Directory -Force -Path $prefix | Out-Null
@@ -178,10 +184,15 @@ jobs:
           ref: ${{ env.TAG }}
 
       # The same kit, NDK and JDK as ci.yml's android-build; see the notes
-      # there.
+      # there. cache: true restores the kit main's CI saved: the inputs are
+      # android-build's, so the key is the same, and a tag's run may read
+      # the default branch's caches. A miss installs it from the mirrors,
+      # bounded at 10 minutes (a restore takes one or two)
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        timeout-minutes: 10
         with:
+          cache: true
           version: '6.12.0'
           host: 'all_os'
           target: 'android'
@@ -248,10 +259,18 @@ jobs:
 
   # On 24.04, the oldest distribution supported: a binary runs where glibc
   # is at least its build machine's. The same builds as ci.yml's
-  # linux-appimage and linux-packages, which ran on the tagged commit.
+  # linux-appimage and linux-packages, which ran on the tagged commit,
+  # one per architecture: x86_64, and aarch64 on GitHub's ARM runner.
   linux:
     needs: gate
-    runs-on: ubuntu-24.04
+    name: linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04, qt_host: linux, qt_arch: linux_gcc_64 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, qt_host: linux_arm64, qt_arch: linux_gcc_arm64 }
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: bash   # -eo pipefail
@@ -263,13 +282,18 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Install Qt 6.12.0 desktop (linux_gcc_64)
+      # cache: true as android's above: the inputs are ci.yml's
+      # linux-appimage's, leg for leg, so each arch restores the kit main's
+      # CI saved for it
+      - name: Install Qt 6.12.0 desktop (${{ matrix.qt_arch }})
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        timeout-minutes: 10
         with:
+          cache: true
           version: '6.12.0'
-          host: 'linux'
+          host: ${{ matrix.qt_host }}
           target: 'desktop'
-          arch: 'linux_gcc_64'
+          arch: ${{ matrix.qt_arch }}
 
       # The xcb platform plugin's libraries, which linuxdeploy bundles;
       # the probes' header; the packages' tools
@@ -300,9 +324,9 @@ jobs:
       - name: Upload the Linux files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux
+          name: linux-${{ matrix.arch }}
           path: |
-            dist/havne-${{ env.VERSION }}-linux-x86_64.AppImage*
+            dist/havne-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage*
             dist/havne-core*
           if-no-files-found: error
           retention-days: 1
@@ -348,6 +372,11 @@ jobs:
             echo "DBGSYM=dist/havne-core-dbgsym_${VERSION}_amd64.deb"
             echo "TARBALL=dist/havne-core-$VERSION-linux-x86_64.tar.gz"
             echo "DEBUG_TARBALL=dist/havne-core-$VERSION-linux-x86_64-debug.tar.gz"
+            echo "APPIMAGE_ARM=dist/havne-$VERSION-linux-aarch64.AppImage"
+            echo "DEB_ARM=dist/havne-core_${VERSION}_arm64.deb"
+            echo "DBGSYM_ARM=dist/havne-core-dbgsym_${VERSION}_arm64.deb"
+            echo "TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64.tar.gz"
+            echo "DEBUG_TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64-debug.tar.gz"
             echo "SBOM=dist/havne-$VERSION.spdx.json"
           } >> "$GITHUB_ENV"
 
@@ -357,7 +386,8 @@ jobs:
       - name: The SBOM
         run: |
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python3 packaging/sbom.py build \
-            --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL"
+            --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL" \
+            "$APPIMAGE_ARM" "$DEB_ARM" "$TARBALL_ARM"
           python3 -m venv "$RUNNER_TEMP/spdx"
           "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
           "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$SBOM"
@@ -365,7 +395,9 @@ jobs:
       - name: Checksums
         run: |
           (cd dist && sha256sum "${ZIP#dist/}" "${SYMBOLS#dist/}" "${APK#dist/}" "${APPIMAGE#dist/}" \
-            "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" "${SBOM#dist/}" \
+            "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" \
+            "${APPIMAGE_ARM#dist/}" "${DEB_ARM#dist/}" "${DBGSYM_ARM#dist/}" "${TARBALL_ARM#dist/}" \
+            "${DEBUG_TARBALL_ARM#dist/}" "${SBOM#dist/}" \
             > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 
@@ -383,6 +415,11 @@ jobs:
             ${{ env.DBGSYM }}
             ${{ env.TARBALL }}
             ${{ env.DEBUG_TARBALL }}
+            ${{ env.APPIMAGE_ARM }}
+            ${{ env.DEB_ARM }}
+            ${{ env.DBGSYM_ARM }}
+            ${{ env.TARBALL_ARM }}
+            ${{ env.DEBUG_TARBALL_ARM }}
 
       # Checked with gh attestation verify <download> -R erickramer42/havne
       # --predicate-type https://spdx.dev/Document/v2.3
@@ -396,6 +433,9 @@ jobs:
             ${{ env.APPIMAGE }}
             ${{ env.DEB }}
             ${{ env.TARBALL }}
+            ${{ env.APPIMAGE_ARM }}
+            ${{ env.DEB_ARM }}
+            ${{ env.TARBALL_ARM }}
 
       # The same signed provenance (a Sigstore bundle) as one release
       # file. OpenSSF Scorecard's Signed-Releases check reads release
@@ -410,6 +450,7 @@ jobs:
       - name: Publish the release
         run: |
           files=("$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"
+            "$APPIMAGE_ARM" "$DEB_ARM" "$DBGSYM_ARM" "$TARBALL_ARM" "$DEBUG_TARBALL_ARM"
             "$SBOM" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber

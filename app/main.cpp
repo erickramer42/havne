@@ -1,14 +1,6 @@
 // File/layer: app/main.cpp | Qt6 Gui/Qml/Quick, app entry point, C++17
-// Testing: manual smoke (the built app launched; HAVNE_SETTINGS_DIR
-//          set by a driven launch; the title bar in the
-//          header's color on Windows 11);
-//          BENCH, the phone run sheet (the system bars' color, Android's
-//          window behind Qt's dark; Phase 8, no drawing while inactive:
-//          the screen turned off with the app in front, the Delivery
-//          line's longest wait for the GUI thread); CI's android-build
-//          compiles the Android part;
-//          QmlTest drives the same QML module and Bridge singleton
-//          without this file
+// Testing: Manual smoke; BENCH (the phone run sheet); CI android-build
+//          (compiles it)
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>

@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-05, **Version:** v0.4.1,
+**Updated:** 2026-11-06, **Version:** v0.5.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,13 +14,15 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.5.0, in progress.** v0.4.1 is out, a patch: the
-pages on a phone; both of the test car's ECUs in one session, recorded
-by the app, the phone and `havne-cli`; a J2534 read that ends at its
-reply, which brought the VX's latency per request on the test car to
-16.4 ms packed and 4.6 ms unpacked; and a listening ELM327 session
-that leaves the other tester's flow control alone, through an OBDLink
-MX+ hearing Single Frame replies only. Changes since then go under
+**Current phase: between releases; v0.6.0 is next.** v0.5.0 is out:
+your own signals, as signal files that core reads from bytes and
+refuses at load where they're wrong, written per vehicle in the app
+(with **Read once**) or converted from an OBDb set by `havne-cli`;
+enumerations and computed signals such as boost; plugins' data tier, a
+package of signal files whose variants the car's VIN proposes, checked
+through the simulated ECU in CI; and Linux downloads for 64-bit ARM.
+None of it has yet read a real ECU: each read so far is the simulated
+car's. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -35,9 +37,7 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.5.0 brings your own signals: PIDs and DIDs defined
-or imported in bulk, and computed signals such as boost
-([roadmap](#roadmap)).
+background too ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -349,9 +349,10 @@ or imported in bulk, and computed signals such as boost
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1018 ctest cases on Windows (both trees rebuilt,
-  2026-11-05), all passing but two env-gated skips (the cross-arch
-  case, and the real-car recordings' diff, run locally), plus the
+- **Tests:** 1238 ctest cases on Windows (both trees rebuilt,
+  2026-11-06), all passing but three skips (the cross-arch case and
+  the real-car recordings' diff, run locally, and a Read once case
+  that runs on Linux only), plus the
   cross-arch subset (101/101); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
@@ -406,8 +407,8 @@ hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
 the VX clock's zero (#5), the VX's serial port on a machine without
 OBDX's software (#11), response pending (#17), the VX's WiFi while
 its USB port is held (#20, in part), a BLE adapter (#25), a real CAN controller that sends with
-one-shot mode (#32), and a sleep on a Linux
-machine (#27). Any other adapter starts the list again.
+one-shot mode (#32), a sleep on a Linux
+machine (#27), and a busy bus through the surrogate (#34). Any other adapter starts the list again.
 
 ## Known issues and technical debt
 
@@ -473,7 +474,7 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.4.0 | Recordings in core and a log viewer, in the app and `havne-cli`; finding a signal among many; SocketCAN through a real controller, on a desk bus and then the test car | Released |
 | v0.4.1 | A patch: the pages on a phone; both ECUs in one session, the recorders and two listeners on the test car; the VX's reply delivery fixed, and what an OBDLink's monitor can't hear found | Released |
-| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | In progress |
+| v0.5.0 | Your own signals: PIDs and DIDs defined or imported in bulk, computed signals such as boost, and the plugin framework's data tier; Linux downloads for ARM (a Raspberry Pi) | Released |
 | v0.6.0-v0.9.0 | v0.6.0, sharing and scripting: exports, imports, Python. v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -484,44 +485,53 @@ releases are in [CHANGELOG.md](CHANGELOG.md). The planned releases are
 in order and hold about three features each; a release's detail comes
 in here when its work starts.
 
-### v0.4.1: the pages on a phone, and what v0.4.0 left unrun
+### v0.5.0: your own signals, and the plugin framework's data tier
 
-A patch ([ADR-0048](docs/adr/0048-semantic-versioning.md)): no new ADR
-and no ABI change.
-- **The UI on a phone**, built and run on the test phone: denser
-  pages, the chart taking the page, a pinch stepping Live's window,
-  the Dashboard's dials side by side upright, a frame-rate readout in
-  developer mode, charts that hold still, Log rows copied. The double
-  tap allows a thumb's drift and is timed by the taps' own stamps, so
-  a slow frame between them (the maximized viewer's chart, about
-  370 ms a paint on the test phone) doesn't split it; tested in QML,
-  and the phone's check (`ui check doubletap`) passes 10 of 10.
-- **Two recordings on the wall clock:** the same bus recorded twice on
-  one machine lines up to about 0.3 ms
-  (`SocketCanBusTest.TwoRecordingsOfOneBusLineUpOnTheirUtcStarts`), and
-  the VX against `candump` on the desk bus to 10.4 ms
-  ([2026-11-04-socketcan-desk-utc](docs/bench-sessions/2026-11-04-socketcan-desk-utc.md)).
-- **The car run** ([2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md)):
-  both ECUs in one session through the VX and through the MX+, the
-  recorders in the laptop's app, the phone's and `havne-cli`, each
-  recording's check clean; the MX+ and the USB2CAN listening beside the
-  VX.
-- **From it:**
-  - a session that only listens through the MX+ hears Single Frame
-    replies only (Known Issue #41, BENCH prep #19: the re-run,
-    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md),
-    tried `AT CFC0` and six more setups); a listening session needs
-    no flow control, so its setup turns it off (`AT CFC0`);
-  - the VX's replies after the surrogate's first read waited about
-    50 ms in a read asked with no time left: no read asks the vendor
-    to wait 0 ms, and a read ends at its reply instead of its slice
-    (ADR-0042's note of 2026-11-04). On the re-run no reply came 50 ms
-    late (packed, the P50 per request 24.6 ms against 65.5-73.7), and
-    the VX held the call for the rest of a batch about 10 ms, so no
-    read makes that call (ADR-0042's note of 2026-11-05); timed again
-    without it, 16.4 ms packed and 4.6 ms unpacked.
+A minor release ([ADR-0048](docs/adr/0048-semantic-versioning.md)),
+which breaks the C ABI on purpose where ADR-0051 says.
+- **Signal files** ([ADR-0051](docs/adr/0051-signal-files.md)): a
+  user's own signals as data, JSON read by a strict parser in core from
+  bytes, for the app on every platform and `havne-cli` alike: Service
+  01 PIDs and Service 22 DIDs on up to four modules, numbers, text,
+  enumerations and computed signals; everything a file gets wrong
+  refused at load, one ID width included. Core's limits move with it:
+  256 requests, the set's layout version 4, recording format 3.
+- **The plugin framework** ([ADR-0052](docs/adr/0052-plugin-framework.md)): one package and
+  manifest, the three tiers, the registry and selection by the VIN's
+  manufacturer code and model year, designed whole; v0.5.0 builds the data
+  tier, which is the signal-file format.
+- **Your own signals, per vehicle:** a form under Settings' Vehicle
+  section, with **Read once** showing the raw reply beside the decoded
+  value; `havne-cli stream --signals <file>` and `signals check`.
+- **Bulk import:** an OBDb signal set (CC BY-SA 4.0, its attribution
+  kept in the converted file's `source` block), converted by
+  `havne-cli signals import obdb` and reported field by field where it
+  differs; the app imports the converted file as any signal file.
+- **Computed signals in core:** the simulated car's boost from its MAP
+  and baro, and a user's own, such as boost from `obd2`'s two PIDs in a
+  signal file, each input judged by its own age bound.
+- **The simulated ECU answers a plugin's DIDs** from the same file, so
+  an example plugin for the simulated car runs in CI with no car;
+  `havne-cli plugins list` and `plugins check`.
+- **Linux downloads for 64-bit ARM** (a Raspberry Pi on Raspberry Pi OS
+  13 or Ubuntu 24.04 and newer): built, with the x86_64 downloads'
+  checks, on CI's ARM runners, and the release checks run on a
+  Raspberry Pi 3 ([docs/linux.md](docs/linux.md)); first published with
+  v0.5.0.
+- **Groundwork, built:** the fakes' module DIDs, and the simulated
+  ECU's second module and `pending` fault.
 
-**Done when:** released; every item above has run where it says.
+**Done when:** `havne-cli` loads the example plugin, the simulated car
+answers its DIDs on `vcan0`, the values decode with its scaling and
+enumerations, and its CI examples pass (met:
+[testing.md](docs/testing.md)'s `havne-cli plugins` row,
+`CliPluginRunTest` in CI's `linux-build`); a user's own DID, defined in
+the app and imported from a synthetic OBDb file, reads from the
+simulated car on a second module (met: [testing.md](docs/testing.md)'s
+"done-when on a second module" row, 2026-11-05); boost shows on Live
+from the mock's MAP and baro (met: testing.md's mock rows and its
+"Boost on Live" row, 2026-11-05); the arm64 deb's `havne-cli` and the
+aarch64 AppImage run on the Raspberry Pi from the release's own files.
 
 ### Waiting on a tester: an iPhone download
 

@@ -1,12 +1,5 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke: logo renders centered at 96px, the tach needle
-//          revs only while Home is on screen, status card centered
-//          (the hint line below is the column's widest item), the
-//          button opens Settings when disconnected and ends the session
-//          when connected. The status card's dot and label in each link
-//          state: test_qml (tests/qml/tst_linkhealth.qml), by objectName.
-//          At a phone's sizes (tests/qml/tst_home.qml): inside the width
-//          upright, the hint line wrapped; scrolling on its side
+// Testing: QML: QmlTest.linkhealth, QmlTest.home (test_qml); Manual smoke
 
 import QtQuick
 import QtQuick.Layouts

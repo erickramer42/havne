@@ -1,26 +1,6 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
-// Testing: model contract covered by test_bridge; swatch colors, dashes
-//          and banner text by test_qml (tests/qml/tst_liveview.qml, and
-//          tst_linkhealth.qml for the banner in each link state), which
-//          finds items by objectName, the rows an ECU lacks left out with
-//          the note saying how many (against the fake J2534 DLL), the
-//          filter above the list (SignalFilterBar.qml, ADR-0050), and the
-//          list giving up rows so the
-//          chart stays whole on a short page; the strip chart's layout (ranges,
-//          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
-//          ChartLayout, drawn by StripChart.qml; every item inside 320 px alone and inside the
-//          app's window at the test phone's size (tests/qml/tst_phone.qml),
-//          the chart maximized by shape and on request, the splitter's
-//          share and the window's steps (stepWindow, which a pinch and
-//          the wheel call; the wheel a step per notch, a notch's parts
-//          added up, a sideways scroll none) there too, and a double tap
-//          on the chart or the splitter (DoubleTapHandler.qml: taps or
-//          clicks a little apart within the interval) as well; F toggling
-//          the chart, and typed into the filter staying a letter of it, by
-//          tst_liveview.qml (the drag itself is manual smoke: run-havne at
-//          384 x 832 and 832 x 384);
-//          the drawing itself, sharp under zoom, is verified manually
-//          (docs/testing.md).
+// Testing: BRIDGE: test_bridge; QML: QmlTest.liveview, QmlTest.linkhealth,
+//          QmlTest.chartlayout, QmlTest.phone (test_qml); Manual smoke
 
 import QtCore
 import QtQuick
@@ -268,6 +248,7 @@ Page {
                 required property double value
                 required property int decimals
                 required property string text          // a text row's value
+                required property string label         // an enum value's word
                 required property bool isText
                 required property bool subscribed
                 required property bool hasValue
@@ -327,6 +308,7 @@ Page {
                         // with a negative reply rather than by its bitmap).
                         text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
+                              : signalDelegate.label !== "" ? signalDelegate.label
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,
                                                signalDelegate.unit)
                         // A text value can run to kilobytes: the name

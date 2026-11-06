@@ -1,8 +1,7 @@
 // File/layer: core/src/recording_rows.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
-// Testing: UNIT: RecordingRowsTest (test_core): each parser's accepted and
-//          refused forms; HARNESS: RecordingTest (test_core) through the
-//          reader; FUZZ: fuzz_recording_rows
+// Testing: UNIT: RecordingRowsTest, RecordingTest (test_core); JsonTest
+//          (test_core); FUZZ: fuzz_recording, fuzz_json
 //
 // The rows of a recording as the reader parses them (ADR-0049 section 5):
 // signals.csv's and markers.csv's CSV rows, events.log's header lines and
@@ -31,7 +30,20 @@ constexpr size_t kUnitMax = 15;
 constexpr const char* kSignalsHeader = "host_us,signal,value,unit";
 constexpr const char* kMarkersHeader = "host_us,label";
 constexpr const char* kFormat2 = "ecuio session recording, format 2 (ADR-0049)";
+/* Format 2's shape, its signal lines' kind also "enum" and each enum
+ * signal's labels on label lines (ADR-0049's appendix of 2026-11-05) */
+constexpr const char* kFormat3 = "ecuio session recording, format 3 (ADR-0049)";
+constexpr size_t kLabelMax = 27; /* ECUIO_ENUM_LABEL_MAX */
 constexpr const char* kFormat1End = "session recording (ADR-0017)";
+/* Format 3's "signal file  signals.json,<SHA-256>" (ADR-0051 section
+ * 4): the signal file the recording was decoded with, copied beside it */
+constexpr const char* kSignalFileKey = "signal file  ";
+constexpr const char* kSignalFileName = "signals.json";
+constexpr size_t kSha256Hex = 64;
+/* "plugin  <id>,<version>,<variant>" after it (ADR-0052 section 4): the
+ * plugin variant that decoded the recording, whose merged set the
+ * signal file is */
+constexpr const char* kPluginKey = "plugin  ";
 
 /* A UTF-8 byte-order mark's length at the start of a header row, or 0 */
 inline size_t bom_length(const char* p, size_t n)
@@ -155,6 +167,16 @@ inline bool parse_number(const char* p, size_t n, double* out)
     double v = static_cast<double>(mantissa);
     if (v != 0.0) {
         int e = exponent;
+        /* The mantissa is under 1e19, so past these the value is past a
+         * double's range or under half its least, whatever its digits:
+         * no loop below runs more than a few steps */
+        if (e > 330) {
+            v = std::numeric_limits<double>::infinity();
+            e = 0;
+        } else if (e < -350) {
+            v = 0.0;
+            e = 0;
+        }
         while (e > 22) {
             v *= 1e22;
             e -= 22;
@@ -311,13 +333,14 @@ inline bool parse_marker_row(const char* line, size_t n, uint64_t* host_us,
     return true;
 }
 
-/* events.log's "signal  <name>,<number|text>,<unit>,<decimals>,<rank>"
- * and then ",<group>" (ADR-0050), which a recording from before groups
- * leaves out */
+/* events.log's "signal  <name>,<number|text|enum>,<unit>,<decimals>,
+ * <rank>" and then ",<group>" (ADR-0050), which a recording from before
+ * groups leaves out; "enum" is format 3's, a number shown as a word */
 struct header_signal {
     std::string name;
     std::string unit;
     bool text = false;
+    bool enumeration = false;
     uint8_t decimal_places = 0;
     uint8_t plot_rank = 0;
     uint8_t group = 0;
@@ -344,12 +367,10 @@ inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
     if (!next_field(p, end, field, &last) || last) {
         return false;
     }
-    if (field == "text") {
-        s.text = true;
-    } else if (field == "number") {
-        s.text = false;
-    } else {
-        *why = "the signal's kind isn't number or text";
+    s.text = field == "text";
+    s.enumeration = field == "enum";
+    if (!s.text && !s.enumeration && field != "number") {
+        *why = "the signal's kind isn't number, text or enum";
         return false;
     }
     if (!next_field(p, end, s.unit, &last) || last) {
@@ -384,6 +405,52 @@ inline bool parse_header_signal(const char* text, size_t n, header_signal& s,
     return true;
 }
 
+/* events.log's "label  <signal>,<raw>,<label>" (format 3): one of an enum
+ * signal's labels, the signal and the label CSV-quoted as a signal line's
+ * name is, the raw value a decimal uint32_t */
+struct header_label {
+    std::string signal;
+    uint32_t raw = 0;
+    std::string label;
+};
+
+inline bool parse_header_label(const char* text, size_t n, header_label& l,
+                               const char** why)
+{
+    if (holds_nul(text, n, why)) {
+        return false;
+    }
+    const char* p = text;
+    const char* end = text + n;
+    bool last = false;
+    std::string field;
+    *why = "the label line isn't signal,raw,label";
+    if (!next_field(p, end, l.signal, &last) || last) {
+        return false;
+    }
+    if (l.signal.empty() || l.signal.size() > kNameMax) {
+        *why = "the label's signal name is empty or longer than 31 bytes";
+        return false;
+    }
+    if (!next_field(p, end, field, &last) || last) {
+        return false;
+    }
+    uint64_t v = 0;
+    if (!parse_count(field.data(), field.size(), &v) || v > UINT32_MAX) {
+        *why = "the label's raw value isn't 0 to 4294967295";
+        return false;
+    }
+    l.raw = static_cast<uint32_t>(v);
+    if (!next_field(p, end, l.label, &last) || !last) {
+        return false;
+    }
+    if (l.label.empty() || l.label.size() > kLabelMax) {
+        *why = "the label is empty or longer than 27 bytes";
+        return false;
+    }
+    return true;
+}
+
 /* Days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's
  * days_from_civil) */
 inline int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
@@ -394,6 +461,26 @@ inline int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
     const unsigned doy = (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1;
     const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     return era * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
+/* A signal file line's value, "signals.json," and 64 lowercase hex
+ * digits: the digits into hex */
+inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
+{
+    const size_t name = std::strlen(kSignalFileName);
+    if (n != name + 1 + kSha256Hex ||
+        std::memcmp(p, kSignalFileName, name) != 0 || p[name] != ',') {
+        return false;
+    }
+    const char* digits = p + name + 1;
+    for (size_t i = 0; i < kSha256Hex; ++i) {
+        const char c = digits[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return false;
+        }
+    }
+    hex->assign(digits, kSha256Hex);
+    return true;
 }
 
 /* "yyyy-MM-ddTHH:mm:ss.zzzZ" as microseconds since 1970 UTC */

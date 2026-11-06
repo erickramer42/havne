@@ -1,25 +1,7 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest: session create (routing, the query split,
-//          profiles and every refusal), start, close and destroy,
-//          callbacks and their snapshot dispatch (every callback at any
-//          list length, the list as it stood, no allocation up to
-//          four), the decoded values (CoreTest.Values*: the batch
-//          against direct decodes, a text slot each, the frame
-//          callbacks first; the defs each frame is checked against:
-//          DefIndexTest), the absent signals
-//          (CoreTest.AFieldPastEveryReplyIsAbsent), the identity
-//          report's VIN (CoreTest.TheVinIsService09sThenF190s), the
-//          unsupported signals
-//          (PidSupportTest, test_obd2; the call's contract:
-//          CoreTest.TheMockHasNoUnsupportedSignals), a packed reply's
-//          records (CoreTest.APacked*), the error strings, a clear's refusals
-//          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
-//          the monitors' names (DiagnosticsTest, test_obd2); the
-//          inspection verdict (InspectionTest, test_obd2);
-//          HARNESS: the J2534 suites and Elm327SessionTest through
-//          create; test_c_abi links the public functions; the USDT
-//          probes: ProbeNotesTest (their notes) and CI's bpftrace step;
-//          the timing report (CoreTest.ASessionWithNoRotationHasNoTimingRows)
+// Testing: UNIT: CoreTest, DefIndexTest (test_core); PidSupportTest,
+//          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
+//          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
 
 #include "ecuio/version.h"
 #include "ecuio/core.h"
@@ -30,6 +12,7 @@
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "obd2_reply.h"      /* a packed Service 01 reply's records */
+#include "computed.h"        /* computed signals' programs */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "uri_query.h"
 #include "error_detail.h"
@@ -263,12 +246,16 @@ namespace {
         }
     }
 
+    /* Which defs decode_frame decodes: every one, only those keyed by a
+     * Service 01 PID (a packed reply's records), or every other */
+    enum class defs_of { all, records, rest };
+
     /* Decodes frame (len bytes of it) against set into the session's
      * buffers from value n and text slot slot on, each def in the set's
      * order; only the defs the index finds for the frame are checked */
     void decode_frame(ecuio_session_t* session, const ecuio_signal_set_t* set,
                       const ecuio_frame_t* frame, uint16_t len, uint32_t& n,
-                      uint32_t& slot)
+                      uint32_t& slot, defs_of which = defs_of::all)
     {
         uint32_t* found = session->def_found.data();
         const uint32_t count =
@@ -276,6 +263,10 @@ namespace {
         for (uint32_t k = 0; k < count; ++k) {
             const uint32_t i = found[k];
             const ecuio_signal_def_t& def = set->defs[i];
+            if (which != defs_of::all &&
+                ecuio_service01_keyed(def) != (which == defs_of::records)) {
+                continue;
+            }
             if (!ecuio_def_applies_to_frame(&def, frame)) {
                 continue;
             }
@@ -304,7 +295,54 @@ namespace {
                 if (rc != ECUIO_DECODE_OK) {
                     continue;
                 }
+                if (def.kind == ECUIO_VALUE_ENUM) {
+                    /* The raw number, and its label from the set's
+                     * table, which outlives the call */
+                    v.text = ecuio_enum_label(set, &def,
+                                              static_cast<uint32_t>(v.value));
+                    v.text_len = v.text != nullptr
+                                     ? static_cast<uint32_t>(strlen(v.text))
+                                     : 0u;
+                }
+                if (!session->latest.empty()) {
+                    session->latest[i] = {v.value, frame->timestamp_us,
+                                          session->decodes};
+                }
             }
+            session->values[n++] = v;
+        }
+    }
+
+    /* Appends each computed value one of the frame's values feeds
+     * (ADR-0051 section 5): from each input's newest value, when every
+     * input has one no older than its bound at the frame's time. A
+     * division by zero or a result that isn't finite gives none. */
+    void compute_values(ecuio_session_t* session, const ecuio_signal_set_t* set,
+                        const ecuio_frame_t* frame, uint32_t& n)
+    {
+        for (const ecuio_session_t::computed_plan& c : session->computed) {
+            const uint32_t inputs = c.program->input_count;
+            bool fed = false;
+            bool fresh = true;
+            double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
+            for (uint32_t k = 0; k < inputs; ++k) {
+                const ecuio_session_t::latest_value& l =
+                    session->latest[c.inputs[k]];
+                fed = fed || l.decode == session->decodes;
+                if (l.decode == 0 || l.time_us > frame->timestamp_us ||
+                    frame->timestamp_us - l.time_us > c.max_age_us[k]) {
+                    fresh = false;
+                }
+                in[k] = l.value;
+            }
+            ecuio_value_t v{};
+            if (!fed || !fresh ||
+                !ecuio_computed_run(*c.program, in, &v.value)) {
+                continue;
+            }
+            const ecuio_signal_def_t& def = set->defs[c.def];
+            v.signal_id = def.id;
+            v.kind = def.kind;
             session->values[n++] = v;
         }
     }
@@ -312,7 +350,8 @@ namespace {
     /* Decodes frame against the session's set into its buffers
      * (ADR-0024 section 4): the number of values, in the set's order, or for a
      * packed Service 01 reply record by record (ADR-0039 Appendix A),
-     * each record a frame of its own in record_frame, so each def
+     * each record a frame of its own in record_frame for the defs keyed
+     * by its PID, every other def from the reply whole, so each def
      * decodes at most once. Each text value takes the next slot, from
      * the first again each frame; create gave the session a slot for
      * every text value a frame can decode to. */
@@ -329,6 +368,7 @@ namespace {
                                  : static_cast<uint16_t>(sizeof(frame->data));
         uint32_t n = 0;
         uint32_t slot = 0;
+        ++session->decodes;
         const std::vector<uint32_t>& ids = session->service01_ids;
         if (session->record_frame &&
             (frame->flags & ECUIO_FRAME_FLAG_ERROR) == 0 &&
@@ -350,8 +390,11 @@ namespace {
                     memcpy(r.data + 2, frame->data + records[k].start,
                            records[k].bytes);
                     r.data_length = static_cast<uint16_t>(2 + records[k].bytes);
-                    decode_frame(session, set, &r, r.data_length, n, slot);
+                    decode_frame(session, set, &r, r.data_length, n, slot,
+                                 defs_of::records);
                 }
+                decode_frame(session, set, frame, len, n, slot, defs_of::rest);
+                compute_values(session, set, frame, n);
                 return n;
             }
             if (reply == ecuio_obd2_reply::unsplit) {
@@ -359,7 +402,38 @@ namespace {
             }
         }
         decode_frame(session, set, frame, len, n, slot);
+        compute_values(session, set, frame, n);
         return n;
+    }
+
+    /* The computed defs' plans (ADR-0051 section 5), from a set the
+     * validator passed: each input's def index and age bound. Runs once,
+     * at create; throws bad_alloc, which create catches. */
+    void plan_computed(ecuio_session_t* s, const ecuio_signal_set_t* set)
+    {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+                continue;
+            }
+            ecuio_session_t::computed_plan c;
+            c.def = i;
+            c.program = &set->computed[d.table_first];
+            for (uint32_t k = 0; k < c.program->input_count; ++k) {
+                for (uint32_t j = 0; j < set->count; ++j) {
+                    if (set->defs[j].id == c.program->input_ids[k]) {
+                        c.inputs[k] = j;
+                        break;
+                    }
+                }
+                const uint32_t age = c.program->max_age_us[k];
+                c.max_age_us[k] = age != 0 ? age : ECUIO_VALUE_STALE_US;
+            }
+            s->computed.push_back(c);
+        }
+        if (!s->computed.empty()) {
+            s->latest.resize(set->count);
+        }
     }
 } // namespace
 
@@ -852,6 +926,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_REPORT_CHANGED:          return "the diagnostics report changed since it was saved";
         case ECUIO_ERR_RECORDING_FAILED:        return "the recording couldn't be made or written";
         case ECUIO_ERR_CANCELED:                return "canceled";
+        case ECUIO_ERR_IN_USE:                  return "a session still uses it";
         default:                                return "unknown status";
     }
 }
@@ -970,7 +1045,8 @@ ecuio_status_t ecuio_session_create(
     }
 
     const ecuio_signal_set_t* profile_set = nullptr;
-    const ecuio_status_t found = ecuio_profile_lookup(chosen, &profile_set);
+    const ecuio_status_t found = ecuio_profile_acquire(chosen, &profile_set);
+    s->profile_hold.set = profile_set;
     if (found != ECUIO_OK) {
         if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
             ecuio_detail_set("no profile is named '%s'", chosen);
@@ -1035,6 +1111,7 @@ ecuio_status_t ecuio_session_create(
             if (!s->service01_ids.empty()) {
                 s->record_frame.reset(new ecuio_frame_t{});
             }
+            plan_computed(s.get(), profile_set);
         } catch (...) {
             return ECUIO_ERR_OUT_OF_MEMORY;
         }

@@ -1,13 +1,6 @@
 // File/layer: tests/fake_elm327.h | test-only, C++17, Qt-free, no
 //             platform headers; header-only
-// Testing: the HARNESS tier's ELM327 (ADR-0026 section 8). Elm327SessionTest
-//          puts it behind the transport's port opener (internal.h);
-//          Elm327PortTest (POSIX) puts it on the far side of a
-//          pseudo-terminal; pending_counted is the other reading of the
-//          count digit (Elm327SessionTest.AScannedDidHeldPending...);
-//          cut_gap_ms an ECU sending a cut reply's rest
-//          (Elm327SessionTest.ACutDid*); monitor_eats_cfs the MX+'s
-//          monitor (Elm327SessionTest.ListeningTurnsFlowControlOff*)
+// Testing: HARNESS: Elm327SessionTest, Elm327PortTest (test_elm327)
 //
 // An ELM327 as its datasheet and the OBDLink manual describe it, bytes
 // in and bytes out: the AT settings it keeps (echo, linefeeds, spaces,
@@ -783,8 +776,8 @@ private:
         const uint32_t rx = fake_ecu::reply_id(tx);
         size_t answer_len = 0;
         if (k.no_data || rx == 0 || !passes(rx) ||
-            !fake_ecu::answer(req, len, k.unsupported_nrc, answer_,
-                              &answer_len) ||
+            !fake_ecu::answer_for(rx, req, len, k.unsupported_nrc, answer_,
+                                  &answer_len) ||
             answer_len > 4095) {
             reply("NO DATA", at);
             return;

@@ -1,9 +1,5 @@
 // File/layer: cli/scan_line.h | havne-cli, a DID scan's progress as a line (ADR-0020)
-// Testing: UNIT (tests/test_cli.cpp, CliScanTest: the line's counts, a
-//          change written at most once a second but a scan's end at once,
-//          nothing for a channel with no scan, and when --until-scanned
-//          ends); CliUsageTest for the option's bad forms; end to end by
-//          hand against the simulated ECU on vcan0 (WSL)
+// Testing: UNIT: CliScanTest (test_cli); CliUsageTest (ctest)
 //
 // uds-generic's scan of a did= range, from each channel's support report
 // (ecuio_session_get_channel_support): one scan line per ECU whose counts

@@ -1,10 +1,6 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
-// Testing: UNIT (registry lookup/overwrite); session-level selection and
-//          the decoded values (CoreTest.Values*) and the absent signals
-//          (CoreTest.AFieldPastEveryReplyIsAbsent) in test_core; the value
-//          layouts in c_abi; BRIDGE (BridgeTest.BothDecodePathsAgreeOverTheFixture);
-//          the timing report (ADR-0042): RequestTimingTest, the transports'
-//          Timing* cases, CoreTest.ASessionWithNoRotationHasNoTimingRows, c_abi
+// Testing: UNIT: CoreTest (test_core); RequestTimingTest (test_obd2); BRIDGE:
+//          BridgeTest (test_bridge)
 
 #ifndef ECUIO_PROFILE_H
 #define ECUIO_PROFILE_H
@@ -36,7 +32,8 @@ extern "C" {
  * Lifetime: the registry keeps the pointer, not a copy, and each
  * session keeps the set it was created with. The set, its defs and
  * its channels must stay valid and unchanged while the name is
- * registered and until every session created with it is destroyed;
+ * registered and until every session created with it is destroyed
+ * (and every simulated ECU answering it, sim.h's profile=);
  * static storage is the simple way. Replacing or unregistering a name
  * leaves existing sessions on their set.
  *
@@ -49,7 +46,7 @@ extern "C" {
 /* The most requests a set's defs may derive (ADR-0015 section 2): one per
  * distinct request and channel, so defs read from one reply count
  * once. */
-#define ECUIO_PROFILE_MAX_REQUESTS 128
+#define ECUIO_PROFILE_MAX_REQUESTS 256
 
 /* Register a name for a signal set, replacing a non-built-in profile of
  * the same name (last wins). The name is 1..ECUIO_PROFILE_NAME_MAX
@@ -97,10 +94,13 @@ const ecuio_signal_set_t* ecuio_session_signal_set(ecuio_session_t* session);
  * callbacks have returned, and delivers what the frame decoded as one
  * batch: every def it matches and decodes (ecuio_def_applies_to_frame,
  * then ecuio_decode_signal or, for TEXT and HEX defs,
- * ecuio_decode_text), in the set's order, stamped with the frame's
- * session time. A def whose decode fails is left out; a frame with no
- * value, or a raw session, delivers no batch. Nothing is decoded while
- * no values callback is registered.
+ * ecuio_decode_text), in the set's order, then each COMPUTED def one
+ * of them feeds (ADR-0051 section 5), in the set's order, all stamped
+ * with the frame's session time. A def whose decode fails is left out,
+ * as is a computed value with an input past its age bound or a result
+ * that isn't finite; a frame with no value, or a raw session, delivers
+ * no batch. Nothing is decoded while no values callback is
+ * registered.
  *
  * The values callback keeps the frame callback's contract (core.h):
  * it runs on the worker and must not block, must never call
@@ -113,7 +113,10 @@ const ecuio_signal_set_t* ecuio_session_signal_set(ecuio_session_t* session);
  * - for each frame, every frame callback returns before any values
  *   callback is called with that frame's batch;
  * - the batch, its values and their text are valid only during the
- *   call. Each text value has bytes of its own.
+ *   call. Each TEXT or HEX value has bytes of its own; an ENUM's label
+ *   is the set's own.
+ * - a value's kind says what it holds, never its text pointer: an ENUM
+ *   is a number that may carry its label.
  */
 
 /* One decoded value. The pointer is last, so every other field's
@@ -122,11 +125,15 @@ typedef struct ecuio_value {
     uint16_t signal_id;    /* the def's id */
     uint8_t  kind;         /* the def's ECUIO_VALUE_* */
     uint8_t  flags;        /* 0; reserved */
-    uint32_t text_len;     /* TEXT and HEX: the bytes at text, the NUL
-                              not counted; 0 otherwise */
-    double   value;        /* the numeric kinds' value; 0 for text */
+    uint32_t text_len;     /* TEXT and HEX, and a labeled ENUM: the bytes
+                              at text, the NUL not counted; 0 otherwise */
+    double   value;        /* the numeric kinds' value (an ENUM's raw
+                              number, a COMPUTED def's result, kind
+                              UINT); 0 for text */
     const char* text;      /* TEXT and HEX: NUL-terminated, valid during
-                              the call; NULL otherwise */
+                              the call; an ENUM: its label
+                              (ecuio_enum_label), NULL where none;
+                              NULL otherwise */
 } ecuio_value_t;
 
 /* What one frame decoded to */

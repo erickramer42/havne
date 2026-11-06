@@ -649,6 +649,7 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
         }
         QString shownText = QString::fromUtf8(text);
         QString unit = QString::fromUtf8(s.pub.unit);
+        QString label;
         const bool number = (s.pub.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0;
         if (number && at != ECUIO_RECORDING_NONE) {
             // signals.csv's numbers are C-locale, as QByteArray reads them
@@ -658,6 +659,16 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
                 const ecuio_display_value_t d = shown(s, value);
                 shownText = QString::number(d.value, 'f', d.decimal_places);
                 unit = QString::fromUtf8(d.unit);
+                // An enum's raw number and its label (format 3's
+                // events.log): the word shows, the number plots
+                if (value >= 0.0 && value <= 4294967295.0 &&
+                    value == std::floor(value)) {
+                    const char* l = ecuio_recording_enum_label(
+                        m_reader, i, static_cast<uint32_t>(value));
+                    if (l != nullptr) {
+                        label = QString::fromUtf8(l);
+                    }
+                }
             }
         } else if (number) {
             unit = QString::fromUtf8(shown(s, 0).unit);
@@ -666,6 +677,7 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
             {QStringLiteral("index"), static_cast<int>(i)},
             {QStringLiteral("text"), shownText},
             {QStringLiteral("unit"), unit},
+            {QStringLiteral("label"), label},
             {QStringLiteral("atMs"), toMsOrNone(at)},
         });
     }

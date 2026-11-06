@@ -1,8 +1,6 @@
 // File/layer: app/android/src/.../SessionService.java | Java, Android only
-// Testing: CI's android-build compiles it and checks the manifest names it;
-//          BENCH and Vehicle on the phone (ADR-0029 section 5): the notification
-//          while an adapter session is up, none after, the session running
-//          on with the screen off
+// Testing: CI android-build (compiles it) and its manifest check; BENCH,
+//          Vehicle (the test phone)
 
 package io.github.erickramer42.havne;
 

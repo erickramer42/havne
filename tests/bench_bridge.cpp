@@ -32,8 +32,9 @@
 // worker rate under obd2 against the same run under raw, which decodes
 // nothing. The looping run and the 100x pass run again recorded through
 // core's recorder (ADR-0049): the looping pair twice, unrecorded and
-// recorded alternated, the faster recorded run at least 0.7 of the
-// faster unrecorded one; the 100x one writing every frame and value with
+// recorded alternated, the faster recorded run at least
+// kMinRecordedLoopShare of the faster unrecorded one (0.7 on Linux, 0.6
+// on Windows); the 100x one writing every frame and value with
 // no record dropped. Exit status 1 on any failed check.
 //
 // --record measures the recorder (ADR-0049 section 9): the bridge's
@@ -299,10 +300,27 @@ constexpr double kMaxDecodeRatio = 3.0;
 constexpr double kMinDecodingShare = 0.5;
 // The looping run recorded through core's recorder against the same run
 // not recorded, the faster of two each (a runner's noise only slows a
-// run): ADR-0049 section 9's CI gate, the 10% judged on the dev machine
-// by --record's alternated runs. Shared runners read about 0.8 on Linux
-// and 0.9 on Windows with one pair, 2026-11-03
+// run): ADR-0049 section 9's CI gate for a gross regression, a cost of a
+// microsecond or more a frame; the 10%, and the recorder's own
+// nanoseconds a frame, are judged on the dev machine by --record's
+// pinned runs. On a shared runner the share measures the runner as much
+// as the recorder: the writer is a third busy thread on two cores, and
+// the bridge's worker rate follows the GUI thread's through the
+// in-flight gate, so holding the worker to a core of its own moved the
+// share above 1 rather than steadying it (0.94 to 1.13 on two of the dev
+// machine's cores, 2026-11-05). Over 63 CI runs each (2026-11-03 to
+// 2026-11-05) Linux read 0.79 to 0.95 (median 0.89) and Windows 0.68 to
+// 0.95 (median 0.80, 4 under 0.75, one under 0.70), most of the spread
+// runner to runner: a job's two recorded runs agree within a few
+// percent. Windows' bound sits about two standard deviations under its
+// median and still fails a cost of about 2 us a frame on its typical
+// runner (220,000 frames a second unrecorded), 1 us on its fastest;
+// Linux's, at 0.7, about 1 us
+#if defined(_WIN32)
+constexpr double kMinRecordedLoopShare = 0.6;
+#else
 constexpr double kMinRecordedLoopShare = 0.7;
+#endif
 constexpr int kDecodeFrames = 100000;
 
 struct LoadRun {

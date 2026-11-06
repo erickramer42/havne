@@ -1,10 +1,8 @@
 // File/layer: core/src/obd2_rates.h | internal, not ABI-exported; the
 //             obd2 set's rate classes, included by request_setup.h
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: RequestEngineTest (the classes the obd2 set's requests
-//     get, the rotation's ratio, the duplicate pair on the test car's
-//     bitmaps); HARNESS: the J2534 and ELM327 rotation
-//     tests (J2534AdoptionTest, Elm327SessionTest).
+// Testing: UNIT: RequestEngineTest (test_obd2); HARNESS: J2534AdoptionTest
+//          (test_j2534_stream); Elm327SessionTest (test_elm327)
 
 #ifndef ECUIO_OBD2_RATES_H
 #define ECUIO_OBD2_RATES_H

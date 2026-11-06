@@ -17,15 +17,19 @@ extern "C" {
 #define ECUIO_MOCK_SIG_MAF_ID      8001
 #define ECUIO_MOCK_SIG_OIL_ID      9001
 #define ECUIO_MOCK_SIG_LAMBDA_ID   10001
+#define ECUIO_MOCK_SIG_MAP_ID      11001
+#define ECUIO_MOCK_SIG_BARO_ID     12001
+/* Computed from the two above, MAP minus baro (ADR-0051 section 5) */
+#define ECUIO_MOCK_SIG_BOOST_ID    13001
 /* CAN arbitration ID carrying the mock telemetry payload. SHARED by
  * mock_transport.cpp (encoder) and signal_sets.cpp (signal defs) so
  * the two halves of the round-trip contract cannot drift apart. */
 #define ECUIO_MOCK_TELEMETRY_ARB_ID  0x0C0u
-/* Mock telemetry payload length. The signals need 12 bytes and classic
+/* Mock telemetry payload length. The signals need 14 bytes and classic
  * CAN carries 8, so mock frames are CAN FD (ECUIO_FRAME_FLAG_FD) at
- * 12 bytes, a valid FD length. Shared by the encoder, the worker and
- * the tests. */
-#define ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN  12u
+ * 16 bytes, the next valid FD length, the last two zero. Shared by the
+ * encoder, the worker and the tests. */
+#define ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN  16u
 
 /* ---- OBD-II v1 set (ADR-0013) ----
  * IDs occupy a distinct band from the mock set (no cross-set def.id
@@ -54,6 +58,11 @@ extern "C" {
  * (ECUIO_PROFILE_MAX_REQUESTS) plus every DID it can scan. Distinct from
  * the mock and obd2 bands above. */
 #define ECUIO_UDS_GENERIC_SIG_ID_BASE  20000u
+
+/* ---- Signal files (ADR-0051) ----
+ * A file's signals take ids from this band, the base plus each one's
+ * place in the file, so they never meet the bands above. */
+#define ECUIO_USER_SIG_ID_BASE  30000u
 
 /* OBD-II ECU #1 physical response ID, paired with the tester request
  * ID 0x7E0. Shared by obd2_signal_sets.cpp (defs), test fixtures, and

@@ -24,7 +24,8 @@ endif()
 
 set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
-    fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus)
+    fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus
+    fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -40,7 +41,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         # split, fuzz_elm327_reply the ELM327 wire, fuzz_socketcan_wire
         # SocketCAN's, fuzz_diagnostics the request engine, fuzz_isotp
         # ISO-TP, fuzz_sim the simulated ECU, fuzz_recording a
-        # recording's rows, all internal
+        # recording's rows, fuzz_json the JSON reader, all internal
         # (the tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})

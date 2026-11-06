@@ -1,14 +1,5 @@
 // File/layer: fuzz/fuzz_isotp.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: ISO-TP (core/src/isotp.h, ADR-0040 section 1), the
-//          first byte picking one: arbitrary frames at arbitrary times
-//          to the timed receiver (every slot within its bounds, every
-//          message within its First Frame's length and the slot, each
-//          read through an exact-size copy, the counts adding up), or a
-//          round trip, a message from the sender to the receiver under
-//          the input's Flow Control frames (the sender keeps STmin, the
-//          block size and the sequence; a send that ends arrives whole
-//          and the same, and one that's abandoned sends nothing more).
-//          Two runs agree.
+// Testing: FUZZ: fuzz_isotp
 
 #include <ecuio/core.h>
 

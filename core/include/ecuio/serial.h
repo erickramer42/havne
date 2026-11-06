@@ -1,8 +1,5 @@
 // File/layer: core/include/ecuio/serial.h | C ABI, public interface
-// Testing: UNIT: SerialPortsTest (test_elm327): the order, the dedupe and
-//          the copy over made-up ports, the /dev names listed, and the
-//          contract against the machine's own ports; the live list in
-//          Settings is manual smoke
+// Testing: UNIT: SerialPortsTest (test_elm327); Manual smoke
 
 #ifndef ECUIO_SERIAL_H
 #define ECUIO_SERIAL_H

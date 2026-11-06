@@ -1,0 +1,12 @@
+{
+  "havne_plugin": 1,
+  "id": "bad-fixture",
+  "name": "A plugin whose second fixture file names no variant",
+  "version": "1.0.0",
+  "requires": { "core": "0.1.0" },
+  "source": { "name": "Havne's tests", "license": "MIT" },
+  "tiers": ["data"],
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "variants": [ { "id": "base", "files": ["data/a.json"] } ],
+  "fixtures": ["fixtures/good.json", "fixtures/bad.json"]
+}

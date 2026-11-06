@@ -1,9 +1,5 @@
 // File/layer: tests/qml/tst_home.qml | Qt Quick Test, QML tier
-// Testing: Home at a phone's sizes (docs/bench-sessions/2026-10-28-android.md):
-//          upright, every item lies inside the page's width, developer
-//          mode's hint line wrapped; on its side, the column starts at
-//          the margin rather than above the page, and the page scrolls
-//          to its last item.
+// Testing: QML: QmlTest.home (test_qml)
 
 import QtQuick
 import QtTest

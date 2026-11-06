@@ -1,26 +1,5 @@
 // File/layer: fuzz/fuzz_request_bus.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: a requesting session's state across many requests: the
-//          request engine (core/src/request_engine.h) and core's ISO-TP
-//          (core/src/isotp.h) driven as the SocketCAN worker drives them
-//          (ADR-0040), on a simulated bus and clock, against one ECU per
-//          channel answering through tests/fake_ecu.h and core's ISO-TP
-//          sender. The input picks the profile (obd2 on one or two
-//          channels, packing on or off; uds-generic with DIDs polled and
-//          scanned, 11-bit or 29-bit) and then, request by request, each
-//          reply's fate (intact, silent, response pending first, a
-//          negative code, garbage, on the other channel's ID, a wrong
-//          sequence number, a stall past N_Cr, cut short, a frame twice,
-//          a Single Frame longer than its frame), stray frames, the
-//          clock's steps, and Read again, rescans, clears and re-probes
-//          between. After every step: each request is one the engine may
-//          send (04 only while clearing), a Single Frame; no worker would
-//          spin (nothing out, nothing due, yet next_event_us 0); a reply
-//          on one channel changes no other channel's request; every
-//          report stays within its caps and its generation never goes
-//          back; ISO-TP's slots stay within bounds. Then an honest drain:
-//          whatever came before, intact replies bring every channel's
-//          walk, identification, diagnostics and DID scan to an end
-//          within simulated minutes. Two runs agree.
+// Testing: FUZZ: fuzz_request_bus
 
 #include <ecuio/core.h>
 #include <ecuio/profile.h>

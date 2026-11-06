@@ -1,17 +1,5 @@
 // File/layer: tests/test_cli.cpp | havne-cli's line formatting and output ring (ADR-0031)
-// Testing: UNIT, Qt-free; the diagnostics line (CliDiagnosticsTest,
-//          ADR-0037) names codes and monitors through core; the timing line
-//          (CliTimingTest, ADR-0042) has latency.csv's columns; the vin
-//          and identity lines (CliVinTest, ADR-0043) decode through core;
-//          the titles and the dtc line (CliDtcTest, ADR-0044) name through it;
-//          the inspection line (CliInspectionTest, ADR-0045) is core's verdict;
-//          the simulated ECU's lines (CliSimTest, ADR-0046); the DID
-//          scan's line and --until-scanned's end (CliScanTest, ADR-0020);
-//          the lines typed into stream --record (CliMarkLinesTest, ADR-0049);
-//          view's grammar, axis and lines (CliViewTest, ADR-0049);
-//          info's lines and --rate-drop (CliInfoTest, ADR-0049).
-//          The program end to end is the golden runs'
-//          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
+// Testing: UNIT (test_cli): this file's suites
 
 #include "can_line.h"
 #include "diagnostics_line.h"
@@ -19,7 +7,9 @@
 #include "jsonl.h"
 #include "line_ring.h"
 #include "mark_lines.h"
+#include "plugin_lines.h"
 #include "scan_line.h"
+#include "signal_file_lines.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
@@ -860,9 +850,11 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
     s.stalled = 4;
     s.unflowed = 5;
     s.clears = 6;
+    s.pending = 8;
     const char* counts =
         "\"requests\":10,\"replies\":7,\"refused\":1,\"silent\":2,\"late\":1,"
-        "\"bad_sequence\":3,\"stalled\":4,\"unflowed\":5,\"clears\":6,";
+        "\"pending\":8,\"bad_sequence\":3,\"stalled\":4,\"unflowed\":5,"
+        "\"clears\":6,";
     cli::Line st(buf, sizeof buf);
     cli::sim_stats_line(st, s);
     EXPECT_EQ(std::string(st.data(), st.size()),
@@ -1008,13 +1000,42 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     info.signal_count = 2;
     info.rows_torn = 1;
     info.records_dropped = 4;
+    const ecuio_recording_signals_t no_file{};
     cli::Line o(buf, sizeof buf);
-    cli::opened_line(o, 1, info);
+    cli::opened_line(o, 1, info, no_file);
     EXPECT_EQ(std::string(o.data(), o.size()),
               "{\"type\":\"opened\",\"recording\":1,\"format\":\"older\","
               "\"duration_us\":30000000,\"utc_start_us\":null,\"signals\":2,"
               "\"markers\":0,\"summary\":false,\"rows_torn\":1,"
-              "\"records_dropped\":4,\"notes_dropped\":0}");
+              "\"records_dropped\":4,\"notes_dropped\":0,"
+              "\"signal_file\":null}");
+    /* The header's file: its hash, there and the same; or there unnamed */
+    ecuio_recording_signals_t named{};
+    named.flags = ECUIO_RECORDING_SIGNALS_NAMED |
+                  ECUIO_RECORDING_SIGNALS_PRESENT |
+                  ECUIO_RECORDING_SIGNALS_MATCH;
+    std::memset(named.sha256, 'a', 64);
+    cli::Line f(buf, sizeof buf);
+    cli::opened_line(f, 1, info, named);
+    const std::string line(f.data(), f.size());
+    EXPECT_NE(line.find(",\"signal_file\":{\"sha256\":\"" +
+                        std::string(64, 'a') +
+                        "\",\"present\":true,\"matches\":true}}"),
+              std::string::npos)
+        << line;
+    ecuio_recording_signals_t unnamed{};
+    unnamed.flags = ECUIO_RECORDING_SIGNALS_PRESENT;
+    cli::Line u(buf, sizeof buf);
+    cli::opened_line(u, 1, info, unnamed);
+    const std::string unnamed_line(u.data(), u.size());
+    EXPECT_NE(unnamed_line.find(",\"signal_file\":{\"sha256\":null,\"present\":"
+                                "true,\"matches\":false}}"),
+              std::string::npos)
+        << unnamed_line;
+    EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
+        << "format 3 is core's, its enums on their signal lines";
+    EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_CORE), "core");
+    EXPECT_STREQ(cli::format_word(99), "unknown");
 
     ecuio_recording_signal_t s{};
     std::strcpy(s.name, "RPM");
@@ -1059,6 +1080,45 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     EXPECT_NE(std::string(t.data(), t.size()).find("\"rate_hz\":null"),
               std::string::npos)
         << "one sample has no rate";
+
+    /* An enum (format 3): "enum" and its labels after "text", a signal
+     * file's "values" shape, then the rest as a number's; a label's
+     * quotes escaped, as any string's */
+    ecuio_recording_signal_t fuel{};
+    std::strcpy(fuel.name, "Fuel");
+    fuel.flags = ECUIO_RECORDING_SIGNAL_ENUM;
+    fuel.samples = 2;
+    fuel.lowest = 1;
+    fuel.highest = 4;
+    fuel.first_us = 100;
+    fuel.last_us = 200;
+    ecuio_enum_entry_t labels[2] = {};
+    labels[0].raw = 1;
+    std::strcpy(labels[0].label, "Open loop, cold");
+    labels[1].raw = 4294967295u;
+    std::strcpy(labels[1].label, "Say \"fault\"");
+    cli::Line en(buf, sizeof buf);
+    cli::signal_line(en, 0, 5, fuel, labels, 2);
+    EXPECT_EQ(std::string(en.data(), en.size()),
+              "{\"type\":\"signal\",\"recording\":0,\"index\":5,\"name\":\"Fuel\","
+              "\"unit\":\"\",\"text\":false,\"enum\":true,\"labels\":{\"1\":"
+              "\"Open loop, cold\",\"4294967295\":\"Say \\\"fault\\\"\"},"
+              "\"decimals\":0,\"rank\":0,\"group\":\"Other\",\"samples\":2,"
+              "\"lowest\":1,\"highest\":4,\"first_us\":100,\"last_us\":200,"
+              "\"rate_hz\":10000}");
+    cli::Line bare(buf, sizeof buf);
+    cli::signal_line(bare, 0, 5, fuel);
+    EXPECT_NE(std::string(bare.data(), bare.size())
+                  .find("\"enum\":true,\"labels\":{},\"decimals\""),
+              std::string::npos)
+        << "an enum with no labels has an empty object";
+    cli::Line number(buf, sizeof buf);
+    cli::signal_line(number, 0, 3, s);
+    EXPECT_EQ(std::string(number.data(), number.size()).find("enum"),
+              std::string::npos)
+        << "a number's line is as it was";
+    EXPECT_GE(cli::labels_bytes(256), 256u * (12 + 6 * 27))
+        << "room for 256 labels, every byte escaped";
 
     cli::Line al(buf, sizeof buf);
     cli::align_line(al, 1, "rise:RPM:4000", true, 24600000, -24600000);
@@ -1219,4 +1279,369 @@ TEST(CliInfoTest, TheLinesCarryWhatTheCheckFound)
                           "\"code\":7,\"message\":\"") +
                   ecuio_status_string(ECUIO_ERR_LOAD_FAILED) +
                   "\",\"detail\":\"the folder has no signals.csv\"}");
+}
+
+// A URI's profile= is the last one in its query, as core reads it, and
+// only that key: one that ends in profile isn't it
+TEST(CliSignalFileTest, AUrisProfileIsItsLastProfileKey)
+{
+    std::string p;
+    EXPECT_FALSE(cli::uri_profile("mock://x", &p));
+    EXPECT_FALSE(cli::uri_profile("mock://x?myprofile=a", &p));
+    ASSERT_TRUE(cli::uri_profile("mock://x?profile=obd2", &p));
+    EXPECT_EQ(p, "obd2");
+    ASSERT_TRUE(
+        cli::uri_profile("replay://a?speed=max&profile=a&profile=b", &p));
+    EXPECT_EQ(p, "b");
+    ASSERT_TRUE(cli::uri_profile("mock://x?profile=", &p));
+    EXPECT_EQ(p, "");
+}
+
+// A loaded file's profile is added to a URI that names none, kept where
+// the URI names it, and a URI naming another is refused
+TEST(CliSignalFileTest, TheFilesProfileIsTheUrisWhenItNamesNone)
+{
+    std::string out;
+    ASSERT_TRUE(cli::uri_for_profile("mock://x", "user.a", &out));
+    EXPECT_EQ(out, "mock://x?profile=user.a");
+    ASSERT_TRUE(cli::uri_for_profile("replay://p?speed=max", "user.a", &out));
+    EXPECT_EQ(out, "replay://p?speed=max&profile=user.a");
+    ASSERT_TRUE(
+        cli::uri_for_profile("mock://x?profile=user.a", "user.a", &out));
+    EXPECT_EQ(out, "mock://x?profile=user.a");
+    EXPECT_FALSE(cli::uri_for_profile("mock://x?profile=obd2", "user.a", &out));
+    EXPECT_FALSE(cli::uri_for_profile("mock://x?profile=", "user.a", &out));
+}
+
+// The kind words are a signal file's, and a unit line is a file's own
+// signal's unit that never converts
+TEST(CliSignalFileTest, KindsAndUnitsAreTheFilesWords)
+{
+    ecuio_signal_def_t d{};
+    d.kind = ECUIO_VALUE_UINT;
+    EXPECT_STREQ(cli::kind_word(d), "number");
+    d.kind = ECUIO_VALUE_INT;
+    EXPECT_STREQ(cli::kind_word(d), "number");
+    d.kind = ECUIO_VALUE_TEXT;
+    EXPECT_STREQ(cli::kind_word(d), "text");
+    d.kind = ECUIO_VALUE_HEX;
+    EXPECT_STREQ(cli::kind_word(d), "hex");
+    d.kind = ECUIO_VALUE_ENUM;
+    EXPECT_STREQ(cli::kind_word(d), "enum");
+    d.kind = ECUIO_VALUE_UINT;
+    d.flags = ECUIO_DEF_FLAG_COMPUTED;
+    EXPECT_STREQ(cli::kind_word(d), "computed");
+
+    ecuio_signal_def_t u{};
+    u.id = ECUIO_USER_SIG_ID_BASE;
+    std::strcpy(u.unit, "km/h");
+    EXPECT_TRUE(cli::unit_converts(u));
+    EXPECT_FALSE(cli::unit_kept(u));
+    std::strcpy(u.unit, "kph");
+    EXPECT_FALSE(cli::unit_converts(u));
+    EXPECT_TRUE(cli::unit_kept(u));
+    std::strcpy(u.unit, "%");
+    EXPECT_TRUE(cli::unit_kept(u));
+    u.unit[0] = '\0';
+    EXPECT_FALSE(cli::unit_kept(u)) << "no unit, nothing to convert";
+    std::strcpy(u.unit, "%");
+    u.id = ECUIO_USER_SIG_ID_BASE - 1;
+    EXPECT_FALSE(cli::unit_kept(u)) << "the base set's, not the file's";
+}
+
+// Each line says what the loader read, in the file's own terms: a reply's
+// echo split back into service and number, the byte after it, the field,
+// an enum's labels, a computed signal's inputs with the stale age where
+// the file gives none
+TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
+{
+    const std::string json =
+        "{\"havne_signals\":1,\"name\":\"Unit test\","
+        "\"source\":{\"name\":\"test\"},"
+        "\"ecus\":[{\"id\":\"tcm\",\"rx\":\"7E9\"}],\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Temp\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":1,\"bits\":16,\"signed\":true},"
+        "\"scale\":0.5,\"offset\":-40,\"unit\":\"kph\",\"decimals\":1,"
+        "\"group\":\"engine\",\"plot\":2},"
+        "{\"key\":\"gear\",\"name\":\"Gear\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"01\",\"number\":\"A4\"},"
+        "\"field\":{\"byte\":0,\"bits\":4,\"bit\":2,\"order\":\"le\"},"
+        "\"kind\":\"enum\",\"values\":{\"1\":\"First\",\"2\":\"Second\"},"
+        "\"group\":\"vehicle\"},"
+        "{\"key\":\"part\",\"name\":\"Part\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"F187\"},"
+        "\"field\":{\"byte\":0,\"bytes\":5},\"kind\":\"hex\"},"
+        "{\"key\":\"half\",\"name\":\"Half\",\"kind\":\"computed\","
+        "\"expr\":\"temp / 2\",\"unit\":\"kph\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    ASSERT_EQ(set.count, 4u);
+    char buf[4096];
+    auto text = [&](auto write) {
+        cli::Line l(buf, sizeof buf);
+        write(l);
+        return std::string(l.data(), l.size());
+    };
+    EXPECT_EQ(text([&](cli::Line& l) {
+                  cli::signal_file_line(l, ecuio_signal_file_name(file),
+                                        ecuio_signal_file_profile(file), set);
+              }),
+              "{\"type\":\"signal_file\",\"name\":\"Unit test\","
+              "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
+              "\"ecus\":[{\"rx\":\"0x7E9\",\"tx\":\"0x7E1\"}]}");
+    const std::string other = ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_OTHER);
+    const std::string expected[] = {
+        "{\"type\":\"signal_def\",\"id\":30000,\"name\":\"Temp\","
+        "\"kind\":\"number\",\"unit\":\"kph\",\"decimals\":1,"
+        "\"group\":\"Engine\",\"rank\":2,\"rx\":\"0x7E9\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},\"byte\":1,"
+        "\"bits\":16,\"order\":\"be\",\"signed\":true,\"scale\":0.5,"
+        "\"offset\":-40}",
+        "{\"type\":\"signal_def\",\"id\":30001,\"name\":\"Gear\","
+        "\"kind\":\"enum\",\"unit\":\"\",\"decimals\":0,"
+        "\"group\":\"Vehicle\",\"rank\":0,\"rx\":\"0x7E9\","
+        "\"read\":{\"service\":\"01\",\"number\":\"A4\"},\"byte\":0,"
+        "\"bits\":4,\"bit\":2,\"order\":\"le\",\"signed\":false,"
+        "\"labels\":{\"1\":\"First\",\"2\":\"Second\"}}",
+        "{\"type\":\"signal_def\",\"id\":30002,\"name\":\"Part\","
+        "\"kind\":\"hex\",\"unit\":\"\",\"decimals\":0,\"group\":\"" +
+            other +
+            "\",\"rank\":0,\"rx\":\"0x7E9\","
+            "\"read\":{\"service\":\"22\",\"number\":\"F187\"},\"byte\":0,"
+            "\"bytes\":5}",
+        "{\"type\":\"signal_def\",\"id\":30003,\"name\":\"Half\","
+        "\"kind\":\"computed\",\"unit\":\"kph\",\"decimals\":0,\"group\":\"" +
+            other +
+            "\",\"rank\":0,\"inputs\":[{\"id\":30000,\"max_age_us\":3000000}]}",
+    };
+    for (uint32_t i = 0; i < 4; ++i) {
+        SCOPED_TRACE(i);
+        EXPECT_TRUE(cli::own_signal(set.defs[i]));
+        EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
+        EXPECT_EQ(
+            text([&](cli::Line& l) { cli::def_line(l, set, set.defs[i]); }),
+            expected[i]);
+    }
+    EXPECT_EQ(text([&](cli::Line& l) { cli::unit_line(l, set.defs[0]); }),
+              "{\"type\":\"unit\",\"id\":30000,\"name\":\"Temp\","
+              "\"unit\":\"kph\",\"converts\":false}");
+    uint32_t n = 0;
+    EXPECT_EQ(cli::def_labels(set, set.defs[0], &n), nullptr);
+    EXPECT_EQ(n, 0u) << "a number has no labels";
+    ASSERT_NE(cli::def_labels(set, set.defs[1], &n), nullptr);
+    EXPECT_EQ(n, 2u);
+    EXPECT_EQ(cli::def_program(set, set.defs[0]), nullptr);
+    EXPECT_NE(cli::def_program(set, set.defs[3]), nullptr);
+    ecuio_signal_file_free(file);
+}
+
+// An import's notes and summary are lines of their own, each kind a word
+TEST(CliSignalFileTest, AnImportsNotesAreLinesOfTheirOwn)
+{
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_CONVERTED), "converted");
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_CHANGED), "changed");
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_SKIPPED), "skipped");
+    EXPECT_STREQ(cli::note_word(ECUIO_OBDB_NOTE_FILE), "file");
+    EXPECT_STREQ(cli::note_word(9), "unknown");
+    ecuio_obdb_note_t n{};
+    n.what = ECUIO_OBDB_NOTE_CHANGED;
+    n.line = 12;
+    n.signal = "TCM_TFT";
+    n.key = "tcm_tft";
+    n.field = "max";
+    n.text = "OBDb holds the value within 0 to 215";
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::import_note_line(l, n);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"import_note\",\"what\":\"changed\",\"line\":12,"
+              "\"signal\":\"TCM_TFT\",\"key\":\"tcm_tft\",\"field\":\"max\","
+              "\"text\":\"OBDb holds the value within 0 to 215\"}");
+    EXPECT_LE(l.size(), cli::note_line_bytes(n));
+    cli::Line s(buf, sizeof buf);
+    cli::imported_line(s, 7, 6, 5);
+    EXPECT_EQ(std::string(s.data(), s.size()),
+              "{\"type\":\"imported\",\"converted\":7,\"changed\":6,"
+              "\"skipped\":5}");
+}
+
+namespace {
+
+std::string text_of(cli::Line& l)
+{
+    EXPECT_TRUE(l.finish());
+    return std::string(l.data(), l.size());
+}
+
+// A packed plugin of two variants, the second for 2019 on
+const char kPacked[] =
+    R"({"havne_plugin": 1, "id": "p", "name": "P", "version": "1.2.3",)"
+    R"( "requires": {"core": "0.1.0"}, "source": {"name": "t"},)"
+    R"( "tiers": ["data"], "match": [{"wmi": ["ZZZ"]}],)"
+    R"( "ecus": [{"id": "pcm", "rx": "7E8"}],)"
+    R"( "variants": [{"id": "base", "files": ["a.json"]},)"
+    R"( {"id": "late", "years": [2019, 2030], "files": ["a.json"]}],)"
+    R"( "files": {"a.json": {"havne_signals": 1, "signals": [{"key": "oil",)"
+    R"( "name": "Oil", "ecu": "pcm", "read": {"service": "22",)"
+    R"( "number": "F40D"}, "field": {"byte": 0}, "scale": 0.25}]}}})";
+
+struct Packed {
+    ecuio_plugin_t* p = nullptr;
+    Packed()
+    {
+        EXPECT_EQ(ecuio_plugin_load(kPacked, sizeof kPacked - 1, nullptr,
+                                    nullptr, &p),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+    }
+    ~Packed() { ecuio_plugin_free(p); }
+    ecuio_plugin_info_t info() const
+    {
+        ecuio_plugin_info_t i{};
+        i.struct_size = sizeof i;
+        ecuio_plugin_info(p, &i);
+        return i;
+    }
+};
+
+} // namespace
+
+// A fixture passes within half its field's step, an enum's step being 1,
+// with only the double's own rounding as slack
+TEST(CliPluginTest, AFixturePassesWithinHalfItsFieldsStep)
+{
+    ecuio_signal_def_t d{};
+    d.kind = ECUIO_VALUE_UINT;
+    d.scale = 0.1;
+    EXPECT_TRUE(cli::fixture_passes(d, 81.3, 81.3));
+    EXPECT_TRUE(cli::fixture_passes(d, 81.3, 81.35));
+    EXPECT_TRUE(cli::fixture_passes(d, 81.3, 81.25));
+    EXPECT_FALSE(cli::fixture_passes(d, 81.3, 81.36));
+    EXPECT_FALSE(cli::fixture_passes(d, 81.3, 81.2));
+    d.scale = -2;
+    EXPECT_TRUE(cli::fixture_passes(d, 10, 11)) << "the step's size, |scale|";
+    EXPECT_FALSE(cli::fixture_passes(d, 10, 11.01));
+    d.kind = ECUIO_VALUE_ENUM;
+    d.scale = 1;
+    EXPECT_TRUE(cli::fixture_passes(d, 3, 3));
+    EXPECT_FALSE(cli::fixture_passes(d, 3, 4));
+    EXPECT_FALSE(cli::fixture_passes(d, 3, 2));
+    EXPECT_EQ(cli::plugin_profile("example-sim", "my2019"),
+              "plugin.example-sim.my2019");
+}
+
+// The plugin line names each variant's profile; the match line the
+// variants proposed, and a VIN with no model year's null
+TEST(CliPluginTest, ThePluginAndMatchLinesNameTheProfiles)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    char buf[2048];
+    cli::Line l(buf, sizeof buf);
+    cli::plugin_line(l, 2, pk.p, pk.info());
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"plugin\",\"package\":2,\"id\":\"p\",\"version\":"
+              "\"1.2.3\",\"name\":\"P\",\"tiers\":[\"data\"],\"variants\":["
+              "{\"id\":\"base\",\"profile\":\"plugin.p.base\"},{\"id\":"
+              "\"late\",\"profile\":\"plugin.p.late\"}],\"fixtures\":0}\n");
+
+    ecuio_vin_info_t vin{};
+    std::strcpy(vin.wmi, "ZZZ");
+    vin.model_year = 2018;
+    uint32_t idx[4] = {};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_plugin_match(pk.p, &vin, idx, 4, &n), ECUIO_OK);
+    cli::Line m(buf, sizeof buf);
+    cli::match_line(m, pk.p, pk.info(), vin, idx, n);
+    EXPECT_EQ(text_of(m), "{\"type\":\"match\",\"wmi\":\"ZZZ\",\"model_year\":"
+                          "2018,\"variants\":[{\"id\":\"base\",\"profile\":"
+                          "\"plugin.p.base\"}]}\n");
+    vin.model_year = 0;
+    ASSERT_EQ(ecuio_plugin_match(pk.p, &vin, idx, 4, &n), ECUIO_OK);
+    cli::Line z(buf, sizeof buf);
+    cli::match_line(z, pk.p, pk.info(), vin, idx, n);
+    EXPECT_NE(text_of(z).find("\"model_year\":null"), std::string::npos);
+}
+
+// A variant line counts its own signals apart from its base set's, and
+// lists its ECUs
+TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(pk.p, 0);
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::variant_line(l, "base", "plugin.p.base", set);
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
+              "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
+              "\"0x7E8\",\"tx\":\"0x7E0\"}]}\n");
+}
+
+// A fixture line: its place, the value and tolerance, the result, what
+// came back (null with nothing) and why when it didn't pass
+TEST(CliPluginTest, AFixtureLineSaysWhatCameBack)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    const char file[] =
+        R"({"havne_fixtures": 1, "values": [{"variant": "late", "signal": "oil", "value": 2.5}]})";
+    ecuio_plugin_value_t v{};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_plugin_values(pk.p, file, sizeof file - 1, &v, 1, &n),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    cli::Line a(buf, sizeof buf);
+    cli::fixture_line(a, "f.json", "late", v, cli::FixtureResult::passed, true,
+                      2.5, nullptr);
+    EXPECT_EQ(text_of(a),
+              "{\"type\":\"fixture\",\"file\":\"f.json\",\"line\":1,"
+              "\"variant\":\"late\",\"signal\":\"oil\",\"value\":2.5,"
+              "\"tolerance\":0.125,\"result\":\"passed\",\"got\":2.5}\n");
+    cli::Line b(buf, sizeof buf);
+    cli::fixture_line(b, "f.json", "late", v, cli::FixtureResult::not_run,
+                      false, 0, "no --on");
+    EXPECT_EQ(text_of(b),
+              "{\"type\":\"fixture\",\"file\":\"f.json\",\"line\":1,"
+              "\"variant\":\"late\",\"signal\":\"oil\",\"value\":2.5,"
+              "\"tolerance\":0.125,\"result\":\"not-run\",\"got\":null,"
+              "\"why\":\"no --on\"}\n");
+    EXPECT_STREQ(cli::fixture_word(cli::FixtureResult::failed), "failed");
+}
+
+// The checked line counts each result, names the interface or null, and
+// warns of a plugin with no fixtures only; a refusal names its package or
+// its file
+TEST(CliPluginTest, TheCheckedAndRefusedLinesSayWhatHappened)
+{
+    cli::FixtureCounts c;
+    c.passed = 6;
+    c.failed = 1;
+    c.files_refused = 1;
+    char buf[1024];
+    cli::Line a(buf, sizeof buf);
+    cli::checked_line(a, c, "vcan0", 2);
+    EXPECT_EQ(text_of(a),
+              "{\"type\":\"checked\",\"fixtures\":7,\"passed\":6,\"failed\":1,"
+              "\"not_run\":0,\"files_refused\":1,\"on\":\"vcan0\"}\n");
+    cli::Line b(buf, sizeof buf);
+    cli::checked_line(b, cli::FixtureCounts{}, nullptr, 0);
+    EXPECT_EQ(text_of(b),
+              "{\"type\":\"checked\",\"fixtures\":0,\"passed\":0,\"failed\":0,"
+              "\"not_run\":0,\"files_refused\":0,\"on\":null,\"warning\":"
+              "\"the plugin has no fixtures: its values are unchecked\"}\n");
+    cli::Line r(buf, sizeof buf);
+    cli::refused_line(r, "refused", nullptr, 3, ECUIO_ERR_LOAD_FAILED, "why");
+    EXPECT_NE(text_of(r).find("\"package\":3,\"code\":7"), std::string::npos);
+    cli::Line f(buf, sizeof buf);
+    cli::refused_line(f, "fixture_refused", "a.json", 0,
+                      ECUIO_ERR_INVALID_ARGUMENT, "why");
+    const std::string ft = text_of(f);
+    EXPECT_NE(ft.find("\"file\":\"a.json\",\"code\":11"), std::string::npos);
+    EXPECT_EQ(ft.find("package"), std::string::npos);
 }

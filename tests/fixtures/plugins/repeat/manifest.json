@@ -1,0 +1,12 @@
+{
+  "havne_plugin": 1,
+  "id": "repeat",
+  "name": "Two fixture files, each with its own value for one signal",
+  "version": "1.0.0",
+  "requires": { "core": "0.1.0" },
+  "source": { "name": "Havne's tests", "license": "MIT" },
+  "tiers": ["data"],
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "variants": [ { "id": "base", "files": ["data/a.json"] } ],
+  "fixtures": ["fixtures/cold.json", "fixtures/hot.json"]
+}

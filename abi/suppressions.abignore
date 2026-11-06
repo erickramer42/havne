@@ -9,3 +9,8 @@
 # [suppress_type]
 #   # v0.4.0 widens ecuio_frame.flags to 64 bits (CHANGELOG.md)
 #   name = ecuio_frame
+
+[suppress_type]
+  # v0.5.0 moves the set to layout 4: the enum and computed tables
+  # (ADR-0051, CHANGELOG.md)
+  name = ecuio_signal_set

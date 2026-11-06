@@ -1,17 +1,12 @@
 // File/layer: tests/test_recorder.cpp | test_core, Qt-free, C++17
-// Testing: HARNESS: RecorderTest: the recorder (ADR-0049 sections 1 to
-//          4) against sessions fed by hand through
-//          ecuio_session_dispatch_callbacks (never started, so every
-//          frame is the test's) and against the mock and the replay
-//          fixture; the seams in internal.h for a held writer, a failed
-//          write, the syncs, a sleep and the writer's wakes; the link
-//          and timing records with the test as the worker
+// Testing: UNIT: RecorderTest (test_core)
 //
 // Each case records into a folder of its own under TEMP/TMPDIR, removed
 // at the end.
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <clocale>
@@ -19,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -26,11 +22,15 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "ecuio/plugin.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 #include "link_health.h" /* core/src: a worker's link transitions */
+#include "recorder.h"    /* core/src: the signal file's bytes */
 #include "session.h"     /* core/src: the session's record link */
+#include "sha256.h"      /* core/src: the file's hash */
+#include "temp_name.h"
 
 namespace fs = std::filesystem;
 
@@ -56,10 +56,8 @@ struct Root {
         const char* tmp = std::getenv("TEMP");
         if (tmp == nullptr)
             tmp = std::getenv("TMPDIR");
-        path =
-            fs::path(tmp != nullptr ? tmp : "/tmp") /
-            (std::string("ecuio-recorder-") +
-             ::testing::UnitTest::GetInstance()->current_test_info()->name());
+        path = fs::path(tmp != nullptr ? tmp : "/tmp") /
+               temp_name("ecuio-recorder");
         std::error_code ec;
         fs::remove_all(path, ec);
     }
@@ -265,9 +263,7 @@ TEST(RecorderTest, TheFolderKeepsTheRootAsTheCallerSpelledIt)
     EXPECT_EQ(parent_of_folder(root.utf8() + "/real/./x/../y"),
               root.path / "real" / "y");
 
-    const std::string relative =
-        std::string("ecuio-recorder-relative-") +
-        ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    const std::string relative = temp_name("ecuio-recorder-relative");
     const fs::path cwd = fs::current_path();
     EXPECT_EQ(parent_of_folder(relative), cwd / relative);
     fs::remove_all(cwd / relative, ec);
@@ -411,7 +407,7 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     const std::string events = rec.file("events.log");
     const std::vector<std::string> ev = lines_of(events);
     ASSERT_GE(ev.size(), 10u) << events;
-    EXPECT_EQ(ev[0], "ecuio session recording, format 2 (ADR-0049)");
+    EXPECT_EQ(ev[0], "ecuio session recording, format 3 (ADR-0049)");
     EXPECT_EQ(ev[1].rfind("started  ", 0), 0u);
     EXPECT_EQ(ev[2].rfind("utc  ", 0), 0u);
     EXPECT_EQ(ev[2].back(), 'Z');
@@ -439,6 +435,137 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     EXPECT_EQ(marks[0], "host_us,label");
     EXPECT_NE(marks[1].find(",\"launch, hard\""), std::string::npos)
         << marks[1];
+}
+
+/* Format 3 (ADR-0049's appendix of 2026-11-05): an enum's raw number in
+ * signals.csv and its labels on label lines after its signal line, read
+ * back through the reader. A label's comma and quotes are CSV-quoted, a
+ * line break in one is a space; only the first def of a name writes
+ * labels (the reader keeps that one's signal line), and an enum with no
+ * entries or a number writes none. */
+constexpr uint32_t kEnumId = 0x110;
+ecuio_signal_def_t kEnumDefs[4];
+ecuio_enum_entry_t kEnumEntries[4];
+ecuio_signal_set_t kEnumSet;
+
+ecuio_enum_entry_t entry(uint32_t raw, const char* label)
+{
+    ecuio_enum_entry_t e{};
+    e.raw = raw;
+    std::strcpy(e.label, label);
+    return e;
+}
+
+void register_enum_profile()
+{
+    static bool done = false;
+    if (done)
+        return;
+    std::memset(kEnumDefs, 0, sizeof kEnumDefs);
+    for (int i = 0; i < 4; ++i) {
+        ecuio_signal_def_t& d = kEnumDefs[i];
+        d.id = static_cast<uint16_t>(i + 1);
+        d.message_id = kEnumId + static_cast<uint32_t>(i);
+        d.kind = ECUIO_VALUE_ENUM;
+        d.bit_length = 8;
+        d.scale = 1.0;
+    }
+    std::strcpy(kEnumDefs[0].name, "Fuel, System");
+    kEnumDefs[0].table_first = 0;
+    kEnumDefs[0].table_count = 3;
+    kEnumDefs[0].plot_rank = 1;
+    kEnumDefs[0].group = ECUIO_SIGNAL_GROUP_FUEL;
+    std::strcpy(kEnumDefs[1].name, "Fuel, System"); /* its labels unwritten */
+    kEnumDefs[1].table_first = 3;
+    kEnumDefs[1].table_count = 1;
+    std::strcpy(kEnumDefs[2].name, "Mode"); /* no entries */
+    kEnumDefs[3].kind = ECUIO_VALUE_UINT;
+    std::strcpy(kEnumDefs[3].name, "Count");
+    kEnumEntries[0] = entry(1, "Open loop, cold");
+    kEnumEntries[1] = entry(2, "Closed \"loop\"");
+    kEnumEntries[2] = entry(4294967295u, "Two\nlines");
+    kEnumEntries[3] = entry(9, "Other");
+    kEnumSet = ecuio_signal_set_t{};
+    kEnumSet.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    kEnumSet.count = 4;
+    kEnumSet.defs = kEnumDefs;
+    kEnumSet.enum_count = 4;
+    kEnumSet.enums = kEnumEntries;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("rec-enum", &kEnumSet, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    done = true;
+}
+
+TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
+{
+    register_enum_profile();
+    Root root;
+    Recording rec(root, "mock://enum?profile=rec-enum");
+    ASSERT_NE(rec.recorder, nullptr);
+    dispatch(rec.session, kEnumId, std::string("\x02", 1));
+    dispatch(rec.session, kEnumId, std::string("\x03", 1)); /* no label */
+    dispatch(rec.session, kEnumId + 3, std::string("\x07", 1));
+    const std::string folder = rec.folder;
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+
+    const std::vector<std::string> values = lines_of(rec.file("signals.csv"));
+    ASSERT_EQ(values.size(), 4u);
+    EXPECT_NE(values[1].find(",\"Fuel, System\",2,"), std::string::npos)
+        << values[1];
+    EXPECT_NE(values[2].find(",\"Fuel, System\",3,"), std::string::npos)
+        << values[2];
+    EXPECT_NE(values[3].find(",Count,7,"), std::string::npos) << values[3];
+
+    const std::string events = rec.file("events.log");
+    EXPECT_EQ(events.rfind("ecuio session recording, format 3 (ADR-0049)\n", 0),
+              0u);
+    EXPECT_NE(events.find("\nsignal  \"Fuel, System\",enum,,0,1,3\n"
+                          "label  \"Fuel, System\",1,\"Open loop, cold\"\n"
+                          "label  \"Fuel, System\",2,\"Closed \"\"loop\"\"\"\n"
+                          "label  \"Fuel, System\",4294967295,Two lines\n"
+                          "signal  \"Fuel, System\",enum,,0,0,0\n"
+                          "signal  Mode,enum,,0,0,0\n"
+                          "signal  Count,number,,0,0,0\n"),
+              std::string::npos)
+        << events;
+    EXPECT_EQ(events.find(",9,Other"), std::string::npos) << events;
+
+    /* Read back: the number as a number, the word beside it */
+    ecuio_recording_t* r = nullptr;
+    ASSERT_EQ(ecuio_recording_open(folder.c_str(), nullptr, nullptr, &r),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_info_t info{};
+    ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
+    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_ENUMS);
+    ASSERT_EQ(info.signal_count, 3u) << "one signal a name";
+    ecuio_recording_signal_t fuel{};
+    ASSERT_EQ(ecuio_recording_get_signal(r, 0, &fuel), ECUIO_OK);
+    EXPECT_STREQ(fuel.name, "Fuel, System");
+    EXPECT_EQ(fuel.flags, ECUIO_RECORDING_SIGNAL_ENUM);
+    EXPECT_EQ(fuel.samples, 2u);
+    EXPECT_EQ(fuel.lowest, 2.0);
+    EXPECT_EQ(fuel.highest, 3.0);
+    ecuio_enum_entry_t got[4] = {};
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_recording_get_labels(r, 0, got, 4, &count), ECUIO_OK);
+    ASSERT_EQ(count, 3u);
+    EXPECT_EQ(got[0].raw, 1u);
+    EXPECT_STREQ(got[0].label, "Open loop, cold");
+    EXPECT_STREQ(got[1].label, "Closed \"loop\"");
+    EXPECT_EQ(got[2].raw, 4294967295u);
+    EXPECT_STREQ(got[2].label, "Two lines");
+    EXPECT_STREQ(ecuio_recording_enum_label(r, 0, 2), "Closed \"loop\"");
+    ecuio_recording_signal_t mode{};
+    ASSERT_EQ(ecuio_recording_get_signal(r, 1, &mode), ECUIO_OK);
+    EXPECT_EQ(mode.flags, ECUIO_RECORDING_SIGNAL_ENUM);
+    EXPECT_EQ(ecuio_recording_get_labels(r, 1, nullptr, 0, &count), ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+    ecuio_recording_signal_t plain{};
+    ASSERT_EQ(ecuio_recording_get_signal(r, 2, &plain), ECUIO_OK);
+    EXPECT_EQ(plain.flags, 0u);
+    ecuio_recording_close(r);
 }
 
 /* A value is written with a '.' whatever LC_NUMERIC says, as a Qt
@@ -1069,7 +1196,7 @@ TEST(RecorderTest, NothingIsWrittenBeforeASessionAttaches)
             }
             continue;
         }
-        EXPECT_EQ(events.rfind("ecuio session recording, format 2", 0), 0u)
+        EXPECT_EQ(events.rfind("ecuio session recording, format 3", 0), 0u)
             << events;
         EXPECT_NE(events.find("\ncaller  app  Havne test\n"), std::string::npos)
             << events;
@@ -1099,9 +1226,31 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     const fs::path folder = fs::u8path(buf);
     ecuio_recorder_test_add_slept(rec, 5000000); /* before attach */
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    /* The recording's zero is read inside the attach */
+    const uint64_t attach_from = ecuio_clock_us();
     ASSERT_EQ(ecuio_session_record(s, rec), ECUIO_OK);
+    const uint64_t attach_to = ecuio_clock_us();
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    /* The sleep goes in just after a wake has taken its look, so the next
+     * look is most of a wake away: a writer that stamped a wake late
+     * couldn't pass. The writer counts a wake before it looks, so the
+     * test lets 5 ms more go by, spinning: a sleep_for's own lateness
+     * (15.6 ms on Windows) would eat into the wake */
+    const uint64_t woke = ecuio_recorder_test_wakes(rec);
+    const auto give_up =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (ecuio_recorder_test_wakes(rec) == woke &&
+           std::chrono::steady_clock::now() < give_up) {
+        std::this_thread::yield();
+    }
+    const auto looked =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+    while (std::chrono::steady_clock::now() < looked) {
+        std::this_thread::yield();
+    }
+    const uint64_t added_from = ecuio_clock_us();
     ecuio_recorder_test_add_slept(rec, 2340000);
+    const uint64_t added_to = ecuio_clock_us();
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     ecuio_recorder_test_add_slept(rec, 600000); /* under a second */
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -1109,15 +1258,33 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
 
     const std::string events = read_text(folder / "events.log");
-    EXPECT_EQ(events.rfind("ecuio session recording, format 2", 0), 0u)
+    EXPECT_EQ(events.rfind("ecuio session recording, format 3", 0), 0u)
         << "the header first, though attach came past the writer's wake";
     const std::vector<EventLine> sleeps = events_of(events, "asleep");
     ASSERT_EQ(sleeps.size(), 1u) << events;
     EXPECT_EQ(sleeps[0].text, "Asleep for 2.3 s: nothing was read meanwhile");
-    /* Stamped at the wake that saw it: after the attach's 150 ms, within
-     * the next 250 */
-    EXPECT_GE(sleeps[0].ms, 140u) << events;
-    EXPECT_LE(sleeps[0].ms, 500u) << events;
+    /* Stamped at the wake that saw it, on the test's own clock: no
+     * earlier than the sleep went in, no later than one idle wake after,
+     * and a late wake's margin, kept under a wake so that a stamp a wake
+     * late fails. macOS's runner fires timers 100-200 ms late (a stamp
+     * 22 ms past this bound there): its margin is wider, and the "a wake
+     * late fails" check is Windows' and Linux's. Both from the
+     * recording's zero, somewhere in the attach; the stamp is whole ms */
+    constexpr uint64_t kWakeUs = 100000;  /* the writer's idle wake */
+#ifdef __APPLE__
+    constexpr uint64_t kMarginUs = 400000; /* macOS's late timers */
+#else
+    constexpr uint64_t kMarginUs = 90000; /* a timer firing late */
+#endif
+    const uint64_t earliest_ms = (added_from - attach_to) / 1000;
+    const uint64_t latest_ms =
+        (added_to + kWakeUs + kMarginUs - attach_from) / 1000 + 1;
+    ::testing::Test::RecordProperty("asleep_ms", std::to_string(sleeps[0].ms));
+    ::testing::Test::RecordProperty("asleep_window_ms",
+                                    std::to_string(earliest_ms) + "-" +
+                                        std::to_string(latest_ms));
+    EXPECT_GE(sleeps[0].ms, earliest_ms) << events;
+    EXPECT_LE(sleeps[0].ms, latest_ms) << events;
 }
 
 /* The writer wakes every 100 ms while idle, so an idle recording costs a
@@ -1142,27 +1309,37 @@ TEST(RecorderTest, AnIdleWriterWakesTenTimesASecond)
     EXPECT_LE(idle_2s, 40u) << "an idle writer wakes every 100 ms";
     const uint64_t idle = idle_2s / 2;
 
-    const uint64_t busy_from = ecuio_recorder_test_wakes(rec.recorder);
-    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(1);
     /* One frame waiting at every wake: the next goes in as soon as the
      * writer has written the last, so no wake finds the ring empty and
      * none spends its time on a full one */
     uint64_t sent = 0;
-    while (std::chrono::steady_clock::now() < end) {
-        ecuio_recorder_state_t st{};
-        ecuio_recorder_get_state(rec.recorder, &st);
-        if (st.frame_rows == sent) {
-            dispatch(rec.session, kNumberId, std::string("\x02", 1));
-            ++sent;
+    const auto busy_second = [&] {
+        const uint64_t from = ecuio_recorder_test_wakes(rec.recorder);
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        while (std::chrono::steady_clock::now() < end) {
+            ecuio_recorder_state_t st{};
+            ecuio_recorder_get_state(rec.recorder, &st);
+            if (st.frame_rows == sent) {
+                dispatch(rec.session, kNumberId, std::string("\x02", 1));
+                ++sent;
+            }
+            std::this_thread::yield();
         }
-        std::this_thread::yield();
-    }
-    const uint64_t busy = ecuio_recorder_test_wakes(rec.recorder) - busy_from;
-    ::testing::Test::RecordProperty("busy_wakes", std::to_string(busy));
+        return ecuio_recorder_test_wakes(rec.recorder) - from;
+    };
     /* Against the idle second just measured, not a count: a desktop
      * wakes about 57 times (Windows' 15.6 ms timer), the macOS runner 18
      * (its timers fire late), and a busy wake no shorter than the idle
-     * one wakes as often as idle */
+     * one wakes as often as idle. Up to three seconds, the best kept: a
+     * runner busy with other tests has left the writer no turn for a
+     * whole second (0 wakes on CI's Windows), while a writer waking at
+     * the idle pace falls short in every one */
+    uint64_t busy = 0;
+    for (int attempt = 0; attempt < 3 && busy < idle + 5; ++attempt) {
+        busy = std::max(busy, busy_second());
+    }
+    ::testing::Test::RecordProperty("busy_wakes", std::to_string(busy));
     EXPECT_GE(busy, idle + 5) << "a busy writer wakes every 10 ms";
 }
 
@@ -1176,4 +1353,522 @@ TEST(RecorderTest, TheWriterSyncsEveryTwoSeconds)
     EXPECT_TRUE(eventually(
         [&] { return ecuio_recorder_test_syncs(rec.recorder) >= 1; }, 3500));
     EXPECT_LE(ecuio_recorder_test_syncs(rec.recorder), 2u);
+}
+
+namespace {
+
+/* A file's bytes as they are */
+std::string read_bytes(const fs::path& p)
+{
+    std::ifstream f(p, std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+/* The signal-file fixture loaded and registered as its profile,
+ * unregistered and freed at the end */
+struct LoadedFile {
+    std::string bytes;
+    ecuio_signal_file_t* file = nullptr;
+    std::string profile;
+
+    explicit LoadedFile(const std::string& path)
+        : bytes(read_bytes(fs::u8path(path)))
+    {
+        EXPECT_EQ(ecuio_signal_file_load(bytes.data(), bytes.size(), &file),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        if (file != nullptr) {
+            profile = ecuio_signal_file_profile(file);
+            EXPECT_EQ(ecuio_profile_register(profile.c_str(),
+                                             ecuio_signal_file_set(file),
+                                             nullptr),
+                      ECUIO_OK);
+        }
+    }
+    ~LoadedFile()
+    {
+        if (file != nullptr) {
+            (void)ecuio_profile_unregister(profile.c_str());
+        }
+        ecuio_signal_file_free(file);
+    }
+    const ecuio_signal_set_t* set() const
+    {
+        return ecuio_signal_file_set(file);
+    }
+};
+
+const std::string kExtras = std::string(ECUIO_SIGNAL_FIXTURES) + "/extras.json";
+
+/* A recorder opened under root and given file (ecuio_recorder_signal_file)
+ * before the session on uri attaches; with no file, set alone, as a set
+ * no one file holds */
+struct FileRecording {
+    ecuio_session_t* session = nullptr;
+    ecuio_recorder_t* recorder = nullptr;
+    std::string folder;
+    ecuio_status_t attached = ECUIO_ERR_NULL_ARGUMENT;
+
+    FileRecording(const Root& root, const std::string& uri,
+                  const ecuio_signal_file_t* file,
+                  const ecuio_signal_set_t* set = nullptr)
+    {
+        EXPECT_EQ(ecuio_session_create(uri.c_str(), &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_record_options_t o{};
+        const std::string keep = root.utf8();
+        o.root_utf8 = keep.c_str();
+        EXPECT_EQ(ecuio_recorder_open(&o, &recorder), ECUIO_OK);
+        if (recorder == nullptr || session == nullptr) {
+            return;
+        }
+        char buf[1024];
+        uint32_t len = 0;
+        (void)ecuio_recorder_get_folder(recorder, buf, sizeof buf, &len);
+        folder = buf;
+        EXPECT_EQ(file != nullptr
+                      ? ecuio_recorder_signal_file(recorder, file)
+                      : ecuio_recorder_take_signals(recorder, set, nullptr, 0),
+                  ECUIO_OK);
+        attached = ecuio_session_record(session, recorder);
+    }
+    ecuio_status_t finish()
+    {
+        ecuio_session_destroy(session);
+        session = nullptr;
+        const ecuio_status_t st = ecuio_recorder_close(recorder, "done");
+        recorder = nullptr;
+        return st;
+    }
+    ~FileRecording()
+    {
+        ecuio_session_destroy(session);
+        ecuio_recorder_close(recorder, nullptr);
+    }
+    fs::path path(const char* name) const { return fs::u8path(folder) / name; }
+};
+
+ecuio_recording_signals_t signals_of(const std::string& folder)
+{
+    ecuio_recording_signals_t s{};
+    ecuio_recording_t* r = nullptr;
+    EXPECT_EQ(ecuio_recording_open(folder.c_str(), nullptr, nullptr, &r),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_recording_get_signals(r, &s), ECUIO_OK);
+    ecuio_recording_close(r);
+    return s;
+}
+
+/* signals.csv's rows without their host_us: what was decoded, in order */
+std::vector<std::string> decoded_rows(const fs::path& csv)
+{
+    std::vector<std::string> out;
+    const std::vector<std::string> rows = lines_of(read_text(csv));
+    for (size_t i = 1; i < rows.size(); ++i) {
+        out.push_back(rows[i].substr(rows[i].find(',') + 1));
+    }
+    return out;
+}
+
+} // namespace
+
+/* The signal file that decodes a session is copied into its recording
+ * byte for byte, its SHA-256 on the header after the profile, and the
+ * reader says whether the bytes there are still those (ADR-0051 section
+ * 4) */
+TEST(RecorderTest, ASignalFileIsCopiedWithItsHashOnTheHeader)
+{
+    LoadedFile f(kExtras);
+    ASSERT_NE(f.file, nullptr);
+    Root root;
+    FileRecording rec(root, "mock://x?profile=" + f.profile, f.file);
+    ASSERT_EQ(rec.attached, ECUIO_OK);
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+
+    EXPECT_EQ(read_bytes(rec.path("signals.json")), f.bytes);
+    const std::string sha =
+        ecuio_sha256::hex_of(f.bytes.data(), f.bytes.size());
+    EXPECT_NE(read_text(rec.path("events.log"))
+                  .find("\nprofile  " + f.profile +
+                        "\nsignal file  signals.json," + sha + "\n"),
+              std::string::npos);
+
+    ecuio_recording_signals_t s = signals_of(rec.folder);
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_NAMED |
+                           ECUIO_RECORDING_SIGNALS_PRESENT |
+                           ECUIO_RECORDING_SIGNALS_MATCH);
+    EXPECT_EQ(s.length, f.bytes.size());
+    EXPECT_EQ(std::string(s.sha256), sha);
+
+    /* One byte changed: there, but not the bytes that decoded it */
+    {
+        std::ofstream out(rec.path("signals.json"), std::ios::binary);
+        out << f.bytes << ' ';
+    }
+    s = signals_of(rec.folder);
+    EXPECT_EQ(s.flags,
+              ECUIO_RECORDING_SIGNALS_NAMED | ECUIO_RECORDING_SIGNALS_PRESENT);
+    EXPECT_EQ(s.length, f.bytes.size() + 1);
+    EXPECT_EQ(std::string(s.sha256), sha);
+
+    /* Gone: named only */
+    fs::remove(rec.path("signals.json"));
+    s = signals_of(rec.folder);
+    EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_NAMED);
+    EXPECT_EQ(s.length, 0u);
+}
+
+/* A recording of a session no file decodes has neither the file nor the
+ * line, and the reader names none; nor does one given a set no one file
+ * holds (length 0) */
+TEST(RecorderTest, ASessionNoFileDecodesNamesNone)
+{
+    register_profile();
+    Root root;
+    {
+        Recording rec(root, "mock://x?profile=rec-test");
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        EXPECT_FALSE(fs::exists(fs::u8path(rec.folder) / "signals.json"));
+        EXPECT_EQ(rec.file("events.log").find("signal file"),
+                  std::string::npos);
+        const ecuio_recording_signals_t s = signals_of(rec.folder);
+        EXPECT_EQ(s.flags, 0u);
+        EXPECT_STREQ(s.sha256, "");
+    }
+    FileRecording rec(root, "mock://y?profile=rec-test", nullptr, &kSet);
+    ASSERT_EQ(rec.attached, ECUIO_OK);
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+    EXPECT_FALSE(fs::exists(rec.path("signals.json")));
+    EXPECT_EQ(read_text(rec.path("events.log")).find("signal file"),
+              std::string::npos);
+}
+
+/* The file is taken once, before attach, and only for the session it
+ * decodes: one whose set the session doesn't use refuses the attach */
+TEST(RecorderTest, AFileIsTakenOnlyForTheSessionItDecodes)
+{
+    register_profile();
+    LoadedFile f(kExtras);
+    ASSERT_NE(f.file, nullptr);
+    Root root;
+    {
+        FileRecording rec(root, "mock://x?profile=rec-test", f.file);
+        EXPECT_EQ(rec.attached, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_NE(std::string(ecuio_last_error_detail())
+                      .find("the signal file isn't what decodes the session "
+                            "(its profile is rec-test)"),
+                  std::string::npos)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_recorder_close(rec.recorder, nullptr), ECUIO_OK);
+        rec.recorder = nullptr;
+    }
+
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* r = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &r), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_signal_file(nullptr, f.file),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_take_signals(nullptr, f.set(), "x", 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_take_signals(r, nullptr, "x", 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_take_signals(r, f.set(), nullptr, 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    const std::string big(ECUIO_SIGNAL_FILE_MAX_BYTES + 1, ' ');
+    EXPECT_EQ(ecuio_recorder_take_signals(r, f.set(), big.data(), big.size()),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, f.file), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, f.file),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_session_t* s = nullptr;
+    const std::string uri = "mock://z?profile=" + f.profile;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(s, r), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_signal_file(r, f.file),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_recorder_close(r, nullptr), ECUIO_OK);
+}
+
+/* A signals.json that can't be written fails the recording as any write
+ * does */
+TEST(RecorderTest, ASignalFileThatCantBeWrittenFailsTheRecording)
+{
+    LoadedFile f(kExtras);
+    ASSERT_NE(f.file, nullptr);
+    Root root;
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* r = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &r), ECUIO_OK);
+    ecuio_recorder_test_fail_writes(r);
+    ASSERT_EQ(ecuio_recorder_signal_file(r, f.file), ECUIO_OK);
+    ecuio_session_t* s = nullptr;
+    const std::string uri = "mock://z?profile=" + f.profile;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(s, r), ECUIO_OK);
+    ecuio_recorder_state_t st{};
+    EXPECT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(r, &st);
+            return st.state == ECUIO_RECORDING_FAILED;
+        },
+        2000));
+    EXPECT_STREQ(st.reason, "the disk is full");
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_recorder_close(r, nullptr), ECUIO_ERR_RECORDING_FAILED);
+}
+
+/* A replay of a recording with the file it holds decodes the same values
+ * in the same order, and its own recording names the same bytes */
+TEST(RecorderTest, AReplayWithTheRecordingsFileDecodesTheSame)
+{
+    const std::string source =
+        std::string(ECUIO_REPLAY_FIXTURES) + "/2026-10-25-engine-start";
+    const size_t frames =
+        lines_of(read_text(fs::u8path(source) / "frames.csv")).size() - 1;
+    Root root;
+
+    auto record = [&](const std::string& from, const LoadedFile& f) {
+        FileRecording rec(
+            root, "replay://" + from + "?speed=max&profile=" + f.profile,
+            f.file);
+        EXPECT_EQ(rec.attached, ECUIO_OK);
+        std::atomic<size_t> seen{0};
+        auto count = [](const ecuio_frame_t*, void* user) {
+            static_cast<std::atomic<size_t>*>(user)->fetch_add(1);
+        };
+        EXPECT_EQ(ecuio_register_frame_callback(rec.session, count, &seen),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+        EXPECT_TRUE(eventually([&] { return seen.load() >= frames; }, 20000))
+            << seen.load();
+        ecuio_recorder_state_t st{};
+        ecuio_recorder_get_state(rec.recorder, &st);
+        EXPECT_EQ(st.records_dropped, 0u);
+        EXPECT_EQ(rec.finish(), ECUIO_OK);
+        return rec.folder;
+    };
+
+    std::string first;
+    {
+        LoadedFile f(kExtras);
+        ASSERT_NE(f.file, nullptr);
+        first = record(source, f);
+    }
+    std::string second;
+    {
+        LoadedFile again(first + "/signals.json");
+        ASSERT_NE(again.file, nullptr);
+        second = record(first, again);
+    }
+    const std::vector<std::string> a =
+        decoded_rows(fs::u8path(first) / "signals.csv");
+    const std::vector<std::string> b =
+        decoded_rows(fs::u8path(second) / "signals.csv");
+    ASSERT_GT(a.size(), 100u);
+    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv").find(",Road Speed,"),
+              std::string::npos);
+    ASSERT_EQ(a.size(), b.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+        ASSERT_EQ(a[i], b[i]) << "row " << i + 1;
+    }
+    const ecuio_recording_signals_t s1 = signals_of(first);
+    const ecuio_recording_signals_t s2 = signals_of(second);
+    EXPECT_EQ(s2.flags, s1.flags);
+    EXPECT_STREQ(s2.sha256, s1.sha256);
+}
+
+namespace {
+
+/* The example plugin read from the repository's plugins/, freed at the
+ * end; variant 1 (my2019) registered as its profile */
+struct ExamplePlugin {
+    std::map<std::string, std::string> files;
+    ecuio_plugin_t* plugin = nullptr;
+    std::string profile;
+
+    static int read(void* user, const char* path, const char** bytes,
+                    size_t* length)
+    {
+        auto* self = static_cast<ExamplePlugin*>(user);
+        auto it = self->files.find(path);
+        if (it == self->files.end()) {
+            return 1;
+        }
+        *bytes = it->second.data();
+        *length = it->second.size();
+        return 0;
+    }
+
+    ExamplePlugin()
+    {
+        const std::string root =
+            std::string(ECUIO_PLUGINS_DIR) + "/example-sim/";
+        for (const char* p : {"manifest.json", "data/base.json",
+                              "data/my2019.json", "fixtures/values.json"}) {
+            files[p] = read_bytes(fs::u8path(root + p));
+        }
+        const std::string& m = files["manifest.json"];
+        EXPECT_EQ(ecuio_plugin_load(m.data(), m.size(), &read, this, &plugin),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        char name[ECUIO_PROFILE_NAME_MAX + 1] = {};
+        EXPECT_EQ(ecuio_plugin_register(plugin, 1, name, sizeof name),
+                  ECUIO_OK);
+        profile = name;
+    }
+    ~ExamplePlugin() { EXPECT_EQ(ecuio_plugin_free(plugin), ECUIO_OK); }
+    const ecuio_signal_file_t* file() const
+    {
+        return ecuio_plugin_variant_file(plugin, 1);
+    }
+};
+
+} // namespace
+
+/* A plugin variant's recording holds its merged file as signals.json and
+ * names the plugin after it; a replay through that copy, loaded as any
+ * signal file, decodes the same values (ADR-0052 section 4) */
+TEST(RecorderTest, APluginVariantsRecordingHoldsItsMergedFile)
+{
+    ExamplePlugin p;
+    ASSERT_NE(p.plugin, nullptr);
+    ASSERT_EQ(p.profile, "plugin.example-sim.my2019");
+    Root root;
+    std::string first;
+    {
+        FileRecording rec(root, "mock://plugin?profile=" + p.profile, p.file());
+        ASSERT_EQ(rec.attached, ECUIO_OK) << ecuio_last_error_detail();
+        /* The TCM's fluid temperature and gear, as its replies read */
+        for (int i = 0; i < 20; ++i) {
+            dispatch(rec.session, 0x7E9,
+                     std::string("\x62\xF4\x10\x1F", 4) +
+                         static_cast<char>(0x40 + i));
+            dispatch(rec.session, 0x7E9,
+                     std::string("\x62\xF4\x11", 3) + static_cast<char>(i % 8));
+        }
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        first = rec.folder;
+    }
+    const std::string json = read_bytes(fs::u8path(first) / "signals.json");
+    ASSERT_FALSE(json.empty());
+    const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+    EXPECT_NE(read_text(fs::u8path(first) / "events.log")
+                  .find("\nprofile  plugin.example-sim.my2019"
+                        "\nsignal file  signals.json," +
+                        sha + "\nplugin  example-sim,1.0.0,my2019\n"),
+              std::string::npos)
+        << read_text(fs::u8path(first) / "events.log").substr(0, 600);
+
+    LoadedFile copy(first + "/signals.json");
+    ASSERT_NE(copy.file, nullptr);
+    EXPECT_EQ(copy.profile, "user.example-the-simulated-car");
+    std::string second;
+    {
+        FileRecording rec(
+            root, "replay://" + first + "?speed=max&profile=" + copy.profile,
+            copy.file);
+        ASSERT_EQ(rec.attached, ECUIO_OK);
+        ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+        ASSERT_TRUE(eventually(
+            [&] {
+                ecuio_recorder_state_t st{};
+                ecuio_recorder_get_state(rec.recorder, &st);
+                return st.frame_rows >= 40;
+            },
+            10000));
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        second = rec.folder;
+    }
+    const std::vector<std::string> a =
+        decoded_rows(fs::u8path(first) / "signals.csv");
+    const std::vector<std::string> b =
+        decoded_rows(fs::u8path(second) / "signals.csv");
+    ASSERT_GE(a.size(), 40u);
+    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv")
+                  .find(",Trans Fluid Temp,40.01,"),
+              std::string::npos)
+        << "the later file's scale, 0.01";
+    EXPECT_EQ(a, b);
+    EXPECT_EQ(read_bytes(fs::u8path(second) / "signals.json"), json);
+    EXPECT_EQ(read_text(fs::u8path(second) / "events.log").find("\nplugin  "),
+              std::string::npos)
+        << "a file loaded alone names no plugin";
+}
+
+namespace {
+
+/* A one-ECU signal file of signals, recorded on the mock and opened: the
+ * reader's words when it can't open it, else its events.log */
+std::string recorded_header(const std::string& name, const std::string& signals)
+{
+    const std::string text = R"({"havne_signals":1,"name":")" + name +
+                             R"(","source":{"name":"t"},)"
+                             R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)" +
+                             signals + "]}";
+    ecuio_signal_file_t* f = nullptr;
+    EXPECT_EQ(ecuio_signal_file_load(text.data(), text.size(), &f), ECUIO_OK)
+        << ecuio_last_error_detail();
+    if (f == nullptr) {
+        return "not loaded";
+    }
+    const std::string profile = ecuio_signal_file_profile(f);
+    EXPECT_EQ(ecuio_profile_register(profile.c_str(), ecuio_signal_file_set(f),
+                                     nullptr),
+              ECUIO_OK);
+    std::string out;
+    {
+        Root root;
+        FileRecording rec(root, "mock://x?profile=" + profile, f);
+        EXPECT_EQ(rec.attached, ECUIO_OK);
+        EXPECT_EQ(rec.finish(), ECUIO_OK);
+        ecuio_recording_t* r = nullptr;
+        out = ecuio_recording_open(rec.folder.c_str(), nullptr, nullptr, &r) ==
+                      ECUIO_OK
+                  ? read_text(rec.path("events.log"))
+                  : std::string("not opened: ") + ecuio_last_error_detail();
+        ecuio_recording_close(r);
+    }
+    (void)ecuio_profile_unregister(profile.c_str());
+    ecuio_signal_file_free(f);
+    return out;
+}
+
+} // namespace
+
+// A number and an enum of one name: the reader keeps the first signal
+// line of a name, so the enum's labels, under the number's, are left out
+TEST(RecorderTest, ANumberAndAnEnumOfOneNameOpen)
+{
+    const std::string events = recorded_header(
+        "Recorder gear",
+        R"({"key":"g1","name":"Gear","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+        R"({"key":"g2","name":"Gear","read":{"service":"22","number":"D101"},"field":{"byte":0},)"
+        R"("kind":"enum","values":{"1":"First","2":"Second"}},)"
+        R"({"key":"m","name":"Mode","read":{"service":"22","number":"D102"},"field":{"byte":0},)"
+        R"("kind":"enum","values":{"1":"Eco"}})");
+    EXPECT_NE(events.find("\nsignal  Gear,number,"), std::string::npos)
+        << events;
+    EXPECT_EQ(events.find("\nlabel  Gear,"), std::string::npos) << events;
+    EXPECT_NE(events.find("\nlabel  Mode,1,Eco\n"), std::string::npos)
+        << events;
+}
+
+// A line break in a name or unit is a space on the header and in the
+// rows, which no line may break
+TEST(RecorderTest, ALineBreakInANameOrUnitIsASpace)
+{
+    const std::string events = recorded_header(
+        "Recorder breaks",
+        R"({"key":"g","name":"Gear\nX","unit":"k\r\nPa","read":{"service":"22","number":"D100"},"field":{"byte":0}})");
+    EXPECT_NE(events.find("\nsignal  Gear X,number,k  Pa,"), std::string::npos)
+        << events;
 }

@@ -1,10 +1,5 @@
 // File/layer: app/qml/DoubleTapHandler.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_phone.qml): two taps on Live's chart
-//          a little apart within the interval toggle it, two far apart
-//          or past the interval don't, two clicks a little apart do; the
-//          viewer's chart and splitter and Live's splitter through it too;
-//          two clicks stamped close but handled a frame's time apart on
-//          the maximized viewer's chart still toggle it.
+// Testing: QML: QmlTest.phone (test_qml)
 
 import QtQuick
 

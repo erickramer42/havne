@@ -1,0 +1,7 @@
+{"schema": 1, "type": "start"}
+{"fixtures": 2, "id": "bad-fixture", "name": "A plugin whose second fixture file names no variant", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.bad-fixture.base"}], "version": "1.0.0"}
+{"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "id": "base", "profile": "plugin.bad-fixture.base", "signals": 1, "type": "variant"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30000, "kind": "number", "name": "Oil Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"code": 11, "detail": "line 3, column 28: the plugin has no variant 'my2030'", "file": "fixtures/bad.json", "message": "invalid argument", "type": "fixture_refused"}
+{"file": "fixtures/good.json", "got": null, "line": 3, "result": "not-run", "signal": "oil_temp", "tolerance": 0.5, "type": "fixture", "value": 90, "variant": "base", "why": "no --on interface: the simulated ECU answers on one"}
+{"failed": 0, "files_refused": 1, "fixtures": 1, "not_run": 1, "on": null, "passed": 0, "type": "checked"}

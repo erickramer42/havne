@@ -1,9 +1,6 @@
 // File/layer: app/btrelay.h | Qt6 Core/Bluetooth, app layer, C++17;
 //             built on Android only (APP_BLUETOOTH)
-// Testing: CI's android-build compiles it; the classic connect's rules
-//          and an aborted socket's retirement are UNIT-tested (btconnect.h,
-//          btretire.h), the relay around it too (adapterrelay.h); BENCH
-//          and Vehicle: the phone with the MX+ (ADR-0047)
+// Testing: CI android-build (compiles it); BENCH, Vehicle (the test phone)
 
 #pragma once
 

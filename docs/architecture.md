@@ -10,14 +10,15 @@ them, a single **bridge** object moves data from the core's worker
 threads onto the GUI thread.
 
 ```
- QML pages: Home · Dashboard · Live · Diagnostics · Log · Settings
+ QML pages: Home · Dashboard · Live · Diagnostics · Log · Recordings · Settings
    │  Theme (colors, link-state labels) · SignalHub (signals by name)
    ▼  properties and list models, GUI thread only
  SessionBridge (app/)          the app's caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    │                   havne-cli (cli/): a session as JSON lines on
    │                   standard output, the public headers alone (ADR-0031)
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h · sim.h · recording.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
+   │         socketcan.h · vin.h · sim.h · recording.h · plugin.h · obdb.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
@@ -27,7 +28,8 @@ threads onto the GUI thread.
    │              (Bluetooth on a phone): an ELM327-compatible adapter's
    │              AT commands, one at a time
    ├── socketcan:// worker thread → a CAN_RAW socket on a Linux CAN
-   │              interface, listen-only: every frame, the kernel's times
+   │              interface: every frame, the kernel's times; requests
+   │              through ISO-TP in core
    └── j2534://   worker thread → loader, which picks a surrogate by the
                   DLL's architecture: client ══ named pipe ══
           ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)
@@ -106,8 +108,11 @@ decode.
 | `replay://<recording folder or frames.csv>[?query]` | Replay, on every platform ([ADR-0023](adr/0023-replay-transport.md)) | `raw` |
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
 | `elm327://<port>[?query]` | An ELM327-compatible adapter on a serial port (`COM5`, `/dev/ttyUSB0`) or at a WiFi adapter's address (`192.168.4.1:23`), on every platform ([ADR-0026](adr/0026-elm327-transport.md)) | `obd2` |
+| `socketcan://<ifname>[?query]` | SocketCAN, Linux only ([ADR-0032](adr/0032-socketcan-listening.md), [ADR-0040](adr/0040-socketcan-requests-isotp.md)) | `raw` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
 | any URI with `?profile=uds-generic&did=…` | as above | `uds-generic`: the DIDs the URI names, polled or scanned ([ADR-0020](adr/0020-uds-generic.md)) |
+| any URI with `?profile=user.<name>` | as above | a signal file's set, the user's own PIDs and DIDs ([ADR-0051](adr/0051-signal-files.md)) |
+| any URI with `?profile=plugin.<id>.<variant>` | as above | a plugin variant's set, its files merged ([ADR-0052](adr/0052-plugin-framework.md)) |
 
 Every scheme shares one strict query grammar (`core/src/uri_query.h`).
 `ecuio_session_create` splits the query once and refuses any key the
@@ -154,6 +159,28 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   once by the request engine beside the rotation, and the DIDs the ECU
   answers join it. The mock answers them, so the profile runs with no
   hardware.
+- **Signal files** ([ADR-0051](adr/0051-signal-files.md),
+  [signal-files.md](signal-files.md)) are a user's own signals as
+  JSON: core reads one from bytes through a strict parser
+  (`core/src/json.h`), refuses everything it gets wrong with a line
+  and column, and registers it as the profile `user.<name>`, its
+  modules as channels and its PIDs and DIDs as requests. A file may
+  extend `obd2`. Core never opens a path: the app and `havne-cli`
+  read the file, so a phone's picked file goes through the same load.
+  `havne-cli signals import obdb` converts an OBDb signal set into one
+  (`obdb.h`).
+- **Plugins' data tier** ([ADR-0052](adr/0052-plugin-framework.md),
+  `plugin.h`): a package of signal files with one manifest, as a
+  folder or packed into one file. Each variant, an ordered list of the
+  package's files merged by signal key, registers as
+  `plugin.<id>.<variant>`, and a VIN's manufacturer code and model year
+  propose the variants that fit. A plugin can't be freed while a
+  session decodes with one of its sets (`ECUIO_ERR_IN_USE`).
+- **Enumerations and computed signals:** an enum def is a raw number
+  with a label from the set's table (`ecuio_enum_label`); a computed
+  def reads no frame and runs a bounded program over up to four other
+  signals, each no older than its age bound, after its frame's own
+  values in the same batch. The mock's boost is one (MAP minus baro).
 - **Unknown or malformed profile names** fail at session create,
   before any DLL loads.
 - **Registration validates.** `ecuio_profile_register` runs the set
@@ -349,7 +376,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   copy of the frame; the values callback stages each value under one
   short lock, which the 100 ms tick swaps out. Everything else runs on
   the GUI thread. It links only QtCore, so `test_bridge` can exercise
-  it headless.
+  it headless. So do the stores beside it (`app/signalstore.h`,
+  `app/pluginstore.h`), which `test_bridge` compiles too.
 - **The QML module is a library:** the `App` module (the pages,
   `Theme`, the bridge and its `Bridge` registration) builds as the
   static library `app_ui`. The app and `test_qml` both link it and
@@ -407,7 +435,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   (trouble codes, readiness, the freeze frame), **Log** (the activity
   log; in developer mode, the raw frames), **Recordings** (the
   recordings list and the viewer), **Settings**
-  (vehicles, device picker, URI, developer mode). Live and the
+  (vehicles with their own signals and plugins, device picker, URI,
+  developer mode). Live and the
   Recordings page share one signal filter (`SignalFilterBar.qml`, its
   rule in `app/signalfilter.h`, [ADR-0050](adr/0050-finding-a-signal.md)):
   words over the name and unit, plotted only, and the groups core
@@ -415,7 +444,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   the one place a session is connected; the header and Home open it.
   It composes the URI from a preset or a device (a J2534 interface or
   a serial port), a profile row
-  (default, `raw`, `uds-generic`) and a DID field, and leaves the
+  (default, `raw`, `uds-generic`, the picked vehicle's signal files and
+  plugin variant) and a DID field, and leaves the
   field editable: a typed URI sets the row and the field from its
   `profile=` and `did=`, and the next click recomposes it with every
   other key kept. Core judges the result at connect and Settings shows
@@ -453,6 +483,14 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   ([ADR-0027](adr/0027-vehicle-profiles.md)) are one JSON document
   among them: each named vehicle's adapter URI and plotted signals,
   recognized at the next connect by a salted hash of its VIN.
+  A vehicle also names its signal files and the plugin variant picked
+  for it. The files themselves are copies kept by their SHA-256 beside
+  the preferences (`signals/<sha256>.json`,
+  `plugins/<sha256>.havne-plugin.json` under `HAVNE_SETTINGS_DIR` when
+  it's set, else the app's data folder), each registered as profiles
+  when the app loads it. A signal file's copy goes when no vehicle
+  keeps it; a plugin's only on its **Remove**, and neither while a
+  session decodes with it.
 - **On a phone**
   ([ADR-0029](adr/0029-android-background-sessions.md)), Qt's GUI loop
   keeps running in the background, and while an adapter session is up
@@ -472,7 +510,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate; the ELM327 transport against a fake ELM327 behind its port, and on Linux and macOS the serial port code over a pseudo-terminal |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
-| Fuzzing | The signal decoder, the validators, the `uds-generic` query parser, the ELM327 reply parsers and the replay reader under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
+| Fuzzing | Each parser of outside input (frames and replies, ELM327 text, ISO-TP, the replay and recording readers, JSON, signal files, plugins, OBDb sets, VINs) and the set validator under libFuzzer, 60 s each in CI, the structured formats starting from seeds built from the committed fixtures ([fuzz/README.md](../fuzz/README.md)) |
 | Static analysis | clang-tidy's analyzer and bug-finding checks over core, the surrogate, `havne-cli` and the desktop app, any warning failing CI; CodeQL too |
 | Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |
@@ -493,6 +531,7 @@ Detail and gaps: [testing.md](testing.md).
 | How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |
 | How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
 | How to run Havne on Linux: the downloads, adapters and permissions, SocketCAN, tracing | [linux.md](linux.md) |
+| How to write a file of your own signals: DIDs and PIDs, enumerations, computed signals | [signal-files.md](signal-files.md) |
 | How to install Havne on an iPhone for testing, and what works there | [ios.md](ios.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
 | What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |

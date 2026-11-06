@@ -1,7 +1,5 @@
 // File/layer: cli/sim_line.h | havne-cli, the simulated ECU's lines (ADR-0046)
-// Testing: UNIT (tests/test_cli.cpp, CliSimTest: the sim line and its
-//          desk bus, the stats line's counts and flags, the end line's
-//          reason and counts); the command on vcan0 by hand (Linux)
+// Testing: UNIT: CliSimTest (test_cli)
 //
 // `havne-cli sim`'s own lines: `sim` names what answers and where, the
 // URI as given (its values, VIN and faults are in it, the defaults
@@ -34,6 +32,8 @@ inline void sim_stats_fields(Line& l, const ecuio_sim_stats_t& s)
     l.u64(s.silent);
     l.key("late");
     l.u64(s.late);
+    l.key("pending");
+    l.u64(s.pending);
     l.key("bad_sequence");
     l.u64(s.bad_sequence);
     l.key("stalled");

@@ -1,18 +1,5 @@
 // File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest.MockFramesDecodeAgainstMockSignalSet decodes
-//          real worker frames against the mock set; the drive cycle
-//          itself is tested deterministically (CoreTest.MockDriveCycle*);
-//          CoreTest.MockAnswersTheSessionsDids decodes its DID replies
-//          under uds-generic; CoreTest.MockFramesKeepTheTickInterval
-//          bounds the worker's cadence against its timestamps;
-//          CoreTest.SessionTimeRunsOnTheClock (stamps on ecuio_clock_us);
-//          its one channel and diagnostics (mock_ecu.h, ADR-0037):
-//          CoreTest.MockSessionHasOneQuietChannel,
-//          CoreTest.MockReportsTheFakeEcusDiagnostics,
-//          CoreTest.MockReadAgainReadsTheSameReport,
-//          CoreTest.MockDiagnoseOffReportsNone; its clear (ADR-0038),
-//          taken on the tick at the drive cycle's engine speed:
-//          CoreTest.MockClearsTheReportLikeTheFakeEcu
+// Testing: UNIT: CoreTest (test_core)
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"

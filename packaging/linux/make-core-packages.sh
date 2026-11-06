@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# File/layer: packaging/linux/make-core-packages.sh | release packaging, Linux x86_64
+# File/layer: packaging/linux/make-core-packages.sh | release packaging, Linux x86_64 and aarch64
 # Testing: run by .github/workflows/ci.yml's linux-packages job (twice,
 #          under reprotest) and release.yml's linux job; tests/
 #          package_check.sh installs and uses what it makes
 #
 # Builds core and havne-cli from the source tree and packs them
-# (ADR-0035 section 2-4), into the out dir:
-#   havne-core_<version>_amd64.deb                  /usr: havne-cli, the
+# (ADR-0035 section 2-4), into the out dir, for the build machine's
+# architecture (<deb arch> amd64 or arm64, <arch> x86_64 or aarch64):
+#   havne-core_<version>_<deb arch>.deb             /usr: havne-cli, the
 #       static archive, the public headers, a CMake package, ecuio.pc
-#   havne-core-dbgsym_<version>_amd64.deb           havne-cli's debug info
-#   havne-core-<version>-linux-x86_64.tar.gz        the same tree, relocatable
-#   havne-core-<version>-linux-x86_64-debug.tar.gz  the debug info, to unpack under /
+#   havne-core-dbgsym_<version>_<deb arch>.deb      havne-cli's debug info
+#   havne-core-<version>-linux-<arch>.tar.gz        the same tree, relocatable
+#   havne-core-<version>-linux-<arch>-debug.tar.gz  the debug info, to unpack under /
 # and beside the deb and the tarball, <file>.components.json, their
 # component lists for the release's SBOM (packaging/sbom.py).
 # Built with -g, then havne-cli's debug info split off by its GNU build
@@ -44,6 +45,14 @@ for t in cmake ninja objcopy strip readelf dpkg-deb dpkg-shlibdeps tar gzip stri
     command -v "$t" > /dev/null || die "no $t (Ubuntu: sudo apt install cmake ninja-build binutils dpkg-dev)"
 done
 
+# dpkg's architecture, not uname's: it names what the packages hold
+debarch=$(dpkg --print-architecture)
+case $debarch in
+    amd64) arch=x86_64 ;;
+    arm64) arch=aarch64 ;;
+    *) die "no packages for $debarch: amd64 and arm64 only" ;;
+esac
+
 # 0.3.4-rc1 sorts after 0.3.4 to dpkg; 0.3.4~rc1 sorts before it
 debver=${version/-/\~}
 if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
@@ -73,7 +82,7 @@ cmake --build "$build" > "$build/build.log" || { cat "$build/build.log"; die "bu
 stage=$build/stage
 debroot=$stage/havne-core
 dbgroot=$stage/havne-core-dbgsym
-tarname=havne-core-$version-linux-x86_64
+tarname=havne-core-$version-linux-$arch
 tarroot=$stage/$tarname
 cmake --install "$build" --prefix "$debroot/usr" > /dev/null
 cmake --install "$build" --prefix "$tarroot" > /dev/null
@@ -106,7 +115,7 @@ done
 
 # Runtime dependencies, from the libraries havne-cli links
 mkdir -p "$stage/shlibs/debian"
-printf 'Source: havne-core\n\nPackage: havne-core\nArchitecture: amd64\n' > "$stage/shlibs/debian/control"
+printf 'Source: havne-core\n\nPackage: havne-core\nArchitecture: %s\n' "$debarch" > "$stage/shlibs/debian/control"
 depends=$(cd "$stage/shlibs" && dpkg-shlibdeps -O -e"$stripped" 2> /dev/null | sed -n 's/^shlibs:Depends=//p')
 [ -n "$depends" ] || die "dpkg-shlibdeps found no dependencies for havne-cli"
 
@@ -118,7 +127,7 @@ mkdir -p "$debroot/DEBIAN" "$dbgroot/DEBIAN"
 cat > "$debroot/DEBIAN/control" <<EOF
 Package: havne-core
 Version: $debver
-Architecture: amd64
+Architecture: $debarch
 Maintainer: $maintainer
 Installed-Size: $(installed_size "$debroot/usr")
 Depends: $depends
@@ -135,7 +144,7 @@ cat > "$dbgroot/DEBIAN/control" <<EOF
 Package: havne-core-dbgsym
 Source: havne-core
 Version: $debver
-Architecture: amd64
+Architecture: $debarch
 Maintainer: $maintainer
 Installed-Size: $(installed_size "$dbgroot/usr")
 Depends: havne-core (= $debver)
@@ -159,8 +168,8 @@ done
 leaks=$(grep -rlF -e "$src" -e "$build" "$cli" "$debroot" "$dbgroot" "$tarroot" || true)
 [ -z "$leaks" ] || die "build paths in: $leaks"
 
-deb=$out/havne-core_${version}_amd64.deb
-dbgdeb=$out/havne-core-dbgsym_${version}_amd64.deb
+deb=$out/havne-core_${version}_$debarch.deb
+dbgdeb=$out/havne-core-dbgsym_${version}_$debarch.deb
 tarball=$out/$tarname.tar.gz
 dbgtar=$out/$tarname-debug.tar.gz
 dpkg-deb --root-owner-group -Zxz --build "$debroot" "$deb" > /dev/null
@@ -178,7 +187,7 @@ tarc "$dbgtar" "$dbgroot" usr
 # bundled, so each lists the libraries it needs, as Depends names them
 deps_json=$(echo "$depends" | tr ',' '\n' | sed -n 's/^ *\([^ ]*\) *(\(.*\)) *$/\1\t\2/p;s/^ *\([^ (]*\) *$/\1\t/p' \
     | while IFS=$'\t' read -r name ver; do
-        printf '{"name": "%s", "version": "%s", "purl": "pkg:deb/ubuntu/%s?arch=amd64"}\n' "$name" "$ver" "$name"
+        printf '{"name": "%s", "version": "%s", "purl": "pkg:deb/ubuntu/%s?arch=%s"}\n' "$name" "$ver" "$name" "$debarch"
       done | paste -sd, -)
 [ -n "$deps_json" ] || die "no dependencies parsed from: $depends"
 for pair in "$deb INSTALL" "$tarball ARCHIVE"; do

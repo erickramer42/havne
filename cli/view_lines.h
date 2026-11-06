@@ -1,8 +1,5 @@
 // File/layer: cli/view_lines.h | havne-cli, a recording's view as lines (ADR-0049 section 5)
-// Testing: UNIT (tests/test_cli.cpp, CliViewTest: --align-on's forms and
-//          refusals, seconds, the axis and a recording's window on it, each
-//          line's fields); the command in the golden runs
-//          (tests/golden/cli/view-*.jsonl, on tests/fixtures/recording/)
+// Testing: UNIT: CliViewTest (test_cli)
 //
 // `havne-cli view`'s lines, read through the reader (recording.h): what
 // each recording holds, where an --align-on puts it, then each signal's
@@ -23,6 +20,7 @@
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -177,10 +175,14 @@ inline bool window_of(const Axis& a, int64_t offset_us, Window& out)
     return true;
 }
 
+// The opened line's format: core's for formats 2 and 3 alike (format 3
+// keeps format 2's shape, its enums seen on their signal lines), so schema
+// 1's word holds
 inline const char* format_word(uint32_t format)
 {
     switch (format) {
     case ECUIO_RECORDING_FORMAT_CORE:
+    case ECUIO_RECORDING_FORMAT_ENUMS:
         return "core";
     case ECUIO_RECORDING_FORMAT_OLDER:
         return "older";
@@ -205,9 +207,12 @@ inline void signed_us(Line& l, int64_t us)
 
 // What a recording holds: {"type":"opened", recording, format,
 // duration_us, utc_start_us|null, signals, markers, summary, rows_torn,
-// records_dropped, notes_dropped}
+// records_dropped, notes_dropped, signal_file}; signal_file is null when
+// the header names none and the folder holds none, else {sha256 (the
+// header's, or null), present, matches} (ADR-0051 section 4)
 inline void opened_line(Line& l, uint32_t recording,
-                        const ecuio_recording_info_t& i)
+                        const ecuio_recording_info_t& i,
+                        const ecuio_recording_signals_t& sf)
 {
     l.raw("{\"type\":\"opened\"");
     l.key("recording");
@@ -234,6 +239,25 @@ inline void opened_line(Line& l, uint32_t recording,
     l.u64(i.records_dropped);
     l.key("notes_dropped");
     l.u64(i.notes_dropped);
+    l.key("signal_file");
+    if (sf.flags == 0) {
+        l.raw("null");
+    } else {
+        l.ch('{');
+        l.key("sha256");
+        if ((sf.flags & ECUIO_RECORDING_SIGNALS_NAMED) != 0) {
+            l.string(sf.sha256, sizeof sf.sha256);
+        } else {
+            l.raw("null");
+        }
+        l.key("present");
+        l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_PRESENT) != 0 ? "true"
+                                                                : "false");
+        l.key("matches");
+        l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_MATCH) != 0 ? "true"
+                                                              : "false");
+        l.ch('}');
+    }
     l.ch('}');
 }
 
@@ -250,12 +274,43 @@ inline void rate_hz(Line& l, const ecuio_recording_signal_t& s)
              static_cast<double>(s.last_us - s.first_us));
 }
 
-// A signal: {"type":"signal", recording, index, name, unit, text,
-// decimals, rank, group (its name; "" for a code this core doesn't
-// know), samples, lowest and highest (a number's, null with no
-// samples), first_us|null, last_us|null, rate_hz|null}
+// The bytes an enum signal's labels add to its line at most: each a
+// key of up to 10 digits and a label of 27 bytes, every byte escaped
+inline size_t labels_bytes(uint32_t count)
+{
+    return static_cast<size_t>(count) * (16 + 6 * ECUIO_ENUM_LABEL_MAX);
+}
+
+// An enum's labels as an object, {"<raw>": label, ...} in raw order, as a
+// signal file's "values" (ADR-0051)
+inline void labels_object(Line& l, const ecuio_enum_entry_t* labels,
+                          uint32_t count)
+{
+    l.ch('{');
+    for (uint32_t k = 0; k < count; ++k) {
+        char raw[16];
+        std::snprintf(raw, sizeof raw, "%u",
+                      static_cast<unsigned>(labels[k].raw));
+        if (k > 0) {
+            l.ch(',');
+        }
+        l.string(raw, sizeof raw);
+        l.ch(':');
+        l.string(labels[k].label, sizeof labels[k].label);
+    }
+    l.ch('}');
+}
+
+// A signal: {"type":"signal", recording, index, name, unit, text, then
+// for an enum (format 3) "enum":true and "labels" {"<raw>": label} in
+// raw order, as a signal file's "values" (ADR-0051), then decimals, rank,
+// group (its name; "" for a code this core doesn't know), samples, lowest
+// and highest (a number's, an enum's too; null with no samples),
+// first_us|null, last_us|null, rate_hz|null}
 inline void signal_line(Line& l, uint32_t recording, uint32_t index,
-                        const ecuio_recording_signal_t& s)
+                        const ecuio_recording_signal_t& s,
+                        const ecuio_enum_entry_t* labels = nullptr,
+                        uint32_t label_count = 0)
 {
     const bool text = (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0;
     l.raw("{\"type\":\"signal\"");
@@ -269,6 +324,12 @@ inline void signal_line(Line& l, uint32_t recording, uint32_t index,
     l.string(s.unit, sizeof s.unit);
     l.key("text");
     l.raw(text ? "true" : "false");
+    if ((s.flags & ECUIO_RECORDING_SIGNAL_ENUM) != 0) {
+        l.key("enum");
+        l.raw("true");
+        l.key("labels");
+        labels_object(l, labels, label_count);
+    }
     l.key("decimals");
     l.u64(s.decimal_places);
     l.key("rank");

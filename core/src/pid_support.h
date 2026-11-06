@@ -1,12 +1,7 @@
 // File/layer: core/src/pid_support.h | C++17, Qt-free; header-only, pure
-// Testing: UNIT: PidSupportTest (test_obd2: the rule against the first
-//          vehicle's bitmaps, ranges never answered, the reports that
-//          judge nothing, the count and capacity, the supported-PID
-//          count); HARNESS: the count through the engine,
-//          J2534AdoptionTest.ProbeWalksTheChainBeforeTheRotation;
-//          Elm327SessionTest.TheSignalsOfAWithheldPidAreUnsupported,
-//          BridgeTest.LiveHidesThePidsTheFakeEcuWithholds (through
-//          ecuio_session_get_unsupported_signals)
+// Testing: UNIT: PidSupportTest (test_obd2); BRIDGE: BridgeTest
+//          (test_bridge); HARNESS: J2534AdoptionTest (test_j2534_stream);
+//          Elm327SessionTest (test_elm327)
 //
 // Which of a set's Service 01 signals their ECU says it doesn't support
 // (ADR-0039 section 6): the supported-PID bitmaps a channel's support

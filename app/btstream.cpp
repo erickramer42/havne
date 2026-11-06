@@ -1,9 +1,6 @@
 // File/layer: app/btstream.cpp | Qt6 Core/Bluetooth, app layer, C++17;
 //             built on Android only (APP_BLUETOOTH)
-// Testing: CI's android-build compiles it; BENCH and Vehicle on the phone
-//          (ADR-0028 section 4, ADR-0029 section 5); the BLE choice, the
-//          classic connect's rules and an aborted socket's retirement are
-//          UNIT-tested (blepicker.h, btconnect.h, btretire.h)
+// Testing: CI android-build (compiles it); BENCH, Vehicle (the test phone)
 
 #include "btstream.h"
 #include "blepicker.h"

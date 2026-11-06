@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 11, "detail": "line 1, column 1: a plugin's manifest starts with \"havne_plugin\"", "message": "invalid argument", "type": "error"}

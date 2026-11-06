@@ -1,8 +1,6 @@
 // File/layer: app/qml/StripChart.qml | Qt6 Quick, UI layer
-// Testing: the layout it strokes is ChartLayout's (tst_chartlayout.qml);
-//          Live's chart through it (tst_liveview.qml, tst_phone.qml);
-//          antialiasing dropped while moving (tst_recordings.qml); the
-//          drawing itself is manual smoke (docs/testing.md)
+// Testing: QML: QmlTest.chartlayout, QmlTest.liveview, QmlTest.phone,
+//          QmlTest.recordings (test_qml); Manual smoke
 
 import QtQuick
 import App

@@ -22,8 +22,21 @@ typedef enum {
      * (start_byte and byte_length; bit_offset and bit_length 0): */
     ECUIO_VALUE_TEXT  = 3,   /* the bytes as text: printable ASCII as it
                                 is, any other byte as '.' */
-    ECUIO_VALUE_HEX   = 4    /* the bytes as hex pairs: "41 0C 1F 40" */
+    ECUIO_VALUE_HEX   = 4,   /* the bytes as hex pairs: "41 0C 1F 40" */
+    /* A raw number shown as a word (ADR-0051): read as UINT, scale 1
+     * and offset 0, its labels in the set's enum table */
+    ECUIO_VALUE_ENUM  = 5
 } ecuio_value_kind_t;
+
+/* A def's flags. Values are append-only; the validator refuses any
+ * other bit. */
+#define ECUIO_DEF_FLAG_COMPUTED 0x1u  /* the value is a program over other
+                                         defs' values (ADR-0051 section
+                                         5): message_id 0, no mux, the
+                                         decode block UINT with every
+                                         bit field 0, scale 1, offset 0,
+                                         and table_first its program in
+                                         the set's computed table */
 
 /* A field's byte order. Values are append-only. */
 #define ECUIO_BYTE_ORDER_LE 0u   /* Intel: LSB first, bit fields at any offset */
@@ -87,8 +100,16 @@ typedef struct ecuio_signal_def {
                                      value, 0 Other */
     uint8_t  display_reserved[1]; /* zero */
 
-    uint32_t flags;               /* none defined; zero */
-    uint32_t reserved[6];         /* zero; ADR-0016 earmarks this room */
+    uint32_t flags;               /* ECUIO_DEF_FLAG_*; any other bit zero */
+    uint32_t quantity_reserved;   /* zero; ADR-0016 earmarks it for the
+                                     unit's quantity */
+    uint16_t table_first;         /* ENUM: its first entry in the set's
+                                     enums; COMPUTED: its program in the
+                                     set's computed; zero otherwise */
+    uint16_t table_count;         /* ENUM: its entries, 0 to
+                                     ECUIO_ENUM_MAX_ENTRIES; zero
+                                     otherwise */
+    uint32_t reserved[4];         /* zero; ADR-0016 earmarks this room */
 } ecuio_signal_def_t;
 
 /* Compile-time ABI pinning, as for ecuio_frame_t in core.h; C99 falls
@@ -104,7 +125,10 @@ static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI"
 static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, group) == 90, "def group offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
-static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, quantity_reserved) == 96, "def quantity_reserved offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, table_first) == 100, "def table_first offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, table_count) == 102, "def table_count offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, reserved) == 104, "def reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_signal_def_t) == 120, "ecuio_signal_def_t size is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, kind) == 16, "def kind offset is ABI");
@@ -115,7 +139,10 @@ _Static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI
 _Static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, group) == 90, "def group offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
-_Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, quantity_reserved) == 96, "def quantity_reserved offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, table_first) == 100, "def table_first offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, table_count) == 102, "def table_count offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, reserved) == 104, "def reserved offset is ABI");
 #endif
 
 /* ADR-0013 section 4: profile-declared channels. rx_id is the
@@ -131,12 +158,92 @@ typedef struct ecuio_channel_decl {
     uint32_t tx_id;   /* request destination */
 } ecuio_channel_decl_t;
 
+/* An enum def's labels (ADR-0051): its table_count entries from
+ * table_first in the set's enums, raw values strictly ascending. A raw
+ * value with no entry has no label, and a UI shows its number. */
+#define ECUIO_ENUM_MAX_ENTRIES 256u   /* one def's entries */
+/* The most entries the enum table, and programs the computed table,
+ * hold: what a def's uint16_t table_first can reach */
+#define ECUIO_SET_MAX_TABLE    65536u
+#define ECUIO_ENUM_LABEL_MAX   27u    /* a label's bytes, the NUL not counted */
+
+typedef struct ecuio_enum_entry {
+    uint32_t raw;                 /* the field's value */
+    char     label[28];           /* UTF-8, 1 to ECUIO_ENUM_LABEL_MAX
+                                     bytes, terminated inside the buffer,
+                                     zero after the NUL */
+} ecuio_enum_entry_t;
+
+/* A computed def's program (ADR-0051 section 5): a stack machine over
+ * up to four inputs, each another def's newest value no older than its
+ * age bound, and up to 16 constants. Each step pushes an input or a
+ * constant, or pops two values and pushes one; a program runs to one
+ * value. The low four bits of a push step are the input's or the
+ * constant's index. */
+#define ECUIO_COMPUTED_MAX_INPUTS    4u
+#define ECUIO_COMPUTED_MAX_CONSTANTS 16u
+#define ECUIO_COMPUTED_MAX_STEPS     33u   /* 16 operations and their 17 operands */
+
+#define ECUIO_COMPUTED_PUSH_INPUT    0x00u  /* | the input's index */
+#define ECUIO_COMPUTED_PUSH_CONSTANT 0x10u  /* | the constant's index */
+#define ECUIO_COMPUTED_ADD           0x20u
+#define ECUIO_COMPUTED_SUBTRACT      0x21u  /* the second from the top minus the top */
+#define ECUIO_COMPUTED_MULTIPLY      0x22u
+#define ECUIO_COMPUTED_DIVIDE        0x23u  /* the second from the top over the top;
+                                               a zero top gives no value */
+
+/* The age past which a value is stale: the app dims it and a computed
+ * input older than this, with no max_age of its own, gives no value
+ * (ADR-0051 section 5). On the samples' session time. */
+#define ECUIO_VALUE_STALE_US 3000000u
+
+/* The bounds of a computed input's own age bound, max_age_us */
+#define ECUIO_COMPUTED_MIN_AGE_US 100000u     /* 0.1 s */
+#define ECUIO_COMPUTED_MAX_AGE_US 60000000u   /* 60 s */
+
+typedef struct ecuio_computed {
+    uint16_t input_ids[4];        /* the inputs' def ids, input_count of
+                                     them; zero after */
+    uint32_t max_age_us[4];       /* each input's age bound: 0 for
+                                     ECUIO_VALUE_STALE_US, else
+                                     ECUIO_COMPUTED_MIN_AGE_US to _MAX_;
+                                     zero after input_count */
+    uint8_t  input_count;         /* 1 to ECUIO_COMPUTED_MAX_INPUTS */
+    uint8_t  step_count;          /* 1 to ECUIO_COMPUTED_MAX_STEPS */
+    uint8_t  constant_count;      /* 0 to ECUIO_COMPUTED_MAX_CONSTANTS */
+    uint8_t  reserved0;           /* zero */
+    uint8_t  steps[36];           /* step_count of them; zero after */
+    double   constants[16];       /* constant_count of them, finite;
+                                     zero after */
+    uint32_t reserved[4];         /* zero */
+} ecuio_computed_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_enum_entry_t) == 32, "ecuio_enum_entry_t size is ABI");
+static_assert(sizeof(ecuio_computed_t) == 208, "ecuio_computed_t size is ABI");
+static_assert(offsetof(ecuio_computed_t, max_age_us) == 8, "computed max_age_us offset is ABI");
+static_assert(offsetof(ecuio_computed_t, input_count) == 24, "computed input_count offset is ABI");
+static_assert(offsetof(ecuio_computed_t, steps) == 28, "computed steps offset is ABI");
+static_assert(offsetof(ecuio_computed_t, constants) == 64, "computed constants offset is ABI");
+static_assert(offsetof(ecuio_computed_t, reserved) == 192, "computed reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_enum_entry_t) == 32, "ecuio_enum_entry_t size is ABI");
+_Static_assert(sizeof(ecuio_computed_t) == 208, "ecuio_computed_t size is ABI");
+_Static_assert(offsetof(ecuio_computed_t, max_age_us) == 8, "computed max_age_us offset is ABI");
+_Static_assert(offsetof(ecuio_computed_t, input_count) == 24, "computed input_count offset is ABI");
+_Static_assert(offsetof(ecuio_computed_t, steps) == 28, "computed steps offset is ABI");
+_Static_assert(offsetof(ecuio_computed_t, constants) == 64, "computed constants offset is ABI");
+_Static_assert(offsetof(ecuio_computed_t, reserved) == 192, "computed reserved offset is ABI");
+#endif
+
 /* The set layout this core reads. ecuio_validate_signal_set refuses
  * any other layout_version; the next incompatible layout bumps it. */
-#define ECUIO_SIGNAL_SET_LAYOUT 3u
+#define ECUIO_SIGNAL_SET_LAYOUT 4u
 
 /* Fill a set member by member from a zeroed struct, never
- * positionally: reserved0 sits between channel_count and channels. */
+ * positionally: reserved0 sits between channel_count and channels.
+ * Every member is at its natural alignment on 32- and 64-bit builds,
+ * so the compiler adds no padding. */
 typedef struct ecuio_signal_set {
     uint32_t layout_version;      /* ECUIO_SIGNAL_SET_LAYOUT; the first member, always */
     uint32_t count;
@@ -144,8 +251,25 @@ typedef struct ecuio_signal_set {
     uint32_t channel_count;       /* 0 with NULL channels: none declared */
     uint32_t reserved0;           /* zero */
     const ecuio_channel_decl_t* channels;
+    uint32_t enum_count;          /* 0 with NULL enums: none */
+    uint32_t computed_count;      /* 0 with NULL computed: none */
+    const ecuio_enum_entry_t* enums;
+    const ecuio_computed_t* computed;
     uint32_t reserved[4];         /* zero */
 } ecuio_signal_set_t;
+
+/* The set's layout on either width: no padding, the pointers in place */
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_signal_set_t, enum_count) == 2 * sizeof(void*) + 16, "set enum_count offset is ABI");
+static_assert(offsetof(ecuio_signal_set_t, enums) == 2 * sizeof(void*) + 24, "set enums offset is ABI");
+static_assert(offsetof(ecuio_signal_set_t, reserved) == 4 * sizeof(void*) + 24, "set reserved offset is ABI");
+static_assert(sizeof(ecuio_signal_set_t) == 4 * sizeof(void*) + 40, "ecuio_signal_set_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_signal_set_t, enum_count) == 2 * sizeof(void*) + 16, "set enum_count offset is ABI");
+_Static_assert(offsetof(ecuio_signal_set_t, enums) == 2 * sizeof(void*) + 24, "set enums offset is ABI");
+_Static_assert(offsetof(ecuio_signal_set_t, reserved) == 4 * sizeof(void*) + 24, "set reserved offset is ABI");
+_Static_assert(sizeof(ecuio_signal_set_t) == 4 * sizeof(void*) + 40, "ecuio_signal_set_t size is ABI");
+#endif
 
 /* ecuio_decode_signal return codes. Values are append-only. */
 #define ECUIO_DECODE_OK                 0
@@ -163,9 +287,11 @@ typedef struct ecuio_signal_set {
                                               ecuio_decode_text */
 #define ECUIO_DECODE_ERR_MUX_MISMATCH   5  /* the payload's mux key differs */
 
-/* Extract one signal from a payload, scale and offset applied. Checks
- * the kind and byte order before the bit parameters, then the bounds,
- * then the mux key. *out_value is written only on ECUIO_DECODE_OK. */
+/* Extract one signal from a payload, scale and offset applied; an
+ * ENUM reads as a UINT, and a COMPUTED def, which no frame carries, is
+ * ECUIO_DECODE_ERR_UNSUPPORTED. Checks the kind and byte order before
+ * the bit parameters, then the bounds, then the mux key. *out_value is
+ * written only on ECUIO_DECODE_OK. */
 int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                         const uint8_t* frame_payload,
                         uint16_t payload_len,
@@ -190,6 +316,14 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
                       uint16_t payload_len,
                       char* out,
                       uint32_t out_cap);
+
+/* An ENUM def's label for a raw value, from the set's enums: NULL for
+ * a raw value with no entry (a UI shows its number), a def that isn't
+ * an ENUM, or a NULL argument. The def must be one of the set's, and
+ * the set valid. */
+const char* ecuio_enum_label(const ecuio_signal_set_t* set,
+                             const ecuio_signal_def_t* signal,
+                             uint32_t raw);
 
 /* ecuio_validate_signal and ecuio_validate_signal_set return codes.
  * Values are append-only. Per-def codes are positive; the set-level
@@ -227,6 +361,16 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
                                                     or a CR, which a
                                                     spreadsheet runs as a
                                                     formula (ADR-0049) */
+#define ECUIO_VALIDATE_ERR_ENUM              19  /* an ENUM def's scale not
+                                                    1 or offset not 0, or
+                                                    table_count over
+                                                    ECUIO_ENUM_MAX_ENTRIES */
+#define ECUIO_VALIDATE_ERR_COMPUTED          20  /* a COMPUTED def with a
+                                                    message_id, a mux, or a
+                                                    decode block other than
+                                                    UINT, zeros, scale 1
+                                                    and offset 0; or a
+                                                    table_count */
 #define ECUIO_VALIDATE_ERR_CHANNELS_NULL    (-10)  /* channel_count > 0 with
                                                       NULL channels */
 #define ECUIO_VALIDATE_ERR_CHANNEL_COUNT    (-11)  /* over ECUIO_MAX_CHANNELS */
@@ -243,15 +387,50 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
                                                       ECUIO_PROFILE_MAX_REQUESTS
                                                       (profile.h); reported
                                                       by ecuio_profile_register */
+#define ECUIO_VALIDATE_ERR_TABLES_NULL      (-18)  /* enum_count or
+                                                      computed_count > 0
+                                                      with its table NULL,
+                                                      or either over
+                                                      ECUIO_SET_MAX_TABLE */
+#define ECUIO_VALIDATE_ERR_TABLE_RANGE      (-19)  /* an ENUM def's entries
+                                                      or a COMPUTED def's
+                                                      program past the
+                                                      set's table */
+#define ECUIO_VALIDATE_ERR_ENUM_ENTRY       (-20)  /* a label empty, not
+                                                      terminated, not zero
+                                                      after its NUL or one
+                                                      a formula would start
+                                                      (code 18's rule); or
+                                                      one def's raw values
+                                                      not strictly
+                                                      ascending */
+#define ECUIO_VALIDATE_ERR_PROGRAM          (-21)  /* a program that doesn't
+                                                      run to one value: a
+                                                      count out of range,
+                                                      an unknown step, an
+                                                      index past its count,
+                                                      too few values for an
+                                                      operation, a constant
+                                                      not finite, an age
+                                                      bound out of range,
+                                                      or a nonzero byte
+                                                      past a count or
+                                                      reserved */
+#define ECUIO_VALIDATE_ERR_COMPUTED_INPUT   (-22)  /* an input id that isn't
+                                                      a numeric def of the
+                                                      set (UINT, INT, FLOAT
+                                                      or ENUM, not
+                                                      COMPUTED) */
 
 /* Why a set failed validation, and where. index names the element the
  * code is about: the failing def; for a duplicate id, the second def
  * of the pair; for a bad channel id, the channel; for a duplicate rx,
  * the second channel of the pair; for too many requests, the first def
- * whose request didn't fit. It is UINT32_MAX for
- * ECUIO_VALIDATE_OK and for a code that names no single element: a
- * NULL, the layout version, the set's reserved fields, the channel
- * count. */
+ * whose request didn't fit; for a table range, the def; for an enum
+ * entry, the entry; for a program or its input, the program. It is
+ * UINT32_MAX for ECUIO_VALIDATE_OK and for a code that names no single
+ * element: a NULL, the layout version, the set's reserved fields, the
+ * channel count, a NULL table. */
 typedef struct ecuio_validation {
     int32_t  code;                /* ECUIO_VALIDATE_*; 0 = OK */
     uint32_t index;               /* the def or channel, or UINT32_MAX */
@@ -269,17 +448,21 @@ _Static_assert(offsetof(ecuio_validation_t, reserved) == 8, "validation reserved
 #endif
 
 /* Structural check of one def: accepts exactly the defs
- * ecuio_decode_signal (numeric kinds) or ecuio_decode_text (text
- * kinds) can decode, with every reserved byte and flags zero. The kind
- * is checked first, then the byte order. */
+ * ecuio_decode_signal (numeric kinds, ENUM with scale 1 and offset 0)
+ * or ecuio_decode_text (text kinds) can decode, and COMPUTED defs
+ * (their decode block as ECUIO_DEF_FLAG_COMPUTED says), with every
+ * reserved byte zero and no flag but ECUIO_DEF_FLAG_COMPUTED. The kind
+ * is checked first, then the byte order. A def's table_first and
+ * table_count are checked against the set's tables by
+ * ecuio_validate_signal_set. */
 int ecuio_validate_signal(const ecuio_signal_def_t* signal);
 
 /* Frame gate, called BEFORE ecuio_decode_signal (dispatch's decode
  * loop): returns 1 when the def applies to the frame (its message_id
  * is the frame's arbitration ID and, with mux on, the frame carries
- * its mux key), and 0 otherwise, for a frame flagged
- * ECUIO_FRAME_FLAG_ERROR (its ID is an error class) or for a NULL
- * argument. Saves the extraction for frames the def can't read. */
+ * its mux key), and 0 otherwise, for a COMPUTED def, for a frame
+ * flagged ECUIO_FRAME_FLAG_ERROR (its ID is an error class) or for a
+ * NULL argument. Saves the extraction for frames the def can't read. */
 int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
                                const ecuio_frame_t* frame);
 
@@ -289,8 +472,10 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
 
 /* The layout version, before any other member is read; the set's
  * reserved fields; every def (ecuio_validate_signal; the first failing
- * def's code); unique def ids; then the channel declarations. A set
- * with count 0 may leave defs NULL. Returns ECUIO_VALIDATE_OK or a
+ * def's code); unique def ids; the channel declarations; then the
+ * tables: each NULL only when empty, each def's range in them, each
+ * enum entry, each program and its inputs. A set with count 0 may
+ * leave defs NULL. Returns ECUIO_VALIDATE_OK or a
  * ECUIO_VALIDATE_ERR_* code. When out isn't NULL, it receives the same
  * code and the index of the element at fault; a caller that only needs
  * pass or fail passes NULL. */
@@ -345,6 +530,58 @@ _Static_assert(offsetof(ecuio_display_value_t, decimal_places) == 24, "display d
 int ecuio_display_convert(const char* unit, uint8_t decimal_places,
                           double value, uint32_t units,
                           ecuio_display_value_t* out);
+
+/* ---- Signal files (ADR-0051) ----
+ * A user's own signals as data: JSON (format 1, docs/signal-files.md),
+ * read from bytes, never a path, so a caller reads the file its own way
+ * (Android's content:// URIs, iOS's sandbox). Everything a file gets
+ * wrong is refused here, at load, not at the car. */
+
+/* A file's bounds */
+#define ECUIO_SIGNAL_FILE_MAX_BYTES   1048576u   /* 1 MiB */
+#define ECUIO_SIGNAL_FILE_MAX_SIGNALS 1024u
+/* The format this core reads: a file's "havne_signals" */
+#define ECUIO_SIGNAL_FILE_FORMAT      1u
+
+typedef struct ecuio_signal_file ecuio_signal_file_t;
+
+/* Reads a signal file from its bytes (UTF-8 JSON, length bytes, no BOM).
+ * ECUIO_OK with *out a file the caller frees with ecuio_signal_file_free;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL bytes (with a length) or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a file it refuses, with
+ * ecuio_last_error_detail() saying where and why ("line 12, column 9:
+ * unknown key 'scael'", never a path); ECUIO_ERR_OUT_OF_MEMORY. *out is
+ * NULL on any failure. The file owns its set, defs, channels and
+ * tables, and its set passes ecuio_validate_signal_set and fits
+ * ECUIO_PROFILE_MAX_REQUESTS. Thread-safe: each call is its own. */
+ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
+                                      ecuio_signal_file_t** out);
+
+/* The file's set, valid until ecuio_signal_file_free; NULL for NULL.
+ * A session using it, through the profile it registers under, keeps
+ * the file alive (profile.h: the registry keeps the set's pointer). */
+const ecuio_signal_set_t* ecuio_signal_file_set(const ecuio_signal_file_t* file);
+
+/* The file's "name", and the profile name it registers under:
+ * "user." and the name in lower case, every run of other characters a
+ * single '-' ("Daily driver extras" -> "user.daily-driver-extras").
+ * Valid until ecuio_signal_file_free; "" for NULL. */
+const char* ecuio_signal_file_name(const ecuio_signal_file_t* file);
+const char* ecuio_signal_file_profile(const ecuio_signal_file_t* file);
+
+/* The set the file extends ("obd2"), or "" when it extends none or for
+ * NULL: a front end can offer the file in that set's place */
+const char* ecuio_signal_file_extends(const ecuio_signal_file_t* file);
+
+/* A signal of the file by its "key": its def in the set, or NULL for a
+ * key the file doesn't hold or a NULL argument. A base set's signals
+ * (extends) have no key here. */
+const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file,
+                                                 const char* key);
+
+/* Frees a file; NULL is a no-op. Unregister its profile first: a
+ * session using the set must be destroyed before this. */
+void ecuio_signal_file_free(ecuio_signal_file_t* file);
 
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a

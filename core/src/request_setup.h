@@ -1,15 +1,9 @@
 // File/layer: core/src/request_setup.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: HARNESS: through both requesting transports:
-//          J2534QueryParamTest and J2534AdoptionTest (the query keys,
-//          the channels, raw on the engine ECU, ?poll=, uds-generic's
-//          scan, identification, diagnostics, the support, identity
-//          and diagnostics reports, Read again, a clear),
-//          Elm327SessionTest (the same through an ELM327);
-//          reply timing (ADR-0042): Elm327SessionTest.Timing*,
-//          J2534HealthTest.VxTiming*, SocketCanRequestTest.Timing*;
-//          its copy for a recording (ADR-0049): RecorderTest.ReplyTiming*,
-//          .TheFinalTiming*, Elm327SessionTest.ARecordingHolds*
+// Testing: UNIT: RecorderTest (test_core); HARNESS: J2534QueryParamTest,
+//          J2534AdoptionTest (test_j2534_stream); Elm327SessionTest
+//          (test_elm327); J2534HealthTest (test_j2534_health);
+//          SocketCanRequestTest (test_vcan)
 //
 // What a requesting transport (J2534, ELM327) derives from its URI and
 // profile before it opens anything: the request keys' values, the

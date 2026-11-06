@@ -1,18 +1,5 @@
 // File/layer: app/qml/ChartLayout.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_chartlayout.qml): nothing to draw, the
-//          plot's room for the widest label, each trace scaled to its
-//          own range with a minimum span, flat traces in lanes of their
-//          own, a gap breaking a trace into segments, the time ticks'
-//          step and captions, and the value labels nudged apart and kept
-//          inside the plot, closed up and then thinned when they don't fit;
-//          a crowded trace's wide swings as a band (each column its whole
-//          range, a swing on a column edge too), a ramp, a small wiggle and
-//          a spike's peak as its line; a recording's columns over a
-//          fixed span (calm ones a line, a swing past the neighbors' lean
-//          a band, a steep ramp a line, a break past gapMs) and over a
-//          span of their own, cut to the axis, a label's
-//          given value and its sample time, absolute ticks. StripChart.qml draws what it
-//          returns; the drawing itself is manual smoke (docs/testing.md).
+// Testing: QML: QmlTest.chartlayout (test_qml); Manual smoke
 
 pragma Singleton
 import QtQml

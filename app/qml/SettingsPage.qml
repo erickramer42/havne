@@ -1,55 +1,12 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_settings.qml): the URI composed from a
-//          preset, the profile row and the DID field, a typed URI read
-//          back into the row and the field with its other keys kept, no
-//          scheme's keys added or taken (a raw replay composes no filter),
-//          the DID field refusing query characters, the field left
-//          editable, core's refusal in the error line, a composed
-//          uds-generic URI connecting through the mock, every control
-//          locked while a connect is in flight, the last URI that
-//          connected and the Record switch back in a new page (a refused
-//          URI not kept), the device list's rows for interfaces and
-//          serial ports and Bluetooth adapters, a serial port's and a
-//          Bluetooth adapter's row and the elm327:// preset
-//          filling the field, each row's versions last seen at a connect
-//          (kept across a new page; the fake's on Windows); the status label
-//          in each link state (tests/qml/tst_linkhealth.qml), by
-//          objectName; the developer box and the mock:// preset that
-//          follows it (tests/qml/tst_log.qml); the Vehicle section
-//          (ADR-0027): New, Rename, Duplicate and their defaults, Forget
-//          and Forget all asking once, kept across a new page, picking
-//          that fills the field, locked during a session, a mock session
-//          left alone, and (Windows, the fake) an adapter's connect
-//          keeping its URI and plotting, its VIN learned and logged;
-//          a typed VIN decoded and kept nowhere (ADR-0043,
-//          test_aTypedVinIsDecodedOnTheDevice);
-//          every item inside the page's width at a phone's (320 px); a
-//          recording's replay (pickRecording, from the Recordings page)
-//          filling the field and connecting under the recorded profile
-//          and DIDs; the
-//          five sections folded at first, each heading's summary,
-//          chevron and fold; Connect... elsewhere opening Adapter; the
-//          Record line saying a
-//          replay isn't recorded; a preset of another scheme dropping
-//          the keys it doesn't take and the mock profile on an adapter.
-//          Manual smoke: the live discovery list renders (Windows: the
-//          registry's interfaces and ports; macOS/Linux: the /dev ports or
-//          the empty-state hint) sized to its rows, a device row
-//          fills the URI field only, Connect button drives
-//          connectSessionAsync (UI stays responsive while a vendor blocks
-//          ~8 s), Record sessions fixed during a session and its folder
-//          shown relative to Documents; at 1280 x 650 the page scrolls;
-//          the Display row steps Theme.zoom; developer mode kept between
-//          runs (Main.qml). The recording's bridge side:
-//          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
-//          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
-//          BridgeTest.UnitSystem*. The relay's line beside its button at
-//          a phone's width: tst_phone.qml; the relay itself:
-//          BridgeTest.Relay*.
+// Testing: UNIT: SignalsTest (test_signals); BRIDGE: BridgeTest
+//          (test_bridge); QML: QmlTest.settings, QmlTest.linkhealth,
+//          QmlTest.log, QmlTest.phone (test_qml); Manual smoke
 
 import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Shapes
 
@@ -192,6 +149,383 @@ Pane {
         vehicles = doc
         vehicleStore.document = VehicleBook.serialize(doc)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
+        useSignalFiles()
+    }
+
+    // ---- The vehicles' signal files (ADR-0051) ----
+    // The store's word on each file the book references, by its sha256:
+    // { ok, words, name, profile, count }. Every referenced file is
+    // registered (VehicleBook.profileProblem keeps one file to a
+    // profile), so a URI typed with any vehicle's profile connects.
+    property var signalInfo: ({})
+    property string signalProblem: ""
+    property string signalNote: ""
+
+    function useSignalFiles() {
+        const info = {}
+        for (const e of Bridge.useSignalFiles(VehicleBook.referencedFiles(vehicles)))
+            info[e.sha256] = e
+        signalInfo = info
+    }
+
+    function signalOk(sha) {
+        const e = signalInfo[sha]
+        return e !== undefined && e.ok
+    }
+
+    function signalFileText(f) {
+        const e = signalInfo[f.sha256]
+        if (e === undefined)
+            return f.name
+        if (!e.ok)
+            return qsTr("%1: %2").arg(f.name, e.words)
+        return e.extends === "obd2"
+            ? qsTr("%1: obd2 and %2 of your own, profile %3").arg(f.name).arg(e.own).arg(f.profile)
+            : e.count === 1 ? qsTr("%1: 1 signal, profile %2").arg(f.name).arg(f.profile)
+            : qsTr("%1: %2 signals, profile %3").arg(f.name).arg(e.count).arg(f.profile)
+    }
+
+    // A file the user picked, into the picked vehicle: refused with the
+    // loader's words, or the book's when another file makes its profile
+    // (its copy then goes, unless a vehicle keeps it). True when added
+    function importSignalFile(url) {
+        signalNote = ""
+        if (pickedVehicle === null)
+            return false
+        const r = Bridge.importSignalFile(url)
+        if (!r.ok) {
+            signalProblem = r.words
+            return false
+        }
+        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
+        const problem = VehicleBook.profileProblem(vehicles, file, "")
+        if (problem !== "") {
+            signalProblem = problem
+            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+            return false
+        }
+        signalProblem = ""
+        if (pickedVehicle.signals.some(e => e.sha256 === r.sha256)) {
+            signalNote = qsTr("%1 is this vehicle's already").arg(r.name)
+            return false
+        }
+        saveVehicles(VehicleBook.addSignals(vehicles, file))
+        signalNote = r.extends === "obd2"
+            ? qsTr("%1 added: obd2 and %2 of your own, profile %3").arg(r.name).arg(r.own)
+                  .arg(r.profile)
+            : r.count === 1 ? qsTr("%1 added: 1 signal, profile %2").arg(r.name).arg(r.profile)
+            : qsTr("%1 added: %2 signals, profile %3").arg(r.name).arg(r.count).arg(r.profile)
+        // The field on an adapter reading Default, obd2, with no profile=
+        // of its own: the file that now stands in for obd2 is read
+        // instead, and the note says so. A profile the user picked stays
+        if (standIn !== null && standIn.sha256 === r.sha256 && profileChoice === "default"
+                && queryValue(splitUri(uriField.text).pairs, "profile") === undefined) {
+            chooseProfile(r.profile)
+            signalNote = qsTr("%1 added: now reading obd2 + %1, profile %2")
+                             .arg(r.name).arg(r.profile)
+        }
+        return true
+    }
+
+    // ---- The app's plugins (ADR-0052) ----
+    // The bridge's list (PluginStore): each loaded plugin with its
+    // variants, or a copy that no longer loads; the variants its VIN
+    // proposes for the car (the session's VIN or the one the lookup holds,
+    // never stored); and what the last import or removal said
+    property var pluginList: []
+    property var pluginMatches: []
+    property string pluginProblem: ""
+    property string pluginNote: ""
+
+    function loadPlugins() {
+        pluginList = Bridge.plugins()
+        refreshMatches()
+    }
+
+    function refreshMatches() {
+        pluginMatches = Bridge.pluginMatches(vinLookupField.text)
+    }
+
+    function pluginText(p) {
+        return p.ok ? qsTr("%1 %2: %3").arg(p.name, p.version, p.variants.join(", "))
+                    : p.words
+    }
+
+    function importPlugin(url) {
+        pluginNote = ""
+        const r = Bridge.importPlugin(url)
+        if (!r.ok) {
+            pluginProblem = r.words
+            return false
+        }
+        pluginProblem = ""
+        pluginNote = r.replaced !== ""
+            ? qsTr("%1 %2 replaces %3").arg(r.name, r.version, r.replaced)
+            : qsTr("%1 %2 added: %3").arg(r.name, r.version, r.profiles.join(", "))
+        loadPlugins()
+        return true
+    }
+
+    // A removed plugin's variants are no vehicle's pick any more, and the
+    // field reads Default when it named one
+    function removePlugin(sha) {
+        pluginNote = ""
+        const entry = pluginList.find(p => p.sha256 === sha)
+        const profiles = entry !== undefined && entry.ok ? entry.profiles : []
+        const r = Bridge.removePlugin(sha)
+        pluginProblem = r.ok ? "" : r.words
+        if (r.ok && profiles.length > 0) {
+            saveVehicles(VehicleBook.dropPlugin(vehicles, profiles))
+            if (profiles.indexOf(profileChoice) >= 0)
+                chooseProfile("default")
+        }
+        loadPlugins()
+    }
+
+    // The user's pick for this vehicle (ADR-0052 section 5: the VIN only
+    // proposes): kept in its entry, and read through the URI's profile=.
+    // The pick pressed again is undone
+    function pickPluginVariant(profile) {
+        if (pickedVehicle !== null && pickedVehicle.plugin === profile) {
+            saveVehicles(VehicleBook.setPlugin(vehicles, ""))
+            if (profileChoice === profile)
+                chooseProfile("default")
+            return
+        }
+        saveVehicles(VehicleBook.setPlugin(vehicles, profile))
+        chooseProfile(profile)
+    }
+
+    // The picked vehicle's variant as What to read offers it: null for
+    // none, or one no plugin loaded registers
+    function pluginChoice() {
+        if (pickedVehicle === null || pickedVehicle.plugin === "")
+            return null
+        for (const p of pluginList) {
+            const at = p.ok ? p.profiles.indexOf(pickedVehicle.plugin) : -1
+            if (at >= 0)
+                return { name: p.profiles[at], label: qsTr("%1: %2").arg(p.name, p.variants[at]),
+                         hint: qsTr("The plugin %1 %2, its variant %3, picked for this vehicle")
+                                   .arg(p.name, p.version, p.variants[at]) }
+        }
+        return null
+    }
+
+    // The vehicle's own file was written here and has no copy anywhere
+    // else, so its removal asks first
+    function removeSignalFile(sha) {
+        if (pickedVehicle !== null && pickedVehicle.own === sha)
+            confirming = "removeSignals:" + sha
+        else
+            dropSignalFile(sha)
+    }
+
+    function dropSignalFile(sha) {
+        confirming = ""
+        signalProblem = ""
+        signalNote = ""
+        saveVehicles(VehicleBook.removeSignals(vehicles, sha))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+    }
+
+    function confirmingFile() {
+        if (!confirming.startsWith("removeSignals:") || pickedVehicle === null)
+            return null
+        const sha = confirming.substring("removeSignals:".length)
+        return pickedVehicle.signals.find(f => f.sha256 === sha) || null
+    }
+
+    // ---- The vehicle's own signals (ADR-0051's form) ----
+    // The own file as a document (SignalForm), null for none; the form's
+    // choices that aren't text; what Read once last said
+    readonly property var ownFile: pickedVehicle === null || pickedVehicle.own === "" ? null
+        : SignalForm.parseFile(Bridge.signalFileText(pickedVehicle.own))
+    readonly property var ownSignals: ownFile === null ? [] : ownFile.signals
+    property string formService: "22"
+    property string formOrder: "be"
+    property string formKind: "number"
+    property string formGroup: ""
+    property string formProblem: ""
+    property string formNote: ""
+    property var readResult: null
+    // The key of the signal Edit filled the form with, "" for a new one:
+    // its Save replaces that signal, renamed or not, and ends the Edit
+    property string editingKey: ""
+    // The vehicle a Read once was asked for: its reply shows only there
+    property string readOnceFor: ""
+
+    // The form and the section's notes are the picked vehicle's: a pick,
+    // New, Duplicate, Forget or a car recognized starts them afresh, and a
+    // question asked about the last one goes with it
+    readonly property string pickedId: pickedVehicle !== null ? pickedVehicle.id : ""
+    onPickedIdChanged: {
+        confirming = ""
+        signalProblem = ""
+        signalNote = ""
+        clearForm()
+    }
+
+    function clearForm() {
+        fillForm(SignalForm.emptyFields())
+    }
+
+    function readForm() {
+        return { name: formName.text, rx: formRx.text, tx: formTx.text, service: formService,
+                 number: formNumber.text, byte: formByte.text, bits: formBits.text,
+                 bit: formBit.text, order: formOrder, signed: formSigned.checked,
+                 bytes: formBytes.text, scale: formScale.text, offset: formOffset.text,
+                 unit: formUnit.text, decimals: formDecimals.text, group: formGroup,
+                 kind: formKind, values: formValues.text }
+    }
+
+    function fillForm(f) {
+        formName.text = f.name
+        formRx.text = f.rx
+        formTx.text = f.tx
+        formService = f.service
+        formNumber.text = f.number
+        formByte.text = f.byte
+        formBits.text = f.bits
+        formBit.text = f.bit
+        formOrder = f.order
+        formSigned.checked = f.signed
+        formBytes.text = f.bytes
+        formScale.text = f.scale
+        formOffset.text = f.offset
+        formUnit.text = f.unit
+        formDecimals.text = f.decimals
+        formGroup = f.group
+        formKind = f.kind
+        formValues.text = f.values
+        formProblem = ""
+        formNote = ""
+        readResult = null
+        editingKey = ""
+    }
+
+    // The adapter Read once asks on: the field's, when it names one, else
+    // the vehicle's last
+    function readOnceAdapter() {
+        const typed = uriField.text.trim()
+        if (/^(j2534|elm327|socketcan):\/\//i.test(typed))
+            return typed
+        return pickedVehicle !== null ? pickedVehicle.uri : ""
+    }
+
+    function readOnceDraft() {
+        formProblem = ""
+        formNote = ""
+        readResult = null
+        const f = readForm()
+        readOnceFor = pickedId
+        const why = Bridge.readOnce(readOnceAdapter(), SignalForm.draft(f), SignalForm.moduleOf(f))
+        if (why !== "")
+            formProblem = why
+    }
+
+    function readResultText(r) {
+        if (r === null)
+            return ""
+        if (r.ok)
+            return qsTr("Asked %1, got %2: %3").arg(r.request, r.reply, r.value)
+        return r.reply !== "" ? qsTr("Asked %1, got %2: %3").arg(r.request, r.reply, r.words)
+                              : qsTr("Asked %1: %2").arg(r.request, r.words)
+    }
+
+    // doc as the vehicle's own file, in place of the one before. The
+    // loader's words when it refuses it, without a line and column of a
+    // file the user never sees; the book's when another file makes its
+    // profile. True when saved
+    function saveOwn(doc, note) {
+        const r = Bridge.importSignalText(JSON.stringify(doc, null, 2))
+        if (!r.ok) {
+            formProblem = String(r.words).replace(/^line \d+, column \d+: /, "")
+            return false
+        }
+        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
+        const problem = VehicleBook.profileProblem(vehicles, file, pickedVehicle.own)
+        if (problem !== "") {
+            formProblem = problem
+            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+            return false
+        }
+        saveVehicles(VehicleBook.setOwn(vehicles, file))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+        formProblem = ""
+        formNote = note
+        return true
+    }
+
+    // The form's signal into the own file, made with the first under a
+    // name no other file's profile has; the signal Edit filled the form
+    // with replaced, or a new one's of the same name. Another signal whose
+    // name makes the same key is not overwritten: the form says so
+    function saveDraft() {
+        formNote = ""
+        readResult = null
+        if (pickedVehicle === null)
+            return false
+        const f = readForm()
+        const signal = SignalForm.draft(f)
+        const clash = ownSignals.find(s => s.key === signal.key && s.key !== editingKey
+                                           && (editingKey !== "" || s.name !== signal.name))
+        if (clash !== undefined) {
+            formProblem = qsTr("%1, saved already, has the key %2 too: edit it, or give "
+                               + "this one another name").arg(clash.name, signal.key)
+            return false
+        }
+        const base = ownFile !== null ? ownFile
+            : SignalForm.emptyFile(pickedVehicle.label,
+                                   VehicleBook.ownName(vehicles, pickedVehicle.label))
+        if (!saveOwn(SignalForm.withSignal(base, signal, SignalForm.moduleOf(f), editingKey),
+                     qsTr("%1 saved in %2").arg(signal.name, base.name)))
+            return false
+        editingKey = ""   // saved: the Edit is over
+        return true
+    }
+
+    function editOwnSignal(key) {
+        const s = ownSignals.find(x => x.key === key)
+        if (s !== undefined) {
+            fillForm(SignalForm.fieldsOf(ownFile, s))
+            editingKey = key
+        }
+    }
+
+    // A copy of the picked vehicle; its own file is copied under a name of
+    // its own, so each vehicle's own signals change apart (one file to a
+    // profile). Its copy unreadable, the new vehicle starts with none
+    function duplicateVehicle() {
+        const from = pickedVehicle
+        let doc = VehicleBook.duplicate(vehicles, copyLabel)
+        if (from !== null && from.own !== "") {
+            const own = SignalForm.parseFile(Bridge.signalFileText(from.own))
+            const r = own === null ? { ok: false } : (() => {
+                own.name = VehicleBook.ownName(doc, VehicleBook.picked(doc).label)
+                return Bridge.importSignalText(JSON.stringify(own, null, 2))
+            })()
+            doc = r.ok ? VehicleBook.setOwn(doc, { sha256: r.sha256, name: r.name,
+                                                   profile: r.profile })
+                       : VehicleBook.removeSignals(doc, from.own)
+        }
+        changeVehicles(doc)
+    }
+
+    // The last signal's removal takes the file with it, once asked: it
+    // was written here and has no copy elsewhere
+    function removeOwnSignal(key) {
+        const doc = SignalForm.withoutSignal(ownFile, key)
+        if (doc.signals.length === 0) {
+            removeSignalFile(pickedVehicle.own)
+            return
+        }
+        saveOwn(doc, qsTr("Removed from %1").arg(doc.name))
+    }
+
+    // Forget and Forget all: the copies no vehicle keeps go with them
+    function forgetVehicles(all) {
+        changeVehicles(all ? VehicleBook.forgetAll(vehicles) : VehicleBook.forget(vehicles))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
     }
 
     // Picking fills the field with the vehicle's connection, read back
@@ -391,13 +725,52 @@ Pane {
     // The choices live only while the app runs.
     property string profileChoice: "default"
 
-    // The profiles the row offers (ADR-0013, ADR-0020). "default" is the
+    // The profiles the row offers (ADR-0013, ADR-0020), then the picked
+    // vehicle's signal files that loaded (ADR-0051). "default" is the
     // scheme's own profile, so it adds no profile= key. A typed name
     // outside the list highlights no button; core judges it at connect.
-    readonly property var profiles: [
-        { name: "default", label: qsTr("Default"),
-          hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
-                     + "CAN interface, the demo set on mock://") },
+    readonly property var profiles: builtInProfiles.concat(vehicleProfiles, pluginProfiles)
+    // The vehicle's plugin variant, when one is picked and loaded
+    readonly property var pluginProfiles: {
+        const choice = pluginChoice()
+        return choice === null ? [] : [choice]
+    }
+    readonly property var vehicleProfiles: pickedVehicle === null ? []
+        : pickedVehicle.signals.filter(f => signalOk(f.sha256)
+                                            && (standIn === null || f.sha256 !== standIn.sha256))
+              .map(f => ({
+              name: f.profile, label: f.name,
+              hint: signalInfo[f.sha256].extends === "obd2"
+                    ? qsTr("Your signal file %1: obd2 and %2 of your own").arg(f.name)
+                          .arg(signalInfo[f.sha256].own)
+                    : signalInfo[f.sha256].count === 1
+                    ? qsTr("Your signal file %1: 1 signal").arg(f.name)
+                    : qsTr("Your signal file %1: %2 signals").arg(f.name)
+                          .arg(signalInfo[f.sha256].count) }))
+
+    // On an adapter, Default is obd2, and a file that extends obd2 reads
+    // all of obd2 and more, so it takes obd2's place there (ADR-0052):
+    // the first such file the picked vehicle has, null for none or on
+    // another scheme, where Default isn't obd2. Default's button stays
+    // only while the field reads it, so the row always shows the URI's
+    readonly property bool adapterUri: VehicleBook.isAdapterUri(uriField.text)
+    readonly property var standIn: !adapterUri || pickedVehicle === null ? null
+        : pickedVehicle.signals.find(f => signalOk(f.sha256)
+                                          && signalInfo[f.sha256].extends === "obd2") || null
+    readonly property var defaultProfile: ({
+        name: "default", label: qsTr("Default"),
+        hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
+                   + "CAN interface, the demo set on mock://") })
+    // The stand-in's entry, built in the same binding as the list, so the
+    // two never disagree mid-update
+    function standInProfile(f) {
+        return { name: f.profile, label: qsTr("obd2 + %1").arg(f.name),
+                 hint: qsTr("obd2's signals and %1 of your own, from your signal file %2")
+                           .arg(signalInfo[f.sha256].own).arg(f.name) }
+    }
+    readonly property var builtInProfiles: (standIn === null ? [defaultProfile]
+        : profileChoice === "default" ? [defaultProfile, standInProfile(standIn)]
+        : [standInProfile(standIn)]).concat([
         { name: "raw", label: qsTr("raw (log only)"),
           hint: qsTr("No decode: frames reach the Log page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
@@ -405,7 +778,7 @@ Pane {
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
           hint: qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
                      + "once and the DIDs the ECU answers join the polling") }
-    ]
+    ])
 
     // True while a typed URI is being read into the choices, so the DID
     // field's change doesn't recompose the URI that set it; and true
@@ -503,8 +876,12 @@ Pane {
                   "pack", "scan", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
                    "pack", "scan", "profile", "did"],
-        "socketcan": ["profile", "did", "baud", "filter"]
+        "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
+                      "diagnose", "pack", "scan"]
     })
+    // What a SocketCAN session that only listens takes: Default is raw
+    // there, and core refuses it the keys that ask an ECU
+    readonly property var socketcanListenKeys: ["profile", "did", "baud", "filter"]
 
     function schemeOf(text) {
         const i = text.indexOf("://")
@@ -527,9 +904,11 @@ Pane {
             pairs = pairs.filter(p => keys.indexOf(p[0]) >= 0)
             if (profileChoice === "mock" && (scheme === "j2534" || scheme === "elm327"))
                 profileChoice = "default"
-            // SocketCAN only listens: a profile that requests is refused there
-            if (profileChoice === "uds-generic" && scheme === "socketcan")
-                profileChoice = "default"
+            // SocketCAN asks an ECU through core's ISO-TP (ADR-0040) under a
+            // profile that requests (uds-generic, a file's); one that only
+            // listens takes no request key
+            if (scheme === "socketcan" && ["default", "raw", "mock"].indexOf(profileChoice) >= 0)
+                pairs = pairs.filter(p => socketcanListenKeys.indexOf(p[0]) >= 0)
         }
         setUri(composeUri(base, pairs))
     }
@@ -598,6 +977,8 @@ Pane {
         }
         vehicles = VehicleBook.parse(vehicleStore.document)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
+        useSignalFiles()
+        loadPlugins()
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Adapter first opens
         // Set like typed text, so the profile row and the DID field read
@@ -610,6 +991,10 @@ Pane {
     Connections {
         target: Bridge
 
+        function onReadOnceResult(result) {
+            if (page.readOnceFor === page.pickedId)
+                page.readResult = result
+        }
         function onConnectResult(uri, error) {
             errorLabel.text = error
             errorLabel.visible = (error !== "")
@@ -630,10 +1015,15 @@ Pane {
         function onConnectedChanged() {
             if (!Bridge.connected)
                 page.plottedApplied = false
+            // A new session reads its VIN again; at its end the matches
+            // the VIN proposed stay to be picked (the VIN goes with it)
+            if (Bridge.connected)
+                page.refreshMatches()
         }
 
         function onVehicleIdentified() {
             page.recognizeVehicle()
+            page.refreshMatches()
         }
 
         function onRecordingChanged() {
@@ -1069,7 +1459,7 @@ Pane {
                         text: qsTr("Duplicate")
                         enabled: page.idle && page.pickedVehicle !== null
                                  && VehicleBook.labelProblem(page.vehicles, page.copyLabel, "") === ""
-                        onClicked: page.changeVehicles(VehicleBook.duplicate(page.vehicles, page.copyLabel))
+                        onClicked: page.duplicateVehicle()
                     }
                     ThemedButton {
                         objectName: "vehicleRename"
@@ -1133,23 +1523,486 @@ Pane {
                     Label {
                         objectName: "vehicleConfirmText"
                         text: page.confirming === "forgetAll" ? qsTr("Forget all vehicles?")
+                            : page.confirmingFile() !== null
+                              ? qsTr("Remove %1? It was written here, and no other copy exists")
+                                    .arg(page.confirmingFile().name)
                             : page.pickedVehicle !== null ? qsTr("Forget %1?").arg(page.pickedVehicle.label)
                             : ""
                         color: Theme.text
+                        wrapMode: Text.Wrap
+                        width: Math.min(implicitWidth, parent.width)
                     }
                     ThemedButton {
                         objectName: "vehicleConfirm"
-                        text: qsTr("Forget")
+                        text: page.confirmingFile() !== null ? qsTr("Remove") : qsTr("Forget")
                         highlighted: true
                         enabled: page.idle
-                        onClicked: page.changeVehicles(page.confirming === "forgetAll"
-                                                       ? VehicleBook.forgetAll(page.vehicles)
-                                                       : VehicleBook.forget(page.vehicles))
+                        onClicked: {
+                            const file = page.confirmingFile()
+                            if (file !== null)
+                                page.dropSignalFile(file.sha256)
+                            else
+                                page.forgetVehicles(page.confirming === "forgetAll")
+                        }
                     }
                     ThemedButton {
                         objectName: "vehicleCancel"
                         text: qsTr("Cancel")
                         onClicked: page.confirming = ""
+                    }
+                }
+
+                // ---- The picked vehicle's signal files (ADR-0051) ----
+                Label {
+                    objectName: "signalFilesTitle"
+                    visible: page.pickedVehicle !== null
+                    text: qsTr("Signal files")
+                    color: Theme.text
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: page.pickedVehicle !== null ? page.pickedVehicle.signals : []
+                    RowLayout {
+                        id: fileRow
+                        required property var modelData
+                        required property int index
+                        objectName: "signalFile_" + index
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "signalFileText"
+                            text: page.signalFileText(fileRow.modelData)
+                            color: page.signalOk(fileRow.modelData.sha256) ? Theme.text
+                                                                           : Theme.warning
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "signalRemove_" + fileRow.index
+                            text: qsTr("Remove")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.removeSignalFile(fileRow.modelData.sha256)
+                        }
+                    }
+                }
+
+                Label {
+                    objectName: "signalFilesNone"
+                    visible: page.pickedVehicle !== null && page.pickedVehicle.signals.length === 0
+                    text: qsTr("None yet. Import adds a file of your own signals, each "
+                               + "then a profile under What to read")
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Flow {
+                    visible: page.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ThemedButton {
+                        objectName: "signalImport"
+                        text: qsTr("Import a signal file")
+                        enabled: page.idle && page.confirming === ""
+                        onClicked: importDialog.open()
+                    }
+                }
+
+                Label {
+                    objectName: "signalProblem"
+                    visible: text !== ""
+                    text: page.signalProblem
+                    color: Theme.warning
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    objectName: "signalNote"
+                    visible: text !== ""
+                    text: page.signalNote
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                FileDialog {
+                    id: importDialog
+                    title: qsTr("Import a signal file")
+                    nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
+                    onAccepted: page.importSignalFile(importDialog.selectedFile)
+                }
+
+                // ---- The app's plugins (ADR-0052): every vehicle's, the
+                // picked one's variant proposed by its VIN ----
+                Label {
+                    objectName: "pluginsTitle"
+                    text: qsTr("Plugins")
+                    color: Theme.text
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: page.pluginList
+                    RowLayout {
+                        id: pluginRow
+                        required property var modelData
+                        required property int index
+                        objectName: "plugin_" + index
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "pluginText"
+                            text: page.pluginText(pluginRow.modelData)
+                            color: pluginRow.modelData.ok ? Theme.text : Theme.warning
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "pluginRemove_" + pluginRow.index
+                            text: qsTr("Remove")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.removePlugin(pluginRow.modelData.sha256)
+                        }
+                    }
+                }
+
+                Label {
+                    objectName: "pluginsNone"
+                    visible: page.pluginList.length === 0
+                    text: qsTr("None yet. A plugin (a .havne-plugin.json file) holds signals "
+                               + "for the cars its maker codes and years name")
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ThemedButton {
+                        objectName: "pluginImport"
+                        text: qsTr("Import a plugin")
+                        enabled: page.idle && page.confirming === ""
+                        onClicked: pluginDialog.open()
+                    }
+                }
+
+                Label {
+                    objectName: "pluginProblem"
+                    visible: text !== ""
+                    text: page.pluginProblem
+                    color: Theme.warning
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    objectName: "pluginNote"
+                    visible: text !== ""
+                    text: page.pluginNote
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                // The variants the VIN proposes for the picked vehicle; the
+                // user picks one (ADR-0052 section 5)
+                Label {
+                    objectName: "pluginMatchesText"
+                    visible: page.pickedVehicle !== null && page.pluginList.length > 0
+                    text: page.pluginMatches.length > 0
+                        ? qsTr("For this car, by its VIN:")
+                        : qsTr("No match yet: plugins are proposed once the car's VIN is "
+                               + "read, or one is typed in the VIN lookup")
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                Flow {
+                    visible: page.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Repeater {
+                        model: page.pickedVehicle !== null ? page.pluginMatches : []
+                        ThemedButton {
+                            required property var modelData
+                            required property int index
+                            objectName: "pluginMatch_" + index
+                            width: Math.min(implicitWidth, parent.width)
+                            text: qsTr("%1: %2").arg(modelData.name, modelData.variant)
+                            highlighted: page.pickedVehicle !== null
+                                         && page.pickedVehicle.plugin === modelData.profile
+                            enabled: page.idle
+                            onClicked: page.pickPluginVariant(modelData.profile)
+                        }
+                    }
+                }
+
+                FileDialog {
+                    id: pluginDialog
+                    title: qsTr("Import a plugin")
+                    nameFilters: [qsTr("Plugins (*.havne-plugin.json)"), qsTr("All files (*)")]
+                    onAccepted: page.importPlugin(pluginDialog.selectedFile)
+                }
+
+                // ---- The vehicle's own signals (ADR-0051's form) ----
+                Label {
+                    objectName: "ownSignalsTitle"
+                    visible: page.pickedVehicle !== null
+                    text: qsTr("Your own signals")
+                    color: Theme.text
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: page.ownSignals
+                    RowLayout {
+                        id: ownRow
+                        required property var modelData
+                        required property int index
+                        objectName: "ownSignal_" + index
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "ownSignalText"
+                            text: qsTr("%1: %2").arg(ownRow.modelData.name,
+                                                     SignalForm.describe(page.ownFile, ownRow.modelData))
+                            color: Theme.text
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "ownEdit_" + ownRow.index
+                            text: qsTr("Edit")
+                            enabled: page.confirming === ""
+                            onClicked: page.editOwnSignal(ownRow.modelData.key)
+                        }
+                        ThemedButton {
+                            objectName: "ownRemove_" + ownRow.index
+                            text: qsTr("Remove")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.removeOwnSignal(ownRow.modelData.key)
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    objectName: "signalForm"
+                    visible: page.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        TextField {
+                            id: formName
+                            objectName: "formName"
+                            placeholderText: qsTr("Name")
+                            width: Math.min(parent.width, Theme.controlHeight * 8)
+                        }
+                        TextField {
+                            id: formRx
+                            objectName: "formRx"
+                            text: "7E8"
+                            placeholderText: qsTr("Reply ID")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formTx
+                            objectName: "formTx"
+                            placeholderText: qsTr("Request ID")
+                            width: Theme.controlHeight * 3
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        Repeater {
+                            model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
+                            ThemedButton {
+                                required property var modelData
+                                objectName: "formService_" + modelData.name
+                                text: modelData.label
+                                highlighted: page.formService === modelData.name
+                                onClicked: page.formService = modelData.name
+                            }
+                        }
+                        TextField {
+                            id: formNumber
+                            objectName: "formNumber"
+                            placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
+                                                                       : qsTr("PID, 2 hex digits")
+                            width: Theme.controlHeight * 5
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        Repeater {
+                            model: SignalForm.kinds
+                            ThemedButton {
+                                required property string modelData
+                                objectName: "formKind_" + modelData
+                                text: modelData
+                                highlighted: page.formKind === modelData
+                                onClicked: page.formKind = modelData
+                            }
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        TextField {
+                            id: formByte
+                            objectName: "formByte"
+                            text: "0"
+                            placeholderText: qsTr("Byte")
+                            width: Theme.controlHeight * 2.5
+                        }
+                        TextField {
+                            id: formBits
+                            objectName: "formBits"
+                            visible: page.formKind === "number" || page.formKind === "enum"
+                            text: "8"
+                            placeholderText: qsTr("Bits")
+                            width: Theme.controlHeight * 2.5
+                        }
+                        TextField {
+                            id: formBit
+                            objectName: "formBit"
+                            visible: formBits.visible
+                            placeholderText: qsTr("Bit")
+                            width: Theme.controlHeight * 2.5
+                        }
+                        TextField {
+                            id: formBytes
+                            objectName: "formBytes"
+                            visible: !formBits.visible
+                            placeholderText: qsTr("Bytes (all)")
+                            width: Theme.controlHeight * 3
+                        }
+                        Repeater {
+                            model: formBits.visible ? ["be", "le"] : []
+                            ThemedButton {
+                                required property string modelData
+                                objectName: "formOrder_" + modelData
+                                text: modelData
+                                highlighted: page.formOrder === modelData
+                                onClicked: page.formOrder = modelData
+                            }
+                        }
+                        CheckBox {
+                            id: formSigned
+                            objectName: "formSigned"
+                            visible: page.formKind === "number"
+                            text: qsTr("Signed")
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        visible: page.formKind === "number"
+                        TextField {
+                            id: formScale
+                            objectName: "formScale"
+                            placeholderText: qsTr("Scale (1)")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formOffset
+                            objectName: "formOffset"
+                            placeholderText: qsTr("Offset (0)")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formUnit
+                            objectName: "formUnit"
+                            placeholderText: qsTr("Unit")
+                            width: Theme.controlHeight * 3
+                        }
+                        TextField {
+                            id: formDecimals
+                            objectName: "formDecimals"
+                            placeholderText: qsTr("Decimals")
+                            width: Theme.controlHeight * 3
+                        }
+                    }
+
+                    TextField {
+                        id: formValues
+                        objectName: "formValues"
+                        visible: page.formKind === "enum"
+                        placeholderText: qsTr("Values: 0=Park, 1=Reverse, 2=Neutral")
+                        Layout.fillWidth: true
+                    }
+
+                    LabeledFlow {
+                        label: qsTr("Group:")
+                        Repeater {
+                            model: SignalForm.groups
+                            ThemedButton {
+                                required property string modelData
+                                objectName: "formGroup_" + (modelData === "" ? "other" : modelData)
+                                text: modelData === "" ? qsTr("other") : modelData
+                                highlighted: page.formGroup === modelData
+                                onClicked: page.formGroup = modelData
+                            }
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        ThemedButton {
+                            objectName: "formReadOnce"
+                            text: Bridge.readingOnce ? qsTr("Reading...") : qsTr("Read once")
+                            enabled: page.idle && !Bridge.readingOnce && page.confirming === ""
+                            onClicked: page.readOnceDraft()
+                        }
+                        ThemedButton {
+                            objectName: "formSave"
+                            text: qsTr("Save")
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.saveDraft()
+                        }
+                        ThemedButton {
+                            objectName: "formClear"
+                            text: qsTr("Clear")
+                            onClicked: page.clearForm()
+                        }
+                    }
+
+                    Label {
+                        objectName: "formReadResult"
+                        visible: text !== ""
+                        text: page.readResultText(page.readResult)
+                        color: page.readResult !== null && page.readResult.ok ? Theme.text : Theme.warning
+                        wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "formProblem"
+                        visible: text !== ""
+                        text: page.formProblem
+                        color: Theme.warning
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "formNote"
+                        visible: text !== ""
+                        text: page.formNote
+                        color: Theme.textDim
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
                     }
                 }
 
@@ -1164,6 +2017,8 @@ Pane {
                         maximumLength: 32
                         placeholderText: qsTr("17 characters")
                         inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                        // A typed VIN proposes plugins too (ADR-0052 section 5)
+                        onTextChanged: page.refreshMatches()
                     }
                 }
 

@@ -1,24 +1,7 @@
 // File/layer: tests/test_obd2.cpp | GTest, UNIT tier, headless, all
 //             platforms (pure data + decoder + request engine: no
 //             transport)
-// Testing: UNIT: set validation, wire-byte decode round-trips matching
-//          the fake's canned responses, mux gate accept/reject, the
-//          request engine (request_engine.h) with the time passed in,
-//          its DID scan and its identification (the turns, the text, the
-//          report), and uds-generic's ?did= grammar and the set it
-//          builds (uds_generic.h). The Service 01 table
-//          (fixtures/obd2/service01.csv) against its own ranges, the
-//          obd2 set and the fakes' ECU; that ECU's diagnostics
-//          (fake_ecu.h). The trouble codes' and monitors' words and
-//          the replies into the report (diagnostics.h), the
-//          monitors against fixtures/obd2/monitors.csv. The signals
-//          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
-//          The trouble codes' titles and parse (DtcTitleTest, ADR-0044).
-//          The inspection verdict over reports (InspectionTest, ADR-0045).
-//          The simulated ECU's answers, URI and faults (SimEcuTest,
-//          ADR-0046).
-//          End-to-end pacing is HARNESS (stream and
-//          health tests) and BENCH (VX), not this file.
+// Testing: UNIT (test_obd2): this file's suites
 
 #include <gtest/gtest.h>
 
@@ -29,12 +12,14 @@
 #include "../core/src/obd2_rates.h"
 #include "../core/src/obd2_reply.h"
 #include "../core/src/pid_support.h"
+#include "../core/src/sim_dids.h"
 #include "../core/src/sim_ecu.h"
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
 #include "fake_diagnostics.h"
 #include "fake_ecu.h"
+#include "temp_name.h"
 
 #include <cmath>
 #include <cstdio>
@@ -197,8 +182,10 @@ TEST(Obd2SetTest, GroupsEachSignalByThePartOfTheCarItReads)
     const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
     for (uint32_t i = 0; i < mock->count; ++i) {
         const ecuio_signal_def_t& m = mock->defs[i];
-        uint8_t expected =
-            ECUIO_SIGNAL_GROUP_OXYGEN; /* Lambda: obd2 has none */
+        /* obd2 has neither: Lambda reads a wideband, boost is computed */
+        uint8_t expected = std::strcmp(m.name, "Boost") == 0
+                               ? ECUIO_SIGNAL_GROUP_AIR
+                               : ECUIO_SIGNAL_GROUP_OXYGEN;
         for (uint32_t k = 0; k < obd2->count; ++k) {
             if (std::strcmp(obd2->defs[k].name, m.name) == 0) {
                 expected = obd2->defs[k].group;
@@ -2246,7 +2233,7 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
         EXPECT_EQ(std::string(ecuio_last_error_detail()), c.detail) << c.query;
     }
 
-    /* 129 DIDs to poll, one past the engine's table */
+    /* One DID to poll past the engine's table */
     std::string many = "did=";
     for (unsigned i = 0; i <= ECUIO_PROFILE_MAX_REQUESTS; ++i) {
         char one[8];
@@ -2255,9 +2242,12 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
     }
     ecuio_uds_session u;
     EXPECT_EQ(build_uds(many, &u), ECUIO_ERR_BAD_URI);
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "?did= lists 129 DIDs to poll, more than the 128 a session "
-                 "asks for; scan a range instead");
+    char detail[96];
+    snprintf(detail, sizeof detail,
+             "?did= lists %u DIDs to poll, more than the %u a session "
+             "asks for; scan a range instead",
+             ECUIO_PROFILE_MAX_REQUESTS + 1u, ECUIO_PROFILE_MAX_REQUESTS);
+    EXPECT_STREQ(ecuio_last_error_detail(), detail);
 
     /* At the limits, and other keys beside did=, it builds */
     many.erase(many.rfind(','));
@@ -2765,6 +2755,66 @@ protected:
 };
 
 } // namespace
+
+/* A module answers Service 0x22 from its own rows and refuses the rest;
+ * an ECU the table doesn't name answers as the engine ECU; a malformed
+ * spec leaves the table empty */
+TEST_F(FakeEcuTest, AModuleAnswersItsOwnDidsAndRefusesTheRest)
+{
+    struct Empty {
+        ~Empty() { fake_ecu::set_module_dids(nullptr); }
+    } empty;
+    const auto ask = [](uint32_t rx, Bytes req, long nrc = -1) {
+        uint8_t out[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        if (!fake_ecu::answer_for(rx, req.data(), req.size(), nrc, out, &n)) {
+            return Bytes{};
+        }
+        return Bytes(out, out + n);
+    };
+    ASSERT_TRUE(fake_ecu::set_module_dids(
+        "7E9:D801=00 12; 7e9:d802=ABCDEF;18DAF1E9:0102=01"));
+    EXPECT_EQ(fake_ecu::module_table().count.load(), 3u);
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x01}),
+              (Bytes{0x62, 0xD8, 0x01, 0x00, 0x12}));
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x02}),
+              (Bytes{0x62, 0xD8, 0x02, 0xAB, 0xCD, 0xEF}))
+        << "lower case reads the same";
+    EXPECT_EQ(ask(0x18DAF1E9, {0x22, 0x01, 0x02}),
+              (Bytes{0x62, 0x01, 0x02, 0x01}))
+        << "a 29-bit reply ID";
+    EXPECT_EQ(ask(0x7E9, {0x22, 0x1E, 0x1C}), (Bytes{0x7F, 0x22, 0x31}))
+        << "the engine ECU's DID isn't the module's";
+    EXPECT_EQ(ask(0x7E9, {0x01, 0x00}), (Bytes{0x7F, 0x01, 0x11}))
+        << "a module serves only 0x22";
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x03}, 0), Bytes{})
+        << "silence asked for";
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x03}, 0x33), (Bytes{0x7F, 0x22, 0x33}));
+    EXPECT_EQ(ask(0x7E8, {0x22, 0x1E, 0x1C}),
+              (Bytes{0x62, 0x1E, 0x1C, 0x12, 0x34}))
+        << "an ECU the table doesn't name answers as the engine ECU";
+    EXPECT_EQ(ask(0x7E8, {0x22, 0xD8, 0x01}), (Bytes{0x7F, 0x22, 0x31}));
+
+    for (const char* bad :
+         {"7E9", "7E9:D801", "7E9:D801=", "7E9:D801=1", "7E9:D801=0G",
+          ":D801=00", "7E9:=00", "7E9:1D8010=00", "123456789:D801=00",
+          "7E9:D801=00112233445566778899AABBCCDDEEFF00"}) {
+        SCOPED_TRACE(bad);
+        EXPECT_FALSE(fake_ecu::set_module_dids(bad));
+        EXPECT_EQ(fake_ecu::module_table().count.load(), 0u)
+            << "a bad spec empties it";
+    }
+    std::string many;
+    for (int i = 0; i < 17; ++i) {
+        many += "7E9:D8" + std::string(i < 16 ? "0" : "1") +
+                "0123456789ABCDEF"[i % 16] + "=01;";
+    }
+    EXPECT_FALSE(fake_ecu::set_module_dids(many.c_str())) << "17 rows";
+    ASSERT_TRUE(fake_ecu::set_module_dids(""));
+    EXPECT_EQ(ask(0x7E9, {0x22, 0x1E, 0x1C}),
+              (Bytes{0x62, 0x1E, 0x1C, 0x12, 0x34}))
+        << "with the table empty every ECU is the engine ECU";
+}
 
 /* The lists cover all four categories; three stored DTCs make an
  * 8-byte reply, past a Single Frame */
@@ -5131,7 +5181,7 @@ TEST(SimEcuTest, TheUrisKeysAndRefusals)
     EXPECT_EQ(c.faults.bad_sequence, 3u);
     EXPECT_EQ(c.faults.stalled, 11u);
     for (const char* bad :
-         {"socketcan://vcan0", "mock://sim?profile=obd2", "mock://sim?values=x",
+         {"socketcan://vcan0", "mock://sim?did=1E1C", "mock://sim?values=x",
           "mock://sim?vin=1FAFAKE10M000000", "mock://sim?vin=1FAFAKEI0M0000001",
           "mock://sim?vin=1fafake10m0000001",
           "mock://sim?faults=", "mock://sim?faults=silent",
@@ -5218,6 +5268,362 @@ TEST(SimEcuTest, FaultsBreakEveryNthReplyOfItsKind)
     EXPECT_EQ(e.segmented, 3u);
 }
 
+// pending: a fault like the others, every Nth reply of its kind, never a
+// bitmap; the second module's replies counted apart from the engine
+// ECU's, so its period is its own
+TEST(SimEcuTest, PendingIsEveryNthReplyAndEachModuleCountsItsOwn)
+{
+    ecuio_sim_config c;
+    char why[256] = {};
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?faults=pending:3,late:5", &c, why,
+                                  sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_EQ(c.faults.pending, 3u);
+    EXPECT_EQ(c.faults.late, 5u);
+    EXPECT_EQ(
+        ecuio_sim_parse_uri("mock://sim?faults=pending:0", &c, why, sizeof why),
+        ecuio_sim_uri_result::bad);
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    e.config.faults.pending = 3;
+    const uint8_t pid[2] = {0x01, 0x0C};
+    const uint8_t bitmap[2] = {0x01, 0x20};
+    const uint8_t did[3] = {0x22, 0xD1, 0x00};
+    std::vector<ecuio_sim_fate> engine, module;
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(ecuio_sim_next_fate(e, bitmap, 2, 6), ecuio_sim_fate::intact);
+        engine.push_back(ecuio_sim_next_fate(e, pid, 2, 4));
+    }
+    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    const std::vector<ecuio_sim_fate> third = {ecuio_sim_fate::intact,
+                                               ecuio_sim_fate::intact,
+                                               ecuio_sim_fate::pending};
+    EXPECT_EQ(engine, third);
+    EXPECT_EQ(module, third) << "the module's own third reply, not the "
+                                "engine ECU's sixth";
+    EXPECT_EQ(e.singles, 3u);
+    EXPECT_EQ(e.module_singles, 3u);
+}
+
+namespace {
+
+std::vector<uint8_t> module_ask(std::initializer_list<uint8_t> req,
+                                bool functional = false)
+{
+    const std::vector<uint8_t> q(req);
+    uint8_t out[ECUIO_SIM_REPLY_MAX];
+    const uint32_t n = ecuio_sim_module_answer(
+        q.data(), static_cast<uint32_t>(q.size()), functional, out);
+    return std::vector<uint8_t>(out, out + n);
+}
+
+} // namespace
+
+// modules=2's module: Service 22 from its own made-up DIDs, 7F 22 31 for
+// one it lacks, 7F <service> 11 for any other service, and a functional
+// request's refusals unsaid; only mock:// takes modules, 1 or 2
+TEST(SimEcuTest, TheSecondModuleAnswersItsOwnDidsAndRefusesTheRest)
+{
+    EXPECT_EQ(module_ask({0x22, 0xD1, 0x00}),
+              (std::vector<uint8_t>{0x62, 0xD1, 0x00, 0x82}));
+    EXPECT_EQ(module_ask({0x22, 0xD1, 0x01}),
+              (std::vector<uint8_t>{0x62, 0xD1, 0x01, 0x03}));
+    const std::vector<uint8_t> name = module_ask({0x22, 0xD1, 0x02});
+    ASSERT_EQ(name.size(), 15u) << "past a Single Frame";
+    EXPECT_EQ(std::string(name.begin() + 3, name.end()), "TCM-HavneSim");
+    EXPECT_EQ(module_ask({0x22, 0xF1, 0x90}),
+              (std::vector<uint8_t>{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(module_ask({0x22, 0xD1}),
+              (std::vector<uint8_t>{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(module_ask({0x01, 0x0C}),
+              (std::vector<uint8_t>{0x7F, 0x01, 0x11}));
+    EXPECT_EQ(module_ask({0x09, 0x02}),
+              (std::vector<uint8_t>{0x7F, 0x09, 0x11}));
+    EXPECT_EQ(module_ask({0x22, 0xD1, 0x00}, true),
+              (std::vector<uint8_t>{0x62, 0xD1, 0x00, 0x82}))
+        << "a positive reply to a functional request is said";
+    EXPECT_TRUE(module_ask({0x01, 0x0C}, true).empty());
+    EXPECT_TRUE(module_ask({0x22, 0xF1, 0x90}, true).empty());
+    EXPECT_TRUE(module_ask({}).empty());
+
+    ecuio_sim_config c;
+    char why[256] = {};
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim", &c, why, sizeof why),
+              ecuio_sim_uri_result::ok);
+    EXPECT_FALSE(c.second_module) << "one ECU by default";
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?modules=2&values=canned", &c, why,
+                                  sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_TRUE(c.second_module);
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?modules=1", &c, why, sizeof why),
+              ecuio_sim_uri_result::ok);
+    EXPECT_FALSE(c.second_module);
+#ifdef _WIN32
+    const std::string replay = "replay://C:/recordings/run?modules=2";
+#else
+    const std::string replay = "replay:///recordings/run?modules=2";
+#endif
+    for (const std::string& bad :
+         {std::string("mock://sim?modules=3"),
+          std::string("mock://sim?modules=0"),
+          std::string("mock://sim?modules="), replay}) {
+        why[0] = '\0';
+        EXPECT_EQ(ecuio_sim_parse_uri(bad.c_str(), &c, why, sizeof why),
+                  ecuio_sim_uri_result::bad)
+            << bad;
+        EXPECT_NE(why[0], '\0') << bad;
+    }
+}
+
+/* ---------- DIDs from a signal set (ADR-0046's appendix) ---------- */
+
+namespace {
+
+/* A def keyed 62 <did> at offset 0 on rx */
+ecuio_signal_def_t did_def(uint16_t id, uint32_t rx, uint16_t did, uint8_t kind,
+                           uint8_t order, uint16_t start, uint8_t bit,
+                           uint8_t bits, double scale, double offset,
+                           const char* name)
+{
+    ecuio_signal_def_t d{};
+    d.id = id;
+    d.message_id = rx;
+    d.mux_offset = 0;
+    d.mux_length = 3;
+    d.mux_key = 0x620000u | did;
+    d.kind = kind;
+    d.byte_order = order;
+    d.start_byte = start;
+    d.bit_offset = bit;
+    d.bit_length = bits;
+    d.scale = scale;
+    d.offset = offset;
+    std::snprintf(d.name, sizeof d.name, "%s", name);
+    return d;
+}
+
+ecuio_signal_set_t
+set_of(const std::vector<ecuio_signal_def_t>& defs,
+       const std::vector<ecuio_channel_decl_t>& channels = {})
+{
+    ecuio_signal_set_t s{};
+    s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    s.count = static_cast<uint32_t>(defs.size());
+    s.defs = defs.data();
+    s.channel_count = static_cast<uint32_t>(channels.size());
+    s.channels = channels.empty() ? nullptr : channels.data();
+    return s;
+}
+
+std::vector<uint8_t> did_ask(const ecuio_signal_set_t& set, uint32_t rx,
+                             std::initializer_list<uint8_t> req,
+                             const std::vector<double>& values,
+                             bool functional = false)
+{
+    const std::vector<uint8_t> q(req);
+    uint8_t out[ECUIO_SIM_REPLY_MAX];
+    const uint32_t n = ecuio_sim_did_answer(
+        set, rx, q.data(), static_cast<uint32_t>(q.size()), functional,
+        [&values](uint32_t i) { return values[i]; }, out, sizeof out);
+    return std::vector<uint8_t>(out, out + n);
+}
+
+} // namespace
+
+// Every field of one DID's reply, each kind and byte order, decodes
+// through its own def to the value it was given: a big-endian word with
+// an offset, a signed little-endian field at a bit offset, a binary32,
+// a one-bit flag in a byte another field shares, and a text field its
+// name
+TEST(SimDidsTest, EachFieldDecodesToTheValueItWasGiven)
+{
+    const std::vector<ecuio_signal_def_t> defs = {
+        did_def(1, 0x7E9, 0x1234, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0,
+                16, 1.0, -40.0, "Fluid"),
+        did_def(2, 0x7E9, 0x1234, ECUIO_VALUE_INT, ECUIO_BYTE_ORDER_LE, 5, 4,
+                12, 0.5, 0.0, "Torque"),
+        did_def(3, 0x7E9, 0x1234, ECUIO_VALUE_FLOAT, ECUIO_BYTE_ORDER_BE, 7, 0,
+                32, 1.0, 0.0, "Ratio"),
+        did_def(4, 0x7E9, 0x1234, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_LE, 5, 0,
+                1, 1.0, 0.0, "Lockup"),
+        did_def(5, 0x7E9, 0x1235, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0,
+                0, 1.0, 0.0, "TCM-Sim"),
+    };
+    const std::vector<ecuio_channel_decl_t> channels = {{0x7E9, 0x7E1}};
+    const ecuio_signal_set_t set = set_of(defs, channels);
+    ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), 0)
+        << "defs a session would take";
+    const std::vector<double> values = {90.0, -100.5, 1.25, 1.0, 0.0};
+    const std::vector<uint8_t> r =
+        did_ask(set, 0x7E9, {0x22, 0x12, 0x34}, values);
+    ASSERT_EQ(r.size(), 11u)
+        << "62 12 34, then the fields to the binary32's end";
+    EXPECT_EQ(r[0], 0x62);
+    EXPECT_EQ(r[3], 0x00);
+    EXPECT_EQ(r[4], 0x82) << "90 + 40 = 130, big-endian";
+    for (size_t i = 0; i < 4; ++i) {
+        double v = -1.0;
+        ASSERT_EQ(ecuio_decode_signal(&defs[i], r.data(),
+                                      static_cast<uint16_t>(r.size()), &v),
+                  ECUIO_DECODE_OK)
+            << defs[i].name;
+        EXPECT_EQ(v, values[i]) << defs[i].name;
+    }
+    const std::vector<uint8_t> t =
+        did_ask(set, 0x7E9, {0x22, 0x12, 0x35}, values);
+    char text[ECUIO_DECODE_TEXT_MAX] = {};
+    ASSERT_EQ(ecuio_decode_text(&defs[4], t.data(),
+                                static_cast<uint16_t>(t.size()), text,
+                                sizeof text),
+              ECUIO_DECODE_OK);
+    EXPECT_STREQ(text, "TCM-Sim");
+}
+
+// The values a field holds and the ones it can't: a byte with an offset
+// runs offset to offset + 255, a signed byte -128 to 127, a value rounds
+// to the field's step, and NaN, a text def, or a zero scale off its
+// offset hold none
+TEST(SimDidsTest, AFieldsRangeIsWhatItAnswers)
+{
+    uint32_t raw = 0;
+    const ecuio_signal_def_t u8 =
+        did_def(1, 0x7E8, 1, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0, 8,
+                1.0, -40.0, "u8");
+    EXPECT_TRUE(ecuio_sim_raw_for(u8, -40.0, &raw));
+    EXPECT_EQ(raw, 0u);
+    EXPECT_TRUE(ecuio_sim_raw_for(u8, 215.0, &raw));
+    EXPECT_EQ(raw, 255u);
+    EXPECT_FALSE(ecuio_sim_raw_for(u8, 216.0, &raw));
+    EXPECT_FALSE(ecuio_sim_raw_for(u8, -41.0, &raw));
+    const ecuio_signal_def_t s8 =
+        did_def(2, 0x7E8, 1, ECUIO_VALUE_INT, ECUIO_BYTE_ORDER_BE, 3, 0, 8, 1.0,
+                0.0, "s8");
+    EXPECT_TRUE(ecuio_sim_raw_for(s8, -128.0, &raw));
+    EXPECT_EQ(raw, 0x80u);
+    EXPECT_TRUE(ecuio_sim_raw_for(s8, 127.0, &raw));
+    EXPECT_FALSE(ecuio_sim_raw_for(s8, 128.0, &raw));
+    EXPECT_FALSE(ecuio_sim_raw_for(s8, -129.0, &raw));
+    const ecuio_signal_def_t tenth =
+        did_def(3, 0x7E8, 1, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0, 16,
+                0.1, 0.0, "tenth");
+    EXPECT_TRUE(ecuio_sim_raw_for(tenth, 1.04, &raw));
+    EXPECT_EQ(raw, 10u) << "the nearest step";
+    EXPECT_FALSE(ecuio_sim_raw_for(tenth, std::nan(""), &raw));
+    const ecuio_signal_def_t text =
+        did_def(4, 0x7E8, 1, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0, 0,
+                1.0, 0.0, "text");
+    EXPECT_FALSE(ecuio_sim_raw_for(text, 0.0, &raw));
+    const ecuio_signal_def_t flat =
+        did_def(5, 0x7E8, 1, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0, 8,
+                0.0, 7.0, "flat");
+    EXPECT_TRUE(ecuio_sim_raw_for(flat, 7.0, &raw));
+    EXPECT_FALSE(ecuio_sim_raw_for(flat, 8.0, &raw));
+}
+
+// What isn't the set's: a DID none of its defs reads, one on another
+// module, a list of DIDs, another service; a functional request's
+// refusals unsaid, its answer said
+TEST(SimDidsTest, WhatTheSetDoesntReadIsRefused)
+{
+    const std::vector<ecuio_signal_def_t> defs = {
+        did_def(1, 0x7E9, 0x1234, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0,
+                8, 1.0, 0.0, "a"),
+        did_def(2, 0x7EA, 0x5678, ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0,
+                8, 1.0, 0.0, "b"),
+    };
+    const ecuio_signal_set_t set = set_of(defs);
+    const std::vector<double> values = {7.0, 9.0};
+    const std::vector<uint8_t> no = {0x7F, 0x22, 0x31};
+    EXPECT_EQ(did_ask(set, 0x7E9, {0x22, 0x12, 0x34}, values),
+              (std::vector<uint8_t>{0x62, 0x12, 0x34, 0x07}));
+    EXPECT_EQ(did_ask(set, 0x7E9, {0x22, 0xF1, 0x90}, values), no);
+    EXPECT_EQ(did_ask(set, 0x7E9, {0x22, 0x56, 0x78}, values), no)
+        << "0x7EA's DID";
+    EXPECT_EQ(did_ask(set, 0x7EA, {0x22, 0x56, 0x78}, values),
+              (std::vector<uint8_t>{0x62, 0x56, 0x78, 0x09}));
+    EXPECT_EQ(did_ask(set, 0x7E9, {0x22, 0x12, 0x34, 0x56, 0x78}, values), no);
+    EXPECT_EQ(did_ask(set, 0x7E9, {0x01, 0x0C}, values),
+              (std::vector<uint8_t>{0x7F, 0x01, 0x11}));
+    EXPECT_TRUE(did_ask(set, 0x7E9, {0x22, 0xF1, 0x90}, values, true).empty());
+    EXPECT_TRUE(did_ask(set, 0x7E9, {0x01, 0x0C}, values, true).empty());
+    EXPECT_EQ(did_ask(set, 0x7E9, {0x22, 0x12, 0x34}, values, true).size(), 4u);
+    EXPECT_TRUE(did_ask(set, 0x7E9, {}, values).empty());
+}
+
+// A set's channels are the simulated car's modules: the engine ECU's
+// pair and none at all both put the DIDs on the engine ECU, every other
+// channel is a module; a 29-bit ID, the functional ID, or half of the
+// engine ECU's pair is refused, why naming the channel
+TEST(SimDidsTest, TheModulesAreTheSetsChannels)
+{
+    ecuio_sim_module_plan plan;
+    char why[256] = {};
+    const ecuio_signal_set_t none = set_of({});
+    ASSERT_TRUE(ecuio_sim_plan_modules(none, &plan, why, sizeof why));
+    EXPECT_TRUE(plan.engine);
+    EXPECT_EQ(plan.count, 0u);
+    const std::vector<ecuio_channel_decl_t> two = {{0x7E8, 0x7E0},
+                                                   {0x7EA, 0x7E2}};
+    ASSERT_TRUE(
+        ecuio_sim_plan_modules(set_of({}, two), &plan, why, sizeof why));
+    EXPECT_TRUE(plan.engine);
+    ASSERT_EQ(plan.count, 1u);
+    EXPECT_EQ(plan.tx[0], 0x7E2u);
+    EXPECT_EQ(plan.rx[0], 0x7EAu);
+    const std::vector<ecuio_channel_decl_t> module = {{0x7E9, 0x7E1}};
+    ASSERT_TRUE(
+        ecuio_sim_plan_modules(set_of({}, module), &plan, why, sizeof why));
+    EXPECT_FALSE(plan.engine) << "the engine ECU answers no DID of the set";
+    EXPECT_EQ(plan.count, 1u);
+    for (const std::vector<ecuio_channel_decl_t>& bad :
+         {std::vector<ecuio_channel_decl_t>{{0x18DAF110, 0x18DA10F1}},
+          std::vector<ecuio_channel_decl_t>{{0x7E9, 0x7DF}},
+          std::vector<ecuio_channel_decl_t>{{0x7EA, 0x7E0}},
+          std::vector<ecuio_channel_decl_t>{{0x7E8, 0x7E2}}}) {
+        why[0] = '\0';
+        EXPECT_FALSE(
+            ecuio_sim_plan_modules(set_of({}, bad), &plan, why, sizeof why))
+            << std::hex << bad[0].rx_id;
+        EXPECT_NE(std::strstr(why, "channel 0"), nullptr) << why;
+    }
+}
+
+// profile= names a registered profile by the registry's grammar, on
+// mock:// alone, and never beside modules=2
+TEST(SimDidsTest, TheUrisProfile)
+{
+    ecuio_sim_config c;
+    char why[256] = {};
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?profile=user.daily-extras_2", &c,
+                                  why, sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_EQ(std::string(c.profile, c.profile_len), "user.daily-extras_2");
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim", &c, why, sizeof why),
+              ecuio_sim_uri_result::ok);
+    EXPECT_EQ(c.profile_len, 0u);
+#ifdef _WIN32
+    const std::string replay = "replay://C:/recordings/run?profile=obd2";
+#else
+    const std::string replay = "replay:///recordings/run?profile=obd2";
+#endif
+    for (const std::string& bad :
+         {std::string("mock://sim?profile="),
+          std::string("mock://sim?profile=Obd2"),
+          std::string("mock://sim?profile=a/b"),
+          std::string("mock://sim?profile=") + std::string(64, 'a'),
+          std::string("mock://sim?profile=obd2&modules=2"), replay}) {
+        why[0] = '\0';
+        EXPECT_EQ(ecuio_sim_parse_uri(bad.c_str(), &c, why, sizeof why),
+                  ecuio_sim_uri_result::bad)
+            << bad;
+        EXPECT_NE(why[0], '\0') << bad;
+    }
+}
+
 /* ---------- a recording as the simulated ECU (ADR-0046 section 7) ---------- */
 
 namespace {
@@ -5260,8 +5666,8 @@ struct ScratchCsv {
         if (dir == nullptr) {
             dir = std::getenv("TMPDIR");
         }
-        path = std::string(dir != nullptr ? dir : "/tmp") + "/ecuio-" + name +
-               ".csv";
+        path = std::string(dir != nullptr ? dir : "/tmp") + "/" +
+               temp_name(std::string("ecuio-") + name) + ".csv";
         FILE* f = std::fopen(path.c_str(), "wb");
         EXPECT_NE(f, nullptr) << path;
         if (f != nullptr) {

@@ -1,11 +1,6 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
-//          their buffers and def index, the absent signals' counts, the info, support, identity and diagnostics
-//          copies, the timing report's; RecorderTest the recorder's
-//          link); HARNESS: the J2534, ELM327 and
-//          SocketCAN suites, whose workers write support[], identity[],
-//          diagnostics[] and the timing rows
+// Testing: UNIT: CoreTest, RecorderTest (test_core)
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -15,6 +10,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "def_index.h"
+#include "profile_hold.h"
 #include "recorder.h"
 #include "uds_generic.h"
 
@@ -26,6 +22,9 @@
 #include <vector>
 
 struct ecuio_session {
+    /* The registry's set, held from create (profile_hold.h); first, so
+     * it's released after every member that reads the set */
+    ecuio_profile_hold profile_hold;
     std::atomic<bool> closed{false};
     /* The worker was started: a start after it is the transport's no-op,
      * and the session_start probe marks the first only (ADR-0034 section 4).
@@ -73,6 +72,25 @@ struct ecuio_session {
     std::unique_ptr<ecuio_frame_t> record_frame;
     uint8_t learned_lengths[256] = {};
     std::atomic<uint64_t> unsplit_replies{0};
+    /* Computed signals (ADR-0051 section 5), sized by create only when
+     * the set has a computed def, touched only by dispatch: each def's
+     * newest value, its session time and the decode it came from
+     * (decode 0 is none yet), and one plan per computed def. */
+    struct latest_value {
+        double value = 0.0;
+        uint64_t time_us = 0;
+        uint64_t decode = 0;
+    };
+    struct computed_plan {
+        uint32_t def = 0; /* the computed def's index */
+        const ecuio_computed_t* program = nullptr;
+        uint32_t inputs[ECUIO_COMPUTED_MAX_INPUTS] =
+            {}; /* the inputs' def indexes */
+        uint64_t max_age_us[ECUIO_COMPUTED_MAX_INPUTS] = {};
+    };
+    std::vector<latest_value> latest;
+    std::vector<computed_plan> computed;
+    uint64_t decodes = 0;
     /* replay://?faults= (ADR-0041): written by the replay worker, read by
      * ecuio_session_get_replay_faults on the caller's thread */
     std::atomic<uint64_t> replay_frames_read{0};

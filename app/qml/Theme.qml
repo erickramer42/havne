@@ -1,12 +1,6 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: test_qml (tests/qml/tst_theme.qml) pins linkColor and
-//          linkLabel for every state and the trace palette's rules
-//          (seriesColor and seriesDash through tst_liveview.qml's rows);
-//          developerMode's effect on the Log page and Settings:
-//          tests/qml/tst_log.qml; dense by the window's shape:
-//          tests/qml/tst_phone.qml; how the palette and a dense page
-//          look is manual smoke (run-havne at 384 x 832 and 832 x 384)
-//          and the phone's run.
+// Testing: QML: QmlTest.theme, QmlTest.liveview, QmlTest.log, QmlTest.phone
+//          (test_qml); Manual smoke
 pragma Singleton
 import QtQuick
 
@@ -49,10 +43,12 @@ QtObject {
     readonly property bool mobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
 
     // A value this old is stale: Live dims its row and the chart breaks
-    // its trace across the gap, and the Dashboard dims its gauge. 3 s is
-    // generous against a full rotation of the requests, at most the
-    // engine's 100 ms wait each, so about 1 s for the obd2 set.
-    readonly property int staleMs:          3000
+    // its trace across the gap, and the Dashboard dims its gauge. Core's
+    // age (ECUIO_VALUE_STALE_US), the one past which a computed signal's
+    // input gives no value, so what the UI dims and what core refuses
+    // agree. 3 s is generous against a full rotation of the requests, at
+    // most the engine's 100 ms wait each, so about 1 s for the obd2 set.
+    readonly property int staleMs:          Bridge.valueStaleMs
 
     // The whole UI's zoom, set with Ctrl + / Ctrl - / Ctrl 0 or from
     // Settings. Main.qml lays the UI out at the window's size divided by

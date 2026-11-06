@@ -372,3 +372,14 @@ plot rank's is, so the validator no longer checks that byte (one
 reserved byte fewer in `SignalsTest.ValidatorRefusesEveryNonzeroReservedByte`);
 the layout, its size and `ECUIO_SIGNAL_SET_LAYOUT` are unchanged, and
 a set that leaves it zero groups every def under Other.
+
+## Appendix: signal files (2026-11-05)
+
+[ADR-0051](0051-signal-files.md), to be built in v0.5.0, raises
+`ECUIO_SIGNAL_SET_LAYOUT` from 3 to 4: the set gains its enum table and
+its computed programs, two pointers and two counts that the set's
+`reserved[4]` can't hold on 64-bit. It gives the def's `reserved[1]`
+(offset 100) to an enum's first entry and count, or a computed def's
+program, and defines the first flag, `ECUIO_DEF_FLAG_COMPUTED`; the
+validator accepts that bit and refuses any other. `reserved[0]` stays
+earmarked for the unit's quantity, and `reserved[2..5]` stay free.

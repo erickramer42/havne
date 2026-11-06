@@ -1,13 +1,17 @@
 name: CI
 
+# The PR to main (the one PR per release from dev, or a hotfix/* PR) is
+# the gate, and the push its merge makes to main is the run the release
+# job's CI gate reads (and the only one that saves the iOS kit's cache).
+# Pushes to dev and feature branches get no run of their own: they are
+# checked locally, and a manual run on dev checks one between releases.
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main]
   # Actions > CI > Run workflow, or: gh workflow run ci.yml --ref <branch>
-  # [-f ios_smoke=true | -f smoke_only=true]. Feature branches get no run
-  # of their own (dev's push run is the gate). A manual run skips the
+  # [-f ios_smoke=true | -f smoke_only=true]. A manual run skips the
   # 20-minute iOS simulator smoke unless
   # asked: ios_smoke adds it to the whole run, smoke_only runs it with
   # core-and-tests alone. [ios-smoke] in a pushed commit's message also
@@ -40,6 +44,13 @@ on:
 
 permissions:
   contents: read
+
+# A push to a PR's branch cancels the PR's run it supersedes: the newer
+# run tests everything the older one would have. main's runs and manual
+# runs are never canceled.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every `cmake --build` and every ctest run (coverage.sh's too) runs this
 # many jobs at once: without it Make builds one file at a time, MSBuild one
@@ -110,8 +121,8 @@ jobs:
           sudo ip link set vcan0 mtu 72
           sudo ip link set up vcan0
 
-      # ECUIO_VCAN_REQUIRED: VcanTest and SocketCanBusTest fail rather than
-      # skip without vcan0
+      # ECUIO_VCAN_REQUIRED: test_vcan's suites and CliPluginRunTest fail
+      # rather than skip without vcan0
       - name: Run tests
         env:
           UBSAN_OPTIONS: print_stacktrace=1
@@ -136,8 +147,10 @@ jobs:
   # this job runs them. The fuzzer and sanitizer runtimes come from
   # libclang-rt-<major>-dev, installed for the image's clang and proved
   # by a one-line link before the build. Not ctest tests: the suite
-  # stays deterministic. A committed seed corpus (the recorder's
-  # frames.csv is the natural source) is future work.
+  # stays deterministic. The harnesses that read a structured format
+  # (JSON, signal files, plugins, OBDb sets) start from the seeds
+  # fuzz/seeds.py builds from the committed fixtures: from nothing, 60 s
+  # barely leaves the JSON reader. The others start empty.
   fuzz:
     if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
@@ -146,7 +159,8 @@ jobs:
       FUZZERS: >-
         fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply
         fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp
-        fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus
+        fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json
+        fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -178,13 +192,15 @@ jobs:
           cmake --build build-fuzz --target $FUZZERS
 
       # Each harness runs 60 s on one core, as many at once as the runner
-      # has cores, each into its own log. Every log is printed in its own
-      # group, and the step fails if any harness found something.
+      # has cores, each into its own log, from its corpus folder (the
+      # seeds, or empty). Every log is printed in its own group, and the
+      # step fails if any harness found something.
       - name: Run the fuzzers (60 s each)
         run: |
           mkdir -p artifacts fuzz-logs
+          python3 fuzz/seeds.py corpus
           printf '%s\n' $FUZZERS | xargs -P "$(nproc)" -I{} sh -c \
-            './build-fuzz/fuzz/{} -max_total_time=60 -timeout=25 -rss_limit_mb=2560 \
+            'mkdir -p corpus/{} && ./build-fuzz/fuzz/{} corpus/{} -max_total_time=60 -timeout=25 -rss_limit_mb=2560 \
                -artifact_prefix=artifacts/{}- -print_final_stats=1 > fuzz-logs/{}.log 2>&1 \
              || echo {} >> fuzz-logs/failed'
           for f in $FUZZERS; do
@@ -429,7 +445,7 @@ jobs:
           cmake --build build
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
-      # frames (the mock's 12-byte telemetry), whatever the kernel's
+      # frames (the mock's 16-byte telemetry), whatever the kernel's
       # default; it's set before the link goes up, as vcan requires
       - name: Bring up vcan0
         run: |
@@ -438,8 +454,8 @@ jobs:
           sudo ip link add dev vcan0 type vcan
           sudo ip link set vcan0 mtu 72
           sudo ip link set up vcan0
-      # ECUIO_VCAN_REQUIRED: VcanTest and SocketCanBusTest fail rather than
-      # skip without vcan0
+      # ECUIO_VCAN_REQUIRED: test_vcan's suites and CliPluginRunTest fail
+      # rather than skip without vcan0
       - name: Run tests
         env:
           ECUIO_VCAN_REQUIRED: '1'
@@ -491,22 +507,30 @@ jobs:
 
   # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
   # Ubuntu it supports: an AppImage runs where glibc is at least its
-  # build machine's
+  # build machine's. One per architecture: x86_64, and aarch64 on
+  # GitHub's ARM runner
   linux-appimage:
     if: ${{ !inputs.smoke_only }}
-    runs-on: ubuntu-24.04
+    name: linux-appimage (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04, qt_host: linux, qt_arch: linux_gcc_64 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, qt_host: linux_arm64, qt_arch: linux_gcc_arm64 }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Qt 6.12.0 desktop (linux_gcc_64)
+      - name: Install Qt 6.12.0 desktop (${{ matrix.qt_arch }})
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           cache: true
           version: '6.12.0'
-          host: 'linux'
+          host: ${{ matrix.qt_host }}
           target: 'desktop'
-          arch: 'linux_gcc_64'
+          arch: ${{ matrix.qt_arch }}
 
       # rcc's embedded files and the squashfs take the commit's time, not
       # the checkout's, so two builds of one commit match (ADR-0035 section 4)
@@ -535,7 +559,7 @@ jobs:
       - name: Upload the AppImage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: havne-linux-x86_64
+          name: havne-linux-${{ matrix.arch }}
           path: dist/*.AppImage
           if-no-files-found: error
           retention-days: 14
@@ -545,9 +569,17 @@ jobs:
   # time in another folder, locale, time zone, umask, CPU count and so on;
   # every byte must match. user_group is left out: it needs other
   # accounts on the runner. Then installed and used as a user would.
+  # One per architecture, as linux-appimage.
   linux-packages:
     if: ${{ !inputs.smoke_only }}
-    runs-on: ubuntu-24.04
+    name: linux-packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, debarch: amd64, runner: ubuntu-24.04 }
+          - { arch: aarch64, debarch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     defaults:
       run:
@@ -555,10 +587,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Without recommends: diffoscope's full form recommends a long list
+      # of comparison tools (ghc alone is 79 MB), which a slow archive
+      # mirror took past the job's timeout. reprotest's own recommends
+      # are named instead (its variations' tools), with diffoscope-minimal,
+      # which compares the packages if a build differs
       - name: Install the tools
+        timeout-minutes: 8
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build dpkg-dev systemtap-sdt-dev reprotest diffoscope gdb pkg-config
+          sudo apt-get install -y --no-install-recommends ninja-build dpkg-dev \
+            systemtap-sdt-dev reprotest disorderfs faketime locales-all \
+            diffoscope-minimal gdb pkg-config
 
       - name: Build twice under reprotest
         run: |
@@ -581,13 +621,13 @@ jobs:
           "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
           python3 packaging/sbom.py selftest --out "$RUNNER_TEMP/selftest.spdx.json"
           python3 packaging/sbom.py build --version "$VERSION" --tag "v$VERSION" --out "$RUNNER_TEMP/core.spdx.json" \
-            "dist/havne-core_${VERSION}_amd64.deb" "dist/havne-core-$VERSION-linux-x86_64.tar.gz"
+            "dist/havne-core_${VERSION}_${{ matrix.debarch }}.deb" "dist/havne-core-$VERSION-linux-${{ matrix.arch }}.tar.gz"
           for f in selftest core; do "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$RUNNER_TEMP/$f.spdx.json"; done
 
       - name: Upload the packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: havne-core-linux-x86_64
+          name: havne-core-linux-${{ matrix.arch }}
           path: dist/havne-core*
           if-no-files-found: error
           retention-days: 14
@@ -723,14 +763,18 @@ jobs:
   ios-build:
     if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The iOS kit is the largest cache entry (about 3.6 GB): a copy
+      # per branch takes the repository past the Actions cache's 10 GB
+      # and evicts the other kits, so only main saves and restores it,
+      # and other branches install it from the mirrors each run
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
@@ -812,10 +856,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Cached on main only, as ios-build's kit
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: ${{ github.ref == 'refs/heads/main' }}
           version: '6.12.0'
           host: 'mac'
           target: 'ios'

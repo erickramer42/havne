@@ -1,38 +1,5 @@
 // File/layer: tests/qml/tst_settings.qml | Qt Quick Test, QML tier
-// Testing: Settings composes the URI from a preset (the base), the
-//          profile row and uds-generic's DID field, reads a typed URI
-//          back into the row and the field and keeps its other keys (the
-//          vehicle run sheet's URIs pass through untouched), refuses
-//          query characters in the DID field, shows core's refusal of a
-//          DID list in the error line, connects a composed uds-generic
-//          URI through the mock, lists serial ports after the interfaces
-//          (a port's row and the elm327:// preset filling the field) and
-//          the phone's Bluetooth adapters after them (a bt: or ble: row's
-//          stream URI; on the desktop a bt: URI refused, its reason in the
-//          error line), and
-//          locks every control, the device rows among them, while a
-//          connect is in flight (Windows: the fake's open stalled by a
-//          knob); the Units row sets the bridge's unit system, connected
-//          or not; a new page (a restart) gets back the last URI that
-//          connected, read into the row, and the Record switch, while a
-//          refused URI isn't kept; a device's row shows the versions last
-//          seen there (Windows: the fake's, from a connect), across a
-//          restart, and a damaged store shows none. The Vehicle section
-//          (ADR-0027): New, Rename, Duplicate and the defaults, Forget
-//          and Forget all asking once, kept across a restart; picking
-//          fills the field; locked during a session; a mock session
-//          leaves the vehicle alone, and (Windows, the fake) an adapter's
-//          connect keeps its URI and plotted signals and its VIN is
-//          learned and logged. A recording that ends is listed, and its
-//          row fills the field with a replay that connects, under the
-//          profile and DIDs recorded. At the narrowest phone's width (320 px) every item lies
-//          inside the page, a long URI in the field and a recording's row
-//          too; the URI and
-//          DID fields ask the keyboard for no
-//          capitals or predictions; the WiFi presets fill their
-//          addresses. The live registry, and
-//          the units kept across a restart (Main.qml's Settings), are
-//          manual smoke.
+// Testing: QML: QmlTest.settings (test_qml)
 
 import QtCore
 import QtQuick
@@ -87,6 +54,9 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
         Bridge.vehicleLabel = ""
+        Bridge.deleteUnusedSignalFiles([])   // the store starts empty too
+        for (const p of Bridge.plugins())     // and so do the plugins
+            Bridge.removePlugin(p.sha256)
     }
 
     function find(within, name) {
@@ -488,15 +458,21 @@ TestCase {
                                  modesSupported: ["listen-only", "one-shot"] }),
                 "CAN interface, one-shot at 250000 bit/s, bus-off, for requests")
 
-        // SocketCAN only listens: uds-generic gives way to the default
-        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16"
+        // SocketCAN asks an ECU through core's ISO-TP under a profile that
+        // requests (ADR-0040): uds-generic stays with its request keys; under
+        // Default, raw there, which only listens, the request keys go
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
         compare(page.profileChoice, "uds-generic")
         mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
-        compare(uri.text, "socketcan://vcan0")
+        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
+        compare(page.profileChoice, "uds-generic")
+        uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")
+        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        compare(uri.text, "socketcan://vcan0?baud=500000")
         press(page, "profile_raw")
         mouseClick(find(list.itemAtIndex(2), "deviceRowArea"))
-        compare(uri.text, "socketcan://can1?profile=raw", "the row's base, the query kept")
+        compare(uri.text, "socketcan://can1?baud=500000&profile=raw", "the row's base, the query kept")
     }
 
     // On a phone the field and Connect are scrolled out of view by the
@@ -930,6 +906,537 @@ TestCase {
         compare(find(page, "vehicleConfirmText").text, "Forget all vehicles?")
         press(page, "vehicleConfirm")
         compare(page.vehicles, VehicleBook.empty())
+    }
+
+    // ---- The vehicle's signal files (ADR-0051) ----
+
+    // A signal file of one DID on the engine ECU
+    function signalFileText(name, did) {
+        return JSON.stringify({
+            havne_signals: 1, name: name, source: { name: "t" },
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "a", name: "A", read: { service: "22", number: did || "D100" },
+                        field: { byte: 0, bits: 8 } }]
+        })
+    }
+
+    function importFile(page, fileName, name, did) {
+        const url = Harness.writeScratchFile(fileName, signalFileText(name, did))
+        verify(url.toString() !== "", "the scratch file is written")
+        return page.importSignalFile(url)
+    }
+
+    function test_anImportedFileIsTheVehiclesAndAProfile() {
+        let page = createPage()
+        verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")
+        press(page, "vehicleNew")
+        verify(find(page, "signalFilesNone").visible)
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(page.pickedVehicle.signals.length, 1)
+        compare(page.pickedVehicle.signals[0].profile, "user.extras")
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Extras: 1 signal, profile user.extras")
+        compare(find(page, "signalNote").text, "Extras added: 1 signal, profile user.extras")
+        compare(page.vehicleProfiles[0].hint, "Your signal file Extras: 1 signal")
+        verify(!find(page, "signalFilesNone").visible)
+        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
+
+        // The file's profile is a choice under What to read
+        find(page, "uriField").text = "mock://demo"
+        press(page, "profile_user.extras")
+        compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
+        compare(find(page, "errorLabel").text, "")
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "a session decodes with it")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+
+        // A new page registers it again (the bridge, which keeps the file
+        // loaded, outlives it; a restart's read from the copy is
+        // BridgeTest.SignalFileUseRegistersItsProfile's)
+        page.destroy()
+        wait(10)
+        page = createPage()
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Extras: 1 signal, profile user.extras")
+        verify(findChild(page, "profile_user.extras"), "still a choice")
+
+        // Two signals are counted as signals
+        const pair = JSON.parse(signalFileText("Pair"))
+        pair.signals.push({ key: "b", name: "B", read: { service: "22", number: "D101" },
+                            field: { byte: 0, bits: 8 } })
+        verify(page.importSignalFile(Harness.writeScratchFile("pair.json", JSON.stringify(pair))))
+        compare(find(page, "signalNote").text, "Pair added: 2 signals, profile user.pair")
+        compare(find(find(page, "signalFile_1"), "signalFileText").text,
+                "Pair: 2 signals, profile user.pair")
+        compare(page.vehicleProfiles[1].hint, "Your signal file Pair: 2 signals")
+    }
+
+    function test_aRefusedOrClashingFileIsNotAdded() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
+        verify(!page.importSignalFile(bad))
+        const words = find(page, "signalProblem").text
+        verify(words.includes("bitz") && words.includes("line"), words)
+        verify(!words.includes("bad.json"), "never the path")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles(), [])
+
+        verify(importFile(page, "a.json", "Extras"))
+        compare(find(page, "signalProblem").text, "", "a good import clears the last refusal")
+        press(page, "vehicleNew")
+        verify(!importFile(page, "b.json", "Extras", "D101"), "another file making user.extras")
+        compare(find(page, "signalProblem").text,
+                "user.extras is made by another file already (Extras, in Vehicle 1)")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles().length, 1, "the refused copy went")
+
+        verify(importFile(page, "a2.json", "Extras"), "the same file in another vehicle is shared")
+        compare(Harness.storedSignalFiles().length, 1)
+    }
+
+    // A copy goes when no vehicle keeps it; the vehicle's own file asks first
+    function test_removeAndForgetDeleteTheCopiesNoVehicleKeeps() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "a.json", "Extras"))
+        press(page, "vehicleDuplicate")
+        compare(page.pickedVehicle.signals.length, 1, "Duplicate copies the files")
+        press(page, "signalRemove_0")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles().length, 1, "the first vehicle keeps it")
+        page.pickVehicle("v1")
+        press(page, "signalRemove_0")
+        compare(Harness.storedSignalFiles(), [], "no vehicle keeps it now")
+
+        verify(importFile(page, "own.json", "Mine"))
+        const own = page.pickedVehicle.signals[0]
+        page.saveVehicles(VehicleBook.setOwn(page.vehicles, own))
+        press(page, "signalRemove_0")
+        compare(find(page, "vehicleConfirmText").text,
+                "Remove Mine? It was written here, and no other copy exists")
+        compare(find(page, "vehicleConfirm").text, "Remove")
+        press(page, "vehicleCancel")
+        compare(page.pickedVehicle.signals.length, 1, "Cancel keeps it")
+        press(page, "signalRemove_0")
+        press(page, "vehicleConfirm")
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles(), [])
+
+        verify(importFile(page, "c.json", "Body"))
+        press(page, "vehicleForgetAll")
+        press(page, "vehicleConfirm")
+        compare(Harness.storedSignalFiles(), [], "Forget all takes the copies")
+        verify(!findChild(page, "profile_user.body"))
+    }
+
+    function importExtending(page, fileName, name) {
+        const doc = JSON.parse(signalFileText(name))
+        doc.extends = "obd2"
+        const url = Harness.writeScratchFile(fileName, JSON.stringify(doc))
+        verify(url.toString() !== "", "the scratch file is written")
+        return page.importSignalFile(url)
+    }
+
+    // A file that extends obd2 takes obd2's place on an adapter, where
+    // Default is obd2 (ADR-0052): its button reads "obd2 + <name>" and
+    // Default's goes once the field reads another profile. Imported while
+    // the field reads Default with no profile= of its own, it's read
+    // instead, and the note says so; a profile the user picked stays, a
+    // second such file keeps a button of its own, and on mock:// Default
+    // isn't obd2, so nothing stands in
+    function test_aFileExtendingObd2TakesItsPlaceOnAnAdapter() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const field = find(page, "uriField")
+        field.text = "elm327://COM9"
+        compare(page.profileChoice, "default")
+        verify(importExtending(page, "plus.json", "Plus"))
+        compare(find(page, "signalNote").text,
+                "Plus added: now reading obd2 + Plus, profile user.plus")
+        compare(field.text, "elm327://COM9?profile=user.plus")
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Plus: obd2 and 1 of your own, profile user.plus")
+        const plus = find(page, "profile_user.plus")
+        compare(plus.text, "obd2 + Plus")
+        verify(plus.highlighted)
+        compare(page.profiles.filter(p => p.name === "user.plus").length, 1,
+                "one button for the file: the stand-in")
+        tryVerify(() => findChild(page, "profile_default") === null, 1000,
+                  "the file reads all of obd2: Default goes")
+        compare(find(page, "profileHint").text,
+                "obd2's signals and 1 of your own, from your signal file Plus")
+
+        // Typed back to Default, both show, so the row is the URI's
+        field.text = "elm327://COM9"
+        verify(find(page, "profile_default").highlighted)
+        verify(!find(page, "profile_user.plus").highlighted)
+
+        // A second such file keeps its own button; Default stays read
+        verify(importExtending(page, "more.json", "More"))
+        compare(find(page, "signalNote").text,
+                "More added: obd2 and 1 of your own, profile user.more")
+        compare(field.text, "elm327://COM9")
+        compare(find(page, "profile_user.more").text, "More")
+        compare(page.vehicleProfiles.find(p => p.name === "user.more").hint,
+                "Your signal file More: obd2 and 1 of your own", "its own, not obd2's")
+        compare(find(page, "profile_user.plus").text, "obd2 + Plus")
+
+        // A profile the user picked stays when one is imported
+        press(page, "vehicleNew")
+        field.text = "elm327://COM9?profile=raw"
+        verify(importExtending(page, "third.json", "Third"))
+        compare(field.text, "elm327://COM9?profile=raw")
+        compare(page.profileChoice, "raw")
+        compare(find(page, "signalNote").text,
+                "Third added: obd2 and 1 of your own, profile user.third")
+        compare(find(page, "profile_user.third").text, "obd2 + Third")
+        tryVerify(() => findChild(page, "profile_default") === null, 1000)
+
+        // On mock://, Default isn't obd2: the file is a choice of its own
+        field.text = "mock://demo"
+        compare(find(page, "profile_user.third").text, "Third")
+        verify(find(page, "profile_default"))
+    }
+
+    // ---- The app's plugins (ADR-0052) ----
+
+    // A packed plugin imported is listed with its variants; the VIN
+    // (typed in the lookup here: the mock has none) proposes the variants
+    // it covers for the picked vehicle, and the one picked is kept in the
+    // vehicle, read through the URI's profile, offered under What to read
+    // and connected; removed, it goes from the list and the row. An
+    // import of its id replaces it, and a package core refuses says so
+    function test_aPluginIsImportedMatchedByTheVinAndConnected() {
+        const page = createPage()
+        verify(find(page, "pluginsNone").visible)
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        compare(find(page, "pluginNote").text,
+                "Example: the simulated car 1.0.0 added: plugin.example-sim.base, "
+                + "plugin.example-sim.my2019")
+        compare(find(find(page, "plugin_0"), "pluginText").text,
+                "Example: the simulated car 1.0.0: base, my2019")
+        verify(!find(page, "pluginsNone").visible)
+        compare(Harness.storedPlugins().length, 1)
+
+        press(page, "vehicleNew")
+        verify(find(page, "pluginMatchesText").text.startsWith("No match yet"))
+        verify(findChild(page, "pluginMatch_0") === null)
+        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"   // 2021
+        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginMatch_1").text, "Example: the simulated car: my2019")
+        find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016
+        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "before my2019")
+        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"
+
+        const field = find(page, "uriField")
+        field.text = "mock://demo"
+        press(page, "pluginMatch_1")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
+        compare(field.text, "mock://demo?profile=plugin.example-sim.my2019")
+        verify(find(page, "pluginMatch_1").highlighted)
+        const choice = find(page, "profile_plugin.example-sim.my2019")
+        compare(choice.text, "Example: the simulated car: my2019")
+        verify(choice.highlighted)
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
+        compare(find(page, "errorLabel").text, "")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+
+        // Its id again replaces it; a package core refuses says why
+        verify(page.importPlugin(Harness.writeExamplePlugin("newer.havne-plugin.json", "1.1.0")))
+        compare(find(page, "pluginNote").text, "Example: the simulated car 1.1.0 replaces 1.0.0")
+        compare(Harness.storedPlugins().length, 1)
+        verify(!page.importPlugin(Harness.writeScratchFile("bad.havne-plugin.json", "{}")))
+        const words = find(page, "pluginProblem").text
+        verify(words.includes("line") && !words.includes("bad.havne"), words)
+
+        press(page, "pluginRemove_0")
+        compare(find(page, "pluginProblem").text, "")
+        verify(find(page, "pluginsNone").visible)
+        compare(Harness.storedPlugins(), [])
+        tryVerify(() => findChild(page, "profile_plugin.example-sim.my2019") === null, 1000,
+                  "a variant no plugin registers isn't offered")
+        compare(page.pickedVehicle.plugin, "", "a removed plugin's variant is no pick")
+        compare(field.text, "mock://demo", "the field reads Default again")
+    }
+
+
+    // A session's VIN proposes variants (ADR-0052 section 5); nothing that
+    // changes the vehicle is used while it runs, and once it ends its
+    // matches stay to be picked, though the VIN goes with the session. A
+    // pick pressed again is undone, and a button never runs past the page
+    function test_aSessionsVinProposesVariantsPickedOnceItEnds() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(page.importPlugin(Harness.writeExamplePlugin("example.havne-plugin.json")))
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // a 2021 the example covers
+        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "proposed")
+        verify(!find(page, "pluginMatch_0").enabled)
+        verify(!find(page, "signalImport").enabled)
+        verify(!find(page, "formSave").enabled)
+        verify(!find(page, "pluginImport").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        verify(findChild(page, "pluginMatch_0") !== null, "the session's matches stay")
+        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        verify(find(page, "pluginMatch_0").enabled)
+        press(page, "pluginMatch_0")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.base")
+        compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
+        press(page, "pluginMatch_0")
+        compare(page.pickedVehicle.plugin, "", "pressed again, undone")
+        compare(find(page, "uriField").text, "mock://demo")
+
+        // Its row narrower than its text (a phone, a long plugin name)
+        const button = find(page, "pluginMatch_0")
+        button.parent.width = 100
+        verify(button.implicitWidth > 100)
+        verify(button.width <= 100, button.width + " in a row of 100")
+    }
+
+    // A copy's own signals are its own: its own file is copied under a
+    // name of its own, so each vehicle's Save goes ahead (one file to a
+    // profile); and a label used again gets an own file named apart
+    function test_eachVehiclesOwnSignalsSaveApart() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const first = page.pickedVehicle.id
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        press(page, "vehicleDuplicate")
+        verify(page.pickedVehicle.id !== first)
+        verify(page.pickedVehicle.own !== "" && page.pickedVehicle.own !== VehicleBook.find(page.vehicles, first).own,
+               "the copy's own file is a copy")
+        compare(page.ownFile.name, "Vehicle 1 (copy) own")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp"])
+        typeSignal(page, "Gear", "D101")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.length, 2)
+
+        press(page, "vehicle_" + first)
+        compare(page.ownSignals.map(s => s.key), ["trans_temp"], "the first is as it was")
+        typeSignal(page, "Fluid Pressure", "D102")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.length, 2)
+
+        // Renamed, its label is free for New, whose own file is named apart
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleRename")
+        press(page, "vehicleNew")
+        compare(page.pickedVehicle.label, "Vehicle 1")
+        typeSignal(page, "Oil Temp", "D103")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownFile.name, "Vehicle 1 own 2")
+    }
+
+    // The form and the section's words are the picked vehicle's: a pick or
+    // New starts them afresh, an Edit's signal never lands in another
+    // vehicle, and a question asked about one goes with it
+    function test_aPickStartsTheFormAndNotesAfresh() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const first = page.pickedVehicle.id
+        const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
+        verify(!page.importSignalFile(bad))
+        verify(find(page, "signalProblem").text !== "")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        press(page, "vehicleNew")
+        compare(find(page, "signalProblem").text, "", "the other vehicle's refusal goes")
+        const second = page.pickedVehicle.id
+
+        press(page, "vehicle_" + first)
+        press(page, "ownEdit_0")
+        compare(find(page, "formName").text, "Trans Temp")
+        press(page, "vehicle_" + second)
+        compare(find(page, "formName").text, "", "the Edit stays with its vehicle")
+        compare(page.editingKey, "")
+
+        press(page, "vehicle_" + first)
+        press(page, "ownRemove_0")
+        verify(page.confirming !== "", "asked")
+        page.saveVehicles(VehicleBook.pick(page.vehicles, second))   // as a car recognized
+        compare(page.confirming, "", "the question goes with the pick")
+    }
+
+    // Edit then a new name renames the signal; a new signal whose name
+    // makes a saved one's key is refused, not saved over it; the same name
+    // again replaces it, as designed
+    function test_anEditRenamesAndAKeyIsNeverTakenTwice() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        press(page, "ownEdit_0")
+        find(page, "formName").text = "Trans Fluid Temp"
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.name), ["Trans Fluid Temp"])
+
+        page.clearForm()
+        typeSignal(page, "Boost (psi)", "D101")
+        press(page, "formSave")
+        page.clearForm()
+        typeSignal(page, "Boost psi", "D102")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text,
+                "Boost (psi), saved already, has the key boost_psi too: edit it, or give this one another name")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D101"])
+        page.clearForm()
+        typeSignal(page, "Boost (psi)", "D103")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D103"], "the same name replaces")
+
+        // An Edit renamed to another signal's key is refused too
+        press(page, "ownEdit_0")
+        find(page, "formName").text = "Boost psi"
+        press(page, "formSave")
+        verify(find(page, "formProblem").text.startsWith("Boost (psi), saved already"))
+        compare(page.ownSignals.length, 2)
+    }
+
+    // A file the vehicle has already isn't added again; a Read once's
+    // reply shows only on the vehicle it was asked for
+    function test_aFileAgainAndAReplyElsewhereSaySo() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        verify(!importFile(page, "extras.json", "Extras"))
+        compare(find(page, "signalNote").text, "Extras is this vehicle's already")
+        compare(page.pickedVehicle.signals.length, 1)
+
+        const reply = { ok: true, request: "22 1E 1C", reply: "62 1E 1C 12 34",
+                        value: "4660", nrc: 0, words: "" }
+        page.readOnceFor = "another vehicle"
+        Bridge.readOnceResult(reply)
+        compare(page.readResult, null, "asked for another vehicle")
+        page.readOnceFor = page.pickedId
+        Bridge.readOnceResult(reply)
+        compare(page.readResult.reply, "62 1E 1C 12 34")
+    }
+
+    // ---- The vehicle's own signals (ADR-0051's form) ----
+
+    function typeSignal(page, name, number, bits) {
+        find(page, "formName").text = name
+        find(page, "formNumber").text = number
+        if (bits !== undefined)
+            find(page, "formBits").text = bits
+    }
+
+    function ownText(page, i) {
+        return find(find(page, "ownSignal_" + i), "ownSignalText").text
+    }
+
+    function test_theFormSavesTheVehiclesOwnSignals() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(find(page, "signalForm").visible)
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(find(page, "formNote").text, "Trans Temp saved in Vehicle 1 own")
+        compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
+        compare(find(find(page, "signalFile_0"), "signalFileText").text,
+                "Vehicle 1 own: 1 signal, profile user.vehicle-1-own")
+        verify(findChild(page, "profile_user.vehicle-1-own"), "a profile under What to read")
+        compare(page.pickedVehicle.own, page.pickedVehicle.signals[0].sha256)
+        compare(Harness.storedSignalFiles().length, 1)
+
+        // A second signal joins the file; the last copy goes
+        page.fillForm(SignalForm.emptyFields())
+        typeSignal(page, "Gear", "D101")
+        press(page, "formKind_enum")
+        find(page, "formValues").text = "0=Park, 3=Drive"
+        press(page, "formSave")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp", "gear"])
+        compare(page.ownSignals[1].values, { "0": "Park", "3": "Drive" })
+        compare(Harness.storedSignalFiles().length, 1, "one copy: the file's newest")
+
+        // Edit fills the form; Save replaces the signal of that name
+        press(page, "ownEdit_0")
+        compare(find(page, "formName").text, "Trans Temp")
+        compare(find(page, "formBits").text, "16")
+        compare(page.formKind, "number")
+        find(page, "formNumber").text = "1E1D"
+        press(page, "formSave")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1D", "D101"])
+
+        // The last signal's Remove takes the file, once asked: it was
+        // written here and has no copy elsewhere
+        press(page, "ownRemove_1")
+        compare(page.ownSignals.length, 1)
+        compare(find(page, "formNote").text, "Removed from Vehicle 1 own")
+        press(page, "ownRemove_0")
+        compare(page.ownSignals.length, 1, "asked first")
+        compare(find(page, "vehicleConfirmText").text,
+                "Remove Vehicle 1 own? It was written here, and no other copy exists")
+        press(page, "vehicleConfirm")
+        compare(page.pickedVehicle.signals, [])
+        compare(page.pickedVehicle.own, "")
+        compare(Harness.storedSignalFiles(), [])
+    }
+
+    function test_theFormShowsTheLoadersWords() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Bad", "1E1C", "12")
+        press(page, "formSave")
+        const words = find(page, "formProblem").text
+        verify(words.includes("big-endian"), words)
+        verify(!/^line \d/.test(words), "no line and column: " + words)
+        compare(page.ownSignals, [])
+        compare(Harness.storedSignalFiles(), [])
+
+        // Read once checks the draft first, then needs an adapter
+        find(page, "uriField").text = "mock://demo"
+        press(page, "formReadOnce")
+        verify(find(page, "formProblem").text.includes("big-endian"))
+        find(page, "formBits").text = "16"
+        press(page, "formReadOnce")
+        compare(find(page, "formProblem").text,
+                "Read once needs an adapter: j2534://, elm327:// or socketcan://")
+        find(page, "formRx").text = "7B8"
+        press(page, "formReadOnce")
+        compare(find(page, "formProblem").text,
+                "The module needs its request ID: only 7E8 to 7EF and 18DAF1xx have one by rule")
+
+        // No Read once while a session holds the adapter
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000)
+        verify(!find(page, "formReadOnce").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+    }
+
+    // The fake DLL's ECU answers 1E1C with 12 34
+    function test_readOnceShowsTheRepliesBytesAndValue() {
+        if (Harness.fakeDllPath === "")
+            skip("the fake J2534 DLL is Windows only")
+        const page = createPage()
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath + "?profile=obd2"
+        typeSignal(page, "Test", "1E1C", "16")
+        find(page, "formScale").text = "0.1"
+        find(page, "formUnit").text = "kPa"
+        find(page, "formDecimals").text = "1"
+        press(page, "formReadOnce")
+        compare(find(page, "formProblem").text, "")
+        tryVerify(() => page.readResult !== null, 15000, "the read ends")
+        compare(find(page, "formReadResult").text, "Asked 22 1E 1C, got 62 1E 1C 12 34: 466.0 kPa")
+        verify(!Bridge.connected, "no session left behind")
     }
 
     function test_pickingAVehicleFillsItsConnection() {

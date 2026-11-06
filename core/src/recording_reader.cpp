@@ -1,10 +1,6 @@
 // File/layer: core/src/recording_reader.cpp | C++17, Qt-free; the reader
 //             (ADR-0049 section 5)
-// Testing: HARNESS: RecordingTest (test_core): folders the recorder wrote
-//          (the mock, the replay fixture) and folders written by hand
-//          (an older recording, torn and refused rows, markers); the
-//          queries against a scan of the rows, from several threads, and
-//          the memory bound through the seams in internal.h
+// Testing: UNIT: RecordingTest (test_core)
 //
 // One pass at open reads events.log's header (the format, the UTC start,
 // each signal's kind, decimal places and plot rank) and signals.csv, and
@@ -16,6 +12,7 @@
 #include "error_detail.h"
 #include "frames_csv.h" /* native_path, file_size, seek_to */
 #include "recording_rows.h"
+#include "sha256.h"
 
 #include "ecuio/internal.h"
 #include "ecuio/recording.h"
@@ -99,8 +96,13 @@ struct signal_entry {
     double highest = NAN;
     std::vector<number_second> numbers;
     std::vector<text_second> texts;
+    std::vector<ecuio_enum_entry_t> labels; /* an enum's, raw ascending */
 
     bool text() const { return (pub.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0; }
+    bool enumeration() const
+    {
+        return (pub.flags & ECUIO_RECORDING_SIGNAL_ENUM) != 0;
+    }
 };
 
 struct marker_entry {
@@ -213,6 +215,7 @@ struct ecuio_recording {
     std::string signals_path;
     uint64_t end_offset = 0; /* past signals.csv's last row the open read */
     ecuio_recording_info_t info{};
+    ecuio_recording_signals_t signal_file{};
     std::vector<signal_entry> signals;
     std::unordered_map<std::string, uint32_t> by_name;
     std::vector<index_entry> index;
@@ -230,7 +233,9 @@ struct ecuio_recording {
     size_t cache_limit = kCacheBytes; /* a test's seam lowers it */
 
     uint32_t add_signal(const std::string& name);
+    bool read_label(const char* text, size_t n, const char** why);
     bool read_events(const std::string& folder);
+    void read_signal_file(const std::string& folder);
     bool read_signals(ecuio_open_progress_t progress, void* user,
                       bool* canceled);
     bool read_markers(const std::string& folder);
@@ -261,6 +266,70 @@ uint32_t ecuio_recording::add_signal(const std::string& name)
     const auto i = static_cast<uint32_t>(signals.size() - 1);
     by_name.emplace(name, i);
     return i;
+}
+
+/* A format 3 label line's text: one label of an enum signal a signal
+ * line above declared, raw values ascending as a set's enums are, at
+ * most a def's ECUIO_ENUM_MAX_ENTRIES */
+bool ecuio_recording::read_label(const char* text, size_t n, const char** why)
+{
+    rows::header_label hl;
+    if (!rows::parse_header_label(text, n, hl, why)) {
+        return false;
+    }
+    const auto it = by_name.find(hl.signal);
+    if (it == by_name.end() || !signals[it->second].enumeration()) {
+        *why = "the label names no enum signal above it";
+        return false;
+    }
+    std::vector<ecuio_enum_entry_t>& labels = signals[it->second].labels;
+    if (!labels.empty() && hl.raw <= labels.back().raw) {
+        *why = "the signal's labels aren't in ascending raw order";
+        return false;
+    }
+    if (labels.size() >= ECUIO_ENUM_MAX_ENTRIES) {
+        *why = "the signal has more labels than an enum holds";
+        return false;
+    }
+    ecuio_enum_entry_t e{};
+    e.raw = hl.raw;
+    std::memcpy(e.label, hl.label.data(), hl.label.size());
+    labels.push_back(e);
+    return true;
+}
+
+static_assert(ecuio_recording_rows::kLabelMax == ECUIO_ENUM_LABEL_MAX,
+              "a label line's bound is an enum entry's");
+
+/* signals.json beside the recording, whether or not the header names
+ * it: its length, and with the header's hash whether its bytes are those.
+ * Read in pieces, so a large file costs no memory; one that can't be
+ * read counts as absent. */
+void ecuio_recording::read_signal_file(const std::string& folder)
+{
+    file_ptr f = open_file(folder + "/" + rows::kSignalFileName);
+    if (!f) {
+        return;
+    }
+    ecuio_sha256::hasher h;
+    char buf[16384];
+    uint64_t length = 0;
+    size_t got = 0;
+    while ((got = std::fread(buf, 1, sizeof buf, f.get())) > 0) {
+        h.add(buf, got);
+        length += got;
+    }
+    if (std::ferror(f.get()) != 0) {
+        return;
+    }
+    signal_file.flags |= ECUIO_RECORDING_SIGNALS_PRESENT;
+    signal_file.length = length;
+    uint8_t digest[32];
+    h.finish(digest);
+    if ((signal_file.flags & ECUIO_RECORDING_SIGNALS_NAMED) != 0 &&
+        ecuio_sha256::hex(digest) == signal_file.sha256) {
+        signal_file.flags |= ECUIO_RECORDING_SIGNALS_MATCH;
+    }
 }
 
 /* events.log: the format, the header's signals and UTC start, the
@@ -299,6 +368,11 @@ bool ecuio_recording::read_events(const std::string& folder)
                 in_header = true;
                 continue;
             }
+            if (rows::equals(p, n, rows::kFormat3)) {
+                info.format = ECUIO_RECORDING_FORMAT_ENUMS;
+                in_header = true;
+                continue;
+            }
             if (n >= m && std::memcmp(p + n - m, rows::kFormat1End, m) == 0) {
                 info.format = ECUIO_RECORDING_FORMAT_OLDER;
                 in_header = true;
@@ -310,12 +384,27 @@ bool ecuio_recording::read_events(const std::string& folder)
                 in_header = false;
                 continue;
             }
-            if (info.format != ECUIO_RECORDING_FORMAT_CORE) {
+            if (info.format != ECUIO_RECORDING_FORMAT_CORE &&
+                info.format != ECUIO_RECORDING_FORMAT_ENUMS) {
                 continue;
             }
             const char* why = nullptr;
-            if (rows::starts_with(p, n, "signal  ")) {
-                if (!rows::parse_header_signal(p + 8, n - 8, hs, &why)) {
+            if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+                rows::starts_with(p, n, "label  ")) {
+                if (!read_label(p + 7, n - 7, &why)) {
+                    ecuio_detail_set("events.log line %llu: %s",
+                                     static_cast<unsigned long long>(line_no),
+                                     why);
+                    return false;
+                }
+            } else if (rows::starts_with(p, n, "signal  ")) {
+                bool ok = rows::parse_header_signal(p + 8, n - 8, hs, &why);
+                if (ok && hs.enumeration &&
+                    info.format == ECUIO_RECORDING_FORMAT_CORE) {
+                    why = "format 2 has no enum signals";
+                    ok = false;
+                }
+                if (!ok) {
                     ecuio_detail_set("events.log line %llu: %s",
                                      static_cast<unsigned long long>(line_no),
                                      why);
@@ -325,11 +414,27 @@ bool ecuio_recording::read_events(const std::string& folder)
                     signal_entry& s = signals[add_signal(hs.name)];
                     std::memcpy(s.pub.unit, hs.unit.data(), hs.unit.size());
                     s.known_kind = true;
-                    s.pub.flags = hs.text ? ECUIO_RECORDING_SIGNAL_TEXT : 0;
+                    s.pub.flags = hs.text          ? ECUIO_RECORDING_SIGNAL_TEXT
+                                  : hs.enumeration ? ECUIO_RECORDING_SIGNAL_ENUM
+                                                   : 0;
                     s.pub.decimal_places = hs.decimal_places;
                     s.pub.plot_rank = hs.plot_rank;
                     s.pub.group = hs.group;
                 }
+            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+                       rows::starts_with(p, n, rows::kSignalFileKey)) {
+                const size_t key = std::strlen(rows::kSignalFileKey);
+                std::string hex;
+                if (!rows::parse_signal_file(p + key, n - key, &hex)) {
+                    ecuio_detail_set("events.log line %llu: the signal file "
+                                     "line isn't signals.json and its "
+                                     "SHA-256",
+                                     static_cast<unsigned long long>(line_no));
+                    return false;
+                }
+                std::memcpy(signal_file.sha256, hex.data(), hex.size());
+                signal_file.sha256[hex.size()] = '\0';
+                signal_file.flags |= ECUIO_RECORDING_SIGNALS_NAMED;
             } else if (rows::starts_with(p, n, "utc  ")) {
                 if (!rows::parse_utc(p + 5, n - 5, &info.utc_start_us)) {
                     ecuio_detail_set("events.log line %llu: the utc line "
@@ -741,6 +846,7 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
             !r->read_markers(folder)) {
             return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
         }
+        r->read_signal_file(folder);
         r->finish();
         *out = r.release();
         return ECUIO_OK;
@@ -756,6 +862,16 @@ ecuio_status_t ecuio_recording_get_info(const ecuio_recording_t* r,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out = r->info;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
+                                           ecuio_recording_signals_t* out)
+{
+    if (r == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = r->signal_file;
     return ECUIO_OK;
 }
 
@@ -789,6 +905,40 @@ ecuio_status_t ecuio_recording_get_marker(const ecuio_recording_t* r,
     out->label_length = static_cast<uint32_t>(m.label.size());
     out->label_utf8 = m.label.c_str();
     return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_recording_get_labels(const ecuio_recording_t* r,
+                                          uint32_t signal,
+                                          ecuio_enum_entry_t* entries,
+                                          uint32_t capacity, uint32_t* count)
+{
+    if (r == nullptr || count == nullptr ||
+        (entries == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (signal >= r->signals.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const std::vector<ecuio_enum_entry_t>& labels = r->signals[signal].labels;
+    *count = static_cast<uint32_t>(labels.size());
+    const size_t n = (std::min)(labels.size(), size_t{capacity});
+    for (size_t i = 0; i < n; ++i) {
+        entries[i] = labels[i];
+    }
+    return ECUIO_OK;
+}
+
+const char* ecuio_recording_enum_label(const ecuio_recording_t* r,
+                                       uint32_t signal, uint32_t raw)
+{
+    if (r == nullptr || signal >= r->signals.size()) {
+        return nullptr;
+    }
+    const std::vector<ecuio_enum_entry_t>& labels = r->signals[signal].labels;
+    const auto it = std::lower_bound(
+        labels.begin(), labels.end(), raw,
+        [](const ecuio_enum_entry_t& e, uint32_t v) { return e.raw < v; });
+    return it != labels.end() && it->raw == raw ? it->label : nullptr;
 }
 
 ecuio_status_t

@@ -1,10 +1,5 @@
 // File/layer: core/src/elm327_stream.h | internal, C++17, Qt-free
-// Testing: HARNESS: Elm327StreamTest (test_elm327): the fake ELM327
-//          behind a registered stream, a pump thread playing the app: a
-//          session through it, a failure and its reopen, an open that
-//          never answers or fails, a stop during the wait, an unknown
-//          name, the registry's refusals, the buffer's overflow, pushes
-//          after close
+// Testing: HARNESS: Elm327StreamTest (test_elm327)
 //
 // App-fed streams (ADR-0028, ecuio/stream.h) behind
 // ecuio_elm327_port_ops_t (internal.h): the third kind of port beside the

@@ -1,52 +1,5 @@
 // File/layer: app/sessionbridge.cpp | Qt6 Core, app layer, C++17
-// Testing: test_bridge (QtCore only): worker->GUI marshaling, coalescing,
-//          in-flight backpressure, the frame log's ring and order, its
-//          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
-//          and the counters on the tick, core's values staged from the
-//          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
-//          each window's envelope at its frames' times
-//          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
-//          id, the signal model's roles and age, the rows core reports
-//          unsupported or absent, hidden from Live's filtered view
-//          (BridgeTest.LiveHides*),
-//          refresh, link-state mapping, the activity log's session,
-//          ECU, diagnostics and delivery lines (the ELM327 session line too,
-//          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
-//          .ConnectLogsTheMocksDiagnostics; a clear's saved report and
-//          lines, ADR-0038: BridgeTest.ChannelClearText*,
-//          .DiagnosticsFileTextIsTheCliLines, .AClearSavesTheReportFirst,
-//          .AFailedSaveSendsNoClear, and on Windows
-//          .AClearTheEngineRefusesLogsOneLineAndNoRead,
-//          .AClearAtTheFakesRunningEngineGoesThrough,
-//          .AClearWhileMovingAsksOnceMore (the moving vehicle's
-//          question) and .AClearAtTheFakesStoppedEngineLogsTheReadAfter;
-//          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
-//          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
-//          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
-//          core lists them, session recording through core's recorder
-//          (ADR-0049; BridgeTest.Recording*: the caller lines, the notes,
-//          the activity lines core writes itself never noted) and
-//          the recent ones' replay URIs (.RecentRecordings*,
-//          .ReplayUriForTakesTheRecordedProfile), display
-//          units on the rows, the chart and not the recording
-//          (BridgeTest.UnitSystem*), the URI label
-//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName,
-//          .UriLabelKeepsABluetoothAddresssLastOctets), the
-//          connect's trim (BridgeTest.ConnectTrimsSpacesAroundTheUri), the
-//          vehicle's parts (ADR-0027: BridgeTest.VinFromIdentity*,
-//          .NewSalt*, .FolderLabel*, .UnplottedNames*, and on Windows
-//          .AConnectsVinReachesQmlOnlyAsASaltedHash and
-//          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
-//          rendering: manual smoke.
-//          reply timing's snapshots and line (ADR-0042):
-//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*;
-//          the VIN's decode, its log line and Settings' lookup (ADR-0043):
-//          BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit, and on
-//          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash; each code's
-//          title and Diagnostics' lookup (ADR-0044):
-//          BridgeTest.DiagnosticsEntryIsWhatThePageShows, .ATypedCodeIsDescribed;
-//          the inspection line (ADR-0045):
-//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession
+// Testing: BRIDGE: BridgeTest (test_bridge); Manual smoke
 
 #include "sessionbridge.h"
 #include "carryover.h"
@@ -389,6 +342,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case HiddenRole: return e.hidden;
         case GroupRole:
             return static_cast<int>(e.group);
+        case LabelRole:
+            return labelOf(e);
         default: return QVariant();
     }
 }
@@ -409,7 +364,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {WindowLowRole, "windowLow"},
             {RowRole, "row"},
             {HiddenRole, "hidden"},
-            {GroupRole, "group"}};
+            {GroupRole, "group"},
+            {LabelRole, "label"}};
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
@@ -450,6 +406,14 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
+        if (set->defs[i].kind == ECUIO_VALUE_ENUM && set->enums != nullptr) {
+            const uint32_t first = set->defs[i].table_first;
+            const uint32_t end = first + set->defs[i].table_count;
+            for (uint32_t k = first; k < end && k < set->enum_count; ++k) {
+                e.labels.emplace_back(set->enums[k].raw,
+                                      QString::fromUtf8(set->enums[k].label));
+            }
+        }
         e.plotRank = set->defs[i].plot_rank;
         e.group = set->defs[i].group;
         m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
@@ -516,8 +480,8 @@ void SignalListModel::updateWindow(const std::vector<WindowValue>& window)
         // bind opacity to ageMs; a QML-side clock stamped on value
         // changes would dim steady values that are still arriving.
         emit dataChanged(index(firstRow), index(lastRow),
-                         {ValueRole, WindowHighRole, WindowLowRole, HasValueRole,
-                          AgeMsRole});
+                         {ValueRole, WindowHighRole, WindowLowRole,
+                          HasValueRole, AgeMsRole, LabelRole});
         // One emission per batch: the strip chart's sole repaint trigger.
         emit valuesUpdated();
     }
@@ -546,6 +510,22 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
         emit dataChanged(index(firstRow), index(lastRow),
                          {TextRole, HasValueRole, AgeMsRole});
     }
+}
+
+QString SignalListModel::labelOf(const Entry& e)
+{
+    // An enum's value is its raw number: a whole number from 0 up
+    if (e.labels.empty() || e.histCount == 0 || !(e.value >= 0.0) ||
+        e.value != std::floor(e.value) || e.value > 4294967295.0) {
+        return QString();
+    }
+    const auto raw = static_cast<uint32_t>(e.value);
+    for (const auto& l : e.labels) {
+        if (l.first == raw) {
+            return l.second;
+        }
+    }
+    return QString();
 }
 
 ecuio_display_value_t SignalListModel::shown(const Entry& e, double value) const
@@ -955,6 +935,9 @@ SessionBridge::SessionBridge(QObject* parent)
 
 SessionBridge::~SessionBridge()
 {
+    // A Read once's session closes within its wait; its queued result is
+    // dropped with `this`, and core must outlive it
+    m_readOnce.join();
     // Async connect worker first: it calls core and posts a queued
     // completion against `this`. Join before tearing the session or
     // shutting core down. Worst case bounded by the surrogate handshake
@@ -985,7 +968,200 @@ SessionBridge::~SessionBridge()
         (void)ecuio_recorder_close(m_recorder, "the app closed");
         m_recorder = nullptr;
     }
+    // Only now: no session is left to decode with the files' sets
+    m_signalStore.close();
+    m_pluginStore.close();
     ecuio_shutdown();
+}
+
+// "1 signal", "2 signals": the activity log's count of a file's signals
+static QString signalCountText(int count)
+{
+    return count == 1 ? QStringLiteral("1 signal")
+                      : QStringLiteral("%1 signals").arg(count);
+}
+
+QVariantMap SessionBridge::importSignalFile(const QUrl& url)
+{
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    QVariantMap result;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("Couldn't read the file")}};
+    } else if (file.size() > static_cast<qint64>(ECUIO_SIGNAL_FILE_MAX_BYTES)) {
+        result = {
+            {QStringLiteral("ok"), false},
+            {QStringLiteral("words"),
+             QStringLiteral("The file is over %1 KiB, a signal file's most")
+                 .arg(ECUIO_SIGNAL_FILE_MAX_BYTES / 1024)}};
+    } else {
+        result =
+            m_signalStore.import(file.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1));
+    }
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Signal file: %1 (%2, %3)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("profile")).toString(),
+                       signalCountText(
+                           result.value(QStringLiteral("count")).toInt()))
+            : QStringLiteral("Signal file refused: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantMap SessionBridge::importSignalText(const QString& text)
+{
+    const QVariantMap result = m_signalStore.import(text.toUtf8());
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Signal file saved: %1 (%2, %3)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("profile")).toString(),
+                       signalCountText(
+                           result.value(QStringLiteral("count")).toInt()))
+            : QStringLiteral("Signal file not saved: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QString SessionBridge::signalFileText(const QString& sha) const
+{
+    return SignalStore::text(sha);
+}
+
+QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
+{
+    const QVariantList used = m_signalStore.use(shas);
+    for (const QVariant& v : used) {
+        const QVariantMap e = v.toMap();
+        if (!e.value(QStringLiteral("ok")).toBool()) {
+            emit logMessage(
+                QStringLiteral("Signal file %1 not offered: %2")
+                    .arg(e.value(QStringLiteral("sha256")).toString().left(12),
+                         e.value(QStringLiteral("words")).toString()));
+        }
+    }
+    return used;
+}
+
+int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
+{
+    return m_signalStore.deleteUnused(keep);
+}
+
+QVariantList SessionBridge::plugins()
+{
+    return m_pluginStore.all();
+}
+
+QVariantMap SessionBridge::importPlugin(const QUrl& url)
+{
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    QVariantMap result;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("Couldn't read the file")}};
+    } else if (file.size() > static_cast<qint64>(ECUIO_PLUGIN_PACKAGE_MAX)) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("The file is over %1 MiB, a plugin's most")
+                       .arg(ECUIO_PLUGIN_PACKAGE_MAX / (1024 * 1024))}};
+    } else {
+        result = m_pluginStore.import(file.read(ECUIO_PLUGIN_PACKAGE_MAX + 1));
+    }
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin: %1 %2 (%3)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("version")).toString(),
+                       result.value(QStringLiteral("profiles"))
+                           .toStringList()
+                           .join(QStringLiteral(", ")))
+            : QStringLiteral("Plugin refused: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantMap SessionBridge::removePlugin(const QString& sha)
+{
+    const QVariantMap result = m_pluginStore.remove(sha);
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin removed")
+            : QStringLiteral("Plugin not removed: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantList SessionBridge::pluginMatches(const QString& typedVin) const
+{
+    return m_pluginStore.matches(typedVin.trimmed().isEmpty() ? m_vin
+                                                              : typedVin,
+                                 QDate::currentDate().year() + 1);
+}
+
+QString SessionBridge::readOnce(const QString& adapterUri,
+                                const QVariantMap& signal,
+                                const QVariantMap& module)
+{
+    // The adapter is the session's while one runs, and a second open
+    // of it may be refused: Read once waits for none
+    if (m_connected.load(std::memory_order_acquire) || m_connecting ||
+        m_disconnecting) {
+        return QStringLiteral(
+            "Read once reads only while no session is connected");
+    }
+    if (m_readOnce.busy()) {
+        return QStringLiteral("A read is running");
+    }
+    ReadOnce::Request request;
+    QString why;
+    if (!ReadOnce::requestFrom(signal, module, &request, &why)) {
+        return why;
+    }
+    const QString uri = ReadOnce::uriFor(adapterUri, request, &why);
+    if (uri.isEmpty()) {
+        return why;
+    }
+    // An app-fed stream's link is readied here, as a connect's is
+    if (m_streamPreparer) {
+        why = m_streamPreparer(uri);
+        if (!why.isEmpty()) {
+            return why;
+        }
+    }
+    applyFrameLoggingEnv();
+    const bool started = m_readOnce.start(
+        uri, request, m_readOnceWaitMs, [this, uri](const QVariantMap& result) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, uri, result]() {
+                    m_readOnce.join();
+                    QVariantMap shown = result;
+                    shown.insert(QStringLiteral("uri"), uri);
+                    emit readingOnceChanged();
+                    emit logMessage(
+                        QStringLiteral("Read once: %1 %2")
+                            .arg(result.value(QStringLiteral("request"))
+                                     .toString(),
+                                 result.value(QStringLiteral("ok")).toBool()
+                                     ? QStringLiteral("answered")
+                                     : result.value(QStringLiteral("words"))
+                                           .toString()));
+                    emit readOnceResult(shown);
+                },
+                Qt::QueuedConnection);
+        });
+    if (!started) {
+        return QStringLiteral("A read is running");
+    }
+    emit readingOnceChanged();
+    return {};
 }
 
 void SessionBridge::destroySessionLocked()
@@ -1398,6 +1574,9 @@ QString SessionBridge::connectSession(const QString& typed)
     if (m_connected.load(std::memory_order_acquire) || m_connecting) {
         return {};
     }
+    if (m_readOnce.busy()) {
+        return QStringLiteral("Read once is using the adapter");
+    }
 
     QString err = m_streamPreparer ? m_streamPreparer(uri) : QString();
     if (!err.isEmpty()) {
@@ -1426,6 +1605,13 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         || m_disconnecting) {
         return;   // one attempt at a time, none during a teardown; the
                   // UI already reflects state
+    }
+    if (m_readOnce.busy()) {
+        const QString err = QStringLiteral("Read once is using the adapter");
+        emit logMessage(
+            QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
+        emit connectResult(uri, err);
+        return;
     }
     // An app-fed stream's link is readied here, on the GUI thread, before
     // core opens it on the connect thread
@@ -1731,7 +1917,21 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
                             .arg(QString::fromUtf8(ecuio_last_error_detail())));
         return;
     }
-    rc = ecuio_session_record(session, recorder);
+    // The signal file decoding the session goes in as signals.json
+    // (ADR-0051 section 4): a vehicle's, its hash the store copy's name,
+    // or a plugin variant's files merged, with the plugin's line
+    // (ADR-0052 section 4), as havne-cli stream --plugin --record does
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
+    if (file == nullptr) {
+        file = m_pluginStore.fileFor(set);
+    }
+    if (file != nullptr) {
+        rc = ecuio_recorder_signal_file(recorder, file);
+    }
+    if (rc == ECUIO_OK) {
+        rc = ecuio_session_record(session, recorder);
+    }
     if (rc != ECUIO_OK) {
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");
@@ -1984,7 +2184,9 @@ void SessionBridge::ValueStaging::stage(uint32_t def,
                                         uint64_t frameUs,
                                         const ecuio_value_t& v)
 {
-    const bool isText = v.text != nullptr;
+    // By kind: an enum's value carries its label as text too, and is
+    // still a number (ADR-0051)
+    const bool isText = v.kind == ECUIO_VALUE_TEXT || v.kind == ECUIO_VALUE_HEX;
     if (!isText) {
         if (!has[def] || v.value < lowest[def]) {
             lowest[def] = v.value;
@@ -3642,13 +3844,27 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
                profile;
     }
     if (info.backend == ECUIO_BACKEND_SOCKETCAN) {
-        // The interface is in the "Connected:" line just before
+        // The interface is in the "Connected:" line just before. A real
+        // controller has a bit rate (core reads it from the interface);
+        // vcan has none. A profile that requests runs through ISO-TP on
+        // its channels; any other only listens
+        const bool listenOnly =
+            (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0;
         const QString bus =
-            (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0
-                ? QStringLiteral("a CAN controller in listen-only mode at %1 bit/s")
-                      .arg(info.baud)
+            listenOnly ? QStringLiteral(
+                             "a CAN controller in listen-only mode at %1 bit/s")
+                             .arg(info.baud)
+            : info.baud != 0
+                ? QStringLiteral("a CAN controller at %1 bit/s").arg(info.baud)
                 : QStringLiteral("a virtual CAN bus");
-        return QStringLiteral("Session: SocketCAN, %1, listening; ").arg(bus) +
+        const QString mode =
+            info.channel_count > 0
+                ? (info.channel_count == 1
+                       ? QStringLiteral("requesting on 1 channel")
+                       : QStringLiteral("requesting on %1 channels")
+                             .arg(info.channel_count))
+                : QStringLiteral("listening");
+        return QStringLiteral("Session: SocketCAN, %1, %2; ").arg(bus, mode) +
                profile;
     }
     const bool elm327 = info.backend == ECUIO_BACKEND_ELM327;

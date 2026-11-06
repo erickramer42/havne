@@ -5,6 +5,8 @@
 #   python tests/cli_record.py replay <havne-cli> <fixture folder> <golden.jsonl> <golden folder> [--update]
 #   python tests/cli_record.py marks <havne-cli>
 #   python tests/cli_record.py fails <havne-cli>
+#   python tests/cli_record.py signals <havne-cli> <fixture folder> <signal file>
+#   python tests/cli_record.py plugin <havne-cli> <plugin folder>
 #   python tests/cli_record.py hang <havne-cli> <fake_j2534.dll>    (Windows)
 #
 # replay: the fixture through obd2 to its last frame, recorded under
@@ -14,8 +16,16 @@
 # marks: lines on standard input are markers, a mark line each, in order.
 # fails: a folder that can't be made says why and exits 1 before any
 # frame. hang: an interrupt while the session's close hangs still ends
-# the recording whole, 2 s on. --update rewrites both goldens from the run.
+# the recording whole, 2 s on. signals: the fixture recorded through a
+# signal file holds it as signals.json with its hash, which info names,
+# and a replay of that recording through its signals.json decodes the
+# same values (ADR-0051 section 4). plugin: the mock's car through the
+# example plugin's second variant holds the variant's merged file as
+# signals.json, names the plugin on events.log's header, and a replay
+# through that copy decodes the same (ADR-0052 section 4). --update
+# rewrites both goldens from the run.
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -182,6 +192,122 @@ def hang(cli, dll):
     return 0
 
 
+def decoded(folder):
+    """signals.csv's rows without their host_us: what was decoded"""
+    rows = (folder / "signals.csv").read_text(encoding="utf-8-sig").splitlines()
+    return [r.split(",", 1)[1] for r in rows[1:]]
+
+
+def signals(cli, fixture, signal_file):
+    want = Path(signal_file).read_bytes()
+    sha = hashlib.sha256(want).hexdigest()
+    with tempfile.TemporaryDirectory(prefix="havne-cli-signals-") as base:
+        first_root = Path(base) / "first"
+        uri = f"replay://{Path(fixture).as_posix()}?speed=max"
+        code, _, err = run(cli, ["stream", uri, "--signals", signal_file,
+                                 "--record", str(first_root)])
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        first = the_folder(first_root)
+        if (first / "signals.json").read_bytes() != want:
+            print("FAIL  signals.json isn't the signal file's bytes")
+            return 1
+        events = (first / "events.log").read_text(encoding="utf-8")
+        if f"\nsignal file  signals.json,{sha}\n" not in events:
+            print(f"FAIL  events.log names no signals.json {sha}")
+            return 1
+        code, rows, err = run(cli, ["info", str(first)])
+        opened = [r for r in rows if r.get("type") == "opened"]
+        if code != 0 or not opened or opened[0].get("signal_file") != {
+                "sha256": sha, "present": True, "matches": True}:
+            print(f"FAIL  info's opened line: {opened}\n{err}")
+            return 1
+
+        second_root = Path(base) / "second"
+        again = f"replay://{first.as_posix()}?speed=max"
+        code, _, err = run(cli, ["stream", again, "--signals",
+                                 str(first / "signals.json"),
+                                 "--record", str(second_root)])
+        if code != 0:
+            print(f"FAIL  the replay of the recording: exit {code}\n{err}")
+            return 1
+        second = the_folder(second_root)
+        a, b = decoded(first), decoded(second)
+        if len(a) < 100 or not any(",Road Speed," in "," + r for r in a):
+            print(f"FAIL  the first recording decoded {len(a)} values, "
+                  "none of the file's")
+            return 1
+        if a != b:
+            at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y),
+                      min(len(a), len(b)))
+            print(f"FAIL  the replay decodes otherwise from row {at + 1} "
+                  f"({len(a)} rows, then {len(b)})")
+            return 1
+        if (second / "signals.json").read_bytes() != want:
+            print("FAIL  the replay's recording holds other bytes")
+            return 1
+    print("ok    a recording holds its signal file, and its replay decodes "
+          "the same")
+    return 0
+
+
+def plugin(cli, package):
+    profile = "plugin.example-sim.my2019"
+    with tempfile.TemporaryDirectory(prefix="havne-cli-plugin-") as base:
+        first_root = Path(base) / "first"
+        code, _, err = run(cli, ["stream", f"mock://x?profile={profile}",
+                                 "--plugin", package, "--count", "400",
+                                 "--record", str(first_root)])
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        first = the_folder(first_root)
+        held = first / "signals.json"
+        if not held.is_file():
+            print("FAIL  the recording holds no signals.json")
+            return 1
+        want = held.read_bytes()
+        sha = hashlib.sha256(want).hexdigest()
+        notes = json.loads(want.decode("utf-8")).get("notes", "")
+        if not notes.startswith("Plugin example-sim 1.0.0, variant my2019:"):
+            print(f"FAIL  signals.json isn't the variant's file:\n{want[:300]}")
+            return 1
+        events = (first / "events.log").read_text(encoding="utf-8")
+        for line in (f"\nsignal file  signals.json,{sha}\n",
+                     "\nplugin  example-sim,1.0.0,my2019\n"):
+            if line not in events:
+                print(f"FAIL  events.log has no {line.strip()!r}:\n"
+                      f"{events[:600]}")
+                return 1
+
+        second_root = Path(base) / "second"
+        again = f"replay://{first.as_posix()}?speed=max"
+        code, _, err = run(cli, ["stream", again, "--signals", str(held),
+                                 "--record", str(second_root)])
+        if code != 0:
+            print(f"FAIL  the replay of the recording: exit {code}\n{err}")
+            return 1
+        second = the_folder(second_root)
+        a, b = decoded(first), decoded(second)
+        if not any(",Oil Temp," in "," + r for r in a):
+            print(f"FAIL  the first recording decoded {len(a)} values, "
+                  "none of the plugin's")
+            return 1
+        if a != b:
+            at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y),
+                      min(len(a), len(b)))
+            print(f"FAIL  the replay decodes otherwise from row {at + 1} "
+                  f"({len(a)} rows, then {len(b)})")
+            return 1
+        if (second / "signals.json").read_bytes() != want:
+            print("FAIL  the replay's recording holds other bytes")
+            return 1
+    print("ok    a plugin's recording holds its variant's file, and its "
+          "replay decodes the same")
+    return 0
+
+
 SKIP = 77
 
 
@@ -196,6 +322,10 @@ def main():
         return marks(cli)
     if command == "fails":
         return fails(cli)
+    if command == "signals":
+        return signals(cli, sys.argv[3], sys.argv[4])
+    if command == "plugin":
+        return plugin(cli, sys.argv[3])
     print(f"cli_record: no command {command!r}", file=sys.stderr)
     return 2
 

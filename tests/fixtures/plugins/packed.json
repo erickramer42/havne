@@ -1,0 +1,28 @@
+{
+  "havne_plugin": 1,
+  "id": "packed",
+  "name": "A packed plugin, which carries no fixtures",
+  "version": "1.0.0",
+  "requires": { "core": "0.1.0" },
+  "source": { "name": "Havne's tests", "license": "MIT" },
+  "tiers": ["data"],
+  "match": [ { "wmi": ["ZZZ"], "years": [2015, 2030] } ],
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "variants": [ { "id": "base", "files": ["a.json"] } ],
+  "files": {
+    "a.json": {
+      "havne_signals": 1,
+      "signals": [
+        {
+          "key": "oil_temp",
+          "name": "Oil Temp",
+          "ecu": "pcm",
+          "read": { "service": "22", "number": "F40D" },
+          "field": { "byte": 0, "bits": 8 },
+          "scale": 1, "offset": -40,
+          "unit": "°C", "decimals": 0, "group": "engine"
+        }
+      ]
+    }
+  }
+}

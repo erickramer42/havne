@@ -1,2 +1,2 @@
 {"schema": 1, "type": "start"}
-{"code": 12, "detail": "faults: 'silent:0' isn't <fault>:<n>, the fault one of silent, late, bad_sequence or stalled and n from 1 to 10000", "message": "malformed transport URI", "type": "error"}
+{"code": 12, "detail": "faults: 'silent:0' isn't <fault>:<n>, the fault one of silent, late, pending, bad_sequence or stalled and n from 1 to 10000", "message": "malformed transport URI", "type": "error"}

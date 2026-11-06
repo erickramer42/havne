@@ -1,11 +1,10 @@
 // File/layer: core/src/signal_sets.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: Obd2SetTest, Obd2DecodeTest and Obd2MuxTest (test_obd2)
-//          for the obd2 set; CoreTest.MockFramesDecodeAgainstMockSignalSet
-//          and SignalsTest for the mock set; every set passes the
-//          validator at registration
+// Testing: UNIT: Obd2SetTest, Obd2DecodeTest, Obd2MuxTest (test_obd2);
+//          CoreTest (test_core); SignalsTest, SignalTablesTest (test_signals)
 
 #include <ecuio/signals.h>
 #include <ecuio/signal_sets.h>
+#include "computed.h"
 #include <string.h>
 
 /* Bounded copy into a fixed-width buffer, always null-terminated.
@@ -50,6 +49,28 @@ static ecuio_signal_def_t mk(uint16_t id, const char* name,
     return d;
 }
 
+/* A computed def (ADR-0051 section 5): no frame of its own, its value
+ * worked out from other defs' by its program, kMockComputed[program].
+ * The validator wants the decode block plain: message 0, UINT, LE,
+ * every bit field 0, scale 1. */
+static ecuio_signal_def_t computed_def(uint16_t id, const char* name,
+                                       const char* unit, uint8_t dp,
+                                       uint8_t group, uint16_t program)
+{
+    ecuio_signal_def_t d = {};
+    d.id = id;
+    d.flags = ECUIO_DEF_FLAG_COMPUTED;
+    d.kind = static_cast<uint8_t>(ECUIO_VALUE_UINT);
+    d.byte_order = ECUIO_BYTE_ORDER_LE;
+    d.scale = 1.0;
+    d.decimal_places = dp;
+    d.group = group;
+    d.table_first = program;
+    copy_str(d.name, sizeof(d.name), name);
+    copy_str(d.unit, sizeof(d.unit), unit);
+    return d;
+}
+
 /* Names, units and decimal places are display strings: the UI shows
  * them as they are (UTF-8). The names match the obd2 set's, so a gauge
  * finds the same signal under either profile. */
@@ -76,16 +97,42 @@ static const ecuio_signal_def_t kMockDefs[] = {
      * equivalence ratio (2/65536, so 0 to just under 2). Only the mock
      * carries it; the obd2 set doesn't poll an O2 sensor. */
     mk(ECUIO_MOCK_SIG_LAMBDA_ID,    "Lambda",            ECUIO_VALUE_UINT, 10, 0, 16, 1.0/32768.0, 0.0, LAMBDA, 2, ECUIO_SIGNAL_GROUP_OXYGEN),
+    /* MAP and baro at bytes 12 and 13, a byte of kPa each, as J1979's
+     * 0x0B and 0x33 */
+    mk(ECUIO_MOCK_SIG_MAP_ID,       "Intake Manifold Pressure", ECUIO_VALUE_UINT, 12, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    mk(ECUIO_MOCK_SIG_BARO_ID,      "Barometric Pressure", ECUIO_VALUE_UINT, 13, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    computed_def(ECUIO_MOCK_SIG_BOOST_ID, "Boost", "kPa", 0, ECUIO_SIGNAL_GROUP_AIR, 0),
 };
 
 #undef DEG_C
 #undef LAMBDA
+
+/* The programs of kMockDefs' computed defs, by their table_first.
+ * Boost is MAP minus baro, as ADR-0051's example file computes it from
+ * obd2's: below zero a vacuum, which is all an NA engine pulls. Both
+ * ride every frame, so the default age bound holds. */
+static const ecuio_computed_t kMockComputed[] = {
+    [] {
+        ecuio_computed_t c = {};
+        c.input_ids[0] = ECUIO_MOCK_SIG_MAP_ID;
+        c.input_ids[1] = ECUIO_MOCK_SIG_BARO_ID;
+        c.input_count = 2;
+        c.step_count = 3;
+        c.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+        c.steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+        c.steps[2] = ECUIO_COMPUTED_SUBTRACT;
+        return c;
+    }(),
+};
 
 static const ecuio_signal_set_t kMockSet = [] {
     ecuio_signal_set_t s = {};
     s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     s.count = static_cast<uint32_t>(sizeof(kMockDefs) / sizeof(kMockDefs[0]));
     s.defs = kMockDefs;
+    s.computed_count =
+        static_cast<uint32_t>(sizeof(kMockComputed) / sizeof(kMockComputed[0]));
+    s.computed = kMockComputed;
     return s;
 }();
 
@@ -94,8 +141,109 @@ const ecuio_signal_set_t* ecuio_mock_signal_set(void)
     return &kMockSet;
 }
 
-/* The set checks, in order. A code that names one def or channel sets
- * *index to it; the others leave it as the caller set it. */
+static bool label_like_formula(const char* text)
+{
+    const char c = text[0];
+    return c == '=' || c == '+' || c == '-' || c == '@' || c == '\t' ||
+           c == '\r';
+}
+
+/* An enum entry's label: 1 to ECUIO_ENUM_LABEL_MAX bytes, zero after
+ * its NUL, and nothing a spreadsheet runs as a formula, since a
+ * recording writes it (ADR-0049 section 8) */
+static bool label_ok(const ecuio_enum_entry_t& e)
+{
+    const void* end = memchr(e.label, '\0', sizeof e.label);
+    if (end == nullptr) {
+        return false;
+    }
+    const size_t n =
+        static_cast<size_t>(static_cast<const char*>(end) - e.label);
+    if (n == 0 || n > ECUIO_ENUM_LABEL_MAX) {
+        return false;
+    }
+    for (size_t i = n; i < sizeof e.label; ++i) {
+        if (e.label[i] != '\0') {
+            return false;
+        }
+    }
+    return !label_like_formula(e.label);
+}
+
+/* Whether id names a def of the set a program can read: a number */
+static bool numeric_input(const ecuio_signal_set_t* set, uint16_t id)
+{
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.id != id) {
+            continue;
+        }
+        return (d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0 &&
+               (d.kind == ECUIO_VALUE_UINT || d.kind == ECUIO_VALUE_INT ||
+                d.kind == ECUIO_VALUE_FLOAT || d.kind == ECUIO_VALUE_ENUM);
+    }
+    return false;
+}
+
+/* The tables (ADR-0051): NULL only when empty, each def's range within
+ * its table, each enum def's raw values strictly ascending, each label
+ * and each program, then each program's inputs */
+static int check_tables(const ecuio_signal_set_t* set, uint32_t* index)
+{
+    if ((set->enum_count > 0 && !set->enums) ||
+        (set->computed_count > 0 && !set->computed) ||
+        set->enum_count > ECUIO_SET_MAX_TABLE ||
+        set->computed_count > ECUIO_SET_MAX_TABLE) {
+        return ECUIO_VALIDATE_ERR_TABLES_NULL;
+    }
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.flags & ECUIO_DEF_FLAG_COMPUTED) {
+            if (d.table_first >= set->computed_count) {
+                *index = i;
+                return ECUIO_VALIDATE_ERR_TABLE_RANGE;
+            }
+        } else if (d.kind == ECUIO_VALUE_ENUM) {
+            if (uint32_t{d.table_first} + d.table_count > set->enum_count) {
+                *index = i;
+                return ECUIO_VALIDATE_ERR_TABLE_RANGE;
+            }
+            for (uint32_t k = 1; k < d.table_count; ++k) {
+                const uint32_t e = uint32_t{d.table_first} + k;
+                if (set->enums[e].raw <= set->enums[e - 1].raw) {
+                    *index = e;
+                    return ECUIO_VALIDATE_ERR_ENUM_ENTRY;
+                }
+            }
+        }
+    }
+    for (uint32_t e = 0; e < set->enum_count; ++e) {
+        if (!label_ok(set->enums[e])) {
+            *index = e;
+            return ECUIO_VALIDATE_ERR_ENUM_ENTRY;
+        }
+    }
+    for (uint32_t p = 0; p < set->computed_count; ++p) {
+        if (!ecuio_computed_check(set->computed[p])) {
+            *index = p;
+            return ECUIO_VALIDATE_ERR_PROGRAM;
+        }
+    }
+    for (uint32_t p = 0; p < set->computed_count; ++p) {
+        const ecuio_computed_t& c = set->computed[p];
+        for (uint32_t k = 0; k < c.input_count; ++k) {
+            if (!numeric_input(set, c.input_ids[k])) {
+                *index = p;
+                return ECUIO_VALIDATE_ERR_COMPUTED_INPUT;
+            }
+        }
+    }
+    return ECUIO_VALIDATE_OK;
+}
+
+/* The set checks, in order. A code that names one def, channel, entry
+ * or program sets *index to it; the others leave it as the caller set
+ * it. */
 static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
 {
     if (!set) return ECUIO_VALIDATE_ERR_NULL;
@@ -148,7 +296,7 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
             }
         }
     }
-    return ECUIO_VALIDATE_OK;
+    return check_tables(set, index);
 }
 
 int ecuio_validate_signal_set(const ecuio_signal_set_t* set,

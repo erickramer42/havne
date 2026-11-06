@@ -1,24 +1,5 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
-// Testing: test_bridge (Qt-linked target): the frame log's ring, order
-//          and payload storage, SignalListModel's history ring and display units,
-//          its hidden rows (unsupported or absent) and LiveSignalModel
-//          (BridgeTest.LiveHides*),
-//          discoverJ2534Devices' and discoverSerialPorts' marshaling
-//          shape, recentRecordings and replayUriFor
-//          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
-//          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
-//          vehicle's VIN key, label and plotted names (ADR-0027;
-//          the VIN core reads, CoreTest.TheVinIsService09sThenF190s;
-//          BridgeTest.UnplottedNames*, ...), the default
-//          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
-//          a mark in a recording (ADR-0049 section 4,
-//          BridgeTest.AMarkGoesIntoTheRecording);
-//          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
-//          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
-//          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
-//          a typed code's title (ADR-0044, BridgeTest.ATypedCodeIsDescribed);
-//          the inspection line (ADR-0045,
-//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession)
+// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge)
 
 #pragma once
 
@@ -29,6 +10,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "readonce.h"
+#include "pluginstore.h"
+#include "signalstore.h"
 #include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
@@ -246,9 +230,13 @@ public:
         HiddenRole, /* core reports it unsupported or absent
                          * (applyUnsupported, applyAbsent): Live
                          * leaves the row out */
-        GroupRole   /* the def's group (ECUIO_SIGNAL_GROUP_*,
+        GroupRole,  /* the def's group (ECUIO_SIGNAL_GROUP_*,
                          * ADR-0050), for Live's filter. Fixed per
                          * signal set. */
+        LabelRole   /* an enum row's label for its newest raw value
+                         * (ADR-0051), from the set's enums; "" for a
+                         * value with none, which shows its number, and
+                         * for any other kind. Notified with ValueRole. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -354,6 +342,9 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
+        // An ENUM def's labels by raw value, copied from the set when it
+        // loads, so a row keeps them whatever happens to the set later
+        std::vector<std::pair<uint32_t, QString>> labels;
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
@@ -387,6 +378,8 @@ private:
     // anything that moves the defaults: a new set, hidden rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
+    // An enum row's label for its newest value, "" when it has none
+    static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
@@ -443,6 +436,11 @@ class SessionBridge : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
+    // The age past which a value is stale (ECUIO_VALUE_STALE_US), in ms:
+    // Theme.staleMs, so the UI dims what core's computed signals refuse
+    Q_PROPERTY(int valueStaleMs READ valueStaleMs CONSTANT)
+    // A Read once is running (readOnce); no session connects meanwhile
+    Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
     // "speed", ...) to the def IDs core's sets give it (signal_sets.h),
     // the first one the session's set has wins. By ID, so a def core
@@ -525,6 +523,54 @@ public:
     ~SessionBridge() override;
 
     QString coreVersion() const;
+    static int valueStaleMs()
+    {
+        return static_cast<int>(ECUIO_VALUE_STALE_US / 1000u);
+    }
+    bool readingOnce() const { return m_readOnce.busy(); }
+    // Read once (ADR-0051's form, ReadOnce): signal and module as a
+    // signal file holds them, read on adapterUri's adapter in a short
+    // session of its own, only while no session is connected. Returns
+    // "" when the read started, its result coming in readOnceResult
+    // (ReadOnce::evaluate's map, plus "uri"); else why it didn't
+    Q_INVOKABLE QString readOnce(const QString& adapterUri,
+                                 const QVariantMap& signal,
+                                 const QVariantMap& module);
+    // The vehicles' signal files (ADR-0051, SignalStore). Import reads
+    // the file at url (a local file, or Android's content:// through
+    // QFile) and keeps a copy when core's loader reads it: { ok, words,
+    // sha256, name, profile, extends, count, own, kept }, words never
+    // naming the path.
+    // It registers nothing; the vehicle book says whether the file may
+    // join (VehicleBook.profileProblem), then useSignalFiles registers
+    // the files the book references. Each logs one line.
+    Q_INVOKABLE QVariantMap importSignalFile(const QUrl& url);
+    // The form's file (ADR-0051's form): its text into the store as an
+    // import's bytes, the same result; and a kept copy's text back, ""
+    // for none. Settings composes the file, core's loader judges it
+    Q_INVOKABLE QVariantMap importSignalText(const QString& text);
+    Q_INVOKABLE QString signalFileText(const QString& sha) const;
+    Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
+    // Removes every copy keep doesn't name, each profile unregistered
+    // first; the files themselves stay loaded until the bridge closes,
+    // since a session may still decode with one
+    Q_INVOKABLE int deleteUnusedSignalFiles(const QStringList& keep);
+    // The app's plugins (ADR-0052, PluginStore): every kept one loaded
+    // and its variants registered at the first call, then the list, one
+    // entry a plugin { sha256, ok, words, id, name, version, variants,
+    // profiles }. Import reads a packed plugin (<id>.havne-plugin.json)
+    // at url as importSignalFile reads a file and keeps a copy when core
+    // loads it (the entry, kept, replaced: the version it replaced, or
+    // ""); Remove frees it and deletes its copy. Both refuse, with
+    // words, an id a session decodes with. Each logs one line.
+    Q_INVOKABLE QVariantList plugins();
+    Q_INVOKABLE QVariantMap importPlugin(const QUrl& url);
+    Q_INVOKABLE QVariantMap removePlugin(const QString& sha);
+    // The variants the plugins propose for a car (ADR-0052 section 5):
+    // the VIN typed, or with "" the session's, which stays here (ADR-0027
+    // section 3); { sha256, id, name, variant, profile } each, none
+    // without a VIN. A proposal only: the user picks
+    Q_INVOKABLE QVariantList pluginMatches(const QString& typedVin) const;
     QVariantMap gaugeSignals() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
@@ -588,6 +634,13 @@ public:
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
     Q_INVOKABLE void forceFrameCountForTesting(int count);
+    // Test seam: the VIN a session's identification would read, and its
+    // vehicleIdentified, for the QML tests (the fakes' VIN is no real one)
+    Q_INVOKABLE void identifyForTesting(const QString& vin)
+    {
+        m_vin = vin;
+        emit vehicleIdentified();
+    }
 
     // J2534 device discovery (Windows; empty list elsewhere). One map per
     // installed Pass-Thru interface driver: { vendorName, dllPath,
@@ -763,6 +816,9 @@ public:
     // Test seam: the session's recorder, for core's internal.h seams
     // (a failed write); nullptr with none
     ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
+    // Test seam: how long Read once waits for its reply once the
+    // session starts (3 s)
+    void setReadOnceWaitForTesting(int ms) { m_readOnceWaitMs = ms; }
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
@@ -810,6 +866,8 @@ signals:
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
+    void readingOnceChanged();
+    void readOnceResult(const QVariantMap& result);
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
@@ -1025,4 +1083,8 @@ private:
     bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES
     std::function<QString(const QString&)>
         m_streamPreparer; // none: nothing to ready
+    ReadOnce m_readOnce;
+    SignalStore m_signalStore;
+    PluginStore m_pluginStore;
+    int m_readOnceWaitMs = 3000;
 };

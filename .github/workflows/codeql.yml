@@ -5,9 +5,10 @@ name: CodeQL
 # (core, the J2534 layer and the surrogate, built x64; no Qt needed)
 # and the workflows themselves. The app and its QML aren't analyzed.
 # OpenSSF Scorecard's SAST check looks for this workflow.
+# The PR to main and the merge's push, as ci.yml, and weekly
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -15,6 +16,11 @@ on:
 
 permissions:
   contents: read
+
+# A push to a PR's branch cancels the PR's analysis it supersedes
+concurrency:
+  group: codeql-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:

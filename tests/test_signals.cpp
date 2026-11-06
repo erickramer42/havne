@@ -95,7 +95,7 @@ TEST_F(SignalDecodeTest, UnsupportedKindOrByteOrderReturnsError) {
     uint8_t frame[8] = {0x00};
     double value = 0.0;
     for (int kind : {static_cast<int>(ECUIO_VALUE_TEXT),
-                     static_cast<int>(ECUIO_VALUE_HEX), 5, 255}) {
+                     static_cast<int>(ECUIO_VALUE_HEX), 6, 255}) {
         ecuio_signal_def_t signal = {};
         signal.kind = static_cast<uint8_t>(kind);
         EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 4) << "kind " << kind;
@@ -232,9 +232,15 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
                          0xCD,       // Load raw 0xCD -> 80.4%
                          0x84, 0x1D, // MAF raw 0x1D84 = 7556 -> 75.56 g/s
                          0x78,       // Oil raw 120 -> 80 deg C
-                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 -> 0.86
+                         0x14, 0x6E, // Lambda raw 0x6E14 = 28180 -> 0.86
+                         0x25,       // MAP raw 37 -> 37 kPa
+                         0x65,       // Baro raw 101 -> 101 kPa
+                         0x00, 0x00};
 
     for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) {
+            continue; /* boost: no field of its own */
+        }
         double val = 0.0;
         int rc = ecuio_decode_signal(&set->defs[i], frame, ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val);
         EXPECT_EQ(rc, 0) << "decode failed for " << set->defs[i].name << " at index " << i;
@@ -268,12 +274,18 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
         case ECUIO_MOCK_SIG_LAMBDA_ID:
             EXPECT_NEAR(val, 0.86, 0.0001);
             break;
+        case ECUIO_MOCK_SIG_MAP_ID:
+            EXPECT_DOUBLE_EQ(val, 37.0);
+            break;
+        case ECUIO_MOCK_SIG_BARO_ID:
+            EXPECT_DOUBLE_EQ(val, 101.0);
+            break;
         }
     }
 }
 
 TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
-    /* The mock encoder produces 12-byte payloads, but transports may deliver
+    /* The mock encoder produces 16-byte payloads, but transports may deliver
        shorter frames (CAN classic subsets, partial ISO-TP fragments).
        Signals whose bits live past payload_len must be REJECTED, and
        signals within it must still decode. Out-value must stay untouched
@@ -289,6 +301,9 @@ TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
 
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
+        if (def.flags & ECUIO_DEF_FLAG_COMPUTED) {
+            continue; /* no field to bound */
+        }
         double val = -999.0;
         const uint32_t end_bit =
             def.start_byte * 8u + def.bit_offset + def.bit_length;
@@ -531,7 +546,9 @@ TEST(SignalsTest, AnErrorFrameAppliesToNoDef)
     f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
     for (uint32_t i = 0; i < set->count; ++i) {
         f.flags = ECUIO_FRAME_FLAG_FD;
-        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 1)
+        /* A computed def applies to no frame at all (boost) */
+        const int data = (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) ? 0 : 1;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), data)
             << set->defs[i].name;
         f.flags = ECUIO_FRAME_FLAG_ERROR;
         EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 0)
@@ -568,13 +585,19 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(offsetof(ecuio_signal_def_t, group), 90u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 91u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, flags), 92u);
-    EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 96u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, quantity_reserved), 96u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, table_first), 100u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, table_count), 102u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 104u);
 
     /* Core reads layout_version before it knows anything else about a
-     * set. 3, so a set that carries an earlier layout's 1 or 2 there
-     * is refused. */
+     * set. 4, so a set that carries an earlier layout's 1, 2 or 3 there
+     * is refused: layout 3's set ended where layout 4's tables start. */
     EXPECT_EQ(offsetof(ecuio_signal_set_t, layout_version), 0u);
-    EXPECT_EQ(ECUIO_SIGNAL_SET_LAYOUT, 3u);
+    EXPECT_EQ(ECUIO_SIGNAL_SET_LAYOUT, 4u);
+    EXPECT_EQ(offsetof(ecuio_signal_set_t, enum_count), 2 * sizeof(void*) + 16);
+    EXPECT_EQ(offsetof(ecuio_signal_set_t, computed), 3 * sizeof(void*) + 24);
+    EXPECT_EQ(sizeof(ecuio_signal_set_t), 4 * sizeof(void*) + 40);
 }
 
 TEST(SignalsTest, DisplayValueLayoutIsPinned)
@@ -675,7 +698,9 @@ TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
      * Temperatures are a UTF-8 degree sign, never "degC". */
     const char* const kShared[] = {"RPM", "Vehicle Speed", "Coolant Temp",
                                    "Engine Oil Temp", "Intake Air Temp", "MAF",
-                                   "Throttle Position", "Engine Load"};
+                                   "Throttle Position", "Engine Load",
+                                   "Intake Manifold Pressure",
+                                   "Barometric Pressure"};
     auto find = [](const ecuio_signal_set_t* set, const char* name) -> const ecuio_signal_def_t* {
         for (uint32_t i = 0; i < set->count; ++i) {
             if (std::strcmp(set->defs[i].name, name) == 0) return &set->defs[i];
@@ -709,7 +734,9 @@ TEST(SignalsTest, MockSignalsDeclareTelemetryMessageId)
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     ASSERT_NE(set, nullptr);
     for (uint32_t i = 0; i < set->count; ++i) {
-        EXPECT_EQ(set->defs[i].message_id, 0x0C0u)
+        /* A computed def rides no message (boost): ID 0 */
+        const uint32_t id = (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) ? 0u : 0x0C0u;
+        EXPECT_EQ(set->defs[i].message_id, id)
             << "signal '" << set->defs[i].name << "' not on telemetry ID";
     }
 }
@@ -738,13 +765,13 @@ TEST(SignalsTest, ValidatorRejectsKindsWithNoDecoder)
 {
     /* Unknown kinds have no decoder, so a def of one would register
      * and never decode. */
-    for (int k : {5, 6, 255}) {
+    for (int k : {6, 7, 255}) {
         ecuio_signal_def_t d = four_byte_def(k);
         EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND) << "kind " << k;
     }
     /* The kind is checked first, as in the decoder: a bad kind with a
      * bad byte order and bad bit parameters reports the kind. */
-    ecuio_signal_def_t d = four_byte_def(5, 2);
+    ecuio_signal_def_t d = four_byte_def(6, 2);
     d.bit_length = 0;
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND);
 }
@@ -831,13 +858,16 @@ TEST(SignalsTest, ValidatorBoundsMuxKeysToThreeBytes)
 
 TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
 {
-    /* Each reserved byte, and flags, must be zero, so a later field
-     * can take the room and existing sets still load. */
+    /* Each reserved byte, every flag but ECUIO_DEF_FLAG_COMPUTED, and
+     * the table fields of a def that is neither an enum nor computed
+     * must be zero, so a later field can take the room and existing
+     * sets still load. 0x02 is in no flag's place. */
     struct Room { size_t offset; size_t size; const char* name; };
 #define ROOM(field) {offsetof(ecuio_signal_def_t, field), sizeof(ecuio_signal_def_t::field), #field}
     const Room rooms[] = {
         ROOM(reserved0), ROOM(mux_reserved),
-        ROOM(display_reserved), ROOM(flags), ROOM(reserved),
+        ROOM(display_reserved), ROOM(flags), ROOM(quantity_reserved),
+        ROOM(table_first), ROOM(table_count), ROOM(reserved),
     };
 #undef ROOM
     const ecuio_signal_def_t good = four_byte_def(ECUIO_VALUE_UINT);
@@ -846,13 +876,13 @@ TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
     for (const Room& room : rooms) {
         for (size_t i = 0; i < room.size; ++i) {
             ecuio_signal_def_t d = good;
-            reinterpret_cast<unsigned char*>(&d)[room.offset + i] = 0x01;
+            reinterpret_cast<unsigned char*>(&d)[room.offset + i] = 0x02;
             EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_RESERVED)
                 << room.name << " byte " << i << " (offset " << room.offset + i << ")";
             ++checked;
         }
     }
-    /* Every byte that isn't a named value: 2 + 2 + 1 + 4 + 24. */
+    /* Every byte that isn't a named value: 2 + 2 + 1 + 4 + 4 + 2 + 2 + 16. */
     EXPECT_EQ(checked, 33u);
 
     /* plot_rank and group took reserved bytes' room: any value is a
@@ -901,7 +931,7 @@ TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)
      * validates if and only if one of the decoders (numbers, or text)
      * decodes an in-bounds payload. */
     const uint8_t payload[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-    const int kinds[] = {0, 1, 2, 3, 4, 5, 255};
+    const int kinds[] = {0, 1, 2, 3, 4, 5, 6, 255};
     const int orders[] = {0, 1, 2};
     const uint8_t lengths[] = {0, 1, 7, 8, 12, 16, 24, 32, 33};
     for (int k : kinds) {
@@ -1097,7 +1127,7 @@ TEST(SignalsTest, ValidatorChecksTextKinds)
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BYTE_LENGTH);
 
     /* The kind is checked before the shape. */
-    d = text_def(5, 0, 0);
+    d = text_def(6, 0, 0);
     d.bit_length = 8;
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND);
 }
@@ -1109,7 +1139,7 @@ TEST(SignalsTest, SetValidationChecksLayoutVersionFirst)
      * def. */
     ecuio_signal_def_t bad_def = four_byte_def(ECUIO_VALUE_UINT);
     bad_def.bit_length = 0;
-    for (uint32_t version : {0u, 1u, 2u, 4u}) {
+    for (uint32_t version : {0u, 1u, 2u, 3u, 5u}) {
         ecuio_signal_set_t set = {};
         set.layout_version = version;
         EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_LAYOUT) << version;

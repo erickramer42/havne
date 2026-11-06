@@ -1,15 +1,5 @@
 // File/layer: tests/test_bridge.cpp | GTest + QtCore/Network, app-layer tests
-// Testing: UNIT/HARNESS: the bridge and its models against the real mock
-//          worker (and, on Windows, the fake J2534 DLL): marshaling,
-//          coalescing, backpressure, the frame log's ring and order, the
-//          signal model's roles and freshness, link states, the activity
-//          log's lines, connect and disconnect threads, both decode
-//          paths over the vehicle fixture, recording, the stream
-//          preparer's refusal (ADR-0028), the BLE service picker
-//          and the inspection line (ADR-0045,
-//          BridgeTest.InspectionEntryIsWhatThePageShows), and the adapter
-//          relay over loopback TCP with a fake adapter (ADR-0047,
-//          BridgeTest.Relay*)
+// Testing: BRIDGE: BridgeTest, ReadOnceTest (test_bridge)
 
 #include <cmath>
 #include <gtest/gtest.h>
@@ -56,6 +46,9 @@
 #include "btretire.h"
 #include "carryover.h"
 #include "fake_bt_socket.h"
+#include "packed_plugin.h"
+#include "pluginstore.h"
+#include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
@@ -188,6 +181,13 @@ const char* const kFakeEcuDiagnosticsLine =
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);   // ONE instance, lives for the process
+    // Every bridge's signal store (SignalStore::root) in a scratch folder,
+    // never the user's app data; a case that reads one sets its own
+    QTemporaryDir settings;
+    if (!settings.isValid()) {
+        return 1;
+    }
+    qputenv("HAVNE_SETTINGS_DIR", settings.path().toUtf8());
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
@@ -741,13 +741,17 @@ TEST(BridgeTest, RelayStopEndsEverything)
     EXPECT_TRUE(closedFromTheFarSide(*c));
     // On loopback the kernel can give the client the old port as its own
     // source port, and the connect then reaches itself (TCP's
-    // simultaneous open): that too says nothing listens
+    // simultaneous open): that too says nothing listens. A connect the
+    // kernel took for the listener as it closed is reset at once (macOS
+    // has read its far side's port as 0 by then); only one that stays
+    // connected means something still listens
     QTcpSocket late;
     late.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(port));
-    if (late.waitForConnected(500)) {
-        EXPECT_EQ(late.localPort(), late.peerPort())
-            << "something listens on " << port << " (connected from "
-            << late.localPort() << ")";
+    if (late.waitForConnected(500) && late.localPort() != late.peerPort()) {
+        const bool dropped = late.state() != QAbstractSocket::ConnectedState ||
+                             late.waitForDisconnected(1000);
+        EXPECT_TRUE(dropped) << "something listens on " << port
+                             << " (connected from " << late.localPort() << ")";
     }
 }
 
@@ -907,7 +911,7 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     const QByteArray events =
         readFile(dir + QStringLiteral("/events.log")).replace("\r\n", "\n");
     for (const char* expected :
-         {"ecuio session recording, format 2 (ADR-0049)\n",
+         {"ecuio session recording, format 3 (ADR-0049)\n",
           "\nuri  mock://rec\n", "\nsignal  RPM,", "\ncaller  Havne ",
           "\ncaller  surrogate frame logging  ",
           "  note  Connected: mock://rec\n",
@@ -2192,6 +2196,58 @@ TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
     model.updateTexts({{uint16_t(1001), QStringLiteral("no")}}, 11);
     EXPECT_FALSE(model.data(row0, SignalListModel::HasValueRole).toBool());
     EXPECT_EQ(model.data(row0, SignalListModel::TextRole).toString(), QString());
+}
+
+/* An enum row (ADR-0051) shows its label for the newest raw value, and
+ * a raw value with no label its number; the label is notified with the
+ * value, and a row of another kind has none */
+TEST(BridgeTest, AnEnumRowShowsItsLabel)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    static const ecuio_enum_entry_t kGears[] = {
+        {0, "Park"}, {3, "Drive"}, {7, "Low"}};
+    defs[1].kind = ECUIO_VALUE_ENUM; /* row 1, id 2001 */
+    defs[1].table_first = 1;         /* Drive and Low */
+    defs[1].table_count = 2;
+    set.enums = kGears;
+    set.enum_count = 3;
+    model.setSignalSet(&set);
+
+    const QModelIndex row0 = model.index(0, 0);
+    const QModelIndex row1 = model.index(1, 0);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QString())
+        << "a label before any value";
+    QList<int> notified;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+                     [&notified](const QModelIndex& topLeft, const QModelIndex&,
+                                 const QList<int>& roles) {
+                         if (topLeft.row() <= 1)
+                             notified = roles;
+                     });
+    model.updateValues({{uint16_t(2001), 3.0}, {uint16_t(1001), 3.0}}, 10);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QStringLiteral("Drive"));
+    EXPECT_TRUE(notified.contains(SignalListModel::LabelRole));
+    EXPECT_EQ(model.data(row0, SignalListModel::LabelRole).toString(),
+              QString())
+        << "a number row has no label";
+    model.updateValues({{uint16_t(2001), 7.0}}, 11);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QStringLiteral("Low"));
+    /* Park is the set's, but not the def's: past its table_first */
+    model.updateValues({{uint16_t(2001), 0.0}}, 12);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QString());
+    model.updateValues({{uint16_t(2001), 5.0}}, 13);
+    EXPECT_EQ(model.data(row1, SignalListModel::LabelRole).toString(),
+              QString())
+        << "a raw value with no label shows its number";
+    EXPECT_DOUBLE_EQ(model.data(row1, SignalListModel::ValueRole).toDouble(),
+                     5.0);
 }
 
 /* A text def takes the bridge's whole path like a number: decoded
@@ -3504,7 +3560,8 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "reply's answer is lost");
     EXPECT_TRUE(SessionBridge::versionsText(elm).isEmpty());
 
-    /* SocketCAN (ADR-0032): a listen-only controller, and vcan */
+    /* SocketCAN (ADR-0032, ADR-0040): a listen-only controller, vcan,
+     * and a requesting profile on a controller and on vcan */
     ecuio_session_info_t can{};
     can.backend = ECUIO_BACKEND_SOCKETCAN;
     can.baud = 500000;
@@ -3519,6 +3576,18 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
               "Session: SocketCAN, a virtual CAN bus, listening; profile mock");
     EXPECT_TRUE(SessionBridge::versionsText(can).isEmpty());
+    can.baud = 500000;
+    can.channel_count = 2;
+    qstrncpy(can.profile, "obd2", sizeof(can.profile));
+    EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
+              "Session: SocketCAN, a CAN controller at 500000 bit/s, "
+              "requesting on 2 channels; profile obd2");
+    can.baud = 0;
+    can.channel_count = 1;
+    qstrncpy(can.profile, "user.sim-car-own", sizeof(can.profile));
+    EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
+              "Session: SocketCAN, a virtual CAN bus, requesting on 1 "
+              "channel; profile user.sim-car-own");
 
     ecuio_session_info_t later{};
     later.backend = 7; // a backend this build doesn't know
@@ -6280,4 +6349,1501 @@ TEST(BridgeTest, ATypedCodeIsDescribed)
     EXPECT_TRUE(bridge.describeDtc(QStringLiteral("P0301X"))
                     .startsWith(QStringLiteral("not a trouble code")));
     EXPECT_TRUE(bridge.describeDtc(QStringLiteral("   ")).isEmpty());
+}
+
+// ---------------------------------------------------------------------------
+// Read once (ADR-0051's form, app/readonce.h): the draft into a request
+// and a def, the URI that asks for it, and what a reply says. Session-free.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A DID read as a signal file holds it, the module the engine ECU
+QVariantMap didSignal(const QString& did, const QVariantMap& field,
+                      const QVariantMap& more = {})
+{
+    QVariantMap s{
+        {QStringLiteral("name"), QStringLiteral("Test")},
+        {QStringLiteral("read"),
+         QVariantMap{{QStringLiteral("service"), QStringLiteral("22")},
+                     {QStringLiteral("number"), did}}},
+        {QStringLiteral("field"), field}};
+    for (auto it = more.begin(); it != more.end(); ++it) {
+        s.insert(it.key(), it.value());
+    }
+    return s;
+}
+
+QVariantMap pidSignal(const QString& pid, const QVariantMap& field,
+                      const QVariantMap& more = {})
+{
+    QVariantMap s = didSignal(QString(), field, more);
+    s.insert(QStringLiteral("read"),
+             QVariantMap{{QStringLiteral("service"), QStringLiteral("01")},
+                         {QStringLiteral("number"), pid}});
+    return s;
+}
+
+QVariantMap engineEcu()
+{
+    return {{QStringLiteral("rx"), QStringLiteral("7E8")}};
+}
+
+QVariantMap field(int byte, int bits, const QVariantMap& more = {})
+{
+    QVariantMap f{{QStringLiteral("byte"), byte},
+                  {QStringLiteral("bits"), bits}};
+    for (auto it = more.begin(); it != more.end(); ++it) {
+        f.insert(it.key(), it.value());
+    }
+    return f;
+}
+
+ReadOnce::Request request(const QVariantMap& signal,
+                          const QVariantMap& module = engineEcu())
+{
+    ReadOnce::Request r;
+    QString why;
+    EXPECT_TRUE(ReadOnce::requestFrom(signal, module, &r, &why))
+        << why.toStdString();
+    return r;
+}
+
+QVariantMap evaluateBytes(const ReadOnce::Request& r,
+                          std::initializer_list<uint8_t> bytes)
+{
+    const std::vector<uint8_t> v(bytes);
+    return ReadOnce::evaluate(r, v.data(), static_cast<uint16_t>(v.size()));
+}
+
+} // namespace
+
+TEST(ReadOnceTest, TheRequestIdIsTheStandardsWhereItGivesOne)
+{
+    EXPECT_EQ(ReadOnce::standardTx(0x7E8), 0x7E0u);
+    EXPECT_EQ(ReadOnce::standardTx(0x7EF), 0x7E7u);
+    EXPECT_EQ(ReadOnce::standardTx(0x7E7), 0u);
+    EXPECT_EQ(ReadOnce::standardTx(0x7B8), 0u);
+    EXPECT_EQ(ReadOnce::standardTx(0x18DAF110), 0x18DA10F1u);
+    EXPECT_EQ(ReadOnce::standardTx(0x18DA10F1), 0u);
+}
+
+/* The adapter's own keys stay; what a session asks for is Read once's */
+TEST(ReadOnceTest, TheUriKeepsTheAdaptersKeysAndAsksForTheOneRequest)
+{
+    QString why;
+    const ReadOnce::Request did =
+        request(didSignal(QStringLiteral("1E1C"), field(0, 16)));
+    EXPECT_EQ(
+        ReadOnce::uriFor(
+            QStringLiteral(" j2534://C:/v/x.dll?profile=obd2&baud=500000"
+                           "&did=F190&poll=0C&identify=1 "),
+            did, &why)
+            .toStdString(),
+        "j2534://C:/v/x.dll?baud=500000&profile=uds-generic&did=7E8:1E1C:hex"
+        "&identify=0&diagnose=0&probe=0");
+
+    const ReadOnce::Request pid =
+        request(pidSignal(QStringLiteral("0B"), field(0, 8)));
+    EXPECT_EQ(
+        ReadOnce::uriFor(QStringLiteral("elm327://COM6"), pid, &why)
+            .toStdString(),
+        "elm327://COM6?profile=raw&poll=0x0B&filter=0x7E8&txid=0x7E0&probe=0");
+
+    const ReadOnce::Request body =
+        request(pidSignal(QStringLiteral("0C"), field(0, 16)),
+                {{QStringLiteral("rx"), QStringLiteral("7B8")},
+                 {QStringLiteral("tx"), QStringLiteral("7B0")}});
+    EXPECT_EQ(ReadOnce::uriFor(QStringLiteral("socketcan://can0?baud=500000"),
+                               body, &why)
+                  .toStdString(),
+              "socketcan://"
+              "can0?baud=500000&profile=obd2&poll=0x0C&filter=0x7B8&txid=0x7B0"
+              "&probe=0");
+    // uds-generic's own rule addresses an 11-bit module off the default
+    const ReadOnce::Request bodyDid =
+        request(didSignal(QStringLiteral("D101"), field(0, 8)),
+                {{QStringLiteral("rx"), QStringLiteral("7B8")},
+                 {QStringLiteral("tx"), QStringLiteral("7B0")}});
+    EXPECT_EQ(ReadOnce::uriFor(QStringLiteral("elm327://COM6"), bodyDid, &why)
+                  .toStdString(),
+              "elm327://"
+              "COM6?profile=uds-generic&did=7B8:D101:hex&identify=0&diagnose=0"
+              "&probe=0");
+    const ReadOnce::Request wide =
+        request(didSignal(QStringLiteral("D101"), field(0, 8)),
+                {{QStringLiteral("rx"), QStringLiteral("18DAF110")}});
+    EXPECT_EQ(
+        ReadOnce::uriFor(QStringLiteral("elm327://COM6"), wide, &why)
+            .toStdString(),
+        "elm327://"
+        "COM6?profile=uds-generic&did=18DAF110:D101:hex&identify=0&diagnose=0"
+        "&probe=0");
+}
+
+TEST(ReadOnceTest, AUriItCantAskOnIsRefused)
+{
+    QString why;
+    const ReadOnce::Request did =
+        request(didSignal(QStringLiteral("1E1C"), field(0, 16)));
+    EXPECT_TRUE(
+        ReadOnce::uriFor(QStringLiteral("mock://demo"), did, &why).isEmpty());
+    EXPECT_EQ(
+        why.toStdString(),
+        "Read once needs an adapter: j2534://, elm327:// or socketcan://");
+    EXPECT_TRUE(
+        ReadOnce::uriFor(QStringLiteral("replay://C:/r/frames.csv"), did, &why)
+            .isEmpty());
+
+    // A DID's module off uds-generic's rule: it has no way to address it
+    const ReadOnce::Request off =
+        request(didSignal(QStringLiteral("1E1C"), field(0, 16)),
+                {{QStringLiteral("rx"), QStringLiteral("7E8")},
+                 {QStringLiteral("tx"), QStringLiteral("7E3")}});
+    why.clear();
+    EXPECT_TRUE(
+        ReadOnce::uriFor(QStringLiteral("elm327://COM6"), off, &why).isEmpty());
+    EXPECT_TRUE(
+        why.startsWith(QStringLiteral("Read once asks for a DID only where")))
+        << why.toStdString();
+}
+
+/* Each key a draft gets wrong is named; nothing reaches a session */
+TEST(ReadOnceTest, TheDraftsMistakesAreNamed)
+{
+    struct Case {
+        const char* what;
+        QVariantMap signal;
+        QVariantMap module;
+        const char* starts;
+    };
+    const QVariantMap f16 = field(0, 16);
+    const QString d = QStringLiteral("1E1C");
+    const QVariantMap rx7b8{{QStringLiteral("rx"), QStringLiteral("7B8")}};
+    const QVariantMap mixed{{QStringLiteral("rx"), QStringLiteral("18DAF110")},
+                            {QStringLiteral("tx"), QStringLiteral("7E0")}};
+    QVariantMap noName = didSignal(d, f16);
+    noName.insert(QStringLiteral("name"), QStringLiteral("  "));
+    QVariantMap longName = didSignal(d, f16);
+    longName.insert(QStringLiteral("name"), QString(32, QLatin1Char('n')));
+    QVariantMap service = didSignal(d, f16);
+    service.insert(
+        QStringLiteral("read"),
+        QVariantMap{{QStringLiteral("service"), QStringLiteral("23")},
+                    {QStringLiteral("number"), d}});
+    QVariantMap noByte = didSignal(d, f16);
+    noByte.insert(QStringLiteral("field"),
+                  QVariantMap{{QStringLiteral("bits"), 8}});
+    const std::vector<Case> cases = {
+        {"no reply ID", didSignal(d, f16), {}, "The module needs its reply ID"},
+        {"a reply ID not hex",
+         didSignal(d, f16),
+         {{QStringLiteral("rx"), QStringLiteral("7G8")}},
+         "The module needs its reply ID"},
+        {"no request ID off the rule", didSignal(d, f16), rx7b8,
+         "The module needs its request ID"},
+        {"two widths", didSignal(d, f16), mixed,
+         "The module's two IDs need the same width"},
+        {"another service", service, engineEcu(), "The service is 01"},
+        {"a DID of three digits", didSignal(QStringLiteral("E1C"), f16),
+         engineEcu(), "A DID is four hex digits"},
+        {"a PID of three digits", pidSignal(QStringLiteral("00C"), f16),
+         engineEcu(), "A PID is two hex digits"},
+        {"a blank name", noName, engineEcu(), "A signal needs a name"},
+        {"a name of 32 bytes", longName, engineEcu(),
+         "The signal's name is 32 bytes; it takes 1 to 31"},
+        {"no first byte", noByte, engineEcu(),
+         "The signal's field needs \"byte\""},
+        {"no bits", didSignal(d, field(0, 0)), engineEcu(),
+         "The signal's bits takes a whole number from 1 to 32"},
+        {"33 bits", didSignal(d, field(0, 33)), engineEcu(),
+         "The signal's bits takes a whole number from 1 to 32"},
+        {"half a bit",
+         didSignal(d, field(0, 8,
+                            {{QStringLiteral("bit"), 0.5},
+                             {QStringLiteral("order"), QStringLiteral("le")}})),
+         engineEcu(), "The signal's bit takes a whole number from 0 to 7"},
+        {"bit 8",
+         didSignal(d, field(0, 1,
+                            {{QStringLiteral("bit"), 8},
+                             {QStringLiteral("order"), QStringLiteral("le")}})),
+         engineEcu(), "The signal's bit takes a whole number from 0 to 7"},
+        {"a big-endian 12 bits", didSignal(d, field(0, 12)), engineEcu(),
+         "The signal's field is big-endian, so whole bytes"},
+        {"another order",
+         didSignal(
+             d, field(0, 8, {{QStringLiteral("order"), QStringLiteral("me")}})),
+         engineEcu(), "The signal's order 'me' isn't \"be\" or \"le\""},
+        {"scale 0", didSignal(d, f16, {{QStringLiteral("scale"), 0}}),
+         engineEcu(), "The signal's scale is 0"},
+        {"a unit of 16 bytes",
+         didSignal(d, f16,
+                   {{QStringLiteral("unit"), QString(16, QLatin1Char('u'))}}),
+         engineEcu(), "The signal's unit is 16 bytes; it takes 0 to 15"},
+        {"4 decimals", didSignal(d, f16, {{QStringLiteral("decimals"), 4}}),
+         engineEcu(), "The signal's decimals takes a whole number from 0 to 3"},
+        {"a computed signal",
+         didSignal(d, f16,
+                   {{QStringLiteral("kind"), QStringLiteral("computed")}}),
+         engineEcu(), "Read once reads a number"},
+        {"a signed enum",
+         didSignal(d, field(0, 8, {{QStringLiteral("signed"), true}}),
+                   {{QStringLiteral("kind"), QStringLiteral("enum")}}),
+         engineEcu(), "Unknown key 'signed' in the signal's field"},
+        {"a formula's name",
+         didSignal(d, f16,
+                   {{QStringLiteral("name"), QStringLiteral("=SUM(A1)")}}),
+         engineEcu(),
+         "The signal's name '=SUM(A1)' starts as a spreadsheet formula"},
+    };
+    for (const Case& c : cases) {
+        ReadOnce::Request r;
+        QString why;
+        EXPECT_FALSE(ReadOnce::requestFrom(c.signal, c.module, &r, &why))
+            << c.what;
+        EXPECT_TRUE(why.startsWith(QString::fromUtf8(c.starts)))
+            << c.what << ": " << why.toStdString();
+    }
+}
+
+/* Core decodes the reply with the draft's def: each kind, each order */
+TEST(ReadOnceTest, AReplyDecodesThroughTheDraft)
+{
+    const ReadOnce::Request kpa =
+        request(didSignal(QStringLiteral("1E1C"), field(0, 16),
+                          {{QStringLiteral("scale"), 0.1},
+                           {QStringLiteral("unit"), QStringLiteral("kPa")},
+                           {QStringLiteral("decimals"), 1}}));
+    QVariantMap out = evaluateBytes(kpa, {0x62, 0x1E, 0x1C, 0x12, 0x34});
+    EXPECT_TRUE(out.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(out.value(QStringLiteral("request")).toString().toStdString(),
+              "22 1E 1C");
+    EXPECT_EQ(out.value(QStringLiteral("reply")).toString().toStdString(),
+              "62 1E 1C 12 34");
+    EXPECT_EQ(out.value(QStringLiteral("value")).toString().toStdString(),
+              "466.0 kPa");
+    EXPECT_DOUBLE_EQ(out.value(QStringLiteral("number")).toDouble(), 466.0);
+
+    const ReadOnce::Request map =
+        request(pidSignal(QStringLiteral("0B"), field(0, 8),
+                          {{QStringLiteral("unit"), QStringLiteral("kPa")}}));
+    out = evaluateBytes(map, {0x41, 0x0B, 0x23});
+    EXPECT_EQ(out.value(QStringLiteral("request")).toString().toStdString(),
+              "01 0B");
+    EXPECT_EQ(out.value(QStringLiteral("value")).toString().toStdString(),
+              "35 kPa");
+
+    const ReadOnce::Request flag = request(
+        didSignal(QStringLiteral("1E1C"),
+                  field(1, 1,
+                        {{QStringLiteral("bit"), 3},
+                         {QStringLiteral("order"), QStringLiteral("le")}})));
+    EXPECT_EQ(evaluateBytes(flag, {0x62, 0x1E, 0x1C, 0x00, 0x08})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "1");
+    EXPECT_EQ(evaluateBytes(flag, {0x62, 0x1E, 0x1C, 0xFF, 0xF7})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "0");
+
+    const ReadOnce::Request little = request(didSignal(
+        QStringLiteral("1E1C"),
+        field(0, 16, {{QStringLiteral("order"), QStringLiteral("le")}})));
+    EXPECT_EQ(evaluateBytes(little, {0x62, 0x1E, 0x1C, 0x34, 0x12})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "4660");
+
+    const ReadOnce::Request trim =
+        request(didSignal(QStringLiteral("1E1C"),
+                          field(0, 16, {{QStringLiteral("signed"), true}}),
+                          {{QStringLiteral("offset"), 10}}));
+    EXPECT_EQ(evaluateBytes(trim, {0x62, 0x1E, 0x1C, 0xFF, 0x38})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "-190");
+
+    const ReadOnce::Request text = request(didSignal(
+        QStringLiteral("F187"), QVariantMap{{QStringLiteral("byte"), 0}},
+        {{QStringLiteral("kind"), QStringLiteral("text")}}));
+    EXPECT_EQ(evaluateBytes(text, {0x62, 0xF1, 0x87, 'P', 'N', '-', 0x01})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "PN-.");
+
+    const ReadOnce::Request hex = request(didSignal(
+        QStringLiteral("1E1C"),
+        QVariantMap{{QStringLiteral("byte"), 1}, {QStringLiteral("bytes"), 1}},
+        {{QStringLiteral("kind"), QStringLiteral("hex")}}));
+    EXPECT_EQ(evaluateBytes(hex, {0x62, 0x1E, 0x1C, 0x12, 0x34, 0x56})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "34");
+
+    // A raw value with no label shows as its number
+    const ReadOnce::Request gear = request(didSignal(
+        QStringLiteral("D101"), field(0, 8),
+        {{QStringLiteral("kind"), QStringLiteral("enum")},
+         {QStringLiteral("values"),
+          QVariantMap{{QStringLiteral("3"), QStringLiteral("Drive")}}}}));
+    EXPECT_EQ(evaluateBytes(gear, {0x62, 0xD1, 0x01, 0x03})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "Drive (3)");
+    EXPECT_EQ(evaluateBytes(gear, {0x62, 0xD1, 0x01, 0x07})
+                  .value(QStringLiteral("value"))
+                  .toString()
+                  .toStdString(),
+              "7");
+}
+
+TEST(ReadOnceTest, ARefusalSaysItsCodesName)
+{
+    const ReadOnce::Request r =
+        request(didSignal(QStringLiteral("1E1C"), field(0, 16)));
+    QVariantMap out = evaluateBytes(r, {0x7F, 0x22, 0x31});
+    EXPECT_FALSE(out.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(out.value(QStringLiteral("nrc")).toInt(), 0x31);
+    EXPECT_EQ(out.value(QStringLiteral("reply")).toString().toStdString(),
+              "7F 22 31");
+    EXPECT_EQ(out.value(QStringLiteral("words")).toString().toStdString(),
+              "Refused: requestOutOfRange (7F 22 31)");
+    EXPECT_EQ(evaluateBytes(r, {0x7F, 0x22, 0x33})
+                  .value(QStringLiteral("words"))
+                  .toString()
+                  .toStdString(),
+              "Refused: securityAccessDenied (7F 22 33)");
+    EXPECT_EQ(evaluateBytes(r, {0x7F, 0x22, 0x99})
+                  .value(QStringLiteral("words"))
+                  .toString()
+                  .toStdString(),
+              "Refused: 7F 22 99");
+}
+
+TEST(ReadOnceTest, AFieldPastTheReplySaysSo)
+{
+    const ReadOnce::Request r =
+        request(didSignal(QStringLiteral("1E1C"), field(1, 16)));
+    const QVariantMap out = evaluateBytes(r, {0x62, 0x1E, 0x1C, 0x12, 0x34});
+    EXPECT_FALSE(out.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(out.value(QStringLiteral("reply")).toString().toStdString(),
+              "62 1E 1C 12 34");
+    EXPECT_EQ(out.value(QStringLiteral("words")).toString().toStdString(),
+              "The field runs past the reply's 2 data bytes");
+}
+
+/* Only the module's reply to this request ends the wait; response
+ * pending doesn't */
+TEST(ReadOnceTest, OnlyItsOwnReplyAnswers)
+{
+    const ReadOnce::Request did =
+        request(didSignal(QStringLiteral("1E1C"), field(0, 16)));
+    const auto answers = [](const ReadOnce::Request& r, uint32_t rx,
+                            std::initializer_list<uint8_t> bytes) {
+        const std::vector<uint8_t> v(bytes);
+        return ReadOnce::answers(r, rx, v.data(),
+                                 static_cast<uint16_t>(v.size()));
+    };
+    EXPECT_TRUE(answers(did, 0x7E8, {0x62, 0x1E, 0x1C, 0x12, 0x34}));
+    EXPECT_FALSE(answers(did, 0x7E9, {0x62, 0x1E, 0x1C, 0x12, 0x34}));
+    EXPECT_FALSE(answers(did, 0x7E8, {0x62, 0x1E, 0x1D, 0x12, 0x34}));
+    EXPECT_TRUE(answers(did, 0x7E8, {0x7F, 0x22, 0x31}));
+    EXPECT_FALSE(answers(did, 0x7E8, {0x7F, 0x22, 0x78}));
+    EXPECT_FALSE(answers(did, 0x7E8, {0x7F, 0x01, 0x12}));
+    EXPECT_FALSE(answers(did, 0x7E8, {0x62}));
+    const ReadOnce::Request pid =
+        request(pidSignal(QStringLiteral("0B"), field(0, 8)));
+    EXPECT_TRUE(answers(pid, 0x7E8, {0x41, 0x0B, 0x23}));
+    EXPECT_FALSE(answers(pid, 0x7E8, {0x41, 0x0C, 0x1F, 0x40}));
+    EXPECT_TRUE(answers(pid, 0x7E8, {0x7F, 0x01, 0x12}));
+}
+
+TEST(BridgeTest, TheStaleAgeIsCores)
+{
+    EXPECT_EQ(SessionBridge::valueStaleMs(),
+              static_cast<int>(ECUIO_VALUE_STALE_US / 1000u));
+}
+
+TEST(BridgeTest, ReadOnceRefusesWhatItCantAsk)
+{
+    SessionBridge bridge;
+    EXPECT_EQ(
+        bridge
+            .readOnce(QStringLiteral("mock://demo"),
+                      didSignal(QStringLiteral("1E1C"), field(0, 16)),
+                      engineEcu())
+            .toStdString(),
+        "Read once needs an adapter: j2534://, elm327:// or socketcan://");
+    EXPECT_EQ(
+        bridge
+            .readOnce(QStringLiteral("elm327://COM6"),
+                      didSignal(QStringLiteral("1E1C"), field(0, 12)),
+                      engineEcu())
+            .toStdString(),
+        "The signal's field is big-endian, so whole bytes: bits a multiple "
+        "of 8 and no bit (\"order\": \"le\" for a bit field)");
+    EXPECT_FALSE(bridge.readingOnce());
+}
+
+#ifdef _WIN32
+
+namespace {
+
+// Read once against the fake DLL's ECU: the result, once it comes
+struct ReadOnceRun {
+    explicit ReadOnceRun(SessionBridge& b) : bridge(b)
+    {
+        QObject::connect(&bridge, &SessionBridge::readOnceResult, &context,
+                         [this](const QVariantMap& r) {
+                             result = r;
+                             done = true;
+                         });
+        QObject::connect(&bridge, &SessionBridge::logMessage, &context,
+                         [this](const QString& line) { log << line; });
+    }
+    bool wait()
+    {
+        return spinUntil([this]() { return done; }, 15000, 10);
+    }
+
+    // The connections end with the run
+    QObject context;
+    SessionBridge& bridge;
+    QVariantMap result;
+    bool done = false;
+    QStringList log;
+};
+
+QString fakeObd2Uri()
+{
+    return QStringLiteral("j2534://%1?profile=obd2&identify=1")
+        .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+}
+
+} // namespace
+
+/* A DID through uds-generic: the fake's 1E1C answers 12 34 */
+TEST(BridgeTest, ReadOnceReadsADidFromTheFakeEcu)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    ReadOnceRun run(bridge);
+    ASSERT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            didSignal(QStringLiteral("1E1C"), field(0, 16)),
+                            engineEcu())
+                  .toStdString(),
+              "");
+    EXPECT_TRUE(bridge.readingOnce());
+    EXPECT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            didSignal(QStringLiteral("1E1C"), field(0, 16)),
+                            engineEcu())
+                  .toStdString(),
+              "A read is running");
+    ASSERT_TRUE(run.wait());
+    EXPECT_FALSE(bridge.readingOnce());
+    EXPECT_TRUE(run.result.value(QStringLiteral("ok")).toBool())
+        << run.result.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("reply")).toString().toStdString(),
+        "62 1E 1C 12 34");
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("value")).toString().toStdString(),
+        "4660");
+    EXPECT_TRUE(
+        run.result.value(QStringLiteral("uri"))
+            .toString()
+            .contains(QStringLiteral("profile=uds-generic&did=7E8:1E1C:hex")));
+    EXPECT_TRUE(
+        run.log.contains(QStringLiteral("Read once: 22 1E 1C answered")))
+        << run.log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_FALSE(bridge.connected());
+}
+
+/* A PID through the raw profile's poll: the fake's MAP, 35 kPa */
+TEST(BridgeTest, ReadOnceReadsAPidFromTheFakeEcu)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    ReadOnceRun run(bridge);
+    ASSERT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            pidSignal(QStringLiteral("0B"), field(0, 8),
+                                      {{QStringLiteral("unit"),
+                                        QStringLiteral("kPa")}}),
+                            engineEcu())
+                  .toStdString(),
+              "");
+    ASSERT_TRUE(run.wait());
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("reply")).toString().toStdString(),
+        "41 0B 23");
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("value")).toString().toStdString(),
+        "35 kPa");
+}
+
+/* A DID the ECU doesn't know: its refusal, by name; another code from
+ * the fake's knob */
+TEST(BridgeTest, ReadOnceShowsTheEcusRefusal)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    {
+        ReadOnceRun run(bridge);
+        ASSERT_EQ(bridge
+                      .readOnce(fakeObd2Uri(),
+                                didSignal(QStringLiteral("1E1D"), field(0, 8)),
+                                engineEcu())
+                      .toStdString(),
+                  "");
+        ASSERT_TRUE(run.wait());
+        EXPECT_FALSE(run.result.value(QStringLiteral("ok")).toBool());
+        EXPECT_EQ(run.result.value(QStringLiteral("nrc")).toInt(), 0x31);
+        EXPECT_EQ(
+            run.result.value(QStringLiteral("words")).toString().toStdString(),
+            "Refused: requestOutOfRange (7F 22 31)");
+        EXPECT_TRUE(run.log.contains(QStringLiteral(
+            "Read once: 22 1E 1D Refused: requestOutOfRange (7F 22 31)")));
+    }
+    FakeEnvArm denied("ECUIO_FAKE_UNSUPPORTED_NRC", "0x33");
+    ReadOnceRun run(bridge);
+    ASSERT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            didSignal(QStringLiteral("1E1D"), field(0, 8)),
+                            engineEcu())
+                  .toStdString(),
+              "");
+    ASSERT_TRUE(run.wait());
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("words")).toString().toStdString(),
+        "Refused: securityAccessDenied (7F 22 33)");
+}
+
+/* An ECU that stays silent: the wait ends it */
+TEST(BridgeTest, ReadOnceWithNoReplySaysSo)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
+    SessionBridge bridge;
+    bridge.setReadOnceWaitForTesting(500);
+    ReadOnceRun run(bridge);
+    ASSERT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            didSignal(QStringLiteral("1E1D"), field(0, 8)),
+                            engineEcu())
+                  .toStdString(),
+              "");
+    ASSERT_TRUE(run.wait());
+    EXPECT_FALSE(run.result.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("reply")).toString().toStdString(), "");
+    EXPECT_EQ(
+        run.result.value(QStringLiteral("words")).toString().toStdString(),
+        "No reply in 0.5 s");
+}
+
+/* The adapter is one session's at a time: no Read once while one is
+ * connected, no connect while a Read once runs */
+TEST(BridgeTest, ReadOnceAndASessionTakeTurns)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
+    EXPECT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            didSignal(QStringLiteral("1E1C"), field(0, 16)),
+                            engineEcu())
+                  .toStdString(),
+              "Read once reads only while no session is connected");
+    EXPECT_FALSE(bridge.readingOnce());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    ReadOnceRun run(bridge);
+    ASSERT_EQ(bridge
+                  .readOnce(fakeObd2Uri(),
+                            didSignal(QStringLiteral("1E1C"), field(0, 16)),
+                            engineEcu())
+                  .toStdString(),
+              "");
+    EXPECT_EQ(bridge.connectSession(fakeUri()).toStdString(),
+              "Read once is using the adapter");
+    QString asyncErr;
+    QObject::connect(
+        &bridge, &SessionBridge::connectResult,
+        [&asyncErr](const QString&, const QString& e) { asyncErr = e; });
+    bridge.connectSessionAsync(fakeUri());
+    EXPECT_EQ(asyncErr.toStdString(), "Read once is using the adapter");
+    EXPECT_FALSE(bridge.connecting());
+    ASSERT_TRUE(run.wait());
+    EXPECT_TRUE(run.result.value(QStringLiteral("ok")).toBool());
+    ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty())
+        << "the adapter is free again";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+#endif // _WIN32
+
+// ---------------------------------------------------------------------------
+// The vehicles' signal files (ADR-0051, app/signalstore.h): each case's
+// store in a HAVNE_SETTINGS_DIR of its own.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// HAVNE_SETTINGS_DIR at a scratch folder for one case, put back after
+class SettingsDirScope
+{
+public:
+    SettingsDirScope() : m_before(qgetenv("HAVNE_SETTINGS_DIR"))
+    {
+        qputenv("HAVNE_SETTINGS_DIR", m_dir.path().toUtf8());
+    }
+    ~SettingsDirScope() { qputenv("HAVNE_SETTINGS_DIR", m_before); }
+    SettingsDirScope(const SettingsDirScope&) = delete;
+    SettingsDirScope& operator=(const SettingsDirScope&) = delete;
+
+    bool valid() const { return m_dir.isValid(); }
+    QString store() const { return m_dir.path() + QStringLiteral("/signals"); }
+
+private:
+    QTemporaryDir m_dir;
+    QByteArray m_before;
+};
+
+// A signal file of one DID on the engine ECU, named name
+QByteArray signalFile(const QString& name,
+                      const QString& did = QStringLiteral("D100"))
+{
+    return QStringLiteral(
+               R"({"havne_signals":1,"name":"%1","source":{"name":"t"},)"
+               R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+               R"({"key":"a","name":"A","read":{"service":"22","number":"%2"},)"
+               R"("field":{"byte":0,"bits":8}}]})")
+        .arg(name, did)
+        .toUtf8();
+}
+
+QString sha256Of(const QByteArray& bytes)
+{
+    return QString::fromLatin1(
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+}
+
+QUrl writeScratch(const QString& folder, const QString& name,
+                  const QByteArray& bytes)
+{
+    QDir().mkpath(folder);
+    QFile f(folder + QLatin1Char('/') + name);
+    EXPECT_TRUE(f.open(QIODevice::WriteOnly));
+    f.write(bytes);
+    return QUrl::fromLocalFile(f.fileName());
+}
+
+bool registered(const char* profile)
+{
+    const ecuio_signal_set_t* set = nullptr;
+    return ecuio_profile_lookup(profile, &set) == ECUIO_OK;
+}
+
+QStringList storeFiles(const QString& store)
+{
+    return QDir(store).entryList(QDir::Files, QDir::Name);
+}
+
+} // namespace
+
+/* A file that loads is kept as <sha256>.json, its bytes as given; the
+ * same bytes from elsewhere reuse that copy */
+TEST(BridgeTest, SignalFileImportKeepsACopyByItsHash)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray bytes = signalFile(QStringLiteral("Extras"));
+    const QString sha = sha256Of(bytes);
+
+    QVariantMap r =
+        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("sha256")).toString(), sha);
+    EXPECT_EQ(r.value(QStringLiteral("name")).toString().toStdString(),
+              "Extras");
+    EXPECT_EQ(r.value(QStringLiteral("profile")).toString().toStdString(),
+              "user.extras");
+    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), 1);
+    EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool());
+    EXPECT_EQ(storeFiles(dir.store()),
+              QStringList{sha + QStringLiteral(".json")});
+    QFile copy(dir.store() + QLatin1Char('/') + sha + QStringLiteral(".json"));
+    ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
+    EXPECT_EQ(copy.readAll(), bytes);
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Signal file: Extras (user.extras, 1 signal)")))
+        << log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_FALSE(registered("user.extras")) << "import registers nothing";
+
+    // The same bytes under another name, from a fresh bridge too
+    SessionBridge again;
+    r = again.importSignalFile(writeScratch(from.path(), "b.json", bytes));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(r.value(QStringLiteral("kept")).toBool());
+    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
+}
+
+/* A file says the built-in set it extends and how many of its signals
+ * are its own, at import and in use: the page offers one extending obd2
+ * in obd2's place (ADR-0052) */
+TEST(BridgeTest, SignalFileSaysWhatItExtendsAndHowManyAreItsOwn)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QByteArray extending = signalFile(QStringLiteral("Plus"));
+    extending.replace(R"("source":{"name":"t"},)",
+                      R"("source":{"name":"t"},"extends":"obd2",)");
+    const QByteArray alone = signalFile(QStringLiteral("Alone"));
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    const int base = static_cast<int>(obd2->count);
+
+    QVariantMap r = bridge.importSignalFile(
+        writeScratch(from.path(), "plus.json", extending));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(),
+              "obd2");
+    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), base + 1);
+    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 1);
+    r = bridge.importSignalFile(writeScratch(from.path(), "alone.json", alone));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(), "");
+    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 1);
+
+    const QVariantList used =
+        bridge.useSignalFiles({sha256Of(extending), sha256Of(alone)});
+    ASSERT_EQ(used.size(), 2);
+    for (const QVariant& v : used) {
+        const QVariantMap e = v.toMap();
+        ASSERT_TRUE(e.value(QStringLiteral("ok")).toBool());
+        const bool plus =
+            e.value(QStringLiteral("sha256")).toString() == sha256Of(extending);
+        EXPECT_EQ(e.value(QStringLiteral("extends")).toString().toStdString(),
+                  plus ? "obd2" : "");
+        EXPECT_EQ(e.value(QStringLiteral("own")).toInt(), 1);
+        EXPECT_EQ(e.value(QStringLiteral("count")).toInt(),
+                  plus ? base + 1 : 1);
+    }
+    bridge.useSignalFiles({});
+}
+
+/* A refusal is the loader's words, never the path it came from; nothing
+ * is kept */
+TEST(BridgeTest, SignalFileRefusalNamesNoPath)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    // On Windows the scratch folder is under the account's home, so its
+    // name is in the path too
+    const QString folder = from.path() + QStringLiteral("/jdoe-private");
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    QByteArray bad = signalFile(QStringLiteral("Extras"));
+    bad.replace("\"bits\"", "\"bitz\"");
+    QVariantMap r =
+        bridge.importSignalFile(writeScratch(folder, "extras.json", bad));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    const QString words = r.value(QStringLiteral("words")).toString();
+    EXPECT_TRUE(words.contains(QStringLiteral("bitz"))) << words.toStdString();
+    EXPECT_TRUE(words.contains(QStringLiteral("line"))) << words.toStdString();
+
+    r = bridge.importSignalFile(
+        QUrl::fromLocalFile(folder + QStringLiteral("/gone.json")));
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't read the file");
+
+    for (const QString& line : log + QStringList{words}) {
+        EXPECT_FALSE(line.contains(QStringLiteral("jdoe")))
+            << line.toStdString();
+        EXPECT_FALSE(line.contains(from.path())) << line.toStdString();
+        EXPECT_FALSE(line.contains(QStringLiteral("extras.json")))
+            << line.toStdString();
+    }
+    EXPECT_TRUE(storeFiles(dir.store()).isEmpty());
+}
+
+/* use() registers the files it's given and unregisters the rest */
+TEST(BridgeTest, SignalFileUseRegistersItsProfile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray bytes = signalFile(QStringLiteral("Extras"));
+    const QString sha = sha256Of(bytes);
+    ASSERT_TRUE(
+        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    QVariantList used = bridge.useSignalFiles({sha});
+    ASSERT_EQ(used.size(), 1);
+    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(registered("user.extras"));
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo?profile=user.extras", &s),
+              ECUIO_OK)
+        << "a URI can choose it";
+    ecuio_session_destroy(s);
+
+    EXPECT_TRUE(bridge.useSignalFiles({}).isEmpty());
+    EXPECT_FALSE(registered("user.extras"));
+}
+
+/* One profile, one file: two files of one name don't both register */
+TEST(BridgeTest, SignalFileOneProfileHasOneFile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray a = signalFile(QStringLiteral("Extras"));
+    const QByteArray b =
+        signalFile(QStringLiteral("Extras"), QStringLiteral("D101"));
+    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "a.json", a))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", b))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QVariantList used = bridge.useSignalFiles({sha256Of(a), sha256Of(b)});
+    ASSERT_EQ(used.size(), 2);
+    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(used[1].toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(
+        used[1].toMap().value(QStringLiteral("words")).toString().toStdString(),
+        "user.extras is made by another file already (Extras)");
+    const ecuio_signal_set_t* set = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("user.extras", &set), ECUIO_OK);
+    ASSERT_NE(set, nullptr);
+    EXPECT_EQ(set->defs[0].mux_key, 0x62D100u)
+        << "the first file's, never replaced";
+}
+
+/* At start-up each copy is read again: a missing, changed or no longer
+ * loading copy says so and isn't offered; a good one registers */
+TEST(BridgeTest, SignalFileThatNoLongerLoadsAtStartUpSaysSo)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    const QByteArray good = signalFile(QStringLiteral("Extras"));
+    QByteArray stale = signalFile(QStringLiteral("Stale"));
+    stale.replace("\"havne_signals\":1", "\"havne_signals\":9");
+    writeScratch(dir.store(), sha256Of(good) + QStringLiteral(".json"), good);
+    writeScratch(dir.store(), sha256Of(stale) + QStringLiteral(".json"), stale);
+    const QString changed = sha256Of("other bytes");
+    writeScratch(dir.store(), changed + QStringLiteral(".json"),
+                 signalFile(QStringLiteral("X")));
+    const QString missing = QString(64, QLatin1Char('e'));
+
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QVariantList used = bridge.useSignalFiles(
+        {sha256Of(stale), missing, changed, sha256Of(good)});
+    ASSERT_EQ(used.size(), 4);
+    const QString staleWords =
+        used[0].toMap().value(QStringLiteral("words")).toString();
+    EXPECT_TRUE(staleWords.startsWith(QStringLiteral("It no longer loads: ")))
+        << staleWords.toStdString();
+    EXPECT_EQ(
+        used[1].toMap().value(QStringLiteral("words")).toString().toStdString(),
+        "Its copy is missing: import the file again");
+    EXPECT_EQ(
+        used[2].toMap().value(QStringLiteral("words")).toString().toStdString(),
+        "Its copy has changed: import the file again");
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FALSE(used[i].toMap().value(QStringLiteral("ok")).toBool()) << i;
+    }
+    EXPECT_FALSE(registered("user.stale"));
+    EXPECT_TRUE(used[3].toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(registered("user.extras"));
+    EXPECT_EQ(log.filter(QStringLiteral(" not offered: ")).size(), 3)
+        << log.join(QLatin1Char('\n')).toStdString();
+}
+
+/* A copy no vehicle keeps goes, its profile first; the folder with the
+ * last one */
+TEST(BridgeTest, SignalFileIsDeletedOnlyOnceItsProfileIsUnregistered)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray a = signalFile(QStringLiteral("Extras"));
+    const QByteArray b = signalFile(QStringLiteral("Body"));
+    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "a.json", a))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", b))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    (void)bridge.useSignalFiles({sha256Of(a), sha256Of(b)});
+    ASSERT_TRUE(registered("user.extras"));
+
+    EXPECT_EQ(bridge.deleteUnusedSignalFiles({sha256Of(b)}), 1);
+    EXPECT_FALSE(registered("user.extras"));
+    EXPECT_TRUE(registered("user.body"));
+    EXPECT_EQ(storeFiles(dir.store()),
+              QStringList{sha256Of(b) + QStringLiteral(".json")});
+
+    EXPECT_EQ(bridge.deleteUnusedSignalFiles({}), 1);
+    EXPECT_FALSE(registered("user.body"));
+    EXPECT_FALSE(QDir(dir.store()).exists()) << "the folder with the last copy";
+}
+
+/* The form's file goes in as text and comes back as text; a refusal is
+ * the loader's, nothing kept */
+TEST(BridgeTest, SignalFileTextGoesInAndComesBack)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString text = QString::fromUtf8(signalFile(QStringLiteral("Mine")));
+    const QVariantMap r = bridge.importSignalText(text);
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QString sha = r.value(QStringLiteral("sha256")).toString();
+    EXPECT_EQ(sha, sha256Of(text.toUtf8()));
+    EXPECT_EQ(bridge.signalFileText(sha), text);
+    EXPECT_TRUE(bridge.signalFileText(QString(64, QLatin1Char('e'))).isEmpty());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Signal file saved: Mine (user.mine, 1 signal)")))
+        << log.join(QLatin1Char('\n')).toStdString();
+    /* Two signals: the count's plural */
+    QString two = QString::fromUtf8(signalFile(QStringLiteral("Pair")));
+    two.replace(QStringLiteral("}}]}"),
+                QStringLiteral("}},{\"key\":\"b\",\"name\":\"B\",\"read\":"
+                               "{\"service\":\"22\",\"number\":\"D101\"},"
+                               "\"field\":{\"byte\":0,\"bits\":8}}]}"));
+    ASSERT_TRUE(
+        bridge.importSignalText(two).value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Signal file saved: Pair (user.pair, 2 signals)")))
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    QString bad = text;
+    bad.replace(QStringLiteral("\"bits\""), QStringLiteral("\"bitz\""));
+    const QVariantMap refused = bridge.importSignalText(bad);
+    EXPECT_FALSE(refused.value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(refused.value(QStringLiteral("words"))
+                    .toString()
+                    .contains(QStringLiteral("bitz")));
+    EXPECT_EQ(storeFiles(dir.store()).size(), 2);
+}
+
+/* A recording of a session a vehicle's file decodes holds the store's
+ * copy as signals.json, named by the copy's hash on events.log's header;
+ * a session no file decodes has none (ADR-0051 section 4) */
+TEST(BridgeTest, SignalFileRecordingHoldsTheStoresCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    const QByteArray bytes = signalFile(QStringLiteral("Recorded"));
+    const QString sha = sha256Of(bytes);
+    ASSERT_TRUE(
+        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    ASSERT_EQ(bridge.useSignalFiles({sha}).size(), 1);
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
+            .isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://plain")).isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 2);
+    folders.sort();
+    const QString first = root.path() + QStringLiteral("/") + folders[0];
+    const QString second = root.path() + QStringLiteral("/") + folders[1];
+    QFile copy(first + QStringLiteral("/signals.json"));
+    ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
+    EXPECT_EQ(copy.readAll(), bytes);
+    QFile events(first + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::ReadOnly | QIODevice::Text));
+    EXPECT_TRUE(events.readAll().contains(
+        ("\nsignal file  signals.json," + sha + "\n").toUtf8()));
+    EXPECT_FALSE(QFile::exists(second + QStringLiteral("/signals.json")));
+}
+
+// ---- The app's plugins (ADR-0052, PluginStore): the example plugin
+// packed, as a phone imports it ----
+
+namespace {
+
+QStringList pluginCopies()
+{
+    return QDir(PluginStore::root()).entryList(QDir::Files, QDir::Name);
+}
+
+} // namespace
+
+/* An import keeps the package's bytes by their hash and registers every
+ * variant as plugin.<id>.<variant>; a later bridge loads it from its copy
+ * at its first list */
+TEST(BridgeTest, PluginImportKeepsACopyAndRegistersEveryVariant)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    ASSERT_FALSE(bytes.isEmpty()) << "the example plugin is readable";
+    const QString sha = sha256Of(bytes);
+    {
+        SessionBridge bridge;
+        QStringList log;
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [&log](const QString& line) { log << line; });
+        EXPECT_TRUE(bridge.plugins().isEmpty());
+        const QVariantMap r = bridge.importPlugin(
+            writeScratch(from.path(), "example-sim.havne-plugin.json", bytes));
+        ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+            << r.value(QStringLiteral("words")).toString().toStdString();
+        EXPECT_EQ(r.value(QStringLiteral("sha256")).toString(), sha);
+        EXPECT_EQ(r.value(QStringLiteral("id")).toString().toStdString(),
+                  "example-sim");
+        EXPECT_EQ(r.value(QStringLiteral("version")).toString().toStdString(),
+                  "1.0.0");
+        EXPECT_EQ(
+            r.value(QStringLiteral("variants")).toStringList(),
+            (QStringList{QStringLiteral("base"), QStringLiteral("my2019")}));
+        EXPECT_EQ(r.value(QStringLiteral("profiles")).toStringList(),
+                  (QStringList{QStringLiteral("plugin.example-sim.base"),
+                               QStringLiteral("plugin.example-sim.my2019")}));
+        EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool());
+        EXPECT_EQ(r.value(QStringLiteral("replaced")).toString(), QString());
+        EXPECT_TRUE(registered("plugin.example-sim.base"));
+        EXPECT_TRUE(registered("plugin.example-sim.my2019"));
+        EXPECT_EQ(pluginCopies(),
+                  QStringList{sha + QStringLiteral(".havne-plugin.json")});
+        QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
+                   QStringLiteral(".havne-plugin.json"));
+        ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
+        EXPECT_EQ(copy.readAll(), bytes);
+        EXPECT_TRUE(log.contains(QStringLiteral(
+            "Plugin: Example: the simulated car 1.0.0 "
+            "(plugin.example-sim.base, plugin.example-sim.my2019)")))
+            << log.join(QLatin1Char('\n')).toStdString();
+        EXPECT_EQ(bridge.plugins().size(), 1);
+    }
+    EXPECT_FALSE(registered("plugin.example-sim.base")) << "freed at close";
+
+    SessionBridge again;
+    const QVariantList all = again.plugins();
+    ASSERT_EQ(all.size(), 1);
+    EXPECT_TRUE(all.at(0).toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(registered("plugin.example-sim.my2019"));
+}
+
+/* A refusal is core's words, never the path it came from; nothing is
+ * kept */
+TEST(BridgeTest, PluginRefusalNamesNoPath)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QVariantMap r = bridge.importPlugin(
+        writeScratch(from.path(), "broken.havne-plugin.json",
+                     packed_plugin::example().replace("\"havne_plugin\": 1",
+                                                      "\"havne_plugin\": 2")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    const QString words = r.value(QStringLiteral("words")).toString();
+    EXPECT_TRUE(words.contains(QStringLiteral("line"))) << words.toStdString();
+    EXPECT_FALSE(words.contains(QStringLiteral("broken")))
+        << words.toStdString();
+    EXPECT_FALSE(words.contains(from.path())) << words.toStdString();
+    EXPECT_TRUE(pluginCopies().isEmpty());
+    EXPECT_TRUE(bridge.plugins().isEmpty());
+}
+
+/* A kept copy is loaded at start only while its bytes are the ones its
+ * name hashes: one changed since says so, registers nothing, and goes
+ * with Remove */
+TEST(BridgeTest, PluginCopyThatChangedSaysSo)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QString sha = sha256Of(bytes);
+    {
+        SessionBridge bridge;
+        ASSERT_TRUE(
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes))
+                .value(QStringLiteral("ok"))
+                .toBool());
+    }
+    QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
+               QStringLiteral(".havne-plugin.json"));
+    ASSERT_TRUE(copy.open(QIODevice::WriteOnly));
+    copy.write(QByteArray(bytes).replace("Oil Temp", "Oil Tamp"));
+    copy.close();
+
+    SessionBridge bridge;
+    const QVariantList all = bridge.plugins();
+    ASSERT_EQ(all.size(), 1);
+    const QVariantMap e = all.at(0).toMap();
+    EXPECT_FALSE(e.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(e.value(QStringLiteral("words")).toString().toStdString(),
+              "Its copy has changed: import the plugin again");
+    EXPECT_FALSE(registered("plugin.example-sim.base"));
+    EXPECT_TRUE(bridge.removePlugin(sha).value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(pluginCopies().isEmpty());
+    EXPECT_TRUE(bridge.plugins().isEmpty());
+}
+
+/* One version per id: an import of an id loaded replaces it, its copy
+ * going with it */
+TEST(BridgeTest, PluginOfAnIdLoadedReplacesIt)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge
+                    .importPlugin(writeScratch(from.path(), "a.json",
+                                               packed_plugin::example()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QByteArray newer = packed_plugin::example("1.1.0");
+    const QVariantMap r =
+        bridge.importPlugin(writeScratch(from.path(), "b.json", newer));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("replaced")).toString().toStdString(),
+              "1.0.0");
+    EXPECT_EQ(
+        pluginCopies(),
+        QStringList{sha256Of(newer) + QStringLiteral(".havne-plugin.json")});
+    const QVariantList all = bridge.plugins();
+    ASSERT_EQ(all.size(), 1);
+    EXPECT_EQ(all.at(0)
+                  .toMap()
+                  .value(QStringLiteral("version"))
+                  .toString()
+                  .toStdString(),
+              "1.1.0");
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
+/* A session on a variant decodes its signals; while it does, the plugin
+ * is neither replaced nor removed, and once it has ended both go ahead */
+TEST(BridgeTest, PluginInUseIsNeitherReplacedNorRemoved)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray bytes = packed_plugin::example();
+    ASSERT_TRUE(bridge.importPlugin(writeScratch(from.path(), "a.json", bytes))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://plugin?profile=plugin.example-sim.base"))
+                    .isEmpty());
+    SignalListModel* m = bridge.signalModel();
+    QStringList names;
+    for (int row = 0; row < m->rowCount(); ++row) {
+        names << m->data(m->index(row), SignalListModel::NameRole).toString();
+    }
+    EXPECT_TRUE(names.contains(QStringLiteral("Oil Temp")))
+        << names.join(',').toStdString();
+    // The mock answers each of the variant's DIDs with its frame count,
+    // so Oil Temp reads a whole raw number less the variant's offset, 40,
+    // and moves on frame by frame
+    const int oil = static_cast<int>(names.indexOf(QStringLiteral("Oil Temp")));
+    ASSERT_GE(oil, 0);
+    const auto oilValue = [m, oil]() {
+        return m->data(m->index(oil), SignalListModel::ValueRole);
+    };
+    ASSERT_TRUE(
+        spinUntil([&oilValue]() { return oilValue().isValid(); }, 5000, 10));
+    const double first = oilValue().toDouble();
+    EXPECT_GE(first, -40.0);
+    EXPECT_LE(first, 215.0);
+    EXPECT_EQ(first, std::floor(first)) << first;
+    EXPECT_TRUE(
+        spinUntil([&]() { return oilValue().toDouble() != first; }, 5000, 10))
+        << first;
+
+    QVariantMap r = bridge.importPlugin(
+        writeScratch(from.path(), "b.json", packed_plugin::example("1.1.0")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "A session decodes with Example: the simulated car 1.0.0: "
+              "disconnect, then import it again");
+    r = bridge.removePlugin(sha256Of(bytes));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(pluginCopies().size(), 1) << "its copy kept";
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    r = bridge.removePlugin(sha256Of(bytes));
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_FALSE(registered("plugin.example-sim.base"));
+    EXPECT_FALSE(QDir(PluginStore::root()).exists())
+        << "the empty folder goes too";
+    EXPECT_TRUE(bridge.plugins().isEmpty());
+}
+
+/* The VIN proposes variants (ADR-0052 section 5): the example matches
+ * ZZZ from 2015 to 2030, its my2019 variant from 2019; a typed VIN or,
+ * with none typed, the session's; no VIN, no match */
+TEST(BridgeTest, PluginMatchesProposeVariantsByTheVin)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge
+                    .importPlugin(writeScratch(from.path(), "a.json",
+                                               packed_plugin::example()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const auto variants = [&bridge](const QString& vin) {
+        QStringList out;
+        for (const QVariant& v : bridge.pluginMatches(vin)) {
+            out << v.toMap().value(QStringLiteral("profile")).toString();
+        }
+        return out;
+    };
+    /* Model year 2021: M, on the later cycle (a letter at position 7) */
+    EXPECT_EQ(variants(QStringLiteral("ZZZFAKE11M0000001")),
+              (QStringList{QStringLiteral("plugin.example-sim.base"),
+                           QStringLiteral("plugin.example-sim.my2019")}));
+    EXPECT_EQ(variants(QStringLiteral("zzz fake11g0000001")),
+              QStringList{QStringLiteral("plugin.example-sim.base")})
+        << "2016: before my2019's years; spaces and lower case taken";
+    EXPECT_TRUE(variants(QStringLiteral("ZZZFAKE11A0000001")).isEmpty())
+        << "2010: before the plugin's years";
+    EXPECT_TRUE(variants(QStringLiteral("1FAFAKE11M0000001")).isEmpty())
+        << "another maker";
+    EXPECT_TRUE(variants(QStringLiteral("ZZZFAKE")).isEmpty()) << "not a VIN";
+    EXPECT_TRUE(variants(QString()).isEmpty()) << "no session, no VIN";
+    const QVariantMap first =
+        bridge.pluginMatches(QStringLiteral("ZZZFAKE11M0000001")).at(0).toMap();
+    EXPECT_EQ(first.value(QStringLiteral("name")).toString().toStdString(),
+              "Example: the simulated car");
+    EXPECT_EQ(first.value(QStringLiteral("variant")).toString().toStdString(),
+              "base");
+}
+
+/* Read once asks a PID on SocketCAN through a profile that requests: a
+ * profile with no channels only listens there and is refused the request
+ * keys (BAD_URI before the link is looked at, so the URI is judged with
+ * or without vcan0) */
+TEST(ReadOnceTest, APidsUriIsOneSocketCanTakes)
+{
+#if !defined(__linux__) || defined(__ANDROID__)
+    GTEST_SKIP() << "socketcan:// is Linux's";
+#else
+    QString why;
+    const ReadOnce::Request pid =
+        request(pidSignal(QStringLiteral("0C"), field(0, 16)));
+    const QString uri =
+        ReadOnce::uriFor(QStringLiteral("socketcan://vcan0"), pid, &why);
+    ASSERT_FALSE(uri.isEmpty()) << why.toStdString();
+    ecuio_session_t* session = nullptr;
+    const ecuio_status_t rc =
+        ecuio_session_create(uri.toUtf8().constData(), &session);
+    EXPECT_NE(rc, ECUIO_ERR_BAD_URI) << ecuio_last_error_detail();
+    if (session != nullptr) {
+        ecuio_session_destroy(session);
+    }
+#endif
+}
+
+/* A copy whose bytes changed since it was kept is written again by an
+ * import of the right bytes, so the next launch loads it: the words that
+ * refused it say to import it again */
+TEST(BridgeTest, SignalFileImportRepairsAChangedCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    const QByteArray good = signalFile(QStringLiteral("Extras"));
+    const QString sha = sha256Of(good);
+    writeScratch(dir.store(), sha + QStringLiteral(".json"),
+                 signalFile(QStringLiteral("X")));
+    QTemporaryDir from;
+    {
+        SessionBridge bridge;
+        const QVariantList before = bridge.useSignalFiles({sha});
+        ASSERT_EQ(before.size(), 1);
+        EXPECT_EQ(before[0]
+                      .toMap()
+                      .value(QStringLiteral("words"))
+                      .toString()
+                      .toStdString(),
+                  "Its copy has changed: import the file again");
+        const QVariantMap r =
+            bridge.importSignalFile(writeScratch(from.path(), "e.json", good));
+        EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool())
+            << "a copy that held other bytes is written, not kept";
+    }
+    SessionBridge later;
+    const QVariantList used = later.useSignalFiles({sha});
+    ASSERT_EQ(used.size(), 1);
+    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool())
+        << used[0]
+               .toMap()
+               .value(QStringLiteral("words"))
+               .toString()
+               .toStdString();
+    EXPECT_TRUE(registered("user.extras"));
+}
+
+TEST(BridgeTest, PluginImportRepairsAChangedCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QByteArray bytes = packed_plugin::example();
+    const QString sha = sha256Of(bytes);
+    ASSERT_TRUE(QDir().mkpath(PluginStore::root()));
+    {
+        QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
+                   QStringLiteral(".havne-plugin.json"));
+        ASSERT_TRUE(copy.open(QIODevice::WriteOnly));
+        copy.write(QByteArray(bytes).replace("Oil Temp", "Oil Tamp"));
+    }
+    {
+        SessionBridge bridge;
+        const QVariantList all = bridge.plugins();
+        ASSERT_EQ(all.size(), 1);
+        EXPECT_FALSE(all.at(0).toMap().value(QStringLiteral("ok")).toBool());
+        const QVariantMap r =
+            bridge.importPlugin(writeScratch(from.path(), "a.json", bytes));
+        EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool());
+    }
+    SessionBridge later;
+    const QVariantList all = later.plugins();
+    ASSERT_EQ(all.size(), 1);
+    EXPECT_TRUE(all.at(0).toMap().value(QStringLiteral("ok")).toBool())
+        << all.at(0)
+               .toMap()
+               .value(QStringLiteral("words"))
+               .toString()
+               .toStdString();
+    EXPECT_TRUE(registered("plugin.example-sim.base"));
+}
+
+/* A session a plugin variant decodes records the variant's files merged
+ * as signals.json, with the plugin's line (ADR-0052 section 4), as
+ * havne-cli stream --plugin --record does; the mock answers the variant's
+ * DIDs */
+TEST(BridgeTest, PluginRecordingHoldsTheVariantsFile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge
+                    .importPlugin(writeScratch(from.path(), "a.json",
+                                               packed_plugin::example()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://rec?profile=plugin.example-sim.base"))
+                    .isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString folder = root.path() + QStringLiteral("/") + folders[0];
+    QFile copy(folder + QStringLiteral("/signals.json"));
+    ASSERT_TRUE(copy.open(QIODevice::ReadOnly)) << "no signals.json";
+    const QByteArray text = copy.readAll();
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(text.constData(),
+                                     static_cast<size_t>(text.size()), &file),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_NE(ecuio_signal_file_find(file, "oil_temp"), nullptr);
+    ecuio_signal_file_free(file);
+    QFile events(folder + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QByteArray log = events.readAll();
+    EXPECT_TRUE(log.contains("\nplugin  example-sim,1.0.0,base\n"))
+        << log.left(600).toStdString();
+    EXPECT_TRUE(log.contains(
+        ("\nsignal file  signals.json," + sha256Of(text) + "\n").toUtf8()));
+}
+
+/* The bridge's own refusal of a file it can't read names no path: the
+ * folder can hold the account's name */
+TEST(BridgeTest, AFileThatCantBeReadIsRefusedWithoutItsPath)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QUrl missing = QUrl::fromLocalFile(
+        from.path() + QStringLiteral("/missing-extras.json"));
+    SessionBridge bridge;
+    for (const QVariantMap& r :
+         {bridge.importSignalFile(missing), bridge.importPlugin(missing)}) {
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+        const QString words = r.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), "Couldn't read the file");
+        EXPECT_FALSE(words.contains(QStringLiteral("missing")));
+    }
 }

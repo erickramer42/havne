@@ -1,37 +1,6 @@
 // File/layer: tests/test_j2534_stream.cpp | GTest, HARNESS tier
-// Testing: End-to-end j2534:// session: URI routing -> attach ->
-//          connect -> worker poll -> a message posted on the fake's
-//          control page -> ReadMsgs -> callback dispatch. Exact-count assertions for INJECTED
-//          frames (the fake emits nothing we did not inject).
-//          Request-loop assertions are floors with a bounded budget:
-//          that producer is a TIME-DRIVEN worker, not a test action,
-//          so an exact count would encode a race, not a contract.
-//          Query-param tests: ?baud=/?flags= values observed at
-//          PassThruConnect, as the fake publishes them on its page;
-//          malformed queries and relative DLL paths rejected at
-//          session_create (no DLL load).
-//          Adoption tests (ADR-0012): ?filter=/?txid=/?poll=, filter
-//          registration shape, request framing, header strip + ID
-//          stamp, stop-on-detach, gating, passive receive.
-//          ADR-0013: j2534 defaults to the obd2 profile (its requests +
-//          mux decode). Raw-contract tests opt out with ?profile=raw;
-//          the obd2 block covers rotation, routing to each def's
-//          channel, Service 0x22 and a backlog beside the replies, plus
-//          ?poll= precedence over the profile's rotation. The probe
-//          (ADR-0015 section 4): the bitmap walk before the rotation, what the
-//          bitmaps and a negative reply drop, ?probe=0, the walk resumed
-//          after a quiet bus, and each channel's support report. The
-//          worker allocates nothing per frame (tests/new_counter.h).
-//          The
-//          query's split in create: unknown keys named with the ones
-//          j2534:// takes, and ?probe='s malformed forms.
-//          Diagnostics (ADR-0037): the fake ECU's whole report, the
-//          list's turns with the rotation and its one-byte requests,
-//          ?diagnose=0, Read again and the report after close. The backoff's
-//          capped step, the vendor clock's cases and the J2534 status
-//          names are here; the
-//          request engine's pacing and the link-health machine run
-//          through the surrogate in test_j2534_health.cpp.
+// Testing: HARNESS: J2534QueryParamTest, J2534StreamTest, J2534AdoptionTest
+//          (test_j2534_stream)
 
 #include <gtest/gtest.h>
 
@@ -1906,6 +1875,53 @@ TEST_F(J2534AdoptionTest, UdsGenericEcuPrefixAsksThatEcu)
     const unsigned char want_reply[5] = {0x62, 0x1E, 0x1C, 0x12, 0x34};
     ASSERT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 5u);
     EXPECT_EQ(memcmp(cap.payloads[0], want_reply, sizeof(want_reply)), 0);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* Two ECUs in one session answer each its own: the engine ECU's DID
+ * 1E1C on 0x7E8, and a module's (ECUIO_FAKE_MODULE_DIDS) D801 on 0x7E9,
+ * which refuses the engine's DID; each reply carries its ECU's ID */
+TEST_F(J2534AdoptionTest, TwoEcusInOneSessionAnswerEachItsOwn)
+{
+    KnobGuard module("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12");
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://"
+             "%s?profile=uds-generic&did=1E1C,7E9:D801&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 4, 200);
+
+    bool engine = false, module_ok = false;
+    const int seen = cap.count.load();
+    const int n = seen < 8 ? seen : 8; /* the capture keeps the first 8 */
+    for (int i = 0; i < n; ++i) {
+        const unsigned short len = cap.payload_lens[i];
+        if (cap.arbitration_ids[i] == 0x7E8u) {
+            const unsigned char want[5] = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+            EXPECT_EQ(len, 5u) << "frame " << i;
+            engine =
+                engine || (len == 5 && memcmp(cap.payloads[i], want, 5) == 0);
+        } else if (cap.arbitration_ids[i] == 0x7E9u) {
+            const unsigned char want[5] = {0x62, 0xD8, 0x01, 0x00, 0x12};
+            EXPECT_EQ(len, 5u) << "frame " << i;
+            module_ok = module_ok ||
+                        (len == 5 && memcmp(cap.payloads[i], want, 5) == 0);
+        } else {
+            ADD_FAILURE() << "a reply on 0x" << std::hex
+                          << cap.arbitration_ids[i];
+        }
+    }
+    EXPECT_TRUE(engine) << "the engine ECU's 1E1C on 0x7E8";
+    EXPECT_TRUE(module_ok) << "the module's D801 on 0x7E9";
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
