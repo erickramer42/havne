@@ -1,0 +1,12 @@
+{
+  "havne_fixtures": 1,
+  "values": [
+    { "variant": "base", "signal": "oil_temp", "value": 104 },
+    { "variant": "base", "signal": "knock_retard", "value": 2.5 },
+    { "variant": "base", "signal": "trans_temp", "value": 81.3 },
+    { "variant": "base", "signal": "gear", "value": 3 },
+    { "variant": "my2019", "signal": "trans_temp", "value": 81.37 },
+    { "variant": "my2019", "signal": "gear", "value": 7 },
+    { "variant": "my2019", "signal": "clutch_slip", "value": -120 }
+  ]
+}

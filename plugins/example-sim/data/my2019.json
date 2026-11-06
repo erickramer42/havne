@@ -1,0 +1,37 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the simulated car, 2019 on",
+  "notes": "From 2019 the made-up TCM reads its fluid at a finer step and adds a seventh gear",
+  "signals": [
+    {
+      "key": "trans_temp",
+      "name": "Trans Fluid Temp",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F410" },
+      "field": { "byte": 0, "bits": 16, "order": "be" },
+      "scale": 0.01, "offset": -40,
+      "unit": "°C", "decimals": 2, "group": "engine"
+    },
+    {
+      "key": "gear",
+      "name": "Gear",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F411" },
+      "field": { "byte": 0, "bits": 8 },
+      "kind": "enum",
+      "values": { "0": "Park", "1": "First", "2": "Second", "3": "Third",
+                  "4": "Fourth", "5": "Fifth", "6": "Sixth", "7": "Seventh",
+                  "14": "Neutral", "15": "Reverse" },
+      "group": "vehicle"
+    },
+    {
+      "key": "clutch_slip",
+      "name": "Clutch Slip",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F412" },
+      "field": { "byte": 0, "bits": 16, "order": "be", "signed": true },
+      "scale": 1, "offset": 0,
+      "unit": "r/min", "decimals": 0, "group": "vehicle"
+    }
+  ]
+}

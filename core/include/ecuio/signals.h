@@ -569,6 +569,10 @@ const ecuio_signal_set_t* ecuio_signal_file_set(const ecuio_signal_file_t* file)
 const char* ecuio_signal_file_name(const ecuio_signal_file_t* file);
 const char* ecuio_signal_file_profile(const ecuio_signal_file_t* file);
 
+/* The set the file extends ("obd2"), or "" when it extends none or for
+ * NULL: a front end can offer the file in that set's place */
+const char* ecuio_signal_file_extends(const ecuio_signal_file_t* file);
+
 /* A signal of the file by its "key": its def in the set, or NULL for a
  * key the file doesn't hold or a NULL argument. A base set's signals
  * (extends) have no key here. */

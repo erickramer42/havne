@@ -29,6 +29,7 @@
 #include "ecuio/internal.h" /* ECUIO_HAVE_SOCKETCAN */
 #include "error_detail.h"
 #include "frames_csv.h"
+#include "profile_hold.h"
 #include "sim_dids.h"
 #include "sim_ecu.h"
 
@@ -92,6 +93,9 @@ struct sim_node {
 #endif
 
 struct ecuio_sim {
+    /* The registry's set, held from create (profile_hold.h); first, so
+     * it's released after every member that reads it */
+    ecuio_profile_hold profile_hold;
     std::atomic<uint64_t> requests{0};
     std::atomic<uint64_t> replies{0};
     std::atomic<uint64_t> refused{0};
@@ -598,10 +602,13 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
         return ECUIO_ERR_BAD_URI;
     }
     const ecuio_signal_set_t* set = nullptr;
+    ecuio_profile_hold hold;
     ecuio_sim_module_plan plan;
     if (config.profile_len != 0) {
         const std::string name(config.profile, config.profile_len);
-        if (ecuio_profile_lookup(name.c_str(), &set) != ECUIO_OK) {
+        const ecuio_status_t found = ecuio_profile_acquire(name.c_str(), &set);
+        hold.set = set;
+        if (found != ECUIO_OK) {
             ecuio_detail_set("profile: no profile '%s' is registered",
                              name.c_str());
             return ECUIO_ERR_UNKNOWN_PROFILE;
@@ -623,6 +630,7 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
     if (s == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    s->profile_hold = std::move(hold);
     if (set != nullptr) {
         s->set = set;
         s->values.reset(new (std::nothrow) std::atomic<double>[set->count]);

@@ -15,6 +15,7 @@
 #include "error_detail.h"
 #include "json.h"
 #include "request_engine.h"
+#include "signal_file_build.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,38 +28,20 @@
 #include <utility>
 #include <vector>
 
-struct ecuio_signal_file {
-    std::string name;
-    std::string profile;
-    std::vector<ecuio_signal_def_t> defs;
-    std::vector<ecuio_channel_decl_t> channels;
-    std::vector<ecuio_enum_entry_t> enums;
-    std::vector<ecuio_computed_t> computed;
-    std::vector<std::pair<std::string, uint32_t>> keys;   /* key, def index */
-    ecuio_signal_set_t set{};
-};
-
-namespace {
+namespace ecuio_sf {
 
 using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
 
-/* A refusal: where in the file, and why */
-struct refused {
-    uint32_t line;
-    uint32_t column;
-    std::string words;
-};
-
 [[noreturn]] void refuse(const Value& at, std::string words)
 {
-    throw refused{at.line, at.column, std::move(words)};
+    throw refused{at.line, at.column, std::move(words), &at};
 }
 
 [[noreturn]] void refuse(const Member& at, std::string words)
 {
-    throw refused{at.line, at.column, std::move(words)};
+    throw refused{at.line, at.column, std::move(words), &at.value};
 }
 
 std::string q(std::string_view text)
@@ -846,6 +829,23 @@ void read_values(const Value& s, ecuio_signal_file& f, ecuio_signal_def_t& d,
     f.enums.insert(f.enums.end(), mine.begin(), mine.end());
 }
 
+void read_source(const Value& source)
+{
+    expect(source, Type::object, "\"source\"");
+    only_keys(source, {"name", "url", "commit", "license", "modified"},
+              "\"source\"");
+    const Value* source_name = source.find("name");
+    if (source_name == nullptr) {
+        refuse(source, "\"source\" needs a \"name\"");
+    }
+    text_of(*source_name, 1, 512, "the source's name");
+    for (const char* k : {"url", "commit", "license", "modified"}) {
+        if (const Value* v = source.find(k)) {
+            text_of(*v, 1, 512, std::string("the source's ") + k);
+        }
+    }
+}
+
 void read_file(const Value& root, ecuio_signal_file& f)
 {
     expect(root, Type::object, "the file");
@@ -863,17 +863,20 @@ void read_file(const Value& root, ecuio_signal_file& f)
     only_keys(root, {"havne_signals", "name", "source", "extends", "ecus", "signals"},
               "the file");
 
+    parts p;
+    p.at = &root;
     const Value* name = root.find("name");
     if (name == nullptr) {
         refuse(root, "the file needs a \"name\"");
     }
-    f.name = text_of(*name, 1, 63, "\"name\"");
-    f.profile = profile_of(f.name);
-    if (f.profile.empty()) {
-        refuse(*name, "\"name\" " + q(f.name) +
-                          " holds no letter or digit to make a profile name from");
+    p.name = text_of(*name, 1, 63, "\"name\"");
+    p.profile = profile_of(p.name);
+    if (p.profile.empty()) {
+        refuse(*name,
+               "\"name\" " + q(p.name) +
+                   " holds no letter or digit to make a profile name from");
     }
-    if (f.profile.size() > ECUIO_PROFILE_NAME_MAX) {
+    if (p.profile.size() > ECUIO_PROFILE_NAME_MAX) {
         refuse(*name, "\"name\" makes a profile name longer than " +
                           std::to_string(ECUIO_PROFILE_NAME_MAX) + " characters");
     }
@@ -882,51 +885,60 @@ void read_file(const Value& root, ecuio_signal_file& f)
     if (source == nullptr) {
         refuse(root, "the file needs a \"source\": where its signals come from");
     }
-    expect(*source, Type::object, "\"source\"");
-    only_keys(*source, {"name", "url", "commit", "license", "modified"}, "\"source\"");
-    const Value* source_name = source->find("name");
-    if (source_name == nullptr) {
-        refuse(*source, "\"source\" needs a \"name\"");
-    }
-    text_of(*source_name, 1, 512, "the source's name");
-    for (const char* k : {"url", "commit", "license", "modified"}) {
-        if (const Value* v = source->find(k)) {
-            text_of(*v, 1, 512, std::string("the source's ") + k);
-        }
-    }
+    read_source(*source);
 
+    p.extends = root.find("extends");
+    p.ecus = root.find("ecus");
+    p.signals_at = root.find("signals");
+    p.own_list = true;
+    build(p, f);
+}
+
+void build(const parts& in, ecuio_signal_file& f)
+{
+    f.name = in.name;
+    f.profile = in.profile;
     const ecuio_signal_set_t* base = nullptr;
-    if (const Value* extends = root.find("extends")) {
+    if (in.extends != nullptr) {
+        const Value* extends = in.extends;
         expect(*extends, Type::string, "\"extends\"");
         if (extends->text != "obd2") {
             refuse(*extends, "\"extends\" " + q(extends->text) +
                                  " isn't a set a file extends: only \"obd2\"");
         }
         base = ecuio_obd2_signal_set();
+        f.extends = extends->text;
         f.defs.assign(base->defs, base->defs + base->count);
         f.channels.assign(base->channels, base->channels + base->channel_count);
     }
 
     std::vector<std::pair<std::string, uint32_t>> ecus;
-    read_ecus(root.find("ecus"), f, &ecus);
+    read_ecus(in.ecus, f, &ecus);
 
-    const Value* signals = root.find("signals");
+    const Value* signals = in.signals_at;
     if (signals == nullptr) {
-        refuse(root, "the file needs \"signals\"");
+        refuse(*in.at, "the file needs \"signals\"");
     }
-    expect(*signals, Type::array, "\"signals\"");
-    if (signals->items.empty()) {
+    std::vector<const Value*> list = in.signals;
+    if (in.own_list) {
+        expect(*signals, Type::array, "\"signals\"");
+        for (const Value& v : signals->items) {
+            list.push_back(&v);
+        }
+    }
+    if (list.empty()) {
         refuse(*signals, "\"signals\" lists none");
     }
-    if (signals->items.size() > ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
-        refuse(*signals, "\"signals\" lists " + std::to_string(signals->items.size()) +
+    if (list.size() > ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
+        refuse(*signals, "\"signals\" lists " + std::to_string(list.size()) +
                              ", more than 1024");
     }
 
     /* First every signal's key and kind, so an expression can read a
      * signal listed after it */
     std::vector<entry> entries;
-    for (const Value& s : signals->items) {
+    for (const Value* sp : list) {
+        const Value& s = *sp;
         expect(s, Type::object, "a signal");
         const Value* key = s.find("key");
         if (key == nullptr) {
@@ -1091,15 +1103,15 @@ void read_file(const Value& root, ecuio_signal_file& f)
                        " is refused by the set's validator (code " +
                        std::to_string(why.code) + ")");
         }
-        refuse(root, "the set is refused by its validator (code " +
-                         std::to_string(why.code) + ")");
+        refuse(*in.at, "the set is refused by its validator (code " +
+                           std::to_string(why.code) + ")");
     }
 
     /* Every request must fit the engine's table, as registration checks */
     std::unique_ptr<ecuio_request_engine> engine(new ecuio_request_engine());
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
-    for (uint32_t i = 0; i < f.set.channel_count; ++i) {
-        rx_ids[i] = f.set.channels[i].rx_id;
+    for (size_t i = 0; i < f.channels.size() && i < ECUIO_MAX_CHANNELS; ++i) {
+        rx_ids[i] = f.channels[i].rx_id;
     }
     ecuio_engine_init(engine.get(), f.set.channel_count);
     uint32_t overflow = UINT32_MAX;
@@ -1116,7 +1128,9 @@ void read_file(const Value& root, ecuio_signal_file& f)
     }
 }
 
-} // namespace
+} // namespace ecuio_sf
+
+using ecuio_sf::refused;
 
 extern "C" {
 
@@ -1143,7 +1157,7 @@ ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
                                                    : ECUIO_ERR_INVALID_ARGUMENT;
         }
         std::unique_ptr<ecuio_signal_file> f(new ecuio_signal_file());
-        read_file(root, *f);
+        ecuio_sf::read_file(root, *f);
         *out = f.release();
         return ECUIO_OK;
     } catch (const refused& r) {
@@ -1167,6 +1181,11 @@ const ecuio_signal_set_t* ecuio_signal_file_set(const ecuio_signal_file_t* file)
 const char* ecuio_signal_file_name(const ecuio_signal_file_t* file)
 {
     return file != nullptr ? file->name.c_str() : "";
+}
+
+const char* ecuio_signal_file_extends(const ecuio_signal_file_t* file)
+{
+    return file != nullptr ? file->extends.c_str() : "";
 }
 
 const char* ecuio_signal_file_profile(const ecuio_signal_file_t* file)

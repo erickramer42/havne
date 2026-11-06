@@ -1,0 +1,55 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the simulated car, every year",
+  "notes": "Made-up DIDs that the simulated ECU answers from these defs",
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "oil_temp",
+      "name": "Oil Temp",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "F40D" },
+      "field": { "byte": 0, "bits": 8 },
+      "scale": 1, "offset": -40,
+      "unit": "°C", "decimals": 0, "group": "engine"
+    },
+    {
+      "key": "knock_retard",
+      "name": "Knock Retard",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "F420" },
+      "field": { "byte": 0, "bits": 16, "order": "be" },
+      "scale": 0.1, "offset": 0,
+      "unit": "°", "decimals": 1, "group": "engine"
+    },
+    {
+      "key": "trans_temp",
+      "name": "Trans Fluid Temp",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F410" },
+      "field": { "byte": 0, "bits": 16, "order": "be" },
+      "scale": 0.1, "offset": -40,
+      "unit": "°C", "decimals": 1, "group": "engine"
+    },
+    {
+      "key": "gear",
+      "name": "Gear",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "F411" },
+      "field": { "byte": 0, "bits": 8 },
+      "kind": "enum",
+      "values": { "0": "Park", "1": "First", "2": "Second", "3": "Third",
+                  "4": "Fourth", "5": "Fifth", "6": "Sixth", "14": "Neutral",
+                  "15": "Reverse" },
+      "group": "vehicle"
+    },
+    {
+      "key": "boost",
+      "name": "Boost",
+      "kind": "computed",
+      "expr": "obd2.map - obd2.baro",
+      "max_age": { "obd2.baro": 30 },
+      "unit": "kPa", "decimals": 0, "group": "air", "plot": 1
+    }
+  ]
+}

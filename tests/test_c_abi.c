@@ -22,6 +22,7 @@
 #include "ecuio/j2534.h"
 #include "ecuio/stream.h"
 #include "ecuio/serial.h"
+#include "ecuio/plugin.h"
 #include "ecuio/vin.h"
 #include "ecuio/sim.h"
 #include "ecuio/socketcan.h"
@@ -120,6 +121,8 @@ typedef char abi_sim_stats_flags_check[(offsetof(ecuio_sim_stats_t, flags) == 72
 typedef char abi_sim_stats_pending_check[(offsetof(ecuio_sim_stats_t, pending) == 80) ? 1 : -1];
 typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
+typedef char abi_plugin_info_size_check[(sizeof(ecuio_plugin_info_t) == 136) ? 1 : -1];
+typedef char abi_plugin_info_count_check[(offsetof(ecuio_plugin_info_t, variant_count) == 120) ? 1 : -1];
 typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];
 typedef char abi_can_flags_check[(offsetof(ecuio_can_interface_t, flags) == 32) ? 1 : -1];
 typedef char abi_can_state_check[(offsetof(ecuio_can_interface_t, state) == 40) ? 1 : -1];
@@ -325,6 +328,7 @@ int main(void)
         sizeof(ecuio_recording_column_t) != 24 ||
         offsetof(ecuio_recording_find_t, label_utf8) != 64 ||
         ECUIO_ERR_CANCELED != 19 || ECUIO_RECORDING_NONE != UINT64_MAX ||
+        ECUIO_ERR_IN_USE != 20 || ecuio_plugin_free(NULL) != ECUIO_OK ||
         ecuio_recording_open(NULL, NULL, NULL, &reading) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         reading != NULL ||

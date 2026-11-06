@@ -16,6 +16,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "def_index.h"
+#include "profile_hold.h"
 #include "recorder.h"
 #include "uds_generic.h"
 
@@ -27,6 +28,9 @@
 #include <vector>
 
 struct ecuio_session {
+    /* The registry's set, held from create (profile_hold.h); first, so
+     * it's released after every member that reads the set */
+    ecuio_profile_hold profile_hold;
     std::atomic<bool> closed{false};
     /* The worker was started: a start after it is the transport's no-op,
      * and the session_start probe marks the first only (ADR-0034 section 4).

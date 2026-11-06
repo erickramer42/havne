@@ -935,6 +935,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_REPORT_CHANGED:          return "the diagnostics report changed since it was saved";
         case ECUIO_ERR_RECORDING_FAILED:        return "the recording couldn't be made or written";
         case ECUIO_ERR_CANCELED:                return "canceled";
+        case ECUIO_ERR_IN_USE:                  return "a session still uses it";
         default:                                return "unknown status";
     }
 }
@@ -1053,7 +1054,8 @@ ecuio_status_t ecuio_session_create(
     }
 
     const ecuio_signal_set_t* profile_set = nullptr;
-    const ecuio_status_t found = ecuio_profile_lookup(chosen, &profile_set);
+    const ecuio_status_t found = ecuio_profile_acquire(chosen, &profile_set);
+    s->profile_hold.set = profile_set;
     if (found != ECUIO_OK) {
         if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
             ecuio_detail_set("no profile is named '%s'", chosen);
