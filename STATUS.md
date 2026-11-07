@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-06, **Version:** v0.5.1,
+**Updated:** 2026-11-07, **Version:** v0.6.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,10 +14,14 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.6.0, sharing and scripting, in progress** (its
-section below). v0.5.1 is out, a patch: a recording replays with its own signal file, a signal its
-module refuses shows as refused, and a vehicle's signal file saves out
-of the app. v0.5.0 brought
+**Current phase: between releases; v0.7.0 is next.** v0.6.0 is out,
+sharing and scripting (its section below): everything reaches
+`havne-cli` and Python as well as the app, a recording exports scrubbed
+as pcapng, CSV or a copy of its folder, a car's health goes in one
+file, candump logs and other loggers' CSVs import as recordings, and the
+simulated car answers as an ELM327 adapter. v0.5.1, a patch, replays a
+recording with its own signal file and shows a refused signal as
+refused. v0.5.0 brought
 your own signals, as signal files that core reads from bytes and
 refuses at load where they're wrong, written per vehicle in the app
 (with **Read once**) or converted from an OBDb set by `havne-cli`;
@@ -405,10 +409,12 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1346 ctest cases on Windows (both trees rebuilt,
-  2026-11-06), all passing but three skips (the cross-arch case and
-  the real-car recordings' diff, run locally, and a Read once case
-  that runs on Linux only), plus the
+- **Tests:** 1607 ctest cases on Windows (both trees rebuilt,
+  2026-11-07), all passing but six skips (the cross-arch case and
+  the real-car recordings' diff, run locally; three cases that run on
+  Linux only, Read once over SocketCAN and the Python package's vcan
+  and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
+  without tshark installed), plus the
   cross-arch subset (102/102); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
@@ -540,8 +546,7 @@ an issue is resolved it is removed, and its number is not reused.
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; the car run of v0.5.0's own signals; the request pace on Windows' high-resolution timer, the charts on the GPU | Released |
-| v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files | In progress |
+| v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files, the health report | Released |
 | v0.7.0-v0.10.0 | v0.7.0, the dashboard and the UI: configurable gauges from a library, a refresh for the phone, night themes. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -558,7 +563,7 @@ For users who script, pen testers among them: everything reaches
 `havne-cli` and Python as well as the app. A minor release
 ([ADR-0048](docs/adr/0048-semantic-versioning.md)): the C ABI grows,
 append-only.
-- **On dev:**
+- **Built:**
   - the ELM327 emulator ([ADR-0055](docs/adr/0055-elm327-emulator.md)):
     `havne-cli sim --elm327`, and core's simulated ECU answering with
     no bus;
@@ -617,9 +622,6 @@ append-only.
     and plots it, saying it has no frames. Left: the app's Import
     button, v0.7.0's, for both formats; until then a folder made
     elsewhere is moved into the recordings folder to be listed.
-- **Next:** the release candidate: the PR `dev` to `main`, its CI run,
-  then v0.6.0-rc1 (the first macOS 13.0 wheel build, the wheels'
-  attestations, and the release APK on the test phone).
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
 the values, and the same script runs on Windows against the ELM327

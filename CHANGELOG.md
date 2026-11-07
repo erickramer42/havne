@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-07
+
 ### Added
 
 - `havne-cli sim <uri> --elm327 tcp:<port>` serves the simulated car as
@@ -901,7 +903,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/erickramer42/havne/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/erickramer42/havne/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/erickramer42/havne/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/erickramer42/havne/compare/v0.4.0...v0.4.1

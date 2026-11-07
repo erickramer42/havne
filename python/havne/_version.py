@@ -4,4 +4,4 @@
 # The package's version: the release's, project(Havne VERSION ...) in the
 # root CMakeLists.txt, which a test checks; the release commit raises both.
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"

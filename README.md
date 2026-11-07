@@ -290,13 +290,12 @@ troubleshooting.
 
 ## Status
 
-v0.5.1, a patch on v0.5.0's own signals (a replay through its
-recording's own signal file, refused signals shown as refused, a signal
-file saved out of the app), is the latest release. Next:
+v0.6.0, sharing and scripting (scrubbed exports and imports, a car's
+health report, Python bindings, an ELM327 emulator, clearing codes from
+`havne-cli`), is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.6.0 | Sharing and scripting: scrubbed exports and imports, a car's health report, Python bindings, an ELM327 emulator, clearing codes from `havne-cli` |
 | v0.7.0-v0.10.0 | Configurable dashboards and a refreshed UI; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
