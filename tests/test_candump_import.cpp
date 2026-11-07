@@ -29,17 +29,28 @@ namespace {
 
 // ---- the parser ----
 
+// The parsed line points into its text (the interface's name), so the
+// text is a copy of its own, declared before the line, and never moved
 struct Parsed {
+    std::string text;
     bool ok = false;
     ecuio_candump::line l;
     std::string why;
-    explicit Parsed(const std::string& text)
+    explicit Parsed(const std::string& t) : text(t)
     {
         const char* w = nullptr;
         ok = ecuio_candump::parse_line(text.data(), text.size(), l, &w);
         why = w != nullptr ? w : "";
     }
-    std::string iface() const { return std::string(l.iface, l.iface_len); }
+    Parsed(const Parsed&) = delete;
+    Parsed& operator=(const Parsed&) = delete;
+    std::string iface() const
+    {
+        // the name lies within the text this Parsed owns
+        EXPECT_TRUE(l.iface >= text.data() &&
+                    l.iface + l.iface_len <= text.data() + text.size());
+        return std::string(l.iface, l.iface_len);
+    }
     std::vector<uint8_t> data() const
     {
         return std::vector<uint8_t>(l.data, l.data + l.length);
