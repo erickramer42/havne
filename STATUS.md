@@ -525,7 +525,7 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; the car run of v0.5.0's own signals; the request pace on Windows' high-resolution timer, the charts on the GPU | Released |
 | v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files | In progress |
-| v0.7.0-v0.9.0 | v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
+| v0.7.0-v0.10.0 | v0.7.0, the dashboard and the UI: configurable gauges from a library, a refresh for the phone, night themes. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -577,13 +577,13 @@ notes' Try it points at [docs/ios.md](docs/ios.md).
 
 ### 1.0.0: the finished reader
 
-After v0.9.0 the formats freeze (the C ABI, `havne-cli`'s schema, the
+After v0.10.0 the formats freeze (the C ABI, `havne-cli`'s schema, the
 plugin formats, the recording format) and the releases are fixes
-alone, as 0.9.x: a second car and testers other than the developer,
+alone, as 0.10.x: a second car and testers other than the developer,
 every adapter class on a car, the release on a PC without Visual
 Studio, Linux on real hardware, accessibility and a user guide, and
 hour-long runs on every transport. 1.0.0 follows once those runs are
-filed and the 0.9.x releases have gone a stated stretch with no
+filed and the 0.10.x releases have gone a stated stretch with no
 high-severity issue: full featured on Windows, Linux and Android, as
 much macOS and iOS as is manageable, with a signed Windows executable
 and an installer that checks for updates. Writing to a car (security

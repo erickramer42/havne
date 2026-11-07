@@ -429,7 +429,7 @@ to `0x7E7` are silent.
 - [ ] The functional rate against the physical: through the MX+ it was
       half (the adapter waits out its timer after a functional
       request); through J2534 it may differ, and that's the number
-      discovery (v0.8.0) needs
+      discovery (v0.9.0) needs
 - [ ] F190 through `0x7DF` to `0x7E8`: a three-frame reply needs flow
       control sent to the ECU's physical ID; if the functional session
       times out where the physical one answers, note it
