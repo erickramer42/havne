@@ -46,6 +46,7 @@ struct ecuio_queue {
     uint32_t waiting = 0; /* readers waiting for an entry */
     uint32_t readers = 0; /* reads under way */
     bool ended = false;   /* the session has closed */
+    bool stream_ended = false; /* a replay has played its last frame */
     bool closing = false; /* ecuio_queue_close has begun */
 
     /* The slot the next entry goes in, the oldest dropped when full */
@@ -118,12 +119,14 @@ ecuio_status_t read_queue(ecuio_queue_t* q, uint32_t capacity, uint32_t chunk,
     *count = 0;
     std::unique_lock<std::mutex> lock(q->m);
     ++q->readers;
-    if (q->size == 0 && timeout_ms > 0 && !q->ended && !q->closing) {
+    if (q->size == 0 && timeout_ms > 0 && !q->ended && !q->closing &&
+        !q->stream_ended) {
         const auto until = std::chrono::steady_clock::now() +
                            std::chrono::milliseconds(timeout_ms);
         ++q->waiting;
-        q->cv.wait_until(lock, until,
-                         [q] { return q->size > 0 || q->ended || q->closing; });
+        q->cv.wait_until(lock, until, [q] {
+            return q->size > 0 || q->ended || q->closing || q->stream_ended;
+        });
         --q->waiting;
     }
     uint32_t taken = 0;
@@ -143,7 +146,11 @@ ecuio_status_t read_queue(ecuio_queue_t* q, uint32_t capacity, uint32_t chunk,
     }
     *count = taken;
     *dropped = q->dropped;
-    const bool over = taken == 0 && (q->ended || q->closing);
+    const ecuio_status_t rc = taken > 0         ? ECUIO_OK
+                              : q->stream_ended ? ECUIO_ERR_STREAM_ENDED
+                              : q->ended || q->closing
+                                  ? ECUIO_ERR_SESSION_CLOSED
+                                  : ECUIO_OK;
     --q->readers;
     /* The last read out of a closing queue wakes the close, holding the
      * mutex: the close can't return and free the queue until the lock's
@@ -151,7 +158,7 @@ ecuio_status_t read_queue(ecuio_queue_t* q, uint32_t capacity, uint32_t chunk,
     if (q->closing && q->readers == 0) {
         q->cv.notify_all();
     }
-    return over ? ECUIO_ERR_SESSION_CLOSED : ECUIO_OK;
+    return rc;
 }
 
 } // namespace
@@ -187,6 +194,23 @@ void ecuio_queue_detach(ecuio_queue_link& link)
         q->ended = true;
     }
     q->cv.notify_all();
+}
+
+void ecuio_queue_end_all(ecuio_session_t* session)
+{
+    for (uint32_t i = 0; i < session->queue_count; ++i) {
+        ecuio_queue_link& link = *session->queues[i];
+        ecuio_queue_t* q = ecuio_queue_pin(link);
+        if (q == nullptr) {
+            continue;
+        }
+        {
+            std::lock_guard<std::mutex> lock(q->m);
+            q->stream_ended = true;
+        }
+        q->cv.notify_all(); /* pinned: the queue can't be freed yet */
+        ecuio_queue_unpin(link);
+    }
 }
 
 extern "C" {

@@ -655,6 +655,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_RECORDING_FAILED:        return "the recording couldn't be made or written";
         case ECUIO_ERR_CANCELED:                return "canceled";
         case ECUIO_ERR_IN_USE:                  return "a session still uses it";
+        case ECUIO_ERR_STREAM_ENDED:            return "the stream has ended";
         default:                                return "unknown status";
     }
 }
