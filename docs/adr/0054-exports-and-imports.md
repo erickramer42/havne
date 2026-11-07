@@ -586,3 +586,90 @@ and scrubbed, its `info` the source's less the torn ISO-TP message the
 scrub leaves out; `tests/golden/recording/replay-obd2`'s copy viewed as
 the source; a mock's recording made with a label, its copy's URI
 `mock://<label>`, its `info` and replay the source's).
+
+## Appendix: the health report as built (2026-11-06)
+
+Section 2's health report: a car's health as one scrubbed file, in core
+so the app, `havne-cli` and Python share it. It grows in four steps:
+the report over a live session (this appendix's first part), then over
+a recording, then `havne-cli health`, then the app's Save report on
+Diagnostics and the viewer. `folder_utf8` answers
+`ECUIO_ERR_NOT_IMPLEMENTED` until the second.
+
+**The call.** `ecuio_health_export(options, report)` (`recording.h`)
+writes `out_path_utf8` in `ECUIO_HEALTH_JSON` (one object,
+`"havne_health": 1`) or `ECUIO_HEALTH_TEXT` (the same facts for a
+person: a forum post, a shop). One model in core is built once and
+written by either writer, which reads only the model, so the two can't
+hold different facts; `HealthTest` checks that every string the JSON
+holds is in the text. The options put their scalars first and their
+pointers last, so the offsets are the same on either width.
+
+**Deterministic.** Core reads no clock for the report: its time is the
+caller's (`utc_us`, microseconds since 1970 UTC; 0 writes none), and so
+is each value's age. The same inputs give the same bytes, so a test
+compares them. Numbers are written to their def's decimals without the
+locale (a comma under a German one would break both formats).
+
+**What it holds, in order:**
+
+1. **The source:** the session's URI as the folder export scrubs it
+   (`scrub::uri`, now in `scrub.cpp` and shared), its backend, bit rate
+   and profile. No vehicle label, and no adapter version strings, which
+   can carry a serial number.
+2. **The vehicle:** the first ECU's VIN that decodes
+   (`ecuio_identity_vin`, `ecuio_vin_decode` with the caller's
+   `latest_model_year`), as its model year, make and whether the check
+   digit matched. Never the VIN, its WMI or its serial part.
+3. **The inspection:** `ecuio_diag_inspect` over every ECU for that
+   model year (ADR-0045): the verdict, the incomplete monitors by name,
+   the allowance and the reports counted. With no model year (no VIN
+   read, or a recording scrubbed of it) it's the rule for none, which
+   the report states: one incomplete monitor passes either model year's
+   rule, two pass only 1996-2000's (`year_needed`), three or more pass
+   neither.
+4. **Each ECU:** its state (complete, reading, not asked); readiness
+   with the MIL, the confirmed-code count and each monitor (with this
+   drive cycle's where 01 41 answered); the stored, pending and
+   permanent codes with core's titles, a refusal as its reply, "N more"
+   past the held list; the freeze frame, its code and its values by the
+   obd2 defs; **the since-the-codes-were-cleared values**, Service 01
+   PIDs 21 (distance with the MIL on), 30 (warm-ups), 31 (distance), 4D
+   (time with the MIL on) and 4E (time), whenever a value of a def keyed
+   `41 <PID>` on the ECU's reply ID is given, ranked or not, since a
+   shop or a buyer reads those first; and the identification items by
+   name and outcome, their text left out and counted.
+5. **The key values,** as a rule: the session's set's ranked signals
+   (`plot_rank` above 0, the ones a UI plots first, ADR-0039 section 8),
+   numbers and enumerations, among the values the caller gives, by rank
+   and then the set's order, each in the units asked
+   (`ecuio_display_convert`), with its age and marked stale past
+   `ECUIO_VALUE_STALE_US`. An enumeration is its label from the set. The
+   since-cleared PIDs aren't repeated here; the odometer (A6) is a key
+   value only when ranked. A set that ranks nothing says so. Core keeps
+   no newest value per signal, so the caller passes the values it holds
+   (`ecuio_health_value_t`): the app from Live, the CLI from a values
+   callback, Python from a value queue.
+6. **Left out:** the identification texts, counted.
+
+**Then checked.** Every answered identification item's text (the VIN, a
+calibration ID, a serial, an ECU's name) goes into the scrub check's
+values, and the written bytes are searched for them and for the VIN's
+shape before the file is renamed into place from `<out>.partial`. A
+match fails it with the class ("the check found an identification
+reply's value in the report: nothing was written"): a number signal
+that reads an ECU's serial, for one.
+
+**The report** (`ecuio_health_report_t`, 120 bytes) counts the ECUs,
+codes, key values and since-cleared values written, the texts left out
+(by the export's classes, `IDENTIFICATION`), the check's
+`failed_class`, and `ECUIO_HEALTH_VIN_DECODED`. No status code is added.
+
+**Tests:** `HealthTest` (test_core: both formats holding the same facts
+and neither the VIN, a calibration ID or the port; the key values' rule,
+a ranked since-cleared PID kept with its ECU and another ECU's value not
+taken; imperial units; an enumeration's label; the inspection with no
+model year; an identity text echoed by a value failing the report; the
+text of a quiet car byte for byte; numbers and times without the
+locale; the export over a `mock://` session, its label out, the file
+written once; the argument checks), `test_c_abi`.

@@ -4,6 +4,7 @@ add_library(ecuio-core STATIC
     src/frame_decoder.cpp
     src/dtc_titles.cpp
     src/export.cpp
+    src/health.cpp
     src/host_clock.cpp
     src/import.cpp
     src/json.cpp
