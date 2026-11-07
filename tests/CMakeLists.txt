@@ -59,6 +59,17 @@ add_test(NAME DiscoveryTimeoutTest.EveryDiscoveryWaits
     COMMAND ${CMAKE_COMMAND} -DFILE=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
             -P ${CMAKE_CURRENT_SOURCE_DIR}/discovery_timeout.cmake)
 
+# The notices each download carries (LGPL-3.0 section 4): the APK's are
+# committed copies of their sources, and every notice holds core's data
+# notices (tests/notices_match.cmake); make-appimage.sh checks the
+# AppImage's as it packs
+add_test(NAME NoticesTest.TheApkCarriesEachNoticeAsItsSource
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=apk
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachNoticeCarriesCoresData
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=core
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
 # (docs/testing.md "Performance") ---

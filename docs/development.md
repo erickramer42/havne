@@ -893,9 +893,18 @@ checked against their SHA-256 and kept in `~/.cache/havne-linuxdeploy`,
 gather the app, the
 Qt libraries, plugins and QML modules it loads (the plugin scans
 `app/qml`), the xcb platform plugin and the offscreen one, and
-`packaging/linux/havne.desktop` with the icon. It then fails a package
-that holds `qmltooling` (a Debug build's QML debugger), or one that
-isn't still running 10 s after it starts on the offscreen platform.
+`packaging/linux/havne.desktop` with the icon. Before a second
+linuxdeploy run packs the AppDir, the script puts the notices in
+`usr/share/doc/havne/`: `LICENSE`, `packaging/notices/`'s
+`THIRD_PARTY_NOTICES.txt` and the LGPL-3.0, GPL-3.0 and ICU texts
+(LGPL-3.0 section 4 wants Qt's notice and both texts with each copy),
+and under `common-licenses/` the `/usr/share/common-licenses` texts
+that the bundled Ubuntu packages' copyright files name (linuxdeploy
+puts each in `usr/share/doc/<package>/`). It then fails a package that
+holds `qmltooling` (a Debug build's QML debugger), one missing a notice
+or a bundled package's copyright file, one whose notice names another
+Qt or ICU than it packed, or one that isn't still running 10 s after it
+starts on the offscreen platform.
 
 - **The build machine** needs Qt's xcb plugin libraries for linuxdeploy
   to bundle: `libxcb-cursor0 libxcb-icccm4 libxcb-image0
