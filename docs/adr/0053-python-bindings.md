@@ -250,3 +250,65 @@ release's downloads and passes `gh attestation verify`.
 - Scripts get frames at the rate they read them, with drops counted;
   a script that needs every frame records the session and reads the
   recording.
+
+## Appendix: the shared core as built (2026-11-06)
+
+Section 2 and 2a, built (step 1 of the bindings; the pull queue,
+section 4, is the next).
+
+- **The target:** `ecuio` (`core/CMakeLists.txt`), built where
+  `HAVNE_SHARED_CORE` is on: by default every desktop platform, not
+  Android or iOS (their apps link core into themselves) and not a
+  fuzzing tree, which refuses it at configure, since its instrumented
+  core links only into a harness. It is `ecuio-core`'s archive linked
+  whole (`/WHOLEARCHIVE:` on MSVC, `--whole-archive` on GNU ld,
+  `-force_load` on Apple's; CMake's floor, 3.21, predates
+  `$<LINK_LIBRARY:WHOLE_ARCHIVE>`), so it holds every object the
+  archive does, with an empty source of its own
+  (`core/src/shared_core.cpp`). The archive is position independent
+  off Windows. The app, `havne-cli` and the tests still link the
+  archive.
+- **The list:** `scripts/ecuio_exports.py` reads `ECUIO_PUBLIC_HEADERS`,
+  `core/CMakeLists.txt`'s one list of public headers (what's installed,
+  what `scripts/api_check.py` compares with a release, what's exported),
+  with `api_check.py`'s parser, and writes `generated/ecuio/` at build
+  time: `ecuio.exports` (a name a line), `ecuio.def`, `ecuio.map` (GNU
+  ld's version script) and `ecuio.exp` (Apple's exported symbols list).
+  It refuses a declared name without the `ecuio_` prefix. The headers
+  declare functions only, so no data symbol is exported.
+  `scripts/abi-check.sh` makes both trees' lists with it, so the `abi`
+  job's shared object exports what the library does, by one rule for
+  the release and for HEAD.
+- **The checks** (`scripts/exports_check.py`, ctest, label `abi`,
+  wherever the option is on):
+  - `ExportsTest.TheLibraryExportsTheDeclarations`: the library's
+    export table equals the list, read with `dumpbin /exports` (found
+    beside `link.exe`), `nm -D --defined-only` or `nm -gU` (Mach-O's
+    image header the one linker-made name let through).
+  - `ExportsTest.EachAllocationHasItsRelease`: section 2's rule, with
+    the release's name widened from `_free` to a word of free, close,
+    destroy or unregister, since a handle's release is its close
+    (`ecuio_recording_close`, `ecuio_sim_destroy`,
+    `ecuio_stream_unregister`). A non-const `T**` parameter or a
+    non-const `T*` return needs a function in the same header taking
+    `T*` first; a `const` one is borrowed. Thirteen hand-outs on this
+    date, each with its release.
+  - `ExportsTest.SelfTest`, the rules' own cases.
+  - `c_abi_shared`: `tests/test_c_abi.c` linked against the library,
+    the calls it doesn't export (`internal.h`'s test hooks, the
+    surrogate client's log path) left out.
+  - `scripts/verify.sh`'s cross-arch step runs `c_abi_shared` and the
+    exports check in `build-win32` too, on the x86 DLL, which CI never
+    builds.
+- **The soname:** `VERSION` is the project's; `SOVERSION` is
+  major.minor while 0.x (`libecuio.so.0.6`), since a minor release may
+  break the C ABI before 1.0 (ADR-0048 section 2), and the major from
+  1.0 (`libecuio.so.1`). On macOS `compatibility_version` follows
+  `SOVERSION` and `current_version` `VERSION`. Windows names no version:
+  the DLL is loaded by path.
+- **Built, not shipped:** nothing installs the library yet, so the core
+  deb and tarball, the SBOM and the release's files stay as they were
+  until the wheel (section 6) decides what ships with it.
+- **`ecuio_version`** (section 2a, `core.h`): `version.h`'s three
+  numbers as the library was built; `ECUIO_ERR_NULL_ARGUMENT`, writing
+  nothing, when any of the pointers is NULL.
