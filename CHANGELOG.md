@@ -98,6 +98,16 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   reads a session's frames or decoded values in batches from a thread
   of its own, waiting up to a timeout, the oldest dropped and counted
   when it falls behind ([ADR-0053](docs/adr/0053-python-bindings.md)).
+- `havne-cli export <recording> <out> --format csv` writes a
+  recording's values, one row per sample (`time_s,signal,unit,value`),
+  after a comment line of counts, for a spreadsheet, pandas
+  (`skiprows=1`) or R. Scrubbed unless `--raw`: text signals and
+  signals read from identification replies are left out, and the file
+  is checked for the car's identity before it's written. A signal name,
+  unit or raw text value that a spreadsheet would run as a formula
+  fails the export instead of being changed
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  CSV export as built").
 
 ## [0.5.1] - 2026-11-06
 

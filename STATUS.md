@@ -376,10 +376,12 @@ background too ([roadmap](#roadmap)).
     offline by core's reader, the Recordings page and `havne-cli
     view`, through the values as recorded or through the frames by a
     profile (`ecuio_recording_open_frames`, so a raw recording plots),
-    exported by `havne-cli export` as pcapng, scrubbed by construction
-    and checked twice ([ADR-0054](docs/adr/0054-exports-and-imports.md)),
-    and a `candump -L` log imported as a recording (`havne-cli import
-    candump`); the app has no export or import yet, and a surrogate
+    exported by `havne-cli export` as pcapng (its frames) or CSV (its
+    values, one row per sample), scrubbed by construction and checked
+    ([ADR-0054](docs/adr/0054-exports-and-imports.md)), and a
+    `candump -L` log imported as a recording (`havne-cli import
+    candump`); the app exports only the Log page's frames and imports
+    nothing yet, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -569,10 +571,12 @@ append-only.
   - the shared core (`ecuio`), exporting the C API and nothing else,
     `ecuio_version`, and the pull queue (`ecuio/queue.h`), steps 1 and
     2 of the Python bindings
-    ([ADR-0053](docs/adr/0053-python-bindings.md)'s appendices).
+    ([ADR-0053](docs/adr/0053-python-bindings.md)'s appendices);
+  - a recording's values exported as CSV, one row per sample, scrubbed
+    and checked, in core and `havne-cli export --format csv`
+    (ADR-0054's appendix "the CSV export as built").
 - **In progress:** the `havne` Python package and its tests (step 3),
-  then the wheel (step 4); a recording's values exported as CSV, in
-  core and `havne-cli export --format csv`.
+  then the wheel (step 4).
 - **To come:** the other exports (a scrubbed recording folder, the
   health report) and CSV import, a vehicle's baseline recording,
   and the Python examples against the simulated ECU.
