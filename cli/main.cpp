@@ -1,9 +1,10 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
 //          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest,
-//          CliTransferRunTest, CliExitTest (ctest);
+//          CliTransferRunTest, CliExitTest, CliObdbImportTest (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
-//          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest
+//          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest,
+//          CliPartialTest
 //          (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
@@ -22,6 +23,7 @@
 #include "jsonl.h"
 #include "line_ring.h"
 #include "mark_lines.h"
+#include "partial_file.h"
 #include "plugin_lines.h"
 #include "recording_signals.h"
 #include "refused_signals.h"
@@ -782,15 +784,7 @@ ecuio_signal_file_t* g_signal_file = nullptr;
 // empty when it isn't UTF-8, which then names no file
 std::wstring wide(const char* utf8)
 {
-    const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1,
-                                      nullptr, 0);
-    if (n <= 0) {
-        return std::wstring();
-    }
-    std::wstring w(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, &w[0], n);
-    w.resize(static_cast<size_t>(n - 1));
-    return w;
+    return cli::utf8_to_wide(utf8);
 }
 #endif
 
@@ -836,32 +830,35 @@ bool read_whole(const char* path, size_t max, const char* what,
 
 bool is_folder(const char* path);
 
-// Writes a file whole, or not at all: into <path>.partial beside it, then
-// renamed over path, so a failed write never leaves half a file at the
-// user's path, and never over a folder. false with why, never the path
+// Writes a file whole, or not at all: into a partial of the call's own
+// beside it (cli/partial_file.h), then renamed over path, so a failed
+// write never leaves half a file at the user's path, and never over a
+// folder. false with why, never the path
 bool write_whole(const char* path, const std::string& bytes, std::string* why)
 {
     if (is_folder(path)) {
         *why = "the converted file can't be written: it's a folder";
         return false;
     }
-    const std::string partial = std::string(path) + ".partial";
+    std::string partial;
     std::string words; /* a Windows error errno doesn't name */
-    FILE* f = nullptr;
-#ifdef _WIN32
-    int e = _wfopen_s(&f, wide(partial.c_str()).c_str(), L"wb");
-#else
-    f = std::fopen(partial.c_str(), "wb");
-    int e = errno;
-#endif
-    bool failed = f == nullptr;
-    if (f != nullptr) {
-        failed =
-            std::fwrite(bytes.data(), 1, bytes.size(), f) != bytes.size() ||
-            std::fflush(f) != 0;
-        e = errno;
-        failed = std::fclose(f) != 0 || failed;
+    int e = 0;
+    FILE* f = cli::create_partial(path, cli::process_id(), &partial, &e);
+    if (f == nullptr) {
+        /* nothing made, nothing to remove: a name there is another's */
+        *why = std::string("the converted file can't be written: ") +
+               (e == EEXIST   ? std::string("every partial name beside it "
+                                            "is taken")
+                : e == ENOENT ? std::string("there's no such folder")
+                : e == EACCES ? std::string("permission denied")
+                              : "error " + std::to_string(e));
+        return false;
     }
+    bool failed =
+        std::fwrite(bytes.data(), 1, bytes.size(), f) != bytes.size() ||
+        std::fflush(f) != 0;
+    e = errno;
+    failed = std::fclose(f) != 0 || failed;
     if (!failed) {
 #ifdef _WIN32
         failed = MoveFileExW(wide(partial.c_str()).c_str(), wide(path).c_str(),
@@ -881,11 +878,7 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
 #endif
     }
     if (failed) {
-#ifdef _WIN32
-        _wremove(wide(partial.c_str()).c_str());
-#else
-        std::remove(partial.c_str());
-#endif
+        cli::remove_file(partial);
         *why = std::string("the converted file can't be written: ") +
                (!words.empty() ? words
                 : e == ENOENT  ? std::string("there's no such folder")

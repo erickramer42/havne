@@ -234,7 +234,7 @@ endif()
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
-        test_cli_health.cpp)
+        test_cli_health.cpp test_cli_partial.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -610,7 +610,8 @@ if(TARGET havne-cli)
         # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
         # model year, its notes and the file written whole, beside nothing
         # else, against committed ones; an --out that can't be written
-        # writes nothing and names no path; a file that isn't a set refused
+        # writes nothing and names no path; other writers' partials of the
+        # same --out are left alone; a file that isn't a set refused
         set(_cli_obdb ${CMAKE_CURRENT_SOURCE_DIR}/cli_obdb_import.py)
         set(_obdb_set ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json)
         add_test(NAME CliObdbImportTest.ASetConvertsToTheCommittedFile
@@ -620,8 +621,12 @@ if(TARGET havne-cli)
         add_test(NAME CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing
             COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} unwritable
                     $<TARGET_FILE:havne-cli> ${_obdb_set})
+        add_test(NAME CliObdbImportTest.OtherWritersPartialsAreLeftAlone
+            COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} beside
+                    $<TARGET_FILE:havne-cli> ${_obdb_set})
         set_tests_properties(CliObdbImportTest.ASetConvertsToTheCommittedFile
-            CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing PROPERTIES TIMEOUT 60)
+            CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing
+            CliObdbImportTest.OtherWritersPartialsAreLeftAlone PROPERTIES TIMEOUT 60)
         app_cli_golden(SignalsImportRefusesWhatIsntAnObdbSet obdb-not-a-set.jsonl
             --exit 3
             -- $<TARGET_FILE:havne-cli> signals import obdb ${_cli_signals}/extras.json
