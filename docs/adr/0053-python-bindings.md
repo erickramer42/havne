@@ -312,3 +312,53 @@ section 4, is the next).
 - **`ecuio_version`** (section 2a, `core.h`): `version.h`'s three
   numbers as the library was built; `ECUIO_ERR_NULL_ARGUMENT`, writing
   nothing, when any of the pointers is NULL.
+
+## Appendix: the pull queue as built (2026-11-06)
+
+Section 4, built (step 2 of the bindings), in `ecuio/queue.h` (a public
+header of its own) and `core/src/queue.cpp`.
+
+- **One kind per queue, typed reads:** section 4's single
+  `ecuio_queue_read` over frames, value batches or both became
+  `ecuio_queue_open(session, kind, capacity, &out)` with one kind,
+  `ECUIO_QUEUE_FRAMES` or `ECUIO_QUEUE_VALUES`, read by
+  `ecuio_queue_read_frames` or `ecuio_queue_read_values`. A read of both
+  would take a `void*` or a union of a 4120-byte frame and a value: both
+  are awkward in ctypes, and the bindings' check of declarations against
+  the headers (section 7) can check neither. A program wanting both
+  opens two queues.
+- **The value entry:** `ecuio_queue_value_t`, 160 bytes with no pointer
+  (one layout on 32- and 64-bit builds): a value of `ecuio_value_t`'s
+  with its frame's `timestamp_us` and `arbitration_id`, and its text (a
+  TEXT or HEX value's, or an ENUM's label) copied into 128 bytes;
+  `ECUIO_QUEUE_VALUE_TEXT_CUT` marks one cut at 127. One entry per value,
+  so a full queue can drop part of one frame's values; `dropped` counts
+  entries.
+- **The bound:** slots made at open, 1 to `ECUIO_QUEUE_MAX_FRAMES` (4096
+  frames, about 17 MB) or `ECUIO_QUEUE_MAX_VALUES` (65536); a full queue
+  drops its oldest entry, and `dropped` is the running total since open.
+  At most `ECUIO_QUEUE_MAX_PER_SESSION` (4) queues a session, opened
+  before `ecuio_session_start` (`ECUIO_ERR_INVALID_ARGUMENT` after it, as
+  `ecuio_session_record`).
+- **The worker's side:** each queue shares a link with its session, as
+  the recorder does (`core/src/pull_queue.h`): dispatch pins it, copies
+  under the queue's mutex after the frame callbacks (frames) or the
+  values callbacks (values), and wakes a reader only when one waits; a
+  values queue makes dispatch decode, as a values callback or a
+  recording does. Nothing allocates on the worker.
+- **A read** copies up to its capacity, oldest first, letting go of the
+  queue's mutex between chunks (32 frames, 256 values), and waits up to
+  its timeout for the first entry. Once the session has closed and the
+  queue is empty it returns `ECUIO_ERR_SESSION_CLOSED`. Two threads may
+  read one queue; each entry goes to one of them.
+- **Close (ADR-0002's ordering):** `ecuio_session_close` detaches every
+  queue after the transport's detach has joined the worker, and wakes
+  their readers; it frees none. `ecuio_queue_close` takes the queue off
+  its link (waiting for the worker's pin), ends the reads under way and
+  waits for them to return, then frees it, before or after its session
+  is closed or destroyed. Reading or closing a queue after
+  `ecuio_queue_close` is undefined, as for every handle.
+- **Tests:** `QueueTest` (test_core, `tests/test_queue.cpp`; the
+  internal `ecuio_queue_test_waiting` tells a case that a read on another
+  thread waits), `CoreTest.WorkersAllocateNothingPerFrameIntoQueues`,
+  `c_abi` and `c_abi_shared` (the layout and the NULL refusals).
