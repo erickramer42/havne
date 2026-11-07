@@ -795,3 +795,57 @@ lines, its ranked values and five since-cleared PIDs), the same car
 answering late through uds-generic (its identification outlasts the
 values' quiet, and the report waits for it), a recording of values alone
 and a range past its end.
+
+**The app's Save report (2026-11-07).** The fourth step: Diagnostics'
+"Save report..." (while connected, whatever the read's state) and the log
+viewer's (a recording open), on every platform, through one helper
+(`app/healthreport.{h,cpp}`) and no change in core.
+
+- **The file:** a save dialog with two filters, text first (the one a
+  shop or a buyer reads) and JSON. The format is the chosen filter's,
+  or JSON for a name ending `.json` (`healthFormatFor`): Android's
+  content:// URI carries no name, so the filter decides there.
+- **Writing:** core writes only to a path and refuses one that exists,
+  while the dialog has already asked about replacing a file and Android
+  hands back a content:// URI. So core writes into a temporary folder of
+  the app's own (its file named `health.txt` or `health.json`, never the
+  vehicle's label), and the bytes its check passed are written to the
+  chosen file (`app/urlwrite.h`, as Export CSV's and a signal file's
+  copy are); the temporary folder goes either way.
+- **A live session:** the session's reports as they stand and the
+  values Live's rows hold, each as core decoded it (the def's unit, an
+  enumeration's raw number; never the display's conversion) and aged
+  from the window that brought it; the app's units, this year + 1 as the
+  latest model year, the time from the system clock. No wait, unlike
+  `havne-cli health`: the page shows the report as it stands, and a
+  report still being read says so.
+- **A recording:** always the whole of it; the viewer's zoom is a view,
+  not a choice of range, and a zoomed-in stretch after the diagnostics
+  replies would read "not recorded" for every ECU. A range is
+  `havne-cli health`'s alone for now. Core reads all of frames.csv, so
+  the report runs on a thread of the viewer's own, one at a time; a
+  report under way when the viewer closes or opens another recording
+  still writes its file (core's export can't stop midway), and its result
+  is dropped.
+- **Its words:** a note under the button ("Report saved: 1 ECU, 3
+  trouble codes, 14 key values", or "Report not saved: <why>") and one
+  log line, "Health report saved: 1 ECU, 3 trouble codes, 14 key values
+  (13 identification items left out)" or "Health report not saved:
+  <why>", each noun as its count wants it (`healthSummary`,
+  `healthSavedLine`); never a path, a folder's name (it can hold the
+  vehicle's label), the VIN or a value.
+
+**Tests (step 4):** `BridgeTest.HealthFormatIsTheFiltersOrTheNames`,
+`.HealthReportWordsEachCount` (one, none and many),
+`.HealthReportOfTheMockIsWrittenWhereChosen` (text, then JSON by the
+filter and by the name, over a file that exists, the mock's label never
+written, core's temporary folder gone, a folder refused, not connected
+refused), `.HeldValuesAreCoresInTheDefsUnit` (an imperial model's held
+value in km/h, its age), `.HealthReportCarriesLivesValuesInTheAppsUnits`
+(a replay under obd2: the key values in mph or deg F);
+`RecordingViewTest.HealthReportIsTheWholeRecordingsOnItsOwnThread` (one
+at a time, the whole recording, the folder's name in neither the file
+nor the words) and `.AReportEndingAfterACloseIsDropped`; `QmlTest.
+diagnostics`' `test_saveReportWritesTheChosenFormat` and `QmlTest.
+recordings`' `test_saveReportWritesTheWholeRecording` (zoomed in, the
+report still the whole recording's).
