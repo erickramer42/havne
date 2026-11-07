@@ -14,6 +14,7 @@
 #include "pluginstore.h"
 #include "signalstore.h"
 #include "framefilter.h"
+#include "recordingimport.h"
 #include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
@@ -623,6 +624,9 @@ class SessionBridge : public QObject
     Q_PROPERTY(FrameListModel* model READ model CONSTANT)
     // The Log page's By ID view over model's frames
     Q_PROPERTY(FrameIdModel* frameIds READ frameIds CONSTANT)
+    // The Recordings page's Import: another logger's file made a recording
+    // in recordingsRoot()
+    Q_PROPERTY(RecordingImport* recordingImport READ recordingImport CONSTANT)
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
@@ -802,6 +806,7 @@ public:
     int overflowFrames() const { return m_reportedOverflow; }
     FrameListModel* model() const { return m_frameLog; }
     FrameIdModel* frameIds() const { return m_frameIds; }
+    RecordingImport* recordingImport() const { return m_recordingImport; }
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
@@ -1190,6 +1195,7 @@ private:
 
     FrameListModel* m_frameLog = nullptr;
     FrameIdModel* m_frameIds = nullptr;
+    RecordingImport* m_recordingImport = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
     // The model's batch for one tick: each signal's window

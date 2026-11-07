@@ -1345,6 +1345,8 @@ SessionBridge::SessionBridge(QObject* parent)
     : QObject(parent)
     , m_frameLog(new FrameListModel(this))
     , m_frameIds(new FrameIdModel(m_frameLog, this))
+    , m_recordingImport(
+          new RecordingImport([this] { return recordingsRoot(); }, this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
     , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))

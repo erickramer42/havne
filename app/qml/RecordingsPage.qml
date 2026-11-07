@@ -46,6 +46,20 @@ Page {
     onBaselineFolderChanged: checkBaseline()
 
     readonly property int recordingsListed: 20
+
+    // Import: another logger's file made a recording. The file picked, its
+    // kind (RecordingImport.Kind: guessed from its first line, switched
+    // here), a CSV's column map, and the last import's words: what it
+    // made, or why not
+    property url importFile: ""
+    property int importKind: RecordingImport.Csv
+    property url importMap: ""
+    property bool importOpen: false
+    // After a candump import is refused, the interface field shows: core
+    // names a log's interfaces when it has several
+    property bool importAsksInterface: false
+    property string importNote: ""
+    property bool importFailed: false
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
     property string openedTitle: ""
@@ -208,6 +222,42 @@ Page {
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         checkBaseline()
+    }
+
+    // A URL's last part, as the picker named it (a content:// URI's too)
+    function fileNameOf(url) {
+        const text = decodeURIComponent(url.toString())
+        return text.substring(text.lastIndexOf("/") + 1)
+    }
+
+    // A file picked to import: its kind guessed, the rest asked for
+    function chooseImportFile(url) {
+        importFile = url
+        importKind = Bridge.recordingImport.guessKind(url)
+        importMap = ""
+        importAsksInterface = false
+        importNote = ""
+        importFailed = false
+        importOpen = true
+    }
+
+    function startImport() {
+        importNote = ""
+        importFailed = false
+        Bridge.recordingImport.start(importFile, importKind, importMap,
+                                     importKind === RecordingImport.Candump
+                                     ? importInterface.text : "")
+    }
+
+    // What an import made, in words
+    function importedWords(result) {
+        if (importKind === RecordingImport.Candump)
+            return qsTr("Imported %1 frames over %2 s")
+                       .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
+        return result.columnsIgnored > 0
+               ? qsTr("Imported %1 values; columns ignored: %2")
+                     .arg(result.values).arg(result.columnsIgnored)
+               : qsTr("Imported %1 values").arg(result.values)
     }
 
     function checkBaseline() {
@@ -639,6 +689,24 @@ Page {
                                  : qsTr("Frames check: %1 findings").arg(n)
     }
 
+    // Import's file and a CSV's column map
+    FileDialog {
+        id: importDialog
+        title: qsTr("Import a log")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: root.chooseImportFile(importDialog.selectedFile)
+    }
+    FileDialog {
+        id: mapDialog
+        title: qsTr("The logger's column map")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Column maps (*.json)"), qsTr("All files (*)")]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: root.importMap = mapDialog.selectedFile
+    }
+
     // Save report's file: text first, the one a shop or a buyer reads
     FileDialog {
         id: reportDialog
@@ -734,6 +802,22 @@ Page {
     }
 
     Connections {
+        target: Bridge.recordingImport
+        function onFinished(result) {
+            root.importFailed = !result.ok
+            if (result.ok) {
+                root.importNote = root.importedWords(result)
+                root.importOpen = false
+                root.refresh()
+            } else {
+                root.importNote = result.words
+                if (root.importKind === RecordingImport.Candump)
+                    root.importAsksInterface = true
+            }
+        }
+    }
+
+    Connections {
         target: Bridge
         // A recording that ended joins the list
         function onRecordingStateChanged() {
@@ -797,7 +881,158 @@ Page {
         height: scroller.contentHeight - 2 * Theme.pageMargin
         spacing: 10
 
-        PageHeader { title: qsTr("Recordings"); visible: !root.chartMaximized }
+        PageHeader {
+            title: qsTr("Recordings")
+            visible: !root.chartMaximized
+            Item { Layout.fillWidth: true }
+            ThemedButton {
+                objectName: "importButton"
+                visible: !root.viewing
+                text: qsTr("Import")
+                enabled: !Bridge.recordingImport.busy
+                onClicked: importDialog.open()
+            }
+        }
+
+        // ---- Import: the file picked, its kind, a CSV's column map ----
+        ColumnLayout {
+            objectName: "importPanel"
+            visible: root.importOpen && !root.viewing
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+
+            Label {
+                objectName: "importFileName"
+                Layout.fillWidth: true
+                wrapMode: Text.WrapAnywhere
+                color: Theme.text
+                text: qsTr("Import %1").arg(root.fileNameOf(root.importFile))
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Rectangle {
+                    implicitWidth: kindSwitch.implicitWidth + 4
+                    implicitHeight: kindSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
+                    Row {
+                        id: kindSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            objectName: "importKind_csv"
+                            text: qsTr("CSV")
+                            selected: root.importKind === RecordingImport.Csv
+                            enabled: !Bridge.recordingImport.busy
+                            onClicked: root.importKind = RecordingImport.Csv
+                        }
+                        SegmentButton {
+                            objectName: "importKind_candump"
+                            text: qsTr("candump")
+                            selected: root.importKind === RecordingImport.Candump
+                            enabled: !Bridge.recordingImport.busy
+                            onClicked: root.importKind = RecordingImport.Candump
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    text: qsTr("Guessed from its first line")
+                }
+            }
+
+            // A CSV's columns come through the logger's column map
+            RowLayout {
+                visible: root.importKind === RecordingImport.Csv
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importMapButton"
+                    text: qsTr("Column map...")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: mapDialog.open()
+                }
+                Label {
+                    objectName: "importMapName"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WrapAnywhere
+                    color: root.importMap.toString() !== "" ? Theme.text : Theme.textDim
+                    text: root.importMap.toString() !== "" ? root.fileNameOf(root.importMap)
+                                                         : qsTr("None chosen")
+                }
+            }
+            Label {
+                visible: root.importKind === RecordingImport.Csv
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.textDim
+                font.pixelSize: 12
+                text: qsTr("A JSON file naming the time column and each signal's column, the one havne-cli import csv takes with --map")
+            }
+
+            // A candump log's bus, once core has said the log holds several
+            RowLayout {
+                visible: root.importKind === RecordingImport.Candump && root.importAsksInterface
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: 13 }
+                TextField {
+                    id: importInterface
+                    objectName: "importInterface"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the row's width, not its text's
+                    placeholderText: qsTr("can0")
+                    font.family: Theme.monoFamily
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+                    enabled: !Bridge.recordingImport.busy
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importStart"
+                    text: qsTr("Import")
+                    highlighted: true
+                    enabled: !Bridge.recordingImport.busy
+                             && (root.importKind === RecordingImport.Candump
+                                 || root.importMap.toString() !== "")
+                    onClicked: root.startImport()
+                }
+                ThemedButton {
+                    objectName: "importCancel"
+                    text: qsTr("Cancel")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: {
+                        root.importOpen = false
+                        root.importNote = ""
+                    }
+                }
+                Label {
+                    objectName: "importBusy"
+                    visible: Bridge.recordingImport.busy
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: qsTr("Importing...")
+                }
+            }
+        }
+
+        // The last import's words: what it made, or why not
+        Label {
+            objectName: "importNote"
+            visible: root.importNote !== "" && !root.viewing
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: root.importFailed ? Theme.danger : Theme.success
+            text: root.importNote
+        }
 
         // ---- The list ----
         Label {

@@ -73,7 +73,8 @@ TestCase {
         return [{ tag: "homePage" }, { tag: "dashboardPage" }, { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
-                { tag: "recordingsCompare" }, { tag: "settingsPage" }]
+                { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
+                { tag: "recordingsImportCandump" }, { tag: "settingsPage" }]
     }
 
     function test_everyPageFitsAPhonesWidth(data) {
@@ -90,8 +91,9 @@ TestCase {
         // recordingsOpened: the viewer as it opens, its toolbar's hint
         // still showing; recordingsViewer: a cursor placed
         const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare"].includes(data.tag)
+        const importing = data.tag.startsWith("recordingsImport")
         const name = data.tag === "logFrames" ? "logPage"
-                   : viewer ? "recordingsPage" : data.tag
+                   : viewer || importing ? "recordingsPage" : data.tag
         const page = find(main.contentItem, name)
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         verify(page.visible, name + " is on screen")
@@ -104,6 +106,22 @@ TestCase {
                       source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C", profile: "raw" }
         if (name === "recordingsPage")
             page.recordings = [row]
+        // Import's panel with every row it can show, long names and words
+        if (importing) {
+            const candump = data.tag === "recordingsImportCandump"
+            page.chooseImportFile(Harness.writeScratchFile(
+                "a-logger-export-with-a-long-file-name-2026-11-07.csv",
+                candump ? "(1.0) can0 7E8#01
+" : "time,rpm
+"))
+            page.importMap = Harness.writeScratchFile(
+                "a-column-map-with-a-long-name-for-the-phone.json", "{}")
+            page.importAsksInterface = true
+            page.importFailed = true
+            page.importNote = candump
+                ? "the log has several interfaces: name one of can0, can1, vcan0 and slcan0"
+                : "the column map: line 1, column 2: the key 'signal' isn't one a column map takes"
+        }
         if (viewer) {
             page.open(row)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")

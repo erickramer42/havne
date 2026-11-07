@@ -43,6 +43,8 @@ qt_add_library(app_ui STATIC
     pluginstore.h
     signalstore.cpp
     signalstore.h
+    recordingimport.cpp
+    recordingimport.h
     recordingview.cpp
     recordingview.h
     sessionbridge.cpp
@@ -67,6 +69,7 @@ qt_add_qml_module(app_ui
         qml/Main.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
+        qml/SegmentButton.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml
