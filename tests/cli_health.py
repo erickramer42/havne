@@ -11,7 +11,10 @@
 # --seconds; and the simulated car as an ELM327 adapter on loopback (sim
 # --elm327 tcp:0), read through obd2 to JSON: its VIN decoded and in
 # neither the file nor the lines, its ranked values and since-cleared
-# PIDs given; and the same car answering late (faults=late:1) through
+# PIDs given; the same car with every third reply late (faults=late:3),
+# whose slow rate class goes longer than the values' quiet between new
+# values: the report still waits for each since-cleared PID its bitmaps
+# list; and the same car answering late (faults=late:1) through
 # uds-generic, whose identification outlasts the values' quiet: the
 # report waits for it, no item left unasked. recording: a recording of
 # values alone to JSON (no ECU and why, its key values), and a range
@@ -51,9 +54,10 @@ def read(path):
         return f.read()
 
 
-def on_emulator(cli, sim_uri, uri, out):
+def on_emulator(cli, sim_uri, uri, out, extra=()):
     """havne-cli health over sim <sim_uri> --elm327 tcp:0, PORT in uri the
-    emulator's port: health's lines, its stdout and how long it took"""
+    emulator's port, extra after its arguments: health's lines, its stdout
+    and how long it took"""
     sim = subprocess.Popen([cli, "sim", sim_uri, "--elm327", "tcp:0",
                             "--seconds", "100"], stdout=subprocess.PIPE,
                            text=True)
@@ -69,7 +73,7 @@ def on_emulator(cli, sim_uri, uri, out):
         if port is None:
             raise SystemExit("FAIL  the emulator wrote no elm327 line")
         return run(cli, ["health", uri.replace("PORT", port), out,
-                         "--format", "json"])
+                         "--format", "json"] + list(extra))
     finally:
         sim.terminate()
         sim.communicate(timeout=60)
@@ -120,6 +124,19 @@ def session(cli):
         if not v["vehicle"]["vin_read"] or not v["key_values"] or \
                 v["source"]["uri"] != "elm327://<address>?profile=obd2":
             raise SystemExit(f"FAIL  the car's report {v}")
+
+        # A slow rotation: every third reply late, so the since-cleared
+        # PIDs come further apart than the quiet time; each is still
+        # waited for, as its bitmap lists it
+        slow = os.path.join(d, "slow.json")
+        lines, _, slow_took = on_emulator(
+            cli, "mock://sim?values=canned&faults=late:3",
+            "elm327://127.0.0.1:PORT?profile=obd2", slow, ["--seconds", "60"])
+        h_slow = one(lines, "health")
+        if (h_slow["since_cleared"] != 5 or not h_slow["settled"]
+                or slow_took > 60):
+            raise SystemExit(f"FAIL  the slow car's health line {h_slow} in "
+                             f"{slow_took:.1f} s")
 
         # Late replies through uds-generic: nothing ranked, so the values
         # are quiet at once, and the identification takes longer

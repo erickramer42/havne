@@ -214,6 +214,68 @@ private:
     uint64_t since_us_ = 0;
 };
 
+/* A def's Service 01 PID (keyed 41 <PID> at offset 0), or 0 for another */
+inline uint32_t service01_pid(const ecuio_signal_def_t& d)
+{
+    if (d.mux_offset != 0 || d.mux_length != 2 || (d.mux_key >> 8) != 0x41u) {
+        return 0;
+    }
+    return d.mux_key & 0xFFu;
+}
+
+/* Whether a channel's answered bitmaps list pid as supported (within the
+ * PIDs they cover, its bit set) and no request for it was dropped */
+inline bool listed_supported(const ecuio_channel_support_t& s, uint32_t pid)
+{
+    if (s.generation == 0 || pid == 0 || pid > s.pids_through) {
+        return false;
+    }
+    if ((s.pid_bitmap[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) == 0) {
+        return false;
+    }
+    const uint32_t listed = s.dropped < ECUIO_SUPPORT_MAX_DROPPED
+                                ? s.dropped
+                                : ECUIO_SUPPORT_MAX_DROPPED;
+    for (uint32_t i = 0; i < listed; ++i) {
+        const ecuio_dropped_request_t& r = s.dropped_list[i];
+        if (r.length == 2 && r.request[0] == 0x01 && r.request[1] == pid) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Whether the wait still owes a shown def its first value: a Service 01
+ * PID that its ECU's channel (by rx_id, among supports[0..n)) lists as
+ * supported. The slow rate class can go longer than the quiet time
+ * between new values, so these are waited for by name; a PID the ECU
+ * lacks, or one no bitmap covers, is left to the quiet rule */
+inline bool awaited(const ecuio_signal_def_t& d, bool has_value,
+                    const ecuio_channel_support_t* supports, uint32_t n)
+{
+    if (has_value || !shown_def(d)) {
+        return false;
+    }
+    const uint32_t pid = service01_pid(d);
+    if (pid == 0) {
+        return false;
+    }
+    for (uint32_t c = 0; c < n; ++c) {
+        if (supports[c].rx_id == d.message_id) {
+            return listed_supported(supports[c], pid);
+        }
+    }
+    return false;
+}
+
+/* The live wait's end: the reports settled, the shown values quiet and
+ * none still owed, or the deadline (--seconds) passed */
+inline bool health_wait_over(bool settled, bool quiet, uint32_t owed,
+                             uint64_t now_us, uint64_t deadline_us)
+{
+    return (settled && quiet && owed == 0) || now_us >= deadline_us;
+}
+
 /* The bytes health_line (or health_failed_line) needs: its counts and
  * keys, and the file's path at its longest escape */
 inline size_t health_line_bytes(const HealthArgs& a)
