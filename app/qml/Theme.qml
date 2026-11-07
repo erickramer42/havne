@@ -31,12 +31,26 @@ QtObject {
     // Shorter than 480 px: a phone on its side, where Live's and the
     // viewer's charts start maximized (Main.qml sets it with dense)
     property bool shortLayout: false
+    // Narrower than 720 px: a phone upright, where the tab bar shows
+    // (Main.qml sets it)
+    property bool compact: false
     readonly property int spacing:          dense ? 6 : 8
     readonly property int pageMargin:       dense ? 10 : 16
     readonly property int controlHeight:    dense ? 32 : 36
     readonly property int rowHeight:        dense ? 36 : 44
     readonly property int toolBarHeight:    dense ? 40 : 48
     readonly property int sidebarWidth:     dense ? 150 : 220
+    // The least a tap target measures each way on a phone (Material's
+    // 48 dp), on the glass: in the layout's units, which the zoom scales,
+    // a zoom under 1 asks for more, so a target never shrinks below it;
+    // elsewhere a control's own height. A control may draw smaller
+    // inside it.
+    readonly property real touchTarget:     mobile || compact ? 48 * Math.max(1, 1 / zoom)
+                                                              : controlHeight
+    // Between a bar's targets and the window's edge, on the glass too, so
+    // a tap low on the tab bar never lands on the system's Back or Home
+    // beside it
+    readonly property real barGap:          8 * Math.max(1, 1 / zoom)
 
     // A phone or tablet: touch only, no keyboard shortcuts, no file
     // manager for the app's own folders

@@ -55,10 +55,22 @@ ApplicationWindow {
 
     // The layout width, after the zoom
     readonly property bool isCompact: zoomRoot.width < 720
-    // A phone on its side, or a window as short
-    readonly property bool isShort: zoomRoot.height < 480
+    // A phone on its side, or a window as short (the bars' insets apart)
+    readonly property bool isShort: zoomRoot.height - zoomRoot.insetTop - zoomRoot.insetBottom < 480
     Binding { target: Theme; property: "dense"; value: root.isCompact || root.isShort }
     Binding { target: Theme; property: "shortLayout"; value: root.isShort }
+    Binding { target: Theme; property: "compact"; value: root.isCompact }
+
+    // The system's bars over the window, per side: Qt's safe area, or a
+    // test's stand-in where larger (a test can't set SafeArea). The
+    // header and the tab bar paint theirs in their own color.
+    property var testInsets: ({ left: 0, top: 0, right: 0, bottom: 0 })
+    readonly property var insets: {
+        const s = SafeArea.margins
+        const t = testInsets
+        return { left: Math.max(s.left, t.left), top: Math.max(s.top, t.top),
+                 right: Math.max(s.right, t.right), bottom: Math.max(s.bottom, t.bottom) }
+    }
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
@@ -133,7 +145,7 @@ ApplicationWindow {
              : o === Qt.InvertedLandscapeOrientation ? "landscape, inverted" : "unknown"
     }
     readonly property string displayLine: {
-        const s = zoomRoot.safe
+        const s = root.insets
         return "Display: screen " + Screen.width + " × " + Screen.height
              + " (" + orientationName(Screen.orientation) + ", " + Screen.devicePixelRatio + "x)"
              + ", available " + Screen.desktopAvailableWidth + " × " + Screen.desktopAvailableHeight
@@ -151,16 +163,20 @@ ApplicationWindow {
     // The whole UI, laid out at the window's size divided by the zoom and
     // scaled by it, so pages reflow as if the window were that size.
     // Shapes and text are vector-drawn, so they stay sharp at any zoom.
-    // It keeps out of the safe area's margins: Android draws the window
-    // under its status and navigation bars (edge to edge), where the
-    // window's color shows; elsewhere the margins are 0.
+    // It keeps out of the insets' sides; at the top and the bottom the
+    // header and the tab bar reach the window's edge and pad their insets
+    // in their own color (Android can draw the window under its status
+    // and navigation bars, edge to edge; elsewhere the insets are 0).
     Item {
         id: zoomRoot
-        readonly property var safe: parent.SafeArea.margins
+        readonly property var safe: root.insets
+        // The top and bottom insets in the layout's units
+        readonly property real insetTop: safe.top / Theme.zoom
+        readonly property real insetBottom: safe.bottom / Theme.zoom
         x: safe.left
-        y: safe.top
+        y: 0
         width: (parent.width - safe.left - safe.right) / Theme.zoom
-        height: (parent.height - safe.top - safe.bottom) / Theme.zoom
+        height: parent.height / Theme.zoom
         scale: Theme.zoom
         transformOrigin: Item.TopLeft
 
@@ -169,8 +185,9 @@ ApplicationWindow {
             spacing: 0
 
             ToolBar {
+                objectName: "headerBar"
                 Layout.fillWidth: true
-                Layout.preferredHeight: Theme.toolBarHeight
+                Layout.preferredHeight: Theme.toolBarHeight + zoomRoot.insetTop
                 background: Rectangle {
                     color: Theme.surface
                     Rectangle { // 2px accent underline
@@ -180,7 +197,9 @@ ApplicationWindow {
                 }
                 RowLayout {
                     id: headerRow
+                    objectName: "headerRow"
                     anchors.fill: parent
+                    anchors.topMargin: zoomRoot.insetTop
                     anchors.leftMargin: 16
                     anchors.rightMargin: 16
                     spacing: 12
@@ -352,19 +371,26 @@ ApplicationWindow {
                 }
             }
 
+            // A phone's tab bar: targets a touch's size at its top (each tab
+            // keeps its own height), then a gap and the system's bottom
+            // inset, all in the bar's color, so a tap low on a tab never
+            // reaches Back or Home beside it
             TabBar {
                 id: tabBar
                 objectName: "tabBar"
                 visible: root.isCompact
                 Layout.fillWidth: true
+                Layout.preferredHeight: Theme.touchTarget + Theme.barGap + zoomRoot.insetBottom
+                spacing: 0
                 currentIndex: stack.currentIndex
                 onCurrentIndexChanged: stack.currentIndex = currentIndex
 
-                background: Rectangle { color: Theme.surface }
+                background: Rectangle { objectName: "tabBarBackground"; color: Theme.surface }
 
                 // per-button styling since TabBar doesn't propagate backgrounds
                 component ThemedTabButton: TabButton {
                     id: btn
+                    implicitHeight: Theme.touchTarget
                     contentItem: Label {
                         text: btn.text
                         // 13px keeps "Settings" inside a fifth of a 375pt phone
@@ -400,6 +426,13 @@ ApplicationWindow {
                 ThemedTabButton { text: qsTr("Log") }
                 ThemedTabButton { text: qsTr("Recs") }
                 ThemedTabButton { text: qsTr("Settings") }
+            }
+            // With no tab bar (the sidebar's width), the pages keep off
+            // the bottom inset
+            Item {
+                visible: !tabBar.visible
+                Layout.fillWidth: true
+                Layout.preferredHeight: zoomRoot.insetBottom
             }
         }
     }
@@ -461,7 +494,7 @@ ApplicationWindow {
         anchors.bottom: parent.bottom
         anchors.rightMargin: 8 + zoomRoot.safe.right
         // Above the tab bar on a phone, so it covers none of the tabs
-        anchors.bottomMargin: 8 + zoomRoot.safe.bottom + (tabBar.visible ? tabBar.height : 0)
+        anchors.bottomMargin: 8 + (tabBar.visible ? tabBar.height * Theme.zoom : zoomRoot.safe.bottom)
         width: frameRateLabel.implicitWidth + 12
         height: frameRateLabel.implicitHeight + 6
         radius: 4
