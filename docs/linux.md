@@ -287,8 +287,9 @@ counts the frames per CAN ID.
   x86_64, and on GitHub's ARM runner builds and checks the aarch64
   AppImage and core packages only. The release's own arm64 files run
   there too: the deb's `havne-cli` streams the mock at the release's
-  version, and the AppImage stays up 10 s offscreen (v0.5.0,
-  2026-11-06).
+  version, the AppImage stays up 10 s offscreen, and the aarch64 wheel
+  installs into a fresh venv with `pip --no-index` and reads `mock://`
+  through `python/examples/read_pids.py` (v0.6.0, 2026-11-07).
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), and a requesting session sending through a
