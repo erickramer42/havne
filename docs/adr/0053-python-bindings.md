@@ -362,3 +362,114 @@ header of its own) and `core/src/queue.cpp`.
   internal `ecuio_queue_test_waiting` tells a case that a read on another
   thread waits), `CoreTest.WorkersAllocateNothingPerFrameIntoQueues`,
   `c_abi` and `c_abi_shared` (the layout and the NULL refusals).
+- **Amended 2026-11-06 (step 3), the stream's end:** a replay that
+  doesn't loop ends its session's queues when its last pass is over or
+  it stops early (its file changed): what's waiting is still read, then
+  a read returns `ECUIO_ERR_STREAM_ENDED` (21, "the stream has ended").
+  Without it a script iterating a replay's values would wait forever,
+  since only a frame count tells a replay's end and a values queue has
+  none. Only a replay ends a stream; a looping replay and every live
+  transport end only at the session's close. The end stays the answer
+  after the close. `QueueTest.AReplaysLastFrameEndsItsQueues`,
+  `.AReplayThatDropsFramesStillEnds`, `.ALoopingReplayEndsOnlyAtTheClose`.
+
+## Appendix: the havne package as built (2026-11-06)
+
+Sections 1, 3, 5 and 7, built (step 3 of the bindings; the wheel,
+section 6, and the examples, section 8, are next), in `python/havne/`
+with its tests in `python/tests/`.
+
+- **The declarations are generated:** `scripts/ctypes_gen.py` reads the
+  public headers (`ECUIO_PUBLIC_HEADERS`) with `api_check.py`'s parser,
+  as the export list is made, and writes `python/havne/_ecuio.py`:
+  every macro and enumerator as a constant, each enum as `c_int`, each
+  struct and union with its fields, each opaque handle as an empty
+  `Structure` (so a handle is a typed pointer, never a bare `c_void_p`),
+  each callback typedef as a `CFUNCTYPE`, and every function's argument
+  and result types, set on the loaded library by `bind(lib)`. The file
+  is committed, so the package needs no headers at run time; section 7's
+  check of declarations against headers became the generator run again
+  and compared, which also catches a struct or constant out of date.
+  `havne.c` is the module, for a call the classes don't wrap.
+- **Finding the library:** `HAVNE_LIBRARY` when set and not empty (a
+  path to the shared core, which must be a file), else the package's own
+  folder (`ecuio.dll`, `libecuio.so.<n>`, `libecuio.dylib`), else
+  `havne.LibraryNotFound`, an `ImportError` naming both places. Never
+  the system's search path: a library found there is some other
+  build's. On Windows the package sets section 3's surrogate variables
+  from its own folder before the load, unless the environment sets them.
+- **The version rule:** section 6's "another major version" is the
+  rule from 1.0. While 0.x a minor release may break the C ABI (ADR-0048
+  section 2, the soname's major.minor), so the package refuses a core
+  whose major or minor differs from its own (`_version.py`, the
+  project's version) and takes any patch. The refusal is
+  `havne.LibraryVersionError`, an `ImportError` naming both versions and
+  the library's path.
+- **Errors:** a call that fails raises `havne.Error`, carrying the
+  status number, its name (`ECUIO_ERR_BAD_URI`), core's words for it,
+  `ecuio_last_error_detail` and the call's name.
+- **Streams:** `Session.frames()` and `.values()` open a pull queue
+  each (before `start()`, as core requires) and read it in batches of
+  256, waiting at most 100 ms a read, so a script's Ctrl+C lands between
+  reads. Iteration ends when the queue says the stream ended (a replay's
+  last frame) or the session closed; the stream's `ended` says which.
+  Each time the dropped count grows it's logged once on the `havne`
+  logger, with the total. A `Stream` is read from one thread at a time
+  (a lock around each read); closing the session from another thread
+  ends the iteration. `Session.record()` records through core's
+  recorder, with `note` and `mark`.
+- **Signals through signal files only** (section 5): `havne.SignalFile`
+  takes a file's text or path, loads it and registers its profile.
+  Every file and plugin loaded stays loaded for the process's life,
+  since a registered profile's set is borrowed by the sessions that use
+  it; registering a name again replaces it for the sessions opened
+  after, as in core.
+- **The plugin, minimal:** `havne.Plugin(path)` loads a plugin's folder
+  (its files read through core's `read` callback) or a packed one,
+  lists `id`, `name`, `version` and `variants`, and `register(variant)`
+  returns the profile name; `Session(uri, plugin=..., variant=...)`
+  registers and opens through it. Declared but not wrapped, through
+  `havne.c`: a VIN's proposed variants (`ecuio_plugin_match`), a
+  variant's merged set and signal file (`ecuio_plugin_variant_set`,
+  `_variant_file`, `_variant_find`), its simulated values
+  (`ecuio_plugin_values`) and its fixtures (`ecuio_plugin_fixture`).
+- **The rest of section 5:** `Recording` (the reader: signals, markers,
+  `query`, `text_at`, `find_threshold`, `find_marker`; a profile or a
+  signal file to read `frames.csv` through), `Sim` (on a Linux virtual
+  bus, or `Sim.unbound(uri).ask(request)` on every platform),
+  `Session.info`, `.support`, `.identity`, `.vin` and `.diagnostics`.
+  `Session.clear(confirm=True)` passes the engine's and the vehicle's
+  state to core's gate (ADR-0038), which judges it as for every front
+  end; the tests clear only the simulated car.
+- **Tests:** each `python/tests/test_*.py` is a ctest of its own,
+  `PythonTest.<file>` (label `python`), under pytest through
+  `python/tests/run.py`: exit 77, ctest's skip, without pytest or when
+  every case in the file skipped, or a failure instead under
+  `ECUIO_PYTEST_REQUIRED=1`. They load the tree's own shared core
+  through `HAVNE_LIBRARY`. Every session they open is `mock://`,
+  `replay://`, the simulated ECU, `vcan0` or the fake J2534 DLL.
+  `PythonTest.test_declarations` runs the generator again and compares,
+  compares the bound functions with the export list, and evaluates each
+  header's `static_assert`s of sizes and offsets against the ctypes
+  types. `PythonTest.test_vcan` is the Done-when's first clause: the
+  simulated ECU on `vcan0`, a script opening `socketcan://vcan0` under
+  `obd2` and printing the decoded PIDs.
+  - **Where they run:** a tree registers them only when the tests'
+    Python has the tree's pointer size, so `build-win32`'s x86 core runs
+    them under a 32-bit Python (`scripts/verify.sh`'s cross-arch step,
+    the J2534 case through the x86 fake and surrogate), which CI never
+    builds. In CI, `core-and-tests`, `win-build`, `macos-build` and
+    `linux-build` install pytest from `.github/pytest-requirements.txt`
+    (hash-pinned) and run them with `ECUIO_PYTEST_REQUIRED=1`;
+    `linux-build`'s `vcan0` runs `test_vcan`. `core-sanitizers` has no
+    pytest, so they skip there.
+- **Left for step 4:** the Done-when's other clauses (the same script
+  against the ELM327 emulator on Windows; the wheel and its
+  attestation). And the Windows wheel's C runtime: `ecuio.dll` imports
+  `MSVCP140.dll` and `VCRUNTIME140.dll` (and `VCRUNTIME140_1.dll` on
+  x64; the archive is built `/MD` for the app); python.org's Python
+  carries the `vcruntime140` DLLs but not `msvcp140.dll`, so on a machine without
+  the Visual C++ redistributable the load would fail. The wheel either
+  carries the runtime's DLLs beside `ecuio.dll`, as the app's zip does,
+  or the shared core links the runtime statically, as the surrogate
+  does.
