@@ -171,10 +171,15 @@ void plan_computed(ecuio_frame_decoder& d, const ecuio_signal_set_t* set)
 
 /* On one message ID, every unkeyed text def matches every frame; of the
  * keyed ones, one frame holds one key of each shape (offset and length),
- * so each shape adds its largest group sharing one key. The answer is the
- * largest such total over the IDs. */
+ * so each shape adds its largest group sharing one key. A packed Service
+ * 01 reply is the exception: split, it decodes a record for each PID it
+ * holds, within one frame's slots, so the 41 <PID> keys add their groups,
+ * the largest ECUIO_OBD2_MAX_RECORDS of them. The answer is the largest
+ * such total over the IDs. */
 uint32_t ecuio_text_slots_for(const ecuio_signal_set_t* set)
 {
+    /* ecuio_service01_keyed's shape: offset 0, two bytes */
+    constexpr uint32_t kService01Shape = 2;
     struct text_key {
         uint32_t message_id;
         uint32_t shape; /* 0 unkeyed; else offset << 8 | length */
@@ -210,6 +215,7 @@ uint32_t ecuio_text_slots_for(const ecuio_signal_set_t* set)
         while (i < keys.size() && keys[i].message_id == id) {
             const uint32_t shape = keys[i].shape;
             uint32_t largest = 0;
+            std::vector<uint32_t> records; /* the 41 <PID> keys' runs */
             while (i < keys.size() && keys[i].message_id == id &&
                    keys[i].shape == shape) {
                 uint32_t run = 0;
@@ -221,8 +227,18 @@ uint32_t ecuio_text_slots_for(const ecuio_signal_set_t* set)
                 }
                 /* Unkeyed defs all match: their shape is one run */
                 largest = std::max(largest, run);
+                if (shape == kService01Shape && (key >> 8) == 0x41u) {
+                    records.push_back(run);
+                }
             }
-            total += largest;
+            std::sort(records.begin(), records.end(),
+                      [](uint32_t a, uint32_t b) { return a > b; });
+            uint32_t packed = 0;
+            for (size_t r = 0; r < records.size() && r < ECUIO_OBD2_MAX_RECORDS;
+                 ++r) {
+                packed += records[r];
+            }
+            total += std::max(largest, packed);
         }
         best = std::max(best, total);
     }

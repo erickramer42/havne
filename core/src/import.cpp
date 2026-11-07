@@ -20,6 +20,7 @@
 #include "recording_rows.h"  /* kFormat2, kFormat3, append_value */
 
 #include "ecuio/core.h"
+#include "ecuio/internal.h" /* ecuio_import_test_between_passes */
 #include "ecuio/recording.h"
 
 #include <algorithm>
@@ -34,6 +35,10 @@ namespace {
 
 namespace dump = ecuio_candump;
 namespace files = ecuio_files;
+
+/* The test seam's hook (internal.h), NULL outside a test */
+void (*g_between_passes)(void*) = nullptr;
+void* g_between_passes_user = nullptr;
 
 /* A frame stamped this much before the one before it takes that one's
  * time: candump stamps each frame on the CPU that took it, so two CPUs'
@@ -52,15 +57,21 @@ class lines_of
 public:
     explicit lines_of(FILE* f) : f_(f) {}
 
+    /* The line last read had no line end: the file ends inside it, a
+     * line cut short (ADR-0049 section 7's torn row) */
+    bool cut() const { return cut_; }
+
     bool next(std::string& line, bool* too_long)
     {
         line.clear();
         *too_long = false;
         int c = 0;
         bool any = false;
+        bool ended = false;
         while ((c = std::fgetc(f_)) != EOF) {
             any = true;
             if (c == '\n') {
+                ended = true;
                 break;
             }
             if (line.size() < dump::kLineMax + 1) {
@@ -72,11 +83,13 @@ public:
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
+        cut_ = any && !ended;
         return any;
     }
 
 private:
     FILE* f_;
+    bool cut_ = false;
 };
 
 struct file_closer {
@@ -161,6 +174,7 @@ void append_hex(std::string& out, uint32_t v)
 /* What the first pass found */
 struct survey {
     uint64_t lines = 0;
+    bool cut = false; /* the last line has no line end: left out */
     std::vector<std::string> interfaces;
 };
 
@@ -179,6 +193,10 @@ bool read_survey(FILE* f, survey& s)
     dump::line l;
     while (lines.next(line, &too_long)) {
         ++s.lines;
+        if (lines.cut()) {
+            s.cut = true; /* candump ends every line: this one was cut */
+            continue;
+        }
         if (line.empty() && !too_long) {
             continue; /* a blank line, as canplayer skips one */
         }
@@ -213,9 +231,11 @@ bool read_survey(FILE* f, survey& s)
 }
 
 /* The second pass: the interface's frames into frames.csv, in time
- * order; report's counts and times */
-bool write_frames(FILE* in, FILE* out, const std::string& iface,
-                  ecuio_import_report_t& r, std::string* why)
+ * order; report's counts and times. Lines other than the first pass's
+ * (more, fewer, or the cut one ended since) are a log that changed. */
+bool write_frames(FILE* in, FILE* out, const survey& s,
+                  const std::string& iface, ecuio_import_report_t& r,
+                  std::string* why)
 {
     lines_of lines(in);
     std::string line;
@@ -226,8 +246,13 @@ bool write_frames(FILE* in, FILE* out, const std::string& iface,
     uint64_t first = 0;
     uint64_t prev = 0;
     bool any = false;
+    bool cut = false;
     while (lines.next(line, &too_long)) {
         ++line_no;
+        if (lines.cut()) {
+            cut = true;
+            continue;
+        }
         if (line.empty() && !too_long) {
             continue;
         }
@@ -290,6 +315,10 @@ bool write_frames(FILE* in, FILE* out, const std::string& iface,
             rows.clear();
         }
     }
+    if (line_no != s.lines || cut != s.cut) {
+        *why = "the log changed while it was read";
+        return false;
+    }
     if (!rows.empty() &&
         std::fwrite(rows.data(), 1, rows.size(), out) != rows.size()) {
         *why = "frames.csv can't be written: " + files::errno_words(errno);
@@ -302,13 +331,18 @@ bool write_frames(FILE* in, FILE* out, const std::string& iface,
 
 /* The recording's events.log: format 2's header, the import as its
  * source, its end line */
-std::string events_log(const std::string& iface, const ecuio_import_report_t& r)
+std::string events_log(const std::string& iface, bool cut,
+                       const ecuio_import_report_t& r)
 {
     std::string e = std::string(ecuio_recording_rows::kFormat2) + "\n";
     e += "started  " + utc_text(r.utc_start_us, ' ') + " (UTC)\n";
     e += "utc  " + utc_text(r.utc_start_us, 'T') + "Z\n";
     e += std::string("core  ") + ecuio_version_string() + "\n";
     e += "import  candump log, interface " + iface + "\n";
+    if (cut) {
+        e += "import  the log's last line has no line end: cut short, left "
+             "out\n";
+    }
     e += "profile  raw\n";
     e += "frame flags  complete\n";
     e += "columns  UTC time, seconds since the recording started (host_us / "
@@ -365,6 +399,9 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
         return fail("the recording's folder can't be made: %s", why);
     }
     const std::string partial = *made;
+    if (g_between_passes != nullptr) {
+        g_between_passes(g_between_passes_user);
+    }
     if (!ecuio_frames_csv::seek_to(in.get(), 0)) {
         return fail("the log can't be read again");
     }
@@ -374,7 +411,7 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
         if (!frames) {
             return fail("frames.csv can't be written: %s", why);
         }
-        if (!write_frames(in.get(), frames.get(), iface, r, &why)) {
+        if (!write_frames(in.get(), frames.get(), s, iface, r, &why)) {
             return fail("%s", why);
         }
         if (std::fclose(frames.release()) != 0) {
@@ -382,7 +419,7 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
                         files::errno_words(errno));
         }
     }
-    const std::string log = events_log(iface, r);
+    const std::string log = events_log(iface, s.cut, r);
     std::unique_ptr<FILE, file_closer> events(
         files::open_file(partial + "/events.log", true, &why));
     if (!events) {
@@ -693,4 +730,10 @@ extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
         *report = r;
     }
     return ECUIO_OK;
+}
+
+void ecuio_import_test_between_passes(void (*hook)(void* user), void* user)
+{
+    g_between_passes = hook;
+    g_between_passes_user = user;
 }

@@ -183,7 +183,7 @@ jobs:
         fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp
         fuzz_vin fuzz_dtc fuzz_sim fuzz_elm327_emulator fuzz_recording
         fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
-        fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import
+        fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

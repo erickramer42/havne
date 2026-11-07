@@ -14,6 +14,7 @@
 #define ECUIO_RECORDING_ROWS_H
 
 #include <clocale>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
@@ -192,9 +193,19 @@ inline double nearest_double(const char* p, size_t n)
  * 12), with a '.' whatever the process's locale: a Qt program sets
  * LC_NUMERIC from the environment, where the decimal point may be a
  * comma. The recorder writes it and the reader decoding frames.csv forms
- * it, so both read back the same double. */
+ * it, so both read back the same double. A value that isn't finite is
+ * nan, inf or -inf, the words parse_number takes, on every C library
+ * (MSVC's %g writes -nan(ind), which none reads). */
 inline void append_value(std::string& out, double v)
 {
+    if (std::isnan(v)) {
+        out += "nan";
+        return;
+    }
+    if (std::isinf(v)) {
+        out += v < 0 ? "-inf" : "inf";
+        return;
+    }
     char buf[40];
     const int n = std::snprintf(buf, sizeof buf, "%.12g", v);
     if (n <= 0) {

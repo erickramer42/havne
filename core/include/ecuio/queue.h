@@ -41,7 +41,9 @@ extern "C" {
  * readers: what's waiting is still read, and then a read returns
  * ECUIO_ERR_SESSION_CLOSED. ecuio_queue_close frees the queue, before or
  * after its session is closed or destroyed; a read under way on another
- * thread returns first.
+ * thread returns first. A closed queue keeps its place until the session
+ * is freed: it still counts toward ECUIO_QUEUE_MAX_PER_SESSION, and a
+ * closed values queue still has the worker decode each frame.
  *
  * The stream's end: a replay that doesn't loop ends its queues once its
  * last pass is over (or it stops early, its file changed): what's waiting
@@ -116,7 +118,7 @@ _Static_assert(offsetof(ecuio_queue_value_t, text) == 32,
  * ECUIO_ERR_SESSION_CLOSED on a closed session; ECUIO_ERR_INVALID_ARGUMENT
  * for an unknown kind, a capacity of 0 or past its kind's ceiling, a
  * session already started, or one holding ECUIO_QUEUE_MAX_PER_SESSION
- * queues; ECUIO_ERR_OUT_OF_MEMORY when the entries can't be allocated. */
+ * queues (a closed one among them); ECUIO_ERR_OUT_OF_MEMORY when the entries can't be allocated. */
 ecuio_status_t ecuio_queue_open(ecuio_session_t* session, uint32_t kind,
                                 uint32_t capacity, ecuio_queue_t** out);
 

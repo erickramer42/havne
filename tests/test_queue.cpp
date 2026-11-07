@@ -417,6 +417,27 @@ TEST(QueueTest, AnEmptyReadWaitsItsTimeoutAndAnEntryEndsTheWait)
     EXPECT_LT(waited, 5000) << "the entry woke the read";
 }
 
+/* A values queue's put wakes a read waiting on it, as a frame's does */
+TEST(QueueTest, AValueEndsAWaitingValuesRead)
+{
+    Fed fed;
+    Queue q;
+    ASSERT_EQ(ecuio_queue_open(fed.session, ECUIO_QUEUE_VALUES, 8, &q.q),
+              ECUIO_OK);
+    Values r(8);
+    std::thread feeder([&] {
+        wait_for([&] { return ecuio_queue_test_waiting(q.q) == 1; }, 5000);
+        fed.dispatch(kNumberId, std::string(1, '\x10'), 1);
+    });
+    const auto t = Clock::now();
+    ASSERT_EQ(r.read(q.q, 10000), ECUIO_OK);
+    const int64_t waited = ms_since(t);
+    feeder.join();
+    ASSERT_EQ(r.count, 1u);
+    EXPECT_EQ(r.out[0].value, 8.0);
+    EXPECT_LT(waited, 5000) << "the value woke the read";
+}
+
 TEST(QueueTest, RefusalsSayWhichArgument)
 {
     Fed fed;

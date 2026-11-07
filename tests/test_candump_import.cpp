@@ -19,6 +19,7 @@
 
 #include "candump.h"
 #include "ecuio/core.h"
+#include "ecuio/internal.h" /* ecuio_import_test_between_passes */
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "partial_left.h"
@@ -451,6 +452,92 @@ TEST(ImportTest, AFrameStampedJustBeforeTheOneBeforeTakesItsTime)
     EXPECT_EQ(late.detail,
               "line 3: its time is more than 0.1 s before the frame before it");
     expect_nothing_left(f, "late");
+}
+
+/* candump ends every line: a last line with no line end was cut short
+ * (a log copied while candump wrote it), so it's left out, frame or not,
+ * and events.log says so */
+TEST(ImportTest, ALastLineWithNoLineEndIsLeftOut)
+{
+    Folder f;
+    for (const char* last :
+         {"(5.300000) can0 100#0", "(5.300000) can0 100#03"}) {
+        SCOPED_TRACE(last);
+        const std::string in =
+            f.write("cut.log", std::string("(5.200000) can0 100#01\n") + last);
+        Imported imp(in, f.utf8("rec"));
+        ASSERT_EQ(imp.rc, ECUIO_OK) << imp.detail;
+        EXPECT_EQ(imp.report.lines, 2u);
+        EXPECT_EQ(imp.report.frames, 1u);
+        EXPECT_EQ(read_file(f.path / "rec" / "frames.csv"),
+                  "host_us,timestamp_us,id,flags,data\n"
+                  "0,0,0x100,0x0,01\n");
+        EXPECT_NE(read_file(f.path / "rec" / "events.log")
+                      .find("\nimport  candump log, interface can0\n"
+                            "import  the log's last line has no line end: "
+                            "cut short, left out\n"),
+                  std::string::npos);
+        std::error_code ec;
+        fs::remove_all(f.path / "rec", ec);
+    }
+    const std::string whole = f.write("whole.log", "(5.200000) can0 100#01\n");
+    Imported imp(whole, f.utf8("whole"));
+    ASSERT_EQ(imp.rc, ECUIO_OK) << imp.detail;
+    EXPECT_EQ(read_file(f.path / "whole" / "events.log").find("line end"),
+              std::string::npos);
+}
+
+namespace {
+
+/* Appends its text to the log between the import's passes */
+struct Appended {
+    fs::path log;
+    std::string text;
+    static void hook(void* user)
+    {
+        const Appended* a = static_cast<const Appended*>(user);
+        std::ofstream f(a->log, std::ios::binary | std::ios::app);
+        f << a->text;
+    }
+};
+
+/* The seam set for a scope */
+struct BetweenPasses {
+    explicit BetweenPasses(Appended* a)
+    {
+        ecuio_import_test_between_passes(&Appended::hook, a);
+    }
+    ~BetweenPasses() { ecuio_import_test_between_passes(nullptr, nullptr); }
+    BetweenPasses(const BetweenPasses&) = delete;
+    BetweenPasses& operator=(const BetweenPasses&) = delete;
+};
+
+} // namespace
+
+/* A line added, or the cut line ended, between the two passes is a log
+ * that changed: refused, nothing left */
+TEST(ImportTest, ALogThatChangesBetweenItsPassesIsRefused)
+{
+    Folder f;
+    struct Case {
+        const char* start;
+        const char* added;
+    } const cases[] = {
+        {"(5.200000) can0 100#01\n", "(5.300000) can0 100#02\n"},
+        {"(5.200000) can0 100#01\n(5.300000) can0 100#0", "2\n"},
+    };
+    int n = 0;
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.added);
+        const std::string name = "rec" + std::to_string(++n);
+        Appended a{f.path / "grows.log", c.added};
+        const std::string in = f.write("grows.log", c.start);
+        BetweenPasses seam(&a);
+        Imported imp(in, f.utf8(name));
+        EXPECT_EQ(imp.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(imp.detail, "the log changed while it was read");
+        expect_nothing_left(f, name);
+    }
 }
 
 TEST(ImportTest, ALogOfSeveralInterfacesTakesTheOneNamed)

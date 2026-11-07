@@ -331,6 +331,42 @@ TEST(RecordingFramesTest, ARawRecordingHasValuesThroughAProfile)
     EXPECT_EQ(r.samples(rpm, 1000000, 2000000, 40), 1u) << "read again";
 }
 
+/* A FLOAT def's value that isn't finite (inf, a NaN of either sign) is no
+ * number to plot: dropped, never a sample or the highest */
+TEST(RecordingFramesTest, AValueThatIsntFiniteIsNoSample)
+{
+    ecuio_signal_def_t d{};
+    d.id = 1;
+    d.message_id = 0x123;
+    d.kind = ECUIO_VALUE_FLOAT;
+    d.byte_order = ECUIO_BYTE_ORDER_BE;
+    d.bit_length = 32;
+    d.scale = 1.0;
+    std::snprintf(d.name, sizeof d.name, "Float");
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 1;
+    set.defs = &d;
+    ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), 0);
+    Folder f;
+    std::string csv = kFramesHeader;
+    csv += row(100000, 0x123, {0x7F, 0x80, 0x00, 0x00}); /* +inf */
+    csv += row(200000, 0x123, {0xFF, 0x80, 0x00, 0x00}); /* -inf */
+    csv += row(300000, 0x123, {0x7F, 0xC0, 0x00, 0x00}); /* NaN */
+    csv += row(400000, 0x123, {0xFF, 0xC0, 0x00, 0x00}); /* -NaN */
+    csv += row(500000, 0x123, {0x3F, 0x80, 0x00, 0x00}); /* 1.0 */
+    f.write("frames.csv", csv);
+    Opened r(f.utf8(), &set);
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const uint32_t k = r.find("Float");
+    ASSERT_NE(k, UINT32_MAX);
+    const ecuio_recording_signal_t s = r.signal(k);
+    EXPECT_EQ(s.samples, 1u);
+    EXPECT_EQ(s.lowest, 1.0);
+    EXPECT_EQ(s.highest, 1.0);
+    EXPECT_EQ(s.first_us, 500000u);
+}
+
 TEST(RecordingFramesTest, TwoSendersOnOneIdTearTheirMessagesNotSpliceThem)
 {
     /* Two First Frames on 0x7E8 before either completes: had the second

@@ -5401,6 +5401,49 @@ TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)
     ecuio_session_destroy(session);
 }
 
+/* A packed Service 01 reply splits into a record for each PID, all in one
+ * frame's text slots: a hex def on 41 1C and one on 41 51 both decode
+ * from 41 1C 06 51 01, each with bytes of its own */
+TEST(CoreTest, APackedReplyGivesEachRecordsTextASlotOfItsOwn)
+{
+    static ecuio_signal_def_t defs[2];
+    defs[0] = text_value_def(1, ECUIO_VALUE_HEX, 2, 0x411C, 2, 1);
+    defs[1] = text_value_def(2, ECUIO_VALUE_HEX, 2, 0x4151, 2, 1);
+    for (ecuio_signal_def_t& d : defs) {
+        d.message_id = ECUIO_OBD2_ECU_ARB_ID;
+    }
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-packed-text", &set, &why), ECUIO_OK)
+        << "code " << why.code << " at def " << why.index;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://t?profile=test-packed-text", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    EXPECT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t packed =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x1C, 0x06, 0x51, 0x01});
+    ecuio_session_dispatch_callbacks(session, &packed);
+    ASSERT_EQ(cap.batches.size(), 1u);
+    const std::vector<SeenValue>& v = cap.batches[0].values;
+    ASSERT_EQ(v.size(), 2u) << "a slot for each record's text";
+    EXPECT_EQ(v[0].id, 1);
+    EXPECT_EQ(v[0].text, "06");
+    EXPECT_EQ(v[1].id, 2);
+    EXPECT_EQ(v[1].text, "01");
+    EXPECT_GE(std::abs(v[1].text_at - v[0].text_at),
+              static_cast<std::ptrdiff_t>(ECUIO_DECODE_TEXT_MAX))
+        << "the two records' texts share bytes";
+    EXPECT_EQ(unsplit(session), 0u);
+    ecuio_session_destroy(session);
+}
+
 namespace {
 
 /* What a frame decodes to, by direct calls, set by the frame callback

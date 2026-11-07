@@ -953,7 +953,8 @@ bool ecuio_recording::read_frames(ecuio_open_progress_t progress, void* user,
             if (!s.text()) {
                 value.clear();
                 rows::append_value(value, v.value);
-                if (!rows::parse_number(value.data(), value.size(), &x)) {
+                if (!rows::parse_number(value.data(), value.size(), &x) ||
+                    !std::isfinite(x)) {
                     continue; /* not finite: no number to plot */
                 }
             }

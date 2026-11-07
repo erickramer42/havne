@@ -23,6 +23,7 @@
 #include "fake_ecu.h"
 #include "temp_name.h"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -6172,9 +6173,41 @@ TEST(SimAskTest, TheClockIsTheCallersAndNeverGoesBack)
     EXPECT_GT(rpm_of(r[0]), 500.0) << "the clock never goes back";
 
     /* A step past an hour moves the time and steps an hour of the
-     * cycle at most: it answers at once */
+     * cycle at most: it answers at once, as the drive cycle reads an
+     * hour of ticks on from 20 s */
+    const auto before = std::chrono::steady_clock::now();
     r = sim_ask(u.sim, 0x7E0, {0x01, 0x0C}, 1000LL * 3600 * kSecond);
-    EXPECT_EQ(r.size(), 1u);
+    const double took =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - before)
+            .count();
+    EXPECT_LT(took, 2.0) << "the step ran the whole thousand hours";
+    ASSERT_EQ(r.size(), 1u);
+    ecuio_mock::DriveCycle car;
+    for (int i = 0; i < 20 * 20 + 3600 * 20; ++i) {
+        car.step();
+    }
+    EXPECT_NEAR(rpm_of(r[0]), car.rpm, 0.25);
+}
+
+// A request is answered once, whatever the capacity: a capacity of 0
+// counts the replies and is still a request, so the next one meets the
+// second request's fault
+TEST(SimAskTest, ACountOnlyCallIsARequestOfItsOwn)
+{
+    Unbound u("mock://ask?faults=silent:2");
+    ASSERT_NE(u.sim, nullptr);
+    const uint8_t q[] = {0x01, 0x0C};
+    uint32_t n = 99;
+    EXPECT_EQ(ecuio_sim_ask(u.sim, 0x7E0, q, 2, 0, nullptr, 0, &n), ECUIO_OK);
+    EXPECT_EQ(n, 1u);
+    std::vector<ecuio_sim_reply_t> r(10);
+    n = 99;
+    EXPECT_EQ(ecuio_sim_ask(u.sim, 0x7E0, q, 2, 0, r.data(), 10, &n), ECUIO_OK);
+    EXPECT_EQ(n, 0u) << "the second request is the silent one";
+    const ecuio_sim_stats_t s = u.stats();
+    EXPECT_EQ(s.requests, 2u);
+    EXPECT_EQ(s.silent, 1u);
+    EXPECT_EQ(s.replies, 1u);
 }
 
 // Each fault as the reply's start and a flag: pending's 7F <service> 78

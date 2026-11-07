@@ -2,8 +2,8 @@
 //             C declarations, Qt-free; included by core sources,
 //             test_core, test_elm327, test_j2534_load and
 //             test_j2534_routing
-// Testing: UNIT: CoreTest, RecorderTest (test_core); test_elm327; HARNESS:
-//          test_j2534_load; test_j2534_routing
+// Testing: UNIT: CoreTest, RecorderTest, ImportTest (test_core);
+//          test_elm327; HARNESS: test_j2534_load; test_j2534_routing
 
 #ifndef ECUIO_INTERNAL_H
 #define ECUIO_INTERNAL_H
@@ -380,6 +380,12 @@ uint32_t ecuio_queue_test_waiting(ecuio_queue_t* queue);
 uint64_t ecuio_recording_test_table_bytes(const ecuio_recording_t* r);
 uint64_t ecuio_recording_test_cache_bytes(const ecuio_recording_t* r);
 void ecuio_recording_test_set_cache_limit(ecuio_recording_t* r, uint64_t bytes);
+
+/* Test-only (ADR-0054 section 4), never in recording.h: the candump
+ * import calls hook(user) after its first pass and before its second, so
+ * a test changes the log between them; NULL takes it away. One for the
+ * process. */
+void ecuio_import_test_between_passes(void (*hook)(void* user), void* user);
 
 #ifdef __cplusplus
 }

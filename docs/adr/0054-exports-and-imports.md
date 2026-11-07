@@ -294,6 +294,18 @@ why`. A frame stamped up to 100 ms before the one before it takes that
 one's time, the SocketCAN transport's rule; further back is refused.
 The folder is written as `<folder>.partial` and renamed once whole.
 
+(Note of 2026-11-07: candump ends every line, so a last line with no
+line end was cut short, as a copy taken while candump writes is, and is
+left out, frame or not, with the line `import  the log's last line has
+no line end: cut short, left out` in `events.log`: ADR-0049 section 7's
+torn row, as replay and the reader take it. The second pass reads the
+lines the first counted and no others: a line added, or the cut line
+ended, between the passes is "the log changed while it was read", and
+nothing is written. `ImportTest.ALastLineWithNoLineEndIsLeftOut` and
+`.ALogThatChangesBetweenItsPassesIsRefused`, the second through
+`ecuio_import_test_between_passes` (internal.h, test-only), which runs
+a test's hook between the passes. Mutation-checked 2026-11-07 (6).)
+
 **havne-cli:** `export <recording> <out> --format pcapng [--from S]
 [--to S] [--raw]` writes `exported` (format, file, scrubbed, frames,
 made_up, left_out by class), or `export_failed` (the class) then the

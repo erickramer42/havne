@@ -9,8 +9,8 @@
 # candump's, a log's lines in each form; and the CSV import's, each
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
-# options, the plugin harness's its form, the recording harness's a
-# folder ('F'), with the pieces cut at 0x1E bytes. Started from
+# options, the plugin harness's its form, the recording and export
+# harnesses' a folder ('F'), with the pieces cut at 0x1E bytes. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
 # nothing, it barely leaves the reader. Built from the fixtures, never
 # copies of them, so the seeds follow the formats as the fixtures do.
@@ -99,20 +99,23 @@ def main(argv):
     text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
     write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
 
-    # The recording harness: a folder, 'F' then events.log, signals.csv,
-    # markers.csv and frames.csv cut at 0x1E, each opened through
-    # signals.csv and through its frames. The findings fixture (a
-    # listener's wire frames, every part), the packed replies (frames
-    # alone), and frames written for the ISO-TP paths: a packed reply in
-    # a First and a Consecutive Frame with the tester's Flow Control
-    # between, two senders' First Frames on one ID, and a message whose
-    # Consecutive Frame comes the next second
+    # The recording and export harnesses: a folder, 'F' then events.log,
+    # signals.csv, markers.csv and frames.csv cut at 0x1E, each opened
+    # through signals.csv and through its frames, or exported and
+    # reported. The findings fixture (a listener's wire frames, every
+    # part), the packed replies (frames alone), and frames written for
+    # the ISO-TP paths: a packed reply in a First and a Consecutive Frame
+    # with the tester's Flow Control between, two senders' First Frames
+    # on one ID, and a message whose Consecutive Frame comes the next
+    # second. The export's own: an engine ECU's identification and
+    # diagnostics, whole and on the wire, and a DID echoing its VIN
     findings = "tests/fixtures/recording/findings/"
-    write(out, "fuzz_recording", "findings",
-          b"F" + SEP.join(read(findings + n) for n in
-                          ("events.log", "signals.csv", "markers.csv", "frames.csv")))
-    write(out, "fuzz_recording", "packed-replies",
-          b"F" + SEP + SEP + SEP + read("tests/fixtures/replay/packed-replies/frames.csv"))
+    folder_seeds = {}
+    folder_seeds["findings"] = b"F" + SEP.join(
+        read(findings + n) for n in
+        ("events.log", "signals.csv", "markers.csv", "frames.csv"))
+    folder_seeds["packed-replies"] = (
+        b"F" + SEP + SEP + SEP + read("tests/fixtures/replay/packed-replies/frames.csv"))
     header = b"host_us,timestamp_us,id,flags,data\n"
     wire = header + (
         b"100000,100000,0x7DF,0x0,02 01 0C 00 00 00 00 00\n"
@@ -128,8 +131,27 @@ def main(argv):
         b"1500000,1500000,0x7E8,0x100,41 0C 1A 0D 32\n")
     events = (b"ecuio session recording, format 2 (ADR-0049)\n"
               b"profile  obd2\n\n")
-    write(out, "fuzz_recording", "wire-frames",
-          b"F" + events + SEP + SEP + SEP + wire)
+    folder_seeds["wire-frames"] = b"F" + events + SEP + SEP + SEP + wire
+    for name, seed in folder_seeds.items():
+        write(out, "fuzz_recording", name, seed)
+        write(out, "fuzz_export", name, seed)
+    vin = b"ZZZFAKE11M0000001"
+    ecu = header + (
+        b"100000,100000,0x7E8,0x100,49 02 01 " + b" ".join(b"%02X" % c for c in vin) + b"\n"
+        b"200000,200000,0x7E8,0x100,41 01 83 07 E5 00\n"
+        b"300000,300000,0x7E8,0x100,43 02 03 01 04 20\n"
+        b"400000,400000,0x7E8,0x0,10 14 62 D8 01 5A 5A 5A\n"
+        b"401000,401000,0x7E0,0x0,30 00 00 00 00 00 00 00\n"
+        b"410000,410000,0x7E8,0x0,21 46 41 4B 45 31 31 4D\n"
+        b"420000,420000,0x7E8,0x0,22 30 30 30 30 30 30 31\n"
+        b"1500000,1500000,0x7E8,0x100,41 0C 1A F8\n")
+    events = (b"ecuio session recording, format 2 (ADR-0049)\n"
+              b"uri  elm327://COM3?profile=obd2\n"
+              b"profile  obd2\n"
+              b"frame flags  complete\n\n")
+    signals = b"\xef\xbb\xbfhost_us,signal,value,unit\n1500000,RPM,1726,RPM\n"
+    write(out, "fuzz_export", "engine-ecu",
+          b"F" + events + SEP + signals + SEP + SEP + ecu)
 
     # The ELM327 emulator: a mode byte (bit 0 a second module, bit 1 the
     # faults), then what a host sends, CR-ended: python-OBD's opening,

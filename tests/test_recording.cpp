@@ -1791,3 +1791,37 @@ TEST(RecordingRowsTest, AnExponentFarPastTheRangeIsZeroOrInfinite)
             << far << ": " << t << " s against " << plain;
     }
 }
+
+/* A value that isn't finite is written as nan, inf or -inf on every C
+ * library (MSVC's %g writes a negative NaN as -nan(ind), which no reader
+ * takes), and each reads back */
+TEST(RecordingRowsTest, ANonFiniteValueIsWrittenAsAWordEveryReaderTakes)
+{
+    uint32_t bits = 0xFFC00000u; /* a negative quiet NaN */
+    float negative_nan = 0;
+    std::memcpy(&negative_nan, &bits, sizeof bits);
+    const struct {
+        double v;
+        const char* text;
+    } cases[] = {
+        {static_cast<double>(negative_nan), "nan"},
+        {std::nan(""), "nan"},
+        {HUGE_VAL, "inf"},
+        {-HUGE_VAL, "-inf"},
+    };
+    for (const auto& c : cases) {
+        std::string out = "x,";
+        rows::append_value(out, c.v);
+        EXPECT_EQ(out, std::string("x,") + c.text);
+        double back = 0;
+        ASSERT_TRUE(rows::parse_number(out.data() + 2, out.size() - 2, &back))
+            << out;
+        EXPECT_EQ(std::isnan(back), std::isnan(c.v)) << out;
+        if (!std::isnan(c.v)) {
+            EXPECT_EQ(back, c.v) << out;
+        }
+    }
+    std::string finite;
+    rows::append_value(finite, 1726.25);
+    EXPECT_EQ(finite, "1726.25");
+}

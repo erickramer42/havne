@@ -534,6 +534,60 @@ TEST(HealthTest, TheTextOfAQuietCarIsByteForByte)
                   "IDs, serials and the like)\n");
 }
 
+/* The whole car's text: its MIL and codes, the freeze frame, a
+ * since-cleared value past ECUIO_VALUE_STALE_US said to be stale, the
+ * identification by outcome alone, the key values with their ages */
+TEST(HealthTest, TheTextOfACarWithCodesIsByteForByte)
+{
+    Car car;
+    EXPECT_EQ(car.write(ECUIO_HEALTH_TEXT),
+              std::string("Havne ") + ecuio_version_string() +
+                  ": a scrubbed health report (ADR-0054)\n"
+                  "Source: a live session, "
+                  "elm327://<address>?profile=obd2&serial=115200 (elm327, "
+                  "500000 bit/s), profile obd2\n"
+                  "Time: 2026-11-06T14:22:33Z\n"
+                  "Units: metric\n"
+                  "\n"
+                  "Vehicle (from its VIN, which is left out)\n"
+                  "  Model year: 2021\n"
+                  "  Make: not known\n"
+                  "  Check digit: matches\n"
+                  "\n"
+                  "Inspection (40 CFR 85.2222)\n"
+                  "  Verdict: mil_on, fails: an ECU commands the MIL\n"
+                  "  Model year 2021: 1 incomplete monitor allowed\n"
+                  "  Incomplete: Catalyst\n"
+                  "  Reports counted: 1\n"
+                  "\n"
+                  "ECU 0x7E8 (complete)\n"
+                  "  Readiness: answered, MIL on, 2 confirmed codes\n"
+                  "    Misfire: complete, this drive cycle complete\n"
+                  "    Catalyst: incomplete, this drive cycle incomplete\n"
+                  "  Stored codes: answered\n"
+                  "    P0301  Cylinder 1 Misfire Detected\n"
+                  "    P0420  Catalyst System Efficiency Below Threshold "
+                  "Bank 1\n"
+                  "  Pending codes: answered, none\n"
+                  "  Permanent codes: refused (7F 0A 11)\n"
+                  "  Freeze frame: answered, stored by P0301  Cylinder 1 "
+                  "Misfire Detected\n"
+                  "    RPM: 3000 RPM\n"
+                  "  Since the codes were cleared:\n"
+                  "    Distance Since Clear: 1234 km (4.0 s old, stale)\n"
+                  "  Identification (each item's text left out): VIN "
+                  "answered, CALID answered, CVN refused\n"
+                  "\n"
+                  "Key values (the profile's ranked signals)\n"
+                  "  RPM: 1726 RPM (0.1 s old)\n"
+                  "  Coolant Temp: 42 " +
+                  ranked_def(2)->unit +
+                  " (0.2 s old)\n"
+                  "\n"
+                  "Left out: 2 identification texts (the VIN, calibration "
+                  "IDs, serials and the like)\n");
+}
+
 TEST(HealthTest, NumbersAndTimesAreWrittenWithoutTheLocale)
 {
     EXPECT_EQ(ecuio_health::fixed(3.0, 0), "3");

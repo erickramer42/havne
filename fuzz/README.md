@@ -28,6 +28,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_plugin_manifest` | The plugin loader (`ecuio_plugin_load`, [ADR-0052](../docs/adr/0052-plugin-framework.md)): the first byte picks the form, even for a packed package, odd for a folder whose manifest and files are the rest cut at 0x1E bytes, served in the order the loader asks. Seeded with the example plugin (`plugins/example-sim/`) in both forms, a value fixture after each (`seeds.py`). Two loads agree; a refusal leaves no plugin and one line of words; no path the loader asks for has an empty, `.` or `..` part; each variant's set passes the validator, registers as `plugin.<id>.<variant>` and is the set the registry hands back, and is one signal file whose merged text reads back to that set, the same for the same input; and the plugin frees. What follows the packed file's first 0x1E byte, or the first piece the folder's loader didn't ask for, is a value fixture file (`ecuio_plugin_values`) read against both plugins alike: a refusal leaves the count and is one line; each entry names a variant, a def of its set that is neither computed nor text nor hex, found again by its key, once, with its reserved words zero, and the cap is kept. |
 | `fuzz_obdb_import` | The OBDb import (`ecuio_obdb_import`, `obdb.h`, [ADR-0051](../docs/adr/0051-signal-files.md) section 7): the first byte picks the options (a model year, alone or extending obd2), the rest is the set, seeded with the fixture in OBDb's shape (`tests/fixtures/obdb/`) under two options bytes (`seeds.py`). Two imports agree, status, words and notes; a refusal leaves no file and one line of words, never the converted file refused; an import's file is NUL-terminated and loads, with as many own signals as converted notes, and every note's strings are one line. |
 | `fuzz_csv_import` | The CSV import (`core/src/csv_import.h`, [ADR-0054](../docs/adr/0054-exports-and-imports.md)'s appendix "the CSV import as built"): the first line is a column map's JSON, the rest the CSV, read from memory. Seeded with each made-up logger's map and file (`tests/fixtures/import/csv/`, `seeds.py`). A refused map or file says why; a map read holds 1 to 256 signals, at most 16 missing texts and a header row of 1 to 1000; two reads of the same bytes agree, outcome, samples and words (the import's second pass relies on it); the samples number the outcome's values, never go back in time or past its duration, each names a signal of its own kind, a number finite, a text 1 to `ECUIO_DECODE_TEXT_MAX` bytes of valid UTF-8 and none of the map's missing texts; no UTC start without a UTC time. |
+| `fuzz_export` | The exports and the health report over a recording folder ([ADR-0054](../docs/adr/0054-exports-and-imports.md)): `fuzz_recording`'s folder input (`F` or `3`, then `events.log`, `signals.csv`, `markers.csv` and `frames.csv` cut at 0x1E bytes) exported as a folder, a CSV and a pcapng, scrubbed and raw, whole and from 1 s to 2 s, and reported as JSON and text, whole and from 0.5 s to 3 s. `fuzz/seeds.py` seeds it with `fuzz_recording`'s seeds and an engine ECU's identification, readiness and codes beside a DID echoing its VIN on the wire. Each status is `ECUIO_OK` or `ECUIO_ERR_LOAD_FAILED` with a one-line detail that never holds the path; a success has no failed class and writes its output, a failure writes nothing, and neither leaves a partial copy; the same recording exported twice gives the same status and bytes. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -36,7 +37,7 @@ each for 60 s on Linux with Clang and uploads any crashing input.
 `seeds.py <folder>` writes the seed inputs of the harnesses that read a
 structured format (`fuzz_json`, `fuzz_signal_file`,
 `fuzz_plugin_manifest`, `fuzz_obdb_import`, `fuzz_elm327_emulator`,
-`fuzz_candump`, `fuzz_csv_import`)
+`fuzz_candump`, `fuzz_csv_import`, `fuzz_export`)
 into `<folder>/<harness>/`,
 built from the committed fixtures in each harness's own form, and the
 CI job starts each of them from its folder. Unseeded, a 60 s run of
@@ -61,7 +62,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -75,7 +76,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

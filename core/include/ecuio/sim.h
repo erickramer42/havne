@@ -258,8 +258,11 @@ _Static_assert(offsetof(ecuio_sim_reply_t, data) == 40,
  * - A sim on a bus (ecuio_sim_create_with): ECUIO_ERR_INVALID_ARGUMENT,
  *   which its own worker answers; so is a length of 0 or past 4095, or
  *   a time_us below ECUIO_SIM_NOW.
- * - *count is every reply, and the first capacity are copied (capacity
- *   0 with replies NULL counts them); at most ECUIO_SIM_MAX_REPLIES.
+ * - The request is answered once, whatever the capacity: the ECU's
+ *   clock moves, the request is counted and a fault drawn, an 04 clears
+ *   it. *count is every reply, at most ECUIO_SIM_MAX_REPLIES, and the
+ *   first capacity are copied; pass ECUIO_SIM_MAX_REPLIES to get them
+ *   all, since asking again is a second request with its own answer.
  * - One caller at a time; ecuio_sim_get_stats and ecuio_sim_set_value
  *   from any thread meanwhile.
  */

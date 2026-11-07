@@ -822,6 +822,31 @@ TEST(ExportTest, ARangeTakesItsFramesAlone)
     EXPECT_EQ(tail.pcap.packets.size(), 2u);
 }
 
+/* The check reads the messages a range writes: a DID echoing the VIN
+ * before the range, whole or as it crossed the bus, writes nothing and
+ * fails nothing */
+TEST(ExportTest, AVinEchoOutsideTheRangeIsNotChecked)
+{
+    Folder f;
+    std::string rows =
+        row(1000, 0x7E8, kWhole, text_bytes({0x62, 0xD8, 0x01}, kVin)) +
+        row(2000, 0x7E8, 0, {0x10, 0x14, 0x62, 0xD8, 0x01, 'Z', 'Z', 'Z'}) +
+        row(2100, 0x7E0, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}) +
+        row(2200, 0x7E8, 0, {0x21, 'F', 'A', 'K', 'E', '1', '1', 'M'}) +
+        row(2300, 0x7E8, 0, {0x22, '0', '0', '0', '0', '0', '0', '1'});
+    for (uint64_t t = 3; t < 7; ++t) {
+        rows += row(t * 1000000, 0x100, 0, {static_cast<uint8_t>(t)});
+    }
+    recording(f, rows);
+    Exported e(f, 0, 3000000, 6000000);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.report.failed_class, 0u);
+    EXPECT_EQ(e.report.frames, 4u);
+    Exported all(f, 0, 0, 0, "all.pcapng");
+    EXPECT_EQ(all.rc, ECUIO_ERR_LOAD_FAILED) << "the echo, in range, fails";
+    EXPECT_EQ(all.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
+}
+
 TEST(ExportTest, AFileThatExistsOrARowThatDoesntReadWritesNothing)
 {
     Folder f;
