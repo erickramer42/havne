@@ -11,9 +11,11 @@
 #include "ecuio/signals.h"
 #include "frame_decoder.h"
 #include "profile_hold.h"
+#include "pull_queue.h"
 #include "recorder.h"
 #include "uds_generic.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -99,6 +101,14 @@ struct ecuio_session {
      * ecuio_session_record before start and kept until the session is
      * freed, so the worker reads it without a lock */
     std::shared_ptr<ecuio_record_link> record_link;
+    /* The pull queues' links (ecuio/queue.h, pull_queue.h), set by
+     * ecuio_queue_open before start and kept until the session is freed,
+     * so the worker reads them without a lock; value_queues counts the
+     * values queues among them, for which dispatch decodes */
+    std::array<std::shared_ptr<ecuio_queue_link>, ECUIO_QUEUE_MAX_PER_SESSION>
+        queues;
+    uint32_t queue_count = 0;
+    uint32_t value_queues = 0;
 };
 
 #endif /* ECUIO_SESSION_H */

@@ -904,6 +904,11 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
     if (session->record_link != nullptr) {
         ecuio_record_detach(*session->record_link);
     }
+    /* So do the pull queues: what's waiting is still read, then their
+     * reads end (ecuio/queue.h) */
+    for (uint32_t i = 0; i < session->queue_count; ++i) {
+        ecuio_queue_detach(*session->queues[i]);
+    }
 
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
@@ -1053,11 +1058,23 @@ void ecuio_session_dispatch_callbacks(
             frames[i].first(frame, frames[i].second);
         }
     }
+    /* The pull queues' copies, after the callbacks (ecuio/queue.h); the
+     * links are set before start and kept until the session is freed */
+    for (uint32_t i = 0; i < session->queue_count; ++i) {
+        ecuio_queue_link& q = *session->queues[i];
+        if (q.kind == ECUIO_QUEUE_FRAMES) {
+            if (ecuio_queue_t* queue = ecuio_queue_pin(q)) {
+                ecuio_queue_put_frame(queue, frame);
+                ecuio_queue_unpin(q);
+            }
+        }
+    }
 
-    /* Then the frame's values (ADR-0024), decoded for a values callback
-     * or a recording; the recording takes the frame and its values as
-     * one record */
-    const bool want_values = values_taken && values.size() > 0;
+    /* Then the frame's values (ADR-0024), decoded for a values callback,
+     * a values queue or a recording; the recording takes the frame and
+     * its values as one record */
+    const bool want_values =
+        (values_taken && values.size() > 0) || session->value_queues > 0;
     ecuio_recorder_t* recorder =
         link != nullptr ? ecuio_record_pin(*link) : nullptr;
     if (!want_values && recorder == nullptr) {
@@ -1077,8 +1094,19 @@ void ecuio_session_dispatch_callbacks(
     batch.arbitration_id = frame->arbitration_id;
     batch.count = count;
     batch.values = session->decoder.values.data();
-    for (size_t i = 0; i < values.size(); ++i) {
-        values[i].first(&batch, values[i].second);
+    if (values_taken) {
+        for (size_t i = 0; i < values.size(); ++i) {
+            values[i].first(&batch, values[i].second);
+        }
+    }
+    for (uint32_t i = 0; i < session->queue_count; ++i) {
+        ecuio_queue_link& q = *session->queues[i];
+        if (q.kind == ECUIO_QUEUE_VALUES) {
+            if (ecuio_queue_t* queue = ecuio_queue_pin(q)) {
+                ecuio_queue_put_values(queue, &batch);
+                ecuio_queue_unpin(q);
+            }
+        }
     }
 }
 

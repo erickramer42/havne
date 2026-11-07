@@ -3187,6 +3187,53 @@ TEST(CoreTest, WorkersAllocateNothingPerFrame)
     }
 }
 
+/* Nor do the pull queues (ecuio/queue.h): their slots are made at open,
+ * and each frame and value is copied into one, the oldest dropped when
+ * full; the values queue alone makes the worker decode */
+TEST(CoreTest, WorkersAllocateNothingPerFrameIntoQueues)
+{
+    TempRecording rec(paced_rows(3));
+    const std::string replay = rec.uri("?speed=max&loop=1&profile=obd2");
+    struct Case {
+        const char* uri;
+        int to;
+    };
+    for (const Case& c : {Case{"mock://demo", 12}, Case{replay.c_str(), 200}}) {
+        SCOPED_TRACE(c.uri);
+        WorkerNews w;
+        w.to = c.to;
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(c.uri, &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_queue_t* frames = nullptr;
+        ecuio_queue_t* values = nullptr;
+        ASSERT_EQ(ecuio_queue_open(session, ECUIO_QUEUE_FRAMES, 4, &frames),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_queue_open(session, ECUIO_QUEUE_VALUES, 4, &values),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_register_frame_callback(session, worker_news_cb, &w),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const bool reached =
+            wait_for([&] { return w.frames.load() >= c.to; }, 5000);
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+        ASSERT_TRUE(reached) << w.frames.load() << " frames";
+        ecuio_queue_value_t v[4];
+        uint32_t count = 0;
+        uint64_t dropped = 0;
+        EXPECT_EQ(ecuio_queue_read_values(values, v, 4, &count, &dropped, 0),
+                  ECUIO_OK);
+        EXPECT_GT(count, 0u) << "the values path ran";
+        EXPECT_GT(dropped, 0u) << "and dropped";
+        ecuio_queue_close(frames);
+        ecuio_queue_close(values);
+        EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+            << "operator new on the worker between frames " << WorkerNews::kFrom
+            << " and " << c.to;
+    }
+}
+
 /* Recording costs the worker no allocation either: the ring is made at
  * open, and each frame and its values (decoded for the recording, with
  * no values callback registered) are copied into it (ADR-0049 section 1) */

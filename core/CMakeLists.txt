@@ -9,6 +9,7 @@ add_library(ecuio-core STATIC
     src/json.cpp
     src/obdb_import.cpp
     src/profile_registry.cpp
+    src/queue.cpp
     src/recorder.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
@@ -48,6 +49,7 @@ set(ECUIO_PUBLIC_HEADERS
     include/ecuio/obdb.h
     include/ecuio/plugin.h
     include/ecuio/profile.h
+    include/ecuio/queue.h
     include/ecuio/recording.h
     include/ecuio/serial.h
     include/ecuio/signals.h

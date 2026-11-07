@@ -11,6 +11,7 @@
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
+#include "ecuio/queue.h"
 #include "ecuio/recording.h"
 
 #include <stdbool.h>
@@ -366,6 +367,11 @@ void ecuio_recorder_test_fail_writes(ecuio_recorder_t* recorder);
 uint64_t ecuio_recorder_test_syncs(const ecuio_recorder_t* recorder);
 void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us);
 uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
+
+/* Test-only, never in queue.h: the reads waiting on a queue for an
+ * entry, so a test closes it only once a read on another thread waits
+ * (a read begun after ecuio_queue_close is undefined) */
+uint32_t ecuio_queue_test_waiting(ecuio_queue_t* queue);
 
 /* Test-only (ADR-0049 section 5's memory bound): the bytes a reader's
  * per-second tables hold (the summaries and the offset index, by
