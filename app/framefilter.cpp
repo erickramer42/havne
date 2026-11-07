@@ -3,7 +3,10 @@
 
 #include "framefilter.h"
 
+#include <QRegularExpression>
 #include <QStringList>
+
+#include <cmath>
 
 #include "ecuio/core.h"
 
@@ -33,6 +36,45 @@ bool hexId(QString text, uint32_t* out)
     return true;
 }
 
+// One length in bytes, decimal; false past what a frame holds
+bool decimalLength(QString text, int* out)
+{
+    text = text.trimmed();
+    if (text.isEmpty() || text.size() > 4) {
+        return false;
+    }
+    for (const QChar c : text) {
+        if (c < QLatin1Char('0') || c > QLatin1Char('9')) {
+            return false;
+        }
+    }
+    const int value = text.toInt();
+    if (value > static_cast<int>(ECUIO_FRAME_DATA_MAX)) {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+// Seconds as the table shows them ("12.5", "30", ".25"), into
+// microseconds; false for a sign, an exponent or past a million hours
+bool seconds(QString text, uint64_t* out)
+{
+    static const QRegularExpression form(
+        QStringLiteral("^([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$"));
+    text = text.trimmed();
+    if (!form.match(text).hasMatch()) {
+        return false;
+    }
+    bool ok = false;
+    const double value = text.toDouble(&ok);
+    if (!ok || value > 3.6e9) {
+        return false;
+    }
+    *out = static_cast<uint64_t>(std::llround(value * 1e6));
+    return true;
+}
+
 } // namespace
 
 QString FrameFilter::parseIds(const QString& text, std::vector<IdRange>* out)
@@ -47,7 +89,25 @@ QString FrameFilter::parseIds(const QString& text, std::vector<IdRange>* out)
         if (item.isEmpty()) {
             return QStringLiteral("an empty item between commas");
         }
+        if (item.contains(QLatin1Char('/'))) {
+            return QStringLiteral(
+                       "\"%1\": an ID and its mask take \":\", as in 7E0:7F8")
+                .arg(item);
+        }
         IdRange r;
+        const qsizetype colon = item.indexOf(QLatin1Char(':'));
+        if (colon >= 0) {
+            if (!hexId(item.left(colon), &r.first) ||
+                !hexId(item.mid(colon + 1), &r.mask)) {
+                return QStringLiteral(
+                           "\"%1\" isn't a hex ID and mask like 7E0:7F8")
+                    .arg(item);
+            }
+            r.last = r.first;
+            r.masked = true;
+            ranges.push_back(r);
+            continue;
+        }
         const qsizetype dash = item.indexOf(QLatin1Char('-'));
         const bool ok =
             dash < 0 ? hexId(item, &r.first)
@@ -113,21 +173,96 @@ QString FrameFilter::parseData(const QString& text, std::vector<int>* out,
     return {};
 }
 
+QString FrameFilter::parseLengths(const QString& text,
+                                  std::vector<LengthRange>* out)
+{
+    out->clear();
+    if (text.trimmed().isEmpty()) {
+        return {};
+    }
+    std::vector<LengthRange> ranges;
+    for (const QString& raw : text.split(QLatin1Char(','))) {
+        const QString item = raw.trimmed();
+        if (item.isEmpty()) {
+            return QStringLiteral("an empty item between commas");
+        }
+        LengthRange r;
+        const qsizetype dash = item.indexOf(QLatin1Char('-'));
+        const bool ok = dash < 0
+                            ? decimalLength(item, &r.first)
+                            : decimalLength(item.left(dash), &r.first) &&
+                                  decimalLength(item.mid(dash + 1), &r.last);
+        if (!ok) {
+            return QStringLiteral(
+                       "\"%1\" isn't a length in bytes (up to %2) or a range "
+                       "like 1-7")
+                .arg(item)
+                .arg(ECUIO_FRAME_DATA_MAX);
+        }
+        if (dash < 0) {
+            r.last = r.first;
+        } else if (r.last < r.first) {
+            return QStringLiteral("\"%1\" runs backward").arg(item);
+        }
+        ranges.push_back(r);
+    }
+    *out = std::move(ranges);
+    return {};
+}
+
+QString FrameFilter::parseTimes(const QString& text, TimeRange* out)
+{
+    *out = TimeRange();
+    const QString t = text.trimmed();
+    if (t.isEmpty()) {
+        return {};
+    }
+    // Not const: each return moves it
+    QString shape =
+        QStringLiteral("\"%1\" isn't a range of seconds like 12.5-30, "
+                       "12.5- (from then on) or -30 (up to then)")
+            .arg(t);
+    const qsizetype dash = t.indexOf(QLatin1Char('-'));
+    if (dash < 0 || t.indexOf(QLatin1Char('-'), dash + 1) >= 0) {
+        return shape;
+    }
+    const QString from = t.left(dash).trimmed();
+    const QString to = t.mid(dash + 1).trimmed();
+    TimeRange r;
+    r.set = true;
+    if ((from.isEmpty() && to.isEmpty()) ||
+        (!from.isEmpty() && !seconds(from, &r.first)) ||
+        (!to.isEmpty() && !seconds(to, &r.last))) {
+        return shape;
+    }
+    if (r.last < r.first) {
+        return QStringLiteral("\"%1\" runs backward").arg(t);
+    }
+    *out = r;
+    return {};
+}
+
 int FrameFilter::terms() const
 {
     return (ids.empty() ? 0 : 1) + (data.empty() ? 0 : 1) +
-           (direction == AnyDirection ? 0 : 1) + (flag == AnyFlag ? 0 : 1);
+           (direction == AnyDirection ? 0 : 1) + (flag == AnyFlag ? 0 : 1) +
+           (lengths.empty() ? 0 : 1) + (time.set ? 1 : 0);
 }
 
-bool FrameFilter::matches(uint32_t id, uint32_t flags, const uint8_t* payload,
-                          int length) const
+bool FrameFilter::matches(uint32_t id, uint32_t flags, uint64_t timestampUs,
+                          const uint8_t* payload, int length) const
 {
     const bool extended = (flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
     if (!ids.empty()) {
         bool any = false;
         for (const IdRange& r : ids) {
-            if (id >= r.first && id <= r.last &&
-                (extended || id <= kMaxStandardId)) {
+            const bool in = r.masked
+                                ? (id & r.mask) == (r.first & r.mask) &&
+                                      (extended || (r.first <= kMaxStandardId &&
+                                                    r.mask <= kMaxStandardId))
+                                : id >= r.first && id <= r.last &&
+                                      (extended || id <= kMaxStandardId);
+            if (in) {
                 any = true;
                 break;
             }
@@ -164,6 +299,21 @@ bool FrameFilter::matches(uint32_t id, uint32_t flags, const uint8_t* payload,
         break;
     default:
         break;
+    }
+    if (time.set && (timestampUs < time.first || timestampUs > time.last)) {
+        return false;
+    }
+    if (!lengths.empty()) {
+        bool any = false;
+        for (const LengthRange& r : lengths) {
+            if (length >= r.first && length <= r.last) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) {
+            return false;
+        }
     }
     if (data.empty()) {
         return true;

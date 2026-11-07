@@ -285,11 +285,16 @@ void FrameListModel::clear()
 }
 
 QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
-                                      int direction, int flag)
+                                      int direction, int flag,
+                                      const QString& lengths,
+                                      const QString& times)
 {
     FrameFilter next;
     const QString idWords = FrameFilter::parseIds(ids, &next.ids);
     const QString dataWords = FrameFilter::parseData(data, &next.data, &next.anchored);
+    const QString lengthWords =
+        FrameFilter::parseLengths(lengths, &next.lengths);
+    const QString timeWords = FrameFilter::parseTimes(times, &next.time);
     next.direction = direction >= FrameFilter::AnyDirection &&
                              direction <= FrameFilter::Sent
                          ? direction
@@ -305,14 +310,17 @@ QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
         next.data = m_filter.data;
         next.anchored = m_filter.anchored;
     }
-    const bool same = next.ids.size() == m_filter.ids.size() &&
-                      std::equal(next.ids.begin(), next.ids.end(), m_filter.ids.begin(),
-                                 [](const FrameFilter::IdRange& a,
-                                    const FrameFilter::IdRange& b) {
-                                     return a.first == b.first && a.last == b.last;
-                                 }) &&
-                      next.data == m_filter.data && next.anchored == m_filter.anchored &&
-                      next.direction == m_filter.direction && next.flag == m_filter.flag;
+    if (!lengthWords.isEmpty()) {
+        next.lengths = m_filter.lengths;
+    }
+    if (!timeWords.isEmpty()) {
+        next.time = m_filter.time;
+    }
+    const bool same =
+        next.ids == m_filter.ids && next.data == m_filter.data &&
+        next.anchored == m_filter.anchored &&
+        next.direction == m_filter.direction && next.flag == m_filter.flag &&
+        next.lengths == m_filter.lengths && next.time == m_filter.time;
     if (!same) {
         beginResetModel();
         m_filter = std::move(next);
@@ -335,7 +343,10 @@ QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
             emit selectionChanged();
         }
     }
-    return {{QStringLiteral("ids"), idWords}, {QStringLiteral("data"), dataWords}};
+    return {{QStringLiteral("ids"), idWords},
+            {QStringLiteral("data"), dataWords},
+            {QStringLiteral("lengths"), lengthWords},
+            {QStringLiteral("times"), timeWords}};
 }
 
 quint64 FrameListModel::newestTimestampUs() const
@@ -581,6 +592,7 @@ QVariant FrameIdModel::data(const QModelIndex& index, int role) const
         case CountRole:    return r.count;
         case RateRole:     return r.rate;
         case PayloadRole:  return QString::fromLatin1(r.payload.toHex(' ').toUpper());
+        case ChangedRole:  return r.changed;
         default:           return QVariant();
     }
 }
@@ -592,7 +604,8 @@ QHash<int, QByteArray> FrameIdModel::roleNames() const
         {ExtendedRole, "extended"},
         {CountRole,    "frames"},
         {RateRole,     "rate"},
-        {PayloadRole,  "payloadHex"}
+        {PayloadRole,  "payloadHex"},
+        {ChangedRole,  "changedBytes"}
     };
 }
 
@@ -609,6 +622,7 @@ void FrameIdModel::refresh()
         quint64 first = std::numeric_limits<quint64>::max();
         quint64 last = 0;
         int recent = 0;
+        QByteArray before; // the payload of the frame before the newest
     };
     std::map<quint64, IdRow> byKey;
     std::map<quint64, Seen> seen;
@@ -617,10 +631,11 @@ void FrameIdModel::refresh()
             ((f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0 ? (quint64{1} << 32) : 0) | f.id;
         IdRow& row = byKey[key];
         row.key = key;
+        Seen& s = seen[key];
+        s.before = std::move(row.payload);
         ++row.count;
         row.payload = QByteArray(reinterpret_cast<const char*>(f.data), f.length);
         oldest = std::min(oldest, f.timestampUs);
-        Seen& s = seen[key];
         s.first = std::min(s.first, f.timestampUs);
         s.last = std::max(s.last, f.timestampUs);
         if (f.timestampUs > from) {
@@ -632,6 +647,15 @@ void FrameIdModel::refresh()
     next.reserve(byKey.size());
     for (auto& [key, row] : byKey) {
         const Seen& s = seen[key];
+        if (row.count > 1) {
+            const qsizetype common =
+                std::min(s.before.size(), row.payload.size());
+            for (qsizetype b = 0; b < row.payload.size(); ++b) {
+                if (b >= common || s.before[b] != row.payload[b]) {
+                    row.changed.append(static_cast<int>(b));
+                }
+            }
+        }
         if (!shortLog) {
             row.rate = static_cast<double>(s.recent) * 1e6 /
                        static_cast<double>(RateWindowUs);
@@ -662,10 +686,13 @@ void FrameIdModel::refresh()
         } else {
             IdRow& old = m_rows[i];
             if (old.count != next[j].count || old.rate != next[j].rate ||
-                old.payload != next[j].payload) {
+                old.payload != next[j].payload ||
+                old.changed != next[j].changed) {
                 old = next[j];
-                emit dataChanged(index(static_cast<int>(i), 0), index(static_cast<int>(i), 0),
-                                 {CountRole, RateRole, PayloadRole});
+                emit dataChanged(
+                    index(static_cast<int>(i), 0),
+                    index(static_cast<int>(i), 0),
+                    {CountRole, RateRole, PayloadRole, ChangedRole});
             }
             ++i;
             ++j;
