@@ -426,6 +426,14 @@ with its tests in `python/tests/`.
   (a lock around each read); closing the session from another thread
   ends the iteration. `Session.record()` records through core's
   recorder, with `note` and `mark`.
+  Amended 2026-11-07: a `Session`, `Sim` or `Recording` left unclosed
+  is closed when it's collected, or at the interpreter's exit
+  (`weakref.finalize`), in `close()`'s order: the session closed, its
+  streams' queues, the session destroyed, then its recorders; `close()`
+  runs the same finalizer. It holds the handles and never an object
+  that holds the session (a stream's queue lives apart from its
+  `Stream`), so a script that keeps a stream keeps its session, and one
+  that keeps nothing lets it go.
 - **Signals through signal files only** (section 5): `havne.SignalFile`
   takes a file's text or path, loads it and registers its profile.
   Every file and plugin loaded stays loaded for the process's life,

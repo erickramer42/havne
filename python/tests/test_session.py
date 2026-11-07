@@ -6,16 +6,23 @@
 # a slow reader's drops counted and said once, a close from another
 # thread ending the iteration, core's refusals as havne.Error, the
 # caller's word passed to a clear, and a clear of the simulated car
-# through core's gate.
+# through core's gate. A session, sim or recording left unclosed is
+# released when it's collected (a stream a script keeps keeps its session).
 
+import gc
 import logging
+import os
 import threading
 import time
+import weakref
 
 import pytest
 
 import havne
 from havne import c
+from havne._core import lib
+
+from conftest import REPLAY
 
 
 def take(stream, n, seconds=10):
@@ -81,6 +88,119 @@ def test_a_close_from_another_thread_ends_the_iteration():
     assert time.monotonic() - t < 5
     assert seen
     assert values.ended == "session closed"
+
+
+def iterated_on_a_thread(stream, per_value=0.0):
+    """The stream iterated on a thread of its own, sleeping per_value
+    after each value: (the thread, what it saw)"""
+    seen = []
+
+    def run():
+        for v in stream:
+            seen.append(v)
+            time.sleep(per_value)
+
+    reader = threading.Thread(target=run, daemon=True)
+    reader.start()
+    return reader, seen
+
+
+def test_a_stream_iterated_after_its_close_ends():
+    s = havne.Session("mock://py")
+    values = s.values()
+    s.start()
+    time.sleep(0.3)
+    s.close()
+    assert values.ended == "session closed", "said at the close, before any read"
+    reader, _ = iterated_on_a_thread(values)
+    reader.join(5)
+    assert not reader.is_alive(), "the iteration ended"
+    assert values.ended == "session closed"
+    assert values.read() == []
+
+
+def test_a_close_while_the_reader_is_in_its_loop_body_ends_the_iteration():
+    s = havne.Session("mock://py")
+    values = s.values()
+    s.start()
+    reader, seen = iterated_on_a_thread(values, per_value=0.05)
+    assert take_until(lambda: seen, 5), "values arrive"
+    s.close()
+    reader.join(5)
+    assert not reader.is_alive(), "the iteration ended"
+    assert values.ended == "session closed"
+
+
+def take_until(cond, seconds):
+    until = time.monotonic() + seconds
+    while time.monotonic() < until:
+        if cond():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def ended(folder):
+    """Whether the recording's events.log has its end line: the
+    recorder closed, after its session's close and destroy"""
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        return any(line.split("  ")[2:3] == ["end"] for line in f.read().splitlines())
+
+
+def test_an_unclosed_session_collected_is_closed_in_close_s_order(tmp_path):
+    # A notebook cell run again drops the last session unclosed: its
+    # worker stops and its recording ends when it's collected
+    s = havne.Session("mock://py")
+    values = s.values()
+    rec = s.record(tmp_path)
+    s.start()
+    assert take(values, 1), "the mock's values"
+    folder, gone = rec.folder, weakref.ref(s)
+    del s, values, rec
+    gc.collect()
+    assert gone() is None, "nothing the package holds keeps the session"
+    assert ended(folder), "the recording ended when its session was collected"
+
+
+def test_a_stream_a_script_keeps_keeps_its_session(tmp_path):
+    s = havne.Session("mock://py")
+    values = s.values()
+    rec = s.record(tmp_path)
+    s.start()
+    folder, gone = rec.folder, weakref.ref(s)
+    del s, rec
+    gc.collect()
+    assert gone() is not None and not ended(folder)
+    assert take(values, 1), "the session still runs"
+    del values
+    gc.collect()
+    assert gone() is None and ended(folder)
+
+
+def counted(monkeypatch, name):
+    """Each call of lib's name counted, then made"""
+    real, calls = getattr(lib, name), []
+
+    def counting(*args):
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(lib, name, counting)
+    return calls
+
+
+def test_an_unclosed_sim_and_recording_collected_are_released(monkeypatch):
+    destroyed = counted(monkeypatch, "ecuio_sim_destroy")
+    closed = counted(monkeypatch, "ecuio_recording_close")
+    sim, recording = havne.Sim.unbound(), havne.Recording(REPLAY, profile="obd2")
+    del sim, recording
+    gc.collect()
+    assert (len(destroyed), len(closed)) == (1, 1)
+    with havne.Sim.unbound() as sim, havne.Recording(REPLAY, profile="obd2") as recording:
+        pass
+    del sim, recording
+    gc.collect()
+    assert (len(destroyed), len(closed)) == (2, 2), "a closed one isn't released twice"
 
 
 def test_core_s_refusals_are_errors_with_their_name_and_detail():

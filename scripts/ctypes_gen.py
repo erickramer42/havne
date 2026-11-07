@@ -6,7 +6,8 @@
 # The havne package's declarations (ADR-0053 section 1): every public
 # header's functions with their argument and result types, the structs
 # and the callback typedefs as ctypes types, the enumerators and the
-# numeric ECUIO_ macros as constants, written to python/havne/_ecuio.py.
+# ECUIO_ macros (numbers, <stdint.h>'s limits among them, and string
+# literals) as constants, written to python/havne/_ecuio.py.
 # The headers are core/CMakeLists.txt's ECUIO_PUBLIC_HEADERS, read as
 # scripts/api_check.py reads them, so the package declares exactly what
 # the shared core exports (scripts/ecuio_exports.py).
@@ -16,10 +17,15 @@
 #
 # C to ctypes: the fixed-width integers, char, int, size_t, double and
 # _Bool as their ctypes types; an enum as c_int (every ABI here gives an
-# enum int's size); char* (const or not) as c_char_p, void* as c_void_p,
-# any other T* as POINTER(T); an array as T * N, its N from the headers'
-# macros; an opaque handle as an empty Structure; a function pointer as
-# CFUNCTYPE. A construct the map doesn't know fails the script, naming it.
+# enum int's size); char* as c_char_p, void* as c_void_p, any other T* as
+# POINTER(T); an array as T * N, its N from the headers' macros; an
+# opaque handle as an empty Structure; a function pointer as CFUNCTYPE.
+# Text core hands the caller to own (a non-const char** out-parameter, a
+# non-const char* result) and a release function's char* are
+# POINTER(c_char), never c_char_p: ctypes turns a c_char_p into a Python
+# copy, and the pointer core must free would be lost. A construct the map
+# doesn't know, or an ECUIO_ macro that is neither a number nor a string,
+# fails the script, naming it.
 
 import os
 import re
@@ -42,6 +48,18 @@ BUILTIN = {
 }
 
 
+# <stdint.h>'s limits, which a macro may name
+STDINT = {
+    "INT8_MIN": -(1 << 7), "INT8_MAX": (1 << 7) - 1, "UINT8_MAX": (1 << 8) - 1,
+    "INT16_MIN": -(1 << 15), "INT16_MAX": (1 << 15) - 1, "UINT16_MAX": (1 << 16) - 1,
+    "INT32_MIN": -(1 << 31), "INT32_MAX": (1 << 31) - 1, "UINT32_MAX": (1 << 32) - 1,
+    "INT64_MIN": -(1 << 63), "INT64_MAX": (1 << 63) - 1, "UINT64_MAX": (1 << 64) - 1,
+}
+
+# A release function, as core.md's export rule names one
+RELEASE = re.compile(r"_(free|close|destroy|unregister)$")
+
+
 class Unknown(ValueError):
     pass
 
@@ -55,12 +73,14 @@ def int_value(text, macros, seen=()):
 
     def name(m):
         n = m.group(0)
+        if n in STDINT and n not in macros:
+            return f"({STDINT[n]})"
         if n in seen or n not in macros:
             raise Unknown(n)
         v = int_value(macros[n], macros, seen + (n,))
         if v is None:
             raise Unknown(n)
-        return str(v)
+        return f"({v})"
 
     try:
         t = re.sub(r"\b(0[xX][0-9A-Fa-f]+|\d+)[uUlL]+\b", r"\1", t)
@@ -74,6 +94,15 @@ def int_value(text, macros, seen=()):
     except (SyntaxError, TypeError, ZeroDivisionError, NameError):
         return None
     return v if isinstance(v, int) else None
+
+
+def string_value(text):
+    """A macro's text as a str when it is one or more adjacent string
+    literals with no escapes, else None"""
+    t = text.strip()
+    if not re.fullmatch(r'"[^"\\\n]*"(\s*"[^"\\\n]*")*', t):
+        return None
+    return "".join(re.findall(r'"([^"]*)"', t))
 
 
 class Model:
@@ -126,10 +155,26 @@ class Model:
         if stars == 0:
             return self.base(word)
         if word == "char":
+            if stars > 1 and not self.const_char(tokens):
+                return self.pointers("POINTER(c_char)", stars - 1)  # owned
             return "c_char_p" if stars == 1 else self.pointers("c_char_p", stars - 1)
         if word == "void":
             return "c_void_p" if stars == 1 else self.pointers("c_void_p", stars - 1)
         return self.pointers(self.base(word), stars)
+
+    @staticmethod
+    def const_char(tokens):
+        """The chars themselves const: const before the first star"""
+        head = tokens[:tokens.index("*")] if "*" in tokens else tokens
+        return "const" in head
+
+    def owned_char(self, tokens):
+        """A plain non-const char*: text core hands over, as a result or
+        to a release function"""
+        toks = list(tokens)
+        if len(toks) == 3 and re.fullmatch(r"[A-Za-z_]\w*", toks[2]):
+            toks = toks[:2]  # a parameter's name
+        return toks == ["char", "*"]
 
     @staticmethod
     def pointers(t, n):
@@ -215,7 +260,7 @@ def generate(tree=ROOT):
         "",
         "HEADERS = (" + ", ".join(repr(h) for h in m.headers) + ",)",
         "",
-        "# --- constants: the numeric ECUIO_ macros, then the enumerators -------",
+        "# --- constants: the ECUIO_ macros, then the enumerators ---------------",
     ]
     for name in sorted(m.macros):
         if not name.startswith("ECUIO_") or name.endswith("_H"):
@@ -223,6 +268,12 @@ def generate(tree=ROOT):
         v = int_value(m.macros[name], m.macros)
         if v is not None:
             lines.append(f"{name} = {v:#x}" if v > 255 else f"{name} = {v}")
+            continue
+        s = string_value(m.macros[name])
+        if s is None:
+            raise Unknown(f"the macro {name} ({m.macros[name].strip()[:60]}): "
+                          "neither a number nor a string")
+        lines.append(f"{name} = {s!r}")
     values = enum_values(m)
     for enum in sorted(m.enums):
         for e in m.enums[enum]:
@@ -269,8 +320,12 @@ def generate(tree=ROOT):
         at = text.index(" " + fname + " (")
         ret = text[:at].split()
         inner = text[text.index("(", at) + 1:text.rindex(")")]
-        args = [] if inner.strip() in ("", "void") else [m.param_type(p.split()) for p in split_params(inner)]
-        lines.append(f"    {fname!r}: ({m.ctype(ret)}, [{', '.join(args)}]),  # {h}")
+        params = [] if inner.strip() in ("", "void") else split_params(inner)
+        args = [m.param_type(p.split()) for p in params]
+        if params and RELEASE.search(fname) and m.owned_char(params[0].split()):
+            args[0] = "POINTER(c_char)"  # the text core handed over
+        result = "POINTER(c_char)" if m.owned_char(ret) else m.ctype(ret)
+        lines.append(f"    {fname!r}: ({result}, [{', '.join(args)}]),  # {h}")
     lines += [
         "}",
         "",

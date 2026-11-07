@@ -4,15 +4,20 @@
 # The package's declarations against the headers, with no library
 # loaded: _ecuio.py is what scripts/ctypes_gen.py makes from them today;
 # every function the shared core exports (scripts/ecuio_exports.py) is
-# declared; and each layout the headers pin with a static_assert (a
-# struct's size, a member's offset) holds for the ctypes types on the
-# platform running, so a type mapped wrong fails here, not in a script.
+# declared, text core hands over as a pointer to free, every macro (a
+# limit, a string; another kind fails the script); and each layout the
+# headers pin with a static_assert (a struct's size, a member's offset)
+# holds for the ctypes types on the platform running, so a type mapped
+# wrong fails here, not in a script.
 
 import ctypes
 import importlib.util
 import os
 import re
+import shutil
 import sys
+
+import pytest
 
 from conftest import ROOT
 
@@ -41,6 +46,61 @@ def test_the_declarations_are_the_headers_today():
 
 def test_every_exported_function_is_declared_and_nothing_else():
     assert sorted(E.FUNCTIONS) == sorted(ecuio_exports.declared(HEADERS))
+
+
+def test_text_core_hands_over_stays_a_pointer():
+    # A c_char_p would come back as a Python copy, and the pointer core
+    # must free with it: owned text is POINTER(c_char)
+    owned = ctypes.POINTER(ctypes.c_char)
+    assert E.FUNCTIONS["ecuio_obdb_free"] == (None, [owned])
+    assert E.FUNCTIONS["ecuio_obdb_import"][1][5] is ctypes.POINTER(owned)
+    # Borrowed text stays c_char_p: a const char** out-parameter, a
+    # caller's buffer, a const char* result
+    assert E.ecuio_plugin_read_t._argtypes_[2] is ctypes.POINTER(ctypes.c_char_p)
+    assert E.FUNCTIONS["ecuio_plugin_variant"][1][2] is ctypes.c_char_p
+    assert E.FUNCTIONS["ecuio_last_error_detail"][0] is ctypes.c_char_p
+
+
+def test_every_macro_is_declared():
+    # <stdint.h>'s limits and string literals too
+    assert E.ECUIO_RECORDING_NONE == 2**64 - 1
+    assert E.ECUIO_TIMING_COLUMNS.startswith("t_s,ecu,request,")
+    assert "," in E.ECUIO_TIMING_COLUMNS and '"' not in E.ECUIO_TIMING_COLUMNS
+
+
+def made_up_tree(tmp_path, line):
+    """core's CMakeLists and public headers with one line added to vin.h"""
+    include = tmp_path / "core" / "include" / "ecuio"
+    shutil.copytree(os.path.join(ROOT, "core", "include", "ecuio"), include)
+    shutil.copy(os.path.join(ROOT, "core", "CMakeLists.txt"), tmp_path / "core")
+    vin = include / "vin.h"
+    body = vin.read_text(encoding="utf-8")
+    at = body.rindex("#endif")
+    vin.write_text(body[:at] + line + "\n" + body[at:], encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_a_macro_that_is_neither_a_number_nor_a_string_fails_the_script(tmp_path):
+    tree = made_up_tree(tmp_path, "#define ECUIO_MADE_UP (sizeof(int))")
+    with pytest.raises(ctypes_gen.Unknown) as e:
+        ctypes_gen.generate(tree)
+    assert "ECUIO_MADE_UP" in str(e.value)
+
+
+def test_a_limit_and_a_string_macro_are_declared(tmp_path):
+    tree = made_up_tree(tmp_path, '#define ECUIO_MADE_UP_MIN (INT32_MIN + 1)\n'
+                                  '#define ECUIO_MADE_UP_TEXT "a,b" "c"')
+    text = ctypes_gen.generate(tree)
+    assert f"ECUIO_MADE_UP_MIN = {-(2**31) + 1}" in text.splitlines()
+    assert "ECUIO_MADE_UP_TEXT = 'a,bc'" in text.splitlines()
+
+
+def test_an_owned_result_and_its_release_are_pointers(tmp_path):
+    tree = made_up_tree(tmp_path, "char* ecuio_made_up_text(const char* name);\n"
+                                  "void ecuio_made_up_free(char* text);")
+    lines = ctypes_gen.generate(tree).splitlines()
+    assert "    'ecuio_made_up_text': (POINTER(c_char), [c_char_p]),  # vin.h" in lines
+    assert "    'ecuio_made_up_free': (None, [POINTER(c_char)]),  # vin.h" in lines
 
 
 def test_the_headers_are_the_installed_list():

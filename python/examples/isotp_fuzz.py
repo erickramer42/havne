@@ -14,7 +14,8 @@
 # failed. Standard library only for the bus (socket.AF_CAN, CAN_RAW).
 #
 # vcan only: an interface whose netlink kind isn't vcan is refused, with
-# no override. Never point a fuzzer at a car.
+# no override, by the bus itself, so fuzz() called from a script of its
+# own refuses too. Never point a fuzzer at a car.
 #
 #   python isotp_fuzz.py --interface vcan0 [--cases 200] [--seed 1]
 #   python isotp_fuzz.py --interface vcan0 --seed 1 --case 37   # one case again
@@ -68,9 +69,13 @@ def refuse_unless_vcan(ifname):
 
 
 class Bus:
-    """A CAN_RAW socket on the interface, hearing the ECU's replies only"""
+    """A CAN_RAW socket on the interface, hearing the ECU's replies only;
+    ValueError for an interface that isn't vcan"""
 
     def __init__(self, ifname):
+        why = refuse_unless_vcan(ifname)
+        if why:
+            raise ValueError(why)
         self.s = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
         with open(f"/sys/class/net/{ifname}/mtu") as f:
             self.fd = int(f.read()) >= 72

@@ -5,14 +5,17 @@
 # The made-up loggers' CSVs (tests/fixtures/import/csv) imported by their
 # column maps, as a dict and as JSON text, then opened with Recording; a
 # candump log imported and its frames decoded through obd2; refusals carry
-# core's words and leave no folder.
+# core's words and leave no folder. An OBDb set converted through the
+# declarations, its text freed by core.
 
+import ctypes
 import json
 import os
 
 import pytest
 
 import havne
+from havne._core import lib
 from conftest import ROOT
 
 CSV = os.path.join(ROOT, "tests", "fixtures", "import", "csv")
@@ -21,6 +24,23 @@ LOG = (
     "(1700000000.254000) can0 7E8#04410C1AF8\n"
     "(1700000000.350000) can1 7E8#04410C0FA0\n"
 )
+
+
+def test_an_obdb_import_through_the_declarations_is_freed_by_core():
+    # The converted file is core's to free: its pointer comes back as
+    # core gave it, and the text is read from it before the free
+    with open(os.path.join(ROOT, "tests", "fixtures", "obdb", "example-car.json"), "rb") as f:
+        data = f.read()
+    out, length = ctypes.POINTER(ctypes.c_char)(), ctypes.c_size_t()
+    rc = lib.ecuio_obdb_import(data, len(data), None, havne.c.ecuio_obdb_note_fn(), None,
+                               ctypes.byref(out), ctypes.byref(length))
+    assert rc == havne.c.ECUIO_OK
+    try:
+        converted = ctypes.string_at(out, length.value)
+    finally:
+        lib.ecuio_obdb_free(out)
+    assert json.loads(converted)["havne_signals"] == 1
+    havne.SignalFile(converted)
 
 
 def column_map(name):
