@@ -1398,3 +1398,60 @@ compared query by query, the mock's computed boost among them; wire
 frames, interleaved senders, a message across a second, the marks),
 `CliViewFramesTest`, the `view-frames*` goldens, `RecordingViewTest`'s
 frames cases and `QmlTest.recordings`.
+
+## Appendix: a vehicle's baseline (2026-11-06)
+
+A vehicle keeps one recording as its baseline, and a new run is overlaid
+on it, the two lined up where each engine starts.
+
+**The engine start.** `ecuio_recording_find` takes a third kind,
+`ECUIO_RECORDING_FIND_ENGINE_START` (3): the engine-speed signal
+reaching `ECUIO_ENGINE_START_RPM` (500) after being below
+`ECUIO_ENGINE_STOPPED_RPM` (100): the threshold kind's rising rule with a
+level of 500 and a hysteresis of 400. A starter cranks an engine at
+150-300 rpm and an idle runs past 500, so the rise to 500 is the engine
+catching, not the starter; a dip below 500 while it runs arms nothing,
+and a stall to under 100 arms the next start. A recording that starts
+with the engine running finds nothing until it stops and starts again.
+A start is the one event every run of a car shares whatever was done
+after it, and its time in each recording is the car's, not the
+recorder's: two runs started minutes apart from the key line up to the
+sample. The engine-speed signal is the number signal whose unit is
+"rpm", ASCII case ignored (obd2's and the mock's PID 0C both say
+"RPM"); of several, the one of the lowest nonzero plot rank, else the
+first in the recording's order; with none, nothing is found. The kind
+takes no signal, direction, level or hysteresis (each 0, else
+`ECUIO_ERR_INVALID_ARGUMENT`), so every front end finds the same start.
+The mock's drive cycle (15 s of key on at 0 rpm, then a 2 s start)
+finds its start after its key on. Tests: `RecordingTest` (a key on and a
+start, a stall and a restart, an engine already running, no signal in
+rpm, the ranks, the refusals, a recording of `mock://demo`).
+
+**The vehicle's field.** Each entry of the vehicles' document
+(ADR-0027) gains `baseline`, the folder of its baseline recording as
+the Recordings page names it (the app's recordings folder, Android's
+app-private one included), "" for none. An entry stored before it reads
+as none; one that isn't text drops the document, as any bad field does.
+Duplicate leaves it out: a baseline is a recording of that car. On the
+Recordings page an open recording becomes the picked vehicle's baseline
+("Use as <vehicle>'s baseline"), its row in the list carries a Baseline
+badge, and "Compare with the baseline" overlays the baseline on another
+open recording, aligned on the engine starts ("Align engine starts",
+also among the compare's alignments). The button shows only while the
+baseline's folder still holds a recording and isn't the one open; a
+baseline whose folder was moved or deleted says so, with a way to clear
+it. The page reads the document from Settings and hands its edits back
+to Settings, which stores it. Tests: `QmlTest.vehiclebook`,
+`QmlTest.recordings`, `RecordingViewTest.TheEngineStartIsHavneClisOwn`,
+`BridgeTest.ARecordingRowIsTheListsRowWhileItsFolderHoldsItsValues`.
+
+**The CLI.** `havne-cli view` takes `--align-on engine-start`, and
+`view <run> <baseline> --align-on engine-start` is the overlay's
+equivalent. The CLI has no vehicle book, so it can't name a vehicle's
+baseline: the caller names the folder. Golden `view-engine-start.jsonl`
+(two key ons whose starts are 7 s apart, and a pull found nowhere),
+`CliViewTest`, `CliUsageTest.View*EngineStart*`.
+
+**Later.** A health report that names the vehicle's baseline takes it
+from its caller, as the CLI does; nothing in core knows which recording
+is a baseline.

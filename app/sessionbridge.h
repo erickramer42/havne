@@ -880,6 +880,11 @@ public:
     // appendix of 2026-10-28), newest first across both. A directory
     // listing and one short read per folder.
     Q_INVOKABLE QVariantList recentRecordings(int limit) const;
+    // One recording's row, as recentRecordings gives it, for a folder
+    // that holds a signals.csv or a frames.csv (what the viewer opens);
+    // an empty map when it's gone. folder comes back as given, so it
+    // matches the path it was stored as (a vehicle's baseline).
+    Q_INVOKABLE QVariantMap recordingRow(const QString& folder) const;
     // A recording's replay:// URI, decoding under the profile it was
     // recorded with: the recorded URI's profile= (with its did= under
     // uds-generic), else its scheme's default (mock:// mock, replay://

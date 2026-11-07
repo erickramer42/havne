@@ -55,4 +55,9 @@ void ecuio_queue_put_values(ecuio_queue_t* queue,
  * more entries, and its readers are woken to read what's left */
 void ecuio_queue_detach(ecuio_queue_link& link);
 
+/* A replay's worker at its end (queue.h, "the stream's end"): each of the
+ * session's queues still attached reads what's left, then
+ * ECUIO_ERR_STREAM_ENDED. On the worker, after its last dispatch. */
+void ecuio_queue_end_all(ecuio_session_t* session);
+
 #endif /* ECUIO_PULL_QUEUE_H */

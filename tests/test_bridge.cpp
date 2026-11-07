@@ -5688,6 +5688,45 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_TRUE(bridge.recentRecordings(10).isEmpty()) << "no folder yet";
 }
 
+/* A vehicle's baseline (ADR-0049's appendix of 2026-11-06): one folder's
+ * row, its title and URI as the list gives them, its folder as stored,
+ * while it holds a signals.csv or a frames.csv; nothing once it's gone */
+TEST(BridgeTest, ARecordingRowIsTheListsRowWhileItsFolderHoldsItsValues)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir =
+        root.path() + QStringLiteral("/20261106-091500 Weekend car");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    for (const char* name : {"/frames.csv", "/signals.csv"}) {
+        QFile f(dir + QString::fromUtf8(name));
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    QFile events(dir + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+    events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                 "uri  mock://demo\n");
+    events.close();
+
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantMap listed = bridge.recentRecordings(1).value(0).toMap();
+    const QVariantMap row = bridge.recordingRow(dir);
+    EXPECT_EQ(row, listed);
+    EXPECT_EQ(row.value(QStringLiteral("title")).toString().toStdString(),
+              "2026-11-06 09:15:00 \xC2\xB7 Weekend car");
+    EXPECT_EQ(row.value(QStringLiteral("profile")).toString(),
+              QStringLiteral("mock"));
+
+    EXPECT_TRUE(bridge.recordingRow(QString()).isEmpty());
+    ASSERT_TRUE(QFile::remove(dir + QStringLiteral("/signals.csv")));
+    EXPECT_EQ(bridge.recordingRow(dir), row) << "its frames still open";
+    ASSERT_TRUE(QFile::remove(dir + QStringLiteral("/frames.csv")));
+    EXPECT_TRUE(bridge.recordingRow(dir).isEmpty()) << "nothing to open";
+    ASSERT_TRUE(QDir(dir).removeRecursively());
+    EXPECT_TRUE(bridge.recordingRow(dir).isEmpty()) << "the folder is gone";
+}
+
 /* With Record on, a replay isn't recorded: it would copy the recording
  * it plays (the third phone run's Record left on made one) */
 TEST(BridgeTest, AReplayIsNotRecorded)

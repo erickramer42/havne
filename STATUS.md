@@ -376,8 +376,9 @@ background too ([roadmap](#roadmap)).
     offline by core's reader, the Recordings page and `havne-cli
     view`, through the values as recorded or through the frames by a
     profile (`ecuio_recording_open_frames`, so a raw recording plots),
-    exported by `havne-cli export` as pcapng (its frames) or CSV (its
-    values, one row per sample), scrubbed by construction and checked
+    exported by `havne-cli export` as pcapng (its frames), CSV (its
+    values, one row per sample) or a folder (a copy that reads and
+    replays as the original), scrubbed by construction and checked
     ([ADR-0054](docs/adr/0054-exports-and-imports.md)), and a
     `candump -L` log imported as a recording (`havne-cli import
     candump`); the app exports only the Log page's frames and imports
@@ -574,15 +575,25 @@ append-only.
     ([ADR-0053](docs/adr/0053-python-bindings.md)'s appendices);
   - a recording's values exported as CSV, one row per sample, scrubbed
     and checked, in core and `havne-cli export --format csv`
-    (ADR-0054's appendix "the CSV export as built").
-- **In progress:** the `havne` Python package and its tests (step 3),
-  then the wheel (step 4).
-- **To come:** the other exports (a scrubbed recording folder, the
-  health report) and CSV import, a vehicle's baseline recording,
-  and the Python examples against the simulated ECU.
+    (ADR-0054's appendix "the CSV export as built");
+  - a scrubbed copy of a recording's folder, every file rewritten by
+    its classes and checked, in core and `havne-cli export --format
+    folder` (ADR-0054's appendix "the folder export as built");
+  - the `havne` Python package over the shared core, its tests in CI
+    (step 3 of ADR-0053; its appendix "the havne package as built"),
+    and a replay's end told through the pull queue
+    (`ECUIO_ERR_STREAM_ENDED`).
+- **In progress:** the bindings' wheel (step 4); the health report
+  (ADR-0054's appendix "the health report as built"): one scrubbed
+  file of a car's health in JSON or text, in core over a live session,
+  a recording's, `havne-cli health` and the app's Save report to come;
+  a vehicle's baseline recording.
+- **To come:** CSV import, and the Python examples against the
+  simulated ECU.
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
-the values; an export of a recording passes the leak check; a recording
+the values (met: `PythonTest.test_vcan`, the simulated ECU on `vcan0`);
+an export of a recording passes the leak check; a recording
 opens in Wireshark (met: `CliTransferRunTest.tshark`, its ISO-TP
 reassembled); python-OBD reads the simulated car through the ELM327
 emulator on Windows (met: `CliElm327RunTest.PythonObdReadsIt`).

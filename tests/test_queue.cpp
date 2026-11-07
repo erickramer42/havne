@@ -667,3 +667,146 @@ TEST(QueueTest, TwoReadersSplitTheEntries)
     EXPECT_EQ(got[0].size() + got[1].size(), kFrames) << "each once";
     EXPECT_EQ(all.size(), kFrames);
 }
+
+/* The stream's end (queue.h): a replay's last pass ends its queues */
+namespace {
+
+std::string fixture_uri(const std::string& query)
+{
+    return "replay://" + std::string(ECUIO_REPLAY_FIXTURES) +
+           "/2026-10-25-engine-start?profile=obd2&speed=max" + query;
+}
+
+/* Reads a queue until a read isn't ECUIO_OK, each waiting up to 10 s;
+ * the entries taken. last_ms: how long that last read took */
+constexpr uint32_t kDrainWaitMs = 10000;
+
+template <typename Reader>
+uint64_t drain(Reader& r, ecuio_queue_t* q, ecuio_status_t* last,
+               int64_t* last_ms = nullptr)
+{
+    uint64_t total = 0;
+    ecuio_status_t rc;
+    for (;;) {
+        const auto t0 = std::chrono::steady_clock::now();
+        rc = r.read(q, kDrainWaitMs);
+        if (last_ms != nullptr) {
+            *last_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
+        }
+        if (rc != ECUIO_OK) {
+            break;
+        }
+        total += r.count;
+    }
+    *last = rc;
+    return total;
+}
+
+/* A read waiting when the end comes returns then, not at its timeout. A
+ * reader that keeps up with the replay waits for its next frame, so the
+ * end finds it waiting; a read that starts after the end returns at once
+ * either way */
+constexpr int64_t kEndWakeMs = kDrainWaitMs / 2;
+
+} // namespace
+
+TEST(QueueTest, AReplaysLastFrameEndsItsQueues)
+{
+    const std::string uri = fixture_uri("");
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    Queue frames, values;
+    ASSERT_EQ(ecuio_queue_open(s, ECUIO_QUEUE_FRAMES, ECUIO_QUEUE_MAX_FRAMES,
+                               &frames.q),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_queue_open(s, ECUIO_QUEUE_VALUES, ECUIO_QUEUE_MAX_VALUES,
+                               &values.q),
+              ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+
+    Frames rf(256);
+    Values rv(1024);
+    ecuio_status_t frames_end = ECUIO_OK;
+    ecuio_status_t values_end = ECUIO_OK;
+    int64_t frames_ms = 0;
+    int64_t values_ms = 0;
+    std::thread value_reader(
+        [&] { (void)drain(rv, values.q, &values_end, &values_ms); });
+    const uint64_t read = drain(rf, frames.q, &frames_end, &frames_ms);
+    value_reader.join();
+    EXPECT_EQ(frames_end, ECUIO_ERR_STREAM_ENDED);
+    EXPECT_EQ(values_end, ECUIO_ERR_STREAM_ENDED);
+    EXPECT_LT(frames_ms, kEndWakeMs) << "the end woke the waiting read";
+    EXPECT_LT(values_ms, kEndWakeMs) << "the end woke the waiting read";
+    EXPECT_EQ(read + rf.dropped, info.replay_frames)
+        << "every frame, read or counted as dropped, before the end";
+    EXPECT_GT(read, 0u);
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_STREAM_ENDED),
+                 "the stream has ended");
+
+    /* The end stays the answer once the session closes too */
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(rf.read(frames.q, 1000), ECUIO_ERR_STREAM_ENDED);
+    ecuio_session_destroy(s);
+}
+
+TEST(QueueTest, AReplayThatDropsFramesStillEnds)
+{
+    const std::string uri = fixture_uri("&faults=drop:20&seed=7");
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    Queue q;
+    ASSERT_EQ(
+        ecuio_queue_open(s, ECUIO_QUEUE_FRAMES, ECUIO_QUEUE_MAX_FRAMES, &q.q),
+        ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    Frames r(256);
+    ecuio_status_t end = ECUIO_OK;
+    const uint64_t read = drain(r, q.q, &end);
+    EXPECT_EQ(end, ECUIO_ERR_STREAM_ENDED);
+    ecuio_replay_faults_t f{};
+    ASSERT_EQ(ecuio_session_get_replay_faults(s, &f), ECUIO_OK);
+    EXPECT_GT(f.dropped, 0u) << "the faults dropped frames";
+    EXPECT_EQ(read + r.dropped + f.dropped + f.overflowed, info.replay_frames)
+        << "the frames the faults never sent don't hold the end back";
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    ecuio_session_destroy(s);
+}
+
+/* A looping replay never ends: its queues end only at the close, as a
+ * live transport's do */
+TEST(QueueTest, ALoopingReplayEndsOnlyAtTheClose)
+{
+    const std::string uri = fixture_uri("&loop=1");
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    Queue q;
+    ASSERT_EQ(
+        ecuio_queue_open(s, ECUIO_QUEUE_FRAMES, ECUIO_QUEUE_MAX_FRAMES, &q.q),
+        ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    Frames r(256);
+    uint64_t seen = 0;
+    ecuio_status_t rc = ECUIO_OK;
+    while (seen < 3u * info.replay_frames &&
+           (rc = r.read(q.q, 10000)) == ECUIO_OK)
+        seen += r.count;
+    EXPECT_EQ(rc, ECUIO_OK) << "past the end of three passes, still going";
+    EXPECT_GE(seen + r.dropped, 3u * info.replay_frames);
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    ecuio_status_t end = ECUIO_OK;
+    (void)drain(r, q.q, &end);
+    EXPECT_EQ(end, ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+}

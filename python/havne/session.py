@@ -1,0 +1,277 @@
+# File/layer: python/havne/session.py | Python 3.11+, the havne package
+# Testing: PythonTest.test_session, test_replay, test_recording,
+#          test_signal_file, test_vcan, test_j2534
+#
+# A session (core.h) and what a script reads from it: frames and values
+# through pull queues (queue.h, ADR-0053 section 4), never a callback, so
+# no Python runs on core's worker; its report, identity and support; a
+# recording of it (recording.h). Session is a context manager: leaving it
+# closes the session, then its streams and the recorders it opened.
+
+import ctypes
+import logging
+import threading
+from collections import namedtuple
+
+from . import _ecuio as e
+from ._core import check, lib, text, utf8, with_profile
+
+log = logging.getLogger("havne")
+
+Frame = namedtuple("Frame", "timestamp_us id channel flags data")
+Frame.__doc__ = ("A frame as core delivers it: session time in us, its CAN ID, "
+                 "its channel, ECUIO_FRAME_FLAG_* and its payload as bytes")
+Value = namedtuple("Value", "timestamp_us id signal_id name unit kind value text")
+Value.__doc__ = ("A decoded value: its frame's time and ID, its def's id, name and "
+                 "unit, ECUIO_VALUE_* kind, the number (an enum's raw one) and the "
+                 "text (a TEXT or HEX value's, an enum's label), else None")
+
+TEXT_KINDS = (e.ECUIO_VALUE_TEXT, e.ECUIO_VALUE_HEX)
+
+
+class Stream:
+    """A pull queue of a session's frames or values. Iterating reads in
+    batches, 100 ms at a time, so Ctrl+C lands within that, and ends when
+    the stream does: a replay's last frame (ECUIO_ERR_STREAM_ENDED) or the
+    session's close. `dropped` is the running total of entries a full queue
+    dropped; each time it grows the "havne" logger says so once. One
+    thread reads a stream at a time; close() from another thread waits for
+    the read under way, at most its timeout."""
+
+    BATCH = 256
+
+    def __init__(self, session, kind, capacity, batch=BATCH):
+        self.kind = kind
+        self.dropped = 0
+        self.ended = None   # "stream ended" or "session closed" once it has
+        self._session = session
+        self._lock = threading.Lock()
+        self._q = ctypes.POINTER(e.ecuio_queue_t)()
+        check(lib.ecuio_queue_open(session._handle(), kind, capacity, ctypes.byref(self._q)),
+              "ecuio_queue_open")
+        entry = e.ecuio_frame_t if kind == e.ECUIO_QUEUE_FRAMES else e.ecuio_queue_value_t
+        self._buf = (entry * batch)()
+        self._batch = batch
+        self._read = (lib.ecuio_queue_read_frames if kind == e.ECUIO_QUEUE_FRAMES
+                      else lib.ecuio_queue_read_values)
+
+    def read(self, timeout=0.1):
+        """What's waiting, as a list, waiting up to timeout seconds for the
+        first entry; [] once the stream has ended"""
+        count, dropped = ctypes.c_uint32(), ctypes.c_uint64()
+        with self._lock:
+            if self._q is None or self.ended:
+                return []
+            rc = self._read(self._q, self._buf, self._batch, ctypes.byref(count),
+                            ctypes.byref(dropped), max(0, int(timeout * 1000)))
+            if rc == e.ECUIO_ERR_STREAM_ENDED:
+                self.ended = "stream ended"
+            elif rc == e.ECUIO_ERR_SESSION_CLOSED:
+                self.ended = "session closed"
+            else:
+                check(rc, self._read.__name__)
+            entries = [self._entry(self._buf[i]) for i in range(count.value)]
+        if dropped.value > self.dropped:
+            what = "frames" if self.kind == e.ECUIO_QUEUE_FRAMES else "values"
+            log.warning("havne: %d %s dropped so far: the script reads slower than "
+                        "they arrive (a recording keeps every frame)", dropped.value, what)
+            self.dropped = dropped.value
+        return entries
+
+    def __iter__(self):
+        while not self.ended:
+            yield from self.read(0.1)
+
+    def close(self):
+        with self._lock:
+            if self._q is not None:
+                lib.ecuio_queue_close(self._q)
+                self._q = None
+
+    def _entry(self, c):
+        if self.kind == e.ECUIO_QUEUE_FRAMES:
+            return Frame(c.timestamp_us, c.arbitration_id, c.channel_id, c.flags,
+                         ctypes.string_at(c.data, c.data_length))
+        name, unit = self._session._names.get(c.signal_id, ("", ""))
+        has_text = c.kind in TEXT_KINDS or (c.kind == e.ECUIO_VALUE_ENUM and c.text_len > 0)
+        return Value(c.timestamp_us, c.arbitration_id, c.signal_id, name, unit, c.kind,
+                     c.value, text(c.text) if has_text else None)
+
+
+class Recorder:
+    """A recording of a session (ADR-0049), opened before its start; it
+    outlives the session, so notes and marks go on until close()"""
+
+    def __init__(self, session, root, label=None):
+        opts = e.ecuio_record_options_t()
+        opts.root_utf8 = utf8(str(root))
+        opts.label_utf8 = utf8(label) if label else None
+        self._r = ctypes.POINTER(e.ecuio_recorder_t)()
+        check(lib.ecuio_recorder_open(ctypes.byref(opts), ctypes.byref(self._r)),
+              "ecuio_recorder_open")
+        try:
+            if session.signal_file is not None:
+                check(lib.ecuio_recorder_signal_file(self._r, session.signal_file._handle),
+                      "ecuio_recorder_signal_file")
+            check(lib.ecuio_session_record(session._handle(), self._r), "ecuio_session_record")
+        except Exception:
+            lib.ecuio_recorder_close(self._r, None)
+            self._r = None
+            raise
+
+    @property
+    def folder(self):
+        n = ctypes.c_uint32()
+        lib.ecuio_recorder_get_folder(self._r, None, 0, ctypes.byref(n))
+        buf = ctypes.create_string_buffer(n.value + 1)
+        check(lib.ecuio_recorder_get_folder(self._r, buf, n.value + 1, ctypes.byref(n)),
+              "ecuio_recorder_get_folder")
+        return text(buf.raw)
+
+    def note(self, line):
+        check(lib.ecuio_recorder_note(self._r, utf8(line)), "ecuio_recorder_note")
+
+    def mark(self, label):
+        check(lib.ecuio_recorder_mark(self._r, utf8(label)), "ecuio_recorder_mark")
+
+    def close(self, why=None):
+        if self._r is not None:
+            r, self._r = self._r, None
+            check(lib.ecuio_recorder_close(r, utf8(why) if why else None),
+                  "ecuio_recorder_close")
+
+
+class Session:
+    """A session on uri (core.h): mock://, replay://, elm327://,
+    socketcan:// (Linux), j2534:// (Windows). signals: a SignalFile whose
+    profile decodes it; plugin and variant: a Plugin's variant to decode
+    with. Open streams and a recorder before start()."""
+
+    def __init__(self, uri, signals=None, plugin=None, variant=None):
+        if signals is not None and plugin is not None:
+            raise ValueError("a session decodes through one set: signals or plugin")
+        self.signal_file = signals
+        if signals is not None:
+            uri = with_profile(uri, signals.profile)
+        elif plugin is not None:
+            uri = with_profile(uri, plugin.register(variant))
+        self.uri = uri
+        self._streams, self._recorders = [], []
+        self._s = ctypes.POINTER(e.ecuio_session_t)()
+        check(lib.ecuio_session_create(utf8(uri), ctypes.byref(self._s)), "ecuio_session_create")
+        self._names = self._read_names()
+
+    def _handle(self):
+        if self._s is None:
+            raise ValueError("the session is closed")
+        return self._s
+
+    def _read_names(self):
+        names = {}
+        sset = lib.ecuio_session_signal_set(self._s)
+        if sset:
+            for i in range(sset.contents.count):
+                d = sset.contents.defs[i]
+                names[d.id] = (text(d.name), text(d.unit))
+        return names
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def frames(self, capacity=1024, batch=Stream.BATCH):
+        """A stream of the session's frames, before start()"""
+        s = Stream(self, e.ECUIO_QUEUE_FRAMES, capacity, batch)
+        self._streams.append(s)
+        return s
+
+    def values(self, capacity=4096, batch=Stream.BATCH):
+        """A stream of the session's decoded values, before start()"""
+        s = Stream(self, e.ECUIO_QUEUE_VALUES, capacity, batch)
+        self._streams.append(s)
+        return s
+
+    def record(self, root, label=None):
+        """A recording of the session into a new folder under root, before start()"""
+        r = Recorder(self, root, label)
+        self._recorders.append(r)
+        return r
+
+    def start(self):
+        check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")
+
+    @property
+    def signals(self):
+        """{signal id: (name, unit)} of the session's set"""
+        return dict(self._names)
+
+    @property
+    def info(self):
+        out = e.ecuio_session_info_t()
+        check(lib.ecuio_session_get_info(self._handle(), ctypes.byref(out)),
+              "ecuio_session_get_info")
+        return out
+
+    def support(self, channel=0):
+        out = e.ecuio_channel_support_t()
+        check(lib.ecuio_session_get_channel_support(self._handle(), channel, ctypes.byref(out)),
+              "ecuio_session_get_channel_support")
+        return out
+
+    def identity(self, channel=0):
+        out = e.ecuio_channel_identity_t()
+        check(lib.ecuio_session_get_channel_identity(self._handle(), channel, ctypes.byref(out)),
+              "ecuio_session_get_channel_identity")
+        return out
+
+    def vin(self, channel=0):
+        """The channel's VIN, "" until identification reads one"""
+        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
+        ident = self.identity(channel)
+        check(lib.ecuio_identity_vin(ctypes.byref(ident), buf, len(buf)), "ecuio_identity_vin")
+        return text(buf.raw)
+
+    def diagnostics(self, channel=0):
+        """The channel's trouble-code report (ADR-0037): core's
+        ecuio_channel_diagnostics_t"""
+        out = e.ecuio_channel_diagnostics_t()
+        check(lib.ecuio_session_get_channel_diagnostics(self._handle(), channel,
+                                                        ctypes.byref(out)),
+              "ecuio_session_get_channel_diagnostics")
+        return out
+
+    def clear(self, channel=0, confirm=False, engine_running=False, moving=False):
+        """Asks the channel's ECU to clear its trouble codes (ADR-0038):
+        Service 04, which also erases the freeze frame and sets the
+        readiness monitors back to incomplete. confirm=True is the
+        caller's word, as havne-cli clear --yes. Core's gate applies
+        whatever is asked: the report read first must be complete and
+        still the channel's, and 04 goes out only with the engine stopped
+        (0 rpm) and the car standing still, unless engine_running or
+        moving gives the caller's word for that too. Returns at once; the
+        report's `clear` field says what became of it. The package's
+        tests clear only the simulated car."""
+        if not confirm:
+            raise ValueError("clear() erases the car's trouble codes: pass confirm=True")
+        flags = ((e.ECUIO_CLEAR_ALLOW_RUNNING if engine_running else 0) |
+                 (e.ECUIO_CLEAR_ALLOW_MOVING if moving else 0))
+        report = self.diagnostics(channel)
+        check(lib.ecuio_session_clear_diagnostics_with(self._handle(), channel,
+                                                       report.generation, flags),
+              "ecuio_session_clear_diagnostics_with")
+        return report.generation
+
+    def close(self):
+        """Closes the session (its worker stops), then its streams and the
+        recorders it opened; destroys it. A second call does nothing."""
+        if self._s is None:
+            return
+        s, self._s = self._s, None
+        lib.ecuio_session_close(s)
+        for st in self._streams:
+            st.close()
+        lib.ecuio_session_destroy(s)
+        for r in self._recorders:
+            r.close()

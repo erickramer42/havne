@@ -41,7 +41,13 @@ extern "C" {
  * readers: what's waiting is still read, and then a read returns
  * ECUIO_ERR_SESSION_CLOSED. ecuio_queue_close frees the queue, before or
  * after its session is closed or destroyed; a read under way on another
- * thread returns first. Reading or closing a queue after
+ * thread returns first.
+ *
+ * The stream's end: a replay that doesn't loop ends its queues once its
+ * last pass is over (or it stops early, its file changed): what's waiting
+ * is still read, and then a read returns ECUIO_ERR_STREAM_ENDED. Only a
+ * replay ends a stream; a looping replay never does, and a live
+ * transport's queues end only at the session's close. Reading or closing a queue after
  * ecuio_queue_close is undefined, as for every handle (core.h's
  * lifecycle). Two threads may read one queue; each entry goes to one of
  * them.
@@ -117,8 +123,10 @@ ecuio_status_t ecuio_queue_open(ecuio_session_t* session, uint32_t kind,
 /* Copies up to `capacity` waiting entries into out, oldest first, and
  * sets *count to how many; *dropped gets the entries dropped since open.
  * With none waiting it waits up to timeout_ms (0: not at all) for the
- * first; ECUIO_OK with *count 0 when none came. Once the session has
- * closed and nothing is left: ECUIO_ERR_SESSION_CLOSED, *count 0.
+ * first; ECUIO_OK with *count 0 when none came. Once the stream has
+ * ended and nothing is left: ECUIO_ERR_STREAM_ENDED; once the session has
+ * closed (and the stream hadn't ended): ECUIO_ERR_SESSION_CLOSED; *count
+ * 0 either way.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL queue, out, count or dropped;
  * ECUIO_ERR_INVALID_ARGUMENT for a capacity of 0, or the other kind's
  * queue. A frame's bytes past its data_length are zero. */

@@ -128,6 +128,12 @@ public:
     Q_INVOKABLE double findThreshold(int signal, double level,
                                      double hysteresis, bool rising);
     Q_INVOKABLE double findMarker(const QString& label);
+    // The engine's first start (core's ECUIO_RECORDING_FIND_ENGINE_START,
+    // as havne-cli view --align-on engine-start finds it): the rpm signal
+    // reaching 500 after being below 100. -1 for none (no rpm signal, an
+    // engine running from the first sample and never stopped) or a
+    // recording not open.
+    Q_INVOKABLE double findEngineStart();
     // Each signal's value in force at tMs, as the cursor shows it: one map
     // each, { index, text (a number in display units, its decimals; a text
     // signal's as recorded; "" before its first sample), unit, atMs (-1

@@ -80,14 +80,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # jsonschema for SchemaFixturesTest (schema/ against the committed
-      # fixtures), the hash-pinned wheels in
-      # .github/jsonschema-requirements.txt, bumped by hand. A venv, since
-      # the image's Python is externally managed; the configure below
-      # takes it as the tests' Python.
-      - name: Install jsonschema
+      # fixtures) and pytest for PythonTest.* (the havne package against
+      # the shared core, python/tests/), the hash-pinned wheels in
+      # .github/jsonschema-requirements.txt and pytest-requirements.txt,
+      # bumped by hand. A venv, since the image's Python is externally
+      # managed; the configure below takes it as the tests' Python.
+      - name: Install jsonschema and pytest
         run: |
           python3 -m venv "$RUNNER_TEMP/schema"
           "$RUNNER_TEMP/schema/bin/python" -m pip install --require-hashes -r .github/jsonschema-requirements.txt
+          "$RUNNER_TEMP/schema/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
       # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
       # (ADR-0034 section 4) and ProbeNotesTest runs
@@ -99,10 +101,12 @@ jobs:
           cmake --build build
 
       # ECUIO_SCHEMA_REQUIRED: SchemaFixturesTest fails rather than skips
-      # without jsonschema
+      # without jsonschema; ECUIO_PYTEST_REQUIRED: PythonTest.* fail
+      # rather than skip without pytest
       - name: Run tests
         env:
           ECUIO_SCHEMA_REQUIRED: '1'
+          ECUIO_PYTEST_REQUIRED: '1'
         run: |
           ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
@@ -352,11 +356,25 @@ jobs:
           if (-not (Test-Path "$prefix\bin\qmake.exe")) { Write-Error "no Qt at $prefix"; exit 1 }
           "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      # pytest for PythonTest.* (the havne package against the shared
+      # core, the J2534 case through the fake DLL and the x64 surrogate),
+      # in a venv the configure takes as the tests' Python, as
+      # core-and-tests does; --system-site-packages, so it still sees
+      # what the runner's Python has (jsonschema, where it does)
+      - name: Install pytest
+        run: |
+          python -m venv --system-site-packages "$env:RUNNER_TEMP\py"
+          & "$env:RUNNER_TEMP\py\Scripts\python.exe" -m pip install --require-hashes -r .github/pytest-requirements.txt
+
       - name: Build full app
         run: |
-          cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX"
+          cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DPython3_EXECUTABLE="$env:RUNNER_TEMP\py\Scripts\python.exe"
           cmake --build build --config Release
+      # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
+      # pytest
       - name: Run tests
+        env:
+          ECUIO_PYTEST_REQUIRED: '1'
         run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
       # The replay fixture through the bridge (tests/bench_bridge.cpp): its
       # table goes to the run's summary, and the step fails only on a
@@ -473,11 +491,26 @@ jobs:
           target: 'desktop'
           arch: 'clang_64'
 
+      # pytest for PythonTest.* (the havne package against the shared
+      # core), in a venv the configure takes as the tests' Python, as
+      # core-and-tests does; --system-site-packages, so it still sees
+      # what the runner's Python has (jsonschema, where it does). The
+      # package needs Python 3.11 or later
+      - name: Install pytest
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/py"
+          "$RUNNER_TEMP/py/bin/python" -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+          "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
+
       - name: Build full app
         run: |
-          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"
           cmake --build build
+      # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
+      # pytest
       - name: Run tests
+        env:
+          ECUIO_PYTEST_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
       # A manual run's regex reaches the shell only through env.
@@ -508,6 +541,17 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
 
+      # pytest for PythonTest.* (the havne package against the shared
+      # core), in a venv the configure takes as the tests' Python, as
+      # core-and-tests does; --system-site-packages, so it still sees
+      # what the runner's Python has (jsonschema, where it does). The
+      # package needs Python 3.11 or later
+      - name: Install pytest
+        run: |
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/py"
+          "$RUNNER_TEMP/py/bin/python" -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+          "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
+
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
       # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
       # and bpftrace: core's USDT probes and the step that traces them
@@ -515,7 +559,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
             systemtap-sdt-dev bpftrace
-          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"
           cmake --build build
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
@@ -528,11 +572,14 @@ jobs:
           sudo ip link add dev vcan0 type vcan
           sudo ip link set vcan0 mtu 72
           sudo ip link set up vcan0
-      # ECUIO_VCAN_REQUIRED: test_vcan's suites and CliPluginRunTest fail
-      # rather than skip without vcan0
+      # ECUIO_VCAN_REQUIRED: test_vcan's suites, CliPluginRunTest and
+      # PythonTest.test_vcan (v0.6.0's "a Python script opens SocketCAN")
+      # fail rather than skip without vcan0; ECUIO_PYTEST_REQUIRED:
+      # PythonTest.* fail rather than skip without pytest
       - name: Run tests
         env:
           ECUIO_VCAN_REQUIRED: '1'
+          ECUIO_PYTEST_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error
       # The one SocketCAN case that sets the interface down and up again
       # needs CAP_NET_ADMIN; it skips in the run above, and runs here

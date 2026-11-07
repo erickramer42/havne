@@ -340,7 +340,10 @@ ApplicationWindow {
                     LogPage { objectName: "logPage" }
                     RecordingsPage {
                         objectName: "recordingsPage"
+                        // A vehicle's baseline: Settings keeps the vehicles
+                        vehicles: settingsView.vehicles
                         onReplayRequested: uri => root.replayRecording(uri)
+                        onVehiclesEdited: doc => settingsView.saveVehicles(doc)
                     }
                     SettingsPage {
                         id: settingsView

@@ -1906,8 +1906,11 @@ void usage(FILE* to)
         "         and with --at the values in force then. --align-on puts\n"
         "         several on one axis, its zero at rise:<signal>:<level>\n"
         "         (reaching it after being --hysteresis below),\n"
-        "         fall:<signal>:<level>, marker:<label>, or utc (their\n"
-        "         wall-clock starts).\n"
+        "         fall:<signal>:<level>, marker:<label>, utc (their\n"
+        "         wall-clock starts), or engine-start (the rpm signal\n"
+        "         reaching 500 after being below 100): view <run>\n"
+        "         <baseline> --align-on engine-start overlays a run on a\n"
+        "         vehicle's baseline.\n"
         "         --frames reads the values from frames.csv through a\n"
         "         profile's decode: --profile's, a --signals file's or a\n"
         "         --plugin variant's, else the recording's own signals.json\n"
@@ -3289,6 +3292,8 @@ int run_view(ViewArgs& args)
                                      : ECUIO_RECORDING_FIND_FALLING;
                 what.level = args.align.level;
                 what.hysteresis = args.hysteresis;
+            } else if (args.align.kind == cli::AlignOn::engine_start) {
+                what.kind = ECUIO_RECORDING_FIND_ENGINE_START;
             } else {
                 what.kind = ECUIO_RECORDING_FIND_MARKER;
                 what.label_utf8 = args.align.label.c_str();
@@ -3893,8 +3898,8 @@ int run(int argc, char** argv)
                     std::fprintf(stderr,
                                  "havne-cli: --align-on takes "
                                  "rise:<signal>:<level>, "
-                                 "fall:<signal>:<level>, marker:<label> or "
-                                 "utc\n");
+                                 "fall:<signal>:<level>, marker:<label>, "
+                                 "utc or engine-start\n");
                     return kExitUsage;
                 }
             } else if (a == "--hysteresis" && has_value) {

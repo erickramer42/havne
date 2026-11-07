@@ -401,6 +401,8 @@ int main(void)
         offsetof(ecuio_recording_signals_t, sha256) != 16 ||
         ECUIO_RECORDING_SIGNALS_MATCH != 0x4u || ECUIO_ERR_CANCELED != 19 ||
         ECUIO_RECORDING_NONE != UINT64_MAX || ECUIO_ERR_IN_USE != 20 ||
+        ECUIO_RECORDING_FIND_ENGINE_START != 3u ||
+        ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM != 400.0 ||
         ecuio_plugin_free(NULL) != ECUIO_OK ||
         ecuio_plugin_values(NULL, NULL, 0, NULL, 0, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||

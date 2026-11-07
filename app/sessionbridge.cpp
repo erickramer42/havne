@@ -2023,19 +2023,63 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     return selecting(own);
 }
 
+namespace {
+
+// A recording folder's row for the Recordings page: { title, uri, folder,
+// source, profile } (recentRecordings says what each holds)
+QVariantMap recordingRowOf(const QFileInfo& info)
+{
+    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder)
+    static const QRegularExpression kName(
+        QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
+                       "\\d+)?(?: (.+))?$"));
+    const QString folder = info.absoluteFilePath();
+
+    // The header's "uri" line, among events.log's first few
+    QString recorded;
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        for (int i = 0; i < 12 && !events.atEnd(); ++i) {
+            const QString line = QString::fromUtf8(events.readLine()).trimmed();
+            if (line.startsWith(QLatin1String("uri "))) {
+                recorded = line.mid(4).trimmed();
+                break;
+            }
+        }
+    }
+
+    const QRegularExpressionMatch m = kName.match(info.fileName());
+    QString title = info.fileName();
+    if (m.hasMatch()) {
+        title = QStringLiteral("%1-%2-%3 %4:%5:%6")
+                    .arg(m.captured(1), m.captured(2), m.captured(3),
+                         m.captured(4), m.captured(5), m.captured(6));
+        if (m.hasCaptured(7)) {
+            title += QStringLiteral(" · ") + m.captured(7);
+        }
+    }
+    const QString uri = SessionBridge::replayUriFor(folder, recorded);
+    QVariantMap row;
+    row["title"] = title;
+    row["uri"] = uri;
+    row["folder"] = folder;
+    row["source"] = SessionBridge::uriLabelFor(recorded);
+    // After the query's "?profile=", the last ? in it
+    row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)
+                         .section(QLatin1Char('&'), 0, 0);
+    return row;
+}
+
+} // namespace
+
 QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
     if (limit <= 0) {
         return out;
     }
-    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder): by name,
-    // last first, is newest first
-    static const QRegularExpression kName(
-        QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
-                       "\\d+)?(?: (.+))?$"));
     // Both roots' folders, newest first across them (the names start with
-    // the stamp)
+    // the stamp, so by name, last first, is newest first)
     QFileInfoList folders;
     for (const QString& root : {recordingsRoot(), earlierRecordingsRoot()}) {
         if (!root.isEmpty()) {
@@ -2051,47 +2095,24 @@ QVariantList SessionBridge::recentRecordings(int limit) const
         if (out.size() >= limit) {
             break;
         }
-        const QString folder = info.absoluteFilePath();
-        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv"))) {
-            continue;
+        if (QFileInfo::exists(info.absoluteFilePath() +
+                              QStringLiteral("/frames.csv"))) {
+            out.append(recordingRowOf(info));
         }
-
-        // The header's "uri" line, among events.log's first few
-        QString recorded;
-        QFile events(folder + QStringLiteral("/events.log"));
-        if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            for (int i = 0; i < 12 && !events.atEnd(); ++i) {
-                const QString line =
-                    QString::fromUtf8(events.readLine()).trimmed();
-                if (line.startsWith(QLatin1String("uri "))) {
-                    recorded = line.mid(4).trimmed();
-                    break;
-                }
-            }
-        }
-
-        const QRegularExpressionMatch m = kName.match(info.fileName());
-        QString title = info.fileName();
-        if (m.hasMatch()) {
-            title = QStringLiteral("%1-%2-%3 %4:%5:%6")
-                        .arg(m.captured(1), m.captured(2), m.captured(3),
-                             m.captured(4), m.captured(5), m.captured(6));
-            if (m.hasCaptured(7)) {
-                title += QStringLiteral(" · ") + m.captured(7);
-            }
-        }
-        const QString uri = replayUriFor(folder, recorded);
-        QVariantMap row;
-        row["title"] = title;
-        row["uri"] = uri;
-        row["folder"] = folder;
-        row["source"] = uriLabelFor(recorded);
-        // After the query's "?profile=", the last ? in it
-        row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)
-                             .section(QLatin1Char('&'), 0, 0);
-        out.append(row);
     }
     return out;
+}
+
+QVariantMap SessionBridge::recordingRow(const QString& folder) const
+{
+    if (folder.isEmpty() ||
+        (!QFileInfo::exists(folder + QStringLiteral("/signals.csv")) &&
+         !QFileInfo::exists(folder + QStringLiteral("/frames.csv")))) {
+        return {};
+    }
+    QVariantMap row = recordingRowOf(QFileInfo(folder));
+    row["folder"] = folder;
+    return row;
 }
 
 // Pure-core half: safe on ANY thread. Creates and registers, the slow

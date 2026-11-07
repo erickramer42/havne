@@ -108,6 +108,28 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   fails the export instead of being changed
   ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
   CSV export as built").
+- `havne-cli export <recording> <out> --format folder` writes a copy
+  of a recording to send, one Havne opens, views, checks and replays as
+  the original. Scrubbed unless `--raw`: identification replies and
+  text signals are left out of its frames and values, the session's
+  address and the vehicle's label out of its log, the app's activity
+  notes left out, and every file is checked for the car's identity
+  before the copy is put in place. Markers keep their labels as typed.
+  Name the copy by its time (`20261106-142233`): the original's folder
+  name can hold the vehicle's label
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  folder export as built").
+- The `havne` Python package (`python/havne/`): sessions on every
+  transport with their frames and decoded values read as iterators,
+  recordings, the simulated ECU, a script's own signals as a signal file
+  and a plugin's variants, over core's shared library through ctypes,
+  with no compiler at install time
+  ([ADR-0053](docs/adr/0053-python-bindings.md)). It runs from the source
+  tree against a built shared core (`HAVNE_LIBRARY`); the wheel comes
+  with the release.
+- Core's pull queue tells a replay's end: once a replay that doesn't loop
+  has played its last frame, a read returns `ECUIO_ERR_STREAM_ENDED`, so
+  a loop over a replay's values finishes.
 
 ## [0.5.1] - 2026-11-06
 
