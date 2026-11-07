@@ -473,6 +473,14 @@ and `-R` work as in `verify.sh`. CI's `win-coverage` job runs the same
 script on every push and uploads the Cobertura file to Codecov for the
 README badge ([testing.md](testing.md#coverage)).
 
+**The tests' Python.** The Python tests (`PythonTest.*`, `SchemaFixturesTest`,
+the CLI's script tests) run under the Python the configure found, so
+give it one with pytest and jsonschema (`-DPython3_EXECUTABLE=<venv
+python>`; CI installs both from `.github/*-requirements.txt` with
+`--require-hashes`). A 32-bit Python 3.11 or later with pytest, given to
+`build-win32` the same way, has `scripts/verify.sh`'s cross-arch step run
+the package's tests against the x86 core.
+
 ## The command-line client
 
 `havne-cli` ([ADR-0031](adr/0031-command-line-client.md)) builds in
@@ -747,14 +755,14 @@ Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." |
+| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). This enforces "core never links Qt." |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the JSON, signal-file, plugin and OBDb harnesses; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
 | `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app. Any warning fails it. Only the app's moc output is built. |
-| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) |
-| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). |
+| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. |
+| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. |
 | `win-coverage` | Windows, MSVC 2022 | Installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs `scripts/coverage.sh` and uploads the report to Codecov ([testing.md](testing.md#coverage)). |
-| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
+| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). |
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |

@@ -119,6 +119,17 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   name can hold the vehicle's label
   ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
   folder export as built").
+- The `havne` Python package (`python/havne/`): sessions on every
+  transport with their frames and decoded values read as iterators,
+  recordings, the simulated ECU, a script's own signals as a signal file
+  and a plugin's variants, over core's shared library through ctypes,
+  with no compiler at install time
+  ([ADR-0053](docs/adr/0053-python-bindings.md)). It runs from the source
+  tree against a built shared core (`HAVNE_LIBRARY`); the wheel comes
+  with the release.
+- Core's pull queue tells a replay's end: once a replay that doesn't loop
+  has played its last frame, a read returns `ECUIO_ERR_STREAM_ENDED`, so
+  a loop over a replay's values finishes.
 
 ## [0.5.1] - 2026-11-06
 
