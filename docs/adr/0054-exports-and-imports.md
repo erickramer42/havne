@@ -747,3 +747,51 @@ out of order; an identity reply before the range still checked; a
 folder export's scrubbed copy; a small recording's text byte for byte.
 `ExportTest`, `CsvExportTest` and `FolderExportTest` cover the shared
 header and rows.
+
+**`havne-cli health` (2026-11-07).** The third step: `havne-cli health
+<uri | recording> <out> --format json|text [--units metric|imperial]`,
+public headers only (`cli/health_lines.h`, `run_health_session`,
+`run_health_recording`). An argument with a scheme's `://` is a live
+session, anything else a recording's folder. The CLI gives the time
+(`utc_us` from the system clock) and the latest model year (this year
+plus one, as the front ends pass it).
+
+- **A recording** takes `--from`/`--to` (view's seconds) and nothing of a
+  session's: its own set, as core reads it.
+- **A live session** takes `--seconds` (the wait's bound, 30 by default,
+  as `clear`'s) and `--signals`/`--plugin` (loaded as `stream` loads
+  them, so a user's ranked signals are key values). A values callback
+  keeps each def's newest value and when it came (`ecuio_clock_us`), one
+  slot per def ID so the worker allocates nothing; each value's age is
+  the report's time less that. The wait is for what's asked: a channel
+  is settled once its diagnostics are complete or were never asked
+  (only obd2 and the mock ask them; a uds-generic or raw session never
+  does) and its identification is complete or has no items. Then it
+  waits until no shown signal (a ranked one or a since-cleared PID) has
+  gained its first value for 2 s: a PID the ECU lacks never comes, so
+  the wait ends on quiet, not on all of them. `--seconds` or Ctrl+C
+  ends it sooner, and the report holds what's in, a report still being
+  read saying so.
+- **Reads only.** On a car the session asks only what core's
+  diagnostics and identification ask (Services 01, 02, 03, 07, 09 and
+  0A, never 04's clear), so it runs parked or driving; the usage says
+  so.
+- **Its lines:** `start`, a session's `session`, then `health` (format,
+  file, source, the report's counts, the identification texts left out,
+  `vin_decoded` as a yes or no, and a session's `settled`); never the
+  VIN or an identification text. A failed check writes `health_failed`
+  with its class before the `error` line. Exits as `export`'s: 0
+  written, 2 usage, 3 a connect, a refused folder, an existing file or a
+  failed check, 1 the CLI's own output failing.
+
+**Tests (step 3):** `CliHealthTest` (test_cli: each argument form and
+refusal, the wait's rule for asked and unasked reports, the shown defs,
+the values' quiet, the lines), `CliUsageTest.Health*`, and
+`CliHealthRunTest` (`tests/cli_health.py`): the mock's report (its label
+out, the file written once), a uds-generic mock with diagnostics off
+ending well before its `--seconds`, the simulated car as an ELM327
+adapter on loopback (its VIN decoded and in neither the file nor the
+lines, its ranked values and five since-cleared PIDs), the same car
+answering late through uds-generic (its identification outlasts the
+values' quiet, and the report waits for it), a recording of values alone
+and a range past its end.
