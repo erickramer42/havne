@@ -133,6 +133,25 @@ public:
     // The newest frame's time, 0 with none held
     quint64 newestTimestampUs() const;
 
+    // The text and hex defs of each session's set, copied and kept, so an
+    // export after the session ends still leaves their messages out
+    void noteTextDefs(const ecuio_signal_set_t* set);
+    // Export CSV (ADR-0054's appendix "frames in memory"): a copy of the
+    // frames held through ecuio_scrub_frames, then the kept ones the
+    // filter shows, oldest first. One comment line of counts, then
+    // time_s,id,ext,dir,dlc,flags,data. A failed check is ok false with
+    // core's words, never a value, and no bytes
+    struct ScrubbedCsv {
+        bool ok = false;
+        QString words;
+        QByteArray bytes;
+        int written = 0;
+        quint64 identification = 0;
+        quint64 textValues = 0;
+        quint64 unattributed = 0;
+    };
+    ScrubbedCsv scrubbedCsv() const;
+
     // The selection, by view row. A tap toggles a row and makes it the
     // anchor; a shift-click selects every row from the anchor to its own
     // (a toggle when the anchor has left the ring)
@@ -209,6 +228,8 @@ private:
     // While the filter is active, the arrival numbers of the frames it
     // shows, oldest first
     std::deque<quint64> m_shown;
+    // noteTextDefs's copies, each once
+    std::vector<ecuio_signal_def_t> m_textDefs;
 };
 
 // The Log page's By ID view: one row per ID (and extended or not) over
@@ -695,6 +716,12 @@ public:
     // words }, words never naming either path; a copy changed since it
     // was kept is refused, not saved. Logs one line
     Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
+    // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
+    // at url (a local file, or Android's content:// through QFile): { ok,
+    // words, written, leftOut, unattributed }, leftOut the identification
+    // replies' and text signals' frames, words never naming the path. A
+    // failed check writes nothing. Logs one line
+    Q_INVOKABLE QVariantMap exportFrames(const QUrl& url);
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,

@@ -451,6 +451,110 @@ QString FrameListModel::selectedText() const
     return text;
 }
 
+void FrameListModel::noteTextDefs(const ecuio_signal_set_t* set)
+{
+    if (set == nullptr) {
+        return;
+    }
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0 ||
+            (d.kind != ECUIO_VALUE_TEXT && d.kind != ECUIO_VALUE_HEX)) {
+            continue;
+        }
+        // What the scrub reads of a def: the frames it applies to
+        const bool held =
+            std::any_of(m_textDefs.begin(), m_textDefs.end(),
+                        [&](const ecuio_signal_def_t& k) {
+                            return k.message_id == d.message_id &&
+                                   k.mux_offset == d.mux_offset &&
+                                   k.mux_length == d.mux_length &&
+                                   k.mux_key == d.mux_key;
+                        });
+        if (!held) {
+            m_textDefs.push_back(d);
+        }
+    }
+}
+
+FrameListModel::ScrubbedCsv FrameListModel::scrubbedCsv() const
+{
+    ScrubbedCsv out;
+    // The rows as they are now: both of core's passes read this copy
+    std::vector<Row> rows;
+    rows.reserve(static_cast<size_t>(m_count));
+    for (int age = 0; age < m_count; ++age) {
+        rows.push_back(
+            m_ring[(m_oldest + static_cast<size_t>(age)) % m_ring.size()]);
+    }
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = static_cast<uint32_t>(m_textDefs.size());
+    set.defs = m_textDefs.empty() ? nullptr : m_textDefs.data();
+    std::vector<uint8_t> keep(rows.size());
+    ecuio_export_report_t report{};
+    const ecuio_scrub_frame_callback_t get = [](void* user, size_t index,
+                                                ecuio_frame_t* f) -> int {
+        const Row& r = (*static_cast<const std::vector<Row>*>(user))[index];
+        f->timestamp_us = r.timestampUs;
+        f->arbitration_id = r.arbId;
+        f->flags = r.flags;
+        f->data_length = r.length;
+        memcpy(f->data, r.data(), r.length);
+        return 0;
+    };
+    const ecuio_status_t rc = ecuio_scrub_frames(rows.size(), get, &rows, &set,
+                                                 0, keep.data(), &report);
+    if (rc != ECUIO_OK) {
+        const QString detail = QString::fromUtf8(ecuio_last_error_detail());
+        out.words = detail.isEmpty()
+                        ? QStringLiteral("The frames couldn't be checked")
+                        : detail.left(1).toUpper() + detail.mid(1);
+        return out;
+    }
+    out.identification = report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION];
+    out.textValues = report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES];
+    out.unattributed = report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE];
+    QByteArray body;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const Row& r = rows[i];
+        if (keep[i] == 0 || (m_filter.active() && !shows(r))) {
+            continue;
+        }
+        ++out.written;
+        body += QByteArray::number(static_cast<double>(r.timestampUs) / 1e6,
+                                   'f', 6);
+        body += ",0x" + QByteArray::number(r.arbId, 16).toUpper();
+        body += r.extended ? ",1" : ",0";
+        body += (r.flags & ECUIO_FRAME_FLAG_TX_ECHO) != 0 ? ",tx," : ",rx,";
+        body += QByteArray::number(r.length);
+        body += ',' + flagWords(r.flags).toLatin1() + ',';
+        body += QByteArray::fromRawData(reinterpret_cast<const char*>(r.data()),
+                                        static_cast<qsizetype>(r.length))
+                    .toHex(' ')
+                    .toUpper();
+        body += '\n';
+    }
+    out.bytes =
+        QStringLiteral(
+            "# Havne %1, the Log page's frames, scrubbed (ADR-0054): %2 "
+            "written%3; left out of the %4 held: %5 frames of "
+            "identification replies, %6 of text signals' messages, %7 "
+            "segments of messages that couldn't be reassembled\n")
+            .arg(QString::fromLatin1(ecuio_version_string()))
+            .arg(out.written)
+            .arg(m_filter.active() ? QStringLiteral(" (those the filter shows)")
+                                   : QString())
+            .arg(rows.size())
+            .arg(out.identification)
+            .arg(out.textValues)
+            .arg(out.unattributed)
+            .toUtf8() +
+        "time_s,id,ext,dir,dlc,flags,data\n" + body;
+    out.ok = true;
+    return out;
+}
+
 // ---------------- FrameIdModel ----------------
 FrameIdModel::FrameIdModel(const FrameListModel* frames, QObject* parent)
     : QAbstractListModel(parent)
@@ -1354,6 +1458,41 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
     return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
 }
 
+QVariantMap SessionBridge::exportFrames(const QUrl& url)
+{
+    const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();
+    QString words = csv.words;
+    bool written = false;
+    if (csv.ok) {
+        if (url.isLocalFile()) {
+            QSaveFile out(url.toLocalFile());
+            written = out.open(QIODevice::WriteOnly) &&
+                      out.write(csv.bytes) == csv.bytes.size() && out.commit();
+        } else {
+            QFile out(url.toString());
+            written = out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+                      out.write(csv.bytes) == csv.bytes.size() && out.flush();
+        }
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    const qulonglong leftOut = csv.identification + csv.textValues;
+    emit logMessage(
+        written ? QStringLiteral("Frames exported: %1 written, %2 left out "
+                                 "(identification and text signals), %3 "
+                                 "segments unattributed")
+                      .arg(csv.written)
+                      .arg(leftOut)
+                      .arg(qulonglong{csv.unattributed})
+                : QStringLiteral("Frames not exported: %1").arg(words));
+    return {{QStringLiteral("ok"), written},
+            {QStringLiteral("words"), written ? QString() : words},
+            {QStringLiteral("written"), written ? csv.written : 0},
+            {QStringLiteral("leftOut"), leftOut},
+            {QStringLiteral("unattributed"), qulonglong{csv.unattributed}}};
+}
+
 QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
 {
     const QVariantList used = m_signalStore.use(shas);
@@ -2010,6 +2149,7 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     m_valueLatency.clear();
     m_valuesStaged = 0;
     prepareValueStaging(ecuio_session_signal_set(session));
+    m_frameLog->noteTextDefs(ecuio_session_signal_set(session));
     // Attached before the worker starts, so the recording holds every frame
     startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);

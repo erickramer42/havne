@@ -53,6 +53,7 @@
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
+#include <ecuio/version.h>
 #include <ecuio/serial.h>
 #include <ecuio/signal_sets.h>
 #include "ecuio/internal.h" // core's recorder seams (a failed write)
@@ -9198,4 +9199,153 @@ TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
     ids.refresh();
     EXPECT_EQ(ids.count(), 0);
     EXPECT_EQ(mirror.rows, 0);
+}
+
+// ---- Export CSV (ADR-0054's appendix "frames in memory") ----
+
+// The VIN reply delivered whole, a value, another ECU's value, the
+// tester's own request, then a text signal's DID
+void heldForExport(FrameListModel& model, FrameMaker& m)
+{
+    m.add(model, 0x7E8, {0x49, 0x02, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+                         '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          1000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    m.add(model, 0x7E8, {0x04, 0x41, 0x0C, 0x1A, 0xF8}, 2000);
+    m.add(model, 0x7E9, {0x03, 0x41, 0x05, 0x7B}, 3000);
+    m.add(model, 0x7E0, {0x02, 0x01, 0x0C}, 4000, ECUIO_FRAME_FLAG_TX_ECHO);
+    m.add(model, 0x7E8,
+          {0x62, 0xD8, 0x02, 'E', 'C', 'M', '-', 'H', 'a', 'v', 'n', 'e'}, 5000,
+          ECUIO_FRAME_FLAG_REASSEMBLED);
+}
+
+std::string csvHead(int written, const char* filter, int held, int ident,
+                    int text)
+{
+    char line[512];
+    std::snprintf(line, sizeof line,
+                  "# Havne %s, the Log page's frames, scrubbed (ADR-0054): %d "
+                  "written%s; left out of the %d held: %d frames of "
+                  "identification replies, %d of text signals' messages, 0 "
+                  "segments of messages that couldn't be reassembled\n"
+                  "time_s,id,ext,dir,dlc,flags,data\n",
+                  ecuio_version_string(), written, filter, held, ident, text);
+    return line;
+}
+
+// Core's scrub leaves the identification reply out, a text def of a
+// session's set leaves its message out (the set noted, the session long
+// gone), and the filter picks among the frames kept
+TEST(BridgeTest, FrameCsvLeavesIdentificationOutAndWritesWhatTheFilterShows)
+{
+    FrameListModel model;
+    FrameMaker m;
+    heldForExport(model, m);
+
+    FrameListModel::ScrubbedCsv csv = model.scrubbedCsv();
+    ASSERT_TRUE(csv.ok) << csv.words.toStdString();
+    EXPECT_EQ(csv.bytes.toStdString(),
+              csvHead(4, "", 5, 1, 0) +
+                  "0.002000,0x7E8,0,rx,5,,04 41 0C 1A F8\n"
+                  "0.003000,0x7E9,0,rx,4,,03 41 05 7B\n"
+                  "0.004000,0x7E0,0,tx,3,sent,02 01 0C\n"
+                  "0.005000,0x7E8,0,rx,12,reassembled,62 D8 02 45 43 4D 2D 48 "
+                  "61 76 6E 65\n");
+    EXPECT_EQ(csv.written, 4);
+    EXPECT_EQ(csv.identification, 1u);
+
+    const std::string json =
+        R"({"havne_signals": 1, "name": "Scrub test", )"
+        R"("source": {"name": "test_bridge"}, )"
+        R"("ecus": [{"id": "pcm", "rx": "7E8"}], )"
+        R"("signals": [{"key": "ecu_name", "name": "ECU name", "ecu": "pcm", )"
+        R"("read": {"service": "22", "number": "D802"}, )"
+        R"("field": {"byte": 0}, "kind": "text"}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    model.noteTextDefs(ecuio_signal_file_set(file));
+    model.noteTextDefs(ecuio_signal_file_set(file));
+    ecuio_signal_file_free(file); // the copies stay
+
+    model.setFilter(QStringLiteral("7E8"), QString(), 0, 0);
+    csv = model.scrubbedCsv();
+    ASSERT_TRUE(csv.ok) << csv.words.toStdString();
+    EXPECT_EQ(csv.bytes.toStdString(),
+              csvHead(1, " (those the filter shows)", 5, 1, 1) +
+                  "0.002000,0x7E8,0,rx,5,,04 41 0C 1A F8\n");
+    EXPECT_EQ(csv.textValues, 1u);
+
+    // A frame echoing the VIN fails the check: no bytes, the class alone
+    FrameListModel echo;
+    m.add(echo, 0x7E8, {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+                        '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          1000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    csv = echo.scrubbedCsv();
+    EXPECT_FALSE(csv.ok);
+    EXPECT_TRUE(csv.bytes.isEmpty());
+    EXPECT_EQ(csv.words.toStdString(),
+              "The check found a VIN-shaped token in a frame the export would "
+              "write: nothing was written");
+}
+
+// The bridge writes the file whole, answers with the counts and logs one
+// line naming no path; a failed check or a target it can't write leaves
+// what was there
+TEST(BridgeTest, ExportFramesWritesTheFileAndLogsOneLine)
+{
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    QStringList lines;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&](const QString& line) { lines << line; });
+    FrameMaker m;
+    heldForExport(*bridge.model(), m);
+
+    const QString target = out.path() + QStringLiteral("/frames.csv");
+    const QVariantMap r = bridge.exportFrames(QUrl::fromLocalFile(target));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("written")).toInt(), 4);
+    EXPECT_EQ(r.value(QStringLiteral("leftOut")).toULongLong(), 1u);
+    EXPECT_EQ(r.value(QStringLiteral("unattributed")).toULongLong(), 0u);
+    QFile f(target);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QByteArray bytes = f.readAll();
+    f.close();
+    EXPECT_TRUE(bytes.startsWith(QByteArray(csvHead(4, "", 5, 1, 0).c_str())));
+    EXPECT_FALSE(bytes.contains("FAKE11M")) << "the VIN reply left out";
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_EQ(lines[0].toStdString(),
+              "Frames exported: 4 written, 1 left out (identification and text "
+              "signals), 0 segments unattributed");
+
+    // A frame echoing the VIN: nothing written, the file as it was
+    m.add(*bridge.model(), 0x7E8,
+          {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+           '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          6000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    lines.clear();
+    const QVariantMap no = bridge.exportFrames(QUrl::fromLocalFile(target));
+    EXPECT_FALSE(no.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(no.value(QStringLiteral("written")).toInt(), 0);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), bytes);
+    f.close();
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_TRUE(lines[0].startsWith(
+        QStringLiteral("Frames not exported: The check found")))
+        << lines[0].toStdString();
+
+    // A folder isn't a file it can write
+    bridge.model()->clear();
+    heldForExport(*bridge.model(), m);
+    const QVariantMap folder =
+        bridge.exportFrames(QUrl::fromLocalFile(out.path()));
+    EXPECT_FALSE(folder.value(QStringLiteral("ok")).toBool());
+    const QString words = folder.value(QStringLiteral("words")).toString();
+    EXPECT_EQ(words.toStdString(), "Couldn't write the file");
+    for (const QString& line : lines) {
+        EXPECT_FALSE(line.contains(out.path())) << line.toStdString();
+    }
 }

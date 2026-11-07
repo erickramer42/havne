@@ -4,8 +4,10 @@
 
 pragma ComponentBehavior: Bound
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Pane {
@@ -28,6 +30,9 @@ Pane {
     // direction (FrameFilter::Direction's order)
     property bool byId: false
     property bool filterOpen: false
+    // Export CSV's last answer: the counts, or why nothing was written
+    property string exportNote: ""
+    property bool exportFailed: false
     property int filterDirection: 0
     // The wide table's Flags column
     readonly property int flagsWidth: 96
@@ -103,6 +108,17 @@ Pane {
         clipboardBuffer.selectAll()
         clipboardBuffer.copy()
         clipboardBuffer.text = ""
+    }
+
+    // Export CSV (SessionBridge::exportFrames): the frames held, scrubbed
+    // by core, then those the filter shows, to the file the user chose
+    function exportFramesTo(url) {
+        const r = Bridge.exportFrames(url)
+        exportFailed = !r.ok
+        exportNote = r.ok ? qsTr("%n frame(s) exported; ", "", r.written)
+                            + qsTr("%n left out (identification and text signals)", "", r.leftOut)
+                          : r.words
+        return r.ok
     }
 
     // One option of a two-option toggle. Both options stay visible and
@@ -259,6 +275,35 @@ Pane {
                     enabled: Bridge.frameCount > 0
                     onClicked: Bridge.clearFrames()
                 }
+                // A file to share: core leaves identification out
+                // (ADR-0054), unlike Copy, which is the user's own pick
+                ThemedButton {
+                    objectName: "exportFrames"
+                    text: qsTr("Export CSV")
+                    enabled: Bridge.model.heldCount > 0
+                    onClicked: exportDialog.open()
+                }
+            }
+            Label {
+                objectName: "exportWords"
+                visible: Bridge.model.heldCount > 0 || page.exportNote !== ""
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                wrapMode: Text.WordWrap
+                text: page.exportNote !== ""
+                      ? page.exportNote
+                      : qsTr("Export CSV leaves identification replies out; Copy copies the rows as they are.")
+                color: page.exportFailed ? Theme.danger : Theme.textDim
+                font.pixelSize: 12
+            }
+            FileDialog {
+                id: exportDialog
+                title: qsTr("Export the frames as CSV")
+                fileMode: FileDialog.SaveFile
+                defaultSuffix: "csv"
+                nameFilters: [qsTr("CSV files (*.csv)"), qsTr("All files (*)")]
+                currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                onAccepted: page.exportFramesTo(exportDialog.selectedFile)
             }
             Flow {
                 objectName: "selectionBar"

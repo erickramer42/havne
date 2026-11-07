@@ -1,6 +1,7 @@
 // File/layer: tests/qml/tst_log.qml | Qt Quick Test, QML tier
 // Testing: QML: QmlTest.log (test_qml)
 
+import QtCore
 import QtQuick
 import QtTest
 import App
@@ -390,6 +391,26 @@ TestCase {
         compare(page.rateText(0), "-")
         compare(page.rateText(2.25), "2.3/s")
         compare(page.rateText(20.4), "20/s")
+    }
+
+    // Export CSV says what it leaves out and that Copy doesn't, then what
+    // it did; a target it can't write says so (the file itself:
+    // BridgeTest.ExportFramesWritesTheFileAndLogsOneLine)
+    function test_exportCsvSaysItLeavesIdentificationOut() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        heldFrames(page)
+        const button = find(page, "exportFrames")
+        verify(button.visible && button.enabled)
+        const words = find(page, "exportWords")
+        verify(words.visible)
+        compare(words.text, "Export CSV leaves identification replies out; "
+                            + "Copy copies the rows as they are.")
+        verify(Qt.colorEqual(words.color, Theme.textDim))
+        const folder = StandardPaths.writableLocation(StandardPaths.TempLocation)
+        verify(!page.exportFramesTo(folder), "a folder isn't a file")
+        compare(words.text, "Couldn't write the file")
+        verify(Qt.colorEqual(words.color, Theme.danger))
     }
 
     // The narrowest phone, 320 px, with the filter open, By ID shown and
