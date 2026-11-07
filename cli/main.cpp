@@ -8,6 +8,7 @@
 
 #include "can_line.h"
 #include "diagnostics_line.h"
+#include "elm327_listener.h"
 #include "info_lines.h"
 #include "timing_line.h"
 #include "view_lines.h"
@@ -1794,6 +1795,9 @@ void usage(FILE* to)
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>]\n"
+        "       havne-cli sim <uri> --elm327 tcp:[<address>:]<port> "
+        "[--seconds S]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
@@ -1851,6 +1855,13 @@ void usage(FILE* to)
         "         listen-only), only on a desk bus with no car. Ends at\n"
         "         Ctrl+C, after S seconds, or once another node sends on\n"
         "         its reply ID (0x7E8, or 0x7E9 with modules=2).\n"
+        "         --elm327 serves the same car, on every platform, as an\n"
+        "         ELM327 adapter on a TCP port, as a WiFi adapter does: on\n"
+        "         127.0.0.1 unless an address is named (one the LAN can\n"
+        "         reach is your choice), port 0 for one the system picks.\n"
+        "         elm327://127.0.0.1:<port> connects Havne to it; so do\n"
+        "         python-OBD and other ELM327 apps. Ends at Ctrl+C or\n"
+        "         after S seconds.\n"
         "view     reads recordings offline (the folders stream --record and\n"
         "         the app write): what each holds, then each signal's lowest,\n"
         "         highest and count in N columns (100) from --from to --to\n"
@@ -2420,7 +2431,98 @@ struct SimArgs {
     bool desk_bus = false; /* --desk-bus: a real controller too */
     const char* signals = nullptr; /* --signals' file */
     const char* plugin = nullptr;  /* --plugin's package */
+    const char* elm327 = nullptr;  /* --elm327's tcp:[<address>:]<port> */
+    cli::Elm327Address elm327_at;
 };
+
+// The simulated ECU as an ELM327 adapter on a TCP port (ADR-0055), on
+// every platform, until Ctrl+C or --seconds: start, elm327, a client
+// line as each host connects and leaves, a sim_stats line every 10 s
+// while the counts change, end with them
+int run_sim_elm327(const SimArgs& args)
+{
+    install_handlers();
+    Output out;
+    write_start(out);
+    ecuio_sim_t* sim = nullptr;
+    const ecuio_status_t st = ecuio_sim_create_unbound(args.uri, 0, &sim);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    const auto created = std::chrono::steady_clock::now();
+    cli::Elm327Server server;
+    std::string why;
+    if (!server.open(args.elm327_at, &why)) {
+        ecuio_sim_destroy(sim);
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    {
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::elm327_line(
+            l, args.uri,
+            cli::address_text(server.address().ip, server.address().port));
+        write_line(out, l);
+    }
+    out.flush();
+    cli::Elm327Emulator emu(sim);
+    const uint64_t started = ecuio_clock_us();
+    uint64_t next_stats = started + kSimStatsEveryUs;
+    ecuio_sim_stats_t last{};
+    ecuio_sim_stats_t s{};
+    const char* reason = nullptr;
+    server.serve(
+        emu,
+        [created] {
+            return static_cast<int64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - created)
+                    .count());
+        },
+        [&] {
+            const uint64_t now = ecuio_clock_us();
+            if (g_interrupted.load()) {
+                reason = "interrupted";
+            } else if (args.seconds &&
+                       now - started >= args.seconds * 1000000u) {
+                reason = "seconds";
+            } else if (now >= next_stats) {
+                next_stats = now + kSimStatsEveryUs;
+                (void)ecuio_sim_get_stats(sim, &s);
+                if (std::memcmp(&s, &last, sizeof s) != 0) {
+                    last = s;
+                    char buf[1024];
+                    cli::Line l(buf, sizeof buf);
+                    cli::sim_stats_line(l, s);
+                    write_line(out, l);
+                    out.flush();
+                }
+            }
+            return reason != nullptr || out.failed;
+        },
+        [&](const char* event, const std::string& peer) {
+            char buf[256];
+            cli::Line l(buf, sizeof buf);
+            cli::client_line(l, event, peer);
+            write_line(out, l);
+            out.flush();
+        });
+    (void)ecuio_sim_get_stats(sim, &s);
+    ecuio_sim_destroy(sim);
+    if (out.failed) {
+        return out.ok() ? kExitOk : kExitFailed;
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::sim_end_line(l, reason != nullptr ? reason : "failed", s);
+    write_line(out, l);
+    out.flush();
+    return reason != nullptr && out.ok() ? kExitOk : kExitFailed;
+}
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
 // bus's controller with --desk-bus, until Ctrl+C, --seconds, the bus
@@ -3465,6 +3567,14 @@ int run(int argc, char** argv)
             const std::string a = argv[i];
             if (a == "--on" && i + 1 < argc) {
                 sim.on = argv[++i];
+            } else if (a == "--elm327" && i + 1 < argc) {
+                sim.elm327 = argv[++i];
+                if (!cli::parse_elm327_address(sim.elm327, &sim.elm327_at)) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --elm327 takes tcp:<port> or "
+                                 "tcp:<a.b.c.d>:<port>, a port 0-65535\n");
+                    return kExitUsage;
+                }
             } else if (a == "--desk-bus") {
                 sim.desk_bus = true;
             } else if (a == "--signals" && i + 1 < argc) {
@@ -3486,9 +3596,15 @@ int run(int argc, char** argv)
                 sim.uri = argv[i];
             }
         }
-        if (!sim.uri || !sim.on) {
-            std::fprintf(stderr,
-                         "havne-cli: sim needs a URI and --on <interface>\n");
+        if (!sim.uri || (sim.on == nullptr) == (sim.elm327 == nullptr)) {
+            std::fprintf(stderr, "havne-cli: sim needs a URI and either --on "
+                                 "<interface> or --elm327 tcp:<port>\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (sim.elm327 != nullptr && sim.desk_bus) {
+            std::fprintf(stderr, "havne-cli: --desk-bus is for --on: the "
+                                 "ELM327 emulator is on no bus\n");
             usage(stderr);
             return kExitUsage;
         }
@@ -3512,7 +3628,7 @@ int run(int argc, char** argv)
             }
             sim.uri = opened.c_str();
         }
-        return run_sim(sim);
+        return sim.elm327 != nullptr ? run_sim_elm327(sim) : run_sim(sim);
     }
     if (command == "plugins") {
         const std::string word = argc > 2 ? argv[2] : "";
