@@ -24,7 +24,12 @@
 #include "csv_import.h"
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
+#include "partial_left.h"
 #include "temp_name.h"
+
+/* test_core.cpp's, around tests/new_counter.h (included there alone) */
+unsigned long news_on_this_thread();
+void fail_new_on_this_thread(unsigned long n);
 
 namespace fs = std::filesystem;
 namespace csv = ecuio_csv_import;
@@ -596,7 +601,7 @@ TEST(CsvImportTest, ACsvBecomesARecordingTheReaderOpens)
     EXPECT_EQ(imp.report.utc_start_us, 0u);
     EXPECT_EQ(imp.report.duration_us, 1000000u);
     EXPECT_FALSE(fs::exists(f.path / "rec" / "frames.csv"));
-    EXPECT_FALSE(fs::exists(f.path / "rec.partial"));
+    EXPECT_FALSE(partial_left(f.path, "rec"));
 
     const std::string events = read_file(f.path / "rec" / "events.log");
     EXPECT_EQ(events.rfind("ecuio session recording, format 3 (ADR-0049)\n", 0),
@@ -680,7 +685,7 @@ TEST(CsvImportTest, ARefusedFileWritesNothing)
     EXPECT_EQ(imp.detail,
               "line 5: the row has 5 fields where the header has 4");
     EXPECT_FALSE(fs::exists(f.path / "rec"));
-    EXPECT_FALSE(fs::exists(f.path / "rec.partial"));
+    EXPECT_FALSE(partial_left(f.path, "rec"));
 
     Imported bad_map(in, f.utf8("rec"), "{\"havne_column_map\": 1}");
     EXPECT_EQ(bad_map.rc, ECUIO_ERR_LOAD_FAILED);
@@ -762,6 +767,43 @@ TEST(CsvImportTest, TheMadeUpLoggersFilesImportAndRead)
         EXPECT_EQ(s.highest, l.highest);
         EXPECT_EQ(rec.info.utc_start_us, l.utc);
     }
+}
+
+/* Out of memory at each of the CSV import's allocations in turn: every
+ * one returns, and none leaves its folder or a partial */
+TEST(CsvImportTest, OutOfMemoryAnywhereLeavesNoFolderBehind)
+{
+    Folder f;
+    const std::string in = f.write("log.csv", kTwoSignals);
+    const std::string out = f.utf8("rec");
+    const std::string map = map_of("Time (s)", "s", kRpm + "," + kGear);
+    ecuio_import_options_t o{};
+    o.format = ECUIO_IMPORT_CSV;
+    o.in_path_utf8 = in.c_str();
+    o.out_folder_utf8 = out.c_str();
+    o.column_map_utf8 = map.c_str();
+    const unsigned long before = news_on_this_thread();
+    ASSERT_EQ(ecuio_import(&o, nullptr), ECUIO_OK);
+    const unsigned long news = news_on_this_thread() - before;
+    std::error_code ec;
+    fs::remove_all(f.path / "rec", ec);
+    ASSERT_GT(news, 10u);
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        fail_new_on_this_thread(n);
+        const ecuio_status_t rc = ecuio_import(&o, nullptr);
+        fail_new_on_this_thread(0);
+        if (rc != ECUIO_OK) {
+            ++refused;
+            ASSERT_TRUE(rc == ECUIO_ERR_OUT_OF_MEMORY ||
+                        rc == ECUIO_ERR_LOAD_FAILED)
+                << "at " << n << ": " << rc;
+            ASSERT_FALSE(fs::exists(f.path / "rec")) << "at " << n;
+        }
+        ASSERT_FALSE(partial_left(f.path, "rec")) << "at " << n;
+        fs::remove_all(f.path / "rec", ec);
+    }
+    EXPECT_GT(refused, 0u);
 }
 
 } // namespace

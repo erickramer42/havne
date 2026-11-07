@@ -12,12 +12,15 @@
 
 #include "isotp.h"
 #include "recording_check.h" /* iso15765_id */
+#include "scrub.h"           /* segment_reply_id */
 
 #include "ecuio/core.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -59,6 +62,21 @@ public:
                ecuio_check::iso15765_id(f.arbitration_id,
                                         (f.flags & ECUIO_FRAME_FLAG_EXTENDED) !=
                                             0);
+    }
+
+    /* A frame on a diagnostic reply ID that no adapter reassembled and
+     * that is too long for classic ISO-TP: a CAN FD frame, whose ISO-TP
+     * form (ISO 15765-2:2016's Single and First Frame escapes) isn't read,
+     * so its message can't be classified. A scrubbed export leaves it out,
+     * as it does a torn segment there. */
+    static bool unread_reply(const ecuio_frame_t& f)
+    {
+        return (f.flags &
+                (ECUIO_FRAME_FLAG_REASSEMBLED | ECUIO_FRAME_FLAG_ERROR)) == 0 &&
+               f.data_length > 8 &&
+               ecuio_scrub::segment_reply_id(
+                   f.arbitration_id,
+                   (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0);
     }
 
     /* Row s's frame f, which on_the_wire takes: the messages it ends go in
@@ -115,6 +133,13 @@ public:
             return false;
         case isotp_result::malformed:
         case isotp_result::dropped:
+            /* A malformed Single Frame leaves the ID's slot open; closing
+             * it tears the whole message, so its later segments are torn
+             * too, never pending into a message no frame list holds */
+            if (isotp_rx_slot* open = isotp_rx_find(*iso_, c.id)) {
+                open->active = false;
+                ++iso_->dropped;
+            }
             torn(c.id, ext, &s, out);
             break;
         }
@@ -189,6 +214,94 @@ private:
 
     std::unique_ptr<isotp_rx> iso_;
     std::vector<held> held_;
+};
+
+/* Identification replies on IDs the reassembly doesn't take (a manufacturer
+ * module's, or a listening capture's): a Single or First Frame whose
+ * payload answers an identification request (scrub::identification) is
+ * one, and so is every Consecutive Frame on its ID until that ID's next
+ * Single or First Frame, whatever its sequence number. Fail closed: such a
+ * frame is left out, and the message's bytes, gathered in order up to its
+ * length, go to the check as identity values. */
+class other_id_identification
+{
+public:
+    /* Frame f, which on_the_wire doesn't take: true when it belongs to an
+     * identification reply; *done then holds a message's bytes once it's
+     * whole (a Single Frame, or the Consecutive Frame that completes it) */
+    bool take(const ecuio_frame_t& f, std::vector<uint8_t>* done)
+    {
+        done->clear();
+        if ((f.flags & (ECUIO_FRAME_FLAG_REASSEMBLED | ECUIO_FRAME_FLAG_ERROR |
+                        ECUIO_FRAME_FLAG_REMOTE)) != 0 ||
+            f.data_length < 1 || f.data_length > 8) {
+            return false;
+        }
+        const uint64_t key =
+            uint64_t{f.arbitration_id} |
+            ((f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0 ? 1ull << 32 : 0);
+        const uint8_t pci = f.data[0] >> 4;
+        if (pci == 0) {
+            open_.erase(key);
+            const uint8_t n = f.data[0] & 0x0F;
+            if (n == 0 || 1u + n > f.data_length ||
+                !ecuio_scrub::identification(f.data + 1, n)) {
+                return false;
+            }
+            done->assign(f.data + 1, f.data + 1 + n);
+            return true;
+        }
+        if (pci == 1) {
+            open_.erase(key);
+            const uint16_t n =
+                static_cast<uint16_t>(((f.data[0] & 0x0F) << 8) | f.data[1]);
+            if (f.data_length != 8 || n < 8 ||
+                !ecuio_scrub::identification(f.data + 2, 6)) {
+                return false;
+            }
+            reply& r = open_[key];
+            r.expected = n;
+            r.bytes.assign(f.data + 2, f.data + 8);
+            return true;
+        }
+        if (pci != 2) {
+            return false;
+        }
+        auto it = open_.find(key);
+        if (it == open_.end()) {
+            return false;
+        }
+        reply& r = it->second;
+        if (!r.given && r.bytes.size() < r.expected) {
+            const size_t take = std::min<size_t>(f.data_length - 1u,
+                                                 r.expected - r.bytes.size());
+            r.bytes.insert(r.bytes.end(), f.data + 1, f.data + 1 + take);
+            if (r.bytes.size() == r.expected) {
+                *done = r.bytes;
+                r.given = true;
+            }
+        }
+        return true;
+    }
+
+    /* The bytes of each reply still short of its length at the end */
+    void finish(std::vector<std::vector<uint8_t>>& out)
+    {
+        for (auto& kv : open_) {
+            if (!kv.second.given) {
+                out.push_back(std::move(kv.second.bytes));
+            }
+        }
+        open_.clear();
+    }
+
+private:
+    struct reply {
+        uint16_t expected = 0;
+        bool given = false;
+        std::vector<uint8_t> bytes;
+    };
+    std::map<uint64_t, reply> open_;
 };
 
 } // namespace ecuio_frame_reassembly

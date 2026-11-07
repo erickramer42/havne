@@ -681,8 +681,9 @@ typedef struct ecuio_export_options {
     uint64_t to_us;
     const char* folder_utf8;   /* the recording's folder */
     const char* out_path_utf8; /* the file to write, refused when it
-                                  exists: <out>.partial first, renamed
-                                  into place once checked */
+                                  exists: written under a name of its
+                                  own beside it, renamed into place
+                                  once checked */
     uint64_t reserved[4];      /* zero; ABI growth space */
 } ecuio_export_options_t;
 
@@ -861,8 +862,8 @@ _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
  * none named, its detail listing them. A frame stamped up to 100 ms
  * before the one before it takes that one's time (candump stamps on the
  * CPU that received it); further back is refused. The folder is written
- * as <folder>.partial and renamed once whole, so a failed import leaves
- * none.
+ * under a name of its own beside it and renamed once whole, so a failed
+ * import leaves none.
  *
  * A CSV (section 5) through options->column_map_utf8: RFC 4180, strict
  * and bounded, checked whole before anything is written; signals.csv
@@ -927,8 +928,9 @@ typedef struct ecuio_health_options {
     const ecuio_health_value_t* values; /* a session's newest values, or
                                            NULL with value_count 0 */
     const char* out_path_utf8;  /* the file to write, refused when it
-                                   exists: <out>.partial first, renamed
-                                   into place once checked */
+                                   exists: written under a name of its
+                                   own beside it, renamed into place
+                                   once checked */
 } ecuio_health_options_t;
 
 typedef struct ecuio_health_report {

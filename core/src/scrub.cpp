@@ -6,6 +6,7 @@
 #include "scrub.h"
 
 #include "ecuio/recording.h"
+#include "ecuio/vin.h"
 
 #include <cstring>
 
@@ -71,6 +72,14 @@ bool reply_id(uint32_t id, bool extended)
         return (id & 0x1FFFFF00u) == 0x18DAF100u;
     }
     return id >= 0x7E8 && id <= 0x7EF;
+}
+
+bool segment_reply_id(uint32_t id, bool extended)
+{
+    if (extended) {
+        return (id & 0x1FFF0000u) == 0x18DA0000u;
+    }
+    return reply_id(id, false);
 }
 
 bool identification(const uint8_t* msg, size_t n)
@@ -175,23 +184,24 @@ void check::feed(const uint8_t* p, size_t n)
     if (found_ != 0 || n == 0) {
         return;
     }
+    /* The recording's own values first: one found names its class, where
+     * a VIN's shape (a DID echoing the VIN, say) would name only the shape */
+    const size_t keep = values_.longest() > 1 ? values_.longest() - 1 : 0;
+    if (keep != 0) {
+        std::string buf;
+        buf.reserve(tail_.size() + n);
+        buf = tail_;
+        buf.append(reinterpret_cast<const char*>(p), n);
+        found_ = values_.find(reinterpret_cast<const uint8_t*>(buf.data()),
+                              buf.size());
+        if (found_ != 0) {
+            return;
+        }
+        tail_ = buf.size() > keep ? buf.substr(buf.size() - keep) : buf;
+    }
     for (size_t i = 0; i < n && found_ == 0; ++i) {
         vin_byte(p[i]);
     }
-    if (found_ != 0) {
-        return;
-    }
-    const size_t keep = values_.longest() > 1 ? values_.longest() - 1 : 0;
-    if (keep == 0) {
-        return;
-    }
-    std::string buf;
-    buf.reserve(tail_.size() + n);
-    buf = tail_;
-    buf.append(reinterpret_cast<const char*>(p), n);
-    found_ =
-        values_.find(reinterpret_cast<const uint8_t*>(buf.data()), buf.size());
-    tail_ = buf.size() > keep ? buf.substr(buf.size() - keep) : buf;
 }
 
 uint32_t check::finish()
@@ -213,6 +223,42 @@ void check::vin_byte(uint8_t c)
     run_letter_ = run_letter_ || (c >= 'A' && c <= 'Z');
     run_digit_ = run_digit_ || (c >= '0' && c <= '9');
     run_hex_ = run_hex_ && ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
+    if (!vin_char(c)) {
+        vin_run_ = 0;
+        return;
+    }
+    ring_[vin_run_ % kVinLength] = static_cast<char>(c);
+    ++vin_run_;
+    if (vin_run_ >= kVinLength && vin_window()) {
+        found_ = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1;
+    }
+}
+
+/* The newest kVinLength characters of the VIN alphabet: a VIN's shape, and
+ * position 9 their check digit. A run of exactly 17 is a VIN by its shape
+ * alone (vin_end); in a longer run, a VIN that a letter or digit either
+ * side hides is found by its check digit, which other text of the shape
+ * matches about one window in eleven. */
+bool check::vin_window() const
+{
+    char w[kVinLength + 1];
+    bool letter = false;
+    bool digit = false;
+    bool hex = true;
+    for (size_t i = 0; i < kVinLength; ++i) {
+        const char c = ring_[(vin_run_ + i) % kVinLength];
+        w[i] = c;
+        letter = letter || (c >= 'A' && c <= 'Z');
+        digit = digit || (c >= '0' && c <= '9');
+        hex = hex && ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
+    }
+    w[kVinLength] = '\0';
+    if (!letter || !digit || hex) {
+        return false;
+    }
+    ecuio_vin_info_t info{};
+    return ecuio_vin_decode(w, 0, &info) == ECUIO_OK &&
+           (info.flags & ECUIO_VIN_CHECK_MATCHES) != 0;
 }
 
 void check::vin_end()
@@ -222,6 +268,7 @@ void check::vin_end()
         found_ = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1;
     }
     run_ = 0;
+    vin_run_ = 0;
     run_vin_ = true;
     run_letter_ = false;
     run_digit_ = false;

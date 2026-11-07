@@ -13,7 +13,9 @@
 // every form an export writes bytes in (as they are, and as hex upper or
 // lower case, spaced or not), and for any VIN-shaped token: 17 of the VIN
 // alphabet with a letter and a digit, not all hex, alone between bytes
-// that aren't letters or digits. A match is the class of the value it
+// that aren't letters or digits, or any 17 such characters inside a
+// longer run of letters and digits whose ninth is their check digit
+// (vin.h's ECUIO_VIN_CHECK_MATCHES). A match is the class of the value it
 // matched, plus one (ECUIO_EXPORT_LEFT_OUT_*), never the value.
 
 #ifndef ECUIO_SCRUB_H
@@ -41,6 +43,11 @@ constexpr size_t kVinLength = 17;
 /* A diagnostic reply ID: 0x7E8-0x7EF, 29-bit 18DAF1xx (ISO 15765-4's
  * replies to the tester at F1) */
 bool reply_id(uint32_t id, bool extended);
+
+/* An ID whose segments no message can be attributed to are left out:
+ * 0x7E8-0x7EF, or any 29-bit 18DAxxyy (a reply to a tester at another
+ * address than F1 too, since the reassembly takes every 18DA ID) */
+bool segment_reply_id(uint32_t id, bool extended);
 
 /* An ISO-TP message (its service byte first) that answers an
  * identification request: Service 09, any item, or 62 for a DID in ISO
@@ -98,6 +105,7 @@ public:
 private:
     void vin_byte(uint8_t c);
     void vin_end();
+    bool vin_window() const;
 
     const values& values_;
     std::string tail_;
@@ -108,6 +116,10 @@ private:
     bool run_letter_ = false;
     bool run_digit_ = false;
     bool run_hex_ = true;
+    /* The run's last characters of the VIN alphabet in a row, the newest
+     * kVinLength of them in a ring */
+    size_t vin_run_ = 0;
+    char ring_[kVinLength] = {};
 };
 
 /* One message, whole: the class plus one of its first match, or 0 */

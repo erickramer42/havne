@@ -8,7 +8,8 @@
 // frames.csv as they arrived, and an events.log header naming the import.
 // A CSV the same way through its column map (csv_import.h's pass, run to
 // check and then to write): signals.csv and a format 3 header, no frames.
-// The folder is written as <folder>.partial and renamed once whole.
+// The folder is written under a name of its own beside <folder>
+// (folder_files.h's partial_name) and renamed once whole.
 
 #include "candump.h"
 #include "csv_import.h"
@@ -323,7 +324,7 @@ std::string events_log(const std::string& iface, const ecuio_import_report_t& r)
 /* The import proper, its files under partial, which the caller removes
  * on failure */
 bool import_candump(const ecuio_import_options_t& o, const std::string& out,
-                    ecuio_import_report_t& r, bool* made)
+                    ecuio_import_report_t& r, std::string* made)
 {
     std::string why;
     std::unique_ptr<FILE, file_closer> in(
@@ -358,11 +359,12 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
     if (files::exists(out)) {
         return fail("the recording's folder exists already");
     }
-    const std::string partial = out + ".partial";
-    if (!files::make_folder(partial, &why)) {
+    /* the name goes in *made before the folder is made */
+    if (!files::partial_folder(out, made, &why)) {
+        made->clear();
         return fail("the recording's folder can't be made: %s", why);
     }
-    *made = true;
+    const std::string partial = *made;
     if (!ecuio_frames_csv::seek_to(in.get(), 0)) {
         return fail("the log can't be read again");
     }
@@ -394,7 +396,7 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
     if (!files::rename_to(partial, out, false, &why)) {
         return fail("the recording's folder can't be put in place: %s", why);
     }
-    *made = false;
+    made->clear();
     return true;
 }
 
@@ -529,7 +531,7 @@ std::string csv_events_log(const csv::column_map& m, const csv::outcome& o)
 }
 
 bool import_csv(const ecuio_import_options_t& o, const std::string& out,
-                ecuio_import_report_t& r, bool* made)
+                ecuio_import_report_t& r, std::string* made)
 {
     std::string why;
     csv::column_map m;
@@ -557,11 +559,12 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
     if (files::exists(out)) {
         return fail("the recording's folder exists already");
     }
-    const std::string partial = out + ".partial";
-    if (!files::make_folder(partial, &why)) {
+    /* the name goes in *made before the folder is made */
+    if (!files::partial_folder(out, made, &why)) {
+        made->clear();
         return fail("the recording's folder can't be made: %s", why);
     }
-    *made = true;
+    const std::string partial = *made;
     if (!ecuio_frames_csv::seek_to(in.get(), 0)) {
         return fail("the file can't be read again");
     }
@@ -611,7 +614,7 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
     if (!files::rename_to(partial, out, false, &why)) {
         return fail("the recording's folder can't be put in place: %s", why);
     }
-    *made = false;
+    made->clear();
     r.lines = second.lines;
     r.values = second.values;
     r.columns_ignored = second.ignored.size();
@@ -649,22 +652,37 @@ extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     ecuio_detail_clear();
-    std::string out = options->out_folder_utf8;
-    while (out.size() > 1 && (out.back() == '/' || out.back() == '\\')) {
-        out.pop_back();
-    }
     ecuio_import_report_t r{};
-    bool made = false;
-    try {
-        const bool ok = is_csv ? import_csv(*options, out, r, &made)
-                               : import_candump(*options, out, r, &made);
-        if (made) {
-            const std::string partial = out + ".partial";
-            files::remove_file(partial + "/frames.csv");
-            files::remove_file(partial + "/signals.csv");
-            files::remove_file(partial + "/events.log");
-            files::remove_folder(partial);
+    /* The partial folder an import made and didn't put in place goes on
+     * every way out, an exception's too */
+    struct partial_guard {
+        std::string made; /* the folder's name while it isn't in place */
+        partial_guard() = default;
+        partial_guard(const partial_guard&) = delete;
+        partial_guard& operator=(const partial_guard&) = delete;
+        ~partial_guard()
+        {
+            if (made.empty()) {
+                return;
+            }
+            try {
+                files::remove_file(made + "/frames.csv");
+                files::remove_file(made + "/signals.csv");
+                files::remove_file(made + "/events.log");
+                files::remove_folder(made);
+            } catch (...) { // NOLINT(bugprone-empty-catch): out of memory
+                            // again while unwinding; the partial stays
+            }
         }
+    };
+    try {
+        std::string out = options->out_folder_utf8;
+        while (out.size() > 1 && (out.back() == '/' || out.back() == '\\')) {
+            out.pop_back();
+        }
+        partial_guard g;
+        const bool ok = is_csv ? import_csv(*options, out, r, &g.made)
+                               : import_candump(*options, out, r, &g.made);
         if (!ok) {
             return ECUIO_ERR_LOAD_FAILED;
         }

@@ -21,7 +21,12 @@
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
+#include "partial_left.h"
 #include "temp_name.h"
+
+/* test_core.cpp's, around tests/new_counter.h (included there alone) */
+unsigned long news_on_this_thread();
+void fail_new_on_this_thread(unsigned long n);
 
 namespace fs = std::filesystem;
 
@@ -297,7 +302,7 @@ struct Imported {
 void expect_nothing_left(const Folder& f, const std::string& name)
 {
     EXPECT_FALSE(fs::exists(f.path / name)) << name;
-    EXPECT_FALSE(fs::exists(f.path / (name + ".partial"))) << name;
+    EXPECT_FALSE(partial_left(f.path, name)) << name;
 }
 
 /* An engine ECU's replies on can0 through a tester's requests: a Single
@@ -348,7 +353,7 @@ TEST(ImportTest, ALogBecomesARecordingOfItsFramesAsTheyArrived)
         "dropped, 0 notes dropped",
     };
     EXPECT_EQ(events, want);
-    EXPECT_FALSE(fs::exists(f.path / "rec.partial"));
+    EXPECT_FALSE(partial_left(f.path, "rec"));
     EXPECT_FALSE(fs::exists(f.path / "rec" / "signals.csv"));
 }
 
@@ -518,7 +523,7 @@ TEST(ImportTest, AFolderThatExistsIsLeftAlone)
     EXPECT_EQ(imp.detail, "the recording's folder exists already");
     EXPECT_EQ(read_file(f.path / "rec" / "keep.txt"), "mine");
     EXPECT_FALSE(fs::exists(f.path / "rec" / "frames.csv"));
-    EXPECT_FALSE(fs::exists(f.path / "rec.partial"));
+    EXPECT_FALSE(partial_left(f.path, "rec"));
 
     /* A trailing separator names the same folder */
     Imported slash(in, f.utf8("rec") + "/");
@@ -572,6 +577,41 @@ TEST(ImportTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     a.column_map_utf8 = "{}";
     a.interface_utf8 = "can0";
     EXPECT_EQ(ecuio_import(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+}
+
+/* Out of memory at each of an import's allocations in turn: every one
+ * returns (never terminates), and none leaves its folder or a partial */
+TEST(ImportTest, OutOfMemoryAnywhereLeavesNoFolderBehind)
+{
+    Folder f;
+    const std::string in = f.write("engine.log", kTwoReplies);
+    const std::string out = f.utf8("rec");
+    ecuio_import_options_t o{};
+    o.format = ECUIO_IMPORT_CANDUMP;
+    o.in_path_utf8 = in.c_str();
+    o.out_folder_utf8 = out.c_str();
+    const unsigned long before = news_on_this_thread();
+    ASSERT_EQ(ecuio_import(&o, nullptr), ECUIO_OK);
+    const unsigned long news = news_on_this_thread() - before;
+    std::error_code ec;
+    fs::remove_all(f.path / "rec", ec);
+    ASSERT_GT(news, 10u);
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        fail_new_on_this_thread(n);
+        const ecuio_status_t rc = ecuio_import(&o, nullptr);
+        fail_new_on_this_thread(0);
+        if (rc != ECUIO_OK) {
+            ++refused;
+            ASSERT_TRUE(rc == ECUIO_ERR_OUT_OF_MEMORY ||
+                        rc == ECUIO_ERR_LOAD_FAILED)
+                << "at " << n << ": " << rc;
+            ASSERT_FALSE(fs::exists(f.path / "rec")) << "at " << n;
+        }
+        ASSERT_FALSE(partial_left(f.path, "rec")) << "at " << n;
+        fs::remove_all(f.path / "rec", ec);
+    }
+    EXPECT_GT(refused, 0u);
 }
 
 } // namespace

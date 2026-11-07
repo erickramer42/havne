@@ -9,6 +9,7 @@
 #ifndef ECUIO_FOLDER_FILES_H
 #define ECUIO_FOLDER_FILES_H
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -17,9 +18,13 @@
 
 #ifdef _WIN32
 #include "win_utf8.h"
+#include <fcntl.h>
+#include <io.h>
 #include <share.h>
+#include <sys/stat.h>
 #else
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -84,7 +89,10 @@ inline std::string os_words(int err)
 }
 #endif
 
-/* A file opened to read ("rb") or write ("wb"); nullptr with *why */
+/* A file opened to read ("rb"), or made to write ("wb"): a write never
+ * opens a file that exists (O_EXCL), so a file of the name is never
+ * truncated, nor one made meanwhile by another export; nullptr with *why
+ * ("it exists already" for that) */
 inline FILE* open_file(const std::string& utf8, bool write, std::string* why)
 {
 #ifdef _WIN32
@@ -93,10 +101,34 @@ inline FILE* open_file(const std::string& utf8, bool write, std::string* why)
         *why = "the name isn't valid UTF-8";
         return nullptr;
     }
-    FILE* f = _wfsopen(w.c_str(), write ? L"wb" : L"rb",
-                       write ? _SH_DENYWR : _SH_DENYNO);
+    FILE* f = nullptr;
+    if (write) {
+        int fd = -1;
+        if (_wsopen_s(&fd, w.c_str(),
+                      _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _SH_DENYWR,
+                      _S_IREAD | _S_IWRITE) == 0) {
+            f = _fdopen(fd, "wb");
+            if (f == nullptr) {
+                _close(fd);
+            }
+        }
+    } else {
+        f = _wfsopen(w.c_str(), L"rb", _SH_DENYNO);
+    }
 #else
-    FILE* f = std::fopen(utf8.c_str(), write ? "wb" : "rb");
+    FILE* f = nullptr;
+    if (write) {
+        const int fd =
+            open(utf8.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (fd >= 0) {
+            f = fdopen(fd, "wb");
+            if (f == nullptr) {
+                close(fd);
+            }
+        }
+    } else {
+        f = std::fopen(utf8.c_str(), "rb");
+    }
 #endif
     if (f == nullptr) {
         const int err = errno;
@@ -140,6 +172,55 @@ inline bool make_folder(const std::string& utf8, std::string* why)
     *why = os_words(errno);
     return false;
 #endif
+}
+
+/* A name of this call's own beside out, for what is written whole there
+ * and then renamed into place: <out>.partial-<pid>-<n>, n counted across
+ * the process. Another export's (one under way, or one a crash left) is
+ * then never in the way, never truncated and never removed. */
+inline std::string partial_name(const std::string& out)
+{
+    static std::atomic<unsigned> next{0};
+#ifdef _WIN32
+    const unsigned long pid = GetCurrentProcessId();
+#else
+    const auto pid = static_cast<unsigned long>(getpid());
+#endif
+    return out + ".partial-" + std::to_string(pid) + "-" +
+           std::to_string(next.fetch_add(1));
+}
+
+/* How many names partial_file and partial_folder try while each is taken */
+constexpr int kPartialTries = 16;
+
+/* A file made under a name of partial_name's in *name; nullptr with *why */
+inline FILE* partial_file(const std::string& out, std::string* name,
+                          std::string* why)
+{
+    for (int i = 0; i < kPartialTries; ++i) {
+        *name = partial_name(out);
+        FILE* f = open_file(*name, true, why);
+        if (f != nullptr || !exists(*name)) {
+            return f;
+        }
+    }
+    return nullptr;
+}
+
+/* A folder made under a name of partial_name's in *name; false with *why */
+inline bool partial_folder(const std::string& out, std::string* name,
+                           std::string* why)
+{
+    for (int i = 0; i < kPartialTries; ++i) {
+        *name = partial_name(out);
+        if (make_folder(*name, why)) {
+            return true;
+        }
+        if (!exists(*name)) {
+            return false;
+        }
+    }
+    return false;
 }
 
 /* Renames from to to; a file to replaces one there with replace, a

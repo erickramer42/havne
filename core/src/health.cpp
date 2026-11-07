@@ -8,7 +8,8 @@
 // identification items' text and the VIN never enter the model: the
 // vehicle is the VIN's decode, an item its name and outcome. The file is
 // then checked for those texts and for the VIN's shape, as an export's
-// (scrub.h), under <out>.partial, renamed into place once it passes.
+// (scrub.h), under a name of its own beside <out> (folder_files.h's
+// partial_name), renamed into place once it passes.
 
 #include "health.h"
 
@@ -1303,9 +1304,10 @@ bool put(const std::string& out, const std::string& bytes,
     if (files::exists(out)) {
         return refused("the file exists already");
     }
-    const std::string partial = out + ".partial";
+    std::string partial;
     std::string why;
-    std::unique_ptr<FILE, file_closer> f(files::open_file(partial, true, &why));
+    std::unique_ptr<FILE, file_closer> f(
+        files::partial_file(out, &partial, &why));
     if (!f) {
         return refused("the report can't be written: %s", why);
     }

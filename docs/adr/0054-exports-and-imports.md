@@ -317,6 +317,53 @@ reads it; the import's values through obd2 are the session's);
 written as it is, a segment of a segmented VIN reply kept, and each
 check skipped).
 
+**Note of 2026-11-07: the scrub's rules widened, the partial's name.**
+Each change closes a way an identity could reach a scrubbed file, and
+each fails closed:
+
+- A torn segment is unattributable on any `18DA` ID, both directions,
+  not only `18DAF1xx` (`scrub::segment_reply_id`; the health report's
+  ECUs stay `scrub::reply_id`'s).
+- A frame on a reply ID that no adapter reassembled and that is longer
+  than classic CAN's 8 bytes (a CAN FD frame, whose ISO-TP escapes the
+  reassembly doesn't read) is left out as unattributable; a raw export
+  keeps it.
+- An identification reply on an ID the reassembly doesn't take (a
+  manufacturer module's, a listening capture's) is left out: a Single
+  or First Frame whose payload `scrub::identification` takes, and every
+  Consecutive Frame on its ID until that ID's next Single or First
+  Frame. Its bytes, gathered up to the message's length, join the
+  check's identity values, a reply short of its length too.
+- A malformed frame inside a message tears the whole message, so its
+  later segments are torn too, never pending into one no frame list
+  holds.
+- A text signal's value written as hex pairs (`ECUIO_VALUE_HEX`'s form)
+  is searched for as its bytes as well as its text.
+- The VIN shape is also any 17 characters of the VIN alphabet inside a
+  longer run of letters and digits whose ninth is their check digit
+  (`ecuio_vin_decode`'s `ECUIO_VIN_CHECK_MATCHES`), with a letter and a
+  digit, not all hex: a VIN that a letter or digit either side hides (a
+  DID's last byte before the text). Other text of that shape matches
+  about one window in eleven, which is why a run of exactly 17 keeps
+  the shape rule alone. Measured 2026-11-07 over the test car's
+  recordings on hand, 243 in all (64 from the laptop, 185,956 frame
+  rows, and 179 from the phone): every message the frames carry and
+  every frames.csv, signals.csv and events.log, as bytes. No window
+  outside an identification reply matched; the laptop's identification
+  replies, which classification leaves out, held the VIN 1,529 times.
+  In each piece the recording's own values are searched before the
+  shape, so a VIN the recording holds is reported as its class.
+- A recording whose `signals.json` is there but doesn't load (or can't
+  be opened) refuses a scrubbed export of every format, saying so and
+  why: the set it names may hold text defs no other set has, so falling
+  back to the profile could keep a text signal's frames. A raw export
+  doesn't read it, and the health report still falls back.
+- An export, a health report and an import write under a name of their
+  own, `<out>.partial-<pid>-<n>` (`folder_files.h`'s `partial_name`),
+  made with an exclusive create and a new name tried while one exists,
+  so another export's partial is never in the way and never touched.
+  Every way out, running out of memory included, removes it.
+
 ## Appendix: frames in memory, the Log page's export (2026-11-06)
 
 The Log page's Export CSV writes the frames its ring holds, which no

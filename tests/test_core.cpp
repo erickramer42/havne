@@ -58,6 +58,12 @@ unsigned long news_on_this_thread()
     return new_counter::on_this_thread();
 }
 
+/* The same for new_counter::fail_new (test_export.cpp) */
+void fail_new_on_this_thread(unsigned long n)
+{
+    new_counter::fail_new(n);
+}
+
 namespace {
 
 std::atomic<int> g_callback_count{0};

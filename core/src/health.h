@@ -60,7 +60,8 @@ std::string write(const inputs& in, uint32_t format,
 
 /* The report's bytes checked for the identity values and the VIN's
  * shape (a match fails it, its class in r.failed_class), then written as
- * <out>.partial and renamed into place; false with the detail set */
+ * a name of its own beside <out> and renamed into place; false with the
+ * detail set */
 bool put(const std::string& out, const std::string& bytes,
          const ecuio_scrub::values& identity, ecuio_health_report_t& r);
 

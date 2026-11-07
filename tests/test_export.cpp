@@ -28,9 +28,15 @@
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
+#include "folder_files.h"
 #include "isotp.h"
+#include "partial_left.h"
 #include "scrub.h"
 #include "temp_name.h"
+
+/* test_core.cpp's, around tests/new_counter.h (included there alone) */
+unsigned long news_on_this_thread();
+void fail_new_on_this_thread(unsigned long n);
 
 namespace fs = std::filesystem;
 
@@ -123,8 +129,6 @@ TEST(ScrubTest, AVinShapedTokenIsSeventeenOfTheAlphabetAlone)
     EXPECT_TRUE(vin(kVin));
     EXPECT_TRUE(vin(std::string("\x01") + kVin + "\x00"));
     EXPECT_TRUE(vin(std::string("VIN: ") + kVin + ", next"));
-    EXPECT_FALSE(vin(std::string(kVin) + "2")); /* 18 long */
-    EXPECT_FALSE(vin(std::string("A") + kVin)); /* 18 long */
     EXPECT_FALSE(vin("ZZZFAKE11M000000"));      /* 16 */
     EXPECT_FALSE(vin("ZZZFAKEI1M0000001"));     /* an I */
     EXPECT_FALSE(vin("ZZZFAKEO1M0000001"));     /* an O */
@@ -133,6 +137,50 @@ TEST(ScrubTest, AVinShapedTokenIsSeventeenOfTheAlphabetAlone)
     EXPECT_FALSE(vin("0123456789ABCDEF0"));     /* hex */
     EXPECT_FALSE(vin("ZZZZZZZZZZZZZZZZZ"));     /* no digit */
     EXPECT_FALSE(vin("12345678901234567"));     /* no letter */
+}
+
+/* Inside a longer run a window is a VIN only when its ninth character is
+ * its check digit, and it has the shape: a letter, a digit, not all hex */
+TEST(ScrubTest, AVinInsideALongerRunIsFoundByItsCheckDigit)
+{
+    ecuio_scrub::values none;
+    auto vin = [&](const std::string& text) {
+        return ecuio_scrub::check_bytes(
+                   none, reinterpret_cast<const uint8_t*>(text.data()),
+                   text.size()) == ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1;
+    };
+    EXPECT_TRUE(vin(std::string(kVin) + "2"));       /* the first window */
+    EXPECT_TRUE(vin(std::string("A") + kVin));       /* the last */
+    EXPECT_TRUE(vin(std::string("B") + kVin + "C")); /* between */
+    EXPECT_TRUE(vin(std::string("zz") + kVin));      /* after lower case */
+    EXPECT_TRUE(vin(std::string("x ") + kVin + "2 y"));
+    /* ZZZFAKE12M0000001: its ninth isn't its check digit */
+    EXPECT_FALSE(vin("ZZZFAKE12M00000012"));
+    EXPECT_FALSE(vin("AZZZFAKE12M0000001"));
+    EXPECT_FALSE(vin("ZZZFAKE12M00000012345"));
+    /* windows whose ninth is their check digit, without the shape */
+    EXPECT_FALSE(vin("1234567890123456789012345678901234567890"));
+    EXPECT_FALSE(vin("0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"));
+    /* the VIN alphabet broken inside the window */
+    EXPECT_FALSE(vin("ZZZFAKE11M000000I1"));
+    EXPECT_FALSE(vin("ZZZFAKE11m00000012"));
+    EXPECT_FALSE(vin("ZZZFAKE11 M00000012")); /* two runs, neither 17 */
+
+    /* the recording's own value names the class before the shape does */
+    ecuio_scrub::values own;
+    ASSERT_TRUE(own.add(kVin, 17, ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION));
+    const std::string echo = std::string("\x62\xD8\x31") + kVin;
+    EXPECT_EQ(
+        ecuio_scrub::check_bytes(
+            own, reinterpret_cast<const uint8_t*>(echo.data()), echo.size()),
+        ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+    EXPECT_TRUE(vin(echo)); /* '1' and the VIN: a window */
+
+    ecuio_scrub::check pieces(none); /* a window across two pieces */
+    pieces.feed(reinterpret_cast<const uint8_t*>("AZZZFAKE1"), 9);
+    EXPECT_EQ(pieces.found(), 0u);
+    pieces.feed(reinterpret_cast<const uint8_t*>("1M0000001"), 9);
+    EXPECT_EQ(pieces.found(), ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
 }
 
 TEST(ScrubTest, AFailedCheckIsWordedByItsClass)
@@ -429,7 +477,7 @@ struct Exported {
 void expect_no_file(const Folder& f, const std::string& name = "out.pcapng")
 {
     EXPECT_FALSE(fs::exists(f.path / name));
-    EXPECT_FALSE(fs::exists(f.path / (name + ".partial")));
+    EXPECT_FALSE(partial_left(f.path, name));
 }
 
 TEST(ExportTest, FramesAsTheyArrivedAreWrittenAsSocketCanHoldsThem)
@@ -783,7 +831,7 @@ TEST(ExportTest, AFileThatExistsOrARowThatDoesntReadWritesNothing)
     EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(e.detail, "the file exists already");
     EXPECT_EQ(read_file(f.path / "out.pcapng"), "mine");
-    EXPECT_FALSE(fs::exists(f.path / "out.pcapng.partial"));
+    EXPECT_FALSE(partial_left(f.path, "out.pcapng"));
 
     recording(f, row(0, 0x100, 0, {1}) + "5,5,0x100,0x0,1\n");
     Exported bad(f, 0, 0, 0, "bad.pcapng");
@@ -1217,7 +1265,7 @@ TEST(FolderExportTest, EachFileIsCopiedThroughItsClasses)
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 1u);
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 1u);
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 2u);
-    EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+    EXPECT_FALSE(partial_left(f.path, "copy"));
 
     /* The copy is a recording: exported again as CSV, its values are
      * the source's */
@@ -1330,11 +1378,12 @@ TEST(FolderExportTest, AnEventsLogOfAnotherFormatIsLeftOut)
 TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
 {
     {
-        SCOPED_TRACE("a VIN as a marker's label");
+        SCOPED_TRACE("a VIN's shape as a marker's label");
         Folder f;
         whole_recording(f);
+        /* not the recording's VIN, which the check finds as its value */
         f.write("rec/markers.csv",
-                std::string("host_us,label\n1500000,") + kVin + "\n");
+                "host_us,label\n1500000,ZZZFAKE22M0000002\n");
         FolderExported e(f);
         EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
         EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
@@ -1342,7 +1391,7 @@ TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
                             "copy's markers.csv: nothing was written");
         EXPECT_EQ(e.report.files, 0u);
         EXPECT_FALSE(fs::exists(f.path / "copy"));
-        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+        EXPECT_FALSE(partial_left(f.path, "copy"));
     }
     {
         SCOPED_TRACE("a DID echoing the VIN as it crossed the bus");
@@ -1364,7 +1413,7 @@ TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
                   "the check found an identification reply's value in a "
                   "message the export would write: nothing was written");
         EXPECT_FALSE(fs::exists(f.path / "copy"));
-        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+        EXPECT_FALSE(partial_left(f.path, "copy"));
     }
     {
         SCOPED_TRACE("a VIN's shape in a message delivered whole, which "
@@ -1380,7 +1429,7 @@ TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
                   "the check found a VIN-shaped token in a message the export "
                   "would write: nothing was written");
         EXPECT_FALSE(fs::exists(f.path / "copy"));
-        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+        EXPECT_FALSE(partial_left(f.path, "copy"));
     }
     {
         SCOPED_TRACE("a calibration ID in signals.json");
@@ -1389,7 +1438,12 @@ TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
                   row(1000, 0x7E8, kWhole,
                       text_bytes({0x49, 0x04, 0x01}, "FAKECAL-01")),
                   "2000,RPM,1726,rpm\n");
-        f.write("rec/signals.json", "{\"notes\": \"FAKECAL-01\"}\n");
+        f.write("rec/signals.json",
+                R"({"havne_signals":1,"name":"T","notes":"FAKECAL-01",)"
+                R"("source":{"name":"t"},"ecus":[{"id":"pcm","rx":"7E8"}],)"
+                R"("signals":[{"key":"a","name":"A","read":{"service":"22",)"
+                R"("number":"D100"},"field":{"byte":0}}]})"
+                "\n");
         FolderExported e(f);
         EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
         EXPECT_EQ(e.report.failed_class,
@@ -1398,7 +1452,7 @@ TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
                             "value in the copy's signals.json: nothing was "
                             "written");
         EXPECT_FALSE(fs::exists(f.path / "copy"));
-        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+        EXPECT_FALSE(partial_left(f.path, "copy"));
     }
 }
 
@@ -1425,7 +1479,7 @@ TEST(FolderExportTest, ARefusedCopyWritesNothing)
     FolderExported b(bad);
     EXPECT_EQ(b.rc, ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(b.detail, "latency.csv line 2: t_s isn't a time in seconds");
-    EXPECT_FALSE(fs::exists(bad.path / "copy.partial"));
+    EXPECT_FALSE(partial_left(bad.path, "copy"));
 
     Folder formula;
     recording(formula, "", "1000,=RPM,1726,rpm\n");
@@ -1662,6 +1716,416 @@ TEST(ScrubFramesTest, ArgumentsACancelAndAFrameTooLongAreRefused)
     EXPECT_EQ(ecuio_scrub_frames(2, give, &s, nullptr, 0, keep, &r), ECUIO_OK);
     EXPECT_EQ(keep[0] + keep[1], 2);
     EXPECT_EQ(r.frames, 2u);
+}
+
+// ---- a message torn every way, and frames no message reads ----
+
+/* A serial's reply (62 F1 8C, 33 bytes) as it crossed the bus, a Single
+ * Frame of length 0 (malformed) between its first Consecutive Frame and
+ * its second */
+std::vector<Mem> serial_with_a_malformed_frame()
+{
+    const std::vector<uint8_t> msg =
+        text_bytes({0x62, 0xF1, 0x8C}, "SERIALFAKE-0123456789ABCDEFGHI");
+    auto cf = [&msg](uint8_t sn, size_t at) {
+        std::vector<uint8_t> d{static_cast<uint8_t>(0x20 | sn)};
+        for (size_t k = 0; k < 7; ++k) {
+            d.push_back(at + k < msg.size() ? msg[at + k] : 0);
+        }
+        return d;
+    };
+    return {
+        {1000,
+         0x7E8,
+         0,
+         {0x10, 0x21, msg[0], msg[1], msg[2], msg[3], msg[4], msg[5]}},
+        {2000, 0x7E8, 0, cf(1, 6)},
+        {3000, 0x7E8, 0, {0, 0, 0, 0, 0, 0, 0, 0}},
+        {4000, 0x7E8, 0, cf(2, 13)},
+        {5000, 0x7E8, 0, cf(3, 20)},
+        {6000, 0x7E8, 0, cf(4, 27)},
+        {7000, 0x7E0, 0, {0x02, 0x01, 0x0C, 0, 0, 0, 0, 0}},
+    };
+}
+
+/* The malformed frame ends the message under way, so every frame of it
+ * is torn: none of them pends into a message no frame list holds */
+TEST(ScrubFramesTest, AMalformedFrameInAMessageTearsAllOfIt)
+{
+    Source s;
+    s.frames = serial_with_a_malformed_frame();
+    Scrubbed r(s);
+    ASSERT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 1}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 6u);
+    EXPECT_EQ(r.report.frames, 1u);
+}
+
+TEST(FolderExportTest, AMalformedFrameInAMessageTearsAllOfIt)
+{
+    Folder f;
+    std::string rows;
+    for (const Mem& m : serial_with_a_malformed_frame()) {
+        rows += row(m.t, m.id, m.flags, m.data);
+    }
+    recording(f, rows);
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.files["frames.csv"],
+              "host_us,timestamp_us,id,flags,data\n" +
+                  row(7000, 0x7E0, 0, {0x02, 0x01, 0x0C, 0, 0, 0, 0, 0}));
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 6u);
+}
+
+/* Torn segments on any 18DA ID: a reply to a tester at F9, and one at F1
+ * (whose First Frames came before the frames began) */
+TEST(ScrubFramesTest, ATornSegmentOnAny18DaIdIsLeftOut)
+{
+    const uint32_t x = ECUIO_FRAME_FLAG_EXTENDED;
+    Source s;
+    s.frames = {
+        {1000, 0x18DAF910, x, text_bytes({0x21}, "FAKE11M")},
+        {2000, 0x18DAF910, x, text_bytes({0x22}, "0000001")},
+        {3000, 0x18DAF110, x, text_bytes({0x21}, "FAKE11M")},
+        {4000, 0x7E0, 0, {0x21, 0, 0, 0, 0, 0, 0, 0}},
+    };
+    Scrubbed r(s);
+    ASSERT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{0, 0, 0, 1}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 3u);
+}
+
+TEST(ExportTest, ATornSegmentOnAny18DaIdIsLeftOut)
+{
+    const uint32_t x = ECUIO_FRAME_FLAG_EXTENDED;
+    Folder f;
+    recording(f, row(1000, 0x18DAF910, x, text_bytes({0x21}, "FAKE11M")) +
+                     row(2000, 0x18DAF910, x, text_bytes({0x22}, "0000001")) +
+                     row(3000, 0x7E0, 0, {0x21, 0, 0, 0, 0, 0, 0, 0}));
+    Exported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 2u);
+    ASSERT_EQ(e.pcap.packets.size(), 1u);
+    EXPECT_EQ(e.pcap.packets[0].can_id(), 0x7E0u);
+    EXPECT_EQ(e.bytes.find("FAKE11M"), std::string::npos);
+}
+
+/* A CAN FD frame on a reply ID, longer than classic ISO-TP's: its ISO-TP
+ * form isn't read, so it's left out; one on another ID is kept */
+TEST(ScrubFramesTest, AnFdFrameOnAReplyIdIsLeftOut)
+{
+    const uint32_t fd = ECUIO_FRAME_FLAG_FD;
+    Source s;
+    s.frames = {
+        {1000, 0x7E8, fd,
+         text_bytes({0x00, 0x13, 0x49, 0x04, 0x01}, "CALIDFAKE0000001")},
+        {2000, 0x18DAF110, fd | ECUIO_FRAME_FLAG_EXTENDED,
+         text_bytes({0x00, 0x13, 0x49, 0x04, 0x01}, "CALIDFAKE0000002")},
+        {3000, 0x123, fd, std::vector<uint8_t>(12, 0x55)},
+        {4000, 0x7E8, fd, {0x04, 0x41, 0x0C, 0x1A, 0xF8}},
+    };
+    Scrubbed r(s);
+    ASSERT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{0, 0, 1, 1}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 2u);
+}
+
+TEST(ExportTest, AnFdFrameOnAReplyIdIsLeftOut)
+{
+    Folder f;
+    recording(
+        f, row(1000, 0x7E8, ECUIO_FRAME_FLAG_FD,
+               text_bytes({0x00, 0x13, 0x49, 0x04, 0x01}, "CALIDFAKE0000001")) +
+               row(2000, 0x123, ECUIO_FRAME_FLAG_FD,
+                   std::vector<uint8_t>(12, 0x55)));
+    Exported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 1u);
+    ASSERT_EQ(e.pcap.packets.size(), 1u);
+    EXPECT_EQ(e.pcap.packets[0].can_id(), 0x123u);
+    EXPECT_EQ(e.bytes.find("CALIDFAKE"), std::string::npos);
+    /* raw keeps it */
+    Exported raw(f, ECUIO_EXPORT_RAW, 0, 0, "raw.pcapng");
+    ASSERT_EQ(raw.rc, ECUIO_OK) << raw.detail;
+    EXPECT_EQ(raw.pcap.packets.size(), 2u);
+}
+
+/* A hex def's value is searched as its bytes: three zero bytes are too
+ * short to search for, so a Flow Control's zero padding doesn't fail the
+ * copy; six bytes are searched, in every form */
+TEST(FolderExportTest, AHexValueIsSearchedAsItsBytes)
+{
+    const std::string header = "profile  raw\nsignal  DID D100,text,,0,0\n";
+    {
+        Folder f;
+        recording(f, row(2000, 0x7E0, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}),
+                  "1000,DID D100,00 00 00,\n", header);
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_OK) << e.detail;
+    }
+    {
+        Folder f;
+        recording(f,
+                  row(2000, 0x7E0, 0,
+                      {0x07, 0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x00}),
+                  "1000,DID D100,de ad be ef 01 02,\n", header);
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES + 1);
+    }
+}
+
+/* The VIN read from a module on 0x726/0x72E, an ID ISO 15765-4 doesn't
+ * give, so no reassembly takes it: its First Frame says what it is, and
+ * the Consecutive Frames on 0x72E go with it until 0x72E's next Single or
+ * First Frame */
+std::vector<Mem> vin_on_another_id()
+{
+    const std::vector<uint8_t> p = text_bytes({0x62, 0xF1, 0x90}, kVin);
+    return {
+        {1000, 0x726, 0, {0x03, 0x22, 0xF1, 0x90, 0, 0, 0, 0}},
+        {2000, 0x72E, 0, {0x10, 0x14, p[0], p[1], p[2], p[3], p[4], p[5]}},
+        {3000, 0x726, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}},
+        {4000, 0x72E, 0, {0x21, p[6], p[7], p[8], p[9], p[10], p[11], p[12]}},
+        {5000,
+         0x72E,
+         0,
+         {0x22, p[13], p[14], p[15], p[16], p[17], p[18], p[19]}},
+        /* past its length, before its ID's next SF or FF: still its */
+        {6000, 0x72E, 0, {0x23, 0, 0, 0, 0, 0, 0, 0}},
+        /* a refusal on 0x72E ends it; a CF after that is no reply's */
+        {7000, 0x72E, 0, {0x03, 0x7F, 0x22, 0x31, 0, 0, 0, 0}},
+        {8000, 0x72E, 0, {0x21, 1, 2, 3, 4, 5, 6, 7}},
+        /* an identification reply in one frame, on a 29-bit ID */
+        {9000,
+         0x18FEF100,
+         ECUIO_FRAME_FLAG_EXTENDED,
+         {0x07, 0x49, 0x06, 0x01, 0xDE, 0xAD, 0xBE, 0xEF}},
+    };
+}
+
+TEST(ScrubFramesTest, AnIdentificationReplyOnAnyIdIsLeftOut)
+{
+    Source s;
+    s.frames = vin_on_another_id();
+    Scrubbed r(s);
+    ASSERT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{1, 0, 1, 0, 0, 0, 1, 1, 0}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 5u);
+
+    /* its bytes gathered, the VIN is searched for in what's kept */
+    s.frames.push_back(
+        {10000, 0x123, kWhole,
+         text_bytes({0x62, 0xD8, 0x01}, std::string(kVin) + "1")});
+    Scrubbed found(s);
+    EXPECT_EQ(found.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(found.report.failed_class,
+              ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+}
+
+TEST(ExportTest, AnIdentificationReplyOnAnyIdIsLeftOut)
+{
+    Folder f;
+    std::string rows;
+    for (const Mem& m : vin_on_another_id()) {
+        rows += row(m.t, m.id, m.flags, m.data);
+    }
+    recording(f, rows);
+    Exported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 5u);
+    EXPECT_EQ(e.pcap.packets.size(), 4u);
+    EXPECT_EQ(e.bytes.find("FAKE11M"), std::string::npos);
+    EXPECT_EQ(e.bytes.find("0000001"), std::string::npos);
+    FolderExported copy(f);
+    ASSERT_EQ(copy.rc, ECUIO_OK) << copy.detail;
+    EXPECT_EQ(copy.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 5u);
+    EXPECT_EQ(copy.files["frames.csv"].find("0x72E,0x0,10 "),
+              std::string::npos);
+}
+
+/* A recording's signals.json that doesn't load refuses a scrubbed export
+ * of every format, in words, leaving nothing; a raw one doesn't read it */
+TEST(ExportTest, ASignalsJsonThatDoesntLoadRefusesAScrubbedExport)
+{
+    const std::string why = "the recording's signals.json doesn't load (";
+    const std::string end =
+        "): a scrubbed export can't tell which signals are text";
+    auto refused = [&](const std::string& detail) {
+        return detail.rfind(why, 0) == 0 &&
+               detail.size() > why.size() + end.size() &&
+               detail.compare(detail.size() - end.size(), end.size(), end) ==
+                   0 &&
+               detail.find("line 1, column") != std::string::npos;
+    };
+    Folder f;
+    whole_recording(f);
+    f.write("rec/signals.json", "{\"havne_signals\": 1,\n");
+    {
+        Exported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_TRUE(refused(e.detail)) << e.detail;
+        EXPECT_FALSE(fs::exists(f.path / "out.pcapng"));
+        EXPECT_FALSE(partial_left(f.path, "out.pcapng"));
+    }
+    {
+        CsvExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_TRUE(refused(e.detail)) << e.detail;
+    }
+    {
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_TRUE(refused(e.detail)) << e.detail;
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+        EXPECT_FALSE(partial_left(f.path, "copy"));
+    }
+    Exported raw(f, ECUIO_EXPORT_RAW, 0, 0, "raw.pcapng");
+    EXPECT_EQ(raw.rc, ECUIO_OK) << raw.detail;
+
+    /* one there that can't be opened (a folder of the name) */
+    Folder g;
+    whole_recording(g);
+    fs::create_directories(g.path / "rec" / "signals.json");
+    Exported e(g);
+    EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(e.detail.rfind(why, 0), 0u) << e.detail;
+}
+
+/* An identification reply on another ID that the frames end before it's
+ * whole: its bytes so far are identity values all the same, so a message
+ * repeating them fails the check */
+std::vector<Mem> a_short_reply_on_another_id()
+{
+    const std::vector<uint8_t> p = text_bytes({0x62, 0xF1, 0x90}, kVin);
+    return {
+        {1000, 0x72E, 0, {0x10, 0x14, p[0], p[1], p[2], p[3], p[4], p[5]}},
+        {2000, 0x72E, 0, {0x21, p[6], p[7], p[8], p[9], p[10], p[11], p[12]}},
+        {3000, 0x123, kWhole, text_bytes({0x62, 0xD8, 0x01}, "-ZZZFAKE11M-")},
+    };
+}
+
+TEST(ScrubFramesTest, AShortIdentificationReplyOnAnotherIdIsSearchedFor)
+{
+    Source s;
+    s.frames = a_short_reply_on_another_id();
+    Scrubbed r(s);
+    EXPECT_EQ(r.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(r.report.failed_class, ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+}
+
+TEST(ExportTest, AShortIdentificationReplyOnAnotherIdIsSearchedFor)
+{
+    Folder f;
+    std::string rows;
+    for (const Mem& m : a_short_reply_on_another_id()) {
+        rows += row(m.t, m.id, m.flags, m.data);
+    }
+    recording(f, rows);
+    Exported e(f);
+    EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+    EXPECT_FALSE(fs::exists(f.path / "out.pcapng"));
+}
+
+/* The folder's entries by name, each a file's bytes or "<folder>" */
+std::map<std::string, std::string> entries(const fs::path& dir)
+{
+    std::map<std::string, std::string> m;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        m[e.path().filename().generic_u8string()] =
+            e.is_directory() ? std::string("<folder>") : read_file(e.path());
+    }
+    return m;
+}
+
+/* An export writes under a name of its own: another's partial (a crashed
+ * export's, or one under way: the next names this process would take
+ * among them) is never in the way and never touched, and the export
+ * leaves none of its own */
+TEST(ExportTest, AnotherExportsPartialIsNeverInTheWayNorTouched)
+{
+    Folder f;
+    recording(f, row(1000, 0x7E0, 0, {0x02, 0x01, 0x0C, 0, 0, 0, 0, 0}));
+    f.write("rec/signals.csv", "host_us,signal,value,unit\n1000,RPM,800,rpm\n");
+    const struct {
+        uint32_t format;
+        const char* name;
+    } cases[] = {{ECUIO_EXPORT_PCAPNG, "out.pcapng"},
+                 {ECUIO_EXPORT_CSV, "out.csv"},
+                 {ECUIO_EXPORT_FOLDER, "copy"}};
+    for (const auto& c : cases) {
+        const std::string out = f.utf8(c.name);
+        f.write(std::string(c.name) + ".partial", "a crashed export's");
+        f.write(std::string(c.name) + ".partial-1-0", "a crashed export's");
+        /* the next two names this process takes, made by another */
+        const std::string taken = ecuio_files::partial_name(out);
+        const std::string stem = taken.substr(0, taken.rfind('-') + 1);
+        const unsigned n = static_cast<unsigned>(
+            std::stoul(taken.substr(taken.rfind('-') + 1)));
+        for (unsigned k = n + 1; k <= n + 2; ++k) {
+            std::ofstream(fs::u8path(stem + std::to_string(k)),
+                          std::ios::binary)
+                << "an export under way";
+        }
+        auto before = entries(f.path);
+        const std::string folder = f.utf8("rec");
+        ecuio_export_options_t o{};
+        o.format = c.format;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        ASSERT_EQ(ecuio_export(&o, nullptr), ECUIO_OK)
+            << c.name << ": " << ecuio_last_error_detail();
+        auto after = entries(f.path);
+        ASSERT_EQ(after.count(c.name), 1u) << c.name;
+        after.erase(c.name);
+        before.erase("rec");
+        after.erase("rec");
+        EXPECT_EQ(after, before) << c.name
+                                 << ": another's left as it was, "
+                                    "none of its own left";
+    }
+}
+
+/* Out of memory at each of an export's allocations in turn: every one
+ * returns (never terminates), and none leaves its file or a .partial */
+TEST(ExportTest, OutOfMemoryAnywhereLeavesNoFileBehind)
+{
+    Folder f;
+    whole_recording(f);
+    const uint32_t formats[] = {ECUIO_EXPORT_PCAPNG, ECUIO_EXPORT_CSV,
+                                ECUIO_EXPORT_FOLDER};
+    for (uint32_t format : formats) {
+        const std::string folder = f.utf8("rec");
+        const std::string out = f.utf8("oom");
+        ecuio_export_options_t o{};
+        o.format = format;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        const unsigned long before = news_on_this_thread();
+        ASSERT_EQ(ecuio_export(&o, nullptr), ECUIO_OK) << format;
+        const unsigned long news = news_on_this_thread() - before;
+        std::error_code ec;
+        fs::remove_all(f.path / "oom", ec);
+        ASSERT_GT(news, 10u);
+        unsigned long refused = 0;
+        for (unsigned long n = 1; n <= news; ++n) {
+            fail_new_on_this_thread(n);
+            const ecuio_status_t rc = ecuio_export(&o, nullptr);
+            fail_new_on_this_thread(0);
+            if (rc != ECUIO_OK) {
+                ++refused;
+                ASSERT_TRUE(rc == ECUIO_ERR_OUT_OF_MEMORY ||
+                            rc == ECUIO_ERR_LOAD_FAILED)
+                    << format << " at " << n << ": " << rc;
+                ASSERT_FALSE(fs::exists(f.path / "oom")) << format << " " << n;
+            }
+            ASSERT_FALSE(partial_left(f.path, "oom")) << format << " at " << n;
+            fs::remove_all(f.path / "oom", ec);
+        }
+        EXPECT_GT(refused, 0u) << format;
+    }
 }
 
 } // namespace

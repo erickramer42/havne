@@ -100,13 +100,20 @@ class set_of
 public:
     /* The recording's own signals.json, else uds-generic's set from the
      * URI's did= list, else the profile by name; NULL for none (a raw
-     * recording, or a profile this core doesn't have) */
+     * recording, or a profile this core doesn't have). A signals.json
+     * there that doesn't load sets own_refused, with its words. */
     const ecuio_signal_set_t* load(const std::string& folder, const header& h)
     {
         set_ = nullptr;
+        own_refused_ = false;
+        own_why_.clear();
         std::string why;
-        detail::file_ptr f(
-            ecuio_files::open_file(folder + "/signals.json", false, &why));
+        const std::string own = folder + "/signals.json";
+        detail::file_ptr f(ecuio_files::open_file(own, false, &why));
+        if (!f && ecuio_files::exists(own)) {
+            own_refused_ = true;
+            own_why_ = why;
+        }
         if (f) {
             std::string bytes(ECUIO_SIGNAL_FILE_MAX_BYTES, '\0');
             bytes.resize(std::fread(&bytes[0], 1, bytes.size(), f.get()));
@@ -115,6 +122,9 @@ public:
                 ECUIO_OK) {
                 file_.reset(loaded);
                 set_ = ecuio_signal_file_set(loaded);
+            } else {
+                own_refused_ = true;
+                own_why_ = ecuio_last_error_detail();
             }
         }
         if (set_ == nullptr && h.profile == ECUIO_UDS_GENERIC_NAME) {
@@ -137,11 +147,16 @@ public:
     }
 
     const ecuio_signal_set_t* set() const { return set_; }
+    /* load found a signals.json it couldn't read or load */
+    bool own_refused() const { return own_refused_; }
+    const std::string& own_why() const { return own_why_; }
 
 private:
     std::unique_ptr<ecuio_signal_file_t, detail::signal_file_free> file_;
     std::unique_ptr<ecuio_uds_session> uds_;
     const ecuio_signal_set_t* set_ = nullptr;
+    bool own_refused_ = false;
+    std::string own_why_;
 };
 
 } // namespace ecuio_recording_set

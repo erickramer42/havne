@@ -26,7 +26,8 @@
 // classes (frames.csv by the plan, kept rows as recorded; signals.csv by
 // the CSV's classes; events.log line by line; markers.csv, latency.csv
 // and signals.json as they are), each through its own file check, under
-// <out>.partial until every one passes.
+// a name of its own beside <out> (folder_files.h's partial_name) until
+// every one passes.
 
 #include "error_detail.h"
 #include "folder_files.h"
@@ -96,6 +97,7 @@ using ecuio_frame_rows::frame_rows;
 
 namespace fr = ecuio_frame_reassembly;
 using fr::message_end;
+using fr::other_id_identification;
 using fr::reassembly;
 using fr::seg;
 
@@ -122,6 +124,38 @@ uint64_t segments(uint32_t id, bool extended, uint16_t len)
            (static_cast<uint64_t>(len) - 6 + 6) / 7;
 }
 
+/* text as ecuio_decode_text writes a hex value, two hex digits a byte with
+ * one space between (either case), into *bytes; false for anything else */
+bool hex_pairs(const std::string& text, std::string* bytes)
+{
+    auto digit = [](char c) -> int {
+        if (c >= '0' && c <= '9') {
+            return c - '0';
+        }
+        if (c >= 'A' && c <= 'F') {
+            return c - 'A' + 10;
+        }
+        if (c >= 'a' && c <= 'f') {
+            return c - 'a' + 10;
+        }
+        return -1;
+    };
+    if (text.size() < 2 || (text.size() + 1) % 3 != 0) {
+        return false;
+    }
+    std::string out;
+    for (size_t i = 0; i < text.size(); i += 3) {
+        const int hi = digit(text[i]);
+        const int lo = digit(text[i + 1]);
+        if (hi < 0 || lo < 0 || (i + 2 < text.size() && text[i + 2] != ' ')) {
+            return false;
+        }
+        out += static_cast<char>(hi << 4 | lo);
+    }
+    *bytes = std::move(out);
+    return true;
+}
+
 bool re_segmentable(const ecuio_frame_t& f)
 {
     return (f.flags & ECUIO_FRAME_FLAG_TRUNCATED) == 0 && f.data_length >= 1 &&
@@ -138,7 +172,10 @@ public:
           probe_(new ecuio_frame_t{}), tx_(new isotp_tx)
     {}
 
-    bool run(const std::string& folder, const std::string& out, bool* made)
+    /* *partial names the file made under a name of its own (pcapng, CSV)
+     * while it isn't in place, so the caller removes it on any failure */
+    bool run(const std::string& folder, const std::string& out,
+             std::string* partial)
     {
         if (folder_) {
             return run_folder(folder, out);
@@ -160,13 +197,13 @@ public:
         if (files::exists(out)) {
             return fail("the file exists already");
         }
-        const std::string partial = out + ".partial";
         std::string why;
-        file_.reset(files::open_file(partial, true, &why));
+        /* the name goes in *partial before the file is made */
+        file_.reset(files::partial_file(out, partial, &why));
         if (!file_) {
+            partial->clear();
             return fail("the export can't be written: %s", why);
         }
-        *made = true;
         if (!(csv_out ? write_csv(folder) : write(folder))) {
             return false;
         }
@@ -174,10 +211,10 @@ public:
             return fail("the export can't be written: %s",
                         files::errno_words(errno));
         }
-        if (!files::rename_to(partial, out, false, &why)) {
+        if (!files::rename_to(*partial, out, false, &why)) {
             return fail("the export can't be put in place: %s", why);
         }
-        *made = false;
+        partial->clear();
         return true;
     }
 
@@ -225,10 +262,16 @@ private:
     /* The recording's text and hex defs (ADR-0054 section 1): its own
      * signals.json, else uds-generic's set from its URI's did= list, else
      * its profile by name. None found leaves the value search alone to
-     * catch a text value. */
+     * catch a text value. A signals.json that doesn't load refuses the
+     * export: the set it names may have text defs no other set has. */
     bool text_defs(const std::string& folder)
     {
         const ecuio_signal_set_t* set = set_.load(folder, header_);
+        if (set_.own_refused()) {
+            return fail("the recording's signals.json doesn't load (%s): a "
+                        "scrubbed export can't tell which signals are text",
+                        set_.own_why());
+        }
         if (set != nullptr) {
             for (uint32_t i = 0; i < set->count; ++i) {
                 const ecuio_signal_def_t& d = set->defs[i];
@@ -299,7 +342,14 @@ private:
                 !seen.insert(row.value).second) {
                 continue;
             }
-            if (!values_.add(row.value.data(), row.value.size(), kTextValues)) {
+            /* A hex def's value is its bytes as spaced pairs: searched as
+             * those bytes, so the shortest value and the padding split
+             * count bytes, not characters (the bytes' forms include the
+             * spaced text) */
+            std::string bytes;
+            const std::string& value =
+                hex_pairs(row.value, &bytes) ? bytes : row.value;
+            if (!values_.add(value.data(), value.size(), kTextValues)) {
                 return fail("the recording holds more text values than the "
                             "export's check can take");
             }
@@ -339,6 +389,8 @@ private:
             return false;
         }
         reassembly rs;
+        other_id_identification others;
+        std::vector<uint8_t> whole;
         std::vector<message_end> ends;
         uint64_t index = 0;
         int got = 0;
@@ -382,8 +434,17 @@ private:
             }
             uint8_t bytes[pc::kFdBytes];
             uint32_t n = 0;
-            if (!folder_ && !pc::socketcan(f, bytes, &n)) {
+            /* a frame no CAN frame can be, or a reply whose ISO-TP form
+             * isn't read (CAN FD's) */
+            if ((!folder_ && !pc::socketcan(f, bytes, &n)) ||
+                (!raw_ && reassembly::unread_reply(f))) {
                 left_out(s, kUnattributable, false);
+            } else if (!raw_ && others.take(f, &whole)) {
+                if (!whole.empty() &&
+                    !add_identity(whole.data(), whole.size())) {
+                    return false;
+                }
+                left_out(s, kIdentification, false);
             } else if (!raw_ && text_message(f.arbitration_id, f.flags, f.data,
                                              f.data_length)) {
                 left_out(s, kTextValues, false);
@@ -398,6 +459,13 @@ private:
         rs.finish(ends);
         if (!judge(ends)) {
             return false;
+        }
+        std::vector<std::vector<uint8_t>> short_replies;
+        others.finish(short_replies);
+        for (const std::vector<uint8_t>& m : short_replies) {
+            if (!add_identity(m.data(), m.size())) {
+                return false;
+            }
         }
         std::sort(dropped_.begin(), dropped_.end());
         return true;
@@ -428,7 +496,7 @@ private:
                         left_out(s, kTextValues, true);
                     }
                 }
-            } else if (scrub::reply_id(e.id, e.extended)) {
+            } else if (scrub::segment_reply_id(e.id, e.extended)) {
                 for (const seg& s : e.frames) {
                     left_out(s, kUnattributable, true);
                 }
@@ -1069,12 +1137,14 @@ private:
     bool begin_file(const std::string& partial, const char* name)
     {
         std::string why;
-        const std::string path = partial + "/" + name;
-        file_.reset(files::open_file(path, true, &why));
+        /* listed before it's made, so a failure past it (bad_alloc
+         * included) still removes it with the partial folder */
+        written_paths_.push_back(partial + "/" + name);
+        file_.reset(files::open_file(written_paths_.back(), true, &why));
         if (!file_) {
+            written_paths_.pop_back();
             return fail("the export can't be written: %s", why);
         }
-        written_paths_.push_back(path);
         file_check_.reset(new scrub::check(values_));
         buf_.clear();
         return true;
@@ -1265,21 +1335,21 @@ private:
         if (files::exists(out)) {
             return fail("the folder exists already");
         }
-        partial_ = out + ".partial";
         std::string why;
-        if (!files::make_folder(partial_, &why)) {
+        if (!files::partial_folder(out, &partial_, &why)) {
+            partial_.clear();
             return fail("the export can't be written: %s", why);
         }
         bool ok = false;
         try {
             ok = write_folder(folder);
+            file_.reset();
+            if (ok && !files::rename_to(partial_, out, false, &why)) {
+                ok = fail("the export can't be put in place: %s", why);
+            }
         } catch (const std::bad_alloc&) {
             remove_partial();
             throw;
-        }
-        file_.reset();
-        if (ok && !files::rename_to(partial_, out, false, &why)) {
-            ok = fail("the export can't be put in place: %s", why);
         }
         if (!ok) {
             remove_partial();
@@ -1368,26 +1438,35 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     ecuio_detail_clear();
-    std::string folder = options->folder_utf8;
-    while (folder.size() > 1 &&
-           (folder.back() == '/' || folder.back() == '\\')) {
-        folder.pop_back();
-    }
-    const std::string out = options->out_path_utf8;
     ecuio_export_report_t r{};
-    bool made = false;
+    std::string out;     /* these two allocate nothing until the try */
+    std::string partial; /* the pcapng's or CSV's, while not in place */
     bool ok = false;
     try {
-        recording_export e(*options, r);
-        ok = e.run(folder, out, &made);
+        std::string folder = options->folder_utf8;
+        while (folder.size() > 1 &&
+               (folder.back() == '/' || folder.back() == '\\')) {
+            folder.pop_back();
+        }
+        out = options->out_path_utf8;
+        {
+            /* closed before its partial is removed: Windows removes no
+             * file still open */
+            recording_export e(*options, r);
+            ok = e.run(folder, out, &partial);
+        }
+        if (!partial.empty()) {
+            files::remove_file(partial);
+        }
     } catch (const std::bad_alloc&) {
-        if (made) {
-            files::remove_file(out + ".partial");
+        try {
+            if (!partial.empty()) {
+                files::remove_file(partial);
+            }
+        } catch (...) { // NOLINT(bugprone-empty-catch): out of memory
+                        // again; the partial stays
         }
         return ECUIO_ERR_OUT_OF_MEMORY;
-    }
-    if (made) {
-        files::remove_file(out + ".partial");
     }
     if (report != nullptr) {
         *report = r;

@@ -63,7 +63,9 @@ public:
     {
         std::fill(keep_, keep_ + count_, uint8_t{1});
         fr::reassembly rs;
+        fr::other_id_identification others;
         std::vector<fr::message_end> ends;
+        std::vector<uint8_t> whole;
         for (size_t i = 0; i < count_; ++i) {
             if (!fetch(i)) {
                 return false;
@@ -83,6 +85,14 @@ public:
                     return false;
                 }
                 left_out(i, kIdentification);
+            } else if (fr::reassembly::unread_reply(f)) {
+                left_out(i, kUnattributable);
+            } else if (others.take(f, &whole)) {
+                if (!whole.empty() &&
+                    !add_identity(whole.data(), whole.size())) {
+                    return false;
+                }
+                left_out(i, kIdentification);
             } else if (text_message(f.arbitration_id, f.flags, f.data,
                                     f.data_length)) {
                 left_out(i, kTextValues);
@@ -90,7 +100,17 @@ public:
         }
         ends.clear();
         rs.finish(ends);
-        return judge(ends);
+        if (!judge(ends)) {
+            return false;
+        }
+        std::vector<std::vector<uint8_t>> short_replies;
+        others.finish(short_replies);
+        for (const std::vector<uint8_t>& m : short_replies) {
+            if (!add_identity(m.data(), m.size())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     bool check()
@@ -203,7 +223,7 @@ private:
                                e.data.data(), e.data.size())) {
                     cls = kTextValues;
                 }
-            } else if (scrub::reply_id(e.id, e.extended)) {
+            } else if (scrub::segment_reply_id(e.id, e.extended)) {
                 cls = kUnattributable;
             }
             if (cls != ECUIO_EXPORT_LEFT_OUT_COUNT) {
