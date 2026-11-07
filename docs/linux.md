@@ -152,8 +152,10 @@ it, a frame nobody acknowledges is sent again until the interface goes
 down
 ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)).
 When an interface goes from listening to asking, say `listen-only off`:
-`ip link set` keeps the mode it last had. No real controller has sent
-through Havne yet.
+`ip link set` keeps the mode it last had. No requesting session has
+sent through a real controller; the simulated ECU has answered the VX
+through one on a desk bus
+([2026-11-03-socketcan-desk-sim](bench-sessions/2026-11-03-socketcan-desk-sim.md)).
 
 **Without hardware,** Linux's virtual CAN bus carries the simulated car:
 
@@ -251,7 +253,12 @@ counts the frames per CAN ID.
   sending tried through `can-utils`
   ([2026-11-02-socketcan-desk](bench-sessions/2026-11-02-socketcan-desk.md)),
   and listening on the test car beside the VX
-  ([2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md)).
+  ([2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md));
+  the simulated ECU answering the VX through it on the desk bus
+  ([2026-11-03-socketcan-desk-sim](bench-sessions/2026-11-03-socketcan-desk-sim.md),
+  [2026-11-04-socketcan-desk-utc](bench-sessions/2026-11-04-socketcan-desk-utc.md));
+  and listening on the test car again beside the VX
+  ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md)).
 - **A Linux desktop:** v0.3.4's AppImage on Xubuntu 26.10 (Xfce, an X11
   session) on a 2011 desktop with a second-generation Core i7 and 8 GB
   (2026-10-30). Made executable and started as it came, with no FUSE
@@ -284,5 +291,5 @@ counts the frames per CAN ID.
   2026-11-06).
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
-  on a pseudo-terminal), and a real CAN controller sending through
-  Havne. [testing.md](testing.md) keeps the details.
+  on a pseudo-terminal), and a requesting session sending through a
+  real CAN controller (one with one-shot mode). [testing.md](testing.md) keeps the details.

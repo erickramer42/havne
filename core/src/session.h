@@ -9,11 +9,13 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
-#include "def_index.h"
+#include "frame_decoder.h"
 #include "profile_hold.h"
+#include "pull_queue.h"
 #include "recorder.h"
 #include "uds_generic.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -43,54 +45,12 @@ struct ecuio_session {
      * transport reads its scan list at attach. NULL under any other
      * profile. */
     std::unique_ptr<ecuio_uds_session> uds;
-    /* The decode's buffers (ADR-0024 section 4, section 6), sized by create from the
-     * set, which never changes: one value per def, and text_slots
-     * slots of ECUIO_DECODE_TEXT_MAX bytes, one per text value a frame
-     * can decode. Only dispatch touches them, on the session's one
-     * worker. */
-    std::vector<ecuio_value_t> values;
-    std::vector<char> text_scratch;
-    uint32_t text_slots = 0;
-    /* The defs each frame can match (def_index.h), and room for one
-     * frame's finds, one per def; built and sized with the buffers above */
-    ecuio_def_index def_index;
-    std::vector<uint32_t> def_found;
-    /* Per def, beside values (ADR-0039 section 6): the frames whose key matched
-     * but ended before its field, counted up to
-     * ECUIO_ABSENT_AFTER_FRAMES, and whether any carried it. Written by
-     * dispatch on the worker, read by ecuio_session_get_absent_signals
-     * on the caller's thread. */
-    std::unique_ptr<std::atomic<uint8_t>[]> short_frames;
-    std::unique_ptr<std::atomic<uint8_t>[]> carried;
-    /* A packed Service 01 reply's split (ADR-0039 Appendix A,
-     * obd2_reply.h): the message IDs a Service 01 def listens on, the
-     * only frames split; the frame each record decodes from; and each
-     * PID's length as this ECU sends it alone, where shorter than
-     * J1979's. Sized by create, touched only by dispatch. The count of
-     * replies that wouldn't split is read on the caller's thread. */
-    std::vector<uint32_t> service01_ids;
-    std::unique_ptr<ecuio_frame_t> record_frame;
-    uint8_t learned_lengths[256] = {};
-    std::atomic<uint64_t> unsplit_replies{0};
-    /* Computed signals (ADR-0051 section 5), sized by create only when
-     * the set has a computed def, touched only by dispatch: each def's
-     * newest value, its session time and the decode it came from
-     * (decode 0 is none yet), and one plan per computed def. */
-    struct latest_value {
-        double value = 0.0;
-        uint64_t time_us = 0;
-        uint64_t decode = 0;
-    };
-    struct computed_plan {
-        uint32_t def = 0; /* the computed def's index */
-        const ecuio_computed_t* program = nullptr;
-        uint32_t inputs[ECUIO_COMPUTED_MAX_INPUTS] =
-            {}; /* the inputs' def indexes */
-        uint64_t max_age_us[ECUIO_COMPUTED_MAX_INPUTS] = {};
-    };
-    std::vector<latest_value> latest;
-    std::vector<computed_plan> computed;
-    uint64_t decodes = 0;
+    /* The decode (frame_decoder.h, ADR-0024 section 4), prepared by create
+     * from the set, which never changes, with the absent signals' counts.
+     * Only dispatch decodes, on the session's one worker; the absent
+     * signals' and unsplit replies' counts are read on the caller's
+     * thread. */
+    ecuio_frame_decoder decoder;
     /* replay://?faults= (ADR-0041): written by the replay worker, read by
      * ecuio_session_get_replay_faults on the caller's thread */
     std::atomic<uint64_t> replay_frames_read{0};
@@ -141,6 +101,14 @@ struct ecuio_session {
      * ecuio_session_record before start and kept until the session is
      * freed, so the worker reads it without a lock */
     std::shared_ptr<ecuio_record_link> record_link;
+    /* The pull queues' links (ecuio/queue.h, pull_queue.h), set by
+     * ecuio_queue_open before start and kept until the session is freed,
+     * so the worker reads them without a lock; value_queues counts the
+     * values queues among them, for which dispatch decodes */
+    std::array<std::shared_ptr<ecuio_queue_link>, ECUIO_QUEUE_MAX_PER_SESSION>
+        queues;
+    uint32_t queue_count = 0;
+    uint32_t value_queues = 0;
 };
 
 #endif /* ECUIO_SESSION_H */

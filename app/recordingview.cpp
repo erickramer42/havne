@@ -1,12 +1,14 @@
 // File/layer: app/recordingview.cpp | Qt6 Core, app layer, C++17
-// Testing: UNIT: test_bridge (tests/test_recording_view.cpp,
-//          RecordingViewTest.*) on tests/fixtures/recording/; a window from
-//          before the start counted against the whole recording's samples
+// Testing: BRIDGE: RecordingViewTest (test_bridge)
 
 #include "recordingview.h"
 
+#include "healthreport.h"
+
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QList>
 #include <QMetaObject>
@@ -17,6 +19,10 @@
 #include <new>
 
 #include "ecuio/core.h"
+#include "ecuio/profile.h"
+
+#include "recording_signals.h" /* cli/: events.log's profile and file lines */
+#include "view_frames.h"       /* cli/: which set decodes the frames */
 
 namespace {
 
@@ -61,6 +67,9 @@ bool signedUs(double ms, int64_t* out)
     return true;
 }
 
+// Why a folder of values alone (a CSV import) has no check or decode
+constexpr const char* kNoFrames = "the recording has no frames";
+
 QString detailOr(ecuio_status_t rc)
 {
     const char* detail = ecuio_last_error_detail();
@@ -71,6 +80,32 @@ QString detailOr(ecuio_status_t rc)
 }
 
 } // namespace
+
+// A set copied on the GUI thread for the open's thread: the registry's
+// can be unregistered, and a plugin's freed, while the open runs
+struct RecordingView::FrameSet {
+    std::vector<ecuio_signal_def_t> defs;
+    std::vector<ecuio_channel_decl_t> channels;
+    std::vector<ecuio_enum_entry_t> enums;
+    std::vector<ecuio_computed_t> computed;
+    ecuio_signal_set_t set{};
+    QString decodedWith;
+
+    explicit FrameSet(const ecuio_signal_set_t& s)
+        : defs(s.defs, s.defs + (s.defs != nullptr ? s.count : 0)),
+          channels(s.channels,
+                   s.channels + (s.channels != nullptr ? s.channel_count : 0)),
+          enums(s.enums, s.enums + (s.enums != nullptr ? s.enum_count : 0)),
+          computed(s.computed,
+                   s.computed + (s.computed != nullptr ? s.computed_count : 0))
+    {
+        set = s;
+        set.defs = defs.empty() ? nullptr : defs.data();
+        set.channels = channels.empty() ? nullptr : channels.data();
+        set.enums = enums.empty() ? nullptr : enums.data();
+        set.computed = computed.empty() ? nullptr : computed.data();
+    }
+};
 
 // What the thread hands the GUI thread. A result dropped unread (a later
 // open, the view destroyed) closes its reader.
@@ -136,17 +171,26 @@ RecordingView::RecordingView(QObject* parent) : QObject(parent) {}
 RecordingView::~RecordingView()
 {
     stop();
+    // Its end, posted to this object, is dropped with it
+    if (m_reportWorker.joinable()) {
+        m_reportWorker.join();
+    }
 }
 
 void RecordingView::run(const std::shared_ptr<Result>& res,
                         std::atomic<bool>* cancel, RecordingView* view,
-                        quint64 generation, const QString& folder)
+                        quint64 generation, const QString& folder,
+                        const std::shared_ptr<FrameSet>& frames)
 {
     const QDir dir(folder);
-    const double signalBytes = static_cast<double>(
-        QFileInfo(dir.filePath(QStringLiteral("signals.csv"))).size());
     const double frameBytes = static_cast<double>(
         QFileInfo(dir.filePath(QStringLiteral("frames.csv"))).size());
+    /* The open reads signals.csv, or frames.csv a first time */
+    const double signalBytes =
+        frames ? frameBytes
+               : static_cast<double>(
+                     QFileInfo(dir.filePath(QStringLiteral("signals.csv")))
+                         .size());
     const double whole = signalBytes + frameBytes;
     const double openShare = whole > 0 ? signalBytes / whole : 1.0;
     auto post = [](RecordingView* v, double p, quint64 g) {
@@ -157,10 +201,16 @@ void RecordingView::run(const std::shared_ptr<Result>& res,
 
     Pass opening{cancel,    view, generation, 0.0,
                  openShare, post, nullptr,    nullptr};
-    res->rc = ecuio_recording_open(path.constData(), onProgress, &opening,
-                                   &res->reader);
+    res->rc =
+        frames ? ecuio_recording_open_frames(path.constData(), &frames->set,
+                                             onProgress, &opening, &res->reader)
+               : ecuio_recording_open(path.constData(), onProgress, &opening,
+                                      &res->reader);
     if (res->rc != ECUIO_OK) {
         res->detail = detailOr(res->rc);
+    } else if (!dir.exists(QStringLiteral("frames.csv"))) {
+        /* Values alone (a CSV import): nothing for the check to read */
+        res->checkDetail = QString::fromUtf8(kNoFrames);
     } else {
         Pass checking{
             cancel,          view, generation,     openShare,
@@ -180,17 +230,152 @@ void RecordingView::run(const std::shared_ptr<Result>& res,
 
 void RecordingView::open(const QString& folder)
 {
+    const QDir dir(folder);
+    if (!dir.exists(QStringLiteral("signals.csv")) &&
+        dir.exists(QStringLiteral("frames.csv"))) {
+        openFrames(folder, QString());
+        return;
+    }
     stop();
+    readHeader(folder);
+    start(folder, nullptr);
+}
+
+void RecordingView::openFrames(const QString& folder, const QString& profile)
+{
+    stop();
+    readHeader(folder);
+    if (!m_hasFrames) {
+        fail(folder, QString::fromUtf8(kNoFrames));
+        return;
+    }
+    const cli::FramesSource source = cli::frames_source(
+        profile == QStringLiteral("signals.json") ? std::string()
+                                                  : profile.toStdString(),
+        cli::RecordedSignals{m_recordedProfile.toStdString(),
+                             m_recordedSha.toStdString(), true},
+        m_ownSignalFile);
+    if (profile == QStringLiteral("signals.json") && !m_ownSignalFile) {
+        fail(folder,
+             QStringLiteral(
+                 "its signals.json isn't the file it was recorded with"));
+        return;
+    }
+    std::shared_ptr<FrameSet> frames;
+    if (source.own_file) {
+        QFile file(QDir(folder).filePath(QStringLiteral("signals.json")));
+        const QByteArray bytes = file.open(QIODevice::ReadOnly)
+                                     ? file.read(ECUIO_SIGNAL_FILE_MAX_BYTES)
+                                     : QByteArray();
+        ecuio_signal_file_t* loaded = nullptr;
+        if (ecuio_signal_file_load(bytes.constData(),
+                                   static_cast<size_t>(bytes.size()),
+                                   &loaded) != ECUIO_OK) {
+            fail(folder,
+                 QStringLiteral("its signals.json doesn't load: %1")
+                     .arg(QString::fromUtf8(ecuio_last_error_detail())));
+            return;
+        }
+        frames = std::make_shared<FrameSet>(*ecuio_signal_file_set(loaded));
+        ecuio_signal_file_free(loaded);
+        frames->decodedWith = QStringLiteral("signals.json");
+    } else if (source.profile.empty()) {
+        fail(
+            folder,
+            m_recordedProfile.isEmpty()
+                ? QStringLiteral(
+                      "it names no profile: pick one to decode its frames with")
+            : m_recordedProfile == QStringLiteral("raw")
+                ? QStringLiteral(
+                      "it was recorded under raw, which decodes nothing: pick "
+                      "a profile to decode its frames with")
+                : QStringLiteral(
+                      "uds-generic's signals come from its session's DIDs: "
+                      "pick a signal file to decode its frames with"));
+        return;
+    } else {
+        const ecuio_signal_set_t* set = nullptr;
+        const bool registered =
+            ecuio_profile_lookup(source.profile.c_str(), &set) == ECUIO_OK;
+        const QString name = QString::fromStdString(source.profile);
+        if (!registered) {
+            fail(folder,
+                 QStringLiteral("the profile %1 isn't loaded").arg(name));
+            return;
+        }
+        if (set == nullptr || set->count == 0) {
+            fail(folder,
+                 QStringLiteral("the profile %1 has no signals to decode with")
+                     .arg(name));
+            return;
+        }
+        frames = std::make_shared<FrameSet>(*set);
+        frames->decodedWith = name;
+    }
+    start(folder, frames);
+}
+
+void RecordingView::start(const QString& folder,
+                          const std::shared_ptr<FrameSet>& frames)
+{
     m_folder = folder;
     m_error.clear();
+    m_decodedWith = frames ? frames->decodedWith : QString();
     m_state = Opening;
     m_progress = 0;
     const quint64 generation = ++m_generation;
     auto res = std::make_shared<Result>();
-    m_worker = std::thread(run, res, &m_cancel, this, generation, folder);
+    m_worker =
+        std::thread(run, res, &m_cancel, this, generation, folder, frames);
     emit progressChanged();
     emit stateChanged();
     emit signalListChanged();
+}
+
+void RecordingView::fail(const QString& folder, const QString& words)
+{
+    m_folder = folder;
+    m_error = words;
+    m_decodedWith.clear();
+    m_state = Failed;
+    m_progress = 0;
+    emit progressChanged();
+    emit stateChanged();
+    emit signalListChanged();
+}
+
+// events.log's profile and signal file lines, and whether the folder's
+// signals.json still hashes to the one named: what openFrames("") picks
+// from, and what the page offers
+void RecordingView::readHeader(const QString& folder)
+{
+    cli::RecordedSignals recorded;
+    QFile log(QDir(folder).filePath(QStringLiteral("events.log")));
+    if (log.open(QIODevice::ReadOnly)) {
+        /* the header is the lines before the first blank one */
+        for (int n = 0; n < 4096 && !log.atEnd(); ++n) {
+            QByteArray line = log.readLine(4096);
+            while (line.endsWith('\n') || line.endsWith('\r')) {
+                line.chop(1);
+            }
+            if (!recorded.take(line.toStdString())) {
+                break;
+            }
+        }
+    }
+    m_recordedProfile = QString::fromStdString(recorded.profile);
+    m_recordedSha = QString::fromStdString(recorded.sha256);
+    m_hasFrames = QDir(folder).exists(QStringLiteral("frames.csv"));
+    m_ownSignalFile = false;
+    if (recorded.names_file()) {
+        QFile own(QDir(folder).filePath(QStringLiteral("signals.json")));
+        if (own.open(QIODevice::ReadOnly) &&
+            own.size() <= static_cast<qint64>(ECUIO_SIGNAL_FILE_MAX_BYTES)) {
+            m_ownSignalFile = QCryptographicHash::hash(
+                                  own.readAll(), QCryptographicHash::Sha256)
+                                  .toHex() == m_recordedSha.toLatin1();
+        }
+    }
 }
 
 void RecordingView::close()
@@ -201,6 +386,11 @@ void RecordingView::close()
     stop();
     m_folder.clear();
     m_error.clear();
+    m_decodedWith.clear();
+    m_recordedProfile.clear();
+    m_recordedSha.clear();
+    m_ownSignalFile = false;
+    m_hasFrames = false;
     m_state = Closed;
     m_progress = 0;
     emit progressChanged();
@@ -228,6 +418,47 @@ void RecordingView::stop()
     if (m_stale) {
         m_stale = false;
         emit staleChanged();
+    }
+}
+
+bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex)
+{
+    if (m_state != Open || m_reporting) {
+        return false;
+    }
+    if (m_reportWorker.joinable()) {
+        m_reportWorker.join(); // ended: its post is what cleared m_reporting
+    }
+    ecuio_health_options_t o{};
+    o.format = healthFormatFor(url, filterIndex);
+    o.units = m_units;
+    o.latest_model_year = healthLatestModelYear();
+    o.utc_us = healthUtcNow();
+    const quint64 generation = m_generation;
+    const QByteArray folder = m_folder.toUtf8();
+    m_reporting = true;
+    m_reportWorker = std::thread([this, o, folder, url, generation]() mutable {
+        o.folder_utf8 = folder.constData();
+        const QVariantMap result = writeHealthReport(o, url);
+        QMetaObject::invokeMethod(
+            this,
+            [this, result, generation] { reportFinished(result, generation); },
+            Qt::QueuedConnection);
+    });
+    emit reportingChanged();
+    return true;
+}
+
+void RecordingView::reportFinished(const QVariantMap& result,
+                                   quint64 generation)
+{
+    if (m_reportWorker.joinable()) {
+        m_reportWorker.join(); // it posted this as its last act
+    }
+    m_reporting = false;
+    emit reportingChanged();
+    if (generation == m_generation) {
+        emit reportSaved(result);
     }
 }
 
@@ -620,6 +851,16 @@ double RecordingView::findMarker(const QString& label)
     ecuio_recording_find_t what{};
     what.kind = ECUIO_RECORDING_FIND_MARKER;
     what.label_utf8 = utf8.constData();
+    return found(what);
+}
+
+double RecordingView::findEngineStart()
+{
+    if (m_reader == nullptr) {
+        return -1.0;
+    }
+    ecuio_recording_find_t what{};
+    what.kind = ECUIO_RECORDING_FIND_ENGINE_START;
     return found(what);
 }
 

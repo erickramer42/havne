@@ -6,8 +6,10 @@
 # Holds the C ABI to its promises (ADR-0001): the core at HEAD against
 # a release's, with libabigail. Each tree's core-only build (debug info,
 # position independent) has its static archive linked whole into a
-# shared object that exports only the public ecuio_ names (none that
-# internal.h declares), as an FFI consumer would load it; abidw dumps
+# shared object that exports what the shared core exports (ADR-0053's
+# appendix): the functions its public headers declare, listed by
+# scripts/ecuio_exports.py from each tree's own headers, as an FFI
+# consumer would load it; abidw dumps
 # the functions and the types the public headers (core/include)
 # declare, and abidiff compares the two.
 #   - An incompatible change fails: a function removed or its signature
@@ -58,22 +60,16 @@ else
     base_name=$base
 fi
 
-# Only the C ABI is exported, as a shared core would export it: the
-# archive's ecuio_ symbols less what internal.h declares (the transport
-# seams, the query keys, the test hooks), which core uses across its own
-# files under the same prefix but never installs. Exact names, each
-# tree's own: a glob for internal.h's would hang on ld's precedence rules
+# Only the C ABI is exported, as the shared core exports it: the
+# functions the tree's installed headers declare, by
+# scripts/ecuio_exports.py (HEAD's, over the base's headers too, so both
+# trees follow one rule). internal.h's seams and test hooks and the
+# surrogate client's calls, which core uses across its own files under
+# the same prefix, stay out.
+# <source dir> <out dir>: the lists in <out dir>, ecuio.map among them
 exports() {
-    local lib=$1 internal=$2/core/include/ecuio/internal.h
-    {
-        echo '{ global:'
-        nm -g --defined-only "$lib" | awk '$3 ~ /^ecuio_/ { print $3 }' | sort -u \
-            | comm -23 - <( [ -f "$internal" ] \
-                && grep -vE '^\s*(\*|/\*|//)' "$internal" \
-                | grep -oE '\becuio_[a-z0-9_]+(\(|\[\])' | sed -E 's/(\(|\[\])$//' | sort -u ) \
-            | sed 's/$/;/'
-        echo 'local: *; };'
-    }
+    python3 "$ROOT/scripts/ecuio_exports.py" --tree "$1" "$2" \
+        || die "ecuio_exports.py failed over $1"
 }
 
 # <source dir> <name>: the core-only tree, its .so and its ABI dump
@@ -91,10 +87,10 @@ dump() {
     local lib
     lib=$(find "$tree" -name 'libecuio-core.a' | head -n 1)
     [ -n "$lib" ] || die "$name: no libecuio-core.a"
-    exports "$lib" "$src" > "$tree.exports.map"
+    exports "$src" "$tree.exports"
     "${CXX:-c++}" -shared -o "$tree/libecuio-core.so" \
         -Wl,--whole-archive "$lib" -Wl,--no-whole-archive \
-        -Wl,--version-script="$tree.exports.map" -pthread
+        -Wl,--version-script="$tree.exports/ecuio.map" -pthread
     abidw --headers-dir "$src/core/include" --drop-private-types --no-show-locs \
         --out-file "$OUT/$name.abi" "$tree/libecuio-core.so"
     # The exported functions: the dump's declarations also hold C++

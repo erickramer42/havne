@@ -6,7 +6,7 @@ import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
 // { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted,
-// signals, own, plugin }] }:
+// signals, own, plugin, baseline }] }:
 // plotted and unplotted are the rows ticked past Live's default and
 // unticked from it (ADR-0039 section 8); a stored entry without
 // plotted reads as none.
@@ -20,6 +20,9 @@ import QtQml
 // plugin is the profile of the plugin variant picked for the vehicle
 // (plugin.<id>.<variant>, ADR-0052 section 5), "" for none; the
 // plugins themselves are the app's, not a vehicle's.
+// baseline is the folder of the vehicle's baseline recording (ADR-0049's
+// appendix of 2026-11-06), as the Recordings page names it, "" for none;
+// an entry stored before it has none.
 // every function takes the document and returns a new one, never
 // changing what it was given, so SettingsPage stores what comes back
 // and the rules test without a page.
@@ -62,7 +65,8 @@ QtObject {
                     || (v.signals !== undefined
                         && (!Array.isArray(v.signals) || !v.signals.every(isFile)))
                     || (v.own !== undefined && !isString(v.own))
-                    || (v.plugin !== undefined && !isString(v.plugin)))
+                    || (v.plugin !== undefined && !isString(v.plugin))
+                    || (v.baseline !== undefined && !isString(v.baseline)))
                 return empty()
             ids[v.id] = true
         }
@@ -91,7 +95,8 @@ QtObject {
         return { id: v.id, label: v.label, vinKey: v.vinKey, uri: v.uri,
                  plotted: v.plotted === undefined ? [] : v.plotted.slice(),
                  unplotted: v.unplotted.slice(), signals: files, own: own,
-                 plugin: v.plugin === undefined ? "" : v.plugin }
+                 plugin: v.plugin === undefined ? "" : v.plugin,
+                 baseline: v.baseline === undefined ? "" : v.baseline }
     }
 
     function copy(doc) {
@@ -166,13 +171,15 @@ QtObject {
         const d = copy(doc)
         const id = nextId(d)
         d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
-                      plotted: [], unplotted: [], signals: [], own: "", plugin: "" })
+                      plotted: [], unplotted: [], signals: [], own: "", plugin: "",
+                      baseline: "" })
         d.picked = id
         return d
     }
 
     // The picked vehicle's connection, plotted signals and signal files
-    // (the same files, so the same profiles), not its VIN key
+    // (the same files, so the same profiles), not its VIN key or its
+    // baseline: a recording of that car
     function duplicate(doc, label) {
         const from = picked(doc)
         if (from === null)
@@ -243,6 +250,47 @@ QtObject {
                                                  profile: file.profile }))
     }
 
+    // An OBDb import read again: file in place of replaced among the
+    // picked vehicle's; the document as it was when the vehicle doesn't
+    // have replaced, file is replaced (the same bytes again) or
+    // profileProblem refuses file
+    function replaceSignals(doc, replaced, file) {
+        const v = picked(doc)
+        if (v === null || file.sha256 === replaced
+                || !(v.signals || []).some(f => f.sha256 === replaced)
+                || profileProblem(doc, file, replaced) !== "")
+            return doc
+        return change(doc, e => {
+            e.signals = e.signals.filter(f => f.sha256 !== file.sha256)
+                                 .map(f => f.sha256 !== replaced ? f
+                                      : { sha256: file.sha256, name: file.name,
+                                          profile: file.profile })
+        })
+    }
+
+    // The name an OBDb import takes for the picked vehicle, and the file
+    // it replaces: "<label> OBDb", else "<label> OBDb 2" and on, the
+    // first whose profile no file in any vehicle makes, unless the picked
+    // vehicle's own file of that very name is an earlier import
+    // (isImport(sha256), the bridge's word), which it then replaces. A
+    // file the user named is never replaced. { name, replaces }, replaces
+    // "" for none
+    function obdbName(doc, label, isImport) {
+        const v = picked(doc)
+        const base = qsTr("%1 OBDb").arg(String(label).trim())
+        for (let n = 1; n < 100; ++n) {
+            const name = n === 1 ? base : base + " " + n
+            const profile = profileOf(name)
+            const mine = v === null ? undefined
+                : (v.signals || []).find(f => f.profile === profile)
+            if (mine !== undefined && mine.name === name && isImport(mine.sha256))
+                return { name: name, replaces: mine.sha256 }
+            if (!doc.list.some(w => (w.signals || []).some(f => f.profile === profile)))
+                return { name: name, replaces: "" }
+        }
+        return { name: base, replaces: "" }
+    }
+
     // The file by sha256 out of the picked vehicle's, own too if it was
     function removeSignals(doc, sha256) {
         return change(doc, v => {
@@ -255,6 +303,15 @@ QtObject {
     // The picked vehicle's plugin variant, by its profile ("" for none)
     function setPlugin(doc, profile) {
         return change(doc, v => v.plugin = String(profile))
+    }
+
+    // The picked vehicle's baseline recording, by its folder ("" for none)
+    function setBaseline(doc, folder) {
+        return change(doc, v => v.baseline = String(folder))
+    }
+
+    function clearBaseline(doc) {
+        return setBaseline(doc, "")
     }
 
     // Every vehicle's pick of one of profiles undone: a plugin removed

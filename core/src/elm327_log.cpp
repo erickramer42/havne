@@ -12,6 +12,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -139,7 +140,13 @@ void close_file(elm327_log_file f)
     CloseHandle(f);
 }
 
-/* The names in dir that start with the prefix */
+struct find_closer {
+    void operator()(void* find) const { FindClose(find); }
+};
+
+/* The names in dir that start with the prefix; the search is closed on
+ * every way out, a bad_alloc from a name's copy among them (the open
+ * catches it) */
 void list_logs(const std::string& dir, std::vector<std::string>& names)
 {
     std::wstring pattern;
@@ -147,17 +154,17 @@ void list_logs(const std::string& dir, std::vector<std::string>& names)
         return;
     }
     WIN32_FIND_DATAW fd;
-    HANDLE find = FindFirstFileW(pattern.c_str(), &fd);
-    if (find == INVALID_HANDLE_VALUE) {
+    HANDLE first = FindFirstFileW(pattern.c_str(), &fd);
+    if (first == INVALID_HANDLE_VALUE) {
         return;
     }
+    const std::unique_ptr<void, find_closer> find(first);
     do {
         char name[MAX_PATH * 3];
         if (ecuio_wide_to_utf8(fd.cFileName, name, sizeof(name))) {
             names.emplace_back(name);
         }
-    } while (FindNextFileW(find, &fd));
-    FindClose(find);
+    } while (FindNextFileW(find.get(), &fd));
 }
 
 void remove_file(const std::string& path)
@@ -195,18 +202,22 @@ void close_file(elm327_log_file f)
     close(f);
 }
 
+struct dir_closer {
+    void operator()(DIR* d) const { closedir(d); }
+};
+
+/* As Windows' above */
 void list_logs(const std::string& dir, std::vector<std::string>& names)
 {
-    DIR* d = opendir(dir.c_str());
+    const std::unique_ptr<DIR, dir_closer> d(opendir(dir.c_str()));
     if (d == nullptr) {
         return;
     }
-    while (const dirent* e = readdir(d)) {
+    while (const dirent* e = readdir(d.get())) {
         if (strncmp(e->d_name, kPrefix, sizeof(kPrefix) - 1) == 0) {
             names.emplace_back(e->d_name);
         }
     }
-    closedir(d);
 }
 
 void remove_file(const std::string& path)

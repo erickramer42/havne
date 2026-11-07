@@ -24,8 +24,9 @@ endif()
 
 set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
-    fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus
-    fuzz_json fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import)
+    fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_elm327_emulator
+    fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
+    fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -41,7 +42,9 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         # split, fuzz_elm327_reply the ELM327 wire, fuzz_socketcan_wire
         # SocketCAN's, fuzz_diagnostics the request engine, fuzz_isotp
         # ISO-TP, fuzz_sim the simulated ECU, fuzz_recording a
-        # recording's rows, fuzz_json the JSON reader, all internal
+        # recording's rows, fuzz_candump a candump log's lines,
+        # fuzz_json the JSON reader, fuzz_csv_import a CSV and its
+        # column map, all internal
         # (the tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})
@@ -87,4 +90,10 @@ endif()
 # fuzz_request_bus answers as the fakes' ECU (tests/fake_ecu.h, header-only)
 if(TARGET fuzz_request_bus)
     target_include_directories(fuzz_request_bus PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+endif()
+
+# fuzz_elm327_emulator drives havne-cli's emulator text (cli/, header-only,
+# public headers only)
+if(TARGET fuzz_elm327_emulator)
+    target_include_directories(fuzz_elm327_emulator PRIVATE ${CMAKE_SOURCE_DIR}/cli)
 endif()

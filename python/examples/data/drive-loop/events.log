@@ -1,0 +1,16 @@
+ecuio session recording, format 3 (ADR-0049)
+started  2026-01-01 00:00:00.000 (local time)
+utc  2026-01-01T00:00:00.000Z
+core  0.5.1
+uri  mock://demo
+profile  mock
+frame flags  complete
+signal  RPM,number,RPM,0,0,1
+signal  Vehicle Speed,number,km/h,0,0,6
+signal  Throttle Position,number,%,1,0,2
+signal  Lambda,number,λ,2,0,4
+caller  make_drive_loop.py
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
+
+
+00:02:33.565  +153.565  end  one loop of the mock's drive cycle: 0 frames, 11516 values, 0 records dropped, 0 notes dropped

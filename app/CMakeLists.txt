@@ -31,6 +31,12 @@ qt_add_library(app_ui STATIC
     bridgesingleton.h
     carryover.cpp
     carryover.h
+    framefilter.cpp
+    framefilter.h
+    healthreport.cpp
+    healthreport.h
+    obdbimport.cpp
+    obdbimport.h
     readonce.cpp
     readonce.h
     pluginstore.cpp
@@ -44,6 +50,7 @@ qt_add_library(app_ui STATIC
     signalfilter.cpp
     signalfilter.h
     latencystats.h
+    urlwrite.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml

@@ -4,16 +4,22 @@
 #
 #   python tests/cli_obdb_import.py convert <havne-cli> <OBDb set> <golden.jsonl> <golden.json> [--update]
 #   python tests/cli_obdb_import.py unwritable <havne-cli> <OBDb set>
+#   python tests/cli_obdb_import.py beside <havne-cli> <OBDb set>
 #
 # convert: the synthetic set (tests/fixtures/obdb/) imported for model year
 # 2019 with a name, URL and commit; the command's lines against
 # golden.jsonl, the file it wrote against golden.json byte for byte (its
 # CRLF taken as LF, a Windows checkout's), and
-# nothing else left in the folder (no .partial). unwritable: an --out in a
-# folder that isn't there, and an --out that is a folder, each exit 1 with
-# why, never the path, and write nothing. --update rewrites both goldens
-# from the run.
+# nothing else left in the folder (no partial). unwritable: an --out in a
+# folder that isn't there, an --out that is a folder and (Windows) a
+# read-only --out the rename can't replace, each exit 1 with why, never
+# the path, and nothing left beside them, the read-only file as it was.
+# beside: other writers' partials of the same --out (the bare .partial
+# name and a .partial-<pid>-<n> one) are left as they were, and the file
+# still lands. --update rewrites both goldens from the run.
 
+import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -105,7 +111,50 @@ def unwritable(cli, fixture):
         folder.mkdir()
         if not refused_out(cli, fixture, root, folder, "it's a folder", [folder]):
             return 1
+        if sys.platform == "win32":
+            # The partial is written, then the rename over a read-only
+            # file is refused: the partial goes, the file stays as it was
+            locked = Path(root) / "locked.json"
+            locked.write_bytes(b"the user's")
+            os.chmod(locked, stat.S_IREAD)
+            try:
+                if not refused_out(cli, fixture, root, locked,
+                                   "permission denied", [folder, locked]):
+                    return 1
+                if locked.read_bytes() != b"the user's":
+                    print("FAIL  the read-only file changed")
+                    return 1
+            finally:
+                os.chmod(locked, stat.S_IREAD | stat.S_IWRITE)
         print("ok    an --out that can't be written says why and writes nothing")
+        return 0
+
+
+def beside(cli, fixture):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-obdb-") as root:
+        out = Path(root) / "converted.json"
+        theirs = {Path(root) / "converted.json.partial": b"an older writer's",
+                  Path(root) / "converted.json.partial-1-0": b"another writer's"}
+        for path, text in theirs.items():
+            path.write_bytes(text)
+        code, rows, err = run(cli, ["signals", "import", "obdb", fixture,
+                                    "--out", str(out)] + OPTIONS)
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        for path, text in theirs.items():
+            if path.read_bytes() != text:
+                print(f"FAIL  {path.name} changed")
+                return 1
+        left = sorted(p.name for p in Path(root).iterdir())
+        want = sorted(["converted.json"] + [p.name for p in theirs])
+        if left != want:
+            print(f"FAIL  the folder holds {left}, not {want}")
+            return 1
+        if b"havne_signals" not in out.read_bytes():
+            print("FAIL  the file written isn't the converted set")
+            return 1
+        print("ok    other writers' partials are left alone and the file lands")
         return 0
 
 
@@ -114,6 +163,8 @@ def main(argv):
         return convert(argv[2], argv[3], argv[4], argv[5], "--update" in argv[6:])
     if len(argv) == 4 and argv[1] == "unwritable":
         return unwritable(argv[2], argv[3])
+    if len(argv) == 4 and argv[1] == "beside":
+        return beside(argv[2], argv[3])
     print(__doc__ or "usage: see the file's header")
     return 2
 

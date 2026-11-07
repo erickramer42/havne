@@ -27,6 +27,7 @@
 #endif
 
 extern "C" {
+#include "ecuio/version.h"
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/signals.h"
@@ -55,6 +56,12 @@ extern "C" {
 unsigned long news_on_this_thread()
 {
     return new_counter::on_this_thread();
+}
+
+/* The same for new_counter::fail_new (test_export.cpp) */
+void fail_new_on_this_thread(unsigned long n)
+{
+    new_counter::fail_new(n);
 }
 
 namespace {
@@ -561,6 +568,27 @@ TEST(CoreTest, VersionStringContainsNumbers) {
     EXPECT_TRUE(version != nullptr);
     EXPECT_GT(strlen(version), 0);
     EXPECT_NE(strstr(version, "."), nullptr);
+}
+
+/* ecuio_version (ADR-0053): version.h's numbers, the string's too, and
+ * a NULL refused with nothing written */
+TEST(CoreTest, VersionNumbersAreTheStrings) {
+    uint32_t major = 99, minor = 99, patch = 99;
+    ASSERT_EQ(ecuio_version(&major, &minor, &patch), ECUIO_OK);
+    EXPECT_EQ(major, static_cast<uint32_t>(ECUIO_VERSION_MAJOR));
+    EXPECT_EQ(minor, static_cast<uint32_t>(ECUIO_VERSION_MINOR));
+    EXPECT_EQ(patch, static_cast<uint32_t>(ECUIO_VERSION_PATCH));
+    EXPECT_EQ(std::to_string(major) + "." + std::to_string(minor) + "." +
+                  std::to_string(patch),
+              ecuio_version_string());
+
+    uint32_t a = 7, b = 7, c = 7;
+    EXPECT_EQ(ecuio_version(nullptr, &b, &c), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_version(&a, nullptr, &c), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_version(&a, &b, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(a, 7u);
+    EXPECT_EQ(b, 7u);
+    EXPECT_EQ(c, 7u);
 }
 
 TEST(CoreTest, InitShutdownIdempotent) {
@@ -3165,6 +3193,53 @@ TEST(CoreTest, WorkersAllocateNothingPerFrame)
     }
 }
 
+/* Nor do the pull queues (ecuio/queue.h): their slots are made at open,
+ * and each frame and value is copied into one, the oldest dropped when
+ * full; the values queue alone makes the worker decode */
+TEST(CoreTest, WorkersAllocateNothingPerFrameIntoQueues)
+{
+    TempRecording rec(paced_rows(3));
+    const std::string replay = rec.uri("?speed=max&loop=1&profile=obd2");
+    struct Case {
+        const char* uri;
+        int to;
+    };
+    for (const Case& c : {Case{"mock://demo", 12}, Case{replay.c_str(), 200}}) {
+        SCOPED_TRACE(c.uri);
+        WorkerNews w;
+        w.to = c.to;
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(c.uri, &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_queue_t* frames = nullptr;
+        ecuio_queue_t* values = nullptr;
+        ASSERT_EQ(ecuio_queue_open(session, ECUIO_QUEUE_FRAMES, 4, &frames),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_queue_open(session, ECUIO_QUEUE_VALUES, 4, &values),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_register_frame_callback(session, worker_news_cb, &w),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const bool reached =
+            wait_for([&] { return w.frames.load() >= c.to; }, 5000);
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+        ASSERT_TRUE(reached) << w.frames.load() << " frames";
+        ecuio_queue_value_t v[4];
+        uint32_t count = 0;
+        uint64_t dropped = 0;
+        EXPECT_EQ(ecuio_queue_read_values(values, v, 4, &count, &dropped, 0),
+                  ECUIO_OK);
+        EXPECT_GT(count, 0u) << "the values path ran";
+        EXPECT_GT(dropped, 0u) << "and dropped";
+        ecuio_queue_close(frames);
+        ecuio_queue_close(values);
+        EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+            << "operator new on the worker between frames " << WorkerNews::kFrom
+            << " and " << c.to;
+    }
+}
+
 /* Recording costs the worker no allocation either: the ring is made at
  * open, and each frame and its values (decoded for the recording, with
  * no values callback registered) are copied into it (ADR-0049 section 1) */
@@ -5323,6 +5398,49 @@ TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)
     EXPECT_EQ(cap.batches[0].values[0].id, f181);
     EXPECT_EQ(cap.batches[0].values[0].kind, ECUIO_VALUE_HEX);
     EXPECT_EQ(cap.batches[0].values[0].text, "41 42");
+    ecuio_session_destroy(session);
+}
+
+/* A packed Service 01 reply splits into a record for each PID, all in one
+ * frame's text slots: a hex def on 41 1C and one on 41 51 both decode
+ * from 41 1C 06 51 01, each with bytes of its own */
+TEST(CoreTest, APackedReplyGivesEachRecordsTextASlotOfItsOwn)
+{
+    static ecuio_signal_def_t defs[2];
+    defs[0] = text_value_def(1, ECUIO_VALUE_HEX, 2, 0x411C, 2, 1);
+    defs[1] = text_value_def(2, ECUIO_VALUE_HEX, 2, 0x4151, 2, 1);
+    for (ecuio_signal_def_t& d : defs) {
+        d.message_id = ECUIO_OBD2_ECU_ARB_ID;
+    }
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-packed-text", &set, &why), ECUIO_OK)
+        << "code " << why.code << " at def " << why.index;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://t?profile=test-packed-text", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    EXPECT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t packed =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x1C, 0x06, 0x51, 0x01});
+    ecuio_session_dispatch_callbacks(session, &packed);
+    ASSERT_EQ(cap.batches.size(), 1u);
+    const std::vector<SeenValue>& v = cap.batches[0].values;
+    ASSERT_EQ(v.size(), 2u) << "a slot for each record's text";
+    EXPECT_EQ(v[0].id, 1);
+    EXPECT_EQ(v[0].text, "06");
+    EXPECT_EQ(v[1].id, 2);
+    EXPECT_EQ(v[1].text, "01");
+    EXPECT_GE(std::abs(v[1].text_at - v[0].text_at),
+              static_cast<std::ptrdiff_t>(ECUIO_DECODE_TEXT_MAX))
+        << "the two records' texts share bytes";
+    EXPECT_EQ(unsplit(session), 0u);
     ecuio_session_destroy(session);
 }
 

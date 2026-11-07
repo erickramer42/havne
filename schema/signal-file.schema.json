@@ -1,0 +1,493 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/signal-file.schema.json",
+  "title": "Havne signal file",
+  "description": "A Havne signal file (format 1, ADR-0051): a set of your own signals, read from a module's replies or computed from other signals. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most 4 ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key), its inputs (signals of the file that are neither computed nor text, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations and 16 levels of nesting; \"max_age\" naming only inputs its expression reads; the signal set's validator; at most 256 requests with the base set's.",
+  "type": "object",
+  "required": ["havne_signals", "name", "source", "signals"],
+  "properties": {
+    "havne_signals": {
+      "title": "Format",
+      "description": "The signal-file format's version, and the file's first key. This Havne reads format 1.",
+      "const": 1
+    },
+    "name": {
+      "title": "Name",
+      "description": "The file's name, 1 to 63 bytes with at least one letter or digit. Its profile is \"user.\" and the name in lower case, every other run of characters one \"-\" (\"Daily driver extras\" is user.daily-driver-extras).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^(?=[^\\u0000]*[A-Za-z0-9])[^\\u0000]*$"
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "extends": { "$ref": "#/$defs/extends" },
+    "ecus": { "$ref": "#/$defs/ecus" },
+    "signals": {
+      "title": "Signals",
+      "description": "The file's signals, 1 to 1024. An expression may read a signal listed after it.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/signal" }
+    },
+    "notes": { "$ref": "#/$defs/notes" }
+  },
+  "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+  "additionalProperties": false,
+  "$defs": {
+    "notes": {
+      "title": "Notes",
+      "description": "Free text for the reader of the file, allowed in every object the loader checks keys in. JSON has no comments: a \"notes\" string goes where one would.",
+      "type": "string"
+    },
+    "tool": {
+      "description": "A key starting \"x-\" is a tool's own: the loader skips it and what it holds."
+    },
+    "plainText": {
+      "type": "string",
+      "pattern": "^[^\\u0000]*$"
+    },
+    "displayText": {
+      "$comment": "The formula guard (ADR-0049 section 8): a recording's CSV can't hold text a spreadsheet would run as a formula",
+      "type": "string",
+      "pattern": "^(?![=+\\-@\\t\\r])[^\\u0000]*$"
+    },
+    "key": {
+      "title": "Key",
+      "description": "The signal's stable name, 1 to 31 of a-z, 0-9 and _. Expressions and fixtures name a signal by it, since its place in the list sets its id.",
+      "type": "string",
+      "pattern": "^[a-z0-9_]{1,31}$"
+    },
+    "hexId": {
+      "description": "A CAN ID in hex, 1 to 8 digits, 1 to 1FFFFFFF.",
+      "type": "string",
+      "pattern": "^(?=[0-9A-Fa-f]*[1-9A-Fa-f])(?:[0-9A-Fa-f]{1,7}|[01][0-9A-Fa-f]{7})$"
+    },
+    "extends": {
+      "title": "Extends",
+      "description": "A built-in set the file adds to: its signals and ECUs come first, the file's after. Only \"obd2\" in format 1. Without it the file is a set of its own.",
+      "enum": ["obd2"]
+    },
+    "source": {
+      "title": "Source",
+      "description": "Where the file's signals come from. Every copy of the file keeps it, so the file carries its attribution.",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "title": "Source name",
+          "description": "Who or what the signals come from, 1 to 512 bytes.",
+          "$ref": "#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "url": {
+          "title": "URL",
+          "description": "Where the source can be found, 1 to 512 bytes.",
+          "$ref": "#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "commit": {
+          "title": "Commit",
+          "description": "The source's revision the signals were taken from, 1 to 512 bytes.",
+          "$ref": "#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "license": {
+          "title": "License",
+          "description": "The source's license, an SPDX identifier where it has one, 1 to 512 bytes.",
+          "$ref": "#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "modified": {
+          "title": "Modified",
+          "description": "What the file changes from the source, 1 to 512 bytes.",
+          "$ref": "#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "ecus": {
+      "title": "ECUs",
+      "description": "The modules the file's signals read, the base set's counted toward 4 in all, of one ID width.",
+      "type": "array",
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/ecu" }
+    },
+    "ecu": {
+      "title": "ECU",
+      "description": "A module by the ID it replies on and the ID it's asked on.",
+      "type": "object",
+      "required": ["id", "rx"],
+      "properties": {
+        "id": {
+          "title": "ECU id",
+          "description": "The name a signal's \"ecu\" gives it, 1 to 31 of a-z, 0-9 and _.",
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,31}$"
+        },
+        "rx": {
+          "title": "Reply ID",
+          "description": "The CAN ID the module replies on, in hex: 11-bit (7E8) or 29-bit (18DAF110).",
+          "$ref": "#/$defs/hexId"
+        },
+        "tx": {
+          "title": "Request ID",
+          "description": "The CAN ID the module is asked on, in hex, of the rx's width. It may be left out only where the standard gives it: rx - 8 for 7E8 to 7EF, and the 18DA swap for 18DAF1xx.",
+          "$ref": "#/$defs/hexId"
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "rx": {
+            "not": { "pattern": "^(?:0{0,5}7[Ee][89A-Fa-f]|18[Dd][Aa][Ff]1[0-9A-Fa-f]{2})$" }
+          }
+        },
+        "required": ["rx"]
+      },
+      "then": { "required": ["tx"] }
+    },
+    "read": {
+      "title": "Read",
+      "description": "The request whose reply holds the signal: a Service 01 PID or a Service 22 DID.",
+      "type": "object",
+      "required": ["service", "number"],
+      "properties": {
+        "service": {
+          "title": "Service",
+          "description": "\"01\" for an OBD-II PID, \"22\" for a DID (UDS ReadDataByIdentifier).",
+          "enum": ["01", "22"]
+        },
+        "number": {
+          "title": "PID or DID",
+          "description": "The PID in 2 hex digits (service 01) or the DID in 4 (service 22).",
+          "type": "string",
+          "pattern": "^(?:[0-9A-Fa-f]{2}|[0-9A-Fa-f]{4})$"
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "service": { "const": "01" } }, "required": ["service"] },
+          "then": { "properties": { "number": { "pattern": "^[0-9A-Fa-f]{2}$" } } }
+        },
+        {
+          "if": { "properties": { "service": { "const": "22" } }, "required": ["service"] },
+          "then": { "properties": { "number": { "pattern": "^[0-9A-Fa-f]{4}$" } } }
+        }
+      ]
+    },
+    "byte": {
+      "title": "Byte",
+      "description": "The field's first byte among the reply's data bytes after the echo: 0 is J1979's A.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4093
+    },
+    "bits": {
+      "title": "Bits",
+      "description": "The field's width in bits, 1 to 32. A big-endian field takes whole bytes.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32,
+      "default": 8
+    },
+    "bit": {
+      "title": "Bit",
+      "description": "The field's first bit in its first byte, 0 to 7: a little-endian field's only.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 7,
+      "default": 0
+    },
+    "order": {
+      "title": "Byte order",
+      "description": "\"be\" (big-endian, as both services send) or \"le\" (little-endian, for a bit field).",
+      "enum": ["be", "le"],
+      "default": "be"
+    },
+    "wholeBytes": {
+      "$comment": "A big-endian field is whole bytes: bits a multiple of 8 and no bit",
+      "if": { "properties": { "order": { "const": "le" } }, "required": ["order"] },
+      "else": {
+        "properties": {
+          "bits": { "multipleOf": 8 },
+          "bit": { "const": 0 }
+        }
+      }
+    },
+    "numberField": {
+      "title": "Field",
+      "description": "Where a number signal's raw value sits in the reply.",
+      "type": "object",
+      "required": ["byte"],
+      "properties": {
+        "byte": { "$ref": "#/$defs/byte" },
+        "bits": { "$ref": "#/$defs/bits" },
+        "bit": { "$ref": "#/$defs/bit" },
+        "order": { "$ref": "#/$defs/order" },
+        "signed": {
+          "title": "Signed",
+          "description": "Whether the raw value is two's complement.",
+          "type": "boolean",
+          "default": false
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false,
+      "$ref": "#/$defs/wholeBytes"
+    },
+    "enumField": {
+      "title": "Field",
+      "description": "Where an enum signal's raw value sits in the reply, unsigned.",
+      "type": "object",
+      "required": ["byte"],
+      "properties": {
+        "byte": { "$ref": "#/$defs/byte" },
+        "bits": { "$ref": "#/$defs/bits" },
+        "bit": { "$ref": "#/$defs/bit" },
+        "order": { "$ref": "#/$defs/order" },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false,
+      "$ref": "#/$defs/wholeBytes"
+    },
+    "textField": {
+      "title": "Field",
+      "description": "Where a text or hex signal's bytes sit in the reply.",
+      "type": "object",
+      "required": ["byte"],
+      "properties": {
+        "byte": { "$ref": "#/$defs/byte" },
+        "bytes": {
+          "title": "Bytes",
+          "description": "How many bytes the text takes; 0 (the default) runs to the reply's end.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4096,
+          "default": 0
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "signalName": {
+      "title": "Name",
+      "description": "The name shown for the signal, 1 to 31 bytes, not starting with = + - @, a tab or a CR.",
+      "$ref": "#/$defs/displayText",
+      "minLength": 1,
+      "maxLength": 31
+    },
+    "signalEcu": {
+      "title": "ECU",
+      "description": "The id of the ECU the signal reads, one of \"ecus\". Left out, the first of \"ecus\", or the base set's first.",
+      "type": "string",
+      "pattern": "^[a-z0-9_]{1,31}$"
+    },
+    "unit": {
+      "title": "Unit",
+      "description": "The value's unit, 0 to 15 bytes, not starting with = + - @, a tab or a CR. A unit outside Havne's conversion table is shown as written and never converted.",
+      "$ref": "#/$defs/displayText",
+      "maxLength": 15
+    },
+    "decimals": {
+      "title": "Decimals",
+      "description": "Decimal places shown, 0 to 3.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "group": {
+      "title": "Group",
+      "description": "The part of the car the signal belongs to; left out, other.",
+      "enum": ["other", "engine", "air", "fuel", "oxygen sensors", "emissions", "vehicle", "electrical", "diagnostics"]
+    },
+    "plot": {
+      "title": "Plot rank",
+      "description": "The signal's place among those a chart plots first: 1 first, 0 (the default) unranked.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "signal": {
+      "title": "Signal",
+      "description": "One signal: a number (the default kind), an enum, text or hex read from a reply, or a value computed from other signals.",
+      "type": "object",
+      "allOf": [
+        {
+          "properties": {
+            "kind": {
+              "title": "Kind",
+              "description": "\"number\" (the default), \"enum\", \"text\", \"hex\" or \"computed\".",
+              "enum": ["number", "text", "hex", "enum", "computed"],
+              "default": "number"
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "number" } } },
+          "then": { "$ref": "#/$defs/numberSignal" }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "enum" } }, "required": ["kind"] },
+          "then": { "$ref": "#/$defs/enumSignal" }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["text", "hex"] } }, "required": ["kind"] },
+          "then": { "$ref": "#/$defs/textSignal" }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "computed" } }, "required": ["kind"] },
+          "then": { "$ref": "#/$defs/computedSignal" }
+        },
+        {
+          "$comment": "A DID's echo is a byte longer than a PID's, so its field starts a byte earlier at the latest",
+          "if": {
+            "properties": { "read": { "properties": { "service": { "const": "22" } }, "required": ["service"] } },
+            "required": ["read"]
+          },
+          "then": { "properties": { "field": { "properties": { "byte": { "maximum": 4092 } } } } }
+        }
+      ]
+    },
+    "numberSignal": {
+      "title": "Number signal",
+      "description": "A number read from a reply: the raw field times scale, plus offset.",
+      "type": "object",
+      "required": ["key", "name", "read", "field"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "name": { "$ref": "#/$defs/signalName" },
+        "kind": { "const": "number" },
+        "ecu": { "$ref": "#/$defs/signalEcu" },
+        "read": { "$ref": "#/$defs/read" },
+        "field": { "$ref": "#/$defs/numberField" },
+        "scale": {
+          "title": "Scale",
+          "description": "What one raw count is worth, never 0.",
+          "type": "number",
+          "not": { "const": 0 },
+          "default": 1
+        },
+        "offset": {
+          "title": "Offset",
+          "description": "Added after the scale.",
+          "type": "number",
+          "default": 0
+        },
+        "unit": { "$ref": "#/$defs/unit" },
+        "decimals": { "$ref": "#/$defs/decimals" },
+        "group": { "$ref": "#/$defs/group" },
+        "plot": { "$ref": "#/$defs/plot" },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "enumSignal": {
+      "title": "Enum signal",
+      "description": "A raw value read from a reply and shown by its label; a value with no label shows as its number.",
+      "type": "object",
+      "required": ["key", "name", "kind", "read", "field", "values"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "name": { "$ref": "#/$defs/signalName" },
+        "kind": { "const": "enum" },
+        "ecu": { "$ref": "#/$defs/signalEcu" },
+        "read": { "$ref": "#/$defs/read" },
+        "field": { "$ref": "#/$defs/enumField" },
+        "values": {
+          "title": "Values",
+          "description": "Each raw value, in decimal with no leading zero, to its label: at most 256.",
+          "type": "object",
+          "maxProperties": 256,
+          "propertyNames": { "pattern": "^(?:0|[1-9][0-9]{0,9})$" },
+          "additionalProperties": {
+            "title": "Label",
+            "description": "The raw value's label, 1 to 27 bytes, not starting with = + - @, a tab or a CR.",
+            "$ref": "#/$defs/displayText",
+            "minLength": 1,
+            "maxLength": 27
+          }
+        },
+        "group": { "$ref": "#/$defs/group" },
+        "plot": { "$ref": "#/$defs/plot" },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "textSignal": {
+      "title": "Text signal",
+      "description": "Bytes read from a reply and shown as ASCII (\"text\") or as hex pairs (\"hex\").",
+      "type": "object",
+      "required": ["key", "name", "kind", "read", "field"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "name": { "$ref": "#/$defs/signalName" },
+        "kind": { "enum": ["text", "hex"] },
+        "ecu": { "$ref": "#/$defs/signalEcu" },
+        "read": { "$ref": "#/$defs/read" },
+        "field": { "$ref": "#/$defs/textField" },
+        "group": { "$ref": "#/$defs/group" },
+        "plot": { "$ref": "#/$defs/plot" },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "computedSignal": {
+      "title": "Computed signal",
+      "description": "A value computed from other signals each time one of its inputs arrives.",
+      "type": "object",
+      "required": ["key", "name", "kind", "expr"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "name": { "$ref": "#/$defs/signalName" },
+        "kind": { "const": "computed" },
+        "expr": {
+          "title": "Expression",
+          "description": "+ - * /, parentheses, decimal constants and signals by key (obd2.<key> for the base set's, such as obd2.map): at most 4 inputs and 16 operations, 256 characters. A computed signal can't read another, or a text one.",
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^(?=.*[a-z_])[a-z0-9_.+*/() \\t-]+$"
+        },
+        "max_age": {
+          "title": "Max age",
+          "description": "Seconds, 0.1 to 60, per input the expression reads, past which that input is too old to compute from. An input left out takes 3 s.",
+          "type": "object",
+          "maxProperties": 4,
+          "propertyNames": { "pattern": "^[a-z_][a-z0-9_.]*$" },
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 60
+          }
+        },
+        "unit": { "$ref": "#/$defs/unit" },
+        "decimals": { "$ref": "#/$defs/decimals" },
+        "group": { "$ref": "#/$defs/group" },
+        "plot": { "$ref": "#/$defs/plot" },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    }
+  }
+}

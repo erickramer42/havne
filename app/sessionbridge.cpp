@@ -3,13 +3,17 @@
 
 #include "sessionbridge.h"
 #include "carryover.h"
+#include "healthreport.h"
+#include "obdbimport.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
+#include "urlwrite.h"
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
+#include "ecuio/obdb.h"
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
 #include "ecuio/signal_sets.h"
@@ -109,22 +113,60 @@ FrameListModel::FrameListModel(QObject* parent)
     m_ring.reserve(MaxFrames);
 }
 
+int FrameListModel::count() const
+{
+    return m_filter.active() ? static_cast<int>(m_shown.size()) : m_count;
+}
+
 int FrameListModel::rowCount(const QModelIndex&) const
 {
-    return m_count;
+    return count();
 }
 
 // A view row's frame: row 0 is the newest, or the oldest
 const FrameListModel::Row& FrameListModel::rowAt(int row) const
 {
-    const size_t age = m_newestFirst ? static_cast<size_t>(m_count - 1 - row)
+    const int n = count();
+    const size_t age = m_newestFirst ? static_cast<size_t>(n - 1 - row)
                                      : static_cast<size_t>(row);   // 0 = oldest
+    if (m_filter.active()) {
+        return rowOfArrival(m_shown[age]);
+    }
     return m_ring[(m_oldest + age) % m_ring.size()];
+}
+
+QString FrameListModel::flagWords(uint32_t flags)
+{
+    QStringList words;
+    if ((flags & ECUIO_FRAME_FLAG_FD) != 0) {
+        words << ((flags & ECUIO_FRAME_FLAG_BITRATE_SWITCH) != 0
+                      ? QStringLiteral("FD BRS")
+                      : QStringLiteral("FD"));
+    }
+    if ((flags & ECUIO_FRAME_FLAG_REMOTE) != 0) {
+        words << QStringLiteral("remote");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0) {
+        words << QStringLiteral("reassembled");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_TRUNCATED) != 0) {
+        words << QStringLiteral("truncated");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_OVERFLOW) != 0) {
+        words << QStringLiteral("after a loss");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_ERROR) != 0) {
+        words << QStringLiteral("error");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_TX_ECHO) != 0) {
+        words << QStringLiteral("sent");
+    }
+    return words.join(QLatin1Char(' '));
 }
 
 QVariant FrameListModel::data(const QModelIndex& index, int role) const
 {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_count) {
+    if (!index.isValid() || index.row() < 0 || index.row() >= count()) {
         return QVariant();
     }
     const Row& r = rowAt(index.row());
@@ -140,6 +182,8 @@ QVariant FrameListModel::data(const QModelIndex& index, int role) const
                     .toHex(' ').toUpper());
         case ArbitrationIdRole: return QVariant::fromValue<quint32>(r.arbId);
         case SelectedRole:      return m_selected.count(r.seq) != 0;
+        case FlagsRole:         return QVariant::fromValue<quint32>(r.flags);
+        case FlagsTextRole:     return flagWords(r.flags);
         default:                return QVariant();
     }
 }
@@ -152,29 +196,41 @@ QHash<int, QByteArray> FrameListModel::roleNames() const
         {ExtendedRole,      "extended"},
         {PayloadRole,       "payloadHex"},
         {ArbitrationIdRole, "arbId"},
-        {SelectedRole,      "selected"}
+        {SelectedRole,      "selected"},
+        {FlagsRole,         "flags"},
+        {FlagsTextRole,     "flagsText"}
     };
 }
 
 void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
 {
+    const bool filtered = m_filter.active();
+    const int before = count();
     const bool full = (m_count == MaxFrames);
     if (full) {
         // Full: the oldest row leaves first, from the end that shows it,
-        // and its slot takes the new frame
-        const int row = m_newestFirst ? m_count - 1 : 0;
+        // and its slot takes the new frame. Filtered, it leaves the view
+        // only when the view shows it
         const quint64 leaving = m_ring[m_oldest].seq;
-        beginRemoveRows(QModelIndex(), row, row);
+        const bool shown = !filtered || (!m_shown.empty() && m_shown.front() == leaving);
+        if (shown) {
+            const int n = count();
+            const int row = m_newestFirst ? n - 1 : 0;
+            beginRemoveRows(QModelIndex(), row, row);
+        }
         m_oldest = (m_oldest + 1) % m_ring.size();
         --m_count;
-        endRemoveRows();
+        if (filtered && shown) {
+            m_shown.pop_front();
+        }
+        if (shown) {
+            endRemoveRows();
+        }
         if (!m_selected.empty() && *m_selected.begin() == leaving) {
             m_selected.erase(m_selected.begin());
             emit selectionChanged();
         }
     }
-    const int row = m_newestFirst ? 0 : m_count;
-    beginInsertRows(QModelIndex(), row, row);
     if (static_cast<size_t>(m_count) == m_ring.size()) {
         m_ring.emplace_back();   // every slot holds a row: one more, below the cap
     }
@@ -182,6 +238,7 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
     r.seq = m_nextSeq++;
     r.timestampUs = frame.timestamp_us;
     r.arbId = frame.arbitration_id;
+    r.flags = frame.flags;
     r.extended = (frame.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
     r.length = len;
     if (len <= InlinePayload) {
@@ -190,10 +247,20 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
     } else {
         r.spill.assign(frame.data, frame.data + len);
     }
-    ++m_count;
-    endInsertRows();
-    if (!full) {
-        emit countChanged(m_count);   // at the cap one row left as one came
+    const bool shown = !filtered || shows(r);
+    if (shown) {
+        const int row = m_newestFirst ? 0 : count();
+        beginInsertRows(QModelIndex(), row, row);
+        ++m_count;
+        if (filtered) {
+            m_shown.push_back(r.seq);
+        }
+        endInsertRows();
+    } else {
+        ++m_count;
+    }
+    if (count() != before || !full) {
+        emit countChanged(count());   // at the cap one row left as one came
     }
 }
 
@@ -206,6 +273,7 @@ void FrameListModel::clear()
     }
     m_oldest = 0;
     m_count = 0;
+    m_shown.clear();
     const bool hadSelection = !m_selected.empty();
     m_selected.clear();
     m_hasAnchor = false;
@@ -214,6 +282,68 @@ void FrameListModel::clear()
     if (hadSelection) {
         emit selectionChanged();
     }
+}
+
+QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
+                                      int direction, int flag)
+{
+    FrameFilter next;
+    const QString idWords = FrameFilter::parseIds(ids, &next.ids);
+    const QString dataWords = FrameFilter::parseData(data, &next.data, &next.anchored);
+    next.direction = direction >= FrameFilter::AnyDirection &&
+                             direction <= FrameFilter::Sent
+                         ? direction
+                         : FrameFilter::AnyDirection;
+    next.flag = flag >= FrameFilter::AnyFlag && flag <= FrameFilter::Error
+                    ? flag
+                    : FrameFilter::AnyFlag;
+    // A field that doesn't parse keeps its part of the filter as it was
+    if (!idWords.isEmpty()) {
+        next.ids = m_filter.ids;
+    }
+    if (!dataWords.isEmpty()) {
+        next.data = m_filter.data;
+        next.anchored = m_filter.anchored;
+    }
+    const bool same = next.ids.size() == m_filter.ids.size() &&
+                      std::equal(next.ids.begin(), next.ids.end(), m_filter.ids.begin(),
+                                 [](const FrameFilter::IdRange& a,
+                                    const FrameFilter::IdRange& b) {
+                                     return a.first == b.first && a.last == b.last;
+                                 }) &&
+                      next.data == m_filter.data && next.anchored == m_filter.anchored &&
+                      next.direction == m_filter.direction && next.flag == m_filter.flag;
+    if (!same) {
+        beginResetModel();
+        m_filter = std::move(next);
+        m_shown.clear();
+        if (m_filter.active()) {
+            for (int age = 0; age < m_count; ++age) {
+                const Row& r = m_ring[(m_oldest + static_cast<size_t>(age)) % m_ring.size()];
+                if (shows(r)) {
+                    m_shown.push_back(r.seq);
+                }
+            }
+        }
+        const bool hadSelection = !m_selected.empty();
+        m_selected.clear();
+        m_hasAnchor = false;
+        endResetModel();
+        emit filterChanged();
+        emit countChanged(count());
+        if (hadSelection) {
+            emit selectionChanged();
+        }
+    }
+    return {{QStringLiteral("ids"), idWords}, {QStringLiteral("data"), dataWords}};
+}
+
+quint64 FrameListModel::newestTimestampUs() const
+{
+    if (m_count == 0) {
+        return 0;
+    }
+    return m_ring[(m_oldest + static_cast<size_t>(m_count - 1)) % m_ring.size()].timestampUs;
 }
 
 size_t FrameListModel::spilledBytesForTesting() const
@@ -235,15 +365,25 @@ void FrameListModel::setNewestFirst(bool newestFirst)
     emit newestFirstChanged();
 }
 
-// The ring holds the newest m_count arrivals, numbered consecutively
+// The ring holds the newest m_count arrivals, numbered consecutively;
+// filtered, the shown ones are m_shown, in order
 int FrameListModel::rowOfSeq(quint64 seq) const
 {
     const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
     if (m_count == 0 || seq < oldestSeq || seq >= m_nextSeq) {
         return -1;
     }
-    const int age = static_cast<int>(seq - oldestSeq);   // 0 = oldest
-    return m_newestFirst ? m_count - 1 - age : age;
+    int age = 0;   // 0 = oldest
+    if (m_filter.active()) {
+        const auto it = std::lower_bound(m_shown.begin(), m_shown.end(), seq);
+        if (it == m_shown.end() || *it != seq) {
+            return -1;
+        }
+        age = static_cast<int>(it - m_shown.begin());
+    } else {
+        age = static_cast<int>(seq - oldestSeq);
+    }
+    return m_newestFirst ? count() - 1 - age : age;
 }
 
 void FrameListModel::notifySelected(int first, int last)
@@ -254,7 +394,7 @@ void FrameListModel::notifySelected(int first, int last)
 
 void FrameListModel::toggleSelected(int row)
 {
-    if (row < 0 || row >= m_count) return;
+    if (row < 0 || row >= count()) return;
     const quint64 seq = rowAt(row).seq;
     if (m_selected.erase(seq) == 0) {
         m_selected.insert(seq);
@@ -266,7 +406,7 @@ void FrameListModel::toggleSelected(int row)
 
 void FrameListModel::selectThrough(int row)
 {
-    if (row < 0 || row >= m_count) return;
+    if (row < 0 || row >= count()) return;
     const int anchor = m_hasAnchor ? rowOfSeq(m_anchorSeq) : -1;
     if (anchor < 0) {
         toggleSelected(row);
@@ -285,14 +425,18 @@ void FrameListModel::clearSelection()
     m_hasAnchor = false;
     if (m_selected.empty()) return;
     m_selected.clear();
-    notifySelected(0, m_count - 1);
+    if (count() > 0) {
+        notifySelected(0, count() - 1);
+    } else {
+        emit selectionChanged();
+    }
 }
 
 QString FrameListModel::selectedText() const
 {
     if (m_selected.empty()) return {};
     QString text = QStringLiteral("time_s\tdlc\text\tid\tdata\n");
-    for (int row = 0; row < m_count; ++row) {
+    for (int row = 0; row < count(); ++row) {
         const Row& r = rowAt(row);
         if (m_selected.count(r.seq) == 0) continue;
         text += QString::number(static_cast<double>(r.timestampUs) / 1e6, 'f', 6)
@@ -307,6 +451,229 @@ QString FrameListModel::selectedText() const
               + QLatin1Char('\n');
     }
     return text;
+}
+
+void FrameListModel::noteTextDefs(const ecuio_signal_set_t* set)
+{
+    if (set == nullptr) {
+        return;
+    }
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0 ||
+            (d.kind != ECUIO_VALUE_TEXT && d.kind != ECUIO_VALUE_HEX)) {
+            continue;
+        }
+        // What the scrub reads of a def: the frames it applies to
+        const bool held =
+            std::any_of(m_textDefs.begin(), m_textDefs.end(),
+                        [&](const ecuio_signal_def_t& k) {
+                            return k.message_id == d.message_id &&
+                                   k.mux_offset == d.mux_offset &&
+                                   k.mux_length == d.mux_length &&
+                                   k.mux_key == d.mux_key;
+                        });
+        if (!held) {
+            m_textDefs.push_back(d);
+        }
+    }
+}
+
+FrameListModel::ScrubbedCsv FrameListModel::scrubbedCsv() const
+{
+    ScrubbedCsv out;
+    // The rows as they are now: both of core's passes read this copy
+    std::vector<Row> rows;
+    rows.reserve(static_cast<size_t>(m_count));
+    for (int age = 0; age < m_count; ++age) {
+        rows.push_back(
+            m_ring[(m_oldest + static_cast<size_t>(age)) % m_ring.size()]);
+    }
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = static_cast<uint32_t>(m_textDefs.size());
+    set.defs = m_textDefs.empty() ? nullptr : m_textDefs.data();
+    std::vector<uint8_t> keep(rows.size());
+    ecuio_export_report_t report{};
+    const ecuio_scrub_frame_callback_t get = [](void* user, size_t index,
+                                                ecuio_frame_t* f) -> int {
+        const Row& r = (*static_cast<const std::vector<Row>*>(user))[index];
+        f->timestamp_us = r.timestampUs;
+        f->arbitration_id = r.arbId;
+        f->flags = r.flags;
+        f->data_length = r.length;
+        memcpy(f->data, r.data(), r.length);
+        return 0;
+    };
+    const ecuio_status_t rc = ecuio_scrub_frames(rows.size(), get, &rows, &set,
+                                                 0, keep.data(), &report);
+    if (rc != ECUIO_OK) {
+        const QString detail = QString::fromUtf8(ecuio_last_error_detail());
+        out.words = detail.isEmpty()
+                        ? QStringLiteral("The frames couldn't be checked")
+                        : detail.left(1).toUpper() + detail.mid(1);
+        return out;
+    }
+    out.identification = report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION];
+    out.textValues = report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES];
+    out.unattributed = report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE];
+    QByteArray body;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const Row& r = rows[i];
+        if (keep[i] == 0 || (m_filter.active() && !shows(r))) {
+            continue;
+        }
+        ++out.written;
+        body += QByteArray::number(static_cast<double>(r.timestampUs) / 1e6,
+                                   'f', 6);
+        body += ",0x" + QByteArray::number(r.arbId, 16).toUpper();
+        body += r.extended ? ",1" : ",0";
+        body += (r.flags & ECUIO_FRAME_FLAG_TX_ECHO) != 0 ? ",tx," : ",rx,";
+        body += QByteArray::number(r.length);
+        body += ',' + flagWords(r.flags).toLatin1() + ',';
+        body += QByteArray::fromRawData(reinterpret_cast<const char*>(r.data()),
+                                        static_cast<qsizetype>(r.length))
+                    .toHex(' ')
+                    .toUpper();
+        body += '\n';
+    }
+    out.bytes =
+        QStringLiteral(
+            "# Havne %1, the Log page's frames, scrubbed (ADR-0054): %2 "
+            "written%3; left out of the %4 held: %5 frames of "
+            "identification replies, %6 of text signals' messages, %7 "
+            "segments of messages that couldn't be reassembled\n")
+            .arg(QString::fromLatin1(ecuio_version_string()))
+            .arg(out.written)
+            .arg(m_filter.active() ? QStringLiteral(" (those the filter shows)")
+                                   : QString())
+            .arg(rows.size())
+            .arg(out.identification)
+            .arg(out.textValues)
+            .arg(out.unattributed)
+            .toUtf8() +
+        "time_s,id,ext,dir,dlc,flags,data\n" + body;
+    out.ok = true;
+    return out;
+}
+
+// ---------------- FrameIdModel ----------------
+FrameIdModel::FrameIdModel(const FrameListModel* frames, QObject* parent)
+    : QAbstractListModel(parent)
+    , m_frames(frames)
+{
+}
+
+int FrameIdModel::rowCount(const QModelIndex&) const
+{
+    return count();
+}
+
+QVariant FrameIdModel::data(const QModelIndex& index, int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= count()) {
+        return QVariant();
+    }
+    const IdRow& r = m_rows[static_cast<size_t>(index.row())];
+    switch (role) {
+        case ArbIdRole:    return QVariant::fromValue<quint32>(static_cast<quint32>(r.key));
+        case ExtendedRole: return (r.key >> 32) != 0;
+        case CountRole:    return r.count;
+        case RateRole:     return r.rate;
+        case PayloadRole:  return QString::fromLatin1(r.payload.toHex(' ').toUpper());
+        default:           return QVariant();
+    }
+}
+
+QHash<int, QByteArray> FrameIdModel::roleNames() const
+{
+    return {
+        {ArbIdRole,    "arbId"},
+        {ExtendedRole, "extended"},
+        {CountRole,    "frames"},
+        {RateRole,     "rate"},
+        {PayloadRole,  "payloadHex"}
+    };
+}
+
+void FrameIdModel::refresh()
+{
+    // The window ends at the newest frame held and is half-open,
+    // (newest - window, newest], so N frames a second count N. A log
+    // shorter than the window rates each ID over its own first to last
+    // frame: N frames there are N - 1 intervals (a lone frame, none)
+    const quint64 newest = m_frames->newestTimestampUs();
+    const quint64 from = newest > RateWindowUs ? newest - RateWindowUs : 0;
+    quint64 oldest = newest;
+    struct Seen {
+        quint64 first = std::numeric_limits<quint64>::max();
+        quint64 last = 0;
+        int recent = 0;
+    };
+    std::map<quint64, IdRow> byKey;
+    std::map<quint64, Seen> seen;
+    m_frames->forEachShown([&](const FrameListModel::Shown& f) {
+        const quint64 key =
+            ((f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0 ? (quint64{1} << 32) : 0) | f.id;
+        IdRow& row = byKey[key];
+        row.key = key;
+        ++row.count;
+        row.payload = QByteArray(reinterpret_cast<const char*>(f.data), f.length);
+        oldest = std::min(oldest, f.timestampUs);
+        Seen& s = seen[key];
+        s.first = std::min(s.first, f.timestampUs);
+        s.last = std::max(s.last, f.timestampUs);
+        if (f.timestampUs > from) {
+            ++s.recent;
+        }
+    });
+    const bool shortLog = newest - std::min(oldest, newest) < RateWindowUs;
+    std::vector<IdRow> next;
+    next.reserve(byKey.size());
+    for (auto& [key, row] : byKey) {
+        const Seen& s = seen[key];
+        if (!shortLog) {
+            row.rate = static_cast<double>(s.recent) * 1e6 /
+                       static_cast<double>(RateWindowUs);
+        } else if (row.count > 1 && s.last > s.first) {
+            row.rate = static_cast<double>(row.count - 1) * 1e6 /
+                       static_cast<double>(s.last - s.first);
+        } else {
+            row.rate = 0.0;
+        }
+        next.push_back(std::move(row));
+    }
+    // Both lists are sorted by key: walk them together, so a row that
+    // stays keeps its place and only one that comes or goes moves others
+    const int before = count();
+    size_t i = 0;
+    size_t j = 0;
+    while (i < m_rows.size() || j < next.size()) {
+        if (j == next.size() || (i < m_rows.size() && m_rows[i].key < next[j].key)) {
+            beginRemoveRows(QModelIndex(), static_cast<int>(i), static_cast<int>(i));
+            m_rows.erase(m_rows.begin() + static_cast<std::ptrdiff_t>(i));
+            endRemoveRows();
+        } else if (i == m_rows.size() || next[j].key < m_rows[i].key) {
+            beginInsertRows(QModelIndex(), static_cast<int>(i), static_cast<int>(i));
+            m_rows.insert(m_rows.begin() + static_cast<std::ptrdiff_t>(i), next[j]);
+            endInsertRows();
+            ++i;
+            ++j;
+        } else {
+            IdRow& old = m_rows[i];
+            if (old.count != next[j].count || old.rate != next[j].rate ||
+                old.payload != next[j].payload) {
+                old = next[j];
+                emit dataChanged(index(static_cast<int>(i), 0), index(static_cast<int>(i), 0),
+                                 {CountRole, RateRole, PayloadRole});
+            }
+            ++i;
+            ++j;
+        }
+    }
+    if (count() != before) {
+        emit countChanged();
+    }
 }
 
 // ---------------- SignalListModel ----------------
@@ -519,6 +886,25 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
         emit dataChanged(index(firstRow), index(lastRow),
                          {TextRole, HasValueRole, AgeMsRole});
     }
+}
+
+std::vector<ecuio_health_value_t> SignalListModel::heldValues() const
+{
+    std::vector<ecuio_health_value_t> held;
+    const qint64 now = m_clock.elapsed();
+    for (const Entry& e : m_entries) {
+        if (e.isText || e.arrivedMs < 0 || e.histCount == 0) {
+            continue;
+        }
+        ecuio_health_value_t v{};
+        v.def_id = e.id;
+        v.value = e.value;
+        v.age_us =
+            static_cast<uint64_t>((std::max)(qint64{0}, now - e.arrivedMs)) *
+            1000u;
+        held.push_back(v);
+    }
+    return held;
 }
 
 QString SignalListModel::labelOf(const Entry& e)
@@ -931,6 +1317,7 @@ void LiveSignalModel::judgeGroups()
 SessionBridge::SessionBridge(QObject* parent)
     : QObject(parent)
     , m_frameLog(new FrameListModel(this))
+    , m_frameIds(new FrameIdModel(m_frameLog, this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
     , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))
@@ -1081,18 +1468,7 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
     const QByteArray bytes = SignalStore::bytes(sha, &words);
     bool written = false;
     if (!bytes.isEmpty()) {
-        if (url.isLocalFile()) {
-            // Whole or not at all: a failed write leaves what was there
-            QSaveFile out(url.toLocalFile());
-            written = out.open(QIODevice::WriteOnly) &&
-                      out.write(bytes) == bytes.size() && out.commit();
-        } else {
-            // A content:// document the picker just made: QFile writes it
-            // through its provider, where a rename can't
-            QFile out(url.toString());
-            written = out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-                      out.write(bytes) == bytes.size() && out.flush();
-        }
+        written = writeToUrl(url, bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
@@ -1107,6 +1483,56 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
         return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
     }
     return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
+}
+
+QVariantMap SessionBridge::exportFrames(const QUrl& url)
+{
+    const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();
+    QString words = csv.words;
+    bool written = false;
+    if (csv.ok) {
+        written = writeToUrl(url, csv.bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    const qulonglong leftOut = csv.identification + csv.textValues;
+    emit logMessage(
+        written ? QStringLiteral("Frames exported: %1 written, %2 left out "
+                                 "(identification and text signals), %3 "
+                                 "segments unattributed")
+                      .arg(csv.written)
+                      .arg(leftOut)
+                      .arg(qulonglong{csv.unattributed})
+                : QStringLiteral("Frames not exported: %1").arg(words));
+    return {{QStringLiteral("ok"), written},
+            {QStringLiteral("words"), written ? QString() : words},
+            {QStringLiteral("written"), written ? csv.written : 0},
+            {QStringLiteral("leftOut"), leftOut},
+            {QStringLiteral("unattributed"), qulonglong{csv.unattributed}}};
+}
+
+QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex)
+{
+    if (m_session == nullptr || !connected()) {
+        const QString words = QStringLiteral("Not connected");
+        emit logMessage(
+            QStringLiteral("Health report not saved: %1").arg(words));
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("words"), words}};
+    }
+    const std::vector<ecuio_health_value_t> held = m_signalModel->heldValues();
+    ecuio_health_options_t o{};
+    o.format = healthFormatFor(url, filterIndex);
+    o.units = m_signalModel->unitSystem();
+    o.latest_model_year = healthLatestModelYear();
+    o.utc_us = healthUtcNow();
+    o.session = m_session;
+    o.value_count = static_cast<uint32_t>(held.size());
+    o.values = held.empty() ? nullptr : held.data();
+    const QVariantMap r = writeHealthReport(o, url);
+    emit logMessage(r.value(QStringLiteral("line")).toString());
+    return r;
 }
 
 QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
@@ -1129,9 +1555,125 @@ int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
     return m_signalStore.deleteUnused(keep);
 }
 
+QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
+                                       const QString& name)
+{
+    m_obdbPending.clear();
+    const uint32_t year = modelYear > 0 ? static_cast<uint32_t>(modelYear) : 0u;
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    ObdbImport::Preview p;
+    if (!file.open(QIODevice::ReadOnly)) {
+        p.words = QStringLiteral("Couldn't read the file");
+    } else if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
+        p.words = QStringLiteral("The file is over %1 MiB, an OBDb set's most")
+                      .arg(ECUIO_OBDB_MAX_BYTES / (1024 * 1024));
+    } else {
+        p = ObdbImport::read(file.read(ECUIO_OBDB_MAX_BYTES + 1), year, name);
+    }
+    if (p.ok) {
+        m_obdbPending = p.json;
+    }
+    emit logMessage(
+        p.ok ? QStringLiteral("OBDb set read for %1: %2 converted, %3 fields "
+                              "differ, %4 left out (model year %5)")
+                   .arg(name)
+                   .arg(p.converted)
+                   .arg(p.changed.size())
+                   .arg(p.skipped.size())
+                   .arg(year == 0 ? QStringLiteral("none")
+                                  : QString::number(year))
+             : QStringLiteral("OBDb set refused: %1").arg(p.words));
+    return ObdbImport::report(p, name, year);
+}
+
+QVariantMap SessionBridge::keepObdb(const QString& replacing)
+{
+    QVariantMap result;
+    if (m_obdbPending.isEmpty()) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("No OBDb set is waiting: import it again")}};
+    } else if (!replacing.isEmpty() && m_session != nullptr &&
+               m_signalStore.shaFor(ecuio_session_signal_set(m_session)) ==
+                   replacing) {
+        // The session decodes with the file this replaces: the import
+        // waits, so Keep works once it has disconnected
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("The session reads the earlier import: "
+                                  "disconnect, then keep it")}};
+    } else {
+        result = m_signalStore.import(m_obdbPending);
+        m_obdbPending.clear();
+    }
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Signal file from OBDb: %1 (%2, %3)%4")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("profile")).toString(),
+                       signalCountText(
+                           result.value(QStringLiteral("count")).toInt()),
+                       replacing.isEmpty()
+                           ? QString()
+                           : QStringLiteral(", replacing %1")
+                                 .arg(replacing.left(12)))
+            : QStringLiteral("OBDb set not kept: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+bool SessionBridge::isObdbImport(const QString& sha) const
+{
+    QString words;
+    return ObdbImport::isConversion(SignalStore::bytes(sha, &words));
+}
+
+int SessionBridge::vinModelYear(const QString& typedVin) const
+{
+    return ObdbImport::modelYear(
+        typedVin.trimmed().isEmpty() ? m_vin : typedVin,
+        QDate::currentDate().year() + 1);
+}
+
 QVariantList SessionBridge::plugins()
 {
     return m_pluginStore.all();
+}
+
+QVariantList SessionBridge::decodeProfiles()
+{
+    QVariantList out;
+    for (const char* builtIn : {"obd2", "mock"}) {
+        out.append(QVariantMap{
+            {QStringLiteral("profile"), QString::fromLatin1(builtIn)},
+            {QStringLiteral("name"), QString()}});
+    }
+    for (const QVariant& v : m_signalStore.registered()) {
+        const QVariantMap e = v.toMap();
+        out.append(QVariantMap{
+            {QStringLiteral("profile"), e.value(QStringLiteral("profile"))},
+            {QStringLiteral("name"), e.value(QStringLiteral("name"))}});
+    }
+    for (const QVariant& v : m_pluginStore.all()) {
+        const QVariantMap e = v.toMap();
+        if (!e.value(QStringLiteral("ok")).toBool()) {
+            continue;
+        }
+        const QStringList variants =
+            e.value(QStringLiteral("variants")).toStringList();
+        const QStringList profiles =
+            e.value(QStringLiteral("profiles")).toStringList();
+        for (qsizetype i = 0; i < profiles.size(); ++i) {
+            out.append(QVariantMap{
+                {QStringLiteral("profile"), profiles.at(i)},
+                {QStringLiteral("name"),
+                 e.value(QStringLiteral("name")).toString() +
+                     (i < variants.size() ? QStringLiteral(" ") + variants.at(i)
+                                          : QString())}});
+        }
+    }
+    return out;
 }
 
 QVariantMap SessionBridge::importPlugin(const QUrl& url)
@@ -1523,19 +2065,73 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     return selecting(own);
 }
 
+namespace {
+
+// A folder the viewer opens: one holding a signals.csv (values, a CSV
+// import's alone) or a frames.csv (frames, decoded through a profile)
+bool holdsRecording(const QString& folder)
+{
+    return QFileInfo::exists(folder + QStringLiteral("/signals.csv")) ||
+           QFileInfo::exists(folder + QStringLiteral("/frames.csv"));
+}
+
+// A recording folder's row for the Recordings page: { title, uri, folder,
+// source, profile, frames } (recentRecordings says what each holds)
+QVariantMap recordingRowOf(const QFileInfo& info)
+{
+    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder)
+    static const QRegularExpression kName(
+        QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
+                       "\\d+)?(?: (.+))?$"));
+    const QString folder = info.absoluteFilePath();
+
+    // The header's "uri" line, among events.log's first few
+    QString recorded;
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        for (int i = 0; i < 12 && !events.atEnd(); ++i) {
+            const QString line = QString::fromUtf8(events.readLine()).trimmed();
+            if (line.startsWith(QLatin1String("uri "))) {
+                recorded = line.mid(4).trimmed();
+                break;
+            }
+        }
+    }
+
+    const QRegularExpressionMatch m = kName.match(info.fileName());
+    QString title = info.fileName();
+    if (m.hasMatch()) {
+        title = QStringLiteral("%1-%2-%3 %4:%5:%6")
+                    .arg(m.captured(1), m.captured(2), m.captured(3),
+                         m.captured(4), m.captured(5), m.captured(6));
+        if (m.hasCaptured(7)) {
+            title += QStringLiteral(" · ") + m.captured(7);
+        }
+    }
+    const QString uri = SessionBridge::replayUriFor(folder, recorded);
+    QVariantMap row;
+    row["title"] = title;
+    row["uri"] = uri;
+    row["folder"] = folder;
+    row["source"] = SessionBridge::uriLabelFor(recorded);
+    // After the query's "?profile=", the last ? in it
+    row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)
+                         .section(QLatin1Char('&'), 0, 0);
+    // Replay plays frames.csv: a folder of values alone has none to play
+    row["frames"] = QFileInfo::exists(folder + QStringLiteral("/frames.csv"));
+    return row;
+}
+
+} // namespace
+
 QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
     if (limit <= 0) {
         return out;
     }
-    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder): by name,
-    // last first, is newest first
-    static const QRegularExpression kName(
-        QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
-                       "\\d+)?(?: (.+))?$"));
     // Both roots' folders, newest first across them (the names start with
-    // the stamp)
+    // the stamp, so by name, last first, is newest first)
     QFileInfoList folders;
     for (const QString& root : {recordingsRoot(), earlierRecordingsRoot()}) {
         if (!root.isEmpty()) {
@@ -1551,47 +2147,21 @@ QVariantList SessionBridge::recentRecordings(int limit) const
         if (out.size() >= limit) {
             break;
         }
-        const QString folder = info.absoluteFilePath();
-        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv"))) {
-            continue;
+        if (holdsRecording(info.absoluteFilePath())) {
+            out.append(recordingRowOf(info));
         }
-
-        // The header's "uri" line, among events.log's first few
-        QString recorded;
-        QFile events(folder + QStringLiteral("/events.log"));
-        if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            for (int i = 0; i < 12 && !events.atEnd(); ++i) {
-                const QString line =
-                    QString::fromUtf8(events.readLine()).trimmed();
-                if (line.startsWith(QLatin1String("uri "))) {
-                    recorded = line.mid(4).trimmed();
-                    break;
-                }
-            }
-        }
-
-        const QRegularExpressionMatch m = kName.match(info.fileName());
-        QString title = info.fileName();
-        if (m.hasMatch()) {
-            title = QStringLiteral("%1-%2-%3 %4:%5:%6")
-                        .arg(m.captured(1), m.captured(2), m.captured(3),
-                             m.captured(4), m.captured(5), m.captured(6));
-            if (m.hasCaptured(7)) {
-                title += QStringLiteral(" · ") + m.captured(7);
-            }
-        }
-        const QString uri = replayUriFor(folder, recorded);
-        QVariantMap row;
-        row["title"] = title;
-        row["uri"] = uri;
-        row["folder"] = folder;
-        row["source"] = uriLabelFor(recorded);
-        // After the query's "?profile=", the last ? in it
-        row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)
-                             .section(QLatin1Char('&'), 0, 0);
-        out.append(row);
     }
     return out;
+}
+
+QVariantMap SessionBridge::recordingRow(const QString& folder) const
+{
+    if (folder.isEmpty() || !holdsRecording(folder)) {
+        return {};
+    }
+    QVariantMap row = recordingRowOf(QFileInfo(folder));
+    row["folder"] = folder;
+    return row;
 }
 
 // Pure-core half: safe on ANY thread. Creates and registers, the slow
@@ -1649,6 +2219,7 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     m_valueLatency.clear();
     m_valuesStaged = 0;
     prepareValueStaging(ecuio_session_signal_set(session));
+    m_frameLog->noteTextDefs(ecuio_session_signal_set(session));
     // Attached before the worker starts, so the recording holds every frame
     startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);

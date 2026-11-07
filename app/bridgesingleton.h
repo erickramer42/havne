@@ -86,6 +86,13 @@ struct FrameListModelForeign
     QML_ANONYMOUS
 };
 
+struct FrameIdModelForeign
+{
+    Q_GADGET
+    QML_FOREIGN(FrameIdModel)
+    QML_ANONYMOUS
+};
+
 struct SignalListModelForeign
 {
     Q_GADGET

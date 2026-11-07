@@ -557,6 +557,21 @@ field that differs from OBDb's reading, and each signal left out and
 why; then a count of each (`imported`) and `signals check`'s lines for
 the file written. A set that isn't OBDb's is an `error` line and exit 3.
 
+In the app, **Import an OBDb set** in Settings' Vehicle section converts
+a set for the picked vehicle, with no session connected (on Android
+through the document picker). The **OBDb model year** beside it is the
+year to convert for: typed, or filled in from a VIN, the one typed under
+**Look up a VIN** or the connected car's once its VIN has named the
+picked vehicle; left empty, the commands for some years only are left
+out. The report shows before anything is kept: what converted, each
+field that differs and each signal left out, and the set's own notes.
+**Keep** adds the file to the vehicle as **Import a signal file** adds
+one, named "<label> OBDb"; **Discard** keeps nothing. The same set
+imported again for the vehicle, for another year say, replaces its
+earlier import, and the report says so before **Keep**; a file whose
+name you chose is never replaced, and the import takes a name of its
+own beside it.
+
 What converts:
 
 - **Commands:** Service 01 and 22 on 11-bit IDs. `hdr` is the module's

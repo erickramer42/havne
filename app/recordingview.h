@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -50,13 +51,27 @@ class RecordingView : public QObject
     // (ECUIO_CHECK_*), id (-1 for the whole bus), extended, atMs,
     // lengthMs, count, code }
     Q_PROPERTY(QVariantList findings READ findings NOTIFY stateChanged)
-    // The check's outcome: { ran, error (why it didn't: no frames.csv,
-    // a row it refused), frames, ids, isotpSkipped, isotpFlagsUnknown,
+    // The check's outcome: { ran, error (why it didn't: "the recording
+    // has no frames", a row it refused), frames, ids, isotpSkipped, isotpFlagsUnknown,
     // isotpNoWire, tornRows }
     Q_PROPERTY(QVariantMap check READ check NOTIFY stateChanged)
     // A query found the file changed since the open (a row that no
     // longer parses, the file gone): what's shown is the open's
     Q_PROPERTY(bool stale READ stale NOTIFY staleChanged)
+    // Where the values come from (ADR-0049's appendix of 2026-11-06): ""
+    // for signals.csv, else the profile frames.csv decoded through, or
+    // "signals.json" for the recording's own signal file
+    Q_PROPERTY(QString decodedWith READ decodedWith NOTIFY stateChanged)
+    // The profile events.log's header names ("" for none), and whether
+    // the folder's signals.json is the file it names, its bytes unchanged
+    Q_PROPERTY(QString recordedProfile READ recordedProfile NOTIFY stateChanged)
+    Q_PROPERTY(bool ownSignalFile READ ownSignalFile NOTIFY stateChanged)
+    // Whether the folder holds a frames.csv: a CSV import holds values
+    // alone, so it has no frames to check, decode or replay
+    Q_PROPERTY(bool hasFrames READ hasFrames NOTIFY stateChanged)
+    // A health report being written (saveHealthReport), until its thread
+    // ends, whether or not the viewer closed meanwhile
+    Q_PROPERTY(bool reporting READ reporting NOTIFY reportingChanged)
 
 public:
     enum State { Closed, Opening, Open, Failed };
@@ -82,11 +97,36 @@ public:
     QVariantList findings() const { return m_findings; }
     QVariantMap check() const { return m_check; }
     bool stale() const { return m_stale; }
+    QString decodedWith() const { return m_decodedWith; }
+    QString recordedProfile() const { return m_recordedProfile; }
+    bool ownSignalFile() const { return m_ownSignalFile; }
+    bool hasFrames() const { return m_hasFrames; }
+    bool reporting() const { return m_reporting; }
+
+    // The log viewer's Save report (ADR-0054's appendix "the health report
+    // as built"): the whole recording's health from its folder (core's
+    // rule for its set, whatever the viewer decodes with; never the view's
+    // zoom), to the file at url in the format healthFormatFor picks. On a
+    // thread of its own, since core reads all of frames.csv; reportSaved
+    // with writeHealthReport's map when it ends, unless the viewer closed
+    // or opened another recording meanwhile. False, nothing started, when
+    // no recording is open or a report is being written already
+    Q_INVOKABLE bool saveHealthReport(const QUrl& url, int filterIndex);
 
     // Opens the recording in folder (the one holding signals.csv), closing
     // any open or opening one first. The state goes to Opening at once,
-    // then Open or Failed on the GUI thread.
+    // then Open or Failed on the GUI thread. A folder with frames.csv and
+    // no signals.csv opens as openFrames(folder, "") does.
     Q_INVOKABLE void open(const QString& folder);
+    // Opens the recording with its values decoded from its frames.csv
+    // (ecuio_recording_open_frames) through profile: a registered one
+    // ("obd2", a vehicle's signal file's, a plugin variant's), or
+    // "signals.json" for the recording's own; "" picks as havne-cli view
+    // --frames does (cli/view_frames.h): its own file while it matches,
+    // else the profile it was recorded under. The set is copied here, on
+    // the GUI thread where the stores change it, before the open's thread
+    // starts. A profile that can't decode is Failed at once, with words.
+    Q_INVOKABLE void openFrames(const QString& folder, const QString& profile);
     // Stops an open under way (Failed, "canceled") or closes the one open
     Q_INVOKABLE void close();
 
@@ -107,6 +147,12 @@ public:
     Q_INVOKABLE double findThreshold(int signal, double level,
                                      double hysteresis, bool rising);
     Q_INVOKABLE double findMarker(const QString& label);
+    // The engine's first start (core's ECUIO_RECORDING_FIND_ENGINE_START,
+    // as havne-cli view --align-on engine-start finds it): the rpm signal
+    // reaching 500 after being below 100. -1 for none (no rpm signal, an
+    // engine running from the first sample and never stopped) or a
+    // recording not open.
+    Q_INVOKABLE double findEngineStart();
     // Each signal's value in force at tMs, as the cursor shows it: one map
     // each, { index, text (a number in display units, its decimals; a text
     // signal's as recorded; "" before its first sample), unit, atMs (-1
@@ -126,6 +172,8 @@ signals:
     void unitSystemChanged();
     void signalListChanged();
     void staleChanged();
+    void reportingChanged();
+    void reportSaved(const QVariantMap& result);
 
 private:
     struct Result;
@@ -134,12 +182,18 @@ private:
         bool plotted = false;
     };
 
+    struct FrameSet;
     static void run(const std::shared_ptr<Result>& res,
                     std::atomic<bool>* cancel, RecordingView* view,
-                    quint64 generation, const QString& folder);
+                    quint64 generation, const QString& folder,
+                    const std::shared_ptr<FrameSet>& frames);
+    void start(const QString& folder, const std::shared_ptr<FrameSet>& frames);
+    void readHeader(const QString& folder);
+    void fail(const QString& folder, const QString& words);
     void finish(const std::shared_ptr<Result>& res, quint64 generation);
     void stop();
     void setProgress(double p, quint64 generation);
+    void reportFinished(const QVariantMap& result, quint64 generation);
     void markStale();
     // A recorded number as displayed: the value, its unit and decimals
     ecuio_display_value_t shown(const Signal& s, double value) const;
@@ -156,6 +210,11 @@ private:
     double m_progress = 0;
     uint32_t m_units = ECUIO_UNITS_METRIC;
     bool m_stale = false;
+    QString m_decodedWith;
+    QString m_recordedProfile;
+    QString m_recordedSha;
+    bool m_ownSignalFile = false;
+    bool m_hasFrames = false;
 
     ecuio_recording_t* m_reader = nullptr;
     ecuio_recording_info_t m_info{};
@@ -166,6 +225,10 @@ private:
 
     std::thread m_worker;
     std::atomic<bool> m_cancel{false};
+    // The health report's: joined when it posts its end, or at destruction
+    // (core's export can't be stopped midway)
+    std::thread m_reportWorker;
+    bool m_reporting = false;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped
     quint64 m_generation = 0;

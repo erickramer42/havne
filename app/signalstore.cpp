@@ -1,5 +1,5 @@
 // File/layer: app/signalstore.cpp | Qt6 Core, app layer, C++17
-// Testing: HARNESS: BridgeTest.SignalStore* and .SignalFile* (test_bridge)
+// Testing: HARNESS: BridgeTest.SignalStore*, .SignalFile*, .Obdb* (test_bridge)
 
 #include "signalstore.h"
 
@@ -259,6 +259,19 @@ SignalStore::fileFor(const ecuio_signal_set_t* set) const
     return nullptr;
 }
 
+QString SignalStore::shaFor(const ecuio_signal_set_t* set) const
+{
+    if (set == nullptr) {
+        return {};
+    }
+    for (const auto& held : m_held) {
+        if (ecuio_signal_file_set(held.second.file) == set) {
+            return held.first;
+        }
+    }
+    return {};
+}
+
 QString SignalStore::profileOf(const QString& sha) const
 {
     if (!m_registered.contains(sha)) {
@@ -266,6 +279,26 @@ QString SignalStore::profileOf(const QString& sha) const
     }
     const auto held = m_held.find(sha);
     return held != m_held.end() ? held->second.profile : QString();
+}
+
+QVariantList SignalStore::registered() const
+{
+    QVariantList out;
+    for (const auto& [sha, held] : m_held) {
+        if (m_registered.contains(sha)) {
+            out.append(entryOf(sha, held));
+        }
+    }
+    std::stable_sort(
+        out.begin(), out.end(), [](const QVariant& a, const QVariant& b) {
+            return a.toMap()
+                       .value(QStringLiteral("name"))
+                       .toString()
+                       .localeAwareCompare(
+                           b.toMap().value(QStringLiteral("name")).toString()) <
+                   0;
+        });
+    return out;
 }
 
 int SignalStore::deleteUnused(const QStringList& keep)

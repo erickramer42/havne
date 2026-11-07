@@ -1,0 +1,13 @@
+{
+  "havne_column_map": 1,
+  "header_row": 3,
+  "delimiter": ";",
+  "decimal": ",",
+  "time": {"column": "Time [s]", "unit": "s"},
+  "missing": ["---"],
+  "signals": [
+    {"column": "Engine Speed [rpm]", "name": "RPM", "unit": "rpm", "decimals": 0},
+    {"column": "Load [%]", "name": "Engine Load", "unit": "%", "decimals": 1},
+    {"column": "Lambda", "name": "Lambda", "unit": "lambda", "decimals": 2}
+  ]
+}

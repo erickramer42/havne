@@ -1,0 +1,11 @@
+Made-up Logger A, export format 2
+Synthetic data for the tests, from no car
+Time [s];Engine Speed [rpm];Load [%];Lambda;Note
+0,00;780,5;12,0;1,00;start
+0,25;812;12,5;0,99;
+0,50;1250,75;30,2;0,98;
+0,75;2100;55,0;---;
+1,00;3420,25;88,5;0,86;wot
+1,25;2980;40,0;1,32;
+1,50;1500;---;1,98;lift
+1,75;900;14,0;1,01;

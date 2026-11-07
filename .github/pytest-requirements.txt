@@ -1,0 +1,20 @@
+# pytest and what it needs, pinned by hash: core-and-tests, win-build,
+# macos-build and linux-build run the havne package's tests
+# (PythonTest.*, python/tests/) with it against the shared core they
+# build. Pure-Python wheels only; colorama is pytest's on Windows alone.
+# exceptiongroup and tomli (pytest's below Python 3.11) are left out: the
+# package needs 3.11 or later. Bumped by hand: take each wheel's sha256
+# from https://pypi.org/pypi/<name>/<version>/json and check the set with
+# pip install --require-hashes in a scratch venv.
+colorama==0.4.6 ; sys_platform == "win32" \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+iniconfig==2.3.1 \
+    --hash=sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pluggy==1.7.0 \
+    --hash=sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec
+pygments==2.21.0 \
+    --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+pytest==9.2.0 \
+    --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588

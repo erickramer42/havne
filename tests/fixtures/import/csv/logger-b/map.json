@@ -1,0 +1,8 @@
+{
+  "havne_column_map": 1,
+  "time": {"column": "timestamp", "unit": "iso8601"},
+  "signals": [
+    {"column": "speed_kmh", "name": "Vehicle Speed", "unit": "km/h", "decimals": 1},
+    {"column": "gear", "name": "Gear", "kind": "text"}
+  ]
+}

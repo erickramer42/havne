@@ -28,10 +28,11 @@
 namespace cli {
 
 // --align-on: rise:<signal>:<level>, fall:<signal>:<level>,
-// marker:<label> or utc. The level is the last colon's: a signal's name
-// may hold one.
+// marker:<label>, utc or engine-start (the rpm signal reaching 500
+// after being below 100, core's ECUIO_RECORDING_FIND_ENGINE_START). The
+// level is the last colon's: a signal's name may hold one.
 struct AlignOn {
-    enum Kind { none, rise, fall, marker, utc };
+    enum Kind { none, rise, fall, marker, utc, engine_start };
     Kind kind = none;
     std::string signal;
     std::string label;
@@ -63,6 +64,8 @@ inline bool parse_align_on(const char* text, AlignOn& out)
     AlignOn a;
     if (s == "utc") {
         a.kind = AlignOn::utc;
+    } else if (s == "engine-start") {
+        a.kind = AlignOn::engine_start;
     } else if (s.rfind("marker:", 0) == 0 && s.size() > 7) {
         a.kind = AlignOn::marker;
         a.label = s.substr(7);
@@ -209,10 +212,13 @@ inline void signed_us(Line& l, int64_t us)
 // duration_us, utc_start_us|null, signals, markers, summary, rows_torn,
 // records_dropped, notes_dropped, signal_file}; signal_file is null when
 // the header names none and the folder holds none, else {sha256 (the
-// header's, or null), present, matches} (ADR-0051 section 4)
+// header's, or null), present, matches} (ADR-0051 section 4); and with
+// view --frames, frames: the profile its frames decoded through, or
+// "signals.json" for the recording's own file
 inline void opened_line(Line& l, uint32_t recording,
                         const ecuio_recording_info_t& i,
-                        const ecuio_recording_signals_t& sf)
+                        const ecuio_recording_signals_t& sf,
+                        const char* frames = nullptr)
 {
     l.raw("{\"type\":\"opened\"");
     l.key("recording");
@@ -257,6 +263,10 @@ inline void opened_line(Line& l, uint32_t recording,
         l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_MATCH) != 0 ? "true"
                                                               : "false");
         l.ch('}');
+    }
+    if (frames != nullptr) {
+        l.key("frames");
+        l.string(frames, SIZE_MAX);
     }
     l.ch('}');
 }

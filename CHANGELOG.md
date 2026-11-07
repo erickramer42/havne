@@ -11,6 +11,215 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-07
+
+### Added
+
+- `havne-cli sim <uri> --elm327 tcp:<port>` serves the simulated car as
+  an ELM327 adapter on a TCP port, on Windows, macOS and Linux: Havne's
+  own `elm327://127.0.0.1:<port>`, python-OBD and ELM327 apps that take
+  a WiFi adapter's address read it with no car. It listens on 127.0.0.1
+  unless you name another address, takes one host at a time, and
+  answers from the same simulated ECU as `sim --on`: the mock's drive
+  cycle or canned values, a recording, a second module, a signal file's
+  or a plugin's DIDs, and the faults
+  ([ADR-0055](docs/adr/0055-elm327-emulator.md)).
+- Core's simulated ECU answers with no bus: `ecuio_sim_create_unbound`
+  and `ecuio_sim_ask` (`ecuio/sim.h`) take one request and return each
+  ECU's reply, its fault as the time it starts and a flag, on the
+  caller's clock.
+- `havne-cli clear <uri> --yes` clears each ECU's trouble codes, freeze
+  frame and readiness from a script, through the same gate as the app:
+  each ECU's report is written first as `diagnostics` lines, then each
+  ECU is cleared at that report by its own ID, only with the engine
+  stopped unless `--engine-running` gives your word (and only standing
+  still unless `--moving` does too), then read again. A `clear` line
+  says what each ECU did; the exit is 0 only when every ECU cleared
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)'s appendix of
+  2026-11-06).
+- The viewer and `havne-cli view --frames` can read a recording's
+  values from its frames through a profile: a raw recording (a
+  SocketCAN listener's among them) has values to plot, and a signal
+  file written today decodes an older recording. The viewer offers it
+  beside the values as recorded, and opens a folder that holds frames
+  alone through its frames
+  ([ADR-0049](docs/adr/0049-recordings-in-core.md)'s appendix of
+  2026-11-06).
+- JSON Schemas for signal files, plugin manifests and plugin value
+  fixtures in `schema/`: an editor mapped to them completes and checks
+  a file as you write it, and another repository can lint its files in
+  CI. A file can't name its schema with `"$schema"`, which the loader
+  refuses, so map it in the editor's settings by file name or folder.
+- `havne-cli export <recording> <out> --format pcapng` writes a
+  recording's frames for Wireshark, scrubbed: identification replies
+  (Service 09, the F180-F1FF DIDs) on any CAN ID, in normal or extended
+  addressing and CAN FD's forms, and text signals' messages are left
+  out and counted, then every message (ISO-TP segments on any ID joined)
+  and the file itself are searched for the car's identity values and
+  anything shaped like a VIN (one run together with other letters or
+  digits found by its check digit), and a match writes nothing. A message an adapter delivered whole goes out
+  as the frames its ECU sent, each marked as made up, so Wireshark's
+  ISO-TP dissector reassembles it. `--from`/`--to` take a stretch;
+  `--raw` writes it as recorded, and the file says so
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix of
+  2026-11-06).
+- `havne-cli import candump <log> <folder> [--interface <name>]` reads
+  a `candump -L` log into a recording's folder: `view --frames`, `info`
+  and `replay://` read it like any other. One bus to a recording: a log
+  of several takes the one you name.
+- `havne-cli import csv <file> <folder> --map <map.json>` reads another
+  logger's CSV of timed signals into a recording's folder that `view`
+  reads like any other, by a column map: the time column (seconds,
+  milliseconds, microseconds, ISO 8601 times or times of day with a
+  date) and each column's signal name, unit and kind, with the
+  logger's preamble, `;` and decimal commas, quoted cells and a
+  logger's texts for no reading (`---`) taken. A column the map leaves
+  out is ignored and named; a typo in the map is refused by its name
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  CSV import as built").
+- The Recordings page lists a folder of values alone (a CSV import
+  moved into the recordings folder) and opens it in the viewer, which
+  says the recording has no frames to replay and hides Replay and the
+  decode choice.
+- A CAN FD frame's error state indicator (ESI) is kept: SocketCAN
+  sessions flag it, recordings and replays carry it, and `havne-cli
+  play` puts it back on the bus.
+- Settings imports an OBDb signal set for a vehicle (Import an OBDb
+  set, in the Vehicle section, on every platform, Android's document
+  picker too): the model year comes from a VIN (the one you look up, or
+  the connected car's) or is typed, and the report shows what
+  converted, each field that differs and each signal left out before
+  Keep saves the file as the vehicle's. Importing the set again, for
+  another year say, replaces the vehicle's earlier import, and says so
+  first.
+- The Log page's frame table (developer mode) filters its frames by ID
+  or range (`7E8, 7E0-7EF`), data bytes anywhere or from the start
+  (`^62 F1 ??`), direction and flag, and says how many of how many it
+  shows. By ID lists one row per ID with its frame count, rate and
+  newest payload; a tap shows that ID's frames. A Flags column names
+  each frame's flags, and the Time header turns the order.
+- Export CSV writes the frames the Log page holds, those the filter
+  shows, oldest first, with identification replies and text signals'
+  messages left out and a check that fails the export rather than write
+  a VIN or another identity value. Copy still copies the selected rows
+  as they are ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s
+  appendix "frames in memory").
+- Core builds as a shared library beside its static one
+  (`libecuio.so`, `libecuio.dylib`, `ecuio.dll`), for a program that
+  loads core by path: it exports the C API's functions and nothing
+  else, which a check holds it to on every desktop platform, and
+  `ecuio_version` gives core's version as three numbers
+  ([ADR-0053](docs/adr/0053-python-bindings.md)). It isn't in the
+  downloads yet.
+- Core's pull queue (`ecuio/queue.h`): a program that can't take a
+  callback on core's worker thread (Python's ctypes, Rust, Go, C#)
+  reads a session's frames or decoded values in batches from a thread
+  of its own, waiting up to a timeout, the oldest dropped and counted
+  when it falls behind ([ADR-0053](docs/adr/0053-python-bindings.md)).
+- `havne-cli export <recording> <out> --format csv` writes a
+  recording's values, one row per sample (`time_s,signal,unit,value`),
+  after a comment line of counts, for a spreadsheet, pandas
+  (`skiprows=1`) or R. Scrubbed unless `--raw`: text signals and
+  signals read from identification replies are left out, and the file
+  is checked for the car's identity before it's written. A signal name,
+  unit or raw text value that a spreadsheet would run as a formula
+  fails the export instead of being changed
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  CSV export as built").
+- `havne-cli export <recording> <out> --format folder` writes a copy
+  of a recording to send, one Havne opens, views, checks and replays as
+  the original. Scrubbed unless `--raw`: identification replies and
+  text signals are left out of its frames and values, the session's
+  address and the vehicle's label out of its log, the app's activity
+  notes left out, and every file is checked for the car's identity
+  before the copy is put in place. Markers keep their labels as typed.
+  Name the copy by its time (`20261106-142233`): the original's folder
+  name can hold the vehicle's label
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  folder export as built").
+- The `havne` Python package (`python/havne/`): sessions on every
+  transport with their frames and decoded values read as iterators,
+  recordings, the simulated ECU, a script's own signals as a signal file
+  and a plugin's variants, over core's shared library through ctypes,
+  with no compiler at install time
+  ([ADR-0053](docs/adr/0053-python-bindings.md)). It runs from the source
+  tree against a built shared core (`HAVNE_LIBRARY`), or installs from
+  a release's wheel (below).
+- Core's pull queue tells a replay's end: once a replay that doesn't loop
+  has played its last frame, a read returns `ECUIO_ERR_STREAM_ENDED`, so
+  a loop over a replay's values finishes.
+- A vehicle's baseline recording: on the Recordings page, "Use as
+  <vehicle>'s baseline" keeps an open recording as the baseline of the
+  vehicle picked in Settings, a Baseline badge marks its row, and
+  "Compare with the baseline" overlays it on another recording, the two
+  lined up on their engine starts (RPM reaching 500 after being below
+  100). A baseline whose folder was moved or deleted says so, with a way
+  to clear it. The compare's alignments gain "Align engine starts", and
+  `havne-cli view <run> <baseline> --align-on engine-start` lines up the
+  same two recordings
+  ([ADR-0049](docs/adr/0049-recordings-in-core.md)'s appendix "a
+  vehicle's baseline").
+- A Python wheel with each release, for Windows x64, Linux x86_64 and
+  64-bit ARM, and macOS on Apple silicon (13 or later):
+  `pip install havne-<version>-py3-none-<platform>.whl` installs the
+  `havne` package with core's library inside, and on Windows the J2534
+  surrogates, so no build, `HAVNE_LIBRARY` or Visual C++
+  redistributable is needed. Python 3.11 or later
+  ([ADR-0053](docs/adr/0053-python-bindings.md)).
+- `python/examples/read_pids.py <uri>` prints the engine speed, vehicle
+  speed and coolant temperature from any session: `mock://`, SocketCAN,
+  an ELM327 adapter or the ELM327 emulator.
+- Three more Python examples in `python/examples/`, each runnable with
+  no car: `did_scan.py <uri>` lists which identifiers (DIDs) an ECU
+  answers, through core's own read-only scan on any session, printing
+  each answer as text or hex; `isotp_fuzz.py --interface vcan0` sends
+  malformed ISO-TP exchanges to the simulated ECU on a Linux virtual
+  CAN bus, from a seed a failing case replays by, and refuses any
+  interface that isn't a virtual bus; `ecu_states.ipynb` predicts fuel
+  cut half a second ahead from a recording's engine speed, speed and
+  throttle with scikit-learn, against a "nothing changes" baseline, on
+  a synthetic recording of the mock's drive cycle that comes with it
+  ([ADR-0053](docs/adr/0053-python-bindings.md)).
+- Python: `havne.import_csv` and `havne.import_candump` make a
+  recording's folder from a CSV or a candump log, each returning the
+  import's counts.
+- `havne-cli health` writes a car's health as one file, JSON or text to
+  share with a shop or a buyer: the vehicle from its VIN (model year,
+  make, check digit; never the VIN itself), the emissions inspection's
+  verdict, each ECU's readiness, trouble codes with their titles,
+  freeze frame and the values since the codes were cleared, the
+  identification by name only, then the profile's key values. It reads
+  a live session (reads only, parked or driving) or a recording, and
+  checks the file for the car's identity before writing it. Live, it
+  waits within `--seconds` for each value an ECU lists as supported; from
+  a recording, an older one's whole replies give its ECUs too, and a
+  since-cleared value no ECU takes is among the key values. In the app,
+  Save report on Diagnostics and in the log viewer writes the same file,
+  text or JSON ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s
+  appendix "the health report as built").
+- An export, an import or a health report is written under a name of
+  its own beside its file and put in place only when whole: another
+  one's unfinished file is never in its way, a failure, running out of
+  memory included, leaves nothing behind, and a file or folder made
+  under its name meanwhile is never replaced, wherever the file system
+  can refuse it. A scrubbed export of a
+  recording whose own signal file doesn't load is refused, saying why.
+
+### Fixed
+
+- `havne-cli` exits with a failure when its output can't be written,
+  a full disk or a closed pipe found only at the last flush included,
+  where it could exit 0.
+- `havne-cli signals import obdb` writes its file through a partial of
+  its own, so two runs writing the same file can't leave a cut-short
+  one in its place.
+- A value that isn't a number (NaN or infinity) is written in a
+  recording as `nan`, `inf` or `-inf` on every platform, words Havne's
+  reader and other tools take; Windows wrote a form neither reads.
+- A packed Service 01 reply holding several PIDs decoded as text (a
+  signal file's hex values, say) gives each its value: the decoder could
+  run out of text slots for them.
+
 ## [0.5.1] - 2026-11-06
 
 ### Added
@@ -694,7 +903,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/erickramer42/havne/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/erickramer42/havne/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/erickramer42/havne/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/erickramer42/havne/compare/v0.4.0...v0.4.1

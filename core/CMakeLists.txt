@@ -1,14 +1,21 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/frame_decoder.cpp
     src/dtc_titles.cpp
+    src/export.cpp
+    src/health.cpp
     src/host_clock.cpp
+    src/import.cpp
     src/json.cpp
     src/obdb_import.cpp
     src/profile_registry.cpp
+    src/queue.cpp
     src/recorder.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
+    src/scrub.cpp
+    src/scrub_frames.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp
@@ -30,6 +37,28 @@ add_library(ecuio-core STATIC
     src/uds_generic.cpp
     src/vin.cpp
     src/j2534_surrogate_client.cpp
+)
+
+# The public headers: the C API an outside program compiles against.
+# One list for what's installed, what scripts/api_check.py compares
+# with a release (it reads these lines) and what the shared core
+# exports (scripts/ecuio_exports.py); the generated version.h joins the
+# install. A new public header joins it; internal.h, signal_sets.h,
+# j2534_surrogate.h, j2534_ptypes.h and surrogate_protocol.h never do.
+set(ECUIO_PUBLIC_HEADERS
+    include/ecuio/core.h
+    include/ecuio/j2534.h
+    include/ecuio/obdb.h
+    include/ecuio/plugin.h
+    include/ecuio/profile.h
+    include/ecuio/queue.h
+    include/ecuio/recording.h
+    include/ecuio/serial.h
+    include/ecuio/signals.h
+    include/ecuio/sim.h
+    include/ecuio/socketcan.h
+    include/ecuio/stream.h
+    include/ecuio/vin.h
 )
 
 target_include_directories(ecuio-core
@@ -67,6 +96,107 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
     endif()
 endif()
 
+# The shared core (HAVNE_SHARED_CORE, the root CMakeLists.txt; ADR-0053's
+# appendix "the shared core as built"): libecuio.so, libecuio.dylib or
+# ecuio.dll, the archive linked whole (on MSVC, core's sources compiled
+# again with the C runtime linked in, below), exporting the list
+# scripts/ecuio_exports.py makes from ECUIO_PUBLIC_HEADERS at build time
+# (generated/ecuio/: .def for link.exe, a version script for GNU ld, an
+# exported symbols list for Apple's ld), so it lets out every declared
+# function and nothing else; ExportsTest holds it to that. Whole, so it
+# carries every object the archive has, as a program linking the archive
+# gets the ones it calls. The soname follows CHANGELOG.md's promise:
+# before 1.0 a minor version may break the ABI, so 0.x names its minor
+# (libecuio.so.0.6, compatibility_version 0.6) and 1.0 on its major
+# (libecuio.so.1). Windows names no version: the DLL is loaded by path.
+if(HAVNE_SHARED_CORE)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT Python3_Interpreter_FOUND)
+        message(FATAL_ERROR
+            "HAVNE_SHARED_CORE=ON needs Python 3 to make the shared core's "
+            "export list from the public headers: install it, point "
+            "Python3_EXECUTABLE at it, or configure with -DHAVNE_SHARED_CORE=OFF.")
+    endif()
+    set(_ecuio_gen ${CMAKE_BINARY_DIR}/generated/ecuio)
+    set(_ecuio_lists ${_ecuio_gen}/ecuio.exports ${_ecuio_gen}/ecuio.def
+        ${_ecuio_gen}/ecuio.map ${_ecuio_gen}/ecuio.exp)
+    list(TRANSFORM ECUIO_PUBLIC_HEADERS PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/
+        OUTPUT_VARIABLE _ecuio_headers)
+    add_custom_command(OUTPUT ${_ecuio_lists}
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/ecuio_exports.py
+            ${_ecuio_gen} ${_ecuio_headers}
+        DEPENDS ${PROJECT_SOURCE_DIR}/scripts/ecuio_exports.py
+            ${PROJECT_SOURCE_DIR}/scripts/api_check.py ${_ecuio_headers}
+        COMMENT "The shared core's export list, from the public headers"
+        VERBATIM)
+    # A cache variable, so tests/ finds the headers
+    set(ECUIO_PUBLIC_HEADER_PATHS "${_ecuio_headers}" CACHE INTERNAL "")
+
+    # src/shared_core.cpp is empty: a library needs a source of its own
+    add_library(ecuio SHARED src/shared_core.cpp ${_ecuio_gen}/ecuio.exports)
+    set_source_files_properties(${_ecuio_gen}/ecuio.exports PROPERTIES HEADER_FILE_ONLY ON)
+    # The archive's objects (linked whole below), except on MSVC, whose
+    # library takes core's sources compiled /MT instead
+    if(NOT MSVC)
+        target_link_libraries(ecuio PRIVATE ecuio-core)
+    endif()
+    target_include_directories(ecuio INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/generated>)
+    app_enable_warnings(ecuio)
+    if(Havne_VERSION_MAJOR EQUAL 0)
+        set(_ecuio_soversion ${Havne_VERSION_MAJOR}.${Havne_VERSION_MINOR})
+    else()
+        set(_ecuio_soversion ${Havne_VERSION_MAJOR})
+    endif()
+    # Mach-O: compatibility_version is SOVERSION's, current_version VERSION's
+    set_target_properties(ecuio PROPERTIES
+        OUTPUT_NAME ecuio
+        VERSION ${Havne_VERSION}
+        SOVERSION ${_ecuio_soversion})
+    if(MSVC)
+        # The C runtime linked in (/MT), as the surrogates do (ADR-0053's
+        # appendix "the wheel as built"): a program loading ecuio.dll may
+        # already hold an older msvcp140.dll, which Windows would hand
+        # this library too, and a DLL built with a newer STL can crash
+        # against an older one (std::mutex, VS 2022 17.10 and
+        # msvcp140.dll before 14.40). So core's sources compile once more
+        # here, /MT, beside the archive's /MD for the app; the separate
+        # heap is safe, since every allocation has its release in core
+        # (ExportsTest.EachAllocationHasItsRelease).
+        get_target_property(_ecuio_core_sources ecuio-core SOURCES)
+        add_library(ecuio-core-mt OBJECT ${_ecuio_core_sources})
+        target_include_directories(ecuio-core-mt PRIVATE
+            $<TARGET_PROPERTY:ecuio-core,INCLUDE_DIRECTORIES>)
+        target_compile_definitions(ecuio-core-mt PRIVATE
+            $<TARGET_PROPERTY:ecuio-core,COMPILE_DEFINITIONS>)
+        app_enable_warnings(ecuio-core-mt)
+        set_target_properties(ecuio-core-mt ecuio PROPERTIES
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def $<TARGET_OBJECTS:ecuio-core-mt>)
+        target_link_libraries(ecuio PRIVATE bcrypt ws2_32)
+    elseif(APPLE)
+        set_source_files_properties(${_ecuio_gen}/ecuio.exp PROPERTIES HEADER_FILE_ONLY ON)
+        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.exp)
+        target_link_options(ecuio PRIVATE
+            "LINKER:-force_load,$<TARGET_FILE:ecuio-core>"
+            "LINKER:-exported_symbols_list,${_ecuio_gen}/ecuio.exp")
+        set_target_properties(ecuio PROPERTIES LINK_DEPENDS ${_ecuio_gen}/ecuio.exp)
+    else()
+        set_source_files_properties(${_ecuio_gen}/ecuio.map PROPERTIES HEADER_FILE_ONLY ON)
+        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.map)
+        target_link_options(ecuio PRIVATE
+            "LINKER:--whole-archive,$<TARGET_FILE:ecuio-core>,--no-whole-archive"
+            "LINKER:--version-script=${_ecuio_gen}/ecuio.map")
+        set_target_properties(ecuio PROPERTIES LINK_DEPENDS ${_ecuio_gen}/ecuio.map)
+    endif()
+    # A shared object's code must be position independent, the archive's
+    # objects included (Windows' DLLs relocate without it)
+    if(NOT WIN32)
+        set_target_properties(ecuio-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
+endif()
+
 # Critical invariant: core never links Qt (ADR-0001). The check lives at
 # the end of the root CMakeLists.txt, after every subdirectory has
 # configured; the CI core-and-tests job also builds core with no Qt at all.
@@ -80,19 +210,7 @@ if(NOT ANDROID AND NOT IOS)
     include(CMakePackageConfigHelpers)
     set_target_properties(ecuio-core PROPERTIES EXPORT_NAME core)
     install(TARGETS ecuio-core EXPORT ecuio ARCHIVE DESTINATION lib)
-    install(FILES
-            include/ecuio/core.h
-            include/ecuio/j2534.h
-            include/ecuio/obdb.h
-            include/ecuio/plugin.h
-            include/ecuio/profile.h
-            include/ecuio/recording.h
-            include/ecuio/serial.h
-            include/ecuio/signals.h
-            include/ecuio/sim.h
-            include/ecuio/socketcan.h
-            include/ecuio/stream.h
-            include/ecuio/vin.h
+    install(FILES ${ECUIO_PUBLIC_HEADERS}
             ${CMAKE_BINARY_DIR}/generated/ecuio/version.h
         DESTINATION include/ecuio)
     install(EXPORT ecuio NAMESPACE ecuio:: FILE ecuioTargets.cmake

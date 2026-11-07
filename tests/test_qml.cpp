@@ -31,6 +31,7 @@
 #include "bridgesingleton.h"
 #include "sessionbridge.h"
 #include "ecuio/profile.h"
+#include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
 #ifdef _WIN32
@@ -69,12 +70,19 @@ class Harness : public QObject
     Q_PROPERTY(QString replayFixtures READ replayFixtures CONSTANT)
     // The directory of the recordings the Recordings page opens (ADR-0049)
     Q_PROPERTY(QString recordingFixtures READ recordingFixtures CONSTANT)
+    // The synthetic OBDb set (tests/fixtures/obdb), as a picker's URL
+    Q_PROPERTY(QUrl obdbFixture READ obdbFixture CONSTANT)
 
 public:
     QString replayFixtures() const { return QStringLiteral(ECUIO_REPLAY_FIXTURES); }
     QString recordingFixtures() const
     {
         return QStringLiteral(ECUIO_RECORDING_FIXTURES);
+    }
+
+    QUrl obdbFixture() const
+    {
+        return QUrl::fromLocalFile(QStringLiteral(ECUIO_OBDB_FIXTURE));
     }
 
     QString fakeDllPath() const
@@ -166,6 +174,32 @@ public:
                                            : QString();
     }
 
+    // A made-up logger's CSV (tests/fixtures/import/csv/<logger>) imported
+    // by its column map into the recordings folder the page lists, as
+    // havne-cli import csv makes one (ADR-0054's appendix "the CSV import
+    // as built"), named name: the folder, "" when the import is refused
+    Q_INVOKABLE QString importCsvFixture(const QString& logger,
+                                         const QString& name)
+    {
+        const QString base =
+            QStringLiteral(ECUIO_IMPORT_FIXTURES "/csv/") + logger;
+        QFile mapFile(base + QStringLiteral("/map.json"));
+        if (!mapFile.open(QIODevice::ReadOnly)) {
+            return {};
+        }
+        const QByteArray map = mapFile.readAll();
+        const QString folder = m_recordingsRoot + QLatin1Char('/') + name;
+        const QByteArray in = (base + QStringLiteral("/log.csv")).toUtf8();
+        const QByteArray out = folder.toUtf8();
+        ecuio_import_options_t o{};
+        o.format = ECUIO_IMPORT_CSV;
+        o.in_path_utf8 = in.constData();
+        o.out_folder_utf8 = out.constData();
+        o.column_map_utf8 = map.constData();
+        ecuio_import_report_t r{};
+        return ecuio_import(&o, &r) == ECUIO_OK ? folder : QString();
+    }
+
     // The signal store's copies (SignalStore::root, the test's settings
     // folder), by file name
     Q_INVOKABLE QStringList storedSignalFiles() const
@@ -201,9 +235,13 @@ public:
         m_armed.clear();
     }
 
+    // The folder the bridge lists recordings from (Setup's scratch one)
+    void setRecordingsRoot(const QString& root) { m_recordingsRoot = root; }
+
 private:
     QStringList m_armed;
     QTemporaryDir m_scratch;
+    QString m_recordingsRoot;
 };
 
 // The relay's adapter as main() makes it on the phone, opening at once:
@@ -248,6 +286,7 @@ public slots:
         // Settings lists the recordings: here an empty scratch folder,
         // never the user's Documents
         m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());
+        m_harness.setRecordingsRoot(m_recordingsDir.path());
         BridgeSingleton::instance = m_bridge.get();
         // As main() wires it: a bt: URI is refused before core is asked
         m_bluetooth = std::make_unique<BluetoothDevices>();
