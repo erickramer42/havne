@@ -473,3 +473,103 @@ with its tests in `python/tests/`.
   carries the runtime's DLLs beside `ecuio.dll`, as the app's zip does,
   or the shared core links the runtime statically, as the surrogate
   does.
+  Amended 2026-11-07: the shared core links it statically (the
+  appendix "the wheel as built").
+
+## Appendix: the wheel as built (2026-11-07)
+
+Section 6, the rest of section 7 and the Done-when's other clauses,
+built (step 4 of the bindings, the last; the examples of section 8
+follow in `python/examples/`, where `read_pids.py` already is, not
+`examples/python/`).
+
+- **Writing it:** `packaging/python/make_wheel.py`, standard library
+  only (a wheel is a zip with `METADATA` 2.1, `WHEEL` and `RECORD`), so
+  there is no build backend to pin. It packs `python/havne/`'s `.py`
+  files, the library beside them, on Windows both surrogates, and
+  `LICENSE` and `core/THIRD_PARTY_NOTICES.txt` under the dist-info's
+  `licenses/`. Two builds of a commit are the same bytes: entries
+  sorted, every time `SOURCE_DATE_EPOCH`'s, fixed modes. A `-rcN` tag
+  gives PEP 440's `0.6.0rc1` in the name and `METADATA`; the package's
+  `__version__` stays `0.6.0`. It refuses a `_version.py` or a library
+  (`ecuio_version`, read by loading it) of another version, a tag the
+  library can't keep, a missing or misnamed surrogate. Beside each
+  wheel, `<wheel>.components.json` for the SBOM: a job artifact,
+  never a release file.
+- **The wheels:** `win_amd64`, `manylinux_2_39_x86_64`,
+  `manylinux_2_39_aarch64` and `macosx_13_0_arm64`, each tag given by
+  `release.yml` and checked against the library itself (PE machine;
+  ELF machine and newest `GLIBC_` version; Mach-O CPU and `minos`).
+- **No x86 Windows wheel:** a 32-bit Python is rare, and the x86 core is
+  still tested, by `scripts/verify.sh`'s cross-arch step under a 32-bit
+  Python.
+- **The Windows C runtime, linked in:** `ecuio.dll` links the runtime
+  statically (`/MT`), as the surrogates do, and imports only
+  `KERNEL32`, `ADVAPI32`, `bcrypt` and `WS2_32`. The other way, the
+  runtime's DLLs beside it, fails inside a Python process that already
+  loaded an older `msvcp140.dll` through another extension: Windows
+  reuses a loaded DLL of that name, and an STL from VS 2022 17.10 on
+  (whose `std::mutex` constructor is `constexpr`) crashes in
+  `std::mutex` against an `msvcp140` older than 14.40. The runtime's
+  separate heap is safe, since every allocation core hands out has its
+  release in core (`ExportsTest.EachAllocationHasItsRelease`). On MSVC,
+  core's sources compile a second time for it (`ecuio-core-mt`, an
+  object library with `MSVC_RUNTIME_LIBRARY MultiThreaded`), only in a
+  tree that builds the shared core; `ecuio-core` and `havne.exe` keep
+  `/MD`. `make_wheel.py` refuses a library or surrogate that imports a
+  runtime DLL (`vcruntime`, `msvcp`, `ucrtbase`, `concrt`, `vccorlib`,
+  `api-ms-win-crt`), the twin of `stage.ps1`'s surrogate check.
+- **Linux:** the library comes from `make-core-packages.sh`'s tree (the
+  packages' reproducible build), its debug info stripped and its build
+  ID kept. A wheel holds no symlinks, so it carries one file under its
+  SONAME (`libecuio.so.0.6`), which the package's search finds by that
+  name. Refused: a `NEEDED` outside manylinux's set (it needs `libc`,
+  `libm`, `libstdc++`, `libgcc_s` and the loader), no SONAME, or a
+  `GLIBC_` version above the tag's 2.39 (Ubuntu 24.04's, the runner's).
+- **macOS 13.0:** Qt 6.12 needs 14.4 (`QT_SUPPORTED_MIN_MACOS_VERSION`
+  in the kit's `Qt6ConfigExtras.cmake`), and core nothing past 13.0, so
+  `release.yml`'s `macos` job builds a core-only tree, arm64, with
+  `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` for the whole tree, no per-target
+  flag. CI's `macos-build` builds the app at Qt's minimum, so the 13.0
+  build first runs on a release candidate. From macOS 11 a wheel tag
+  names the major alone (pip offers a machine only `<major>_0`), so a
+  library built for 14.4, as a CI tree with no deployment target may
+  be, is tagged `macosx_14_0` (rounding up would refuse it on 14.x
+  itself) and would install on 14.0 to 14.3, where its load fails; a
+  release builds for an exact major, so its wheel claims no more than
+  it keeps. A tag naming a minor from 11 on is refused, and so is one
+  whose major is below the library's. The library may load only
+  `/usr/lib` and `/System/Library` dylibs.
+- **The release:** `release.yml`'s `windows` job builds `ecuio` beside
+  the app and packs the wheel with both surrogates; each `linux` leg
+  packs its arch's from the packages' tree; the new `macos` job builds
+  and packs its own. Each job then runs `packaging/python/check_wheel.py`
+  on its wheel under `ECUIO_PYTEST_REQUIRED=1`: installed into a fresh
+  venv with `pip --no-index`, used from outside the tree with
+  `HAVNE_LIBRARY`, `PYTHONPATH` and the surrogates' variables unset,
+  the library found in `site-packages`, and `read_pids.py mock://`
+  through it. `publish` adds the four wheels to the SBOM (purpose
+  `LIBRARY`; each depends on Python 3.11 or later, and on Linux on
+  glibc, libstdc++ and libgcc_s, on macOS on macOS 13.0; the Windows
+  wheel lists the C runtime linked in), `SHA256SUMS.txt`, both
+  attestations' subjects and the release's files.
+- **Tests:** `WheelTest.SelfTest` (made-up PE, ELF and Mach-O files and
+  a made-up package: the tags, every refusal, `RECORD`, two builds byte
+  for byte) and `WheelTest.Installed` (`tests/wheel_installed.py`, in
+  every 64-bit tree with the shared core: the tree's own library built
+  twice to the same bytes, then `check_wheel.py`; on Windows the fake
+  DLL through the wheel's x64 surrogate, and the Win32 tree's fake
+  through its x86 one where that tree exists, which CI's has not).
+  Mutation-checked 2026-11-07: each of make_wheel's refusals, the
+  sorting, the epoch's time, the modes and `RECORD`'s hashes (18); the
+  package's SONAME search and its surrogate setup (2).
+- **The Done-when's script:** `python/examples/read_pids.py <uri>`
+  prints each of the engine speed, vehicle speed and coolant
+  temperature as `name: value unit` and exits 0 once all three came.
+  `PythonTest.test_vcan` runs it on `vcan0` against the simulated ECU,
+  `PythonTest.test_read_pids` against `mock://` and against the ELM327
+  emulator on loopback (`havne-cli sim --elm327 tcp:0`, ADR-0055) on
+  every platform, Windows included, and `check_wheel.py` through each
+  installed wheel. The last clause, a wheel installed from a release's
+  downloads passing `gh attestation verify`, is the release skill's
+  check on the first release that carries the wheels.
