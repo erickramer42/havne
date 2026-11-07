@@ -6,16 +6,18 @@
 # alone by its seed and index, a bus with no ECU fails the run, an ECU
 # that goes away mid-run stops it within a few probes, so does a second
 # ECU already on the bus (the sim yields to it), and an
-# interface that isn't vcan is refused. havne-cli's sim as the ECU is
+# interface that isn't vcan is refused, by the bus itself too. havne-cli's sim as the ECU is
 # ExampleTest.isotp_fuzz_cli, outside pytest, for the sanitizer tree.
 
+import io
+import os
 import sys
 import threading
 import time
 
 import pytest
 
-from conftest import need_vcan, run_example
+from conftest import ROOT, need_vcan, run_example
 
 import havne
 
@@ -81,3 +83,17 @@ def test_an_interface_that_isnt_vcan_is_refused():
     rc, out, err = run_example("isotp_fuzz.py", "--interface", "lo", "--cases", "1")
     assert rc == 2 and out == "", out
     assert err.startswith("isotp_fuzz: ") and "vcan" in err, err
+
+
+@linux
+def test_the_bus_itself_refuses_an_interface_that_isnt_vcan():
+    # A script importing the fuzzer never reaches main()'s check
+    sys.path.insert(0, os.path.join(ROOT, "python", "examples"))
+    try:
+        import isotp_fuzz
+    finally:
+        sys.path.pop(0)
+    with pytest.raises(ValueError, match="vcan only"):
+        isotp_fuzz.Bus("lo")
+    with pytest.raises(ValueError, match="vcan only"):
+        isotp_fuzz.fuzz("lo", 1, 1, out=io.StringIO())
