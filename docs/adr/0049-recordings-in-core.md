@@ -2,8 +2,8 @@
 
 - **Status:** Accepted. Built: section 10's steps 1 to 5 (2026-11-02
   and 2026-11-03), and the reader's decode of `frames.csv` (its
-  appendix of 2026-11-06); step 6, the export, comes with v0.6.0's
-  sharing.
+  appendix of 2026-11-06); step 6, section 8's `.xlsx` export, isn't
+  built (the note of 2026-11-07).
 - **Date:** 2026-11-02.
 - **Builds on:** [ADR-0017](0017-session-recording.md) (the recording
   folder and its files, whose "recorder in core" alternative this
@@ -1455,3 +1455,9 @@ baseline: the caller names the folder. Golden `view-engine-start.jsonl`
 **Later.** A health report that names the vehicle's baseline takes it
 from its caller, as the CLI does; nothing in core knows which recording
 is a baseline.
+
+**Note of 2026-11-07: the spreadsheet export.** v0.6.0's sharing is
+[ADR-0054](0054-exports-and-imports.md)'s exports. Section 8's `.xlsx`
+export isn't built: ADR-0054's CSV export, with its formula rule, is
+how a recording opens in a spreadsheet, and step 6 waits for a release
+to name it.

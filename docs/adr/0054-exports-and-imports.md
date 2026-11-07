@@ -1,6 +1,9 @@
 # ADR-0054: Exports and imports: scrubbed by construction, PCAP out, candump and CSV in
 
-- **Status:** Proposed.
+- **Status:** Accepted. Built (the appendices of 2026-11-06 and
+  2026-11-07): the pcapng export and the candump import, frames in
+  memory, the CSV export, the folder export, the health report and the
+  CSV import.
 - **Date:** 2026-11-06.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI); [ADR-0006](0006-frame-abi-v0.3.md) (the frame and

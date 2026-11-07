@@ -1,6 +1,7 @@
 # ADR-0052: The plugin framework: one package, three tiers, data first
 
-- **Status:** Accepted. The data tier's core built in v0.5.0 (the appendix).
+- **Status:** Accepted. The data tier's core and havne-cli's plugins
+  built in v0.5.0, their JSON Schemas in v0.6.0 (the appendices).
 - **Date:** 2026-11-05.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary);

@@ -311,7 +311,8 @@ background too ([roadmap](#roadmap)).
     cases and `havne-cli` end to end over `vcan0` (the simulated ECU
     answering through ISO-TP, recorded and checked) (2026-11-05,
     [docs/linux.md](docs/linux.md#what-has-run-where)); not yet with an
-    adapter on Linux.
+    ELM327 adapter on Linux, nor a CAN controller on a Linux machine
+    outside WSL.
   - **Reply timing** ([ADR-0042](docs/adr/0042-reply-timing.md)): every
     requesting session measures, per request in its rotation, its
     outcomes, its reply latency (host clock) and its refresh interval
@@ -392,7 +393,8 @@ background too ([roadmap](#roadmap)).
     ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md); the test
     phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md);
     a Linux machine's suspend is left, BENCH prep #27).
-- **Not yet:** real hardware beyond two adapters and one car: 29-bit
+- **Not yet:** real hardware beyond three adapters (the VX, the MX+ and
+  the USB2CAN) and one car: 29-bit
   addressing, a real x64 driver, and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md),
@@ -615,7 +617,9 @@ append-only.
     and plots it, saying it has no frames. Left: the app's Import
     button, v0.7.0's, for both formats; until then a folder made
     elsewhere is moved into the recordings folder to be listed.
-- **Next:** the review pass, its fixes, the docs pass and the release.
+- **Next:** the release candidate: the PR `dev` to `main`, its CI run,
+  then v0.6.0-rc1 (the first macOS 13.0 wheel build, the wheels'
+  attestations, and the release APK on the test phone).
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
 the values, and the same script runs on Windows against the ELM327
@@ -624,7 +628,10 @@ emulator and on every platform against `mock://` (met:
 `vcan0`, `PythonTest.test_read_pids` and each wheel's install check);
 the wheel installs from a release's downloads and passes `gh
 attestation verify` (v0.6.0's release candidate); an export of a
-recording passes the leak check; a recording opens in Wireshark (met:
+recording passes the leak check (met 2026-11-07: scrubbed pcapng, CSV
+and folder exports of 159 real-car, bench and phone recordings hold none
+of their cars' identity values, whole or in 7-byte pieces, as bytes or
+hex); a recording opens in Wireshark (met:
 `CliTransferRunTest.tshark`, its ISO-TP reassembled); python-OBD reads
 the simulated car through the ELM327 emulator on Windows (met:
 `CliElm327RunTest.PythonObdReadsIt`); a CSV from another logger plots in

@@ -1,6 +1,9 @@
 # ADR-0053: Python bindings: ctypes over the C ABI, a wheel per platform
 
-- **Status:** Accepted.
+- **Status:** Accepted. Built (the appendices of 2026-11-06 and
+  2026-11-07): the shared core, the pull queue, the havne package, the
+  wheel and the examples; the wheel from a release's downloads, with its
+  attestation, comes with v0.6.0's release candidate.
 - **Date:** 2026-11-06.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary, the product's name only where a user

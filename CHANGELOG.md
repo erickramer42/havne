@@ -50,10 +50,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   refuses, so map it in the editor's settings by file name or folder.
 - `havne-cli export <recording> <out> --format pcapng` writes a
   recording's frames for Wireshark, scrubbed: identification replies
-  (Service 09, the F180-F1FF DIDs) and text signals' messages are left
-  out and counted, then every message and the file itself are searched
-  for the car's identity values and anything shaped like a VIN, and a
-  match writes nothing. A message an adapter delivered whole goes out
+  (Service 09, the F180-F1FF DIDs) on any CAN ID, in normal or extended
+  addressing and CAN FD's forms, and text signals' messages are left
+  out and counted, then every message (ISO-TP segments on any ID joined)
+  and the file itself are searched for the car's identity values and
+  anything shaped like a VIN (one run together with other letters or
+  digits found by its check digit), and a match writes nothing. A message an adapter delivered whole goes out
   as the frames its ECU sent, each marked as made up, so Wireshark's
   ISO-TP dissector reassembles it. `--from`/`--to` take a stretch;
   `--raw` writes it as recorded, and the file says so
@@ -186,10 +188,35 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   freeze frame and the values since the codes were cleared, the
   identification by name only, then the profile's key values. It reads
   a live session (reads only, parked or driving) or a recording, and
-  checks the file for the car's identity before writing it. In the app,
+  checks the file for the car's identity before writing it. Live, it
+  waits within `--seconds` for each value an ECU lists as supported; from
+  a recording, an older one's whole replies give its ECUs too, and a
+  since-cleared value no ECU takes is among the key values. In the app,
   Save report on Diagnostics and in the log viewer writes the same file,
   text or JSON ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s
   appendix "the health report as built").
+- An export, an import or a health report is written under a name of
+  its own beside its file and put in place only when whole: another
+  one's unfinished file is never in its way, a failure, running out of
+  memory included, leaves nothing behind, and a file or folder made
+  under its name meanwhile is never replaced, wherever the file system
+  can refuse it. A scrubbed export of a
+  recording whose own signal file doesn't load is refused, saying why.
+
+### Fixed
+
+- `havne-cli` exits with a failure when its output can't be written,
+  a full disk or a closed pipe found only at the last flush included,
+  where it could exit 0.
+- `havne-cli signals import obdb` writes its file through a partial of
+  its own, so two runs writing the same file can't leave a cut-short
+  one in its place.
+- A value that isn't a number (NaN or infinity) is written in a
+  recording as `nan`, `inf` or `-inf` on every platform, words Havne's
+  reader and other tools take; Windows wrote a form neither reads.
+- A packed Service 01 reply holding several PIDs decoded as text (a
+  signal file's hex values, say) gives each its value: the decoder could
+  run out of text slots for them.
 
 ## [0.5.1] - 2026-11-06
 

@@ -497,6 +497,11 @@ havne-cli stream "elm327://COM5?profile=uds-generic&did=1000-13FF&scan=first" \
 havne-cli devices                                         # what a URI can name
 havne-cli vin <VIN>                                       # a VIN's year, make and check digit, offline
 havne-cli dtc P0301                                       # a trouble code's title, offline
+havne-cli sim mock://sim --elm327 tcp:35000               # a simulated car as a WiFi adapter
+havne-cli clear mock://demo --yes                         # clear each ECU's codes, engine stopped
+havne-cli health mock://demo report.txt --format text     # a car's health as one file
+havne-cli export <recording> run.pcapng --format pcapng   # its frames for Wireshark, scrubbed
+havne-cli import candump <log> <folder>                   # another tool's log as a recording
 ```
 
 An adapter only the phone reaches: the app relays it to a computer on
@@ -511,8 +516,11 @@ havne-cli stream "elm327://127.0.0.1:35000?poll=0x0C" --seconds 30
 
 Its output is JSON lines, schema 1 (ADR-0031 section 3); a `slept` line marks
 a gap the machine's sleep made (ADR-0033 section 6). Its tests are
-`test_cli` (the formatting, the ring and the sleep rule) and ctest's `CliGoldenTest`,
-`CliUsageTest` and `CliSignalTest`. A golden run compares the whole
+`test_cli` (the formatting, the ring and the sleep rule) and ctest's
+`Cli*` suites, which run it as a child: `CliGoldenTest`, `CliUsageTest`
+and `CliSignalTest`, and a run suite per command (`CliReplayTest`,
+`CliRecordTest`, `CliViewRunTest`, `CliTransferRunTest`,
+`CliHealthRunTest`, `CliClearRunTest`, `CliElm327RunTest` and more). A golden run compares the whole
 output with `tests/golden/cli/`; after a deliberate change to what it
 prints (or to what core decodes), rewrite the golden file with the
 test's own command plus `--update`, then read the diff before
@@ -755,14 +763,14 @@ Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). This enforces "core never links Qt." |
+| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
-| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the JSON, signal-file, plugin and OBDb harnesses; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
+| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
 | `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app. Any warning fails it. Only the app's moc output is built. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `win-coverage` | Windows, MSVC 2022 | Installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs `scripts/coverage.sh` and uploads the report to Codecov ([testing.md](testing.md#coverage)). |
-| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
+| `win-coverage` | Windows, MSVC 2022 | On pushes to `main` and manual runs, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs `scripts/coverage.sh` and uploads the report to Codecov ([testing.md](testing.md#coverage)). |
+| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo, then core's USDT probes under bpftrace (`tests/probe_trace.sh`), then the load test as on Windows. `can-utils` gives `CliTransferRunTest.candump` its `candump`. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
@@ -794,8 +802,8 @@ desktop Qt with `--autodesktop`.
 
 `scorecard.yml` runs the OpenSSF Scorecard. Actions are pinned to
 full commit SHAs with a `# vX.Y.Z` comment, and Dependabot bumps them
-weekly. `codeql.yml` runs CodeQL on pushes to `main` and `dev`, pull
-requests and a weekly schedule: C++ from a Windows core-only build
+weekly. `codeql.yml` runs CodeQL on pull requests to `main`, pushes to
+`main` and a weekly schedule: C++ from a Windows core-only build
 (core, the J2534 layer and the surrogate; not the app or QML) and the
 workflows. Results land in the repository's code-scanning dashboard,
 which needs CodeQL's default setup off (Settings to Code security),
