@@ -19,6 +19,7 @@
 #include "error_detail.h"
 #include "frames_csv.h"
 #include "recording_stretch.h"
+#include "pull_queue.h"
 #include "replay_faults.h"
 #include "session.h"
 #include "uri_query.h"
@@ -252,10 +253,28 @@ void stop_early(ecuio_replay_transport* t)
                             ECUIO_ERR_RECORDING_CHANGED, episodes);
 }
 
+/* A replay that ends its pass or stops early ends its session's pull
+ * queues (queue.h, "the stream's end"); one stopped by the session's close
+ * leaves them to the close */
+struct end_queues_at_exit {
+    ecuio_replay_transport* t;
+    ~end_queues_at_exit()
+    {
+        {
+            std::lock_guard<std::mutex> lock(t->mutex);
+            if (t->stop) {
+                return;
+            }
+        }
+        ecuio_queue_end_all(t->session);
+    }
+};
+
 /* Sends the file's frames, paced by their session time over the speed;
  * on loop=1 again from the top, its stamps carried on past the last */
 void replay_worker(ecuio_replay_transport* t)
 {
+    const end_queues_at_exit end_queues{t};
     const auto start = std::chrono::steady_clock::now();
     std::vector<char>& buf = t->line;
     ecuio_frame_t* frame = t->frame.get();

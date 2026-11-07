@@ -157,6 +157,9 @@ typedef enum {
     ECUIO_ERR_IN_USE = 20,            /* a session or a simulated ECU still
                                          decodes with what was to be freed
                                          (a plugin, ADR-0052) */
+    ECUIO_ERR_STREAM_ENDED = 21,      /* a pull queue's session has nothing
+                                         more to give: a replay played its
+                                         last frame (queue.h) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;
