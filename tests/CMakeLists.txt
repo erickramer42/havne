@@ -376,7 +376,7 @@ if(TARGET havne-cli)
         add_test(NAME CliHealthRunTest.session
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     session $<TARGET_FILE:havne-cli>)
-        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 120)
+        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 180)
         add_test(NAME CliHealthRunTest.recording
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     recording $<TARGET_FILE:havne-cli>

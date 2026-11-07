@@ -2723,15 +2723,33 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
         }
         return n;
     };
+    // The shown defs still owed a first value: PIDs the bitmaps list
+    const auto owed_now = [&]() {
+        ecuio_channel_support_t supports[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+        for (uint32_t c = 0; c < channels; ++c) {
+            (void)ecuio_session_get_channel_support(session, c, &supports[c]);
+        }
+        uint32_t n = 0;
+        std::lock_guard<std::mutex> lock(values->mutex);
+        for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (cli::awaited(d, values->at_us[d.id] != 0, supports, channels)) {
+                ++n;
+            }
+        }
+        return n;
+    };
     const uint64_t deadline = ecuio_clock_us() + a.seconds * 1000000u;
     cli::ValuesQuiet quiet;
     for (;;) {
         const uint64_t now = ecuio_clock_us();
-        if (settled_now() &&
-            quiet.quiet(shown_with_value(), now, cli::kHealthQuietUs)) {
-            break;
-        }
-        if (now >= deadline || g_interrupted.load()) {
+        const bool settled_here = settled_now();
+        const bool quiet_here =
+            settled_here &&
+            quiet.quiet(shown_with_value(), now, cli::kHealthQuietUs);
+        if (cli::health_wait_over(settled_here, quiet_here,
+                                  quiet_here ? owed_now() : 0, now, deadline) ||
+            g_interrupted.load()) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

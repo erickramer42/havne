@@ -173,6 +173,89 @@ TEST(CliHealthTest, TheShownDefsAreTheRankedAndTheSinceClearedPids)
     EXPECT_FALSE(cli::shown_def(d));
 }
 
+/* An ECU's channel whose bitmaps list pids (and cover through 0x60) */
+ecuio_channel_support_t support_of(uint32_t rx, std::vector<uint32_t> pids)
+{
+    ecuio_channel_support_t s{};
+    s.rx_id = rx;
+    s.generation = 3;
+    s.pids_through = 0x60;
+    for (uint32_t p : pids) {
+        s.pid_bitmap[(p - 1) / 8] |=
+            static_cast<uint8_t>(0x80u >> ((p - 1) % 8));
+    }
+    return s;
+}
+
+ecuio_signal_def_t pid_def(uint32_t rx, uint32_t pid)
+{
+    ecuio_signal_def_t d{};
+    d.kind = ECUIO_VALUE_UINT;
+    d.message_id = rx;
+    d.mux_length = 2;
+    d.mux_key = 0x4100u | pid;
+    return d;
+}
+
+/* A since-cleared PID the bitmaps list is waited for until it has a
+ * value; one they clear, or no bitmap covers, or a dropped request, or a
+ * def that isn't Service 01's, is left to the quiet rule */
+TEST(CliHealthTest, ASupportedPidKeepsTheWaitUntilItsFirstValue)
+{
+    const ecuio_channel_support_t s[2] = {support_of(0x7E8, {0x0C, 0x31, 0x4D}),
+                                          support_of(0x7E9, {0x21})};
+    EXPECT_TRUE(cli::awaited(pid_def(0x7E8, 0x31), false, s, 2));
+    EXPECT_TRUE(cli::awaited(pid_def(0x7E8, 0x4D), false, s, 2));
+    EXPECT_TRUE(cli::awaited(pid_def(0x7E9, 0x21), false, s, 2));
+    EXPECT_FALSE(cli::awaited(pid_def(0x7E8, 0x31), true, s, 2)); /* has one */
+    EXPECT_FALSE(
+        cli::awaited(pid_def(0x7E8, 0x21), false, s, 2)); /* bit clear */
+    EXPECT_FALSE(
+        cli::awaited(pid_def(0x7EA, 0x31), false, s, 2)); /* no channel */
+    EXPECT_FALSE(
+        cli::awaited(pid_def(0x7E8, 0x0C), false, s, 2)); /* not shown */
+
+    ecuio_signal_def_t ranked = pid_def(0x7E8, 0x0C);
+    ranked.plot_rank = 1; /* shown: RPM, listed */
+    EXPECT_TRUE(cli::awaited(ranked, false, s, 2));
+
+    ecuio_channel_support_t short_chain = s[0];
+    short_chain.pids_through = 0x40; /* 4D past what was answered */
+    EXPECT_FALSE(cli::awaited(pid_def(0x7E8, 0x4D), false, &short_chain, 1));
+    EXPECT_TRUE(cli::awaited(pid_def(0x7E8, 0x31), false, &short_chain, 1));
+
+    ecuio_channel_support_t unlearned = s[0];
+    unlearned.generation = 0;
+    EXPECT_FALSE(cli::awaited(pid_def(0x7E8, 0x31), false, &unlearned, 1));
+
+    ecuio_channel_support_t refused = s[0];
+    refused.dropped = 1;
+    refused.dropped_list[0].request[0] = 0x01;
+    refused.dropped_list[0].request[1] = 0x31;
+    refused.dropped_list[0].length = 2;
+    refused.dropped_list[0].reason = ECUIO_DROP_NOT_SUPPORTED;
+    EXPECT_FALSE(cli::awaited(pid_def(0x7E8, 0x31), false, &refused, 1));
+    EXPECT_TRUE(cli::awaited(pid_def(0x7E8, 0x4D), false, &refused, 1));
+
+    ecuio_signal_def_t did = pid_def(0x7E8, 0x31);
+    did.mux_length = 3;
+    did.mux_key = 0x62F190u; /* a DID's reply, ranked */
+    did.plot_rank = 2;
+    EXPECT_FALSE(cli::awaited(did, false, s, 2));
+}
+
+/* The wait ends once settled, quiet and owed nothing, or at the deadline
+ * whatever is still owed */
+TEST(CliHealthTest, TheDeadlineEndsTheWaitWhateverIsOwed)
+{
+    EXPECT_TRUE(cli::health_wait_over(true, true, 0, 10, 100));
+    EXPECT_FALSE(cli::health_wait_over(true, true, 2, 10, 100));
+    EXPECT_FALSE(cli::health_wait_over(true, false, 0, 10, 100));
+    EXPECT_FALSE(cli::health_wait_over(false, true, 0, 10, 100));
+    EXPECT_TRUE(cli::health_wait_over(true, true, 2, 100, 100));
+    EXPECT_TRUE(cli::health_wait_over(false, false, 5, 101, 100));
+}
+
 /* The values' wait ends once the count stops growing for the quiet time,
  * counted again from each rise */
 TEST(CliHealthTest, TheValuesWaitEndsOnQuiet)
