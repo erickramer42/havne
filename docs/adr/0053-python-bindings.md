@@ -206,6 +206,14 @@ from a recording (scikit-learn, the examples' own requirement, never
 the package's). The examples' outputs are synthetic: they run against
 the simulated car, so no VIN or identifier of a real one appears.
 
+- **Amended 2026-11-07, the examples as built:** they live in
+  `python/examples/` beside `read_pids.py`. The DID scan runs core's own
+  scan (ADR-0020) through a session, so the same script scans a car
+  through any adapter; `ecuio_sim_ask` is its test's oracle, not its
+  engine. The notebook reads a committed synthetic recording, and CI
+  carries no scientific stack, so it runs locally. See the appendix
+  "the examples as built".
+
 ## Done when
 
 A Python script opens SocketCAN, decodes PIDs and prints the values;
@@ -573,3 +581,74 @@ follow in `python/examples/`, where `read_pids.py` already is, not
   installed wheel. The last clause, a wheel installed from a release's
   downloads passing `gh attestation verify`, is the release skill's
   check on the first release that carries the wheels.
+
+## Appendix: the examples as built (2026-11-07)
+
+Section 8, built in `python/examples/`. Each runs against `mock://`,
+the simulated ECU or a committed synthetic recording, never a car.
+
+- **`did_scan.py <uri> [--range F180-F1FF] [--ecu 7E8 ...]`:** core's
+  own DID scan (ADR-0020) through a session: the URI under
+  `uds-generic` with one `did=` range per ECU (`<rx>:` for any but
+  `7E8`), so it asks Service 0x22 only. Each answer prints once, as
+  text when every byte is printable, as hex otherwise; then each ECU's
+  scanned, found and refused counts from its channel's support. A URI
+  that already names a profile is refused. Done when every ECU's scan
+  completes (`ECUIO_SUPPORT_SCAN_COMPLETE`), or, for a transport that
+  answers DIDs itself with no scan to count (the mock), when every DID
+  of the range answered; exit 0 then, 1 when `--seconds` run out first,
+  2 for a bad argument.
+- **`isotp_fuzz.py --interface vcan0 [--cases 200] [--seed 1]`:**
+  malformed ISO-TP exchanges against the simulated ECU, from a seeded
+  generator, so a failure replays alone (`--case K`). Core's
+  `fuzz_isotp` already feeds the reassembly bytes in memory; on a bus
+  the cases add time and state: the sim's N_Cr wait for a Consecutive
+  Frame, its N_Bs wait for a Flow Control, the tester's Flow Control
+  abused while the sim sends a segmented reply (an overflow, waits, two
+  in a row, none, a new request instead, a functional one), a new
+  request in the middle of a message, CAN FD lengths where the bus
+  takes them. After each case a probe (`01 0C` on 0x7E0) must be
+  answered, and the sim must not report its bus failed. It stops at
+  once, with words, when its sim yields to another ECU on the bus or
+  three probes in a row go unanswered: a shared bus fails in seconds,
+  where every case waiting out its probe would take minutes. Only an
+  interface whose netlink kind is `vcan` is accepted, with no
+  override. The standard library's CAN sockets carry the frames; the
+  package only starts the sim, and `--ecu-running` or `--ecu-cli
+  <havne-cli>` (`havne-cli sim`, which must then end with exit 0 and
+  its end line not failed) need no package at all.
+- **`ecu_states.ipynb`:** whether a recording's own signals say what
+  the engine does half a second later, for one state, fuel cut (lambda
+  over 1.3 with the engine turning). The reader's columns at 10 Hz give
+  the features (engine speed, speed and throttle, how much each moved
+  over 0.5 s, how long the throttle has been closed); a logistic
+  regression and a depth-3 decision tree are judged on five blocked
+  folds against a baseline that says the state stays as it is, where
+  it changes, and the tree's rules are printed beside the drive
+  cycle's own. Its last cell checks the tree is right at more than half
+  the changes, where the baseline is right at none. It needs numpy and
+  scikit-learn, the examples' requirement only.
+- **The notebook's data:** `python/examples/data/drive-loop/`, one
+  loop of the mock's drive cycle from key-on to the engine's stop:
+  `events.log` and `signals.csv` with the four signals the notebook
+  reads, under 500 KB, `mock://demo` as its uri, its times fixed at
+  2026-01-01 00:00 UTC and no label. `data/make_drive_loop.py` makes it
+  again through core's recorder in about three minutes; the mock's
+  timing makes a new run differ in its rows' times only.
+- **Tests:** `PythonTest.test_did_scan` (the mock on every platform; on
+  `vcan0` the sim's second module, `modules=2`, against the unbound
+  sim's own answers to each DID of the range, the engine ECU refusing
+  them all) and `PythonTest.test_isotp_fuzz` (Linux, `vcan0`: 200
+  cases, one replayed alone, no ECU, the ECU closed mid-run, a second
+  ECU already on the bus, `lo` refused) under pytest, both serial as
+  `vcan0` is shared; `ExampleTest.isotp_fuzz_cli`
+  (`tests/example_isotp_fuzz.py`, outside pytest, so `core-sanitizers`
+  runs it on its ASan `havne-cli`, where a sanitizer's report fails the
+  sim's exit) and `ExampleTest.notebook` (`tests/example_notebook.py`:
+  the notebook run top to bottom through `nbconvert`, in a kernelspec
+  of the test's own naming the test's Python, so a user's `python3`
+  kernel can't stand in; exit 77 without scikit-learn, nbconvert or
+  ipykernel, as in every CI job). Mutation-checked 2026-11-07: core's
+  N_Bs timeout and the sim's reset on a timed-out reply (2); the
+  scan's completion, its ECUs' prefixes and reply IDs, the probe, the
+  vcan refusal and both stops (8).
