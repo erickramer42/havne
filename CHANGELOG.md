@@ -63,6 +63,20 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   a `candump -L` log into a recording's folder: `view --frames`, `info`
   and `replay://` read it like any other. One bus to a recording: a log
   of several takes the one you name.
+- `havne-cli import csv <file> <folder> --map <map.json>` reads another
+  logger's CSV of timed signals into a recording's folder that `view`
+  reads like any other, by a column map: the time column (seconds,
+  milliseconds, microseconds, ISO 8601 times or times of day with a
+  date) and each column's signal name, unit and kind, with the
+  logger's preamble, `;` and decimal commas, quoted cells and a
+  logger's texts for no reading (`---`) taken. A column the map leaves
+  out is ignored and named; a typo in the map is refused by its name
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  CSV import as built").
+- The Recordings page lists a folder of values alone (a CSV import
+  moved into the recordings folder) and opens it in the viewer, which
+  says the recording has no frames to replay and hides Replay and the
+  decode choice.
 - A CAN FD frame's error state indicator (ESI) is kept: SocketCAN
   sessions flag it, recordings and replays carry it, and `havne-cli
   play` puts it back on the bus.
@@ -151,6 +165,20 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - `python/examples/read_pids.py <uri>` prints the engine speed, vehicle
   speed and coolant temperature from any session: `mock://`, SocketCAN,
   an ELM327 adapter or the ELM327 emulator.
+- Three more Python examples in `python/examples/`, each runnable with
+  no car: `did_scan.py <uri>` lists which identifiers (DIDs) an ECU
+  answers, through core's own read-only scan on any session, printing
+  each answer as text or hex; `isotp_fuzz.py --interface vcan0` sends
+  malformed ISO-TP exchanges to the simulated ECU on a Linux virtual
+  CAN bus, from a seed a failing case replays by, and refuses any
+  interface that isn't a virtual bus; `ecu_states.ipynb` predicts fuel
+  cut half a second ahead from a recording's engine speed, speed and
+  throttle with scikit-learn, against a "nothing changes" baseline, on
+  a synthetic recording of the mock's drive cycle that comes with it
+  ([ADR-0053](docs/adr/0053-python-bindings.md)).
+- Python: `havne.import_csv` and `havne.import_candump` make a
+  recording's folder from a CSV or a candump log, each returning the
+  import's counts.
 - `havne-cli health` writes a car's health as one file, JSON or text to
   share with a shop or a buyer: the vehicle from its VIN (model year,
   make, check digit; never the VIN itself), the emissions inspection's
@@ -158,9 +186,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   freeze frame and the values since the codes were cleared, the
   identification by name only, then the profile's key values. It reads
   a live session (reads only, parked or driving) or a recording, and
-  checks the file for the car's identity before writing it
-  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
-  health report as built").
+  checks the file for the car's identity before writing it. In the app,
+  Save report on Diagnostics and in the log viewer writes the same file,
+  text or JSON ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s
+  appendix "the health report as built").
 
 ## [0.5.1] - 2026-11-06
 

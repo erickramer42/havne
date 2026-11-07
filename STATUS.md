@@ -597,14 +597,25 @@ append-only.
     SocketCAN on `vcan0` and the ELM327 emulator. Left: the macOS 13.0
     build and `gh attestation verify` on a wheel run first on v0.6.0's
     release candidate;
+  - the examples (ADR-0053's appendix "the examples as built"): a DID
+    scan through core's own scan, ISO-TP fuzzing of the simulated ECU
+    on `vcan0`, a notebook predicting fuel cut from a committed
+    synthetic recording; the notebook runs locally, as CI carries no
+    scientific stack;
   - the health report (ADR-0054's appendix "the health report as
     built"): one scrubbed file of a car's health in JSON or text, from
     a live session or a recording (each ECU's reports rebuilt from its
-    replies in frames.csv), in core and `havne-cli health`.
-- **In progress:** the health report's Save report in the app, on
-  Diagnostics and in the log viewer.
-- **To come:** CSV import, and the Python examples against the
-  simulated ECU.
+    replies in frames.csv), in core, `havne-cli health` and the app's
+    Save report on Diagnostics and in the log viewer;
+  - the CSV import (ADR-0054's appendix "the CSV import as built"):
+    another logger's CSV by a column map into a recording's folder of
+    values, in core, `havne-cli import csv` and Python's
+    `havne.import_csv` (with `havne.import_candump`); the app's
+    Recordings page lists a folder of values alone and the viewer opens
+    and plots it, saying it has no frames. Left: the app's Import
+    button, v0.7.0's, for both formats; until then a folder made
+    elsewhere is moved into the recordings folder to be listed.
+- **Next:** the review pass, its fixes, the docs pass and the release.
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
 the values, and the same script runs on Windows against the ELM327
@@ -612,10 +623,14 @@ emulator and on every platform against `mock://` (met:
 `python/examples/read_pids.py`, through `PythonTest.test_vcan` on
 `vcan0`, `PythonTest.test_read_pids` and each wheel's install check);
 the wheel installs from a release's downloads and passes `gh
-attestation verify` (v0.6.0's release candidate); an export of a recording passes the leak check; a recording
-opens in Wireshark (met: `CliTransferRunTest.tshark`, its ISO-TP
-reassembled); python-OBD reads the simulated car through the ELM327
-emulator on Windows (met: `CliElm327RunTest.PythonObdReadsIt`).
+attestation verify` (v0.6.0's release candidate); an export of a
+recording passes the leak check; a recording opens in Wireshark (met:
+`CliTransferRunTest.tshark`, its ISO-TP reassembled); python-OBD reads
+the simulated car through the ELM327 emulator on Windows (met:
+`CliElm327RunTest.PythonObdReadsIt`); a CSV from another logger plots in
+the viewer (met: `QmlTest.recordings`, an import listed, opened and
+plotted; `RecordingViewTest.AnImportedCsvOpensAndPlots`;
+`CliTransferRunTest.csv-import`, two made-up loggers' layouts).
 
 ### Waiting on a tester: an iPhone download
 
