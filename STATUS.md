@@ -601,9 +601,11 @@ append-only.
     built"): one per platform with the shared core inside, each release
     job installing it into a fresh venv and running
     `python/examples/read_pids.py` through it, which also reads
-    SocketCAN on `vcan0` and the ELM327 emulator. Left: the macOS 13.0
-    build and `gh attestation verify` on a wheel run first on v0.6.0's
-    release candidate;
+    SocketCAN on `vcan0` and the ELM327 emulator. The v0.6.0 release's
+    four wheels, the macOS 13.0 one among them, pass `gh attestation
+    verify` for their provenance and the SBOM, and the Linux ones
+    install from the downloads and read `mock://` on x86_64 and
+    aarch64 (2026-11-07);
   - the examples (ADR-0053's appendix "the examples as built"): a DID
     scan through core's own scan, ISO-TP fuzzing of the simulated ECU
     on `vcan0`, a notebook predicting fuel cut from a committed
@@ -629,7 +631,8 @@ emulator and on every platform against `mock://` (met:
 `python/examples/read_pids.py`, through `PythonTest.test_vcan` on
 `vcan0`, `PythonTest.test_read_pids` and each wheel's install check);
 the wheel installs from a release's downloads and passes `gh
-attestation verify` (v0.6.0's release candidate); an export of a
+attestation verify` (met: the v0.6.0 release's four wheels,
+2026-11-07); an export of a
 recording passes the leak check (met 2026-11-07: scrubbed pcapng, CSV
 and folder exports of 159 real-car, bench and phone recordings hold none
 of their cars' identity values, whole or in 7-byte pieces, as bytes or
