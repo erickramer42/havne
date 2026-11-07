@@ -481,7 +481,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   codes, freeze frame and key values from a session or a recording as
   one JSON or text file, checked for the car's identity like an export.
   A vehicle keeps a baseline recording, which the viewer overlays on
-  another, the two lined up on their engine starts.
+  another, the two lined up on their engine starts, and which the health
+  report names by its start and length, never its folder.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial

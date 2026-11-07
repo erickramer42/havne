@@ -1461,3 +1461,11 @@ is a baseline.
 export isn't built: ADR-0054's CSV export, with its formula rule, is
 how a recording opens in a spreadsheet, and step 6 waits for a release
 to name it.
+
+**Note of 2026-11-07: the health report names it.** The report takes the
+baseline's folder from its caller, as "Later." above says: the app's
+Save report passes the picked vehicle's, `havne-cli health` takes
+`--baseline <recording>`. Core reads only its `events.log`, for its
+start, length, profile and backend, and never writes the folder's name
+([ADR-0054](0054-exports-and-imports.md)'s appendix "the health report
+as built", its note of 2026-11-07).
