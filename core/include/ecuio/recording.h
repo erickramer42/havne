@@ -896,6 +896,7 @@ ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
 #define ECUIO_HEALTH_VIN_DECODED 0x00000001u /* a VIN was read: the
                                                 vehicle's model year and
                                                 make are its decode's */
+#define ECUIO_HEALTH_BASELINE_READ 0x00000002u /* the baseline was read */
 
 /* POD, 32 bytes: a session's newest value of one def, as the caller
  * holds it (core keeps none), its age by the caller's clock */
@@ -908,7 +909,8 @@ typedef struct ecuio_health_value {
 } ecuio_health_value_t;
 
 /* The scalars first and the pointers last, so every offset but the
- * pointers' is the same on either width */
+ * pointers' is the same on either width; the baseline's pointer sits in
+ * a union of eight bytes, which keeps it at 48 on either width too */
 typedef struct ecuio_health_options {
     uint32_t format;            /* ECUIO_HEALTH_* */
     uint32_t flags;             /* zero */
@@ -923,7 +925,15 @@ typedef struct ecuio_health_options {
                                    1970 UTC, the caller's; 0 writes none */
     uint32_t value_count;       /* entries of values; 0 for a folder */
     uint32_t reserved0;         /* zero */
-    uint64_t reserved[4];       /* zero; ABI growth space */
+    union {
+        const char* baseline_folder_utf8; /* the vehicle's baseline
+                                             recording's folder, NULL or
+                                             "" for none: the report
+                                             names it, never by its
+                                             folder */
+        uint64_t baseline_room;           /* its place on either width */
+    };
+    uint64_t reserved[3];       /* zero; ABI growth space */
     ecuio_session_t* session;   /* the source: a live session, or */
     const char* folder_utf8;    /* a recording's folder */
     const ecuio_health_value_t* values; /* a session's newest values, or
@@ -954,6 +964,8 @@ static_assert(offsetof(ecuio_health_value_t, age_us) == 16,
               "health value age_us offset is ABI");
 static_assert(offsetof(ecuio_health_options_t, utc_us) == 32,
               "health options utc_us offset is ABI");
+static_assert(offsetof(ecuio_health_options_t, baseline_folder_utf8) == 48,
+              "health options baseline_folder_utf8 offset is ABI");
 static_assert(offsetof(ecuio_health_options_t, session) == 80,
               "health options session offset is ABI");
 static_assert(sizeof(ecuio_health_report_t) == 120,
@@ -967,6 +979,8 @@ _Static_assert(offsetof(ecuio_health_value_t, age_us) == 16,
                "health value age_us offset is ABI");
 _Static_assert(offsetof(ecuio_health_options_t, utc_us) == 32,
                "health options utc_us offset is ABI");
+_Static_assert(offsetof(ecuio_health_options_t, baseline_folder_utf8) == 48,
+               "health options baseline_folder_utf8 offset is ABI");
 _Static_assert(offsetof(ecuio_health_options_t, session) == 80,
                "health options session offset is ABI");
 _Static_assert(sizeof(ecuio_health_report_t) == 120,
@@ -988,7 +1002,12 @@ _Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
  * (Service 01 PIDs 21, 30, 31, 4D and 4E, whenever given) and its
  * identification items by name and outcome (their text left out), then
  * the key values: the set's ranked signals (plot_rank above 0, numbers
- * and enumerations) among the values given, in rank order. From a
+ * and enumerations) among the values given, in rank order. With a
+ * baseline_folder_utf8, the report names the vehicle's baseline
+ * recording from its events.log: its start (UTC), length, profile and
+ * backend, and whether the report's own recording is it (the same
+ * start); one that can't be read says so and the report is still
+ * written. From a
  * recording's folder, each ECU's reports are rebuilt from its replies in
  * frames.csv that end in the range (an ECU: a reply ID with a positive
  * diagnostic or identification reply; the last of each kind; one with

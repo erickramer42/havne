@@ -3,7 +3,7 @@
 # script again. ADR-0053 section 1.
 # pylint: skip-file
 # flake8: noqa
-from ctypes import (CFUNCTYPE, POINTER, Structure, c_bool, c_char, c_char_p,
+from ctypes import (CFUNCTYPE, POINTER, Structure, Union, c_bool, c_char, c_char_p,
                     c_double, c_float, c_int, c_int8, c_int16, c_int32, c_int64,
                     c_size_t, c_uint, c_uint8, c_uint16, c_uint32, c_uint64,
                     c_void_p)
@@ -144,6 +144,7 @@ ECUIO_FRAME_FLAG_REASSEMBLED = 0x100
 ECUIO_FRAME_FLAG_REMOTE = 2
 ECUIO_FRAME_FLAG_TRUNCATED = 64
 ECUIO_FRAME_FLAG_TX_ECHO = 32
+ECUIO_HEALTH_BASELINE_READ = 2
 ECUIO_HEALTH_JSON = 1
 ECUIO_HEALTH_TEXT = 2
 ECUIO_HEALTH_VIN_DECODED = 1
@@ -714,6 +715,13 @@ ecuio_frame_t._fields_ = [
     ('flags', c_uint32),
     ('reserved', c_uint32),
 ]
+class ecuio_health_options_t_u0(Union):
+    _fields_ = [
+        ('baseline_folder_utf8', c_char_p),
+        ('baseline_room', c_uint64),
+    ]
+
+ecuio_health_options_t._anonymous_ = ('_u0',)
 ecuio_health_options_t._fields_ = [
     ('format', c_uint32),
     ('flags', c_uint32),
@@ -724,7 +732,8 @@ ecuio_health_options_t._fields_ = [
     ('utc_us', c_uint64),
     ('value_count', c_uint32),
     ('reserved0', c_uint32),
-    ('reserved', (c_uint64 * 4)),
+    ('_u0', ecuio_health_options_t_u0),
+    ('reserved', (c_uint64 * 3)),
     ('session', POINTER(ecuio_session_t)),
     ('folder_utf8', c_char_p),
     ('values', POINTER(ecuio_health_value_t)),

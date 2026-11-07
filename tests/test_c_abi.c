@@ -481,10 +481,14 @@ int main(void)
     if (sizeof(ecuio_health_value_t) != 32 ||
         offsetof(ecuio_health_value_t, age_us) != 16 ||
         offsetof(ecuio_health_options_t, utc_us) != 32 ||
+        offsetof(ecuio_health_options_t, baseline_folder_utf8) != 48 ||
+        offsetof(ecuio_health_options_t, baseline_room) != 48 ||
+        offsetof(ecuio_health_options_t, reserved) != 56 ||
         offsetof(ecuio_health_options_t, session) != 80 ||
         sizeof(ecuio_health_report_t) != 120 ||
         offsetof(ecuio_health_report_t, failed_class) != 80 ||
         ECUIO_HEALTH_TEXT != 2u || ECUIO_HEALTH_VIN_DECODED != 1u ||
+        ECUIO_HEALTH_BASELINE_READ != 2u ||
         ecuio_health_export(NULL, &health_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;

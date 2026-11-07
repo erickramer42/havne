@@ -19,7 +19,9 @@
 # _Bool as their ctypes types; an enum as c_int (every ABI here gives an
 # enum int's size); char* as c_char_p, void* as c_void_p, any other T* as
 # POINTER(T); an array as T * N, its N from the headers' macros; an
-# opaque handle as an empty Structure; a function pointer as CFUNCTYPE.
+# opaque handle as an empty Structure; a function pointer as CFUNCTYPE;
+# an anonymous union member as a Union of its own, named <struct>_u<N>,
+# in the struct's _anonymous_, so its members read as the struct's.
 # Text core hands the caller to own (a non-const char** out-parameter, a
 # non-const char* result) and a release function's char* are
 # POINTER(c_char), never c_char_p: ctypes turns a c_char_p into a Python
@@ -253,7 +255,7 @@ def generate(tree=ROOT):
         "# script again. ADR-0053 section 1.",
         "# pylint: skip-file",
         "# flake8: noqa",
-        "from ctypes import (CFUNCTYPE, POINTER, Structure, c_bool, c_char, c_char_p,",
+        "from ctypes import (CFUNCTYPE, POINTER, Structure, Union, c_bool, c_char, c_char_p,",
         "                    c_double, c_float, c_int, c_int8, c_int16, c_int32, c_int64,",
         "                    c_size_t, c_uint, c_uint8, c_uint16, c_uint32, c_uint64,",
         "                    c_void_p)",
@@ -309,7 +311,24 @@ def generate(tree=ROOT):
     for n in with_fields:
         visit(n)
     for n in order:
-        fields = [m.field(text) for _, text in m.structs[m.struct_of[n]]]
+        fields, anonymous = [], []
+        for _, text in m.structs[m.struct_of[n]]:
+            toks = text.split()
+            if toks[:1] != ["union"]:
+                fields.append(m.field(text))
+                continue
+            if toks[1:2] != ["{"] or toks[-1] != "}":
+                raise Unknown(f"the union in {n}: '{text}' (only an anonymous one)")
+            members = [x.strip() for x in " ".join(toks[2:-1]).split(";") if x.strip()]
+            u = f"{n}_u{len(anonymous)}"
+            lines.append(f"class {u}(Union):")
+            lines.append("    _fields_ = [")
+            lines += [f"        ({name!r}, {t})," for name, t in (m.field(x) for x in members)]
+            lines += ["    ]", ""]
+            anonymous.append(f"_u{len(anonymous)}")
+            fields.append((anonymous[-1], u))
+        if anonymous:
+            lines.append(f"{n}._anonymous_ = ({', '.join(repr(a) for a in anonymous)},)")
         lines.append(f"{n}._fields_ = [")
         lines += [f"    ({name!r}, {t})," for name, t in fields]
         lines.append("]")
