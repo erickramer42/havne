@@ -14,7 +14,13 @@
 
 #include "error_detail.h"
 #include "folder_files.h"
+#include "frame_reassembly.h"
+#include "frame_rows.h"
+#include "health_replies.h"
 #include "pid_support.h" /* ecuio_service01_keyed */
+#include "recording_rows.h" /* parse_number */
+#include "recording_set.h"
+#include "recording_stretch.h" /* seconds_text */
 #include "scrub.h"
 #include "session.h"
 
@@ -28,6 +34,8 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <set>
+#include <unordered_map>
 #include <vector>
 
 namespace ecuio_health {
@@ -55,7 +63,9 @@ bool numeric(const ecuio_signal_def_t& d)
     return d.kind != ECUIO_VALUE_TEXT && d.kind != ECUIO_VALUE_HEX;
 }
 
-const char* outcome_word(uint8_t o)
+/* An item's outcome; one a recording holds no reply for is "not
+ * recorded", since a recording can't say whether it was asked */
+const char* outcome_word(uint8_t o, bool recorded = false)
 {
     switch (o) {
     case ECUIO_DIAG_ANSWERED:
@@ -67,7 +77,7 @@ const char* outcome_word(uint8_t o)
     case ECUIO_DIAG_UNSUPPORTED:
         return "unsupported";
     default:
-        return "unasked";
+        return recorded ? "not recorded" : "unasked";
     }
 }
 
@@ -133,6 +143,20 @@ const char* backend_word(uint32_t b)
     }
 }
 
+/* A recording's backend, by its URI's scheme */
+const char* scheme_word(const std::string& uri)
+{
+    static const char* const kSchemes[] = {"mock", "j2534", "replay", "elm327",
+                                           "socketcan"};
+    const size_t end = uri.find("://");
+    for (const char* k : kSchemes) {
+        if (end != std::string::npos && uri.compare(0, end, k) == 0) {
+            return k;
+        }
+    }
+    return "unknown";
+}
+
 std::string hex_id(uint32_t id)
 {
     char b[16];
@@ -196,7 +220,8 @@ struct item {
 
 struct ecu {
     std::string id;
-    const char* state = "complete"; /* complete, reading, not asked */
+    const char* state = "complete"; /* complete, reading, not asked;
+                                       recorded */
     const char* readiness = "unasked";
     std::string readiness_reply;
     bool mil = false;
@@ -214,23 +239,29 @@ struct ecu {
 };
 
 struct model {
-    std::string uri;
-    std::string backend;
-    uint32_t baud = 0;
-    std::string profile;
-    bool has_utc = false;
-    std::string utc;
     const char* units = "metric";
-    bool vin = false;
-    uint16_t model_year = 0;
-    std::string make;
-    bool check_matches = false;
-    ecuio_inspection_t inspection{};
+    uint64_t identification_left_out = 0;
     std::vector<std::string> incomplete;
     std::vector<ecu> ecus;
-    bool ranks = false; /* the set ranks a signal */
     std::vector<shown> key_values;
-    uint64_t identification_left_out = 0;
+    std::string started; /* a recording's start, from_s and to_s */
+    std::string from_s;
+    std::string to_s;
+    std::string uri;
+    std::string backend;
+    std::string profile;
+    std::string utc;
+    std::string make;
+    uint32_t baud = 0;
+    ecuio_inspection_t inspection{};
+    uint16_t model_year = 0;
+    bool recording = false;
+    bool frames = true;
+    bool has_started = false;
+    bool has_utc = false;
+    bool vin = false;
+    bool check_matches = false;
+    bool ranks = false; /* the set ranks a signal */
 };
 
 const ecuio_signal_def_t* def_of(const ecuio_signal_set_t* set, uint32_t id)
@@ -287,12 +318,15 @@ ecu ecu_of(const inputs& in, uint32_t c, const ecuio_signal_set_t* obd2,
     const ecuio_channel_diagnostics_t& d = in.diagnostics[c];
     ecu e;
     e.id = hex_id(d.rx_id != 0 ? d.rx_id : in.identity[c].rx_id);
-    if ((d.flags & ECUIO_DIAG_ASKED) == 0) {
+    const bool rec = in.recording;
+    if (rec) {
+        e.state = "recorded";
+    } else if ((d.flags & ECUIO_DIAG_ASKED) == 0) {
         e.state = "not asked";
     } else if ((d.flags & ECUIO_DIAG_COMPLETE) == 0) {
         e.state = "reading";
     }
-    e.readiness = outcome_word(d.readiness);
+    e.readiness = outcome_word(d.readiness, rec);
     if (d.readiness == ECUIO_DIAG_REFUSED) {
         e.readiness_reply = reply_words(0x01, d.readiness_nrc);
     }
@@ -326,7 +360,7 @@ ecu ecu_of(const inputs& in, uint32_t c, const ecuio_signal_set_t* obd2,
         dl.key = kKeys[l];
         dl.label = kLabels[l];
         dl.service = kServices[l];
-        dl.outcome = outcome_word(src.outcome);
+        dl.outcome = outcome_word(src.outcome, rec);
         if (src.outcome == ECUIO_DIAG_REFUSED) {
             dl.reply = reply_words(kServices[l], src.nrc);
         }
@@ -337,7 +371,7 @@ ecu ecu_of(const inputs& in, uint32_t c, const ecuio_signal_set_t* obd2,
         }
         dl.more = src.reported > held ? src.reported - held : 0u;
     }
-    e.freeze = outcome_word(d.freeze);
+    e.freeze = outcome_word(d.freeze, rec);
     if (d.freeze == ECUIO_DIAG_REFUSED) {
         e.freeze_reply = reply_words(0x02, d.freeze_nrc);
     }
@@ -382,7 +416,7 @@ ecu ecu_of(const inputs& in, uint32_t c, const ecuio_signal_set_t* obd2,
                           it.request[0], it.request[1], it.request[2]);
             x.name = b;
         }
-        x.outcome = outcome_word(it.outcome);
+        x.outcome = outcome_word(it.outcome, rec);
         if (it.outcome == ECUIO_IDENTITY_ANSWERED) {
             ++m.identification_left_out;
             const size_t n = strnlen(it.text, sizeof it.text);
@@ -399,8 +433,21 @@ ecu ecu_of(const inputs& in, uint32_t c, const ecuio_signal_set_t* obd2,
 model build(const inputs& in, scrub::values* identity)
 {
     model m;
-    m.uri = scrub::uri(in.uri);
-    if (in.info != nullptr) {
+    if (!in.uri.empty()) {
+        m.uri = scrub::uri(in.uri); /* a recording may have none */
+    }
+    if (in.recording) {
+        m.recording = true;
+        m.frames = in.frames;
+        m.backend = scheme_word(in.uri);
+        m.profile = in.profile;
+        m.has_started = in.started_us != 0;
+        if (m.has_started) {
+            m.started = utc_text(in.started_us);
+        }
+        m.from_s = fixed(static_cast<double>(in.from_us) / 1e6, 3);
+        m.to_s = fixed(static_cast<double>(in.to_us) / 1e6, 3);
+    } else if (in.info != nullptr) {
         m.backend = backend_word(in.info->backend);
         m.baud = in.info->baud;
         m.profile =
@@ -591,6 +638,14 @@ void json_code(json_out& j, const char* key, const code& c)
     j.close('}');
 }
 
+/* Why a recording's report has no ECU */
+const char* ecus_note(const model& m)
+{
+    return m.frames ? "no ECU answered a diagnostic or identification "
+                      "request in the range"
+                    : "the recording has no frames";
+}
+
 std::string json(const model& m)
 {
     json_out j;
@@ -600,8 +655,12 @@ std::string json(const model& m)
     j.str("adr", "ADR-0054");
     j.boolean("scrubbed", true);
     j.open("source", '{');
-    j.str("kind", "session");
-    j.str("uri", m.uri);
+    j.str("kind", m.recording ? "recording" : "session");
+    if (m.recording && m.uri.empty()) {
+        j.null("uri");
+    } else {
+        j.str("uri", m.uri);
+    }
     j.str("backend", m.backend);
     if (m.baud != 0) {
         j.u64("baud", m.baud);
@@ -609,6 +668,16 @@ std::string json(const model& m)
         j.null("baud");
     }
     j.str("profile", m.profile);
+    if (m.recording) {
+        if (m.has_started) {
+            j.str("started", m.started);
+        } else {
+            j.null("started");
+        }
+        j.raw("from_s", m.from_s);
+        j.raw("to_s", m.to_s);
+        j.boolean("frames", m.frames);
+    }
     j.close('}');
     if (m.has_utc) {
         j.str("utc", m.utc);
@@ -727,6 +796,9 @@ std::string json(const model& m)
         j.close('}');
     }
     j.close(']');
+    if (m.recording && m.ecus.empty()) {
+        j.str("ecus_note", ecus_note(m));
+    }
 
     j.boolean("profile_ranks_signals", m.ranks);
     j.open("key_values", '[');
@@ -780,11 +852,22 @@ std::string text(const model& m)
     std::string t;
     t += std::string("Havne ") + ecuio_version_string() +
          ": a scrubbed health report (ADR-0054)\n";
-    t += "Source: a live session, " + m.uri + " (" + m.backend;
-    if (m.baud != 0) {
-        t += ", " + std::to_string(m.baud) + " bit/s";
+    if (m.recording) {
+        t += "Source: a recording, " +
+             (m.uri.empty() ? std::string("no URI") : m.uri) + " (" +
+             m.backend + "), profile " +
+             (m.profile.empty() ? std::string("none") : m.profile) + "\n";
+        if (m.has_started) {
+            t += "Recorded: " + m.started + "\n";
+        }
+        t += "Range: " + m.from_s + " s to " + m.to_s + " s\n";
+    } else {
+        t += "Source: a live session, " + m.uri + " (" + m.backend;
+        if (m.baud != 0) {
+            t += ", " + std::to_string(m.baud) + " bit/s";
+        }
+        t += "), profile " + m.profile + "\n";
     }
-    t += "), profile " + m.profile + "\n";
     if (m.has_utc) {
         t += "Time: " + m.utc + "\n";
     }
@@ -889,6 +972,10 @@ std::string text(const model& m)
             }
             t += "\n";
         }
+    }
+
+    if (m.recording && m.ecus.empty()) {
+        t += std::string("\nECUs: ") + ecus_note(m) + "\n";
     }
 
     t += "\nKey values (the profile's ranked signals)\n";
@@ -1003,6 +1090,194 @@ struct file_closer {
     }
 };
 
+struct recording_closer {
+    void operator()(ecuio_recording_t* r) const { ecuio_recording_close(r); }
+};
+
+/* A recording's report: each ECU's reports from the replies in frames.csv
+ * that end in the range (health_replies.h), and each of the set's number
+ * defs the value in force at the range's end, aged from it: signals.csv's,
+ * else, with frames.csv and a set, the values its frames decode to
+ * (ecuio_recording_open_frames). Every identification reply's values go
+ * to the check, in the range or not. False with the detail set; *status
+ * the failure's. */
+bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
+                 ecuio_status_t* status)
+{
+    namespace fr = ecuio_frame_reassembly;
+    namespace rs = ecuio_recording_set;
+    *status = ECUIO_ERR_LOAD_FAILED;
+    const std::string folder = o.folder_utf8;
+    const bool has_frames = files::exists(folder + "/frames.csv");
+    const bool has_values = files::exists(folder + "/signals.csv");
+    if (!has_frames && !has_values) {
+        return refused("the folder has no frames.csv or signals.csv");
+    }
+    const rs::header header = rs::read_header(folder);
+    rs::set_of set_of;
+    const ecuio_signal_set_t* set = set_of.load(folder, header);
+    const ecuio_signal_set_t* obd2 = nullptr;
+    (void)ecuio_profile_lookup("obd2", &obd2);
+
+    const auto in_range = [&o](uint64_t host_us) {
+        return host_us >= o.from_us && (o.to_us == 0 || host_us <= o.to_us);
+    };
+    ecuio_health_replies::builder replies(obd2);
+    std::set<std::string> ident_values;
+    uint64_t end_us = 0;
+    const auto take = [&](uint32_t id, bool ext, const uint8_t* data, size_t n,
+                          uint64_t host_us) {
+        if (scrub::identification(data, n)) {
+            std::vector<std::string> v;
+            scrub::identification_values(data, n, v);
+            ident_values.insert(v.begin(), v.end());
+        }
+        if (in_range(host_us)) {
+            replies.take(id, ext, data, n);
+        }
+    };
+    if (has_frames) {
+        ecuio_frame_rows::frame_rows rows;
+        if (!rows.open(folder)) {
+            return false;
+        }
+        fr::reassembly iso;
+        std::vector<fr::message_end> ends;
+        uint64_t index = 0;
+        int got = 0;
+        while ((got = rows.next()) == 1) {
+            const ecuio_frame_t& f = rows.frame();
+            const uint64_t host_us = rows.host_us();
+            end_us = host_us;
+            const bool ext = (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
+            if ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0 &&
+                (f.flags &
+                 (ECUIO_FRAME_FLAG_ERROR | ECUIO_FRAME_FLAG_TRUNCATED)) == 0) {
+                take(f.arbitration_id, ext, f.data, f.data_length, host_us);
+            } else if (fr::reassembly::on_the_wire(f)) {
+                ends.clear();
+                (void)iso.take(fr::seg{index, host_us}, f, ends);
+                for (const fr::message_end& e : ends) {
+                    if (e.whole) {
+                        take(e.id, e.extended, e.data.data(), e.data.size(),
+                             e.frames.back().host_us);
+                    }
+                }
+            }
+            ++index;
+        }
+        if (got < 0) {
+            return false;
+        }
+    }
+    std::vector<ecuio_channel_diagnostics_t> diags;
+    std::vector<ecuio_channel_identity_t> ids;
+    replies.finish(diags, ids);
+
+    std::unique_ptr<ecuio_recording_t, recording_closer> rec;
+    if (has_values || set != nullptr) {
+        ecuio_recording_t* opened = nullptr;
+        const ecuio_status_t st =
+            has_values ? ecuio_recording_open(folder.c_str(), nullptr, nullptr,
+                                              &opened)
+                       : ecuio_recording_open_frames(folder.c_str(), set,
+                                                     nullptr, nullptr, &opened);
+        if (st != ECUIO_OK) {
+            *status = st;
+            return false;
+        }
+        rec.reset(opened);
+        ecuio_recording_info_t info{};
+        if (ecuio_recording_get_info(rec.get(), &info) == ECUIO_OK) {
+            end_us = (std::max)(end_us, info.duration_us);
+        }
+    }
+    if (o.from_us > end_us) {
+        /* A range wholly past the end, refused as replay refuses a
+         * stretch with no frames */
+        char from[24];
+        char end[24];
+        ecuio_stretch::seconds_text(o.from_us, from, sizeof from);
+        ecuio_stretch::seconds_text(end_us, end, sizeof end);
+        ecuio_detail_set(
+            "the range starts at %s s, after the recording ends at %s s", from,
+            end);
+        return false;
+    }
+    const uint64_t to_us = o.to_us != 0 ? (std::min)(o.to_us, end_us) : end_us;
+
+    /* The value in force at to_us of each number def the recording holds
+     * a signal of by its name */
+    std::vector<ecuio_health_value_t> values;
+    if (rec && set != nullptr) {
+        ecuio_recording_info_t info{};
+        (void)ecuio_recording_get_info(rec.get(), &info);
+        std::unordered_map<std::string, uint32_t> by_name;
+        for (uint32_t i = 0; i < info.signal_count; ++i) {
+            ecuio_recording_signal_t sig{};
+            if (ecuio_recording_get_signal(rec.get(), i, &sig) == ECUIO_OK &&
+                (sig.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0) {
+                by_name.emplace(
+                    std::string(sig.name, strnlen(sig.name, sizeof sig.name)),
+                    i);
+            }
+        }
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            const auto it = by_name.find(
+                std::string(d.name, strnlen(d.name, sizeof d.name)));
+            if (!numeric(d) || it == by_name.end()) {
+                continue;
+            }
+            char text[64] = {};
+            uint64_t at = ECUIO_RECORDING_NONE;
+            const ecuio_status_t st = ecuio_recording_text_at(
+                rec.get(), it->second, to_us, text, sizeof text, &at);
+            if (st != ECUIO_OK) {
+                *status = st;
+                return false;
+            }
+            double v = 0;
+            if (at == ECUIO_RECORDING_NONE || at < o.from_us ||
+                !ecuio_recording_rows::parse_number(text, std::strlen(text),
+                                                    &v)) {
+                continue;
+            }
+            ecuio_health_value_t hv{};
+            hv.def_id = d.id;
+            hv.value = v;
+            hv.age_us = to_us - at;
+            values.push_back(hv);
+        }
+    }
+
+    inputs in;
+    in.recording = true;
+    in.frames = has_frames;
+    in.uri = header.uri;
+    in.profile = header.profile;
+    in.started_us = header.utc_us;
+    in.from_us = o.from_us;
+    in.to_us = to_us;
+    in.set = set;
+    in.diagnostics = diags.data();
+    in.identity = ids.data();
+    in.channels = static_cast<uint32_t>(diags.size());
+    in.values = values.data();
+    in.value_count = static_cast<uint32_t>(values.size());
+    in.units = o.units;
+    in.latest_model_year = o.latest_model_year;
+    in.utc_us = o.utc_us;
+    scrub::values identity;
+    for (const std::string& v : ident_values) {
+        (void)identity.add(v.data(), v.size(),
+                           ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION);
+    }
+    const std::string bytes = write(in, o.format, &r, &identity);
+    *status = ECUIO_ERR_LOAD_FAILED;
+    return put(o.out_path_utf8, bytes, identity, r);
+}
+
 } // namespace
 
 bool put(const std::string& out, const std::string& bytes,
@@ -1064,6 +1339,7 @@ ecuio_health_export(const ecuio_health_options_t* options,
         (o.units != ECUIO_UNITS_METRIC && o.units != ECUIO_UNITS_IMPERIAL) ||
         ((o.session != nullptr) == (o.folder_utf8 != nullptr)) ||
         (o.values == nullptr && o.value_count != 0) ||
+        (o.folder_utf8 != nullptr && o.value_count != 0) ||
         (o.to_us != 0 && o.to_us < o.from_us)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
@@ -1072,13 +1348,18 @@ ecuio_health_export(const ecuio_health_options_t* options,
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
     }
-    if (o.folder_utf8 != nullptr) {
-        return ECUIO_ERR_NOT_IMPLEMENTED;
-    }
     ecuio_detail_clear();
     ecuio_health_report_t r{};
     bool ok = false;
+    ecuio_status_t failed = ECUIO_ERR_LOAD_FAILED;
     try {
+        if (o.folder_utf8 != nullptr) {
+            ok = ecuio_health::from_folder(o, r, &failed);
+            if (report != nullptr) {
+                *report = r;
+            }
+            return ok ? ECUIO_OK : failed;
+        }
         ecuio_session_info_t info{};
         if (ecuio_session_get_info(o.session, &info) != ECUIO_OK) {
             return ECUIO_ERR_INVALID_ARGUMENT;
@@ -1114,5 +1395,5 @@ ecuio_health_export(const ecuio_health_options_t* options,
     if (report != nullptr) {
         *report = r;
     }
-    return ok ? ECUIO_OK : ECUIO_ERR_LOAD_FAILED;
+    return ok ? ECUIO_OK : failed;
 }

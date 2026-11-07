@@ -879,12 +879,11 @@ typedef struct ecuio_health_options {
     uint64_t to_us;
     uint64_t utc_us;            /* the report's time, microseconds since
                                    1970 UTC, the caller's; 0 writes none */
-    uint32_t value_count;       /* entries of values */
+    uint32_t value_count;       /* entries of values; 0 for a folder */
     uint32_t reserved0;         /* zero */
     uint64_t reserved[4];       /* zero; ABI growth space */
     ecuio_session_t* session;   /* the source: a live session, or */
-    const char* folder_utf8;    /* a recording's folder (not built:
-                                   ECUIO_ERR_NOT_IMPLEMENTED) */
+    const char* folder_utf8;    /* a recording's folder */
     const ecuio_health_value_t* values; /* a session's newest values, or
                                            NULL with value_count 0 */
     const char* out_path_utf8;  /* the file to write, refused when it
@@ -946,17 +945,28 @@ _Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
  * (Service 01 PIDs 21, 30, 31, 4D and 4E, whenever given) and its
  * identification items by name and outcome (their text left out), then
  * the key values: the set's ranked signals (plot_rank above 0, numbers
- * and enumerations) among the values given, in rank order. The file is
- * checked for the identification texts and the VIN's shape before it's
- * renamed into place; a match fails it with its class. Deterministic:
- * the time and each value's age are the caller's. report may be NULL.
+ * and enumerations) among the values given, in rank order. From a
+ * recording's folder, each ECU's reports are rebuilt from its replies in
+ * frames.csv that end in the range (an ECU: a reply ID with a positive
+ * diagnostic or identification reply; the last of each kind; one with
+ * none "not recorded"), and the values are the set's (its signals.json,
+ * else its uds-generic DIDs, else its profile) in force at the range's
+ * end, from signals.csv or, with none, decoded from frames.csv, each aged
+ * from that end; a recording with no frames.csv has no ECU and says so.
+ * The file is checked for the identification texts and the VIN's shape
+ * before it's renamed into place; a match fails it with its class.
+ * Deterministic: the time and each value's age are the caller's, or the
+ * recording's. report may be NULL.
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or out path;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format or units, a flag or
  * reserved field this core doesn't know, a session and a folder both or
- * neither, NULL values with a count, a value's flags or reserved
- * nonzero; ECUIO_ERR_NOT_IMPLEMENTED for a folder; ECUIO_ERR_LOAD_FAILED for a
- * file that exists or can't be written, or a failed check (its words
- * in the detail, never a value or a path).
+ * neither, NULL values with a count, values with a folder, a value's
+ * flags or reserved nonzero; ECUIO_ERR_LOAD_FAILED for a folder with
+ * neither frames.csv nor signals.csv, a row the reader refuses
+ * ("frames.csv line N: ..."), a range that starts after the recording
+ * ends, a file that exists or can't be written, or
+ * a failed check (its words in the detail, never a value or a path);
+ * the reader's own codes for a recording that changes while it's read.
  */
 ecuio_status_t ecuio_health_export(const ecuio_health_options_t* options,
                                    ecuio_health_report_t* report);

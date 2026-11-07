@@ -31,18 +31,17 @@
 #include "error_detail.h"
 #include "folder_files.h"
 #include "frame_reassembly.h"
+#include "frame_rows.h"
 #include "frames_csv.h"
 #include "isotp.h"
 #include "json.h" /* quoted */
 #include "pcapng.h"
 #include "recording_check.h" /* iso15765_id */
 #include "recording_rows.h"
+#include "recording_set.h"
 #include "scrub.h"
-#include "uds_generic.h"
-#include "uri_query.h"
 
 #include "ecuio/core.h"
-#include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
@@ -65,6 +64,7 @@ namespace files = ecuio_files;
 namespace rows = ecuio_recording_rows;
 namespace scrub = ecuio_scrub;
 namespace pc = ecuio_pcapng;
+namespace rs = ecuio_recording_set;
 
 constexpr size_t kWriteChunk = 1u << 16;
 constexpr uint32_t kIdentification = ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION;
@@ -86,82 +86,13 @@ struct file_closer {
 };
 using file_ptr = std::unique_ptr<FILE, file_closer>;
 
-struct signal_file_free {
-    void operator()(ecuio_signal_file_t* f) const { ecuio_signal_file_free(f); }
-};
-
 bool fail(const char* fmt, const std::string& a = std::string())
 {
     ecuio_detail_set(fmt, a.c_str());
     return false;
 }
 
-/* frames.csv's rows in order; a torn last row is left out (ADR-0049
- * section 7) */
-class frame_rows
-{
-public:
-    frame_rows() : buf_(csv::kLineMax + 2), frame_(new ecuio_frame_t{}) {}
-
-    bool open(const std::string& folder)
-    {
-        std::string why;
-        f_.reset(files::open_file(folder + "/frames.csv", false, &why));
-        if (!f_) {
-            return fail("the recording's frames.csv can't be opened: %s", why);
-        }
-        if (!csv::read_header(f_.get(), buf_)) {
-            return false;
-        }
-        line_ = 1;
-        prev_ = 0;
-        return true;
-    }
-
-    /* 1 a row, 0 the end, -1 a row refused (the detail set) */
-    int next()
-    {
-        bool too_long = false;
-        bool torn = false;
-        if (!csv::read_line(f_.get(), buf_, &too_long, &torn) || torn) {
-            return 0;
-        }
-        ++line_;
-        if (too_long) {
-            return refuse("the row is longer than a frame's");
-        }
-        const char* why = nullptr;
-        std::memset(frame_.get(), 0, sizeof *frame_);
-        if (!csv::parse_row(buf_.data(), &row_, frame_.get(), &why)) {
-            return refuse(why);
-        }
-        if (row_.host_us < prev_) {
-            return refuse("host_us is earlier than the row before");
-        }
-        prev_ = row_.host_us;
-        return 1;
-    }
-
-    uint64_t host_us() const { return row_.host_us; }
-    /* The row as it was read, its line end taken off */
-    const char* line() const { return buf_.data(); }
-    const ecuio_frame_t& frame() const { return *frame_; }
-
-private:
-    int refuse(const char* why)
-    {
-        ecuio_detail_set("frames.csv line %llu: %s",
-                         static_cast<unsigned long long>(line_), why);
-        return -1;
-    }
-
-    file_ptr f_;
-    std::vector<char> buf_;
-    std::unique_ptr<ecuio_frame_t> frame_;
-    csv::row row_;
-    uint64_t line_ = 0;
-    uint64_t prev_ = 0;
-};
+using ecuio_frame_rows::frame_rows;
 
 namespace fr = ecuio_frame_reassembly;
 using fr::message_end;
@@ -260,34 +191,9 @@ private:
      * gives 0), its profile and URI, and each signal's declared kind */
     bool read_header(const std::string& folder)
     {
-        std::string why;
-        file_ptr f(files::open_file(folder + "/events.log", false, &why));
-        if (!f) {
-            return true;
-        }
-        std::vector<char> buf(rows::kRowMax + 2);
-        bool too_long = false;
-        while (csv::read_line(f.get(), buf, &too_long)) {
-            const size_t n = std::strlen(buf.data());
-            if (too_long || n == 0) {
-                break;
-            }
-            if (rows::starts_with(buf.data(), n, "utc  ")) {
-                (void)rows::parse_utc(buf.data() + 5, n - 5, &utc_us_);
-            } else if (rows::starts_with(buf.data(), n, "profile  ")) {
-                profile_.assign(buf.data() + 9, n - 9);
-            } else if (rows::starts_with(buf.data(), n, "uri  ")) {
-                uri_.assign(buf.data() + 5, n - 5);
-            } else if (rows::starts_with(buf.data(), n, "signal  ")) {
-                rows::header_signal hs;
-                const char* bad = nullptr;
-                if (rows::parse_header_signal(buf.data() + 8, n - 8, hs,
-                                              &bad) &&
-                    hs.text) {
-                    text_names_.insert(hs.name);
-                }
-            }
-        }
+        header_ = rs::read_header(folder);
+        text_names_.insert(header_.text_names.begin(),
+                           header_.text_names.end());
         return true;
     }
 
@@ -322,34 +228,7 @@ private:
      * catch a text value. */
     bool text_defs(const std::string& folder)
     {
-        const ecuio_signal_set_t* set = nullptr;
-        std::string why;
-        file_ptr f(files::open_file(folder + "/signals.json", false, &why));
-        if (f) {
-            std::string bytes(ECUIO_SIGNAL_FILE_MAX_BYTES, '\0');
-            bytes.resize(std::fread(&bytes[0], 1, bytes.size(), f.get()));
-            ecuio_signal_file_t* loaded = nullptr;
-            if (ecuio_signal_file_load(bytes.data(), bytes.size(), &loaded) ==
-                ECUIO_OK) {
-                file_set_.reset(loaded);
-                set = ecuio_signal_file_set(loaded);
-            }
-        }
-        if (set == nullptr && profile_ == ECUIO_UDS_GENERIC_NAME) {
-            const size_t scheme = uri_.find("://");
-            ecuio_uri_query query;
-            if (scheme != std::string::npos &&
-                ecuio_uri::split(ecuio_uri::query_of(uri_.c_str() + scheme + 3),
-                                 &query) == ecuio_uri::split_result::ok) {
-                uds_.reset(new ecuio_uds_session);
-                if (ecuio_uds_build(query, uds_.get()) == ECUIO_OK) {
-                    set = &uds_->set;
-                }
-            }
-        } else if (set == nullptr && !profile_.empty()) {
-            (void)ecuio_profile_lookup(profile_.c_str(), &set);
-        }
-        ecuio_detail_clear();
+        const ecuio_signal_set_t* set = set_.load(folder, header_);
         if (set != nullptr) {
             for (uint32_t i = 0; i < set->count; ++i) {
                 const ecuio_signal_def_t& d = set->defs[i];
@@ -607,7 +486,8 @@ private:
         }
         const uint32_t dir =
             (f.flags & ECUIO_FRAME_FLAG_TX_ECHO) != 0 ? pc::kOutbound : 0;
-        pc::enhanced_packet(buf_, utc_us_ + host_us, bytes, n, comment, dir);
+        pc::enhanced_packet(buf_, header_.utc_us + host_us, bytes, n, comment,
+                            dir);
         ++written_;
     }
 
@@ -1422,7 +1302,6 @@ private:
     ecuio_export_report_t& r_;
     const bool raw_;
     const bool folder_;
-    uint64_t utc_us_ = 0;
     scrub::values values_;
     std::vector<uint64_t> dropped_;
     file_ptr file_;
@@ -1431,10 +1310,8 @@ private:
     std::unique_ptr<ecuio_frame_t> made_;
     std::unique_ptr<ecuio_frame_t> probe_;
     std::unique_ptr<isotp_tx> tx_;
-    std::string profile_;
-    std::string uri_;
-    std::unique_ptr<ecuio_signal_file_t, signal_file_free> file_set_;
-    std::unique_ptr<ecuio_uds_session> uds_;
+    rs::header header_;
+    rs::set_of set_;
     std::vector<const ecuio_signal_def_t*> text_;
     /* Signals whose values a scrubbed CSV leaves out: text or hex by the
      * def or the header, and numbers keyed as identification replies */

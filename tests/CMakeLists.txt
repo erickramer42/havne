@@ -38,12 +38,14 @@ target_link_libraries(test_core PRIVATE
     GTest::gtest_main
 )
 
-# The scrubbed real-bus recording replay:// plays (ADR-0023), and the
-# signal file a recording copies (ADR-0051 section 4)
+# The scrubbed real-bus recording replay:// plays (ADR-0023), the
+# signal file a recording copies (ADR-0051 section 4), and a recording of
+# values alone (the health report, ADR-0054)
 target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     ECUIO_SIGNAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals"
     ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+    ECUIO_GOLDEN_RECORDING="${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2"
 )
 
 app_enable_warnings(test_core)
@@ -219,7 +221,8 @@ endif()
 # too, which is the host's clock). Rewrite one after a deliberate change
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
-    add_executable(test_cli test_cli.cpp test_cli_transfer.cpp)
+    add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
+        test_cli_health.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -348,6 +351,18 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
+        # The health report (ADR-0054): the mock's, a session whose
+        # reports are never asked, the simulated car as an ELM327 adapter
+        # on loopback; a recording of values alone and a range past its end
+        add_test(NAME CliHealthRunTest.session
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
+                    session $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 120)
+        add_test(NAME CliHealthRunTest.recording
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
+                    recording $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliHealthRunTest.recording PROPERTIES TIMEOUT 60)
         # A candump -L log of the simulated car on vcan0 imported and read
         # through obd2: its values the direct session's (Linux; skipped
         # without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED; serial:
@@ -775,6 +790,16 @@ if(TARGET havne-cli)
     app_cli_usage(ExportANegativeFromIsUsage "export|rec|out|--format|pcapng|--from|-1")
     app_cli_usage(ExportAnUnknownOptionIsUsage "export|rec|out|--format|pcapng|--scrub")
     app_cli_usage(ImportWithoutCandumpIsUsage "import|bus.log|rec")
+    # health (ADR-0054): refused before a session opens or a file is read
+    app_cli_usage(HealthWithoutAFileIsUsage "health|mock://x")
+    app_cli_usage(HealthWithoutAFormatIsUsage "health|mock://x|out")
+    app_cli_usage(HealthAnUnknownFormatIsUsage "health|mock://x|out|--format|pdf")
+    app_cli_usage(HealthARangeOnASessionIsUsage
+        "health|mock://x|out|--format|json|--from|1")
+    app_cli_usage(HealthSecondsOnARecordingIsUsage
+        "health|rec|out|--format|json|--seconds|5")
+    app_cli_usage(HealthSignalsAndAPluginIsUsage
+        "health|mock://x|out|--format|json|--signals|a.json|--plugin|p")
     app_cli_usage(ImportWithoutAFolderIsUsage "import|candump|bus.log")
     app_cli_usage(ImportAnUnknownOptionIsUsage "import|candump|bus.log|rec|--map|m.json")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
