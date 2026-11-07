@@ -59,11 +59,13 @@ Pane {
         Bridge.frameIds.refresh()
     }
 
-    // A By ID row tapped: the table of that ID's frames
+    // A By ID row tapped: the table of that ID's frames alone. The ID
+    // filter takes a number of either width, so the row's own width is
+    // the flag: a standard 0x7E8's tap leaves an extended 0x7E8 out, as
+    // an extended one's leaves the standard one out
     function showIdFrames(id, extended) {
         filterIds.text = id.toString(16).toUpperCase()
-        if (extended && id <= 0x7FF)
-            filterFlag.currentIndex = 1   // the 29-bit one, not the 11-bit
+        filterFlag.currentIndex = extended ? 1 : 2   // Extended (29-bit), Standard (11-bit)
         applyFilter()
         page.filterOpen = true
         page.byId = false
