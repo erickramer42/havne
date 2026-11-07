@@ -109,22 +109,60 @@ FrameListModel::FrameListModel(QObject* parent)
     m_ring.reserve(MaxFrames);
 }
 
+int FrameListModel::count() const
+{
+    return m_filter.active() ? static_cast<int>(m_shown.size()) : m_count;
+}
+
 int FrameListModel::rowCount(const QModelIndex&) const
 {
-    return m_count;
+    return count();
 }
 
 // A view row's frame: row 0 is the newest, or the oldest
 const FrameListModel::Row& FrameListModel::rowAt(int row) const
 {
-    const size_t age = m_newestFirst ? static_cast<size_t>(m_count - 1 - row)
+    const int n = count();
+    const size_t age = m_newestFirst ? static_cast<size_t>(n - 1 - row)
                                      : static_cast<size_t>(row);   // 0 = oldest
+    if (m_filter.active()) {
+        return rowOfArrival(m_shown[age]);
+    }
     return m_ring[(m_oldest + age) % m_ring.size()];
+}
+
+QString FrameListModel::flagWords(uint32_t flags)
+{
+    QStringList words;
+    if ((flags & ECUIO_FRAME_FLAG_FD) != 0) {
+        words << ((flags & ECUIO_FRAME_FLAG_BITRATE_SWITCH) != 0
+                      ? QStringLiteral("FD BRS")
+                      : QStringLiteral("FD"));
+    }
+    if ((flags & ECUIO_FRAME_FLAG_REMOTE) != 0) {
+        words << QStringLiteral("remote");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0) {
+        words << QStringLiteral("reassembled");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_TRUNCATED) != 0) {
+        words << QStringLiteral("truncated");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_OVERFLOW) != 0) {
+        words << QStringLiteral("after a loss");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_ERROR) != 0) {
+        words << QStringLiteral("error");
+    }
+    if ((flags & ECUIO_FRAME_FLAG_TX_ECHO) != 0) {
+        words << QStringLiteral("sent");
+    }
+    return words.join(QLatin1Char(' '));
 }
 
 QVariant FrameListModel::data(const QModelIndex& index, int role) const
 {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_count) {
+    if (!index.isValid() || index.row() < 0 || index.row() >= count()) {
         return QVariant();
     }
     const Row& r = rowAt(index.row());
@@ -140,6 +178,8 @@ QVariant FrameListModel::data(const QModelIndex& index, int role) const
                     .toHex(' ').toUpper());
         case ArbitrationIdRole: return QVariant::fromValue<quint32>(r.arbId);
         case SelectedRole:      return m_selected.count(r.seq) != 0;
+        case FlagsRole:         return QVariant::fromValue<quint32>(r.flags);
+        case FlagsTextRole:     return flagWords(r.flags);
         default:                return QVariant();
     }
 }
@@ -152,29 +192,41 @@ QHash<int, QByteArray> FrameListModel::roleNames() const
         {ExtendedRole,      "extended"},
         {PayloadRole,       "payloadHex"},
         {ArbitrationIdRole, "arbId"},
-        {SelectedRole,      "selected"}
+        {SelectedRole,      "selected"},
+        {FlagsRole,         "flags"},
+        {FlagsTextRole,     "flagsText"}
     };
 }
 
 void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
 {
+    const bool filtered = m_filter.active();
+    const int before = count();
     const bool full = (m_count == MaxFrames);
     if (full) {
         // Full: the oldest row leaves first, from the end that shows it,
-        // and its slot takes the new frame
-        const int row = m_newestFirst ? m_count - 1 : 0;
+        // and its slot takes the new frame. Filtered, it leaves the view
+        // only when the view shows it
         const quint64 leaving = m_ring[m_oldest].seq;
-        beginRemoveRows(QModelIndex(), row, row);
+        const bool shown = !filtered || (!m_shown.empty() && m_shown.front() == leaving);
+        if (shown) {
+            const int n = count();
+            const int row = m_newestFirst ? n - 1 : 0;
+            beginRemoveRows(QModelIndex(), row, row);
+        }
         m_oldest = (m_oldest + 1) % m_ring.size();
         --m_count;
-        endRemoveRows();
+        if (filtered && shown) {
+            m_shown.pop_front();
+        }
+        if (shown) {
+            endRemoveRows();
+        }
         if (!m_selected.empty() && *m_selected.begin() == leaving) {
             m_selected.erase(m_selected.begin());
             emit selectionChanged();
         }
     }
-    const int row = m_newestFirst ? 0 : m_count;
-    beginInsertRows(QModelIndex(), row, row);
     if (static_cast<size_t>(m_count) == m_ring.size()) {
         m_ring.emplace_back();   // every slot holds a row: one more, below the cap
     }
@@ -182,6 +234,7 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
     r.seq = m_nextSeq++;
     r.timestampUs = frame.timestamp_us;
     r.arbId = frame.arbitration_id;
+    r.flags = frame.flags;
     r.extended = (frame.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
     r.length = len;
     if (len <= InlinePayload) {
@@ -190,10 +243,20 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
     } else {
         r.spill.assign(frame.data, frame.data + len);
     }
-    ++m_count;
-    endInsertRows();
-    if (!full) {
-        emit countChanged(m_count);   // at the cap one row left as one came
+    const bool shown = !filtered || shows(r);
+    if (shown) {
+        const int row = m_newestFirst ? 0 : count();
+        beginInsertRows(QModelIndex(), row, row);
+        ++m_count;
+        if (filtered) {
+            m_shown.push_back(r.seq);
+        }
+        endInsertRows();
+    } else {
+        ++m_count;
+    }
+    if (count() != before || !full) {
+        emit countChanged(count());   // at the cap one row left as one came
     }
 }
 
@@ -206,6 +269,7 @@ void FrameListModel::clear()
     }
     m_oldest = 0;
     m_count = 0;
+    m_shown.clear();
     const bool hadSelection = !m_selected.empty();
     m_selected.clear();
     m_hasAnchor = false;
@@ -214,6 +278,68 @@ void FrameListModel::clear()
     if (hadSelection) {
         emit selectionChanged();
     }
+}
+
+QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
+                                      int direction, int flag)
+{
+    FrameFilter next;
+    const QString idWords = FrameFilter::parseIds(ids, &next.ids);
+    const QString dataWords = FrameFilter::parseData(data, &next.data, &next.anchored);
+    next.direction = direction >= FrameFilter::AnyDirection &&
+                             direction <= FrameFilter::Sent
+                         ? direction
+                         : FrameFilter::AnyDirection;
+    next.flag = flag >= FrameFilter::AnyFlag && flag <= FrameFilter::Error
+                    ? flag
+                    : FrameFilter::AnyFlag;
+    // A field that doesn't parse keeps its part of the filter as it was
+    if (!idWords.isEmpty()) {
+        next.ids = m_filter.ids;
+    }
+    if (!dataWords.isEmpty()) {
+        next.data = m_filter.data;
+        next.anchored = m_filter.anchored;
+    }
+    const bool same = next.ids.size() == m_filter.ids.size() &&
+                      std::equal(next.ids.begin(), next.ids.end(), m_filter.ids.begin(),
+                                 [](const FrameFilter::IdRange& a,
+                                    const FrameFilter::IdRange& b) {
+                                     return a.first == b.first && a.last == b.last;
+                                 }) &&
+                      next.data == m_filter.data && next.anchored == m_filter.anchored &&
+                      next.direction == m_filter.direction && next.flag == m_filter.flag;
+    if (!same) {
+        beginResetModel();
+        m_filter = std::move(next);
+        m_shown.clear();
+        if (m_filter.active()) {
+            for (int age = 0; age < m_count; ++age) {
+                const Row& r = m_ring[(m_oldest + static_cast<size_t>(age)) % m_ring.size()];
+                if (shows(r)) {
+                    m_shown.push_back(r.seq);
+                }
+            }
+        }
+        const bool hadSelection = !m_selected.empty();
+        m_selected.clear();
+        m_hasAnchor = false;
+        endResetModel();
+        emit filterChanged();
+        emit countChanged(count());
+        if (hadSelection) {
+            emit selectionChanged();
+        }
+    }
+    return {{QStringLiteral("ids"), idWords}, {QStringLiteral("data"), dataWords}};
+}
+
+quint64 FrameListModel::newestTimestampUs() const
+{
+    if (m_count == 0) {
+        return 0;
+    }
+    return m_ring[(m_oldest + static_cast<size_t>(m_count - 1)) % m_ring.size()].timestampUs;
 }
 
 size_t FrameListModel::spilledBytesForTesting() const
@@ -235,15 +361,25 @@ void FrameListModel::setNewestFirst(bool newestFirst)
     emit newestFirstChanged();
 }
 
-// The ring holds the newest m_count arrivals, numbered consecutively
+// The ring holds the newest m_count arrivals, numbered consecutively;
+// filtered, the shown ones are m_shown, in order
 int FrameListModel::rowOfSeq(quint64 seq) const
 {
     const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
     if (m_count == 0 || seq < oldestSeq || seq >= m_nextSeq) {
         return -1;
     }
-    const int age = static_cast<int>(seq - oldestSeq);   // 0 = oldest
-    return m_newestFirst ? m_count - 1 - age : age;
+    int age = 0;   // 0 = oldest
+    if (m_filter.active()) {
+        const auto it = std::lower_bound(m_shown.begin(), m_shown.end(), seq);
+        if (it == m_shown.end() || *it != seq) {
+            return -1;
+        }
+        age = static_cast<int>(it - m_shown.begin());
+    } else {
+        age = static_cast<int>(seq - oldestSeq);
+    }
+    return m_newestFirst ? count() - 1 - age : age;
 }
 
 void FrameListModel::notifySelected(int first, int last)
@@ -254,7 +390,7 @@ void FrameListModel::notifySelected(int first, int last)
 
 void FrameListModel::toggleSelected(int row)
 {
-    if (row < 0 || row >= m_count) return;
+    if (row < 0 || row >= count()) return;
     const quint64 seq = rowAt(row).seq;
     if (m_selected.erase(seq) == 0) {
         m_selected.insert(seq);
@@ -266,7 +402,7 @@ void FrameListModel::toggleSelected(int row)
 
 void FrameListModel::selectThrough(int row)
 {
-    if (row < 0 || row >= m_count) return;
+    if (row < 0 || row >= count()) return;
     const int anchor = m_hasAnchor ? rowOfSeq(m_anchorSeq) : -1;
     if (anchor < 0) {
         toggleSelected(row);
@@ -285,14 +421,18 @@ void FrameListModel::clearSelection()
     m_hasAnchor = false;
     if (m_selected.empty()) return;
     m_selected.clear();
-    notifySelected(0, m_count - 1);
+    if (count() > 0) {
+        notifySelected(0, count() - 1);
+    } else {
+        emit selectionChanged();
+    }
 }
 
 QString FrameListModel::selectedText() const
 {
     if (m_selected.empty()) return {};
     QString text = QStringLiteral("time_s\tdlc\text\tid\tdata\n");
-    for (int row = 0; row < m_count; ++row) {
+    for (int row = 0; row < count(); ++row) {
         const Row& r = rowAt(row);
         if (m_selected.count(r.seq) == 0) continue;
         text += QString::number(static_cast<double>(r.timestampUs) / 1e6, 'f', 6)
@@ -307,6 +447,108 @@ QString FrameListModel::selectedText() const
               + QLatin1Char('\n');
     }
     return text;
+}
+
+// ---------------- FrameIdModel ----------------
+FrameIdModel::FrameIdModel(const FrameListModel* frames, QObject* parent)
+    : QAbstractListModel(parent)
+    , m_frames(frames)
+{
+}
+
+int FrameIdModel::rowCount(const QModelIndex&) const
+{
+    return count();
+}
+
+QVariant FrameIdModel::data(const QModelIndex& index, int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= count()) {
+        return QVariant();
+    }
+    const IdRow& r = m_rows[static_cast<size_t>(index.row())];
+    switch (role) {
+        case ArbIdRole:    return QVariant::fromValue<quint32>(static_cast<quint32>(r.key));
+        case ExtendedRole: return (r.key >> 32) != 0;
+        case CountRole:    return r.count;
+        case RateRole:     return r.rate;
+        case PayloadRole:  return QString::fromLatin1(r.payload.toHex(' ').toUpper());
+        default:           return QVariant();
+    }
+}
+
+QHash<int, QByteArray> FrameIdModel::roleNames() const
+{
+    return {
+        {ArbIdRole,    "arbId"},
+        {ExtendedRole, "extended"},
+        {CountRole,    "frames"},
+        {RateRole,     "rate"},
+        {PayloadRole,  "payloadHex"}
+    };
+}
+
+void FrameIdModel::refresh()
+{
+    // The window ends at the newest frame held; a ring shorter than the
+    // window counts over its own span
+    const quint64 newest = m_frames->newestTimestampUs();
+    const quint64 from = newest > RateWindowUs ? newest - RateWindowUs : 0;
+    quint64 oldest = newest;
+    std::map<quint64, IdRow> byKey;
+    std::map<quint64, int> recent;
+    m_frames->forEachShown([&](const FrameListModel::Shown& f) {
+        const quint64 key =
+            ((f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0 ? (quint64{1} << 32) : 0) | f.id;
+        IdRow& row = byKey[key];
+        row.key = key;
+        ++row.count;
+        row.payload = QByteArray(reinterpret_cast<const char*>(f.data), f.length);
+        oldest = std::min(oldest, f.timestampUs);
+        if (f.timestampUs >= from) {
+            ++recent[key];
+        }
+    });
+    const quint64 spanUs = std::min(RateWindowUs, newest - std::min(oldest, newest));
+    std::vector<IdRow> next;
+    next.reserve(byKey.size());
+    for (auto& [key, row] : byKey) {
+        row.rate = spanUs == 0 ? 0.0
+                               : static_cast<double>(recent[key]) * 1e6 /
+                                     static_cast<double>(spanUs);
+        next.push_back(std::move(row));
+    }
+    // Both lists are sorted by key: walk them together, so a row that
+    // stays keeps its place and only one that comes or goes moves others
+    const int before = count();
+    size_t i = 0;
+    size_t j = 0;
+    while (i < m_rows.size() || j < next.size()) {
+        if (j == next.size() || (i < m_rows.size() && m_rows[i].key < next[j].key)) {
+            beginRemoveRows(QModelIndex(), static_cast<int>(i), static_cast<int>(i));
+            m_rows.erase(m_rows.begin() + static_cast<std::ptrdiff_t>(i));
+            endRemoveRows();
+        } else if (i == m_rows.size() || next[j].key < m_rows[i].key) {
+            beginInsertRows(QModelIndex(), static_cast<int>(i), static_cast<int>(i));
+            m_rows.insert(m_rows.begin() + static_cast<std::ptrdiff_t>(i), next[j]);
+            endInsertRows();
+            ++i;
+            ++j;
+        } else {
+            IdRow& old = m_rows[i];
+            if (old.count != next[j].count || old.rate != next[j].rate ||
+                old.payload != next[j].payload) {
+                old = next[j];
+                emit dataChanged(index(static_cast<int>(i), 0), index(static_cast<int>(i), 0),
+                                 {CountRole, RateRole, PayloadRole});
+            }
+            ++i;
+            ++j;
+        }
+    }
+    if (count() != before) {
+        emit countChanged();
+    }
 }
 
 // ---------------- SignalListModel ----------------
@@ -931,6 +1173,7 @@ void LiveSignalModel::judgeGroups()
 SessionBridge::SessionBridge(QObject* parent)
     : QObject(parent)
     , m_frameLog(new FrameListModel(this))
+    , m_frameIds(new FrameIdModel(m_frameLog, this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
     , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))

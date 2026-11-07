@@ -13,6 +13,7 @@
 #include "readonce.h"
 #include "pluginstore.h"
 #include "signalstore.h"
+#include "framefilter.h"
 #include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
@@ -20,6 +21,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -57,10 +59,16 @@ struct HostClock {
 // Rows can be selected for copying: the selection holds frames, not row
 // numbers, so it stays on them as rows arrive, the order flips or the
 // ring wraps, and a frame leaving the ring leaves the selection.
+// A filter (FrameFilter) shows only the frames it passes: the rows are
+// then those frames' arrival numbers, kept as frames come and go, so a
+// frame costs the same filtered as not; count is the rows shown and
+// heldCount the frames the ring holds.
 class FrameListModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(int heldCount READ heldCount NOTIFY countChanged)
+    Q_PROPERTY(int filterTerms READ filterTerms NOTIFY filterChanged)
     Q_PROPERTY(bool newestFirst READ newestFirst WRITE setNewestFirst NOTIFY newestFirstChanged)
     Q_PROPERTY(int selectedCount READ selectedCount NOTIFY selectionChanged)
 
@@ -74,7 +82,9 @@ public:
         ExtendedRole,
         PayloadRole,
         ArbitrationIdRole,  /* appended, so existing role numbers are unchanged */
-        SelectedRole
+        SelectedRole,
+        FlagsRole,          /* the frame's ECUIO_FRAME_FLAG_* */
+        FlagsTextRole       /* flagWords(): "FD reassembled", "" for none */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -83,9 +93,45 @@ public:
     // len is the frame's data_length, already clamped to its buffer
     void appendFrame(const ecuio_frame_t& frame, uint16_t len);
     void clear();
-    int count() const { return m_count; }
+    // The rows shown: every frame held, or those the filter passes
+    int count() const;
+    int heldCount() const { return m_count; }
     bool newestFirst() const { return m_newestFirst; }
     void setNewestFirst(bool newestFirst);
+
+    // The filter (framefilter.h's syntax): the ID and data fields' text,
+    // FrameFilter::Direction and FrameFilter::Flag. A field that doesn't
+    // parse keeps the filter in force as it was; the answer is { ids,
+    // data }, each "" or the words for its field. A change shows the
+    // rows anew and lets the selection go
+    Q_INVOKABLE QVariantMap setFilter(const QString& ids, const QString& data,
+                                      int direction, int flag);
+    int filterTerms() const { return m_filter.terms(); }
+    // The flags a row shows, in words, the ID's width left to its column:
+    // "FD BRS", "reassembled", "truncated", "after a loss", "error",
+    // "sent", "remote"; "" for none
+    static QString flagWords(uint32_t flags);
+
+    // The frames the filter passes, oldest first, as the By ID view and an
+    // export read them
+    struct Shown {
+        uint32_t id;
+        uint32_t flags;
+        quint64 timestampUs;
+        const uint8_t* data;
+        int length;
+    };
+    template <typename F> void forEachShown(F&& f) const
+    {
+        for (int age = 0; age < m_count; ++age) {
+            const Row& r = m_ring[(m_oldest + static_cast<size_t>(age)) % m_ring.size()];
+            if (!m_filter.active() || shows(r)) {
+                f(Shown{r.arbId, r.flags, r.timestampUs, r.data(), r.length});
+            }
+        }
+    }
+    // The newest frame's time, 0 with none held
+    quint64 newestTimestampUs() const;
 
     // The selection, by view row. A tap toggles a row and makes it the
     // anchor; a shift-click selects every row from the anchor to its own
@@ -112,12 +158,14 @@ signals:
     void countChanged(int newCount);
     void newestFirstChanged();
     void selectionChanged();
+    void filterChanged();
 
 private:
     struct Row {
         quint64 seq = 0;   // arrival number: the ring's rows run consecutively
         quint64 timestampUs = 0;
         quint32 arbId = 0;
+        quint32 flags = 0; // ECUIO_FRAME_FLAG_*
         quint16 length = 0;
         bool extended = false;
         uint8_t inlineData[InlinePayload] = {};
@@ -132,8 +180,19 @@ private:
 
     const Row& rowAt(int row) const;
     // The view row of the frame that arrived seq-th; -1 when it's gone
+    // or the filter doesn't show it
     int rowOfSeq(quint64 seq) const;
     void notifySelected(int first, int last);
+    bool shows(const Row& r) const
+    {
+        return m_filter.matches(r.arbId, r.flags, r.data(), r.length);
+    }
+    // The ring's row for an arrival number it holds
+    const Row& rowOfArrival(quint64 seq) const
+    {
+        const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
+        return m_ring[(m_oldest + static_cast<size_t>(seq - oldestSeq)) % m_ring.size()];
+    }
 
     // Grows to MaxFrames and keeps its slots across clear(), so the ring
     // stops allocating once it has gone round
@@ -146,6 +205,55 @@ private:
                                     // frame leaving the ring is the first
     quint64 m_anchorSeq = 0;
     bool m_hasAnchor = false;
+    FrameFilter m_filter;
+    // While the filter is active, the arrival numbers of the frames it
+    // shows, oldest first
+    std::deque<quint64> m_shown;
+};
+
+// The Log page's By ID view: one row per ID (and extended or not) over
+// the frames FrameListModel shows: how many the table holds, the rate
+// over its last 10 s, and the newest payload. refresh() reads the frames
+// again, which the page does twice a second while the view shows; rows
+// keep their places, an ID that comes or goes inserted or removed, so
+// the view doesn't jump.
+class FrameIdModel : public QAbstractListModel
+{
+    Q_OBJECT
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
+
+public:
+    explicit FrameIdModel(const FrameListModel* frames, QObject* parent = nullptr);
+
+    // The window the rate counts over
+    static constexpr quint64 RateWindowUs = 10000000;
+
+    enum IdRoles {
+        ArbIdRole = Qt::UserRole + 1,
+        ExtendedRole,
+        CountRole,
+        RateRole,       // frames a second, a double
+        PayloadRole     // the newest payload, spaced hex
+    };
+
+    int rowCount(const QModelIndex& parent = {}) const override;
+    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
+    QHash<int, QByteArray> roleNames() const override;
+    int count() const { return static_cast<int>(m_rows.size()); }
+    Q_INVOKABLE void refresh();
+
+signals:
+    void countChanged();
+
+private:
+    struct IdRow {
+        quint64 key = 0;    // extended in bit 32, then the ID: the sort order
+        int count = 0;
+        double rate = 0.0;
+        QByteArray payload; // the newest
+    };
+    const FrameListModel* m_frames;
+    std::vector<IdRow> m_rows;
 };
 
 // QElapsedTimer's restart() and elapsed() on core's clock (ecuio_clock_us),
@@ -478,6 +586,8 @@ class SessionBridge : public QObject
     // (ECUIO_FRAME_FLAG_OVERFLOW: its buffer overflowed, frames were lost)
     Q_PROPERTY(int overflowFrames READ overflowFrames NOTIFY overflowFramesChanged)
     Q_PROPERTY(FrameListModel* model READ model CONSTANT)
+    // The Log page's By ID view over model's frames
+    Q_PROPERTY(FrameIdModel* frameIds READ frameIds CONSTANT)
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
@@ -618,6 +728,7 @@ public:
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
     int overflowFrames() const { return m_reportedOverflow; }
     FrameListModel* model() const { return m_frameLog; }
+    FrameIdModel* frameIds() const { return m_frameIds; }
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
@@ -998,6 +1109,7 @@ private:
     }
 
     FrameListModel* m_frameLog = nullptr;
+    FrameIdModel* m_frameIds = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
     // The model's batch for one tick: each signal's window

@@ -31,6 +31,8 @@ qt_add_library(app_ui STATIC
     bridgesingleton.h
     carryover.cpp
     carryover.h
+    framefilter.cpp
+    framefilter.h
     readonce.cpp
     readonce.h
     pluginstore.cpp

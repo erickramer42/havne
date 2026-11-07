@@ -8481,3 +8481,354 @@ TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
             "Its copy has changed since it was kept: import the file again");
     EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
 }
+
+// ---- The Log page's filter and By ID view (framefilter.h) ----
+
+namespace {
+
+// A frame for the model: its ID, flags, time and payload
+struct FrameMaker {
+    std::unique_ptr<ecuio_frame_t> frame = std::make_unique<ecuio_frame_t>();
+    FrameMaker() { *frame = ecuio_frame_t{}; }
+    void add(FrameListModel& model, uint32_t id, std::initializer_list<uint8_t> bytes,
+             quint64 timeUs, uint32_t flags = 0)
+    {
+        frame->arbitration_id = id;
+        frame->flags = flags;
+        frame->timestamp_us = timeUs;
+        uint16_t n = 0;
+        for (uint8_t b : bytes) {
+            frame->data[n++] = b;
+        }
+        frame->data_length = n;
+        model.appendFrame(*frame, n);
+    }
+};
+
+// Counts rows as the model's signals say, so a view that trusts them
+// sees what rowCount says
+struct RowMirror {
+    int rows = 0;
+    explicit RowMirror(QAbstractItemModel& m)
+    {
+        rows = m.rowCount();
+        QObject::connect(&m, &QAbstractItemModel::rowsInserted,
+                         [this](const QModelIndex&, int first, int last) {
+                             rows += last - first + 1;
+                         });
+        QObject::connect(&m, &QAbstractItemModel::rowsRemoved,
+                         [this](const QModelIndex&, int first, int last) {
+                             rows -= last - first + 1;
+                         });
+        QObject::connect(&m, &QAbstractItemModel::modelReset,
+                         [this, &m]() { rows = m.rowCount(); });
+    }
+};
+
+QStringList idsShown(const FrameListModel& model)
+{
+    QStringList out;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        out << QString::number(
+                   model.data(model.index(row, 0), FrameListModel::ArbitrationIdRole)
+                       .toUInt(),
+                   16)
+                   .toUpper();
+    }
+    return out;
+}
+
+bool passes(const QString& ids, const QString& data, uint32_t id,
+            std::initializer_list<uint8_t> bytes, uint32_t flags = 0)
+{
+    FrameFilter f;
+    EXPECT_EQ(FrameFilter::parseIds(ids, &f.ids).toStdString(), "");
+    EXPECT_EQ(FrameFilter::parseData(data, &f.data, &f.anchored).toStdString(), "");
+    std::vector<uint8_t> payload(bytes);
+    return f.matches(id, flags, payload.data(), static_cast<int>(payload.size()));
+}
+
+} // namespace
+
+/* The ID field: hex IDs and ranges, commas between, "0x" optional;
+ * what doesn't parse says which item and why */
+TEST(FrameFilterTest, TheIdFieldTakesIdsAndRanges)
+{
+    std::vector<FrameFilter::IdRange> r;
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral(" 7E8, 0x7e0-7EF ,18DAF110"), &r)
+                  .toStdString(),
+              "");
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0].first, 0x7E8u);
+    EXPECT_EQ(r[0].last, 0x7E8u);
+    EXPECT_EQ(r[1].first, 0x7E0u);
+    EXPECT_EQ(r[1].last, 0x7EFu);
+    EXPECT_EQ(r[2].first, 0x18DAF110u);
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("  "), &r).toStdString(), "");
+    EXPECT_TRUE(r.empty());
+
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7E8,,7E9"), &r).toStdString(),
+              "an empty item between commas");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7G8"), &r).toStdString(),
+              "\"7G8\" isn't a hex ID (up to 1FFFFFFF) or a range like 7E0-7EF");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("20000000"), &r).toStdString(),
+              "\"20000000\" isn't a hex ID (up to 1FFFFFFF) or a range like 7E0-7EF");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7EF-7E0"), &r).toStdString(),
+              "\"7EF-7E0\" runs backward");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7E0-"), &r).toStdString(),
+              "\"7E0-\" isn't a hex ID (up to 1FFFFFFF) or a range like 7E0-7EF");
+    EXPECT_TRUE(r.empty()) << "a refusal leaves nothing";
+}
+
+/* The data field: hex bytes and ??, anywhere unless ^ anchors them */
+TEST(FrameFilterTest, TheDataFieldTakesBytesAndWildcards)
+{
+    std::vector<int> d;
+    bool anchored = true;
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("62 f1 ??"), &d, &anchored)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(d, (std::vector<int>{0x62, 0xF1, -1}));
+    EXPECT_FALSE(anchored);
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("^ 620D"), &d, &anchored)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(d, (std::vector<int>{0x62, 0x0D}));
+    EXPECT_TRUE(anchored);
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("^"), &d, &anchored).toStdString(),
+              "\"^\" needs bytes after it");
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("62 F"), &d, &anchored).toStdString(),
+              "\"F\" isn't whole bytes: two hex digits each, or ??");
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("6Z"), &d, &anchored).toStdString(),
+              "\"6Z\" isn't a hex byte or ??");
+    EXPECT_TRUE(d.empty());
+}
+
+/* What passes: the IDs (an ID past 0x7FF only an extended frame's), the
+ * bytes anywhere or at byte 0, the direction and the one flag */
+TEST(FrameFilterTest, AFrameMatchesEveryFieldInForce)
+{
+    EXPECT_TRUE(passes(QStringLiteral("7E0-7EF"), QString(), 0x7E8, {0x41}));
+    EXPECT_FALSE(passes(QStringLiteral("7E0-7EF"), QString(), 0x7DF, {0x41}));
+    EXPECT_TRUE(passes(QStringLiteral("7E8"), QString(), 0x7E8, {0x41},
+                       ECUIO_FRAME_FLAG_EXTENDED))
+        << "a 29-bit 0x7E8 is still 0x7E8";
+    EXPECT_FALSE(passes(QStringLiteral("18DAF110"), QString(), 0x18DAF110, {0x41}))
+        << "no 11-bit frame carries a 29-bit ID";
+    EXPECT_TRUE(passes(QStringLiteral("18DAF110"), QString(), 0x18DAF110, {0x41},
+                       ECUIO_FRAME_FLAG_EXTENDED));
+
+    EXPECT_TRUE(passes(QString(), QStringLiteral("F1 ?? 01"), 0x7E8, {0x62, 0xF1, 0x90, 0x01}));
+    EXPECT_FALSE(passes(QString(), QStringLiteral("^F1"), 0x7E8, {0x62, 0xF1}));
+    EXPECT_TRUE(passes(QString(), QStringLiteral("^62 F1"), 0x7E8, {0x62, 0xF1}));
+    EXPECT_FALSE(passes(QString(), QStringLiteral("62 F1 90"), 0x7E8, {0x62, 0xF1}))
+        << "longer than the payload";
+    EXPECT_TRUE(passes(QString(), QStringLiteral("??"), 0x7E8, {0x00}));
+    EXPECT_FALSE(passes(QString(), QStringLiteral("??"), 0x7E8, {}));
+
+    FrameFilter f;
+    f.direction = FrameFilter::Sent;
+    const uint8_t b[] = {0x01};
+    EXPECT_FALSE(f.matches(0x7E0, 0, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    f.direction = FrameFilter::Received;
+    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    f.direction = FrameFilter::AnyDirection;
+    const std::pair<int, uint32_t> flags[] = {
+        {FrameFilter::Extended, ECUIO_FRAME_FLAG_EXTENDED},
+        {FrameFilter::Fd, ECUIO_FRAME_FLAG_FD},
+        {FrameFilter::Reassembled, ECUIO_FRAME_FLAG_REASSEMBLED},
+        {FrameFilter::Truncated, ECUIO_FRAME_FLAG_TRUNCATED},
+        {FrameFilter::Overflow, ECUIO_FRAME_FLAG_OVERFLOW},
+        {FrameFilter::Error, ECUIO_FRAME_FLAG_ERROR}};
+    for (const auto& [flag, bit] : flags) {
+        f.flag = flag;
+        EXPECT_TRUE(f.matches(0x7E0, bit, b, 1)) << flag;
+        EXPECT_FALSE(f.matches(0x7E0, 0, b, 1)) << flag;
+    }
+    f.flag = FrameFilter::Standard;
+    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_EXTENDED, b, 1));
+    EXPECT_EQ(f.terms(), 1);
+    f.flag = FrameFilter::AnyFlag;
+    EXPECT_EQ(f.terms(), 0);
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_ERROR, b, 1)) << "no filter";
+}
+
+/* The table shows what the filter passes, in either order, as frames
+ * come and the ring wraps; the rows its signals report are rowCount's */
+TEST(BridgeTest, FrameFilterShowsWhatItPasses)
+{
+    FrameListModel model;
+    RowMirror mirror(model);
+    FrameMaker m;
+    quint64 t = 0;
+    for (int i = 0; i < 6; ++i) {
+        m.add(model, i % 2 == 0 ? 0x7E8 : 0x7E9, {0x41, static_cast<uint8_t>(i)}, ++t);
+    }
+    QVariantMap words = model.setFilter(QStringLiteral("7E9"), QString(), 0, 0);
+    EXPECT_EQ(words.value(QStringLiteral("ids")).toString().toStdString(), "");
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 3);
+    EXPECT_EQ(model.heldCount(), 6);
+    EXPECT_EQ(mirror.rows, 3);
+    EXPECT_EQ(idsShown(model), (QStringList{"7E9", "7E9", "7E9"}));
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::PayloadRole).toString(),
+              QStringLiteral("41 05"))
+        << "newest first";
+
+    // A frame the filter passes is a row; one it doesn't isn't
+    m.add(model, 0x7E8, {0x41, 6}, ++t);
+    EXPECT_EQ(mirror.rows, 3);
+    m.add(model, 0x7E9, {0x41, 7}, ++t);
+    EXPECT_EQ(mirror.rows, 4);
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::PayloadRole).toString(),
+              QStringLiteral("41 07"));
+
+    // A field that doesn't parse keeps its part in force and says why
+    words = model.setFilter(QStringLiteral("7E9,"), QStringLiteral("^41"), 0, 0);
+    EXPECT_EQ(words.value(QStringLiteral("ids")).toString().toStdString(),
+              "an empty item between commas");
+    EXPECT_EQ(model.filterTerms(), 2);
+    EXPECT_EQ(model.count(), 4);
+
+    // Oldest first, then no filter: every frame again
+    model.setNewestFirst(false);
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::PayloadRole).toString(),
+              QStringLiteral("41 01"));
+    model.setFilter(QString(), QString(), 0, 0);
+    EXPECT_EQ(model.filterTerms(), 0);
+    EXPECT_EQ(model.count(), 8);
+    EXPECT_EQ(mirror.rows, 8);
+}
+
+/* At the cap, the oldest frame leaves the view only when the view shows
+ * it; the selection stays on its frames and lets go at a filter change */
+TEST(BridgeTest, FrameFilterHoldsAsTheRingWraps)
+{
+    FrameListModel model;
+    RowMirror mirror(model);
+    FrameMaker m;
+    quint64 t = 0;
+    model.setFilter(QStringLiteral("100"), QString(), 0, 0);
+    for (int i = 0; i < FrameListModel::MaxFrames; ++i) {
+        m.add(model, i % 10 == 0 ? 0x100 : 0x200, {static_cast<uint8_t>(i)}, ++t);
+    }
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10);
+    EXPECT_EQ(mirror.rows, model.count());
+    model.toggleSelected(0);   // the newest 0x100 frame
+    const QString selected = model.selectedText();
+
+    // The oldest frame, a 0x100, leaves; the next ones (0x200) leave the
+    // ring unseen
+    m.add(model, 0x200, {0xAA}, ++t);
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10 - 1);
+    EXPECT_EQ(mirror.rows, model.count());
+    for (int i = 0; i < 9; ++i) {
+        m.add(model, 0x200, {0xAA}, ++t);
+    }
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10 - 1);
+    // A 0x100 comes as the next 0x100 leaves
+    m.add(model, 0x100, {0xBB}, ++t);
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10 - 1);
+    EXPECT_EQ(mirror.rows, model.count());
+    EXPECT_EQ(model.heldCount(), FrameListModel::MaxFrames);
+    EXPECT_EQ(model.selectedCount(), 1);
+    EXPECT_EQ(model.selectedText(), selected) << "the selection kept its frame";
+    EXPECT_TRUE(
+        model.data(model.index(1, 0), FrameListModel::SelectedRole).toBool());
+
+    model.setFilter(QStringLiteral("100"), QStringLiteral("BB"), 0, 0);
+    EXPECT_EQ(model.selectedCount(), 0);
+    EXPECT_EQ(model.count(), 1);
+    model.clear();
+    EXPECT_EQ(model.count(), 0);
+    EXPECT_EQ(model.filterTerms(), 2) << "Clear empties the table, not the filter";
+}
+
+/* A row's flags in words, for the table's Flags column */
+TEST(BridgeTest, FrameFlagsReadAsWords)
+{
+    EXPECT_EQ(FrameListModel::flagWords(0).toStdString(), "");
+    EXPECT_EQ(FrameListModel::flagWords(ECUIO_FRAME_FLAG_EXTENDED).toStdString(), "")
+        << "the Ext column says it";
+    EXPECT_EQ(FrameListModel::flagWords(ECUIO_FRAME_FLAG_FD |
+                                        ECUIO_FRAME_FLAG_BITRATE_SWITCH |
+                                        ECUIO_FRAME_FLAG_REASSEMBLED)
+                  .toStdString(),
+              "FD BRS reassembled");
+    EXPECT_EQ(FrameListModel::flagWords(ECUIO_FRAME_FLAG_FD | ECUIO_FRAME_FLAG_TRUNCATED |
+                                        ECUIO_FRAME_FLAG_OVERFLOW | ECUIO_FRAME_FLAG_ERROR |
+                                        ECUIO_FRAME_FLAG_TX_ECHO |
+                                        ECUIO_FRAME_FLAG_REMOTE)
+                  .toStdString(),
+              "FD remote truncated after a loss error sent");
+    FrameListModel model;
+    FrameMaker m;
+    m.add(model, 0x7E8, {0x41}, 1, ECUIO_FRAME_FLAG_REASSEMBLED);
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::FlagsTextRole).toString(),
+              QStringLiteral("reassembled"));
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::FlagsRole).toUInt(),
+              ECUIO_FRAME_FLAG_REASSEMBLED);
+}
+
+/* By ID: one row per ID and width over the frames shown, its count, its
+ * rate over the last 10 s and its newest payload; rows keep their places */
+TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
+{
+    FrameListModel frames;
+    FrameIdModel ids(&frames);
+    RowMirror mirror(ids);
+    FrameMaker m;
+    // 0x7E8 every 100 ms for 20 s; 0x7E9 every second; a 29-bit 0x7E8
+    // once
+    for (int i = 0; i < 200; ++i) {
+        const quint64 t = static_cast<quint64>(i) * 100000;
+        m.add(frames, 0x7E8, {0x41, static_cast<uint8_t>(i)}, t);
+        if (i % 10 == 0) {
+            m.add(frames, 0x7E9, {0x62}, t);
+        }
+    }
+    m.add(frames, 0x7E8, {0x01}, 19900000, ECUIO_FRAME_FLAG_EXTENDED);
+    ids.refresh();
+    ASSERT_EQ(ids.count(), 3);
+    EXPECT_EQ(mirror.rows, 3);
+    auto at = [&](int row, int role) { return ids.data(ids.index(row, 0), role); };
+    EXPECT_EQ(at(0, FrameIdModel::ArbIdRole).toUInt(), 0x7E8u);
+    EXPECT_FALSE(at(0, FrameIdModel::ExtendedRole).toBool());
+    EXPECT_EQ(at(0, FrameIdModel::CountRole).toInt(), 200);
+    EXPECT_NEAR(at(0, FrameIdModel::RateRole).toDouble(), 10.0, 0.11)
+        << "the last 10 s: 100 frames";
+    EXPECT_EQ(at(0, FrameIdModel::PayloadRole).toString(), QStringLiteral("41 C7"));
+    EXPECT_EQ(at(1, FrameIdModel::ArbIdRole).toUInt(), 0x7E9u);
+    EXPECT_NEAR(at(1, FrameIdModel::RateRole).toDouble(), 1.0, 0.11);
+    EXPECT_TRUE(at(2, FrameIdModel::ExtendedRole).toBool()) << "29-bit sorts after";
+
+    // The filter narrows it; a new ID is inserted in its place
+    frames.setFilter(QStringLiteral("7E9-7EA"), QString(), 0, 0);
+    ids.refresh();
+    EXPECT_EQ(ids.count(), 1);
+    EXPECT_EQ(mirror.rows, 1);
+    int resets = 0;
+    QObject::connect(&ids, &QAbstractItemModel::modelReset, [&resets]() { ++resets; });
+    m.add(frames, 0x7EA, {0x01}, 20000000);
+    ids.refresh();
+    EXPECT_EQ(ids.count(), 2);
+    EXPECT_EQ(mirror.rows, 2);
+    EXPECT_EQ(resets, 0) << "inserted, not reset";
+    EXPECT_EQ(at(1, FrameIdModel::ArbIdRole).toUInt(), 0x7EAu);
+    EXPECT_EQ(at(1, FrameIdModel::RateRole).toDouble(), 0.1)
+        << "one frame in the 10 s window";
+
+    // One frame alone has no span to rate over
+    FrameListModel lone;
+    FrameIdModel loneIds(&lone);
+    m.add(lone, 0x123, {0x01}, 5);
+    loneIds.refresh();
+    EXPECT_EQ(loneIds.data(loneIds.index(0, 0), FrameIdModel::RateRole).toDouble(), 0.0);
+    frames.clear();
+    ids.refresh();
+    EXPECT_EQ(ids.count(), 0);
+    EXPECT_EQ(mirror.rows, 0);
+}

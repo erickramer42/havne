@@ -2,6 +2,8 @@
 // Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.log,
 //          QmlTest.linkhealth, QmlTest.phone (test_qml); Manual smoke
 
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -20,6 +22,52 @@ Pane {
     readonly property bool narrowTable: frameList.width < 480   // the rows' narrow too
 
     readonly property int maxLogLines: 200
+
+    // ---- The Frames view's table (framefilter.h) ----
+    // By ID instead of the frames; the filter's panel open; its
+    // direction (FrameFilter::Direction's order)
+    property bool byId: false
+    property bool filterOpen: false
+    property int filterDirection: 0
+    // The wide table's Flags column
+    readonly property int flagsWidth: 96
+
+    // The filter's fields to the model, which keeps the last good part of
+    // a field that doesn't parse and says why
+    function applyFilter() {
+        const r = Bridge.model.setFilter(filterIds.text, filterData.text,
+                                         page.filterDirection, filterFlag.currentIndex)
+        filterIdsProblem.text = r.ids
+        filterDataProblem.text = r.data
+    }
+
+    function clearFilter() {
+        filterIds.text = ""
+        filterData.text = ""
+        filterFlag.currentIndex = 0
+        page.filterDirection = 0
+        applyFilter()
+    }
+
+    function showById() {
+        page.byId = true
+        Bridge.frameIds.refresh()
+    }
+
+    // A By ID row tapped: the table of that ID's frames
+    function showIdFrames(id, extended) {
+        filterIds.text = id.toString(16).toUpperCase()
+        if (extended && id <= 0x7FF)
+            filterFlag.currentIndex = 1   // the 29-bit one, not the 11-bit
+        applyFilter()
+        page.filterOpen = true
+        page.byId = false
+    }
+
+    // Frames a second, as the By ID view shows them
+    function rateText(rate) {
+        return rate <= 0 ? "-" : rate < 10 ? rate.toFixed(1) + "/s" : Math.round(rate) + "/s"
+    }
 
     // Each line is stamped with local time in the surrogate session
     // log's format (HH:MM:SS.mmm), so the two line up, and a disconnect
@@ -185,10 +233,13 @@ Pane {
             Layout.fillHeight: true
             spacing: Theme.spacing
 
-            // ---- Pause, Clear and the row order ----
-            // A Flow, so on a phone's width they wrap rather than lay the
-            // page out past its edge
+            // ---- Pause and Clear; while rows are selected, the selection
+            // bar in their place (Copy and Select none take no room until
+            // they're of use). A Flow, so on a phone's width they wrap
+            // rather than lay the page out past its edge ----
             Flow {
+                objectName: "frameTools"
+                visible: Bridge.model.selectedCount === 0
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
@@ -208,8 +259,23 @@ Pane {
                     enabled: Bridge.frameCount > 0
                     onClicked: Bridge.clearFrames()
                 }
-                // The selected rows to the clipboard; a tap on a row
-                // selects it
+            }
+            Flow {
+                objectName: "selectionBar"
+                visible: Bridge.model.selectedCount > 0
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
+                Label {
+                    objectName: "selectedLabel"
+                    height: Theme.controlHeight
+                    verticalAlignment: Text.AlignVCenter
+                    text: qsTr("%1 selected").arg(Bridge.model.selectedCount)
+                    color: Theme.info
+                    font.pixelSize: 13
+                }
+                // The selected rows to the clipboard, as they are: the
+                // user's own pick
                 ThemedButton {
                     objectName: "copyFrames"
                     enabled: Bridge.model.selectedCount > 0
@@ -218,43 +284,169 @@ Pane {
                 }
                 ThemedButton {
                     objectName: "selectNone"
-                    enabled: Bridge.model.selectedCount > 0   // kept in place, so nothing shifts
+                    enabled: Bridge.model.selectedCount > 0
                     text: qsTr("Select none")
                     onClicked: Bridge.model.clearSelection()
                 }
+            }
+
+            // ---- The table's view, and the filter ----
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
                 Rectangle {
-                    implicitWidth: order.implicitWidth + 4
-                    implicitHeight: order.implicitHeight + 4
+                    implicitWidth: tableSwitch.implicitWidth + 4
+                    implicitHeight: tableSwitch.implicitHeight + 4
                     radius: Theme.radius
                     color: Theme.surface
 
                     Row {
-                        id: order
+                        id: tableSwitch
                         anchors.centerIn: parent
                         spacing: 2
-
-                        // A click goes to the newest row: a new order resets
-                        // the model, which leaves the view where it was, and
-                        // the same order brings a scrolled view back
                         SegmentButton {
-                            objectName: "order_newest"
-                            text: qsTr("Newest first")
-                            selected: Bridge.model.newestFirst
-                            onClicked: {
-                                Bridge.model.newestFirst = true
-                                Qt.callLater(frameList.jumpToLatest)
-                            }
+                            objectName: "table_frames"
+                            text: qsTr("Frames")
+                            selected: !page.byId
+                            onClicked: page.byId = false
                         }
                         SegmentButton {
-                            objectName: "order_oldest"
-                            text: qsTr("Oldest first")
-                            selected: !Bridge.model.newestFirst
-                            onClicked: {
-                                Bridge.model.newestFirst = false
-                                Qt.callLater(frameList.jumpToLatest)
+                            objectName: "table_byId"
+                            text: qsTr("By ID")
+                            selected: page.byId
+                            onClicked: page.showById()
+                        }
+                    }
+                }
+                ThemedButton {
+                    objectName: "filterToggle"
+                    text: Bridge.model.filterTerms > 0
+                          ? qsTr("Filter (%1)").arg(Bridge.model.filterTerms)
+                          : qsTr("Filter")
+                    highlighted: page.filterOpen
+                    onClicked: page.filterOpen = !page.filterOpen
+                }
+            }
+
+            // ---- The filter: the columns a bus is read by ----
+            GridLayout {
+                objectName: "filterPanel"
+                visible: page.filterOpen
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: Theme.spacing
+                rowSpacing: Theme.spacing / 2
+
+                Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 13 }
+                TextField {
+                    id: filterIds
+                    objectName: "filterIds"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                    placeholderText: qsTr("7E8, 7E0-7EF")
+                    font.family: Theme.monoFamily
+                    inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText
+                    onTextEdited: page.applyFilter()
+                }
+                Item { visible: filterIdsProblem.visible }  // the label column, empty
+                Label {
+                    id: filterIdsProblem
+                    objectName: "filterIdsProblem"
+                    visible: text !== ""
+                    color: Theme.warning
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                }
+
+                Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: 13 }
+                TextField {
+                    id: filterData
+                    objectName: "filterData"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                    placeholderText: qsTr("^62 F1 ??")
+                    font.family: Theme.monoFamily
+                    inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText
+                    onTextEdited: page.applyFilter()
+                }
+                Item { visible: filterDataProblem.visible }  // the label column, empty
+                Label {
+                    id: filterDataProblem
+                    objectName: "filterDataProblem"
+                    visible: text !== ""
+                    color: Theme.warning
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                }
+
+                Flow {
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                    spacing: Theme.spacing
+
+                    Rectangle {
+                        implicitWidth: directionSwitch.implicitWidth + 4
+                        implicitHeight: directionSwitch.implicitHeight + 4
+                        radius: Theme.radius
+                        color: Theme.surface
+
+                        Row {
+                            id: directionSwitch
+                            anchors.centerIn: parent
+                            spacing: 2
+                            Repeater {
+                                model: [qsTr("All"), qsTr("Received"), qsTr("Sent")]
+                                SegmentButton {
+                                    required property string modelData
+                                    required property int index
+                                    objectName: "direction_" + index
+                                    text: modelData
+                                    selected: page.filterDirection === index
+                                    onClicked: {
+                                        page.filterDirection = index
+                                        page.applyFilter()
+                                    }
+                                }
                             }
                         }
                     }
+                    ComboBox {
+                        id: filterFlag
+                        objectName: "filterFlag"
+                        // FrameFilter::Flag's order
+                        model: [qsTr("Any flag"), qsTr("Extended (29-bit)"),
+                                qsTr("Standard (11-bit)"), qsTr("CAN FD"),
+                                qsTr("Reassembled"), qsTr("Truncated"),
+                                qsTr("After a loss"), qsTr("Error")]
+                        implicitHeight: Theme.controlHeight
+                        onActivated: page.applyFilter()
+                    }
+                    ThemedButton {
+                        objectName: "filterClear"
+                        text: qsTr("Clear the filter")
+                        enabled: Bridge.model.filterTerms > 0 || filterIds.text !== ""
+                                 || filterData.text !== ""
+                        onClicked: page.clearFilter()
+                    }
+                }
+                // No transport reports the frames it sends yet, so Sent
+                // shows none: said, so an empty table doesn't read as lost
+                Label {
+                    objectName: "sentNote"
+                    visible: page.filterDirection === 2
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                    text: qsTr("No adapter reports the frames the session sends yet, so Sent shows none")
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
                 }
             }
 
@@ -284,6 +476,17 @@ Pane {
                     font.pixelSize: 13
                 }
 
+                // What the filter leaves of the table
+                Label {
+                    objectName: "filterStatus"
+                    visible: Bridge.model.filterTerms > 0
+                    width: Math.min(implicitWidth, parent.width)
+                    wrapMode: Text.Wrap
+                    text: qsTr("Showing %1 of %2").arg(Bridge.model.count).arg(Bridge.model.heldCount)
+                    color: Theme.info
+                    font.pixelSize: 13
+                }
+
                 Label {
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
@@ -306,16 +509,6 @@ Pane {
                     visible: Bridge.overflowFrames > 0
                 }
 
-                Label {
-                    objectName: "selectedLabel"
-                    width: Math.min(implicitWidth, parent.width)
-                    wrapMode: Text.Wrap
-                    text: qsTr("%1 selected").arg(Bridge.model.selectedCount)
-                    color: Theme.info
-                    font.pixelSize: 13
-                    visible: Bridge.model.selectedCount > 0
-                }
-
                 // Bridge diagnostics: frames delivered to the GUI thread (one
                 // queued call each, ADR-0005's per-frame baseline) and the
                 // coalesced signal batches. Left out at phone width.
@@ -332,6 +525,7 @@ Pane {
 
             // ---- Frame table ----
             Rectangle {
+                visible: !page.byId
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Theme.radius
@@ -352,10 +546,35 @@ Pane {
                         anchors.rightMargin: 12
                         spacing: 8
 
-                        // Widths MUST match delegate columns below
-                        Label { text: qsTr("Time (s)"); color: Theme.textDim; font.pixelSize: 12;
-                                Layout.preferredWidth: page.narrowTable ? 64 : 96
-                                elide: Text.ElideRight }
+                        // Widths MUST match delegate columns below. The time's
+                        // header is the order: a tap turns it, and goes to the
+                        // newest row (a new order resets the model, which
+                        // leaves the view where it was)
+                        AbstractButton {
+                            id: orderToggle
+                            objectName: "orderToggle"
+                            Layout.preferredWidth: page.narrowTable ? 64 : 96
+                            Layout.fillHeight: true
+                            Accessible.name: Bridge.model.newestFirst
+                                             ? qsTr("Time, newest first") : qsTr("Time, oldest first")
+                            contentItem: Label {
+                                text: (Bridge.model.newestFirst ? qsTr("Time ↓") : qsTr("Time ↑"))
+                                      + (page.narrowTable ? "" : qsTr(" (s)"))
+                                color: Theme.text
+                                font.pixelSize: 12
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                            }
+                            background: Rectangle {
+                                color: "transparent"
+                                border.width: orderToggle.visualFocus ? 2 : 0
+                                border.color: Theme.text
+                            }
+                            onClicked: {
+                                Bridge.model.newestFirst = !Bridge.model.newestFirst
+                                Qt.callLater(frameList.jumpToLatest)
+                            }
+                        }
                         Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: 12;
                                 visible: !page.narrowTable
                                 Layout.preferredWidth: 36 }
@@ -366,6 +585,9 @@ Pane {
                                 Layout.preferredWidth: page.narrowTable ? 80 : 96 }
                         Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: 12;
                                 Layout.fillWidth: true }
+                        Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: 12;
+                                visible: !page.narrowTable
+                                Layout.preferredWidth: page.flagsWidth }
                     }
                 }
 
@@ -425,8 +647,9 @@ Pane {
                         readonly property bool narrow: ListView.view !== null
                                                        && ListView.view.width < 480
                         width: ListView.view !== null ? ListView.view.width : 0
-                        // Narrow, a long payload wraps onto more lines
-                        height: narrow ? Math.max(26, payloadLabel.implicitHeight + 8) : 26
+                        // Narrow, a long payload wraps onto more lines, its
+                        // flags under it
+                        height: narrow ? Math.max(26, payloadColumn.implicitHeight + 8) : 26
                         radius: 4
                         color: frameRow.model.selected ? Qt.alpha(Theme.info, 0.22) : "transparent"
 
@@ -490,14 +713,37 @@ Pane {
                                 Layout.preferredWidth: frameRow.narrow ? 80 : 96
                                 elide: Text.ElideRight
                             }
-                            Label {
-                                id: payloadLabel
-                                text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
-                                color: Theme.text
-                                font.family: Theme.monoFamily; font.pixelSize: 12
+                            Column {
+                                id: payloadColumn
                                 Layout.fillWidth: true
-                                wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
-                                elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
+                                Label {
+                                    id: payloadLabel
+                                    width: parent.width
+                                    text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
+                                    color: Theme.text
+                                    font.family: Theme.monoFamily; font.pixelSize: 12
+                                    wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
+                                    elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
+                                }
+                                // A phone's flags, under the payload
+                                Label {
+                                    objectName: "rowFlagsNarrow"
+                                    width: parent.width
+                                    visible: frameRow.narrow && text !== ""
+                                    text: frameRow.model.flagsText
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            Label {
+                                objectName: "rowFlags"
+                                visible: !frameRow.narrow
+                                text: frameRow.model.flagsText
+                                color: Theme.textDim
+                                font.pixelSize: 12
+                                Layout.preferredWidth: page.flagsWidth
+                                elide: Text.ElideRight
                             }
                         }
                     }
@@ -505,8 +751,13 @@ Pane {
                     // ---- Empty state ----
                     Label {
                         anchors.centerIn: parent
+                        width: Math.min(implicitWidth, parent.width - 16)
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
                         visible: frameList.count === 0
-                        text: !Bridge.connected ? qsTr("No session: connect one from Settings")
+                        text: !Bridge.connected && Bridge.model.heldCount === 0
+                              ? qsTr("No session: connect one from Settings")
+                            : Bridge.model.heldCount > 0 ? qsTr("No frame the filter shows")
                             : Bridge.logPaused ? qsTr("Paused")
                             : qsTr("Waiting for frames…")
                         color: Theme.textDim
@@ -524,6 +775,123 @@ Pane {
                              && (frameList.tailing ? !frameList.follow : !frameList.atYBeginning)
                     text: frameList.tailing ? qsTr("Latest ↓") : qsTr("Latest ↑")
                     onClicked: frameList.jumpToLatest()
+                }
+            }
+
+            // ---- By ID: one row per ID over the frames the table shows ----
+            Rectangle {
+                visible: page.byId
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: Theme.radius
+                color: Theme.surface
+                clip: true
+
+                // Read again twice a second while it shows (FrameIdModel)
+                Timer {
+                    interval: 500
+                    repeat: true
+                    running: page.visible && page.showingFrames && page.byId
+                    onTriggered: Bridge.frameIds.refresh()
+                }
+
+                Rectangle {
+                    id: idHeader
+                    anchors { top: parent.top; left: parent.left; right: parent.right }
+                    height: 32
+                    z: 2
+                    color: Theme.elevated
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 8
+                        // Widths MUST match the delegate's columns below
+                        Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
+                                Layout.preferredWidth: 104 }   // a 29-bit ID and its E
+                        Label { text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: 12;
+                                Layout.preferredWidth: 52 }
+                        Label { text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: 12;
+                                Layout.preferredWidth: 52 }
+                        Label { text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: 12;
+                                Layout.fillWidth: true; elide: Text.ElideRight }
+                    }
+                }
+
+                ListView {
+                    id: idList
+                    objectName: "idList"
+                    anchors { top: idHeader.bottom; left: parent.left
+                              right: parent.right; bottom: parent.bottom }
+                    anchors.margins: 4
+                    clip: true
+                    model: Bridge.frameIds
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                    delegate: Rectangle {
+                        id: idRow
+                        readonly property bool narrow: ListView.view !== null
+                                                       && ListView.view.width < 480
+                        width: ListView.view !== null ? ListView.view.width : 0
+                        height: Math.max(Theme.rowHeight, idPayload.implicitHeight + 8)
+                        radius: 4
+                        color: "transparent"
+
+                        required property var model
+                        required property int index
+
+                        // A tap reads this ID's frames: the filter takes it
+                        MouseArea {
+                            objectName: "idRowArea"
+                            anchors.fill: parent
+                            onClicked: page.showIdFrames(idRow.model.arbId, idRow.model.extended)
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 8
+                            Label {
+                                text: "0x" + idRow.model.arbId.toString(16).toUpperCase()
+                                      + (idRow.model.extended ? " E" : "")
+                                color: Theme.text
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: 104
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: idRow.model.frames
+                                color: Theme.textDim
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: 52
+                            }
+                            Label {
+                                text: page.rateText(idRow.model.rate)
+                                color: Theme.textDim
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.preferredWidth: 52
+                            }
+                            Label {
+                                id: idPayload
+                                text: idRow.model.payloadHex
+                                color: Theme.text
+                                font.family: Theme.monoFamily; font.pixelSize: 12
+                                Layout.fillWidth: true
+                                wrapMode: idRow.narrow ? Text.Wrap : Text.NoWrap   // between bytes
+                                elide: idRow.narrow ? Text.ElideNone : Text.ElideRight
+                            }
+                        }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        visible: idList.count === 0
+                        text: Bridge.model.heldCount > 0 ? qsTr("No frame the filter shows")
+                                                         : qsTr("No frames yet")
+                        color: Theme.textDim
+                    }
                 }
             }
         }

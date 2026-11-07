@@ -807,6 +807,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
+        ../app/framefilter.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -865,6 +866,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/framefilter.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
