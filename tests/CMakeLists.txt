@@ -592,6 +592,15 @@ if(TARGET havne-cli)
         app_cli_golden(ViewLeavesOutARecordingItCantAlign view-unaligned.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
                --align-on rise:RPM:2010 --hysteresis 30 --columns 2 --signal RPM)
+        # A vehicle's baseline (ADR-0049's appendix of 2026-11-06): two key
+        # ons at 0 rpm and their starts 7 s apart (start-early's unit
+        # "RPM", start-late's "rpm"), lined up on their engine starts, and
+        # a pull whose engine runs from its first sample, found nowhere
+        app_cli_golden(ViewAlignsOnTheEngineStarts view-engine-start.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/start-early
+               ${_cli_pulls}/start-late ${_cli_pulls}/pull-early
+               --align-on engine-start --from -6 --to 4 --columns 10
+               --at 0.5 --signal RPM)
         app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
         # view --frames (ADR-0049's appendix of 2026-11-06): a SocketCAN
@@ -740,6 +749,9 @@ if(TARGET havne-cli)
         "view|x|--align-on|marker:pull|--hysteresis|5")
     app_cli_usage(ViewANegativeHysteresisIsUsage
         "view|x|--align-on|rise:RPM:1|--hysteresis|-1")
+    app_cli_usage(ViewHysteresisWithAnEngineStartIsUsage
+        "view|x|--align-on|engine-start|--hysteresis|400")
+    app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
     app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
     app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
     app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")

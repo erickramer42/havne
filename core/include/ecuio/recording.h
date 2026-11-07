@@ -293,9 +293,16 @@ _Static_assert(sizeof(ecuio_recording_column_t) == 24,
                "ecuio_recording_column_t size is ABI");
 #endif
 
-/* ecuio_recording_find_t.kind */
-#define ECUIO_RECORDING_FIND_THRESHOLD 1u
-#define ECUIO_RECORDING_FIND_MARKER    2u
+/* ecuio_recording_find_t.kind: an engine start is the engine speed
+ * rising from a stop (ecuio_recording_find) */
+#define ECUIO_RECORDING_FIND_THRESHOLD    1u
+#define ECUIO_RECORDING_FIND_MARKER       2u
+#define ECUIO_RECORDING_FIND_ENGINE_START 3u
+/* An engine start's levels, in rpm: the engine-speed signal reaching
+ * ECUIO_ENGINE_START_RPM after being below ECUIO_ENGINE_STOPPED_RPM. A
+ * starter cranks an engine at 150-300 rpm, and an idle runs past 500. */
+#define ECUIO_ENGINE_START_RPM   500
+#define ECUIO_ENGINE_STOPPED_RPM 100
 /* ecuio_recording_find_t.direction, for a threshold */
 #define ECUIO_RECORDING_FIND_RISING  1u /* reaches level after being below
                                            level - hysteresis */
@@ -485,12 +492,22 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
 
 /*
  * The first time at or after from_us that what describes: a threshold's
- * sample reaching its level, counting only samples from from_us on, or
- * a marker with the label. Nothing found is ECUIO_OK with *at_us
+ * sample reaching its level, counting only samples from from_us on, a
+ * marker with the label, or an engine start. An engine start is the
+ * engine-speed signal's rising threshold at ECUIO_ENGINE_START_RPM with
+ * a hysteresis of ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM: a
+ * sample below ECUIO_ENGINE_STOPPED_RPM arms it, so a recording that
+ * starts with the engine running finds nothing until a later start. The
+ * engine-speed signal is the number signal whose unit is "rpm", ASCII
+ * case ignored (obd2's and the mock's say "RPM"): of several, the one of
+ * the lowest nonzero plot_rank, else the first in the recording's order;
+ * with none, nothing is found. Its signal, direction, level and
+ * hysteresis are 0. Nothing found is ECUIO_OK with *at_us
  * ECUIO_RECORDING_NONE. ECUIO_ERR_INVALID_ARGUMENT also for an unknown
  * kind or direction, a negative or NaN hysteresis, nonzero flags or
- * reserved, or a threshold on a text signal; ECUIO_ERR_NULL_ARGUMENT for
- * a marker's NULL label.
+ * reserved, a threshold on a text signal, or an engine start with a
+ * nonzero signal, direction, level or hysteresis;
+ * ECUIO_ERR_NULL_ARGUMENT for a marker's NULL label.
  */
 ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                                     const ecuio_recording_find_t* what,

@@ -1675,49 +1675,17 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
     }
 }
 
-ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
-                                    const ecuio_recording_find_t* what,
-                                    uint64_t from_us, uint64_t* at_us)
+namespace {
+
+/* The first sample of a number signal from from_us on that reaches level
+ * (rising: at or above it; falling: at or below) after a sample past
+ * hysteresis from it (rising: below level - hysteresis) armed it */
+ecuio_status_t find_crossing(const ecuio_recording_t* r, uint32_t signal,
+                             bool rising, double level, double hysteresis,
+                             uint64_t from_us, uint64_t* at_us)
 {
-    if (r == nullptr || what == nullptr || at_us == nullptr) {
-        return ECUIO_ERR_NULL_ARGUMENT;
-    }
-    for (uint64_t v : what->reserved) {
-        if (v != 0) {
-            return ECUIO_ERR_INVALID_ARGUMENT;
-        }
-    }
-    if (what->flags != 0) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
-    *at_us = ECUIO_RECORDING_NONE;
-    if (what->kind == ECUIO_RECORDING_FIND_MARKER) {
-        if (what->label_utf8 == nullptr) {
-            return ECUIO_ERR_NULL_ARGUMENT;
-        }
-        for (const marker_entry& m : r->markers) {
-            if (m.host_us >= from_us && m.label == what->label_utf8) {
-                *at_us = m.host_us;
-                break;
-            }
-        }
-        return ECUIO_OK;
-    }
-    if (what->kind != ECUIO_RECORDING_FIND_THRESHOLD ||
-        what->signal >= r->signals.size() ||
-        (what->direction != ECUIO_RECORDING_FIND_RISING &&
-         what->direction != ECUIO_RECORDING_FIND_FALLING) ||
-        !(what->hysteresis >= 0.0) || std::isnan(what->level)) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
-    const signal_entry& s = r->signals[what->signal];
-    if (s.text()) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
-    const bool rising = what->direction == ECUIO_RECORDING_FIND_RISING;
-    const double level = what->level;
-    const double arm_at =
-        rising ? level - what->hysteresis : level + what->hysteresis;
+    const signal_entry& s = r->signals[signal];
+    const double arm_at = rising ? level - hysteresis : level + hysteresis;
     auto arms = [&](double v) { return rising ? v < arm_at : v > arm_at; };
     auto fires = [&](double v) { return rising ? v >= level : v <= level; };
     bool armed = false;
@@ -1750,7 +1718,7 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                 return rc;
             }
             for (const raw_row& row : *rows) {
-                if (row.signal != what->signal || row.host_us < from_us) {
+                if (row.signal != signal || row.host_us < from_us) {
                     continue;
                 }
                 if (armed && fires(row.value)) {
@@ -1766,6 +1734,101 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+}
+
+/* "rpm" in any ASCII case, the whole unit */
+bool is_rpm(const char* unit)
+{
+    static const char kRpm[] = "rpm";
+    for (size_t i = 0; i < sizeof kRpm; ++i) {
+        char c = unit[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (c != kRpm[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The engine-speed signal: a number signal in rpm, the lowest nonzero
+ * rank among several, else the first; UINT32_MAX with none */
+uint32_t engine_speed_signal(const ecuio_recording_t* r)
+{
+    uint32_t best = UINT32_MAX;
+    for (uint32_t k = 0; k < r->signals.size(); ++k) {
+        const signal_entry& s = r->signals[k];
+        if (s.text() || !is_rpm(s.pub.unit)) {
+            continue;
+        }
+        const uint8_t rank = s.pub.plot_rank;
+        if (best == UINT32_MAX ||
+            (rank != 0 && (r->signals[best].pub.plot_rank == 0 ||
+                           rank < r->signals[best].pub.plot_rank))) {
+            best = k;
+        }
+    }
+    return best;
+}
+
+} // namespace
+
+ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
+                                    const ecuio_recording_find_t* what,
+                                    uint64_t from_us, uint64_t* at_us)
+{
+    if (r == nullptr || what == nullptr || at_us == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    for (uint64_t v : what->reserved) {
+        if (v != 0) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    if (what->flags != 0) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *at_us = ECUIO_RECORDING_NONE;
+    if (what->kind == ECUIO_RECORDING_FIND_MARKER) {
+        if (what->label_utf8 == nullptr) {
+            return ECUIO_ERR_NULL_ARGUMENT;
+        }
+        for (const marker_entry& m : r->markers) {
+            if (m.host_us >= from_us && m.label == what->label_utf8) {
+                *at_us = m.host_us;
+                break;
+            }
+        }
+        return ECUIO_OK;
+    }
+    if (what->kind == ECUIO_RECORDING_FIND_ENGINE_START) {
+        /* A NaN is refused too: it equals nothing */
+        if (what->signal != 0 || what->direction != 0 || what->level != 0.0 ||
+            what->hysteresis != 0.0) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        const uint32_t rpm = engine_speed_signal(r);
+        if (rpm == UINT32_MAX) {
+            return ECUIO_OK;
+        }
+        return find_crossing(r, rpm, true, ECUIO_ENGINE_START_RPM,
+                             ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM,
+                             from_us, at_us);
+    }
+    if (what->kind != ECUIO_RECORDING_FIND_THRESHOLD ||
+        what->signal >= r->signals.size() ||
+        (what->direction != ECUIO_RECORDING_FIND_RISING &&
+         what->direction != ECUIO_RECORDING_FIND_FALLING) ||
+        !(what->hysteresis >= 0.0) || std::isnan(what->level)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (r->signals[what->signal].text()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    return find_crossing(r, what->signal,
+                         what->direction == ECUIO_RECORDING_FIND_RISING,
+                         what->level, what->hysteresis, from_us, at_us);
 }
 
 void ecuio_recording_close(ecuio_recording_t* r)

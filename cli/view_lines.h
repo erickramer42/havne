@@ -28,10 +28,11 @@
 namespace cli {
 
 // --align-on: rise:<signal>:<level>, fall:<signal>:<level>,
-// marker:<label> or utc. The level is the last colon's: a signal's name
-// may hold one.
+// marker:<label>, utc or engine-start (the rpm signal reaching 500
+// after being below 100, core's ECUIO_RECORDING_FIND_ENGINE_START). The
+// level is the last colon's: a signal's name may hold one.
 struct AlignOn {
-    enum Kind { none, rise, fall, marker, utc };
+    enum Kind { none, rise, fall, marker, utc, engine_start };
     Kind kind = none;
     std::string signal;
     std::string label;
@@ -63,6 +64,8 @@ inline bool parse_align_on(const char* text, AlignOn& out)
     AlignOn a;
     if (s == "utc") {
         a.kind = AlignOn::utc;
+    } else if (s == "engine-start") {
+        a.kind = AlignOn::engine_start;
     } else if (s.rfind("marker:", 0) == 0 && s.size() > 7) {
         a.kind = AlignOn::marker;
         a.label = s.substr(7);

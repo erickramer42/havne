@@ -22,12 +22,14 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
+#include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 #include "recording_rows.h" /* core/src */
 #include "sha256.h"         /* core/src */
@@ -758,6 +760,267 @@ TEST(RecordingTest, HysteresisKeepsANoisyLevelFromCountingTwice)
     EXPECT_EQ(r.find(falling, 0), 3800000u) << "armed only by 1110";
     EXPECT_EQ(r.find(threshold(0, 1000, 0, ECUIO_RECORDING_FIND_FALLING), 0),
               1300000u);
+}
+
+namespace {
+
+ecuio_recording_find_t engine_start()
+{
+    ecuio_recording_find_t f{};
+    f.kind = ECUIO_RECORDING_FIND_ENGINE_START;
+    return f;
+}
+
+/* signals.csv's rows of one signal: { host_us, value } each */
+std::string rows_of(const char* name, const char* unit,
+                    const std::vector<std::pair<uint64_t, double>>& samples)
+{
+    std::string s;
+    for (const auto& p : samples) {
+        char buf[128];
+        std::snprintf(buf, sizeof buf, "%llu,%s,%.12g,%s\n",
+                      static_cast<unsigned long long>(p.first), name, p.second,
+                      unit);
+        s += buf;
+    }
+    return s;
+}
+
+} // namespace
+
+/* The engine starting: key on at 0 rpm, the starter's 220, the catch;
+ * a dip to 450 while it runs is no start, a stall to 40 and a restart
+ * is the next. obd2's and the mock's unit is "RPM" */
+TEST(RecordingTest, AnEngineStartIsTheRpmRisingFromAStop)
+{
+    Folder f;
+    f.write("events.log",
+            events_v2({"Coolant,number,°C,0,1", "RPM,number,RPM,0,2"}));
+    f.write("signals.csv", std::string(kBom) + rows::kSignalsHeader + "\n" +
+                               rows_of("Coolant", "°C", {{50000, 20}}) +
+                               rows_of("RPM", "RPM",
+                                       {{100000, 0},
+                                        {1100000, 0},
+                                        {2100000, 0},
+                                        {3000000, 220},
+                                        {3100000, 240},
+                                        {3200000, 499.75},
+                                        {3300000, 900},
+                                        {4300000, 850},
+                                        {5300000, 450},
+                                        {5400000, 860},
+                                        {6300000, 40},
+                                        {7300000, 0},
+                                        {8300000, 230},
+                                        {8400000, 760}}));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.find(engine_start(), 0), 3300000u);
+    EXPECT_EQ(r.find(engine_start(), 3300000), 8400000u)
+        << "a sample before from_us arms nothing";
+    EXPECT_EQ(r.find(engine_start(), 3300001), 8400000u)
+        << "450 isn't a stop; 40 is";
+    EXPECT_EQ(r.find(engine_start(), 6300001), 8400000u)
+        << "the stop's own sample arms it";
+    EXPECT_EQ(r.find(engine_start(), 8400001), ECUIO_RECORDING_NONE);
+    /* It is the rising threshold at 500 with 400 of hysteresis */
+    EXPECT_EQ(
+        r.find(threshold(1, ECUIO_ENGINE_START_RPM,
+                         ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM,
+                         ECUIO_RECORDING_FIND_RISING),
+               3300001),
+        8400000u);
+}
+
+/* A recording that starts with the engine running finds nothing until it
+ * stops and starts again; one with a stop at exactly 100 rpm, nothing:
+ * the stop is below it */
+TEST(RecordingTest, AnEngineAlreadyRunningIsNoStart)
+{
+    Folder f;
+    f.write("events.log", events_v2({"RPM,number,rpm,0,1"}));
+    f.write("signals.csv", std::string(kBom) + rows::kSignalsHeader + "\n" +
+                               rows_of("RPM", "rpm",
+                                       {{100000, 820},
+                                        {1100000, 3000},
+                                        {2100000, 100},
+                                        {3100000, 900},
+                                        {4100000, 99.75},
+                                        {5100000, 800}}));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.find(engine_start(), 0), 5100000u);
+    EXPECT_EQ(r.find(engine_start(), 4100001), ECUIO_RECORDING_NONE);
+}
+
+/* No number signal in rpm: no engine start, whatever the names say. A
+ * text signal in rpm isn't one, nor is a unit that only starts so */
+TEST(RecordingTest, NoSignalInRpmFindsNoEngineStart)
+{
+    Folder f;
+    f.write("events.log",
+            events_v2({"RPM,number,r/min,0,1", "Note,text,rpm,0,0",
+                       "Speed,number,rpms,0,2", "Shaft,number,rp,0,3"}));
+    f.write("signals.csv", std::string(kBom) + rows::kSignalsHeader + "\n" +
+                               rows_of("RPM", "r/min", {{100000, 0}}) +
+                               rows_of("Note", "rpm", {{150000, 0}}) +
+                               rows_of("Speed", "rpms", {{160000, 0}}) +
+                               rows_of("Shaft", "rp", {{170000, 0}}) +
+                               rows_of("RPM", "r/min", {{200000, 900}}) +
+                               rows_of("Note", "rpm", {{250000, 900}}) +
+                               rows_of("Speed", "rpms", {{260000, 900}}) +
+                               rows_of("Shaft", "rp", {{270000, 900}}));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.find(engine_start(), 0), ECUIO_RECORDING_NONE);
+}
+
+/* Of several signals in rpm, the one ranked first among the ranked; with
+ * none ranked, the first in the recording's order */
+TEST(RecordingTest, TheEngineSpeedIsTheBestRankedSignalInRpm)
+{
+    const std::string starts = rows_of("Fan", "rpm", {{100000, 0}}) +
+                               rows_of("Turbo", "RPM", {{110000, 0}}) +
+                               rows_of("Engine", "Rpm", {{120000, 0}}) +
+                               rows_of("Fan", "rpm", {{1000000, 900}}) +
+                               rows_of("Turbo", "RPM", {{2000000, 900}}) +
+                               rows_of("Engine", "Rpm", {{3000000, 900}});
+    {
+        Folder f;
+        f.write("events.log",
+                events_v2({"Fan,number,rpm,0,0", "Turbo,number,RPM,0,3",
+                           "Engine,number,Rpm,0,2"}));
+        f.write("signals.csv",
+                std::string(kBom) + rows::kSignalsHeader + "\n" + starts);
+        Reader r(f.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        EXPECT_EQ(r.find(engine_start(), 0), 3000000u) << "rank 2 over 3 and 0";
+    }
+    {
+        Folder f;
+        f.write("events.log",
+                events_v2({"Fan,number,rpm,0,0", "Turbo,number,RPM,0,0",
+                           "Engine,number,Rpm,0,0"}));
+        f.write("signals.csv",
+                std::string(kBom) + rows::kSignalsHeader + "\n" + starts);
+        Reader r(f.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        EXPECT_EQ(r.find(engine_start(), 0), 1000000u)
+            << "none ranked: the first";
+    }
+    {
+        /* A text signal in rpm is none, ranked first or not */
+        Folder f;
+        f.write("events.log",
+                events_v2({"Note,text,rpm,0,1", "Engine,number,rpm,0,0"}));
+        f.write("signals.csv", std::string(kBom) + rows::kSignalsHeader + "\n" +
+                                   rows_of("Note", "rpm", {{50000, 0}}) +
+                                   rows_of("Engine", "rpm", {{100000, 0}}) +
+                                   rows_of("Note", "rpm", {{500000, 900}}) +
+                                   rows_of("Engine", "rpm", {{1000000, 900}}));
+        Reader r(f.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        EXPECT_EQ(r.find(engine_start(), 0), 1000000u) << "the number signal";
+    }
+}
+
+/* An engine start takes no signal, direction, level or hysteresis */
+TEST(RecordingTest, AnEngineStartRefusesWhatItDoesntTake)
+{
+    Folder f;
+    f.write("events.log", events_v2({"RPM,number,rpm,0,1"}));
+    f.write("signals.csv",
+            std::string(kBom) + rows::kSignalsHeader + "\n" +
+                rows_of("RPM", "rpm", {{100000, 0}, {200000, 900}}));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    uint64_t at = 0;
+    const auto refused = [&](ecuio_recording_find_t what) {
+        return ecuio_recording_find(r.r, &what, 0, &at) ==
+               ECUIO_ERR_INVALID_ARGUMENT;
+    };
+    ecuio_recording_find_t bad = engine_start();
+    bad.signal = 1;
+    EXPECT_TRUE(refused(bad)) << "a signal";
+    bad = engine_start();
+    bad.direction = ECUIO_RECORDING_FIND_RISING;
+    EXPECT_TRUE(refused(bad)) << "a direction";
+    bad = engine_start();
+    bad.level = ECUIO_ENGINE_START_RPM;
+    EXPECT_TRUE(refused(bad)) << "a level";
+    bad.level = NAN;
+    EXPECT_TRUE(refused(bad)) << "a NaN level";
+    bad = engine_start();
+    bad.hysteresis = 400;
+    EXPECT_TRUE(refused(bad)) << "a hysteresis";
+    bad = engine_start();
+    bad.flags = 1;
+    EXPECT_TRUE(refused(bad)) << "a flag";
+    bad = engine_start();
+    bad.reserved[0] = 1;
+    EXPECT_TRUE(refused(bad)) << "a reserved word";
+    bad = engine_start();
+    bad.kind = ECUIO_RECORDING_FIND_ENGINE_START + 1;
+    EXPECT_TRUE(refused(bad)) << "the kind after it";
+    const ecuio_recording_find_t ok = engine_start();
+    EXPECT_EQ(ecuio_recording_find(r.r, &ok, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recording_find(nullptr, &ok, 0, &at),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(r.find(ok, 0), 200000u);
+}
+
+/* The mock's drive cycle as recorded: 15 s of key on at 0 rpm, then the
+ * start (the starter at about 220 rpm, the catch), found where its RPM
+ * first reaches 500 */
+TEST(RecordingTest, AMockRecordingsEngineStartIsAfterItsKeyOn)
+{
+    Folder root;
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &session), ECUIO_OK);
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+    char folder[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(session, rec), ECUIO_OK);
+    /* The RPM seen, so the wait ends once the engine runs */
+    std::atomic<double> rpm{0};
+    auto on_values = [](const ecuio_value_batch_t* b, void* user) {
+        for (uint32_t i = 0; i < b->count; ++i) {
+            if (b->values[i].signal_id == ECUIO_MOCK_SIG_RPM_ID) {
+                static_cast<std::atomic<double>*>(user)->store(
+                    b->values[i].value);
+            }
+        }
+    };
+    ASSERT_EQ(ecuio_register_values_callback(session, on_values, &rpm),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    const bool ran = eventually([&] { return rpm.load() >= 700; }, 40000);
+    ecuio_session_destroy(session);
+    ASSERT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+    ASSERT_TRUE(ran) << "the mock's engine starts after its key on";
+
+    Reader r(folder);
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const uint32_t k = r.index_of("RPM");
+    EXPECT_STREQ(r.signal(k).unit, "RPM");
+    const uint64_t at = r.find(engine_start(), 0);
+    ASSERT_NE(at, ECUIO_RECORDING_NONE);
+    EXPECT_GE(at, 15000000u) << "after the key on";
+    uint64_t sample = 0;
+    EXPECT_GE(std::stod(r.text_at(k, at, &sample)), 500.0);
+    EXPECT_EQ(sample, at);
+    EXPECT_LT(std::stod(r.text_at(k, at - 1, &sample)), 500.0)
+        << "the sample before it hadn't reached 500";
+    EXPECT_EQ(r.find(threshold(k, 500, 400, ECUIO_RECORDING_FIND_RISING), 0),
+              at);
+    EXPECT_EQ(r.find(engine_start(), at + 1), ECUIO_RECORDING_NONE);
 }
 
 TEST(RecordingTest, ConcurrentQueriesOnOneHandleAgree)
