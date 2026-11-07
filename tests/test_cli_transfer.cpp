@@ -250,4 +250,41 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "\"utc_start_us\":1793883802250000,\"duration_us\":3500000}");
 }
 
+// Paths at their longest escape (every byte a control character's six)
+// still fit the lines they size, so a line is never cut or dropped
+TEST(CliTransferTest, LongPathsFitTheirLines)
+{
+    const std::string path(4000, '\x01');
+    std::string escaped;
+    for (size_t i = 0; i < path.size(); ++i) {
+        escaped += "\\u0001";
+    }
+    cli::ExportArgs ex;
+    ex.folder = "rec";
+    ex.out = path.c_str();
+    ex.format_word = "folder";
+    ex.options.format = ECUIO_EXPORT_FOLDER;
+    ecuio_export_report_t r{};
+    std::vector<char> eb(cli::exported_line_bytes(ex));
+    cli::Line e(eb.data(), eb.size());
+    cli::exported_line(e, ex, r);
+    ASSERT_TRUE(e.finish());
+    EXPECT_NE(text(e).find("\"file\":\"" + escaped + "\""), std::string::npos);
+    EXPECT_NE(text(e).find("\"activity\":0}}"), std::string::npos);
+
+    cli::ImportArgs im;
+    im.folder = path.c_str();
+    im.interface_name = path.c_str();
+    im.options.format = ECUIO_IMPORT_CANDUMP;
+    ecuio_import_report_t ir{};
+    std::vector<char> ib(cli::imported_line_bytes(im));
+    cli::Line i(ib.data(), ib.size());
+    cli::imported_line(i, im, ir);
+    ASSERT_TRUE(i.finish());
+    EXPECT_NE(text(i).find("\"folder\":\"" + escaped + "\",\"interface\":\"" +
+                           escaped + "\""),
+              std::string::npos);
+    EXPECT_NE(text(i).find("\"duration_us\":0}"), std::string::npos);
+}
+
 } // namespace

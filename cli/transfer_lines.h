@@ -179,6 +179,21 @@ inline const char* left_out_word(uint32_t cls)
     }
 }
 
+// The bytes exported_line (or export_failed_line) needs: its counts and
+// keys, and the file's path at its longest escape
+inline size_t exported_line_bytes(const ExportArgs& a)
+{
+    return 1024 + Line::string_bytes(a.out) + Line::string_bytes(a.format_word);
+}
+
+// The bytes imported_line needs: its counts and keys, the folder's path
+// and the interface's name at their longest escapes
+inline size_t imported_line_bytes(const ImportArgs& a)
+{
+    return 1024 + Line::string_bytes(a.folder) +
+           Line::string_bytes(a.interface_name);
+}
+
 // {"type":"exported","format":...,"file":...,"scrubbed":...,"frames":N,
 //  "made_up":N,"left_out":{"identification":N,...}}; csv and folder add
 //  "values":N and "signals":N after made_up, folder then "files":N and

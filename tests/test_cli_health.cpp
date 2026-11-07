@@ -230,4 +230,27 @@ TEST(CliHealthTest, TheLinesCarryCountsAndNoIdentity)
               "{\"type\":\"health_failed\",\"class\":\"identification\"}\n");
 }
 
+// A path at its longest escape (every byte a control character's six)
+// still fits the line it sizes, so the line is never cut or dropped
+TEST(CliHealthTest, ALongPathFitsItsLine)
+{
+    const std::string path(4000, '\x01');
+    std::string escaped;
+    for (size_t i = 0; i < path.size(); ++i) {
+        escaped += "\\u0001";
+    }
+    cli::HealthArgs h;
+    h.out = path.c_str();
+    h.format_word = "json";
+    h.live = true;
+    ecuio_health_report_t r{};
+    r.ecus = UINT32_MAX;
+    std::vector<char> buf(cli::health_line_bytes(h));
+    cli::Line l(buf.data(), buf.size());
+    cli::health_line(l, h, r, true);
+    const std::string t = text_of(l);
+    EXPECT_NE(t.find("\"file\":\"" + escaped + "\""), std::string::npos);
+    EXPECT_NE(t.find("\"settled\":true}"), std::string::npos);
+}
+
 } // namespace

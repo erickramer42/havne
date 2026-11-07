@@ -1,7 +1,7 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
 //          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest,
-//          CliTransferRunTest (ctest);
+//          CliTransferRunTest, CliExitTest (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
 //          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest
 //          (test_cli); BENCH
@@ -265,6 +265,16 @@ void write_line(Output& out, cli::Line& l)
     if (l.finish()) {
         out.write(l.data(), l.size());
     }
+}
+
+// A command's last word: its output flushed, then its exit, or 1 when a
+// write failed (a closed pipe stays quiet, as ok() says). Every return
+// after the output began goes through it, so a write that fails only at
+// the flush is never a quiet 0
+int ended(Output& out, int code)
+{
+    out.flush();
+    return out.ok() ? code : kExitFailed;
 }
 
 // A recording's signal line (view's and info's), an enum's labels on it
@@ -1090,7 +1100,7 @@ int run_signals_check(const char* path)
     write_check_lines(out, file);
     ecuio_signal_file_free(file);
     out.flush();
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 // A plugin loaded for the process's life (stream --plugin, sim --plugin):
@@ -1108,6 +1118,18 @@ bool is_folder(const char* path)
 #else
     struct stat st{};
     return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+// Whether path names a file, not a folder
+bool is_file(const char* path)
+{
+#ifdef _WIN32
+    const DWORD a = GetFileAttributesW(wide(path).c_str());
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
+#else
+    struct stat st{};
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 #endif
 }
 
@@ -1325,7 +1347,7 @@ int run_plugins_match(const char* path, const char* typed)
     }
     ecuio_plugin_free(p);
     out.flush();
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 // A fixture entry and what its run found
@@ -1706,7 +1728,7 @@ int run_signals_import(const ImportArgs& args)
         ecuio_signal_file_free(file);
     }
     out.flush();
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 // What the callbacks share with the main thread
@@ -2557,7 +2579,7 @@ int run_clear_command(const char* uri, uint32_t flags)
         cli::run_clear(session, channels, flags, io, kClearWait);
     ecuio_session_destroy(session);
     if (out.failed) {
-        return out.ok() ? kExitOk : kExitFailed;
+        return ended(out, kExitOk);
     }
     char buf[256];
     cli::Line l(buf, sizeof buf);
@@ -2609,8 +2631,8 @@ int write_health_result(Output& out, const cli::HealthArgs& a,
                         ecuio_status_t rc, const ecuio_health_report_t& r,
                         bool settled)
 {
-    char buf[1024];
-    cli::Line l(buf, sizeof buf);
+    BigLine b(cli::health_line_bytes(a));
+    cli::Line& l = b.line;
     if (rc != ECUIO_OK) {
         if (r.failed_class != 0) {
             cli::health_failed_line(l, r);
@@ -2618,12 +2640,12 @@ int write_health_result(Output& out, const cli::HealthArgs& a,
         }
         write_error(out, rc);
         out.flush();
-        return out.ok() ? kExitConnect : kExitFailed;
+        return ended(out, kExitConnect);
     }
     cli::health_line(l, a, r, settled);
     write_line(out, l);
     out.flush();
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 // A recording's report: core reads the folder, the CLI gives the time
@@ -2828,14 +2850,22 @@ int run_sim_elm327(const SimArgs& args)
     (void)ecuio_sim_get_stats(sim, &s);
     ecuio_sim_destroy(sim);
     if (out.failed) {
-        return out.ok() ? kExitOk : kExitFailed;
+        return ended(out, kExitOk);
     }
     char buf[1024];
     cli::Line l(buf, sizeof buf);
     cli::sim_end_line(l, reason != nullptr ? reason : "failed", s);
     write_line(out, l);
     out.flush();
-    return reason != nullptr && out.ok() ? kExitOk : kExitFailed;
+    if (reason == nullptr) {
+        // The listener's wait failed: the end line says "failed", stderr why
+        std::fprintf(stderr, "havne-cli: %s\n",
+                     server.failure().empty() ? "the listener stopped"
+                                              : server.failure().c_str());
+        (void)out.ok();
+        return kExitFailed;
+    }
+    return ended(out, kExitOk);
 }
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
@@ -2897,7 +2927,7 @@ int run_sim(const SimArgs& args)
     }
     ecuio_sim_destroy(sim);
     if (out.failed) {
-        return out.ok() ? kExitOk : kExitFailed;
+        return ended(out, kExitOk);
     }
     char buf[1024];
     cli::Line l(buf, sizeof buf);
@@ -2919,7 +2949,7 @@ int run_sim(const SimArgs& args)
                      args.on);
         return kExitFailed;
     }
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 // A typed VIN's decode (ADR-0043), offline: spaces dropped and upper
@@ -2946,7 +2976,7 @@ int run_vin(const char* typed)
     cli::Line l(buf, sizeof buf);
     cli::vin_line(l, vin.c_str(), latest_model_year());
     write_line(out, l);
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 // A typed trouble code's title (ADR-0044), as Diagnostics' lookup takes
@@ -2972,7 +3002,7 @@ int run_dtc(const char* typed)
     cli::Line l(buf, sizeof buf);
     cli::dtc_line(l, code);
     write_line(out, l);
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 struct ViewArgs {
@@ -3063,6 +3093,13 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
             ecuio_recording_open(folder, nullptr, nullptr, r);
         *why = ecuio_last_error_detail();
         return st;
+    }
+    // A folder with no frames.csv (one that isn't there, too) is refused
+    // in the reader's words before a profile is asked for, as the app's
+    // viewer refuses it
+    if (!is_file((std::string(folder) + "/frames.csv").c_str())) {
+        *why = "the folder has no frames.csv";
+        return ECUIO_ERR_LOAD_FAILED;
     }
     const cli::RecordedSignals recorded = recorded_signals(folder);
     bool own = false;
@@ -3201,7 +3238,7 @@ int run_view(ViewArgs& args)
         if (rc != ECUIO_OK) {
             write_start(out);
             write_error(out, rc, why.c_str());
-            return out.ok() ? kExitConnect : kExitFailed;
+            return ended(out, kExitConnect);
         }
         Viewed& v = views[i];
         v.r.reset(r);
@@ -3311,7 +3348,7 @@ int run_view(ViewArgs& args)
                     write_start(out);
                     write_error(out, rc,
                                 "the recording changed while it was read");
-                    return out.ok() ? kExitConnect : kExitFailed;
+                    return ended(out, kExitConnect);
                 }
             }
             v.aligned = at != ECUIO_RECORDING_NONE;
@@ -3427,7 +3464,7 @@ int run_view(ViewArgs& args)
             }
             if (rc != ECUIO_OK) {
                 write_error(out, rc, "the recording changed while it was read");
-                return out.ok() ? kExitConnect : kExitFailed;
+                return ended(out, kExitConnect);
             }
         }
         for (size_t n = 0; n < v.shown.size(); ++n) {
@@ -3457,7 +3494,7 @@ int run_view(ViewArgs& args)
                     if (rc != ECUIO_OK) {
                         write_error(out, rc,
                                     "the recording changed while it was read");
-                        return out.ok() ? kExitConnect : kExitFailed;
+                        return ended(out, kExitConnect);
                     }
                 }
                 cli::at_value(b.line, n == 0, v.signals[v.shown[n]], host,
@@ -3467,7 +3504,7 @@ int run_view(ViewArgs& args)
             write_line(out, b.line);
         }
     }
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 int run_devices()
@@ -3531,7 +3568,7 @@ int run_devices()
         write_line(out, l);
     }
     out.flush();
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 #if HAVNE_CLI_PLAY
@@ -3765,7 +3802,7 @@ int run_play(const PlayArgs& args)
     l.ch('}');
     write_line(out, l);
     out.flush();
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 #endif
 
@@ -3795,7 +3832,7 @@ int run_info(const InfoArgs& args)
         } else {
             write_error(out, rc);
         }
-        return out.ok() ? kExitConnect : kExitFailed;
+        return ended(out, kExitConnect);
     }
 
     write_start(out);
@@ -3833,7 +3870,7 @@ int run_info(const InfoArgs& args)
     cli::Line l(buf, sizeof buf);
     cli::summary_line(l, summary, args.options);
     write_line(out, l);
-    return out.ok() ? kExitOk : kExitFailed;
+    return ended(out, kExitOk);
 }
 
 int run(int argc, char** argv)
@@ -4053,19 +4090,19 @@ int run(int argc, char** argv)
         write_start(out);
         ecuio_export_report_t report{};
         const ecuio_status_t rc = ecuio_export(&ex.options, &report);
-        char buf[1024];
-        cli::Line l(buf, sizeof buf);
+        BigLine b(cli::exported_line_bytes(ex));
+        cli::Line& l = b.line;
         if (rc != ECUIO_OK) {
             if (report.failed_class != 0) {
                 cli::export_failed_line(l, report);
                 write_line(out, l);
             }
             write_error(out, rc);
-            return out.ok() ? kExitConnect : kExitFailed;
+            return ended(out, kExitConnect);
         }
         cli::exported_line(l, ex, report);
         write_line(out, l);
-        return out.ok() ? kExitOk : kExitFailed;
+        return ended(out, kExitOk);
     }
     if (command == "import") {
         cli::ImportArgs im;
@@ -4084,7 +4121,7 @@ int run(int argc, char** argv)
             if (!read_whole(im.map_path, size_t{1} << 20, "column map", &map,
                             &why)) {
                 write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
-                return out.ok() ? kExitConnect : kExitFailed;
+                return ended(out, kExitConnect);
             }
             im.options.column_map_utf8 = map.c_str();
         }
@@ -4092,13 +4129,13 @@ int run(int argc, char** argv)
         const ecuio_status_t rc = ecuio_import(&im.options, &report);
         if (rc != ECUIO_OK) {
             write_error(out, rc);
-            return out.ok() ? kExitConnect : kExitFailed;
+            return ended(out, kExitConnect);
         }
-        char buf[1024];
-        cli::Line l(buf, sizeof buf);
+        BigLine b(cli::imported_line_bytes(im));
+        cli::Line& l = b.line;
         cli::imported_line(l, im, report);
         write_line(out, l);
-        return out.ok() ? kExitOk : kExitFailed;
+        return ended(out, kExitOk);
     }
     if (command == "play") {
 #if HAVNE_CLI_PLAY

@@ -214,6 +214,13 @@ private:
     uint64_t since_us_ = 0;
 };
 
+/* The bytes health_line (or health_failed_line) needs: its counts and
+ * keys, and the file's path at its longest escape */
+inline size_t health_line_bytes(const HealthArgs& a)
+{
+    return 1024 + Line::string_bytes(a.out) + Line::string_bytes(a.format_word);
+}
+
 /* {"type":"health","format":...,"file":...,"source":"session"|"recording",
  *  "ecus":N,"codes":N,"values":N,"since_cleared":N,
  *  "left_out":{"identification":N},"vin_decoded":bool}; a session's adds

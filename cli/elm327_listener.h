@@ -1,6 +1,7 @@
 // File/layer: cli/elm327_listener.h | havne-cli, the ELM327 emulator's
 //             TCP listener (ADR-0055); public headers only
-// Testing: HARNESS: CliElm327RunTest (tests/cli_elm327.py)
+// Testing: HARNESS: CliElm327RunTest (tests/cli_elm327.py); a failed wait
+//          by hand
 //
 // Serves cli/elm327_emulator.h on a TCP port, as a WiFi ELM327 adapter
 // does, at the address cli/elm327_lines.h parsed. One host at a time, as
@@ -19,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <system_error>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -122,6 +124,10 @@ public:
 
     const Elm327Address& address() const { return address_; }
 
+    /* Why serve() returned before stop() said so (its wait failed, in
+     * the system's words), or "" */
+    const std::string& failure() const { return failure_; }
+
     /* Serves until stop() says so, waking at least every poll_ms: a host
      * at a time, its bytes to emu, emu's bytes back when due (clock()
      * is emu's time); each connection and its end a line through
@@ -181,6 +187,7 @@ private:
     Socket client_ = kNone;
     std::string peer_;
     Elm327Address address_;
+    std::string failure_;
 #ifdef _WIN32
     bool started_ = false;
 #endif
@@ -217,6 +224,8 @@ private:
         timeval tv{ms / 1000, (ms % 1000) * 1000};
         const int got = select(0, &r, nullptr, nullptr, &tv);
         if (got == SOCKET_ERROR) {
+            failure_ = "the listener's wait failed: " +
+                       std::system_category().message(WSAGetLastError());
             return false;
         }
         *listener_ready = FD_ISSET(listener_, &r) != 0;
@@ -225,7 +234,12 @@ private:
         pollfd p[2] = {{listener_, POLLIN, 0}, {client_, POLLIN, 0}};
         const int got = poll(p, client_ != kNone ? 2 : 1, ms);
         if (got < 0) {
-            return errno == EINTR;
+            if (errno == EINTR) {
+                return true;
+            }
+            failure_ = "the listener's wait failed: " +
+                       std::generic_category().message(errno);
+            return false;
         }
         *listener_ready = (p[0].revents & POLLIN) != 0;
         *client_ready = client_ != kNone && p[1].revents != 0;

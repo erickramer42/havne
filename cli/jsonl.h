@@ -1,5 +1,6 @@
 // File/layer: cli/jsonl.h | havne-cli, JSON-lines formatting (ADR-0031 section 3)
-// Testing: UNIT (tests/test_cli.cpp, CliLineTest)
+// Testing: UNIT (tests/test_cli.cpp, CliLineTest; string_bytes: CliHealthTest,
+//          CliTransferTest)
 //
 // Builds one JSON line into a caller's fixed buffer: no allocation, so
 // the frame and values callbacks call it on core's worker. A field that
@@ -160,6 +161,15 @@ public:
         }
         m_buf[m_len++] = '"';
         return i;
+    }
+
+    // The most bytes string() writes for s, its quotes included: six a
+    // byte (a control character's \u00XX), or "null"'s four for none. A
+    // line holding a caller's text (a path) is sized from it, so a long
+    // one is never cut or dropped
+    static size_t string_bytes(const char* s)
+    {
+        return s != nullptr ? 2 + 6 * std::strlen(s) : 4;
     }
 
     // The line's end. False if anything didn't fit: drop the line.

@@ -376,6 +376,16 @@ if(TARGET havne-cli)
                     recording $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliHealthRunTest.recording PROPERTIES TIMEOUT 60)
+        # Output that fails only at its flush (standard output a file open
+        # for reading) is exit 1 with words, for each command that writes
+        # a few lines and returns
+        add_test(NAME CliExitTest.AFailedWriteIsExit1
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_write_fail.py
+                    $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliExitTest.AFailedWriteIsExit1 PROPERTIES TIMEOUT 120)
         # A candump -L log of the simulated car on vcan0 imported and read
         # through obd2: its values the direct session's (Linux; skipped
         # without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED; serial:
@@ -670,6 +680,12 @@ if(TARGET havne-cli)
             view-frames-no-profile.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
                --frames)
+        # A folder that isn't there: the reader's refusal (no frames.csv),
+        # not a profile to name, as the app's viewer says
+        app_cli_golden(ViewFramesRefusesAMissingFolder
+            view-frames-missing-folder.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view
+               ${CMAKE_CURRENT_BINARY_DIR}/never-there --frames)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
