@@ -100,12 +100,15 @@ public:
     void setNewestFirst(bool newestFirst);
 
     // The filter (framefilter.h's syntax): the ID and data fields' text,
-    // FrameFilter::Direction and FrameFilter::Flag. A field that doesn't
-    // parse keeps the filter in force as it was; the answer is { ids,
-    // data }, each "" or the words for its field. A change shows the
+    // FrameFilter::Direction, FrameFilter::Flag, and the length and time
+    // fields' text. A field that doesn't parse keeps its part of the
+    // filter in force as it was; the answer is { ids, data, lengths,
+    // times }, each "" or the words for its field. A change shows the
     // rows anew and lets the selection go
     Q_INVOKABLE QVariantMap setFilter(const QString& ids, const QString& data,
-                                      int direction, int flag);
+                                      int direction, int flag,
+                                      const QString& lengths = QString(),
+                                      const QString& times = QString());
     int filterTerms() const { return m_filter.terms(); }
     // The flags a row shows, in words, the ID's width left to its column:
     // "FD BRS", "reassembled", "truncated", "after a loss", "error",
@@ -204,7 +207,8 @@ private:
     void notifySelected(int first, int last);
     bool shows(const Row& r) const
     {
-        return m_filter.matches(r.arbId, r.flags, r.data(), r.length);
+        return m_filter.matches(r.arbId, r.flags, r.timestampUs, r.data(),
+                                r.length);
     }
     // The ring's row for an arrival number it holds
     const Row& rowOfArrival(quint64 seq) const
@@ -253,8 +257,11 @@ public:
         ArbIdRole = Qt::UserRole + 1,
         ExtendedRole,
         CountRole,
-        RateRole,       // frames a second, a double
-        PayloadRole     // the newest payload, spaced hex
+        RateRole,    // frames a second, a double
+        PayloadRole, // the newest payload, spaced hex
+        ChangedRole  // the newest payload's byte positions that differ from
+                     // the frame before it (a list of ints; past the
+                     // shorter payload, every byte); none with one frame
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -272,6 +279,7 @@ private:
         int count = 0;
         double rate = 0.0;
         QByteArray payload; // the newest
+        QVariantList changed;
     };
     const FrameListModel* m_frames;
     std::vector<IdRow> m_rows;

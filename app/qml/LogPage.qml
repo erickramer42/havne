@@ -41,14 +41,19 @@ Pane {
     // a field that doesn't parse and says why
     function applyFilter() {
         const r = Bridge.model.setFilter(filterIds.text, filterData.text,
-                                         page.filterDirection, filterFlag.currentIndex)
+                                         page.filterDirection, filterFlag.currentIndex,
+                                         filterLengths.text, filterTimes.text)
         filterIdsProblem.text = r.ids
         filterDataProblem.text = r.data
+        filterLengthsProblem.text = r.lengths
+        filterTimesProblem.text = r.times
     }
 
     function clearFilter() {
         filterIds.text = ""
         filterData.text = ""
+        filterLengths.text = ""
+        filterTimes.text = ""
         filterFlag.currentIndex = 0
         page.filterDirection = 0
         applyFilter()
@@ -69,6 +74,20 @@ Pane {
         applyFilter()
         page.filterOpen = true
         page.byId = false
+    }
+
+    // A By ID row's payload with the bytes that changed from the frame
+    // before marked, as styled text: the payload's spaced hex and the
+    // changed positions, both from the bridge
+    function markedPayload(hex, changed) {
+        if (!changed || changed.length === 0)
+            return hex
+        const bytes = hex.split(" ")
+        for (const at of changed) {
+            if (at < bytes.length)
+                bytes[at] = "<font color=\"" + Theme.warning + "\"><b>" + bytes[at] + "</b></font>"
+        }
+        return bytes.join(" ")
     }
 
     // Frames a second, as the By ID view shows them
@@ -431,6 +450,57 @@ Pane {
                     Layout.preferredWidth: 0   // the panel's width, not its text's
                 }
 
+                // The data length in bytes, and a span of the table's seconds
+                Label { text: qsTr("Length"); color: Theme.textDim; font.pixelSize: 13 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                    spacing: Theme.spacing
+                    TextField {
+                        id: filterLengths
+                        objectName: "filterLengths"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0   // half the row, not its text's
+                        placeholderText: qsTr("8, 1-7")
+                        font.family: Theme.monoFamily
+                        inputMethodHints: Qt.ImhPreferNumbers | Qt.ImhNoPredictiveText
+                        onTextEdited: page.applyFilter()
+                    }
+                    Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: 13 }
+                    TextField {
+                        id: filterTimes
+                        objectName: "filterTimes"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0   // half the row, not its text's
+                        placeholderText: qsTr("12.5-30")
+                        font.family: Theme.monoFamily
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly | Qt.ImhNoPredictiveText
+                        onTextEdited: page.applyFilter()
+                    }
+                }
+                Item { visible: filterLengthsProblem.visible }  // the label column, empty
+                Label {
+                    id: filterLengthsProblem
+                    objectName: "filterLengthsProblem"
+                    visible: text !== ""
+                    color: Theme.warning
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                }
+                Item { visible: filterTimesProblem.visible }  // the label column, empty
+                Label {
+                    id: filterTimesProblem
+                    objectName: "filterTimesProblem"
+                    visible: text !== ""
+                    color: Theme.warning
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the panel's width, not its text's
+                }
+
                 Flow {
                     Layout.columnSpan: 2
                     Layout.fillWidth: true
@@ -478,7 +548,8 @@ Pane {
                         objectName: "filterClear"
                         text: qsTr("Clear the filter")
                         enabled: Bridge.model.filterTerms > 0 || filterIds.text !== ""
-                                 || filterData.text !== ""
+                                 || filterData.text !== "" || filterLengths.text !== ""
+                                 || filterTimes.text !== ""
                         onClicked: page.clearFilter()
                     }
                 }
@@ -920,9 +991,14 @@ Pane {
                                 font.family: Theme.monoFamily; font.pixelSize: 12
                                 Layout.preferredWidth: 52
                             }
+                            // The bytes that changed from the ID's frame
+                            // before, in the warning color and bold
                             Label {
                                 id: idPayload
-                                text: idRow.model.payloadHex
+                                objectName: "idPayload"
+                                text: page.markedPayload(idRow.model.payloadHex,
+                                                         idRow.model.changedBytes)
+                                textFormat: Text.StyledText
                                 color: Theme.text
                                 font.family: Theme.monoFamily; font.pixelSize: 12
                                 Layout.fillWidth: true

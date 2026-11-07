@@ -9001,7 +9001,8 @@ bool passes(const QString& ids, const QString& data, uint32_t id,
     EXPECT_EQ(FrameFilter::parseIds(ids, &f.ids).toStdString(), "");
     EXPECT_EQ(FrameFilter::parseData(data, &f.data, &f.anchored).toStdString(), "");
     std::vector<uint8_t> payload(bytes);
-    return f.matches(id, flags, payload.data(), static_cast<int>(payload.size()));
+    return f.matches(id, flags, 0, payload.data(),
+                     static_cast<int>(payload.size()));
 }
 
 } // namespace
@@ -9085,11 +9086,11 @@ TEST(FrameFilterTest, AFrameMatchesEveryFieldInForce)
     FrameFilter f;
     f.direction = FrameFilter::Sent;
     const uint8_t b[] = {0x01};
-    EXPECT_FALSE(f.matches(0x7E0, 0, b, 1));
-    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, 0, 0, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, 0, b, 1));
     f.direction = FrameFilter::Received;
-    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
-    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, 0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, 0, b, 1));
     f.direction = FrameFilter::AnyDirection;
     const std::pair<int, uint32_t> flags[] = {
         {FrameFilter::Extended, ECUIO_FRAME_FLAG_EXTENDED},
@@ -9100,16 +9101,192 @@ TEST(FrameFilterTest, AFrameMatchesEveryFieldInForce)
         {FrameFilter::Error, ECUIO_FRAME_FLAG_ERROR}};
     for (const auto& [flag, bit] : flags) {
         f.flag = flag;
-        EXPECT_TRUE(f.matches(0x7E0, bit, b, 1)) << flag;
-        EXPECT_FALSE(f.matches(0x7E0, 0, b, 1)) << flag;
+        EXPECT_TRUE(f.matches(0x7E0, bit, 0, b, 1)) << flag;
+        EXPECT_FALSE(f.matches(0x7E0, 0, 0, b, 1)) << flag;
     }
     f.flag = FrameFilter::Standard;
-    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
-    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_EXTENDED, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, 0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_EXTENDED, 0, b, 1));
     EXPECT_EQ(f.terms(), 1);
     f.flag = FrameFilter::AnyFlag;
     EXPECT_EQ(f.terms(), 0);
-    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_ERROR, b, 1)) << "no filter";
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_ERROR, 0, b, 1))
+        << "no filter";
+}
+
+/* An ID under a mask, candump's can_id:can_mask: the ID's bits where
+ * the mask has ones. A value or mask past 0x7FF is an extended frame's;
+ * "/" is refused with the ":" form named */
+TEST(FrameFilterTest, TheIdFieldTakesAMaskAsCandumpWritesIt)
+{
+    std::vector<FrameFilter::IdRange> r;
+    EXPECT_EQ(FrameFilter::parseIds(
+                  QStringLiteral("7E0:7F8, 7DF, 0x18DAF100:0x1FFFFF00"), &r)
+                  .toStdString(),
+              "");
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_TRUE(r[0].masked);
+    EXPECT_EQ(r[0].first, 0x7E0u);
+    EXPECT_EQ(r[0].last, 0x7E0u);
+    EXPECT_EQ(r[0].mask, 0x7F8u);
+    EXPECT_FALSE(r[1].masked);
+    EXPECT_EQ(r[1].first, 0x7DFu);
+    EXPECT_EQ(r[2].mask, 0x1FFFFF00u);
+
+    EXPECT_EQ(
+        FrameFilter::parseIds(QStringLiteral("7E8, 7E0/7F8"), &r).toStdString(),
+        "\"7E0/7F8\": an ID and its mask take \":\", as in 7E0:7F8");
+    for (const char* bad :
+         {"7E0:", ":7F8", "7E0-7EF:7F8", "7E0:7F8:1", "7E0:20000000"}) {
+        EXPECT_EQ(
+            FrameFilter::parseIds(QString::fromLatin1(bad), &r).toStdString(),
+            "\"" + std::string(bad) +
+                "\" isn't a hex ID and mask like 7E0:7F8");
+    }
+    EXPECT_TRUE(r.empty());
+
+    for (uint32_t id = 0x7E0; id <= 0x7E7; ++id) {
+        EXPECT_TRUE(passes(QStringLiteral("7E0:7F8"), QString(), id, {0x01}))
+            << id;
+    }
+    EXPECT_FALSE(passes(QStringLiteral("7E0:7F8"), QString(), 0x7E8, {0x01}));
+    EXPECT_FALSE(passes(QStringLiteral("7E0:7F8"), QString(), 0x7D8, {0x01}));
+    EXPECT_TRUE(passes(QStringLiteral("7E5:7F8"), QString(), 0x7E2, {0x01}))
+        << "the value's bits outside the mask don't count";
+    EXPECT_TRUE(passes(QStringLiteral("7E0:7F8"), QString(), 0x7E3, {0x01},
+                       ECUIO_FRAME_FLAG_EXTENDED))
+        << "a 29-bit 0x7E3 is still 0x7E3";
+    EXPECT_TRUE(passes(QStringLiteral("18DAF100:1FFFFF00"), QString(),
+                       0x18DAF1E8, {0x01}, ECUIO_FRAME_FLAG_EXTENDED));
+    EXPECT_FALSE(passes(QStringLiteral("18DAF100:1FFFFF00"), QString(),
+                        0x18DAF2E8, {0x01}, ECUIO_FRAME_FLAG_EXTENDED));
+    // Past 0x7FF, the value or the mask: an extended frame's alone
+    EXPECT_FALSE(
+        passes(QStringLiteral("7E0:1FFFFFF8"), QString(), 0x7E0, {0x01}));
+    EXPECT_TRUE(passes(QStringLiteral("7E0:1FFFFFF8"), QString(), 0x7E0, {0x01},
+                       ECUIO_FRAME_FLAG_EXTENDED));
+    EXPECT_FALSE(
+        passes(QStringLiteral("18DA0000:0"), QString(), 0x7E0, {0x01}));
+    EXPECT_TRUE(passes(QStringLiteral("18DA0000:0"), QString(), 0x7E0, {0x01},
+                       ECUIO_FRAME_FLAG_EXTENDED))
+        << "mask 0 passes every ID";
+    EXPECT_TRUE(passes(QStringLiteral("7FF:0"), QString(), 0x123, {0x01}));
+}
+
+/* The length field: decimal lengths in bytes and ranges, commas between,
+ * against the frame's data length */
+TEST(FrameFilterTest, TheLengthFieldTakesCountsAndRanges)
+{
+    std::vector<FrameFilter::LengthRange> r;
+    EXPECT_EQ(FrameFilter::parseLengths(QStringLiteral(" 8, 1-3 ,0, 4096"), &r)
+                  .toStdString(),
+              "");
+    ASSERT_EQ(r.size(), 4u);
+    EXPECT_EQ(r[0].first, 8);
+    EXPECT_EQ(r[0].last, 8);
+    EXPECT_EQ(r[1].first, 1);
+    EXPECT_EQ(r[1].last, 3);
+    EXPECT_EQ(r[2].last, 0);
+    EXPECT_EQ(r[3].first, 4096);
+    EXPECT_EQ(FrameFilter::parseLengths(QStringLiteral("  "), &r).toStdString(),
+              "");
+    EXPECT_TRUE(r.empty());
+
+    EXPECT_EQ(
+        FrameFilter::parseLengths(QStringLiteral("8,,9"), &r).toStdString(),
+        "an empty item between commas");
+    for (const char* bad :
+         {"x", "4097", "-3", "3-", "1.5", "+8", "0x8", "8 9"}) {
+        EXPECT_EQ(
+            FrameFilter::parseLengths(QString::fromLatin1(bad), &r)
+                .toStdString(),
+            "\"" + std::string(bad) +
+                "\" isn't a length in bytes (up to 4096) or a range like 1-7");
+    }
+    EXPECT_EQ(
+        FrameFilter::parseLengths(QStringLiteral("8-1"), &r).toStdString(),
+        "\"8-1\" runs backward");
+    EXPECT_TRUE(r.empty());
+
+    FrameFilter f;
+    ASSERT_EQ(FrameFilter::parseLengths(QStringLiteral("2-3, 8"), &f.lengths)
+                  .toStdString(),
+              "");
+    const uint8_t b[8] = {};
+    EXPECT_FALSE(f.matches(0x7E8, 0, 0, b, 1));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 2));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 3));
+    EXPECT_FALSE(f.matches(0x7E8, 0, 0, b, 4));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 8));
+    EXPECT_FALSE(f.matches(0x7E8, 0, 0, b, 0));
+    EXPECT_EQ(f.terms(), 1);
+}
+
+/* The time field: one range of the table's seconds, both ends in it,
+ * either end left open */
+TEST(FrameFilterTest, TheTimeFieldTakesARangeOfSeconds)
+{
+    FrameFilter::TimeRange r;
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral(" 12.5 - 30 "), &r)
+                  .toStdString(),
+              "");
+    EXPECT_TRUE(r.set);
+    EXPECT_EQ(r.first, 12500000u);
+    EXPECT_EQ(r.last, 30000000u);
+    EXPECT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("12.5-"), &r).toStdString(), "");
+    EXPECT_EQ(r.first, 12500000u);
+    EXPECT_EQ(r.last, UINT64_MAX);
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral("-.25"), &r).toStdString(),
+              "");
+    EXPECT_EQ(r.first, 0u);
+    EXPECT_EQ(r.last, 250000u);
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral("1.000001-2."), &r)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(r.first, 1000001u);
+    EXPECT_EQ(r.last, 2000000u);
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral("  "), &r).toStdString(),
+              "");
+    EXPECT_FALSE(r.set);
+
+    for (const char* bad : {"-", "12", "1-2-3", "a-3", "+1-3", "1e3-", "1,2-3",
+                            "1-2,3", "3600000001-"}) {
+        EXPECT_EQ(
+            FrameFilter::parseTimes(QString::fromLatin1(bad), &r).toStdString(),
+            "\"" + std::string(bad) +
+                "\" isn't a range of seconds like 12.5-30, 12.5- (from then "
+                "on) "
+                "or -30 (up to then)");
+        EXPECT_FALSE(r.set) << bad;
+    }
+    EXPECT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("30-12.5"), &r).toStdString(),
+        "\"30-12.5\" runs backward");
+    EXPECT_FALSE(r.set);
+
+    FrameFilter f;
+    ASSERT_EQ(FrameFilter::parseTimes(QStringLiteral("12.5-30"), &f.time)
+                  .toStdString(),
+              "");
+    const uint8_t b[] = {0x01};
+    EXPECT_FALSE(f.matches(0x7E8, 0, 12499999, b, 1));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 12500000, b, 1));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 30000000, b, 1));
+    EXPECT_FALSE(f.matches(0x7E8, 0, 30000001, b, 1));
+    EXPECT_EQ(f.terms(), 1);
+    ASSERT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("-30"), &f.time).toStdString(),
+        "");
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 1));
+    ASSERT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("12.5-"), &f.time).toStdString(),
+        "");
+    EXPECT_TRUE(f.matches(0x7E8, 0, UINT64_MAX, b, 1));
+    ASSERT_EQ(FrameFilter::parseLengths(QStringLiteral("1"), &f.lengths)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(f.terms(), 2) << "the length and the time, a term each";
 }
 
 /* The table shows what the filter passes, in either order, as frames
@@ -9157,6 +9334,72 @@ TEST(BridgeTest, FrameFilterShowsWhatItPasses)
     EXPECT_EQ(model.filterTerms(), 0);
     EXPECT_EQ(model.count(), 8);
     EXPECT_EQ(mirror.rows, 8);
+}
+
+/* The length and time fields through the model: their answer's words,
+ * a field that doesn't parse keeping its part, and the four-argument
+ * call leaving both out */
+TEST(BridgeTest, FrameFilterTakesALengthAndATime)
+{
+    FrameListModel model;
+    RowMirror mirror(model);
+    FrameMaker m;
+    // A frame a second for 10 s, its length 1 + i % 3
+    for (int i = 0; i < 10; ++i) {
+        const quint64 t = static_cast<quint64>(i) * 1000000;
+        if (i % 3 == 0) {
+            m.add(model, 0x7E8, {0x41}, t);
+        } else if (i % 3 == 1) {
+            m.add(model, 0x7E8, {0x41, 0x0C}, t);
+        } else {
+            m.add(model, 0x7E8, {0x41, 0x0C, 0x1A}, t);
+        }
+    }
+    QVariantMap words = model.setFilter(QString(), QString(), 0, 0,
+                                        QStringLiteral("2-3"), QString());
+    EXPECT_EQ(words.value(QStringLiteral("lengths")).toString().toStdString(),
+              "");
+    EXPECT_EQ(words.value(QStringLiteral("times")).toString().toStdString(),
+              "");
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 6);
+    EXPECT_EQ(mirror.rows, 6);
+
+    words = model.setFilter(QString(), QString(), 0, 0, QStringLiteral("2-3"),
+                            QStringLiteral("2-5"));
+    EXPECT_EQ(model.filterTerms(), 2);
+    EXPECT_EQ(model.count(), 3) << "2, 4 and 5 s; 3 s is one byte long";
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::TimestampRole)
+                  .toULongLong(),
+              5000000u)
+        << "both ends in the range";
+
+    // A field that doesn't parse keeps its part in force and says why
+    words = model.setFilter(QString(), QString(), 0, 0, QStringLiteral("2-"),
+                            QStringLiteral("5"));
+    EXPECT_EQ(
+        words.value(QStringLiteral("lengths")).toString().toStdString(),
+        "\"2-\" isn't a length in bytes (up to 4096) or a range like 1-7");
+    EXPECT_EQ(words.value(QStringLiteral("times")).toString().toStdString(),
+              "\"5\" isn't a range of seconds like 12.5-30, 12.5- (from then "
+              "on) or -30 "
+              "(up to then)");
+    EXPECT_EQ(words.value(QStringLiteral("ids")).toString().toStdString(), "");
+    EXPECT_EQ(model.filterTerms(), 2);
+    EXPECT_EQ(model.count(), 3);
+
+    // Only the time: from 7 s on
+    model.setFilter(QString(), QString(), 0, 0, QString(),
+                    QStringLiteral("7-"));
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 3);
+    EXPECT_EQ(mirror.rows, 3);
+
+    // The four-argument call: no length and no time
+    model.setFilter(QStringLiteral("7E8"), QString(), 0, 0);
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 10);
+    EXPECT_EQ(mirror.rows, 10);
 }
 
 /* At the cap, the oldest frame leaves the view only when the view shows
@@ -9287,6 +9530,65 @@ TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
     ids.refresh();
     EXPECT_EQ(ids.count(), 0);
     EXPECT_EQ(mirror.rows, 0);
+}
+
+/* By ID marks the newest payload's bytes that differ from the frame
+ * before it among those shown; a length change marks every byte past
+ * the shorter payload; a lone frame marks none */
+TEST(BridgeTest, FrameIdsMarkTheBytesThatChanged)
+{
+    FrameListModel frames;
+    FrameIdModel ids(&frames);
+    FrameMaker m;
+    auto changed = [&](int row) {
+        QList<int> out;
+        for (const QVariant& v :
+             ids.data(ids.index(row, 0), FrameIdModel::ChangedRole).toList()) {
+            out.append(v.toInt());
+        }
+        return out;
+    };
+    m.add(frames, 0x100, {0x01, 0x02, 0x03}, 1);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>()) << "one frame: nothing before it";
+
+    int changes = 0;
+    QObject::connect(&ids, &QAbstractItemModel::dataChanged,
+                     [&changes](const QModelIndex&, const QModelIndex&,
+                                const QList<int>& roles) {
+                         if (roles.contains(FrameIdModel::ChangedRole)) {
+                             ++changes;
+                         }
+                     });
+    m.add(frames, 0x100, {0x01, 0x22, 0x03}, 2);
+    m.add(frames, 0x200, {0xAA}, 3);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>{1});
+    EXPECT_EQ(changed(1), QList<int>()) << "each ID its own";
+    EXPECT_EQ(changes, 1);
+
+    m.add(frames, 0x100, {0x01, 0x22, 0x03}, 4);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>()) << "the same payload again";
+
+    m.add(frames, 0x100, {0x01, 0x22, 0x33, 0x04, 0x05}, 5);
+    ids.refresh();
+    EXPECT_EQ(changed(0), (QList<int>{2, 3, 4}))
+        << "longer: the bytes past the old length";
+
+    m.add(frames, 0x100, {0x01, 0x23}, 6);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>{1})
+        << "shorter: its own bytes that differ";
+
+    // The frame before among those shown: one the filter hides doesn't count
+    m.add(frames, 0x100, {0xFF, 0x23}, 7);
+    m.add(frames, 0x100, {0x01, 0x24}, 8);
+    frames.setFilter(QString(), QStringLiteral("^01"), 0, 0);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>{1}) << "from 01 23, past the hidden FF 23";
+    EXPECT_EQ(ids.roleNames().value(FrameIdModel::ChangedRole),
+              QByteArray("changedBytes"));
 }
 
 // A log shorter than the window: each ID's frames less one over its own
