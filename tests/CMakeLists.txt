@@ -51,7 +51,13 @@ target_compile_definitions(test_core PRIVATE
 )
 
 app_enable_warnings(test_core)
-gtest_discover_tests(test_core)
+gtest_discover_tests(test_core DISCOVERY_TIMEOUT 60)
+# Discovery runs each test binary at build time, and its default 5 s
+# is less than a cold runner can take: every call names 60 s, which
+# tests/discovery_timeout.cmake checks across this file
+add_test(NAME DiscoveryTimeoutTest.EveryDiscoveryWaits
+    COMMAND ${CMAKE_COMMAND} -DFILE=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/discovery_timeout.cmake)
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
@@ -83,7 +89,7 @@ target_compile_definitions(test_signals PRIVATE
     ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins")
 
 app_enable_warnings(test_signals)
-gtest_discover_tests(test_signals)
+gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 
 # --- OBD-II set + request engine tests: MUST stay Qt-free (UNIT tier) ---
 # obd2_signal_sets.cpp is ALL-platform (signal data is transport-
@@ -113,7 +119,7 @@ target_compile_definitions(test_obd2 PRIVATE
 )
 
 app_enable_warnings(test_obd2)
-gtest_discover_tests(test_obd2)
+gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 
 # --- ELM327 tests: MUST stay Qt-free (UNIT and HARNESS tiers, ADR-0026) ---
 # test_elm327.cpp: elm327_protocol.h, header-only and internal like
@@ -136,7 +142,7 @@ if(WIN32)
     target_link_libraries(test_elm327 PRIVATE ws2_32)
 endif()
 app_enable_warnings(test_elm327)
-gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
+gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
 # --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
@@ -149,7 +155,7 @@ target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 target_compile_definitions(test_socketcan PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay")
 app_enable_warnings(test_socketcan)
-gtest_discover_tests(test_socketcan)
+gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 
 # --- The simulated CAN bus: Qt-free, Linux only (SocketCAN) ---
 # test_vcan.cpp: vcan_bus.h's fake ECU through the kernel's ISO-TP and a
@@ -176,7 +182,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # core/src: isotp.h, pure and internal (test_socketcan's precedent)
     target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
     app_enable_warnings(test_vcan)
-    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+    gtest_discover_tests(test_vcan DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()
 
 # --- Golden-output comparator: Python 3, no packages ---
@@ -233,7 +239,7 @@ if(TARGET havne-cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
-    gtest_discover_tests(test_cli PROPERTIES TIMEOUT 30)
+    gtest_discover_tests(test_cli DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
     if(Python3_Interpreter_FOUND)
         set(_cli_golden ${CMAKE_CURRENT_SOURCE_DIR}/golden/cli)
@@ -1311,7 +1317,7 @@ if(WIN32)
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     app_enable_warnings(test_j2534_discovery)
-    gtest_discover_tests(test_j2534_discovery
+    gtest_discover_tests(test_j2534_discovery DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1400,7 +1406,7 @@ if(WIN32)
     add_dependencies(test_j2534_load fake_j2534_legacy)
     app_deploy_surrogate(test_j2534_load)
     app_enable_warnings(test_j2534_load)
-    gtest_discover_tests(test_j2534_load
+    gtest_discover_tests(test_j2534_load DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1424,7 +1430,7 @@ if(WIN32)
     add_dependencies(test_j2534_stream fake_j2534)
     app_deploy_surrogate(test_j2534_stream)
     app_enable_warnings(test_j2534_stream)
-    gtest_discover_tests(test_j2534_stream
+    gtest_discover_tests(test_j2534_stream DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1458,7 +1464,7 @@ if(WIN32)
     # (it then skips, and verify.sh's cross-arch step fails on a skip).
     # The suite is about 14 s; CMake 3.22's TEST_FILTER could serialize
     # that one case alone.
-    gtest_discover_tests(test_j2534_surrogate
+    gtest_discover_tests(test_j2534_surrogate DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS} RUN_SERIAL TRUE
     )
 endif()
@@ -1481,7 +1487,7 @@ if(WIN32)
     add_dependencies(test_j2534_health fake_j2534)
     app_deploy_surrogate(test_j2534_health)
     app_enable_warnings(test_j2534_health)
-    gtest_discover_tests(test_j2534_health
+    gtest_discover_tests(test_j2534_health DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1504,7 +1510,7 @@ if(WIN32)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
     app_deploy_surrogate(test_j2534_connect)
     app_enable_warnings(test_j2534_connect)
-    gtest_discover_tests(test_j2534_connect
+    gtest_discover_tests(test_j2534_connect DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1526,7 +1532,7 @@ if(WIN32)
     add_dependencies(test_j2534_routing fake_j2534)
     app_deploy_surrogate(test_j2534_routing)
     app_enable_warnings(test_j2534_routing)
-    gtest_discover_tests(test_j2534_routing
+    gtest_discover_tests(test_j2534_routing DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
