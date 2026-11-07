@@ -18,7 +18,7 @@ threads onto the GUI thread.
    │                   havne-cli (cli/): a session as JSON lines on
    │                   standard output, the public headers alone (ADR-0031)
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
-   │         socketcan.h · vin.h · sim.h · recording.h · plugin.h · obdb.h
+   │         socketcan.h · vin.h · sim.h · recording.h · plugin.h · obdb.h · queue.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
@@ -54,7 +54,11 @@ threads onto the GUI thread.
    versions. Every public name carries the core's own prefix,
    `ecuio_` or `ECUIO_` (ECU I/O). It names the domain rather than
    the product, so a product rename leaves the ABI alone. A strict-C
-   compile of every public header pins it.
+   compile of every public header pins it. Core also builds as a
+   shared library (`ecuio`, ADR-0053) that exports those functions
+   and nothing else, for programs that load it by path, and a caller
+   that can't take a callback on the worker reads a session through a
+   pull queue (`queue.h`) on a thread of its own.
 
 ## A frame's journey
 

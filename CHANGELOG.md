@@ -74,6 +74,30 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   Keep saves the file as the vehicle's. Importing the set again, for
   another year say, replaces the vehicle's earlier import, and says so
   first.
+- The Log page's frame table (developer mode) filters its frames by ID
+  or range (`7E8, 7E0-7EF`), data bytes anywhere or from the start
+  (`^62 F1 ??`), direction and flag, and says how many of how many it
+  shows. By ID lists one row per ID with its frame count, rate and
+  newest payload; a tap shows that ID's frames. A Flags column names
+  each frame's flags, and the Time header turns the order.
+- Export CSV writes the frames the Log page holds, those the filter
+  shows, oldest first, with identification replies and text signals'
+  messages left out and a check that fails the export rather than write
+  a VIN or another identity value. Copy still copies the selected rows
+  as they are ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s
+  appendix "frames in memory").
+- Core builds as a shared library beside its static one
+  (`libecuio.so`, `libecuio.dylib`, `ecuio.dll`), for a program that
+  loads core by path: it exports the C API's functions and nothing
+  else, which a check holds it to on every desktop platform, and
+  `ecuio_version` gives core's version as three numbers
+  ([ADR-0053](docs/adr/0053-python-bindings.md)). It isn't in the
+  downloads yet.
+- Core's pull queue (`ecuio/queue.h`): a program that can't take a
+  callback on core's worker thread (Python's ctypes, Rust, Go, C#)
+  reads a session's frames or decoded values in batches from a thread
+  of its own, waiting up to a timeout, the oldest dropped and counted
+  when it falls behind ([ADR-0053](docs/adr/0053-python-bindings.md)).
 
 ## [0.5.1] - 2026-11-06
 

@@ -216,8 +216,11 @@ background too ([roadmap](#roadmap)).
     sets the list's share, and a pinch or the wheel steps Live's
     window; pages are denser on a phone's width or height. Developer
     mode (off until switched on): the `mock://` preset, a frame-rate
-    badge, and the Log page's raw frame table with its bridge counters,
-    whose selected rows copy to the clipboard. Kept between runs: zoom,
+    badge, and the Log page's raw frame table with its bridge counters:
+    a filter (ID, data, direction, flag), a By ID view (count, rate,
+    newest payload), selected rows copied to the clipboard as they are,
+    and Export CSV, scrubbed by core (ADR-0054's appendix "frames in
+    memory"). Kept between runs: zoom,
     metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
     connected, the Record sessions switch, the splitters' shares and
@@ -560,12 +563,18 @@ append-only.
     the Actions cache;
   - PCAP export and candump import in core and `havne-cli`, scrubbed
     by construction ([ADR-0054](docs/adr/0054-exports-and-imports.md));
-  - an OBDb set imported in Settings.
-- **In progress:** the Python bindings and their wheel
-  ([ADR-0053](docs/adr/0053-python-bindings.md)), starting with a
-  shared core; the Log page's filter, per-ID view and scrubbed export.
-- **To come:** the other exports (a scrubbed recording folder, CSV,
-  the health report) and CSV import, a vehicle's baseline recording,
+  - an OBDb set imported in Settings;
+  - the Log page's filter, per-ID view and Export CSV, scrubbed by core
+    (`ecuio_scrub_frames`);
+  - the shared core (`ecuio`), exporting the C API and nothing else,
+    `ecuio_version`, and the pull queue (`ecuio/queue.h`), steps 1 and
+    2 of the Python bindings
+    ([ADR-0053](docs/adr/0053-python-bindings.md)'s appendices).
+- **In progress:** the `havne` Python package and its tests (step 3),
+  then the wheel (step 4); a recording's values exported as CSV, in
+  core and `havne-cli export --format csv`.
+- **To come:** the other exports (a scrubbed recording folder, the
+  health report) and CSV import, a vehicle's baseline recording,
   and the Python examples against the simulated ECU.
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints

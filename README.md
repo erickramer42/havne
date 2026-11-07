@@ -175,7 +175,7 @@ start's overlaid dashed, aligned on a marker typed while recording.*
    │                           marshaling, 100 ms coalescing, link health
    │   havne-cli (cli/)        a second front end: a session as JSON lines
    ▼  C ABI: core.h · signals.h · profile.h · plugin.h · obdb.h · j2534.h · serial.h
-             stream.h · socketcan.h · vin.h · sim.h · recording.h
+             stream.h · socketcan.h · vin.h · sim.h · recording.h · queue.h
  ecuio-core (core/)            no Qt, ever: sessions, profiles, signal files, plugins, decoding, recordings
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
