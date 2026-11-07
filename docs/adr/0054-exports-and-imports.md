@@ -376,6 +376,83 @@ each fails closed:
   so another export's partial is never in the way and never touched.
   Every way out, running out of memory included, removes it.
 
+**Note of 2026-11-07: ISO-TP read in both layouts, joined on any ID, the
+rename that never replaces.** Each change fails closed:
+
+- The other-ID rule above reads each frame in both addressing layouts,
+  normal (the PCI at byte 0) and extended (byte 0 a target address, the
+  PCI at byte 1), classic or CAN FD (ISO 15765-2:2016's Single Frame
+  escape, its length in the next byte, and First Frame escape, 12 bits
+  of zero and then 32), through `frame_reassembly.h`'s `tp_read`. A frame
+  is an identification reply's when either layout reads it as one. The
+  match is on the payload after the PCI, never elsewhere in the frame.
+  Only the forms the standards give are read: no extended layout on ISO
+  15765-4's IDs (`iso15765_id`), which that standard gives normal
+  addressing, so a frame there that isn't on the wire is an adapter's
+  payload with no PCI; and a Single Frame, in either layout, in the
+  escape's form only in a frame longer than 8 bytes and in the nibble's
+  only in one of 8 or less, as ISO 15765-2:2016 gives them.
+- A Single or First Frame whose payload `scrub::identification` takes is
+  one whatever its length says. A length that can't be right (short of
+  what the frame holds, past `ECUIO_FRAME_DATA_MAX`, or an escape that
+  reads as neither) is followed all the same: each Consecutive Frame on
+  its ID and layout until a frame there that isn't one, or until
+  `ECUIO_FRAME_DATA_MAX` bytes, the most an ISO-TP message holds, so one
+  false match on a busy ID leaves out at most that many bytes of it. Its
+  bytes join the identity values.
+- A reply that a frame on its ID ends before it is whole (a new Single or
+  First Frame, any frame that isn't a Consecutive Frame) gives its bytes
+  so far to the identity values, as one the recording ends does.
+- The second check also joins ISO-TP-shaped frames on any ID that the
+  reassembly doesn't take (`any_id_messages`), in both layouts, a First
+  Frame's payload with each Consecutive Frame after it until its length,
+  a frame there that isn't one, or the end, and checks each message with
+  a written frame whole: a manufacturer's reply that echoes the VIN,
+  segmented on its own ID, fails the export though no frame of it holds
+  the VIN whole. Nothing more is left out. The pcapng and the folder
+  export do it, and `ecuio_scrub_frames`.
+- The rename into place (`folder_files.h`'s `rename_to`) never replaces a
+  name taken meanwhile wherever the file system can say so: `MoveFileExW`
+  without replacing on Windows, `renameat2` with `RENAME_NOREPLACE` on
+  Linux, `renamex_np` with `RENAME_EXCL` on macOS and iOS; where those
+  aren't there, a file by `link` and then `unlink`, a folder onto an
+  empty folder made first as a reservation (removed again if the rename
+  fails). Where the file system can do none of these (some of Android's
+  shared storage), the name is checked as the rename starts: a file or
+  an empty folder made there in between is replaced, so no-replace
+  holds where the file system allows it.
+
+Measured 2026-11-07 over the recordings on hand, 245 in all (23
+listening captures with 27,944 frame rows, 75 sessions that request
+with 333,587, and 147 older recordings with no profile line with
+408,679), through `ecuio_scrub_frames` of the shared core before these
+changes and after: no frame more left out and no export refused. The
+other-ID rule takes no frame in either layout there; the listening
+captures' frames are all on the wire, and the extended layout matters
+for a manufacturer's extended-addressing IDs, which none of these
+recordings uses.
+Read without the limits above on the forms, the rules took 2,003
+Single and First Frames that aren't identification,
+none of them nor the frames followed after them holding a VIN-shaped
+run: 1,872 adapter payloads on `0x7E8` read in the extended layout
+(Mode 01's `41 05 49` as a Single Frame of `49`; a reply read as a
+First Frame then took the replies after it) and 131 CAN FD frames of
+the mock's whose byte 1 is `49`, read as nibble Single Frames. Their
+bytes, taken for identity values, refused one export.
+
+What the scrub doesn't find, by design:
+
+- A VIN with no check digit in place (a manufacturer's own, or one from
+  a market that doesn't use it) glued to letters or digits either side:
+  the shape rule takes a run of exactly 17, and the window rule a run
+  whose ninth character is its check digit.
+- A VIN a module broadcasts with no ISO-TP form (a counter byte first,
+  then the VIN spread over frames): no frame holds it whole, and nothing
+  joins the frames.
+- A typed marker label of 17 or more characters of the VIN alphabet can
+  refuse a folder copy, at the window rule's rate (about one window in
+  eleven): the label is searched as the shape like any other text.
+
 ## Appendix: frames in memory, the Log page's export (2026-11-06)
 
 The Log page's Export CSV writes the frames its ring holds, which no

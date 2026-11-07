@@ -96,6 +96,8 @@ bool fail(const char* fmt, const std::string& a = std::string())
 using ecuio_frame_rows::frame_rows;
 
 namespace fr = ecuio_frame_reassembly;
+using fr::any_id_messages;
+using fr::joined;
 using fr::message_end;
 using fr::other_id_identification;
 using fr::reassembly;
@@ -628,6 +630,7 @@ private:
             return false;
         }
         reassembly rs;
+        any_id_messages any;
         std::vector<message_end> ends;
         uint64_t index = 0;
         int got = 0;
@@ -642,7 +645,11 @@ private:
                     return false;
                 }
             }
-            if (!in_range(s.host_us) || is_dropped(s.index)) {
+            const bool written = in_range(s.host_us) && !is_dropped(s.index);
+            if (!wire && !check_joined(any, &f, written)) {
+                return false;
+            }
+            if (!written) {
                 continue;
             }
             if (!wire && !check_message(f.data, f.data_length)) {
@@ -662,7 +669,8 @@ private:
         }
         ends.clear();
         rs.finish(ends);
-        if (!check_ends(ends) || !flush(true)) {
+        if (!check_ends(ends) || !check_joined(any, nullptr, false) ||
+            !flush(true)) {
             return false;
         }
         if (written_ != r_.frames) {
@@ -692,6 +700,29 @@ private:
                 written = written || in_range(s.host_us);
             }
             if (written && !check_message(e.data.data(), e.data.size())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /* The messages any ISO-TP-shaped frames join (any_id_messages) that
+     * a written frame carries, each checked whole: frame f's (f nullptr:
+     * those still open at the end) */
+    bool check_joined(any_id_messages& any, const ecuio_frame_t* f,
+                      bool written)
+    {
+        if (raw_ || (f != nullptr && !fr::tp_readable(*f))) {
+            return true;
+        }
+        joins_.clear();
+        if (f != nullptr) {
+            any.take(*f, written, joins_);
+        } else {
+            any.finish(joins_);
+        }
+        for (const joined& j : joins_) {
+            if (j.written && !check_message(j.data.data(), j.data.size())) {
                 return false;
             }
         }
@@ -1195,6 +1226,7 @@ private:
             return false;
         }
         reassembly rs;
+        any_id_messages any;
         std::vector<message_end> ends;
         uint64_t index = 0;
         int got = 0;
@@ -1210,7 +1242,11 @@ private:
                     return false;
                 }
             }
-            if (!in_range(s.host_us) || is_dropped(s.index)) {
+            const bool written = in_range(s.host_us) && !is_dropped(s.index);
+            if (!wire && !check_joined(any, &f, written)) {
+                return false;
+            }
+            if (!written) {
                 continue;
             }
             if (!wire && !check_message(f.data, f.data_length)) {
@@ -1228,7 +1264,7 @@ private:
         }
         ends.clear();
         rs.finish(ends);
-        if (!check_ends(ends)) {
+        if (!check_ends(ends) || !check_joined(any, nullptr, false)) {
             return false;
         }
         if (written_ != r_.frames) {
@@ -1405,6 +1441,7 @@ private:
     uint64_t events_left_ = 0;
     std::string made_up_;
     std::string made_up_flow_;
+    std::vector<joined> joins_;
     uint64_t written_ = 0;
 };
 

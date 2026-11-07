@@ -116,7 +116,9 @@ public:
     bool check()
     {
         fr::reassembly rs;
+        fr::any_id_messages any;
         std::vector<fr::message_end> ends;
+        std::vector<fr::joined> joins;
         for (size_t i = 0; i < count_; ++i) {
             if (!fetch(i)) {
                 return false;
@@ -128,6 +130,12 @@ public:
                 if (!check_ends(ends)) {
                     return false;
                 }
+            } else if (fr::tp_readable(f)) {
+                joins.clear();
+                any.take(f, keep_[i] != 0, joins);
+                if (!check_joined(joins)) {
+                    return false;
+                }
             }
             if (keep_[i] != 0 && !check_bytes(f.data, f.data_length)) {
                 return false;
@@ -135,7 +143,9 @@ public:
         }
         ends.clear();
         rs.finish(ends);
-        if (!check_ends(ends)) {
+        joins.clear();
+        any.finish(joins);
+        if (!check_ends(ends) || !check_joined(joins)) {
             return false;
         }
         for (size_t i = 0; i < count_; ++i) {
@@ -245,6 +255,18 @@ private:
                              "write: nothing was written",
                              scrub::failed_words(found));
             return false;
+        }
+        return true;
+    }
+
+    /* The messages any ISO-TP-shaped frames join that a kept frame
+     * carries (any_id_messages) */
+    bool check_joined(const std::vector<fr::joined>& joins)
+    {
+        for (const fr::joined& j : joins) {
+            if (j.written && !check_bytes(j.data.data(), j.data.size())) {
+                return false;
+            }
         }
         return true;
     }

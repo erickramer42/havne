@@ -28,6 +28,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #endif
 
 namespace ecuio_files {
@@ -224,8 +227,76 @@ inline bool partial_folder(const std::string& out, std::string* name,
     return false;
 }
 
+#ifndef _WIN32
+/* Which of rename_to's ways without replacing a test starts from: 0 the
+ * system's own (renameat2 or renamex_np), 1 a file's link or a folder's
+ * reservation, 2 the check before rename */
+inline std::atomic<int> rename_test_from{0};
+
+/* An errno that says the file system can't do what was asked, rather than
+ * that the name is taken */
+inline bool not_supported(int err)
+{
+    return err == EINVAL || err == ENOSYS || err == EPERM ||
+           err == EOPNOTSUPP || err == ENOTSUP || err == EXDEV || err == EMLINK;
+}
+
+/* The system's rename that refuses a taken name: 0, an errno, or -1 when
+ * it isn't there or the file system can't */
+inline int rename_exclusive(const char* from, const char* to)
+{
+#if defined(__linux__) && defined(SYS_renameat2)
+    constexpr unsigned kNoReplace = 1u; /* RENAME_NOREPLACE */
+    if (syscall(SYS_renameat2, AT_FDCWD, from, AT_FDCWD, to, kNoReplace) == 0) {
+        return 0;
+    }
+    return not_supported(errno) ? -1 : errno;
+#elif defined(__APPLE__)
+    if (renamex_np(from, to, RENAME_EXCL) == 0) {
+        return 0;
+    }
+    return not_supported(errno) ? -1 : errno;
+#else
+    (void)from;
+    (void)to;
+    return -1;
+#endif
+}
+
+/* A file renamed by a second name: link refuses a taken one */
+inline int rename_by_link(const char* from, const char* to)
+{
+    if (link(from, to) != 0) {
+        return not_supported(errno) ? -1 : errno;
+    }
+    if (unlink(from) != 0) {
+        const int err = errno;
+        unlink(to);
+        return err;
+    }
+    return 0;
+}
+
+/* A folder renamed onto a reservation: mkdir refuses a taken name, and
+ * rename refuses the reservation once anything is in it */
+inline int rename_onto_reservation(const char* from, const char* to)
+{
+    if (mkdir(to, 0700) != 0) {
+        return not_supported(errno) ? -1 : errno;
+    }
+    if (std::rename(from, to) != 0) {
+        const int err = errno == ENOTEMPTY ? EEXIST : errno;
+        rmdir(to); /* only while it is still empty */
+        return err;
+    }
+    return 0;
+}
+#endif
+
 /* Renames from to to; a file to replaces one there with replace, a
- * folder never does. False with *why. */
+ * folder never does. Without replace, a name taken meanwhile is refused
+ * wherever the file system can say so; where it can't, a name taken
+ * before the rename starts is refused. False with *why. */
 inline bool rename_to(const std::string& from, const std::string& to,
                       bool replace, std::string* why)
 {
@@ -243,9 +314,27 @@ inline bool rename_to(const std::string& from, const std::string& to,
     *why = os_words(GetLastError());
     return false;
 #else
-    if (!replace && exists(to)) {
-        *why = os_words(EEXIST);
-        return false;
+    if (!replace) {
+        const int start = rename_test_from.load();
+        int got = start <= 0 ? rename_exclusive(from.c_str(), to.c_str()) : -1;
+        if (got < 0 && start <= 1) {
+            struct stat st{};
+            const bool folder =
+                stat(from.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+            got = folder ? rename_onto_reservation(from.c_str(), to.c_str())
+                         : rename_by_link(from.c_str(), to.c_str());
+        }
+        if (got == 0) {
+            return true;
+        }
+        if (got > 0) {
+            *why = os_words(got);
+            return false;
+        }
+        if (exists(to)) {
+            *why = os_words(EEXIST);
+            return false;
+        }
     }
     if (std::rename(from.c_str(), to.c_str()) == 0) {
         return true;
