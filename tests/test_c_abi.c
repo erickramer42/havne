@@ -214,6 +214,8 @@ int main(void)
     ecuio_export_report_t export_report;
     ecuio_import_options_t import_options;
     ecuio_import_report_t import_report;
+    ecuio_health_options_t health_options;
+    ecuio_health_report_t health_report;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     uint32_t version_major = 0, version_minor = 0, version_patch = 0;
@@ -467,6 +469,20 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    /* The health report (ADR-0054's appendix): its layouts and refusals */
+    memset(&health_options, 0, sizeof health_options);
+    health_options.format = ECUIO_HEALTH_JSON;
+    if (sizeof(ecuio_health_value_t) != 32 ||
+        offsetof(ecuio_health_value_t, age_us) != 16 ||
+        offsetof(ecuio_health_options_t, utc_us) != 32 ||
+        offsetof(ecuio_health_options_t, session) != 80 ||
+        sizeof(ecuio_health_report_t) != 120 ||
+        offsetof(ecuio_health_report_t, failed_class) != 80 ||
+        ECUIO_HEALTH_TEXT != 2u || ECUIO_HEALTH_VIN_DECODED != 1u ||
+        ecuio_health_export(NULL, &health_report) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     if (ecuio_obdb_import("{}", 2, NULL, NULL, NULL, NULL, NULL) !=

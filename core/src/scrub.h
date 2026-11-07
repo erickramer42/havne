@@ -1,7 +1,8 @@
 // File/layer: core/src/scrub.h | internal, C++17, Qt-free; what a scrubbed
 //             export leaves out, and the check of what it wrote (ADR-0054
 //             section 1)
-// Testing: UNIT: ScrubTest, ExportTest (test_core)
+// Testing: UNIT: ScrubTest, ExportTest, FolderExportTest, HealthTest
+//          (test_core)
 //
 // Scrubbed by construction, then checked. The classifier names what never
 // goes out as it is (an identification reply, a segment whose message
@@ -114,6 +115,13 @@ uint32_t check_bytes(const values& v, const uint8_t* p, size_t n);
 
 /* The words for a failed check: the class, never the value */
 const char* failed_words(uint32_t failed_class);
+
+/* A session's URI as a scrubbed file holds it (ADR-0054 section 1): its
+ * scheme, the authority as <path> (a replay's file, a J2534 DLL),
+ * <label> (a mock's, the user's text) or <address> (a port, a host and
+ * port, a Bluetooth stream, an interface), then only the query pairs
+ * core reads whose value is plain (letters, digits and : , . / _ -) */
+std::string uri(const std::string& uri);
 
 } // namespace ecuio_scrub
 
