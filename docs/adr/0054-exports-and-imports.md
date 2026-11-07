@@ -795,3 +795,200 @@ lines, its ranked values and five since-cleared PIDs), the same car
 answering late through uds-generic (its identification outlasts the
 values' quiet, and the report waits for it), a recording of values alone
 and a range past its end.
+
+## Appendix: the CSV import as built (2026-11-07)
+
+`ECUIO_IMPORT_CSV` makes a recording's folder from another logger's CSV
+of timed signals, by a column map. `havne-cli import csv <file>
+<folder> --map <map.json>` and Python's `havne.import_csv` are its front
+ends. This appendix amends the first appendix's "until they're built"
+and the later appendices' "still answers `ECUIO_ERR_NOT_IMPLEMENTED`"
+for the CSV import.
+
+**The call.** `ecuio_import(options, report)` with `format`
+`ECUIO_IMPORT_CSV` (2), `in_path_utf8` the file, `out_folder_utf8` the
+folder to make, and `column_map_utf8` the map's JSON text (core's strict
+reader, 1 MiB at most). A CSV with no map, a map with candump, or a CSV
+with `interface_utf8` is `ECUIO_ERR_INVALID_ARGUMENT`; a refused map or
+file is `ECUIO_ERR_LOAD_FAILED` with the words in the detail ("the
+column map: unknown key 'decimal' in signal 1", "line 12: ..."), never a
+path. The report's first two reserved words became `values` (48) and
+`columns_ignored` (56), so it stays 80 bytes with `reserved[2]` at 64
+(static-asserted, `test_c_abi`; `ecuio_import` is new since v0.5.1, so
+the ABI check against it sees an added function). A CSV import fills `lines`, `values`,
+`columns_ignored`, `utc_start_us` (0 when the file gives no UTC time)
+and `duration_us`; `frames`, `error_frames` and `interfaces` stay 0.
+
+**The column map** (`core/src/csv_import.h`'s `parse_map`):
+
+```json
+{
+  "havne_column_map": 1,
+  "header_row": 3,
+  "delimiter": ";",
+  "decimal": ",",
+  "time": {"column": "Time [s]", "unit": "s"},
+  "start": "2026-11-05T22:03:22.125+09:00",
+  "missing": ["---"],
+  "signals": [
+    {"column": "Engine Speed [rpm]", "name": "RPM", "unit": "rpm", "decimals": 0},
+    {"column": "Gear", "name": "Gear", "kind": "text"}
+  ]
+}
+```
+
+- `havne_column_map` is 1 and required. Any key not named here is
+  refused by its name, in the map, in `time` or in a signal: a typo
+  must not import silently.
+- `header_row` 1-1000 (default 1): the rows above it, a logger's
+  preamble, are skipped as lines. `delimiter` `,`, `;` or a tab;
+  `decimal` `.` or `,`, a decimal comma needing another delimiter.
+- `time`: `column` and `unit`, one of `s`, `ms`, `us` (from any zero:
+  the first row is the recording's start), `iso8601` (each cell a date and time with `Z` or an offset,
+  `T` or a space between, up to six fraction digits, from 1970 on) or
+  `time-of-day` (`hh:mm:ss[.ffffff]`, with `date` YYYY-MM-DD and
+  `utc_offset` `Z` or +hh:mm, which come with it and only with it; a
+  time more than 12 hours before the row before's is the next day's).
+- `start`, for the relative units only: an ISO 8601 time with its
+  offset, the first row's UTC time. **It is optional:** without it the
+  folder has no UTC time, as below. A made-up start would line a
+  recording up wrong against another; none lines it up with nothing.
+- `missing`: up to 16 texts of 1-32 bytes read as no sample (`---`,
+  `NaN`), empty by default. An empty cell is no sample either; any
+  other cell a number column can't read is refused with its line.
+- `signals`: 1 to 256, each `column` (the header's text, matched whole:
+  **by name only**, never by index, which takes the wrong column when a
+  logger adds one), `name` (1-31 bytes), `unit` (up to 15), `kind`
+  `number` (the default) or `text`, `decimals` 0-3 (a number's; default
+  2, a text 0), `rank` 0-255 (default the map's order, 1 first, capped
+  at 255, so the viewer plots the numbers; a text 0) and `group`
+  (`ECUIO_SIGNAL_GROUP_*`, default 0). A name or unit starting as a
+  spreadsheet formula (`=`, `+`, `-`, `@`, a tab, a carriage return) is
+  refused, the validator's rule; two signals with one name or column,
+  or the time column a signal's too, are refused. A header column the
+  map doesn't read is ignored, counted and named.
+
+**The reader** is RFC 4180 and strict (`reader<Source>`, one byte at a
+time from a file or memory): a UTF-8 byte order mark at the file's
+start dropped, quoted fields with `""` escapes and delimiters and line
+breaks inside, CRLF or LF, blank lines skipped, no last line break
+needed. Each refusal names its line: a carriage return without a line
+feed, a NUL byte, invalid UTF-8, a quote inside an unquoted field, text
+after a closing quote, an unclosed quote, a row over 64 KiB, more than
+1024 columns, a row whose fields aren't the header's count, a header
+missing a mapped column or naming one twice, a row with no time. Numbers
+are read locale-free (spaces around them allowed, inf and NaN refused;
+with a decimal comma a point is refused) and times to the microsecond
+(within 1e15 us). A row up to 100 ms before the row before takes that
+row's time, the candump import's rule; further back is refused. At most
+1e8 rows.
+
+**What it makes:** `<folder>.partial`, renamed into place once whole,
+removed on any failure, and only when the folder is free. Two passes, as
+the candump import's: the first checks and counts, the second writes,
+and a second pass whose counts differ is "the file changed while it was
+read". `signals.csv` (its byte order mark, `host_us,signal,value,unit`,
+microseconds from the first row) and `events.log` in format 3, no
+`frames.csv`:
+
+```
+ecuio session recording, format 3 (ADR-0049)
+started  2026-11-05 13:03:22.250 (UTC)
+utc  2026-11-05T13:03:22.250Z
+core  0.6.0
+import  CSV, its time from the column 'timestamp' as ISO 8601 times
+import  columns ignored: 2 ('throttle', 'comment')
+profile  raw
+signal  Vehicle Speed,number,km/h,1,1,0
+signal  Gear,text,,0,0,0
+columns  UTC time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
+
+13:03:25.750  +3.500  end  import: 0 frames, 16 values, 0 records dropped, 0 notes dropped
+```
+
+The `signal` lines are the recorder's own formatting
+(`core/src/recording_lines.h`, which `recorder.cpp` writes through too).
+The ignored columns name the first 32 and count the rest. The file's
+name is never written: it can hold a vehicle's label.
+
+**With no UTC time** (a relative unit and no `start`), `events.log` has
+no `started` or `utc` line, its `columns` line says "time since the
+start" and its end line's clock runs from 00:00:00. Then:
+
+- the reader's `utc_start_us` is 0, as for a recording made before the
+  `utc` line;
+- `havne-cli import csv` and `view` write `"utc_start_us":null`, and
+  `view --align-on utc` leaves that recording unaligned (`found` false,
+  no columns), aligning the others as before;
+- the app's viewer gives it a `utcStartMs` of 0, which the Recordings
+  page reads as no start: no "started" text, and a comparison on UTC
+  starts isn't drawn, saying which of the two has none ("this
+  recording has no UTC start");
+- `havne-cli info` checks a recording's frames, which an import of a
+  CSV has none of: it is `error` "the folder has no frames.csv" and exit
+  3, as for any recording of values alone; `replay://` refuses it for
+  the same reason.
+
+**The front ends.** `havne-cli import csv <file> <folder> --map
+<map.json>` reads the map (1 MiB at most; a map that can't be read is
+an `error` line in `read_whole`'s words, exit 3), then writes
+`{"type":"imported","format":"csv","folder":...,"lines":N,"values":N,"columns_ignored":N,"utc_start_us":N|null,"duration_us":N}`;
+a refusal is the `error` line with core's detail and exit 3, nothing
+made. `--map` is required for csv and refused for candump, as
+`--interface` is the other way round (exit 2). Python:
+`havne.import_csv(path, folder, column_map)`, the map a dict or its JSON
+text, and `havne.import_candump(path, folder, interface=None)`, each
+returning `havne.Imported` (the folder and core's counts,
+`utc_start_us` None when the file gave none) or raising `havne.Error`
+with core's words.
+
+**In the app.** The Recordings page lists every folder in its
+recordings folder that holds a `signals.csv` or a `frames.csv`
+(`SessionBridge::recentRecordings`, through the one rule
+`recordingRow` uses for a vehicle's baseline), so an import made there,
+CSV or candump, is listed and opens. Each row says whether it has
+frames (`frames`), and a recording of values alone, a CSV import's,
+shows what it can't do instead of failing at it: its row says "values
+alone: the recording has no frames to replay" and has no Replay; the
+viewer (`RecordingView.hasFrames`) has no Replay in Settings and no
+decode through a profile (`openFrames` refuses at once, "the recording
+has no frames", never a pass that fails or waits), and its frames
+check reads "Frames check: the recording has no frames", the check not
+run. **Left for v0.7.0:** the Import button, which picks a file and a
+map and makes the folder in the recordings folder; until then a folder
+made elsewhere is moved there to be listed.
+
+**Tests:** `CsvImportTest` (test_core, `tests/test_csv_import.cpp`:
+each map key and every map refusal, the map's bounds at their edges;
+the reader's quoting, BOM, preamble, blank lines and every refusal at
+its line, its bounds at their edges; each time form to its
+microseconds, midnight crossed, the 100 ms rule; empty cells and
+`missing`; the decimal comma; a folder made and read back through
+`ecuio_recording_open`, a start or the file's own times giving the
+`utc` line, a refused file making nothing, many ignored columns; the two
+made-up loggers' files, `tests/fixtures/import/csv/`: a preamble with
+`;` and decimal commas, ISO times with an offset and quoted cells),
+`ImportTest`'s argument refusals, `RecordingViewTest.AnImportedCsvOpensAndPlots`
+(the Done-when: imported, opened by the viewer, its numbers plotted and
+their columns), `CliTransferTest` (the arguments and the `imported`
+line), `CliUsageTest.ImportCsv*`, `CliGoldenTest.ImportCsvRefusesAMapsUnknownKey`
+(`import-csv-unknown-key.jsonl`), `CliTransferRunTest.csv-import` (both
+loggers imported and viewed; a missing map, a refused map and a folder
+already there), `PythonTest.test_import`,
+`BridgeTest.TheRecordingsListTakesAFolderOfValuesAlone` (the list's
+rule is `recordingRow`'s, each row's `frames`),
+`RecordingViewTest.AFolderWithNoFramesOpensUnchecked` (the check's and
+a decode's words), `QmlTest.recordings`'
+`test_aCsvImportIsListedAndOpensWithoutFrames` (an import listed, its
+row without Replay, opened from the list with its numbers plotted, no
+check, Replay in Settings or decode), and `fuzz_csv_import` (the
+first line a map, the rest the CSV; two reads agree; the samples within
+their bounds). Mutation-checked 2026-11-07 (14: a quoted delimiter
+splitting, a short row taken, the BOM kept, the 100 ms bound off, a time
+back kept, an unknown key taken, the second pass skipped, the ignored
+list dropped, a `utc` line with no UTC time, a missing text kept,
+midnight not crossed, the CLI's null start a number, the map never
+handed to core, Python's None start a 0), and the app's 6 (the list
+taking frames alone, a row without frames still replaying, a decode
+of no frames going ahead, the check run on no frames, the decode
+choice and Replay in Settings shown without frames).
