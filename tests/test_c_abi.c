@@ -423,6 +423,8 @@ int main(void)
         ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
         ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_scrub_frames(0, NULL, NULL, NULL, 0, NULL, &export_report) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;

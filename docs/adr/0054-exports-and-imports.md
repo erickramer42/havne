@@ -316,3 +316,63 @@ reads it; the import's values through obd2 are the session's);
 `fuzz_candump`. Mutation-checked 2026-11-06 (35: among them a class
 written as it is, a segment of a segmented VIN reply kept, and each
 check skipped).
+
+## Appendix: frames in memory, the Log page's export (2026-11-06)
+
+The Log page's Export CSV writes the frames its ring holds, which no
+recording holds, so it can't go through `ecuio_export`. Core scrubs them
+by the same rules instead, through one more append-only call:
+`ecuio_scrub_frames(count, get, user_data, set, flags, keep, report)`
+(`recording.h`, `core/src/scrub_frames.cpp`).
+
+- **The frames come one at a time.** A frame is 4 KB (its data holds a
+  whole ISO-TP message), so an array of the ring's 10,000 would take
+  about 41 MB, too much on a phone. Core calls `get` for each index, in
+  arrival order, into one frame of its own, twice: the classification
+  pass, then the check's. Both passes must see the same frames, so the
+  page copies the ring's rows (each about a hundred bytes) before the
+  call and builds each frame from that copy. `get` runs on the caller's
+  thread before the call returns, so a binding can pass a plain foreign
+  function (ADR-0053).
+- **The rules are the export's.** The ISO-TP reassembly is the export's
+  own (`core/src/frame_reassembly.h`, shared by both), timed on each
+  frame's `timestamp_us`. The classes are the same: an identification
+  reply's frames, every segment; a torn message's segments on a
+  diagnostic reply ID; the messages of a text or hex def of `set`. The
+  page passes the text and hex defs of every session's set since the
+  bridge started, copied at each connect, so an export made after the
+  session ends still leaves their messages out.
+- **The check** searches each kept frame, and each whole message a kept
+  frame carries, for the identity values the left-out replies carry and
+  for VIN-shaped tokens. It doesn't search the text the page writes: the
+  CSV holds each frame's bytes as spaced hex, a form the check already
+  covers, and a row's time and ID separate one frame's bytes from the
+  next. There are no `signals.csv` text values in memory, so a text
+  value outside a text def's message is caught only by its VIN shape. A
+  match fails the call with `ECUIO_ERR_LOAD_FAILED`, the same as
+  `ecuio_export`, the class in `failed_class` and `keep` all zero. The
+  page then writes nothing and shows the class's words.
+- **Nothing is made up.** A message an adapter delivered whole is one
+  row with its `reassembled` flag, so `made_up` stays 0.
+- **The file:** the kept frames the page's filter shows, oldest first.
+  One comment line names Havne's version, the frames written, and each
+  class's count out of the frames held. Then
+  `time_s,id,ext,dir,dlc,flags,data`: the frame's session time in
+  seconds, the ID in hex, 1 for a 29-bit ID, `rx` or `tx`, the bytes,
+  the flags in the table's words, and the bytes as spaced hex. The
+  page's words say that Export CSV leaves identification replies out
+  and that Copy copies the selected rows as they are.
+
+**The CLI:** frames in memory are the app's alone. `havne-cli stream`
+writes each frame as it comes, unscrubbed, and keeps no ring to export.
+`havne-cli export --format csv` over a recording is still to come:
+`ECUIO_EXPORT_CSV` answers `ECUIO_ERR_NOT_IMPLEMENTED` until it's built.
+
+**Tests:** `ScrubFramesTest` (test_core: an identification reply whole
+and as it crossed the bus, a torn segment on a reply ID, a text def's
+messages whole and segmented, a DID echoing the fake VIN whole and as
+it crossed the bus before the reply that names it, a VIN shape with no
+reply, the refusals and a cancel), `BridgeTest.FrameCsv*` and
+`.ExportFrames*` (test_bridge: the file byte for byte, the filter, a
+noted set after its file is freed, a failed check leaving the file as
+it was), `QmlTest.log`'s Export CSV case, and `test_c_abi`.

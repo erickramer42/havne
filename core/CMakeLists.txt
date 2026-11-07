@@ -13,6 +13,7 @@ add_library(ecuio-core STATIC
     src/recording_check.cpp
     src/recording_reader.cpp
     src/scrub.cpp
+    src/scrub_frames.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp

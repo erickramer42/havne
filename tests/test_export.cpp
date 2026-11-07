@@ -1,15 +1,17 @@
 // File/layer: tests/test_export.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: ScrubTest, ExportTest (test_core)
+// Testing: UNIT: ScrubTest, ExportTest, ScrubFramesTest (test_core)
 //
 // scrub.h's classifier and check, and ecuio_export's pcapng: each export
 // read back by a pcapng parser of the test's own, its frames' bytes and
 // times, the re-segmented frames reassembled by core's ISO-TP to the
 // stored message, what a scrubbed export leaves out, and both checks
-// failing an export that would carry an identity value. Each case writes
-// into a folder of its own under TEMP/TMPDIR, removed at the end.
+// failing an export that would carry an identity value; ecuio_scrub_frames
+// over frames in memory by the same rules. Each export case writes into a
+// folder of its own under TEMP/TMPDIR, removed at the end.
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +23,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
+#include "ecuio/signals.h"
 #include "isotp.h"
 #include "scrub.h"
 #include "temp_name.h"
@@ -833,6 +836,231 @@ TEST(ExportTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
     a.format = ECUIO_EXPORT_CSV;
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
+}
+
+// ---- frames in memory (ecuio_scrub_frames) ----
+
+struct Mem {
+    uint64_t t = 0;
+    uint32_t id = 0;
+    uint32_t flags = 0;
+    std::vector<uint8_t> data;
+};
+
+struct Source {
+    std::vector<Mem> frames;
+    size_t calls = 0;
+    size_t cancel_at = SIZE_MAX; /* the call that cancels */
+    uint16_t length_past = 0;    /* a data_length to give frame 0 instead */
+};
+
+int give(void* user, size_t index, ecuio_frame_t* out)
+{
+    auto& s = *static_cast<Source*>(user);
+    if (s.calls++ == s.cancel_at) {
+        return 1;
+    }
+    const Mem& m = s.frames.at(index);
+    out->timestamp_us = m.t;
+    out->arbitration_id = m.id;
+    out->flags = m.flags;
+    out->data_length = static_cast<uint16_t>(m.data.size());
+    std::memcpy(out->data, m.data.data(), m.data.size());
+    if (index == 0 && s.length_past != 0) {
+        out->data_length = s.length_past;
+    }
+    return 0;
+}
+
+struct Scrubbed {
+    ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
+    ecuio_export_report_t report{};
+    std::vector<uint8_t> keep;
+    std::string detail;
+    Scrubbed(Source& s, const ecuio_signal_set_t* set = nullptr)
+        : keep(s.frames.size(), 7)
+    {
+        rc = ecuio_scrub_frames(s.frames.size(), give, &s, set, 0, keep.data(),
+                                &report);
+        detail = ecuio_last_error_detail();
+    }
+};
+
+std::vector<uint8_t> none_kept(size_t n)
+{
+    return std::vector<uint8_t>(n, 0);
+}
+
+/* The VIN reply delivered whole, then as it crossed the bus around the
+ * tester's request and Flow Control, then a value */
+TEST(ScrubFramesTest, AnIdentificationReplyIsLeftOutEveryFrameOfIt)
+{
+    Source s;
+    s.frames = {
+        {1000, 0x7E8, kWhole, text_bytes({0x49, 0x02, 0x01}, kVin)},
+        {2000, 0x7DF, 0, {0x02, 0x09, 0x02, 0, 0, 0, 0, 0}},
+        {2100, 0x7E8, 0, {0x10, 0x14, 0x49, 0x02, 0x01, 'Z', 'Z', 'Z'}},
+        {2200, 0x7E0, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}},
+        {2300, 0x7E8, 0, {0x21, 'F', 'A', 'K', 'E', '1', '1', 'M'}},
+        {2400, 0x7E8, 0, {0x22, '0', '0', '0', '0', '0', '0', '1'}},
+        {3000, 0x7E8, 0, {0x04, 0x41, 0x0C, 0x1A, 0xF8}},
+    };
+    Scrubbed r(s);
+    ASSERT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{0, 1, 0, 1, 0, 0, 1}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 4u);
+    EXPECT_EQ(r.report.frames, 3u);
+    EXPECT_EQ(r.report.made_up, 0u);
+    EXPECT_EQ(r.report.failed_class, 0u);
+    EXPECT_EQ(s.calls, 2 * s.frames.size()) << "each frame asked for twice";
+}
+
+TEST(ScrubFramesTest, ASegmentNoMessageCanBeAttributedToIsLeftOutOnAReplyId)
+{
+    Source s;
+    s.frames = {
+        /* its First Frame came before the ring's oldest frame */
+        {1000, 0x7E8, 0, {0x21, 'S', 'E', 'C', 'R', 'E', 'T', '1'}},
+        /* a First Frame never finished */
+        {2000, 0x7E9, 0, {0x10, 0x0A, 0x62, 0xD8, 0x01, 'A', 'B', 'C'}},
+        /* on a request ID: as it is */
+        {3000, 0x7E0, 0, {0x21, 0, 0, 0, 0, 0, 0, 0}},
+        /* delivered whole but cut short: a row holds it as it is */
+        {4000, 0x7E8, kWhole | ECUIO_FRAME_FLAG_TRUNCATED, {0x62, 0xD8}},
+        {5000, 0x7E8, 0, {0x04, 0x41, 0x0C, 0x1A, 0xF8}},
+    };
+    Scrubbed r(s);
+    ASSERT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{0, 0, 1, 1, 1}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 2u);
+    EXPECT_EQ(r.report.frames, 3u);
+}
+
+/* A text or hex def of the caller's set: its messages left out, whole
+ * or segmented; with no set they stay */
+TEST(ScrubFramesTest, ATextDefsMessagesAreLeftOutByTheSetsDef)
+{
+    const std::string json =
+        R"({"havne_signals": 1, "name": "Scrub test", )"
+        R"("source": {"name": "test_export"}, )"
+        R"("ecus": [{"id": "pcm", "rx": "7E8"}], )"
+        R"("signals": [{"key": "ecu_name", "name": "ECU name", "ecu": "pcm", )"
+        R"("read": {"service": "22", "number": "D802"}, )"
+        R"("field": {"byte": 0}, "kind": "text"}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    Source s;
+    s.frames = {
+        {1000, 0x7E8, kWhole, text_bytes({0x62, 0xD8, 0x02}, "ECM-HavneSim")},
+        {2000, 0x7E8, 0, {0x10, 0x0F, 0x62, 0xD8, 0x02, 'E', 'C', 'M'}},
+        {2100, 0x7E0, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}},
+        {2200, 0x7E8, 0, {0x21, '-', 'H', 'a', 'v', 'n', 'e', 'S'}},
+        {2300, 0x7E8, 0, {0x22, 'i', 'm', 0, 0, 0, 0, 0}},
+        {3000, 0x7E8, kWhole, {0x62, 0xD8, 0x03, 0x01, 0x02}},
+    };
+    Scrubbed r(s, ecuio_signal_file_set(file));
+    EXPECT_EQ(r.rc, ECUIO_OK) << r.detail;
+    EXPECT_EQ(r.keep, (std::vector<uint8_t>{0, 0, 1, 0, 0, 1}));
+    EXPECT_EQ(r.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 4u);
+    EXPECT_EQ(r.report.frames, 2u);
+
+    Scrubbed all(s);
+    EXPECT_EQ(all.rc, ECUIO_OK) << all.detail;
+    EXPECT_EQ(all.keep, std::vector<uint8_t>(6, 1));
+    ecuio_signal_file_free(file);
+}
+
+/* The check: a DID echoing the VIN, whole or segmented, and a VIN shape
+ * with no identification reply; nothing kept, the class alone named */
+TEST(ScrubFramesTest, AnIdentityValueOrAVinShapeInAKeptFrameFailsIt)
+{
+    const Mem vin_reply{1000, 0x7E8, kWhole,
+                        text_bytes({0x49, 0x02, 0x01}, kVin)};
+    const Mem echo{2000, 0x7E8, kWhole, text_bytes({0x62, 0xD8, 0x01}, kVin)};
+    {
+        SCOPED_TRACE("delivered whole");
+        Source s;
+        s.frames = {vin_reply, echo};
+        Scrubbed r(s);
+        EXPECT_EQ(r.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(r.report.failed_class,
+                  ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+        EXPECT_EQ(r.report.frames, 0u);
+        EXPECT_EQ(r.keep, none_kept(2));
+        EXPECT_EQ(r.detail,
+                  "the check found an identification reply's value in a "
+                  "frame the export would write: nothing was written");
+    }
+    {
+        SCOPED_TRACE("as it crossed the bus, after the reply");
+        Source s;
+        s.frames = {
+            {500, 0x7E8, 0, {0x10, 0x14, 0x62, 0xD8, 0x01, 'Z', 'Z', 'Z'}},
+            {600, 0x7E0, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}},
+            {700, 0x7E8, 0, {0x21, 'F', 'A', 'K', 'E', '1', '1', 'M'}},
+            {800, 0x7E8, 0, {0x22, '0', '0', '0', '0', '0', '0', '1'}},
+            vin_reply,
+        };
+        Scrubbed r(s);
+        EXPECT_EQ(r.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(r.report.failed_class,
+                  ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+        EXPECT_EQ(r.keep, none_kept(5));
+    }
+    {
+        SCOPED_TRACE("with no identification reply: the VIN's shape");
+        Source s;
+        s.frames = {echo};
+        Scrubbed r(s);
+        EXPECT_EQ(r.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(r.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
+        EXPECT_EQ(r.detail,
+                  "the check found a VIN-shaped token in a frame the export "
+                  "would write: nothing was written");
+        EXPECT_EQ(r.detail.find(kVin), std::string::npos);
+        EXPECT_EQ(r.keep, none_kept(1));
+    }
+}
+
+TEST(ScrubFramesTest, ArgumentsACancelAndAFrameTooLongAreRefused)
+{
+    Source s;
+    s.frames = {{1000, 0x7E8, 0, {0x04, 0x41, 0x0C, 0x1A, 0xF8}},
+                {2000, 0x7E8, 0, {0x04, 0x41, 0x0C, 0x1A, 0xF9}}};
+    uint8_t keep[2] = {7, 7};
+    ecuio_export_report_t r{};
+    r.frames = 9;
+    EXPECT_EQ(ecuio_scrub_frames(2, nullptr, &s, nullptr, 0, keep, &r),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(r.frames, 0u);
+    EXPECT_EQ(ecuio_scrub_frames(2, give, &s, nullptr, 0, nullptr, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_scrub_frames(2, give, &s, nullptr, 1, keep, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(s.calls, 0u) << "refused before any frame is asked for";
+    EXPECT_EQ(ecuio_scrub_frames(0, give, &s, nullptr, 0, nullptr, &r),
+              ECUIO_OK);
+    EXPECT_EQ(r.frames, 0u);
+
+    s.cancel_at = 3; /* the second pass's second frame */
+    EXPECT_EQ(ecuio_scrub_frames(2, give, &s, nullptr, 0, keep, &r),
+              ECUIO_ERR_CANCELED);
+    EXPECT_EQ(keep[0] + keep[1], 0);
+    EXPECT_EQ(s.calls, 4u);
+
+    s.cancel_at = SIZE_MAX;
+    s.calls = 0;
+    s.length_past = ECUIO_FRAME_DATA_MAX + 1;
+    EXPECT_EQ(ecuio_scrub_frames(2, give, &s, nullptr, 0, keep, &r),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "frame 0 holds more bytes than a frame can");
+
+    s.length_past = 0;
+    EXPECT_EQ(ecuio_scrub_frames(2, give, &s, nullptr, 0, keep, &r), ECUIO_OK);
+    EXPECT_EQ(keep[0] + keep[1], 2);
+    EXPECT_EQ(r.frames, 2u);
 }
 
 } // namespace

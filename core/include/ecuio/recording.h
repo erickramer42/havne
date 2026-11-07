@@ -718,6 +718,40 @@ _Static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
 ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
                             ecuio_export_report_t* report);
 
+/* Puts frame index of the caller's frames in *out (zeroed first); nonzero
+ * cancels. Called on the caller's thread before ecuio_scrub_frames
+ * returns, never later, so a binding can pass a plain foreign function. */
+typedef int (*ecuio_scrub_frame_callback_t)(void* user_data, size_t index,
+                                            ecuio_frame_t* out);
+
+/*
+ * Frames in memory scrubbed as ecuio_export scrubs a recording's (ADR-0054
+ * section 1 and its appendix "frames in memory"): get is called for each
+ * index from 0 to count - 1 in the order the frames arrived, twice, and
+ * must give the same frame both times. The frames of ISO-TP messages as
+ * they crossed the bus are reassembled first, on their timestamp_us. An
+ * identification reply's frames (every segment of a segmented one), a
+ * torn message's segments on a diagnostic reply ID and the messages a
+ * text or hex def of set applies to (set may be NULL) are left out:
+ * keep[i] is 0 for those and 1 for every other frame. Then each kept
+ * frame, and each whole message a kept frame carries, is searched for
+ * the identity values the left-out replies carry and for VIN-shaped
+ * tokens; one match fails it, the same as ecuio_export, with keep all
+ * zero and the class in report->failed_class. report: frames kept,
+ * left_out by class, made_up 0 (nothing is re-segmented). report may be
+ * NULL. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL get, or a NULL keep
+ * with a count; ECUIO_ERR_INVALID_ARGUMENT for a flag (none is defined)
+ * or a frame whose data_length is past ECUIO_FRAME_DATA_MAX;
+ * ECUIO_ERR_CANCELED when get returned nonzero; ECUIO_ERR_LOAD_FAILED
+ * for a failed check (the class's words, never the value);
+ * ECUIO_ERR_OUT_OF_MEMORY. On any failure keep is all zero.
+ */
+ecuio_status_t ecuio_scrub_frames(size_t count,
+                                  ecuio_scrub_frame_callback_t get,
+                                  void* user_data,
+                                  const ecuio_signal_set_t* set, uint32_t flags,
+                                  uint8_t* keep, ecuio_export_report_t* report);
+
 /* ecuio_import_options_t.format; append-only */
 #define ECUIO_IMPORT_CANDUMP 1u /* can-utils' log (section 4) */
 #define ECUIO_IMPORT_CSV     2u /* another logger's signals (section 5):
