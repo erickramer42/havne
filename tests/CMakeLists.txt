@@ -23,7 +23,8 @@ endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_check.cpp test_sha256.cpp)
+    test_recorder.cpp test_recording.cpp test_recording_check.cpp
+    test_recording_frames.cpp test_sha256.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -291,6 +292,27 @@ if(TARGET havne-cli)
         app_cli_golden(SimRefusesARelativeRecording sim-relative-recording.jsonl
             --exit 3
             -- $<TARGET_FILE:havne-cli> sim "replay://recordings/run?loop=1" --on vcan0)
+        # The ELM327 emulator (ADR-0055) parses its URI as the bus's sim
+        # does, before it listens: the same refusal, every platform
+        app_cli_golden(SimElm327RefusesABadUri sim-bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0"
+               --elm327 tcp:0)
+        # The emulator on 127.0.0.1, a port the system picks: a host's
+        # ELM327 exchange, core's own elm327:// session, a second module's
+        # DID, a plugin's DIDs, and python-OBD (skipped without it)
+        function(app_cli_elm327 name mode)
+            add_test(NAME CliElm327RunTest.${name}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_elm327.py
+                        ${mode} $<TARGET_FILE:havne-cli>
+                        ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+            set_tests_properties(CliElm327RunTest.${name} PROPERTIES
+                TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endfunction()
+        app_cli_elm327(AHostSpeaksElm327ToIt adapter)
+        app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
+        app_cli_elm327(ASecondModulesDidAnswers modules)
+        app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(PythonObdReadsIt python-obd)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
         # first, its clear at the key-on's 0 rpm, the report read again;
         # and with the word on the engine, its 0 km/h read too
@@ -535,6 +557,30 @@ if(TARGET havne-cli)
                --align-on rise:RPM:2010 --hysteresis 30 --columns 2 --signal RPM)
         app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
+        # view --frames (ADR-0049's appendix of 2026-11-06): a SocketCAN
+        # listener's wire frames through the profile its header names, the
+        # replay fixture (frames.csv alone) through obd2, the packed
+        # replies through a signal file extending obd2, and a folder that
+        # names no profile
+        set(_cli_frames ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay)
+        app_cli_golden(ViewFramesDecodesAListenersWireFrames view-frames.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/findings --frames
+               --columns 4)
+        app_cli_golden(ViewFramesDecodesARecordingWithNoSignals
+            view-frames-replay.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/2026-10-25-engine-start
+               --frames --profile obd2 --columns 3 --signal RPM
+               --signal "Vehicle Speed")
+        app_cli_golden(ViewFramesDecodesThroughASignalFile
+            view-frames-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
+               --frames --signals
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json
+               --columns 2)
+        app_cli_golden(ViewFramesRefusesAFolderThatNamesNoProfile
+            view-frames-no-profile.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
+               --frames)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
@@ -634,6 +680,13 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    app_cli_usage(SimOnAndElm327IsUsage "sim|mock://sim|--on|vcan0|--elm327|tcp:0")
+    app_cli_usage(SimElm327DeskBusIsUsage "sim|mock://sim|--elm327|tcp:0|--desk-bus")
+    app_cli_usage(SimElm327WithoutAnAddressIsUsage "sim|mock://sim|--elm327")
+    app_cli_usage(SimElm327NotTcpIsUsage "sim|mock://sim|--elm327|udp:35000")
+    app_cli_usage(SimElm327APortPastTheRangeIsUsage "sim|mock://sim|--elm327|tcp:65536")
+    app_cli_usage(SimElm327AShortAddressIsUsage "sim|mock://sim|--elm327|tcp:127.0.1:35000")
+    app_cli_usage(SimElm327AHostNameIsUsage "sim|mock://sim|--elm327|tcp:localhost:35000")
     app_cli_usage(ClearWithoutYesIsUsage "clear|mock://x")
     app_cli_usage(ClearWithoutAUriIsUsage "clear|--yes")
     app_cli_usage(ClearTwoUrisIsUsage "clear|mock://a|mock://b|--yes")
@@ -661,6 +714,15 @@ if(TARGET havne-cli)
     app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
     app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
         "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
+    app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
+    app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
+    app_cli_usage(ViewSignalsAndAPluginIsUsage
+        "view|x|--frames|--signals|a.json|--plugin|b")
+    app_cli_usage(ViewAProfileThatIsntTheSignalFilesIsUsage
+        "view|${_cli_pull_early}|--frames|--profile|obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json")
+    app_cli_usage(ViewAProfileThatIsntAVariantIsUsage
+        "view|${_cli_pull_early}|--frames|--profile|obd2|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim")
     app_cli_usage(InfoWithoutARecordingIsUsage "info")
     app_cli_usage(InfoTwoRecordingsIsUsage "info|x|y")
     app_cli_usage(InfoAGapOfZeroIsUsage "info|x|--gap|0")

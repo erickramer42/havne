@@ -1134,6 +1134,41 @@ QVariantList SessionBridge::plugins()
     return m_pluginStore.all();
 }
 
+QVariantList SessionBridge::decodeProfiles()
+{
+    QVariantList out;
+    for (const char* builtIn : {"obd2", "mock"}) {
+        out.append(QVariantMap{
+            {QStringLiteral("profile"), QString::fromLatin1(builtIn)},
+            {QStringLiteral("name"), QString()}});
+    }
+    for (const QVariant& v : m_signalStore.registered()) {
+        const QVariantMap e = v.toMap();
+        out.append(QVariantMap{
+            {QStringLiteral("profile"), e.value(QStringLiteral("profile"))},
+            {QStringLiteral("name"), e.value(QStringLiteral("name"))}});
+    }
+    for (const QVariant& v : m_pluginStore.all()) {
+        const QVariantMap e = v.toMap();
+        if (!e.value(QStringLiteral("ok")).toBool()) {
+            continue;
+        }
+        const QStringList variants =
+            e.value(QStringLiteral("variants")).toStringList();
+        const QStringList profiles =
+            e.value(QStringLiteral("profiles")).toStringList();
+        for (qsizetype i = 0; i < profiles.size(); ++i) {
+            out.append(QVariantMap{
+                {QStringLiteral("profile"), profiles.at(i)},
+                {QStringLiteral("name"),
+                 e.value(QStringLiteral("name")).toString() +
+                     (i < variants.size() ? QStringLiteral(" ") + variants.at(i)
+                                          : QString())}});
+        }
+    }
+    return out;
+}
+
 QVariantMap SessionBridge::importPlugin(const QUrl& url)
 {
     // Android's content:// URIs open through QFile as they are

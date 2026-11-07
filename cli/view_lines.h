@@ -209,10 +209,13 @@ inline void signed_us(Line& l, int64_t us)
 // duration_us, utc_start_us|null, signals, markers, summary, rows_torn,
 // records_dropped, notes_dropped, signal_file}; signal_file is null when
 // the header names none and the folder holds none, else {sha256 (the
-// header's, or null), present, matches} (ADR-0051 section 4)
+// header's, or null), present, matches} (ADR-0051 section 4); and with
+// view --frames, frames: the profile its frames decoded through, or
+// "signals.json" for the recording's own file
 inline void opened_line(Line& l, uint32_t recording,
                         const ecuio_recording_info_t& i,
-                        const ecuio_recording_signals_t& sf)
+                        const ecuio_recording_signals_t& sf,
+                        const char* frames = nullptr)
 {
     l.raw("{\"type\":\"opened\"");
     l.key("recording");
@@ -257,6 +260,10 @@ inline void opened_line(Line& l, uint32_t recording,
         l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_MATCH) != 0 ? "true"
                                                               : "false");
         l.ch('}');
+    }
+    if (frames != nullptr) {
+        l.key("frames");
+        l.string(frames, SIZE_MAX);
     }
     l.ch('}');
 }

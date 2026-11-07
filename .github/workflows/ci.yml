@@ -163,7 +163,8 @@ jobs:
   # libclang-rt-<major>-dev, installed for the image's clang and proved
   # by a one-line link before the build. Not ctest tests: the suite
   # stays deterministic. The harnesses that read a structured format
-  # (JSON, signal files, plugins, OBDb sets) start from the seeds
+  # (JSON, signal files, plugins, OBDb sets, the ELM327 emulator's
+  # hosts) start from the seeds
   # fuzz/seeds.py builds from the committed fixtures: from nothing, 60 s
   # barely leaves the JSON reader. The others start empty.
   fuzz:
@@ -174,8 +175,9 @@ jobs:
       FUZZERS: >-
         fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply
         fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp
-        fuzz_vin fuzz_dtc fuzz_sim fuzz_recording fuzz_request_bus fuzz_json
-        fuzz_signal_file fuzz_plugin_manifest fuzz_obdb_import
+        fuzz_vin fuzz_dtc fuzz_sim fuzz_elm327_emulator fuzz_recording
+        fuzz_request_bus fuzz_json fuzz_signal_file fuzz_plugin_manifest
+        fuzz_obdb_import
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -168,26 +168,6 @@ void append_hex(std::string& out, uint32_t v)
     out.append(buf, static_cast<size_t>(n));
 }
 
-/* The value to 12 significant digits (the app's 'g', 12), with a '.'
- * whatever the process's locale: a Qt program sets LC_NUMERIC from the
- * environment, where the decimal point may be a comma */
-void append_value(std::string& out, double v)
-{
-    char buf[40];
-    const int n = std::snprintf(buf, sizeof buf, "%.12g", v);
-    if (n <= 0) {
-        return;
-    }
-    /* The locale is set once at startup (Qt sets LC_NUMERIC), before any
-     * recorder runs; this only reads its decimal point */
-    // NOLINTNEXTLINE(concurrency-mt-unsafe)
-    const char* point = std::localeconv()->decimal_point;
-    const char p = (point != nullptr && point[0] != '\0') ? point[0] : '.';
-    for (int i = 0; i < n; ++i) {
-        out += (buf[i] == p) ? '.' : buf[i];
-    }
-}
-
 /* Seconds since the start to the millisecond, rounded, as "+1.234" */
 void append_seconds(std::string& out, uint64_t host_us)
 {
@@ -940,7 +920,7 @@ struct ecuio_recorder {
                 } else {
                     double x;
                     std::memcpy(&x, body + at, sizeof x);
-                    append_value(value_out, x);
+                    ecuio_recording_rows::append_value(value_out, x);
                 }
                 value_out += ',';
                 value_out += d->unit;

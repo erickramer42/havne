@@ -9,8 +9,10 @@
 #include "can_line.h"
 #include "clear_run.h"
 #include "diagnostics_line.h"
+#include "elm327_listener.h"
 #include "info_lines.h"
 #include "timing_line.h"
+#include "view_frames.h"
 #include "view_lines.h"
 #include "vin_line.h"
 #include "jsonl.h"
@@ -948,20 +950,17 @@ int use_signal_file(const char* path, const char* uri, std::string* opened)
 // but unused); a copy that doesn't load or register is start and an
 // error line (3). The match costs the reader's open, one pass over
 // signals.csv, before the replay starts.
-int use_recording_signals(const char* uri, std::string* opened)
+// What a recording's events.log header says decoded it (its profile and
+// signal file lines); empty when it has no events.log
+cli::RecordedSignals recorded_signals(const std::string& folder)
 {
-    opened->clear();
-    std::string folder;
-    if (!cli::replay_folder(uri, &folder)) {
-        return -1;
-    }
+    cli::RecordedSignals recorded;
     std::string head;
     std::string why;
     if (!read_whole((folder + "/events.log").c_str(), 4u << 20, "events.log",
                     &head, &why)) {
-        return -1;
+        return recorded;
     }
-    cli::RecordedSignals recorded;
     size_t at = 0;
     while (at < head.size()) {
         size_t end = head.find('\n', at);
@@ -973,6 +972,18 @@ int use_recording_signals(const char* uri, std::string* opened)
         }
         at = end + 1;
     }
+    return recorded;
+}
+
+int use_recording_signals(const char* uri, std::string* opened)
+{
+    opened->clear();
+    std::string folder;
+    if (!cli::replay_folder(uri, &folder)) {
+        return -1;
+    }
+    std::string why;
+    const cli::RecordedSignals recorded = recorded_signals(folder);
     if (!recorded.names_file()) {
         return -1;
     }
@@ -1800,9 +1811,14 @@ void usage(FILE* to)
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>]\n"
+        "       havne-cli sim <uri> --elm327 tcp:[<address>:]<port> "
+        "[--seconds S]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--align-on <what>] [--hysteresis H]\n"
+        "                      [--frames [--profile <name>]\n"
+        "                      [--signals <file> | --plugin <pkg>]]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
         "       havne-cli signals check <file>\n"
@@ -1857,6 +1873,13 @@ void usage(FILE* to)
         "         listen-only), only on a desk bus with no car. Ends at\n"
         "         Ctrl+C, after S seconds, or once another node sends on\n"
         "         its reply ID (0x7E8, or 0x7E9 with modules=2).\n"
+        "         --elm327 serves the same car, on every platform, as an\n"
+        "         ELM327 adapter on a TCP port, as a WiFi adapter does: on\n"
+        "         127.0.0.1 unless an address is named (one the LAN can\n"
+        "         reach is your choice), port 0 for one the system picks.\n"
+        "         elm327://127.0.0.1:<port> connects Havne to it; so do\n"
+        "         python-OBD and other ELM327 apps. Ends at Ctrl+C or\n"
+        "         after S seconds.\n"
         "clear    clears each ECU's trouble codes, freeze frame and\n"
         "         readiness through core's gate: every ECU's report is "
         "written\n"
@@ -1873,6 +1896,11 @@ void usage(FILE* to)
         "         (reaching it after being --hysteresis below),\n"
         "         fall:<signal>:<level>, marker:<label>, or utc (their\n"
         "         wall-clock starts).\n"
+        "         --frames reads the values from frames.csv through a\n"
+        "         profile's decode: --profile's, a --signals file's or a\n"
+        "         --plugin variant's, else the recording's own signals.json\n"
+        "         or the profile it was recorded under, so a raw recording\n"
+        "         has values too.\n"
         "info     checks a recording's frames offline: what it holds, then\n"
         "         each gap (no frame for over --gap seconds, 1), ID whose\n"
         "         interval passed --rate-drop times its median (10), ID first\n"
@@ -2433,6 +2461,8 @@ struct SimArgs {
     bool desk_bus = false; /* --desk-bus: a real controller too */
     const char* signals = nullptr; /* --signals' file */
     const char* plugin = nullptr;  /* --plugin's package */
+    const char* elm327 = nullptr;  /* --elm327's tcp:[<address>:]<port> */
+    cli::Elm327Address elm327_at;
 };
 
 // Clearing trouble codes (ADR-0038's appendix of 2026-11-06): start,
@@ -2490,6 +2520,95 @@ int run_clear_command(const char* uri, uint32_t flags)
         return kExitFailed;
     }
     return std::strcmp(r.reason, "cleared") == 0 ? kExitOk : kExitFailed;
+}
+
+// The simulated ECU as an ELM327 adapter on a TCP port (ADR-0055), on
+// every platform, until Ctrl+C or --seconds: start, elm327, a client
+// line as each host connects and leaves, a sim_stats line every 10 s
+// while the counts change, end with them
+int run_sim_elm327(const SimArgs& args)
+{
+    install_handlers();
+    Output out;
+    write_start(out);
+    ecuio_sim_t* sim = nullptr;
+    const ecuio_status_t st = ecuio_sim_create_unbound(args.uri, 0, &sim);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    const auto created = std::chrono::steady_clock::now();
+    cli::Elm327Server server;
+    std::string why;
+    if (!server.open(args.elm327_at, &why)) {
+        ecuio_sim_destroy(sim);
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    {
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::elm327_line(
+            l, args.uri,
+            cli::address_text(server.address().ip, server.address().port));
+        write_line(out, l);
+    }
+    out.flush();
+    cli::Elm327Emulator emu(sim);
+    const uint64_t started = ecuio_clock_us();
+    uint64_t next_stats = started + kSimStatsEveryUs;
+    ecuio_sim_stats_t last{};
+    ecuio_sim_stats_t s{};
+    const char* reason = nullptr;
+    server.serve(
+        emu,
+        [created] {
+            return static_cast<int64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - created)
+                    .count());
+        },
+        [&] {
+            const uint64_t now = ecuio_clock_us();
+            if (g_interrupted.load()) {
+                reason = "interrupted";
+            } else if (args.seconds &&
+                       now - started >= args.seconds * 1000000u) {
+                reason = "seconds";
+            } else if (now >= next_stats) {
+                next_stats = now + kSimStatsEveryUs;
+                (void)ecuio_sim_get_stats(sim, &s);
+                if (std::memcmp(&s, &last, sizeof s) != 0) {
+                    last = s;
+                    char buf[1024];
+                    cli::Line l(buf, sizeof buf);
+                    cli::sim_stats_line(l, s);
+                    write_line(out, l);
+                    out.flush();
+                }
+            }
+            return reason != nullptr || out.failed;
+        },
+        [&](const char* event, const std::string& peer) {
+            char buf[256];
+            cli::Line l(buf, sizeof buf);
+            cli::client_line(l, event, peer);
+            write_line(out, l);
+            out.flush();
+        });
+    (void)ecuio_sim_get_stats(sim, &s);
+    ecuio_sim_destroy(sim);
+    if (out.failed) {
+        return out.ok() ? kExitOk : kExitFailed;
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::sim_end_line(l, reason != nullptr ? reason : "failed", s);
+    write_line(out, l);
+    out.flush();
+    return reason != nullptr && out.ok() ? kExitOk : kExitFailed;
 }
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
@@ -2643,6 +2762,11 @@ struct ViewArgs {
     cli::AlignOn align;
     double hysteresis = 0;
     bool has_hysteresis = false;
+    // --frames: the values from frames.csv through a profile's decode
+    bool frames = false;
+    std::string profile;                // --profile; "" for the default
+    const char* signals_path = nullptr; // --signals
+    const char* plugin_path = nullptr;  // --plugin
 };
 
 struct InfoArgs {
@@ -2684,6 +2808,7 @@ struct Viewed {
     bool aligned = true;
     uint64_t align_host_us = ECUIO_RECORDING_NONE;
     int64_t offset_us = 0;
+    std::string decoded; // --frames: the profile, or "signals.json"
 
     // The index of a signal by name, or UINT32_MAX
     uint32_t find(const std::string& name) const
@@ -2699,24 +2824,161 @@ struct Viewed {
     }
 };
 
+// view's open of one recording: its signals.csv, or with --frames its
+// frames.csv through the set cli/view_frames.h's rules pick, *decoded
+// naming it. A failure's why for the error line, never a path.
+ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
+                           ecuio_recording_t** r, std::string* decoded,
+                           std::string* why)
+{
+    if (!args.frames) {
+        const ecuio_status_t st =
+            ecuio_recording_open(folder, nullptr, nullptr, r);
+        *why = ecuio_last_error_detail();
+        return st;
+    }
+    const cli::RecordedSignals recorded = recorded_signals(folder);
+    bool own = false;
+    if (args.profile.empty() && recorded.names_file()) {
+        ecuio_recording_t* plain = nullptr;
+        ecuio_recording_signals_t sig{};
+        if (ecuio_recording_open(folder, nullptr, nullptr, &plain) ==
+                ECUIO_OK &&
+            ecuio_recording_get_signals(plain, &sig) == ECUIO_OK) {
+            own = (sig.flags & ECUIO_RECORDING_SIGNALS_MATCH) != 0;
+        }
+        ecuio_recording_close(plain);
+    }
+    const cli::FramesSource source =
+        cli::frames_source(args.profile, recorded, own);
+    ecuio_signal_file_t* file = nullptr;
+    const ecuio_signal_set_t* set = nullptr;
+    if (source.own_file) {
+        const ecuio_status_t st = load_signal_file(
+            (std::string(folder) + "/signals.json").c_str(), &file, why);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+        set = ecuio_signal_file_set(file);
+        *decoded = "signals.json";
+    } else if (source.profile.empty()) {
+        *why = source.why;
+        return ECUIO_ERR_UNKNOWN_PROFILE;
+    } else {
+        const bool registered =
+            ecuio_profile_lookup(source.profile.c_str(), &set) == ECUIO_OK;
+        *why = cli::profile_refusal(source.profile, registered,
+                                    set != nullptr ? set->count : 0);
+        if (!why->empty()) {
+            return ECUIO_ERR_UNKNOWN_PROFILE;
+        }
+        *decoded = source.profile;
+    }
+    const ecuio_status_t st =
+        ecuio_recording_open_frames(folder, set, nullptr, nullptr, r);
+    *why = ecuio_last_error_detail();
+    ecuio_signal_file_free(file); /* the reader keeps its own copy */
+    return st;
+}
+
+// view --frames' --signals and --plugin: the file's profile, or each
+// variant's, registered for the process's life, and the --profile to
+// decode with when none was given. -1 to go on; else the exit code: a
+// file that can't be read or is refused is start and an error line (3),
+// a --profile that isn't the file's or a variant's a usage error (2)
+int use_view_signals(Output& out, ViewArgs& args)
+{
+    std::string why;
+    ecuio_status_t st = ECUIO_OK;
+    if (args.signals_path != nullptr) {
+        ecuio_signal_file_t* file = nullptr;
+        st = load_signal_file(args.signals_path, &file, &why);
+        if (st == ECUIO_OK) {
+            const char* profile = ecuio_signal_file_profile(file);
+            if (!args.profile.empty() && args.profile != profile) {
+                std::fprintf(stderr,
+                             "havne-cli: --profile isn't the signal file's, "
+                             "%s\n",
+                             profile);
+                ecuio_signal_file_free(file);
+                return kExitUsage;
+            }
+            st = ecuio_profile_register(profile, ecuio_signal_file_set(file),
+                                        nullptr);
+            if (st == ECUIO_OK) {
+                g_signal_file = file;
+                args.profile = profile;
+                return -1;
+            }
+            why = ecuio_last_error_detail();
+            ecuio_signal_file_free(file);
+        }
+    } else if (args.plugin_path != nullptr) {
+        ecuio_plugin_t* p = nullptr;
+        st = load_package(args.plugin_path, &p, &why);
+        if (st == ECUIO_OK) {
+            const ecuio_plugin_info_t info = plugin_info(p);
+            std::string names;
+            bool known = false;
+            for (uint32_t v = 0; v < info.variant_count; ++v) {
+                const std::string name =
+                    cli::plugin_profile(info.id, variant_of(p, v).c_str());
+                names += (v == 0 ? "" : ", ") + name;
+                known = known || name == args.profile;
+            }
+            if (args.profile.empty() && info.variant_count == 1) {
+                args.profile = names;
+                known = true;
+            }
+            if (!known) {
+                std::fprintf(stderr,
+                             "havne-cli: --profile names the variant to "
+                             "decode with: %s\n",
+                             names.c_str());
+                ecuio_plugin_free(p);
+                return kExitUsage;
+            }
+            st = register_variants(p, &why);
+            if (st == ECUIO_OK) {
+                g_plugin = p;
+                return -1;
+            }
+            (void)ecuio_plugin_free(p);
+        }
+    } else {
+        return -1;
+    }
+    write_start(out);
+    write_error(out, st, why.c_str());
+    out.flush();
+    return kExitConnect;
+}
+
 // A recording read offline (ADR-0049 section 5): every recording opens,
 // then the names are checked (a name in none is a usage error, before any
 // output), then the lines. A failed open or query is an error line, exit 3.
-int run_view(const ViewArgs& args)
+int run_view(ViewArgs& args)
 {
     Output out;
+    const int used = use_view_signals(out, args);
+    if (used >= 0) {
+        return used;
+    }
     std::vector<Viewed> views(args.folders.size());
     for (size_t i = 0; i < args.folders.size(); ++i) {
         ecuio_recording_t* r = nullptr;
+        std::string decoded;
+        std::string why;
         const ecuio_status_t rc =
-            ecuio_recording_open(args.folders[i], nullptr, nullptr, &r);
+            open_viewed(args, args.folders[i], &r, &decoded, &why);
         if (rc != ECUIO_OK) {
             write_start(out);
-            write_error(out, rc);
+            write_error(out, rc, why.c_str());
             return out.ok() ? kExitConnect : kExitFailed;
         }
         Viewed& v = views[i];
         v.r.reset(r);
+        v.decoded = decoded;
         ecuio_recording_get_info(r, &v.info);
         ecuio_recording_get_signals(r, &v.signal_file);
         v.signals.resize(v.info.signal_count);
@@ -2867,7 +3129,8 @@ int run_view(const ViewArgs& args)
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, i, v.info, v.signal_file);
+        cli::opened_line(l, i, v.info, v.signal_file,
+                         v.decoded.empty() ? nullptr : v.decoded.c_str());
         write_line(out, l);
         for (uint32_t k = 0; k < v.signals.size(); ++k) {
             write_signal_line(out, v.r.get(), i, k, v.signals[k]);
@@ -3422,6 +3685,14 @@ int run(int argc, char** argv)
                     return kExitUsage;
                 }
                 view.has_hysteresis = true;
+            } else if (a == "--frames") {
+                view.frames = true;
+            } else if (a == "--profile" && has_value) {
+                view.profile = argv[++i];
+            } else if (a == "--signals" && has_value) {
+                view.signals_path = argv[++i];
+            } else if (a == "--plugin" && has_value) {
+                view.plugin_path = argv[++i];
             } else if (a.rfind("--", 0) == 0) {
                 std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
                 usage(stderr);
@@ -3444,6 +3715,18 @@ int run(int argc, char** argv)
         }
         if (view.has_from && view.has_to && view.from_us >= view.to_us) {
             std::fprintf(stderr, "havne-cli: --from must come before --to\n");
+            return kExitUsage;
+        }
+        if (!view.frames &&
+            (!view.profile.empty() || view.signals_path != nullptr ||
+             view.plugin_path != nullptr)) {
+            std::fprintf(stderr, "havne-cli: --profile, --signals and "
+                                 "--plugin go with --frames\n");
+            return kExitUsage;
+        }
+        if (view.signals_path != nullptr && view.plugin_path != nullptr) {
+            std::fprintf(stderr, "havne-cli: --signals or --plugin, not "
+                                 "both\n");
             return kExitUsage;
         }
         return run_view(view);
@@ -3576,6 +3859,14 @@ int run(int argc, char** argv)
             const std::string a = argv[i];
             if (a == "--on" && i + 1 < argc) {
                 sim.on = argv[++i];
+            } else if (a == "--elm327" && i + 1 < argc) {
+                sim.elm327 = argv[++i];
+                if (!cli::parse_elm327_address(sim.elm327, &sim.elm327_at)) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --elm327 takes tcp:<port> or "
+                                 "tcp:<a.b.c.d>:<port>, a port 0-65535\n");
+                    return kExitUsage;
+                }
             } else if (a == "--desk-bus") {
                 sim.desk_bus = true;
             } else if (a == "--signals" && i + 1 < argc) {
@@ -3597,9 +3888,15 @@ int run(int argc, char** argv)
                 sim.uri = argv[i];
             }
         }
-        if (!sim.uri || !sim.on) {
-            std::fprintf(stderr,
-                         "havne-cli: sim needs a URI and --on <interface>\n");
+        if (!sim.uri || (sim.on == nullptr) == (sim.elm327 == nullptr)) {
+            std::fprintf(stderr, "havne-cli: sim needs a URI and either --on "
+                                 "<interface> or --elm327 tcp:<port>\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (sim.elm327 != nullptr && sim.desk_bus) {
+            std::fprintf(stderr, "havne-cli: --desk-bus is for --on: the "
+                                 "ELM327 emulator is on no bus\n");
             usage(stderr);
             return kExitUsage;
         }
@@ -3623,7 +3920,7 @@ int run(int argc, char** argv)
             }
             sim.uri = opened.c_str();
         }
-        return run_sim(sim);
+        return sim.elm327 != nullptr ? run_sim_elm327(sim) : run_sim(sim);
     }
     if (command == "plugins") {
         const std::string word = argc > 2 ? argv[2] : "";

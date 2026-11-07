@@ -57,6 +57,14 @@ class RecordingView : public QObject
     // A query found the file changed since the open (a row that no
     // longer parses, the file gone): what's shown is the open's
     Q_PROPERTY(bool stale READ stale NOTIFY staleChanged)
+    // Where the values come from (ADR-0049's appendix of 2026-11-06): ""
+    // for signals.csv, else the profile frames.csv decoded through, or
+    // "signals.json" for the recording's own signal file
+    Q_PROPERTY(QString decodedWith READ decodedWith NOTIFY stateChanged)
+    // The profile events.log's header names ("" for none), and whether
+    // the folder's signals.json is the file it names, its bytes unchanged
+    Q_PROPERTY(QString recordedProfile READ recordedProfile NOTIFY stateChanged)
+    Q_PROPERTY(bool ownSignalFile READ ownSignalFile NOTIFY stateChanged)
 
 public:
     enum State { Closed, Opening, Open, Failed };
@@ -82,11 +90,24 @@ public:
     QVariantList findings() const { return m_findings; }
     QVariantMap check() const { return m_check; }
     bool stale() const { return m_stale; }
+    QString decodedWith() const { return m_decodedWith; }
+    QString recordedProfile() const { return m_recordedProfile; }
+    bool ownSignalFile() const { return m_ownSignalFile; }
 
     // Opens the recording in folder (the one holding signals.csv), closing
     // any open or opening one first. The state goes to Opening at once,
-    // then Open or Failed on the GUI thread.
+    // then Open or Failed on the GUI thread. A folder with frames.csv and
+    // no signals.csv opens as openFrames(folder, "") does.
     Q_INVOKABLE void open(const QString& folder);
+    // Opens the recording with its values decoded from its frames.csv
+    // (ecuio_recording_open_frames) through profile: a registered one
+    // ("obd2", a vehicle's signal file's, a plugin variant's), or
+    // "signals.json" for the recording's own; "" picks as havne-cli view
+    // --frames does (cli/view_frames.h): its own file while it matches,
+    // else the profile it was recorded under. The set is copied here, on
+    // the GUI thread where the stores change it, before the open's thread
+    // starts. A profile that can't decode is Failed at once, with words.
+    Q_INVOKABLE void openFrames(const QString& folder, const QString& profile);
     // Stops an open under way (Failed, "canceled") or closes the one open
     Q_INVOKABLE void close();
 
@@ -134,9 +155,14 @@ private:
         bool plotted = false;
     };
 
+    struct FrameSet;
     static void run(const std::shared_ptr<Result>& res,
                     std::atomic<bool>* cancel, RecordingView* view,
-                    quint64 generation, const QString& folder);
+                    quint64 generation, const QString& folder,
+                    const std::shared_ptr<FrameSet>& frames);
+    void start(const QString& folder, const std::shared_ptr<FrameSet>& frames);
+    void readHeader(const QString& folder);
+    void fail(const QString& folder, const QString& words);
     void finish(const std::shared_ptr<Result>& res, quint64 generation);
     void stop();
     void setProgress(double p, quint64 generation);
@@ -156,6 +182,10 @@ private:
     double m_progress = 0;
     uint32_t m_units = ECUIO_UNITS_METRIC;
     bool m_stale = false;
+    QString m_decodedWith;
+    QString m_recordedProfile;
+    QString m_recordedSha;
+    bool m_ownSignalFile = false;
 
     ecuio_recording_t* m_reader = nullptr;
     ecuio_recording_info_t m_info{};

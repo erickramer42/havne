@@ -179,6 +179,11 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
                                                 the process crashed or the
                                                 power went; drops counted
                                                 from its drop lines */
+#define ECUIO_RECORDING_INFO_FRAMES                                            \
+    0x2u /* the values were decoded from
+                                                frames.csv at the open
+                                                (ecuio_recording_open_frames),
+                                                not read from signals.csv */
 
 /* ecuio_recording_info_t.format: events.log's header */
 #define ECUIO_RECORDING_FORMAT_UNKNOWN 0u /* none, or a first line the
@@ -370,6 +375,39 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
                                     ecuio_open_progress_t progress,
                                     void* user_data,
                                     ecuio_recording_t** out);
+
+/*
+ * Opens the recording in folder_utf8 with its values decoded from its
+ * frames.csv through signal_set, as a session under that set decodes
+ * them (ADR-0049's appendix of 2026-11-06): so a raw recording, or one
+ * made before a signal file was written, has values. signals.csv isn't
+ * read; events.log, markers.csv and signals.json are, as by
+ * ecuio_recording_open, and every other reader call answers alike on the
+ * handle, with ECUIO_RECORDING_INFO_FRAMES set. The reader keeps its own
+ * copy of the set, which the caller may free once this returns. The
+ * signals are the set's defs that decoded at least once, in the set's
+ * order, each with its def's name, unit, decimal places, plot rank,
+ * group and kind (TEXT and HEX are text, an ENUM has its labels); a
+ * number reads as signals.csv would hold it, to 12 significant digits.
+ * A frame on ISO 15765-4's IDs that isn't REASSEMBLED and carries a
+ * Single, First or Consecutive Frame's PCI is a frame as it crossed the
+ * bus: the message it completes decodes, at the time of its last frame;
+ * a First Frame while a message on its ID is under way (two senders)
+ * ends both. Memory beside ecuio_recording_open's: 16 bytes for each
+ * second with frames, 24 for each computed signal's input in each such
+ * second, and 256 each time a packed reply's lengths change.
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL folder, set or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a set ecuio_validate_signal_set refuses;
+ * ECUIO_ERR_LOAD_FAILED for a folder with no frames.csv or a file the
+ * reader refuses ("frames.csv line 12: ...", never the path);
+ * ECUIO_ERR_CANCELED and ECUIO_ERR_OUT_OF_MEMORY as for
+ * ecuio_recording_open, progress following frames.csv.
+ */
+ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
+                                           const ecuio_signal_set_t* signal_set,
+                                           ecuio_open_progress_t progress,
+                                           void* user_data,
+                                           ecuio_recording_t** out);
 
 /*
  * The getters. Every reader call returns ECUIO_ERR_NULL_ARGUMENT for a

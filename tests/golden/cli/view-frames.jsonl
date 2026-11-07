@@ -1,0 +1,6 @@
+{"schema": 1, "type": "start"}
+{"duration_us": 20000000, "format": "core", "frames": "obd2", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 1, "summary": true, "type": "opened", "utc_start_us": 1793721600000000}
+{"decimals": 0, "first_us": 100000, "group": "Engine", "highest": 1610, "index": 0, "last_us": 19950000, "lowest": 804, "name": "RPM", "rank": 1, "rate_hz": 15.415617128463476, "recording": 0, "samples": 307, "text": false, "type": "signal", "unit": "RPM"}
+{"host_us": 2000000, "index": 0, "label": "lap", "recording": 0, "type": "marker"}
+{"column_us": 5000000, "columns": 4, "from_us": 0, "to_us": 20000000, "type": "axis"}
+{"highest": [1010, 1210, 1410, 1610], "lowest": [804, 1060, 1323, 1400], "recording": 0, "samples": [98, 70, 40, 99], "signal": "RPM", "type": "columns"}
