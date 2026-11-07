@@ -291,6 +291,15 @@ if(TARGET havne-cli)
         app_cli_golden(SimRefusesARelativeRecording sim-relative-recording.jsonl
             --exit 3
             -- $<TARGET_FILE:havne-cli> sim "replay://recordings/run?loop=1" --on vcan0)
+        # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
+        # first, its clear at the key-on's 0 rpm, the report read again;
+        # and with the word on the engine, its 0 km/h read too
+        app_cli_golden(ClearClearsTheMock clear-mock.jsonl
+            -- $<TARGET_FILE:havne-cli> clear mock://golden --yes)
+        app_cli_golden(ClearWithTheWordOnTheEngine clear-mock-running.jsonl
+            -- $<TARGET_FILE:havne-cli> clear mock://golden --yes --engine-running)
+        app_cli_golden(ClearRefusesABadUri bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> clear "mock://golden?speed=2" --yes)
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
@@ -328,6 +337,24 @@ if(TARGET havne-cli)
                         sim $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
                 PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
+        # A clear through core's gate against the fake DLL's ECU (Windows)
+        # or the simulated ECU on vcan0 (Linux; skipped without it unless
+        # ECUIO_VCAN_REQUIRED, and serial: it answers 0x7E0 for the bus)
+        if(WIN32)
+            foreach(_case EngineRunningIsNotCleared EngineOffIsCleared
+                    ARefusalIsNamed MovingIsNotCleared TheWordOnMovingClears)
+                add_test(NAME CliClearRunTest.${_case}
+                    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
+                            ${_case} $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+                set_tests_properties(CliClearRunTest.${_case} PROPERTIES TIMEOUT 90)
+            endforeach()
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliClearRunTest.TheSimulatedEcuIsCleared
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
+                        TheSimulatedEcuIsCleared $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliClearRunTest.TheSimulatedEcuIsCleared
+                PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
         endif()
         # Every path havne-cli takes, under a folder named outside any one
         # code page: on Windows its arguments come as UTF-16
@@ -607,6 +634,11 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    app_cli_usage(ClearWithoutYesIsUsage "clear|mock://x")
+    app_cli_usage(ClearWithoutAUriIsUsage "clear|--yes")
+    app_cli_usage(ClearTwoUrisIsUsage "clear|mock://a|mock://b|--yes")
+    app_cli_usage(ClearMovingWithoutRunningIsUsage "clear|mock://x|--yes|--moving")
+    app_cli_usage(ClearAnUnknownOptionIsUsage "clear|mock://x|--yes|--force")
     # view's refusals come before any recording opens, but for a name no
     # recording has, which comes after the opens and before any line
     app_cli_usage(ViewWithoutARecordingIsUsage "view")

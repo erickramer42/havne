@@ -7,6 +7,7 @@
 // Public headers only: what any program linking core can do.
 
 #include "can_line.h"
+#include "clear_run.h"
 #include "diagnostics_line.h"
 #include "info_lines.h"
 #include "timing_line.h"
@@ -91,6 +92,10 @@ constexpr auto kPoll = std::chrono::milliseconds(100);
 // How long a close may hold up an interrupted --record before the
 // recorder closes without it (ADR-0049 section 1)
 constexpr auto kRecordingCloseWait = std::chrono::seconds(2);
+// How long clear waits for each step: the reports read, each clear's
+// outcome, the read after it
+constexpr auto kClearWait = std::chrono::seconds(30);
+
 // How often sim writes its counts, when they changed
 constexpr uint64_t kSimStatsEveryUs = 10u * 1000 * 1000;
 
@@ -1791,6 +1796,7 @@ void usage(FILE* to)
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
+        "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>]\n"
@@ -1851,6 +1857,13 @@ void usage(FILE* to)
         "         listen-only), only on a desk bus with no car. Ends at\n"
         "         Ctrl+C, after S seconds, or once another node sends on\n"
         "         its reply ID (0x7E8, or 0x7E9 with modules=2).\n"
+        "clear    clears each ECU's trouble codes, freeze frame and\n"
+        "         readiness through core's gate: every ECU's report is "
+        "written\n"
+        "         first, then each ECU is cleared at that report, by its own\n"
+        "         ID, only at 0 rpm unless --engine-running gives your word\n"
+        "         (then only at 0 km/h unless --moving does too), and read\n"
+        "         again. --yes is your word that the codes may go.\n"
         "view     reads recordings offline (the folders stream --record and\n"
         "         the app write): what each holds, then each signal's lowest,\n"
         "         highest and count in N columns (100) from --from to --to\n"
@@ -2421,6 +2434,63 @@ struct SimArgs {
     const char* signals = nullptr; /* --signals' file */
     const char* plugin = nullptr;  /* --plugin's package */
 };
+
+// Clearing trouble codes (ADR-0038's appendix of 2026-11-06): start,
+// session, every ECU's diagnostics line before any clear is asked, a
+// clear line per ECU, the read after, end. Exit 0 when every ECU answered
+// 44, 1 otherwise (each clear line says why).
+int run_clear_command(const char* uri, uint32_t flags)
+{
+    Output out;
+    write_start(out);
+    ecuio_session_t* session = nullptr;
+    std::string detail;
+    ecuio_status_t st = create_within(out, uri, &session, &detail);
+    if (st != ECUIO_OK) {
+        write_error(out, st, detail.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    ecuio_session_get_info(session, &info);
+    write_session(out, info);
+    out.flush();
+    install_handlers();
+    st = ecuio_session_start(session);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        ecuio_session_destroy(session);
+        return kExitConnect;
+    }
+    const uint32_t channels =
+        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? info.channel_count
+            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    cli::ClearIo io;
+    io.write = [&out](cli::Line& l) { write_line(out, l); };
+    io.flush = [&out] {
+        out.flush();
+        return !out.failed;
+    };
+    io.stop = [] { return g_interrupted.load(); };
+    const cli::ClearResult r =
+        cli::run_clear(session, channels, flags, io, kClearWait);
+    ecuio_session_destroy(session);
+    if (out.failed) {
+        return out.ok() ? kExitOk : kExitFailed;
+    }
+    char buf[256];
+    cli::Line l(buf, sizeof buf);
+    cli::clear_end_line(l, r);
+    write_line(out, l);
+    out.flush();
+    if (!out.ok()) {
+        return kExitFailed;
+    }
+    return std::strcmp(r.reason, "cleared") == 0 ? kExitOk : kExitFailed;
+}
 
 // The simulated ECU (ADR-0046) answering on a virtual bus, or a desk
 // bus's controller with --desk-bus, until Ctrl+C, --seconds, the bus
@@ -3458,6 +3528,47 @@ int run(int argc, char** argv)
                              "interface is a network device\n");
         return kExitUsage;
 #endif
+    }
+    if (command == "clear") {
+        const char* uri = nullptr;
+        bool yes = false;
+        bool running = false;
+        bool moving = false;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--yes") {
+                yes = true;
+            } else if (a == "--engine-running") {
+                running = true;
+            } else if (a == "--moving") {
+                moving = true;
+            } else if (a.rfind("--", 0) == 0 || uri != nullptr) {
+                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+                usage(stderr);
+                return kExitUsage;
+            } else {
+                uri = argv[i];
+            }
+        }
+        if (uri == nullptr) {
+            std::fprintf(stderr, "havne-cli: clear needs a URI\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (!yes) {
+            std::fprintf(stderr,
+                         "havne-cli: clear erases the ECUs' trouble codes, "
+                         "freeze frame and readiness: it needs --yes\n");
+            return kExitUsage;
+        }
+        if (moving && !running) {
+            std::fprintf(stderr, "havne-cli: --moving is a word on top of "
+                                 "--engine-running's\n");
+            return kExitUsage;
+        }
+        return run_clear_command(uri,
+                                 (running ? ECUIO_CLEAR_ALLOW_RUNNING : 0u) |
+                                     (moving ? ECUIO_CLEAR_ALLOW_MOVING : 0u));
     }
     if (command == "sim") {
         SimArgs sim;

@@ -2,6 +2,7 @@
 // Testing: UNIT (test_cli): this file's suites
 
 #include "can_line.h"
+#include "clear_run.h"
 #include "diagnostics_line.h"
 #include "info_lines.h"
 #include "jsonl.h"
@@ -1978,4 +1979,201 @@ TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
     EXPECT_STREQ(cli::nrc_name(0x7F), "serviceNotSupportedInActiveSession");
     EXPECT_STREQ(cli::nrc_name(0x00), "");
     EXPECT_STREQ(cli::nrc_name(0x99), "");
+}
+
+/* ---------- havne-cli clear (ADR-0038's appendix of 2026-11-06) ---------- */
+
+namespace {
+
+std::string clear_text(const ecuio_channel_diagnostics_t& d,
+                       const char* word = nullptr)
+{
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::clear_line(l, d, word);
+    return std::string(l.data(), l.size());
+}
+
+/* A mock session started, destroyed at the end */
+struct MockSession {
+    ecuio_session_t* s = nullptr;
+    explicit MockSession(const char* uri)
+    {
+        EXPECT_EQ(ecuio_session_create(uri, &s), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
+    }
+    ~MockSession() { ecuio_session_destroy(s); }
+    MockSession(const MockSession&) = delete;
+    MockSession& operator=(const MockSession&) = delete;
+};
+
+/* Each line's type, and the lines, as run_clear wrote them */
+struct Written {
+    std::vector<std::string> lines;
+    bool flush_ok = true;
+    int flushes = 0;
+    cli::ClearIo io()
+    {
+        cli::ClearIo io;
+        io.write = [this](cli::Line& l) {
+            lines.emplace_back(l.data(), l.size());
+        };
+        io.flush = [this] {
+            ++flushes;
+            return flush_ok;
+        };
+        io.stop = [] { return false; };
+        return io;
+    }
+    std::vector<std::string> types() const
+    {
+        std::vector<std::string> t;
+        for (const std::string& l : lines) {
+            const size_t a = l.find("\"type\":\"") + 8;
+            t.push_back(l.substr(a, l.find('"', a) - a));
+        }
+        return t;
+    }
+};
+
+} // namespace
+
+TEST(CliClearTest, TheOutcomesInWords)
+{
+    const char* const words[] = {
+        "none",           "cleared",        "refused",
+        "unanswered",     "engine-running", "no-engine-speed",
+        "report-changed", "moving",         "no-vehicle-speed"};
+    for (uint8_t i = 0; i < 9; ++i) {
+        EXPECT_STREQ(cli::clear_outcome_word(i), words[i]) << int{i};
+    }
+    EXPECT_STREQ(cli::clear_outcome_word(9), "unknown");
+    EXPECT_TRUE(cli::clear_reads_again(ECUIO_CLEAR_CLEARED));
+    EXPECT_TRUE(cli::clear_reads_again(ECUIO_CLEAR_UNANSWERED));
+    EXPECT_FALSE(cli::clear_reads_again(ECUIO_CLEAR_REFUSED));
+    EXPECT_FALSE(cli::clear_reads_again(ECUIO_CLEAR_ENGINE_RUNNING));
+}
+
+TEST(CliClearTest, TheLineNamesTheReplyAndWhatWasRead)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.rx_id = 0x7E8;
+    d.clear = ECUIO_CLEAR_REFUSED;
+    d.clear_nrc = 0x22;
+    d.clear_rpm = 812;
+    d.flags = ECUIO_DIAG_CLEAR_RPM;
+    EXPECT_EQ(clear_text(d), "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                             "\"outcome\":\"refused\",\"reply\":\"7F 04 22\","
+                             "\"rpm\":812,\"kmh\":null}");
+    d.clear = ECUIO_CLEAR_NO_ENGINE_SPEED;
+    d.clear_nrc = 0x12;
+    d.flags = 0;
+    EXPECT_EQ(clear_text(d), "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                             "\"outcome\":\"no-engine-speed\","
+                             "\"reply\":\"7F 01 12\",\"rpm\":null,"
+                             "\"kmh\":null}")
+        << "01 0C's refusal";
+    d.clear = ECUIO_CLEAR_CLEARED;
+    d.clear_nrc = 0;
+    d.clear_rpm = 0;
+    d.clear_kmh = 30;
+    d.flags = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
+    EXPECT_EQ(clear_text(d), "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                             "\"outcome\":\"cleared\",\"rpm\":0,\"kmh\":30}")
+        << "a 0 read is a 0, not a null";
+    d.clear_nrc = 0x22;
+    EXPECT_EQ(clear_text(d, "not-read"),
+              "{\"type\":\"clear\",\"rx\":\"0x7E8\",\"outcome\":\"not-read\","
+              "\"rpm\":null,\"kmh\":null}")
+        << "the run's own word: nothing of the report's";
+
+    cli::ClearResult r;
+    r.reason = "not-cleared";
+    r.cleared = 1;
+    r.not_cleared = 2;
+    char buf[256];
+    cli::Line l(buf, sizeof buf);
+    cli::clear_end_line(l, r);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"end\",\"reason\":\"not-cleared\",\"cleared\":1,"
+              "\"not_cleared\":2}");
+}
+
+// The worker takes a clear by moving the generation on (outcome none,
+// clearing) and settles it by moving it on again with an outcome
+TEST(CliClearTest, AClearSettlesPastItsGeneration)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.generation = 5;
+    d.clear = ECUIO_CLEAR_CLEARED; /* an earlier clear's */
+    EXPECT_FALSE(cli::clear_settled(d, 5)) << "not taken yet";
+    d.generation = 6;
+    d.clear = ECUIO_CLEAR_NONE;
+    d.flags = ECUIO_DIAG_CLEARING;
+    EXPECT_FALSE(cli::clear_settled(d, 5)) << "under way";
+    d.generation = 7;
+    d.flags = 0;
+    EXPECT_FALSE(cli::clear_settled(d, 5)) << "no outcome";
+    d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
+    EXPECT_TRUE(cli::clear_settled(d, 5));
+    d.clear = ECUIO_CLEAR_CLEARED;
+    d.generation = 8; /* the read after, started */
+    EXPECT_TRUE(cli::clear_settled(d, 5));
+}
+
+// The report first, flushed, then the clear, then the read after a 44
+TEST(CliClearTest, TheReportComesFirstAndTheReadAfter)
+{
+    MockSession m("mock://clear");
+    ASSERT_NE(m.s, nullptr);
+    Written w;
+    const cli::ClearResult r =
+        cli::run_clear(m.s, 1, 0, w.io(), std::chrono::seconds(10));
+    EXPECT_STREQ(r.reason, "cleared");
+    EXPECT_EQ(r.cleared, 1u);
+    EXPECT_EQ(r.not_cleared, 0u);
+    ASSERT_EQ(w.types(), (std::vector<std::string>{"diagnostics", "clear",
+                                                   "diagnostics"}));
+    EXPECT_NE(w.lines[0].find("\"P0301\""), std::string::npos) << w.lines[0];
+    EXPECT_EQ(w.lines[1], "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                          "\"outcome\":\"cleared\",\"rpm\":0,\"kmh\":null}");
+    EXPECT_EQ(w.lines[2].find("\"P0301\""), std::string::npos) << w.lines[2];
+    EXPECT_GE(w.flushes, 1);
+}
+
+// Output that fails before the clear asks none: the report the ECU holds
+// is the one nobody kept
+TEST(CliClearTest, AFailedOutputAsksNoClear)
+{
+    MockSession m("mock://clear");
+    ASSERT_NE(m.s, nullptr);
+    ecuio_channel_diagnostics_t before{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(m.s, 0, &before), ECUIO_OK);
+    Written w;
+    w.flush_ok = false;
+    const cli::ClearResult r =
+        cli::run_clear(m.s, 1, 0, w.io(), std::chrono::seconds(10));
+    EXPECT_STREQ(r.reason, "output-failed");
+    EXPECT_EQ(r.cleared, 0u);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ecuio_channel_diagnostics_t after{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(m.s, 0, &after), ECUIO_OK);
+    EXPECT_EQ(after.generation, before.generation) << "no clear was taken";
+    EXPECT_EQ(after.clear, ECUIO_CLEAR_NONE);
+    EXPECT_EQ(w.types(), (std::vector<std::string>{"diagnostics"}));
+}
+
+// A session that reads no diagnostics has nothing to save: no clear
+TEST(CliClearTest, NothingReadIsNothingCleared)
+{
+    MockSession m("mock://clear?diagnose=0");
+    ASSERT_NE(m.s, nullptr);
+    Written w;
+    const cli::ClearResult r =
+        cli::run_clear(m.s, 1, 0, w.io(), std::chrono::milliseconds(300));
+    EXPECT_STREQ(r.reason, "nothing-read");
+    EXPECT_EQ(r.not_cleared, 1u);
+    ASSERT_EQ(w.lines.size(), 1u);
+    EXPECT_NE(w.lines[0].find("\"outcome\":\"not-read\""), std::string::npos);
 }
