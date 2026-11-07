@@ -80,7 +80,11 @@ public:
         listener_ = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0,
                                WSA_FLAG_NO_HANDLE_INHERIT);
 #else
-        listener_ = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        /* FD_CLOEXEC by fcntl: macOS has no SOCK_CLOEXEC */
+        listener_ = socket(AF_INET, SOCK_STREAM, 0);
+        if (listener_ != kNone && !close_on_exec(listener_)) {
+            drop(listener_);
+        }
 #endif
         if (listener_ == kNone) {
             *why = "the socket wouldn't open";
@@ -205,6 +209,14 @@ private:
         s = kNone;
     }
 
+#ifndef _WIN32
+    /* Kept from a child the process starts (FD_CLOEXEC); false if not */
+    static bool close_on_exec(Socket s)
+    {
+        return fcntl(s, F_SETFD, FD_CLOEXEC) == 0;
+    }
+#endif
+
     static std::string peer_of(const sockaddr_in& a)
     {
         return address_text(ntohl(a.sin_addr.s_addr), ntohs(a.sin_port));
@@ -257,6 +269,13 @@ private:
         if (s == kNone) {
             return;
         }
+#ifndef _WIN32
+        /* an accepted socket inherits no FD_CLOEXEC from its listener */
+        if (!close_on_exec(s)) {
+            drop(s);
+            return;
+        }
+#endif
         if (client_ != kNone) {
             emit("refused", peer_of(from));
             drop(s);
