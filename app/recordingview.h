@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -68,6 +69,9 @@ class RecordingView : public QObject
     // Whether the folder holds a frames.csv: a CSV import holds values
     // alone, so it has no frames to check, decode or replay
     Q_PROPERTY(bool hasFrames READ hasFrames NOTIFY stateChanged)
+    // A health report being written (saveHealthReport), until its thread
+    // ends, whether or not the viewer closed meanwhile
+    Q_PROPERTY(bool reporting READ reporting NOTIFY reportingChanged)
 
 public:
     enum State { Closed, Opening, Open, Failed };
@@ -97,6 +101,17 @@ public:
     QString recordedProfile() const { return m_recordedProfile; }
     bool ownSignalFile() const { return m_ownSignalFile; }
     bool hasFrames() const { return m_hasFrames; }
+    bool reporting() const { return m_reporting; }
+
+    // The log viewer's Save report (ADR-0054's appendix "the health report
+    // as built"): the whole recording's health from its folder (core's
+    // rule for its set, whatever the viewer decodes with; never the view's
+    // zoom), to the file at url in the format healthFormatFor picks. On a
+    // thread of its own, since core reads all of frames.csv; reportSaved
+    // with writeHealthReport's map when it ends, unless the viewer closed
+    // or opened another recording meanwhile. False, nothing started, when
+    // no recording is open or a report is being written already
+    Q_INVOKABLE bool saveHealthReport(const QUrl& url, int filterIndex);
 
     // Opens the recording in folder (the one holding signals.csv), closing
     // any open or opening one first. The state goes to Opening at once,
@@ -157,6 +172,8 @@ signals:
     void unitSystemChanged();
     void signalListChanged();
     void staleChanged();
+    void reportingChanged();
+    void reportSaved(const QVariantMap& result);
 
 private:
     struct Result;
@@ -176,6 +193,7 @@ private:
     void finish(const std::shared_ptr<Result>& res, quint64 generation);
     void stop();
     void setProgress(double p, quint64 generation);
+    void reportFinished(const QVariantMap& result, quint64 generation);
     void markStale();
     // A recorded number as displayed: the value, its unit and decimals
     ecuio_display_value_t shown(const Signal& s, double value) const;
@@ -207,6 +225,10 @@ private:
 
     std::thread m_worker;
     std::atomic<bool> m_cancel{false};
+    // The health report's: joined when it posts its end, or at destruction
+    // (core's export can't be stopped midway)
+    std::thread m_reportWorker;
+    bool m_reporting = false;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped
     quint64 m_generation = 0;

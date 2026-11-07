@@ -183,6 +183,46 @@ TestCase {
         verify(shown()[1].indexOf("°F") > 0, shown()[1])
     }
 
+    // Save report (ADR-0054's appendix "the health report as built"):
+    // offered only while connected, text by the first filter over a file
+    // that exists, JSON by the second, one log line each; a folder isn't
+    // a file, and the note says so in danger's color
+    function test_saveReportWritesTheChosenFormat() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const button = find(page, "saveReport")
+        verify(!button.visible, "only while connected")
+        connectAndRead(page, "mock://demo")
+        verify(button.visible)
+        verify(button.enabled, "whatever the read's state")
+        const note = find(page, "reportNote")
+        verify(!note.visible, "no note before a report")
+
+        const txt = Harness.writeScratchFile("report.txt", "the old report")
+        verify(txt.toString() !== "")
+        verify(page.saveReportTo(txt, 0))
+        const text = Harness.readScratchFile(txt)
+        verify(text.indexOf("mock://<label>") >= 0, text)
+        verify(text.indexOf("the old report") < 0, "replaced")
+        verify(note.visible)
+        verify(note.text.indexOf("Report saved: 1 ECU, ") === 0, note.text)
+        verify(note.text.indexOf("trouble codes, 0 key values") > 0, note.text)
+        compare(note.color, Theme.textDim)
+        compare(logged("Health report saved: 1 ECU, ").length, 1)
+
+        verify(page.saveReportTo(txt, 1))
+        compare(JSON.parse(Harness.readScratchFile(txt)).havne_health, 1)
+        compare(logged("Health report saved: ").length, 2)
+
+        const folder = txt.toString().replace(/\/report\.txt$/, "")
+        verify(!page.saveReportTo(folder, 0))
+        compare(note.text, "Report not saved: Couldn't write the file")
+        compare(note.color, Theme.danger)
+        compare(logged("Health report not saved: ").length, 1)
+
+        find(page, "clearCodes").clicked()
+        verify(!button.enabled, "not while the clear's question is open")
+    }
+
     function test_readAgainReadsOnceMore() {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         connectAndRead(page, "mock://demo")

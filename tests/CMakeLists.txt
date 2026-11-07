@@ -582,6 +582,14 @@ if(TARGET havne-cli)
                         ${_cli_plugins}/repeat)
             set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
                 PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+            # python/examples/isotp_fuzz.py against havne-cli's sim on
+            # vcan0 (ADR-0053's appendix "the examples as built"): outside
+            # pytest, so the sanitizer tree runs it on its ASan havne-cli
+            add_test(NAME ExampleTest.isotp_fuzz_cli
+                COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_isotp_fuzz.py
+                        $<TARGET_FILE:havne-cli>)
+            set_tests_properties(ExampleTest.isotp_fuzz_cli
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "python")
         endif()
         # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
         # model year, its notes and the file written whole, beside nothing
@@ -993,10 +1001,18 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
         endif()
         set_tests_properties(PythonTest.${_app_name} PROPERTIES
             ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
-        if(_app_name STREQUAL "test_vcan")
+        if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")   # vcan0
             set_tests_properties(PythonTest.${_app_name} PROPERTIES RUN_SERIAL TRUE)
         endif()
     endforeach()
+
+    # python/examples/ecu_states.ipynb run top to bottom (tests/example_notebook.py);
+    # skips without scikit-learn, nbconvert or ipykernel, as in CI
+    add_test(NAME ExampleTest.notebook
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_notebook.py)
+    set_tests_properties(ExampleTest.notebook PROPERTIES
+        ENVIRONMENT "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>;PYTHONDONTWRITEBYTECODE=1"
+        SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
 
     # The wheel itself (tests/wheel_installed.py): made from this tree's
     # shared core, installed in a fresh venv and used from outside the
@@ -1059,6 +1075,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
+        ../app/healthreport.cpp
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
         ../app/readonce.cpp
@@ -1122,6 +1139,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/healthreport.cpp
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
         ../app/readonce.cpp

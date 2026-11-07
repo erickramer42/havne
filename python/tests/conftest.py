@@ -23,6 +23,30 @@ REPLAY = os.path.join(ROOT, "tests", "fixtures", "replay", "2026-10-25-engine-st
 SIGNALS = os.path.join(ROOT, "tests", "fixtures", "signals")
 PLUGINS = os.path.join(ROOT, "plugins")
 EXAMPLES = os.path.join(ROOT, "python", "examples")
+VCAN = os.environ.get("ECUIO_VCAN_IF", "vcan0")
+
+
+def vcan_why():
+    """Why vcan0 (ECUIO_VCAN_IF) can't be used here, or None"""
+    if not sys.platform.startswith("linux"):
+        return "SocketCAN needs Linux"
+    try:
+        with open(f"/sys/class/net/{VCAN}/operstate", encoding="ascii") as f:
+            state = f.read().strip()
+    except OSError:
+        return f"no {VCAN} (the linux skill's vcan, or ip link add {VCAN} type vcan)"
+    return None if state in ("up", "unknown") else f"{VCAN} is {state}"
+
+
+def need_vcan():
+    """vcan0's name; skips the case without it, or fails it under
+    ECUIO_VCAN_REQUIRED=1, as the C++ vcan suites do (CI's linux-build)"""
+    why = vcan_why()
+    if why:
+        if os.environ.get("ECUIO_VCAN_REQUIRED") == "1":
+            pytest.fail(f"{why}, and ECUIO_VCAN_REQUIRED=1")
+        pytest.skip(why)
+    return VCAN
 
 
 def replay_uri(query=""):

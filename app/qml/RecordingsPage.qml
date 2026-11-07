@@ -5,6 +5,7 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import App
 
@@ -638,15 +639,55 @@ Page {
                                  : qsTr("Frames check: %1 findings").arg(n)
     }
 
+    // Save report's file: text first, the one a shop or a buyer reads
+    FileDialog {
+        id: reportDialog
+        title: qsTr("Save the health report")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "txt"
+        nameFilters: [qsTr("Text (*.txt)"), qsTr("JSON (*.json)")]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: root.saveReportTo(reportDialog.selectedFile,
+                                      reportDialog.selectedNameFilter.index)
+    }
+
     // The signal rows' filter: Live has its own
     SignalFilter {
         id: signalFilter
     }
 
+    // The last Save report's outcome in words, "" before one on this
+    // recording
+    property string reportNote: ""
+    property bool reportFailed: false
+
+    // The whole recording's health report to url, its format by the
+    // dialog's filter or the file's name (ADR-0054's appendix "the health
+    // report as built"); the view's zoom never narrows it. The result
+    // comes back in onReportSaved; false when none started
+    function saveReportTo(url, filterIndex) {
+        const started = recording.saveHealthReport(url, filterIndex)
+        if (started) {
+            reportFailed = false
+            reportNote = qsTr("Saving the report…")
+        }
+        return started
+    }
+
+    function reportSaved(r) {
+        Bridge.logEvent(r.line)
+        reportFailed = !r.ok
+        reportNote = r.ok ? qsTr("Report saved: %1").arg(r.summary)
+                          : qsTr("Report not saved: %1").arg(r.words)
+    }
+
     RecordingView {
         id: recording
         unitSystem: Bridge.unitSystem
+        onReportSaved: result => root.reportSaved(result)
         onStateChanged: {
+            root.reportNote = ""
+            root.reportFailed = false
             if (recording.state !== RecordingView.Open)
                 return
             const defaults = {}
@@ -958,6 +999,26 @@ Page {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             text: recording.state === RecordingView.Open ? root.infoText() : ""
+        }
+
+        // The whole recording's health as one scrubbed file to share
+        RowLayout {
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+            ThemedButton {
+                objectName: "saveReport"
+                enabled: !recording.reporting
+                text: qsTr("Save report…")
+                onClicked: reportDialog.open()
+            }
+            Label {
+                objectName: "reportNote"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: root.reportNote
+                color: root.reportFailed ? Theme.danger : Theme.textDim
+            }
         }
 
         // Where the values come from: offered once it opened, or failed
