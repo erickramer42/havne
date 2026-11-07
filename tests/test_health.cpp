@@ -543,6 +543,9 @@ TEST(HealthTest, NumbersAndTimesAreWrittenWithoutTheLocale)
     EXPECT_EQ(ecuio_health::fixed(0.005, 3), "0.005");
     EXPECT_EQ(ecuio_health::utc_text(0), "1970-01-01T00:00:00Z");
     EXPECT_EQ(ecuio_health::utc_text(951782400000000u), "2000-02-29T00:00:00Z");
+    EXPECT_EQ(ecuio_health::utc_text(253402300799999999u),
+              "9999-12-31T23:59:59Z");
+    EXPECT_EQ(ecuio_health::utc_text(UINT64_MAX), "9999-12-31T23:59:59Z");
     EXPECT_EQ(ecuio_health::utc_text(kUtc), "2026-11-06T14:22:33Z");
 }
 

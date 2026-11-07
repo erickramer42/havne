@@ -1037,6 +1037,10 @@ std::string fixed(double v, uint8_t dp)
 
 std::string utc_text(uint64_t utc_us)
 {
+    /* ISO 8601's last four-digit second, 9999-12-31T23:59:59Z: a later
+       stamp (a header's garbage) reads as it */
+    constexpr uint64_t kLastUs = 253402300799999999u;
+    utc_us = (std::min)(utc_us, kLastUs);
     /* Civil from days (Howard Hinnant's algorithm), no gmtime */
     const uint64_t secs = utc_us / 1000000u;
     const int64_t days = static_cast<int64_t>(secs / 86400u);
@@ -1050,14 +1054,17 @@ std::string utc_text(uint64_t utc_us)
     const uint64_t mp = (5 * doy + 2) / 153;
     const uint64_t d = doy - (153 * mp + 2) / 5 + 1;
     const uint64_t mo = mp < 10 ? mp + 3 : mp - 9;
+    /* Each field's remainder changes no value in range: it lets the
+       compiler bound the widths (GCC's -Wformat-truncation) */
     char b[32];
-    std::snprintf(b, sizeof b, "%04lld-%02llu-%02lluT%02llu:%02llu:%02lluZ",
-                  static_cast<long long>(y + (mo <= 2 ? 1 : 0)),
-                  static_cast<unsigned long long>(mo),
-                  static_cast<unsigned long long>(d),
-                  static_cast<unsigned long long>(rem / 3600),
-                  static_cast<unsigned long long>(rem % 3600 / 60),
-                  static_cast<unsigned long long>(rem % 60));
+    std::snprintf(b, sizeof b, "%04u-%02u-%02uT%02u:%02u:%02uZ",
+                  static_cast<unsigned>(
+                      static_cast<uint64_t>(y + (mo <= 2 ? 1 : 0)) % 10000u),
+                  static_cast<unsigned>(mo % 100),
+                  static_cast<unsigned>(d % 100),
+                  static_cast<unsigned>(rem / 3600 % 100),
+                  static_cast<unsigned>(rem % 3600 / 60),
+                  static_cast<unsigned>(rem % 60));
     return b;
 }
 
