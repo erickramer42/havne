@@ -795,6 +795,16 @@ double RecordingView::findMarker(const QString& label)
     return found(what);
 }
 
+double RecordingView::findEngineStart()
+{
+    if (m_reader == nullptr) {
+        return -1.0;
+    }
+    ecuio_recording_find_t what{};
+    what.kind = ECUIO_RECORDING_FIND_ENGINE_START;
+    return found(what);
+}
+
 QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
                                      double tMs)
 {
