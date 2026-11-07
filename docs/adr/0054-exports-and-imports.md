@@ -673,3 +673,77 @@ model year; an identity text echoed by a value failing the report; the
 text of a quiet car byte for byte; numbers and times without the
 locale; the export over a `mock://` session, its label out, the file
 written once; the argument checks), `test_c_abi`.
+
+**Over a recording (2026-11-07).** `folder_utf8` names a recording's
+folder, and the report is built from what the recording holds, through
+the same model and writers, so it reads as the session's would. Nothing
+in the call changed: a folder takes no values of the caller's
+(`value_count` 0, else `ECUIO_ERR_INVALID_ARGUMENT`), since the
+recording has its own, and `from_us`/`to_us` are host_us as the
+exports' (0 and 0 the whole recording; a `to_us` past the end is the
+end; a `from_us` past the end is refused, `ECUIO_ERR_LOAD_FAILED` "the
+range starts at A s, after the recording ends at B s", as replay
+refuses a stretch with no frames).
+
+- **The ECUs** come from the replies in `frames.csv`
+  (`core/src/health_replies.h`, pure): whole messages on the diagnostic
+  reply IDs (`scrub::reply_id`), a reassembled row as it is and wire
+  frames through `frame_reassembly.h` (the export's rules), each taken
+  when it ends in the range. They go through the request engine's
+  parsers: 41 01 `ecuio_diag_take_readiness`, 41 41 `ecuio_diag_take_cycle`
+  (after readiness, whatever their order), 43/47/4A
+  `ecuio_diag_take_codes`, 7F 03/07/0A that list's refusal, 42 00 00 the
+  freeze frame's PIDs, 42 02 00 its code, 42 PID 00 its values by the
+  obd2 defs (only with a nonzero code), 49 xx (not a PID bitmap) and 62
+  F180-F1FF identification items, their text by
+  `ecuio_identity_format`. The last reply of each kind wins, so a
+  readiness reply after the codes were read is the one shown, and the
+  drive cycle's monitors (41 41) are laid on it. An ECU is a reply ID
+  with at least one positive reply of these kinds: a listener's raw
+  recording hears every module's traffic, and a refusal alone makes no
+  ECU. Any other refusal says nothing of which request it answers, and
+  7F xx 78 (still working) is no answer; both are skipped. Nothing is
+  marked asked or complete, so the inspection never reads READING, and
+  a kind with no reply reads "not recorded" (a recording can't say
+  whether it was asked); each ECU's state is "recorded".
+- **The values** are the recording's set's (`core/src/recording_set.h`,
+  the exports' rule, shared with them: its own `signals.json`, else
+  uds-generic's set from the URI's `did=` list, else the profile by
+  name): each number def with a signal of its name, the value in force at
+  the range's end (`ecuio_recording_text_at`, parsed without the locale)
+  and aged from that end; one whose last sample is before the range's
+  start has none. A recording with `frames.csv` and a set but no
+  `signals.csv` has its values decoded from the frames
+  (`ecuio_recording_open_frames`). The key values and since-cleared
+  values then follow the live rule.
+- **The source:** kind `recording`, the URI from `events.log` through
+  `scrub::uri` (none: `null`, "no URI"), the backend by the URI's scheme
+  (`unknown` without one), the profile from the header, no bit rate
+  (the header has none), the recording's start (`started`, from its
+  `utc` line), the range (`from_s`, `to_s`) and whether it has
+  `frames.csv`. A recording of values alone (no `frames.csv`) has no ECU
+  and says so (`ecus_note` "the recording has no frames"); one whose
+  frames hold no such reply says no ECU answered in the range. A folder
+  with neither file is refused as the folder export refuses it.
+- **The check** also takes every identification reply's values in the
+  whole recording (`scrub::identification_values`), in the range or not,
+  besides the items' texts: a number signal in the range that reads an
+  ECU's serial fails the report even when the serial's reply came
+  before the range. A scrubbed copy (the folder export) holds no
+  identification reply, so its report reads no VIN and lists no item.
+
+`frames.csv` is read a row at a time by `core/src/frame_rows.h`'s
+`frame_rows`, the exports' reader, shared with them.
+
+**Tests (step 2):** `HealthTest`: a hand-written recording of replies,
+reassembled and on the wire, rebuilt into the ECU's report (both formats
+holding the same facts, no VIN, calibration ID or port; another module's
+refusal no ECU; 7F 03 78 and a Service 09 bitmap ignored); a range
+taking the replies that end in it and no value from before it, and one
+starting past the end refused; the
+replay fixture's frames decoded for its values, with no ECU; a recording
+of values alone; a refusal of a folder with neither file and of a row
+out of order; an identity reply before the range still checked; a
+folder export's scrubbed copy; a small recording's text byte for byte.
+`ExportTest`, `CsvExportTest` and `FolderExportTest` cover the shared
+header and rows.

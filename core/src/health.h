@@ -5,10 +5,12 @@
 //
 // The report's facts from what a session publishes (its info, URI and
 // set, each channel's diagnostics and identity) and the values a caller
-// holds, written as JSON or text from the one model, so the two formats
-// can't hold different facts. Pure: no session, file or clock, so a test
-// builds reports by hand. ecuio_health_export (health.cpp) gathers the
-// inputs from a session, writes the file and checks it.
+// holds, or from what a recording holds (its header, set, replies and
+// values), written as JSON or text from the one model, so the two
+// formats can't hold different facts. Pure: no session, file or clock,
+// so a test builds reports by hand. ecuio_health_export (health.cpp)
+// gathers the inputs from a session or a recording's folder, writes the
+// file and checks it.
 
 #ifndef ECUIO_HEALTH_H
 #define ECUIO_HEALTH_H
@@ -39,6 +41,15 @@ struct inputs {
     uint32_t units = ECUIO_UNITS_METRIC;
     uint32_t latest_model_year = 0;
     uint64_t utc_us = 0; /* 0: no time */
+
+    /* A recording's report (info NULL): each ECU's reports rebuilt from
+     * its replies (health_replies.h), a kind with none "not recorded" */
+    bool recording = false;
+    bool frames = true;      /* the recording holds frames.csv */
+    std::string profile;     /* its header's */
+    uint64_t started_us = 0; /* its start, microseconds since 1970 UTC */
+    uint64_t from_us = 0;    /* the range read, host_us */
+    uint64_t to_us = 0;
 };
 
 /* The report in one format, its counts in *report, and each identity
