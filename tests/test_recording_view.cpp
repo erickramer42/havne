@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -338,17 +339,17 @@ TEST(RecordingViewTest, ColumnsHoldEachColumnsRange)
     EXPECT_FALSE(v.stale());
 }
 
-// A logger's CSV imported by its column map (ADR-0054's appendix "the CSV
-// import as built") opens as any recording: no frames, so unchecked; its
-// signals ranked in the map's order, so plotted; its columns its samples
-TEST(RecordingViewTest, AnImportedCsvOpensAndPlots)
+// logger-a's CSV imported by its column map into dir's "rec": the folder,
+// or "" (the case failed) when the fixture or the import fails
+QString importedCsv(const QTemporaryDir& dir)
 {
     const QString base = QStringLiteral(ECUIO_IMPORT_FIXTURES "/csv/logger-a");
     QFile mapFile(base + QStringLiteral("/map.json"));
-    ASSERT_TRUE(mapFile.open(QIODevice::ReadOnly));
+    if (!mapFile.open(QIODevice::ReadOnly)) {
+        ADD_FAILURE() << "no map.json";
+        return QString();
+    }
     const QByteArray map = mapFile.readAll();
-    QTemporaryDir dir;
-    ASSERT_TRUE(dir.isValid());
     const QByteArray in = (base + QStringLiteral("/log.csv")).toUtf8();
     const QByteArray out = (dir.path() + QStringLiteral("/rec")).toUtf8();
     ecuio_import_options_t o{};
@@ -357,10 +358,25 @@ TEST(RecordingViewTest, AnImportedCsvOpensAndPlots)
     o.out_folder_utf8 = out.constData();
     o.column_map_utf8 = map.constData();
     ecuio_import_report_t r{};
-    ASSERT_EQ(ecuio_import(&o, &r), ECUIO_OK) << ecuio_last_error_detail();
+    if (ecuio_import(&o, &r) != ECUIO_OK) {
+        ADD_FAILURE() << ecuio_last_error_detail();
+        return QString();
+    }
+    return QString::fromUtf8(out);
+}
+
+// A logger's CSV imported by its column map (ADR-0054's appendix "the CSV
+// import as built") opens as any recording: no frames, so unchecked; its
+// signals ranked in the map's order, so plotted; its columns its samples
+TEST(RecordingViewTest, AnImportedCsvOpensAndPlots)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = importedCsv(dir);
+    ASSERT_FALSE(folder.isEmpty());
 
     RecordingView v;
-    v.open(QString::fromUtf8(out));
+    v.open(folder);
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
     EXPECT_FALSE(v.hasFrames());
@@ -996,4 +1012,52 @@ TEST(RecordingViewTest, AReportEndingAfterACloseIsDropped)
     v.open(folder);
     ASSERT_TRUE(waitFor([&] { return !v.reporting() && settled(v); }));
     EXPECT_EQ(saved, 0) << "another open drops it too";
+}
+
+// A CSV import holds values alone, and Save report stays offered on it:
+// core's report takes a folder with no frames.csv, which has no ECU and
+// says so, so the save ends and succeeds rather than failing on frames
+TEST(RecordingViewTest, AnImportedCsvsReportEndsWithNoEcu)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = importedCsv(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    ASSERT_FALSE(v.hasFrames());
+
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    const QUrl url =
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/report.json"));
+    ASSERT_TRUE(v.saveHealthReport(url, 1));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(v.reporting());
+    const QVariantMap r = saved[0];
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("ecus")).toInt(), 0);
+    EXPECT_EQ(r.value(QStringLiteral("line")).toString().toStdString(),
+              "Health report saved: 0 ECUs, 0 trouble codes, 0 key values (0 "
+              "identification items left out)");
+
+    // The report says why it has no ECU, in the viewer's words, and is
+    // the whole import's: its raw profile ranks nothing, so no key values
+    QFile f(url.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QJsonObject doc = QJsonDocument::fromJson(f.readAll()).object();
+    EXPECT_TRUE(doc.value(QStringLiteral("ecus")).toArray().isEmpty());
+    EXPECT_EQ(doc.value(QStringLiteral("ecus_note")).toString(),
+              QStringLiteral("the recording has no frames"));
+    EXPECT_TRUE(doc.value(QStringLiteral("key_values")).toArray().isEmpty());
+    const QJsonObject source = doc.value(QStringLiteral("source")).toObject();
+    EXPECT_EQ(source.value(QStringLiteral("kind")).toString(),
+              QStringLiteral("recording"));
+    EXPECT_FALSE(source.value(QStringLiteral("frames")).toBool(true));
+    EXPECT_EQ(source.value(QStringLiteral("from_s")).toDouble(-1), 0.0);
+    EXPECT_EQ(source.value(QStringLiteral("to_s")).toDouble(-1), 1.75);
 }
