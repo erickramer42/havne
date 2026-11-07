@@ -1512,7 +1512,8 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
             {QStringLiteral("unattributed"), qulonglong{csv.unattributed}}};
 }
 
-QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex)
+QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
+                                            const QString& baselineFolder)
 {
     if (m_session == nullptr || !connected()) {
         const QString words = QStringLiteral("Not connected");
@@ -1530,6 +1531,9 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex)
     o.session = m_session;
     o.value_count = static_cast<uint32_t>(held.size());
     o.values = held.empty() ? nullptr : held.data();
+    const QByteArray baseline = healthBaselineArgument(baselineFolder);
+    o.baseline_folder_utf8 =
+        baseline.isEmpty() ? nullptr : baseline.constData();
     const QVariantMap r = writeHealthReport(o, url);
     emit logMessage(r.value(QStringLiteral("line")).toString());
     return r;

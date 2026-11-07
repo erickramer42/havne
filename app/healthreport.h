@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 #include <QUrl>
 #include <QVariantMap>
@@ -29,6 +30,10 @@ uint32_t healthFormatFor(const QUrl& url, int filterIndex);
 uint64_t healthUtcNow();
 uint32_t healthLatestModelYear();
 
+// A baseline's folder as core takes it (UTF-8, the platform's separators),
+// empty for none: baseline_folder_utf8 is then NULL
+QByteArray healthBaselineArgument(const QString& folder);
+
 // A written report's counts in words, each noun as its count wants it:
 // "1 ECU, 3 trouble codes, 0 key values"; and the log's line, "Health
 // report saved: <summary> (2 identification items left out)"
@@ -37,7 +42,9 @@ QString healthSavedLine(const ecuio_health_report_t& report);
 
 // options: every field but out_path_utf8, which this sets. The result:
 // { ok, words, ecus, codes, values, sinceCleared, identificationLeftOut,
-// vinDecoded, summary, line }, words "" on success and never a path, a
+// vinDecoded, baselineRead, summary, line }, baselineRead whether core
+// read the baseline named (the report says why not), words "" on success
+// and never a path, a
 // folder's name or a value; summary healthSummary's ("" on failure);
 // line the log's, in the same words
 QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url);

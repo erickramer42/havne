@@ -421,7 +421,8 @@ void RecordingView::stop()
     }
 }
 
-bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex)
+bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
+                                     const QString& baselineFolder)
 {
     if (m_state != Open || m_reporting) {
         return false;
@@ -436,9 +437,13 @@ bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex)
     o.utc_us = healthUtcNow();
     const quint64 generation = m_generation;
     const QByteArray folder = m_folder.toUtf8();
+    const QByteArray baseline = healthBaselineArgument(baselineFolder);
     m_reporting = true;
-    m_reportWorker = std::thread([this, o, folder, url, generation]() mutable {
+    m_reportWorker = std::thread([this, o, folder, baseline, url,
+                                  generation]() mutable {
         o.folder_utf8 = folder.constData();
+        o.baseline_folder_utf8 =
+            baseline.isEmpty() ? nullptr : baseline.constData();
         const QVariantMap result = writeHealthReport(o, url);
         QMetaObject::invokeMethod(
             this,

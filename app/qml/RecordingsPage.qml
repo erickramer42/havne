@@ -663,10 +663,11 @@ Page {
 
     // The whole recording's health report to url, its format by the
     // dialog's filter or the file's name (ADR-0054's appendix "the health
-    // report as built"); the view's zoom never narrows it. The result
-    // comes back in onReportSaved; false when none started
+    // report as built"), naming the picked vehicle's baseline; the view's
+    // zoom never narrows it. The result comes back in onReportSaved; false
+    // when none started
     function saveReportTo(url, filterIndex) {
-        const started = recording.saveHealthReport(url, filterIndex)
+        const started = recording.saveHealthReport(url, filterIndex, baselineFolder)
         if (started) {
             reportFailed = false
             reportNote = qsTr("Saving the report…")

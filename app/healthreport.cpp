@@ -68,6 +68,12 @@ QString healthSavedLine(const ecuio_health_report_t& report)
                      "identification item", "identification items"));
 }
 
+QByteArray healthBaselineArgument(const QString& folder)
+{
+    return folder.isEmpty() ? QByteArray()
+                            : QDir::toNativeSeparators(folder).toUtf8();
+}
+
 QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url)
 {
     // Core's own name in a folder of the app's: never the vehicle's label
@@ -106,6 +112,7 @@ QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url)
     const qulonglong leftOut =
         report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION];
     const bool vin = (report.flags & ECUIO_HEALTH_VIN_DECODED) != 0;
+    const bool baseline = (report.flags & ECUIO_HEALTH_BASELINE_READ) != 0;
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("words"), QString()},
             {QStringLiteral("ecus"), report.ecus},
@@ -114,6 +121,7 @@ QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url)
             {QStringLiteral("sinceCleared"), report.since_cleared},
             {QStringLiteral("identificationLeftOut"), leftOut},
             {QStringLiteral("vinDecoded"), vin},
+            {QStringLiteral("baselineRead"), baseline},
             {QStringLiteral("summary"), healthSummary(report)},
             {QStringLiteral("line"), healthSavedLine(report)}};
 }

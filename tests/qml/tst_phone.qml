@@ -530,6 +530,19 @@ TestCase {
         verify(title.visible)
     }
 
+    // Diagnostics and Recordings take Settings' vehicles, so each report
+    // names the picked vehicle's baseline
+    function test_theReportsPagesTakeSettingsVehicles() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const folder = Harness.recordingFixtures + "/findings"
+        find(main.contentItem, "settingsPage").vehicles = { salt: "", picked: "v1", list: [{
+            id: "v1", label: "Daily driver", vinKey: "", uri: "", plotted: [], unplotted: [],
+            signals: [], own: "", plugin: "", baseline: folder }] }
+        compare(find(main.contentItem, "diagnosticsPage").baselineFolder, folder)
+        compare(find(main.contentItem, "recordingsPage").baselineFolder, folder)
+    }
+
     // The relay's line beside its button (ADR-0047): the traffic wraps in
     // its own width rather than running under Stop relaying
     function test_relayTrafficFitsBesideItsButton() {

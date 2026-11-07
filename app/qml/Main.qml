@@ -335,6 +335,8 @@ ApplicationWindow {
                     }
                     DiagnosticsPage {
                         objectName: "diagnosticsPage"
+                        // The report names the picked vehicle's baseline
+                        vehicles: settingsView.vehicles
                         onConnectRequested: root.openConnect()
                     }
                     LogPage { objectName: "logPage" }

@@ -185,8 +185,9 @@ TestCase {
 
     // Save report (ADR-0054's appendix "the health report as built"):
     // offered only while connected, text by the first filter over a file
-    // that exists, JSON by the second, one log line each; a folder isn't
-    // a file, and the note says so in danger's color
+    // that exists, JSON by the second, one log line each; the picked
+    // vehicle's baseline named, by its start; a folder isn't a file, and
+    // the note says so in danger's color
     function test_saveReportWritesTheChosenFormat() {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         const button = find(page, "saveReport")
@@ -211,7 +212,20 @@ TestCase {
 
         verify(page.saveReportTo(txt, 1))
         compare(JSON.parse(Harness.readScratchFile(txt)).havne_health, 1)
+        compare(JSON.parse(Harness.readScratchFile(txt)).baseline, null, "no vehicle, none")
         compare(logged("Health report saved: ").length, 2)
+
+        const findings = Harness.recordingFixtures + "/findings"
+        page.vehicles = { salt: "", picked: "v1", list: [{
+            id: "v1", label: "Daily driver", vinKey: "", uri: "", plotted: [], unplotted: [],
+            signals: [], own: "", plugin: "", baseline: findings }] }
+        compare(page.baselineFolder, findings)
+        verify(page.saveReportTo(txt, 1))
+        const named = Harness.readScratchFile(txt)
+        const baseline = JSON.parse(named).baseline
+        verify(baseline.read, named)
+        compare(baseline.started, "2026-11-03T16:00:00Z")
+        verify(named.indexOf("findings") < 0 && named.indexOf("Daily") < 0, "never its folder")
 
         const folder = txt.toString().replace(/\/report\.txt$/, "")
         verify(!page.saveReportTo(folder, 0))
