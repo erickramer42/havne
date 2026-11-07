@@ -9836,6 +9836,56 @@ TEST(BridgeTest, HealthReportWordsEachCount)
               "identification items left out)");
 }
 
+/* A live session's report names the picked vehicle's baseline it's
+ * given, by its start and never its folder: read, gone (the report still
+ * saved, baselineRead false) and none ("") */
+TEST(BridgeTest, HealthReportNamesTheBaselineItIsGiven)
+{
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://Daily driver")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    const struct {
+        QString folder;
+        bool read;
+    } cases[] = {
+        {QStringLiteral(ECUIO_RECORDING_FIXTURES "/findings"), true},
+        {out.path() + QStringLiteral("/vanished-folder"), false},
+        {QString(), false},
+    };
+    int n = 0;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.folder.toStdString());
+        const QString target =
+            out.path() + QStringLiteral("/report-%1.json").arg(++n);
+        const QVariantMap r =
+            bridge.saveHealthReport(QUrl::fromLocalFile(target), 1, c.folder);
+        ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+            << r.value(QStringLiteral("words")).toString().toStdString();
+        EXPECT_EQ(r.value(QStringLiteral("baselineRead")).toBool(), c.read);
+        const QByteArray bytes = readFile(target);
+        EXPECT_FALSE(bytes.contains("vanished"));
+        EXPECT_FALSE(bytes.contains(ECUIO_RECORDING_FIXTURES));
+        const QJsonValue b = QJsonDocument::fromJson(bytes).object().value(
+            QStringLiteral("baseline"));
+        if (c.folder.isEmpty()) {
+            EXPECT_TRUE(b.isNull()) << bytes.toStdString();
+            continue;
+        }
+        EXPECT_EQ(b.toObject().value(QStringLiteral("read")).toBool(), c.read);
+        if (c.read) {
+            EXPECT_EQ(b.toObject().value(QStringLiteral("started")).toString(),
+                      QStringLiteral("2026-11-03T16:00:00Z"));
+            EXPECT_FALSE(
+                b.toObject().value(QStringLiteral("is_source")).toBool());
+        }
+    }
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* The mock's report written where the user chose: text, then JSON by
  * the filter or the name, over a file that exists; its label never in
  * the file or the lines; core's temporary folder gone each time */

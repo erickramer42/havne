@@ -5,7 +5,8 @@
 # loaded: _ecuio.py is what scripts/ctypes_gen.py makes from them today;
 # every function the shared core exports (scripts/ecuio_exports.py) is
 # declared, text core hands over as a pointer to free, every macro (a
-# limit, a string; another kind fails the script); and each layout the
+# limit, a string; another kind fails the script), an anonymous union as
+# a Union of the struct's own (a named one fails it); and each layout the
 # headers pin with a static_assert (a struct's size, a member's offset)
 # holds for the ctypes types on the platform running, so a type mapped
 # wrong fails here, not in a script.
@@ -101,6 +102,44 @@ def test_an_owned_result_and_its_release_are_pointers(tmp_path):
     lines = ctypes_gen.generate(tree).splitlines()
     assert "    'ecuio_made_up_text': (POINTER(c_char), [c_char_p]),  # vin.h" in lines
     assert "    'ecuio_made_up_free': (None, [POINTER(c_char)]),  # vin.h" in lines
+
+
+def test_an_anonymous_union_is_a_union_of_the_structs_own(tmp_path):
+    tree = made_up_tree(tmp_path, "typedef struct ecuio_made_up {\n"
+                                  "    uint32_t count;\n"
+                                  "    uint32_t reserved0;\n"
+                                  "    union {\n"
+                                  "        const char* name;\n"
+                                  "        uint64_t room;\n"
+                                  "    };\n"
+                                  "    uint64_t reserved[2];\n"
+                                  "} ecuio_made_up_t;")
+    text = ctypes_gen.generate(tree)
+    lines = text.splitlines()
+    at = lines.index("class ecuio_made_up_t_u0(Union):")
+    assert lines[at:at + 5] == ["class ecuio_made_up_t_u0(Union):",
+                                "    _fields_ = [",
+                                "        ('name', c_char_p),",
+                                "        ('room', c_uint64),",
+                                "    ]"]
+    assert "ecuio_made_up_t._anonymous_ = ('_u0',)" in lines
+    assert lines.index("ecuio_made_up_t._anonymous_ = ('_u0',)") < \
+        lines.index("ecuio_made_up_t._fields_ = [")
+    assert "    ('_u0', ecuio_made_up_t_u0)," in lines
+    namespace = {}
+    exec(compile(text, "made_up", "exec"), namespace)
+    t = namespace["ecuio_made_up_t"]
+    assert t.name.offset == 8 and t.room.offset == 8
+    assert t.reserved.offset == 16 and ctypes.sizeof(t) == 32
+
+
+def test_a_named_union_fails_the_script(tmp_path):
+    tree = made_up_tree(tmp_path, "typedef struct ecuio_made_up {\n"
+                                  "    union { uint32_t a; uint64_t b; } u;\n"
+                                  "} ecuio_made_up_t;")
+    with pytest.raises(ctypes_gen.Unknown) as e:
+        ctypes_gen.generate(tree)
+    assert "only an anonymous one" in str(e.value)
 
 
 def test_the_headers_are_the_installed_list():

@@ -740,10 +740,14 @@ public:
     // built"): the session's health to the file at url (a local file, or
     // Android's content:// through QFile), in the format healthFormatFor
     // picks from it and the dialog's filterIndex, with the values Live's
-    // rows hold. No wait: a report still being read says so itself. The
-    // map writeHealthReport gives (healthreport.h), its words never
-    // naming a path. Logs one line
-    Q_INVOKABLE QVariantMap saveHealthReport(const QUrl& url, int filterIndex);
+    // rows hold. No wait: a report still being read says so itself.
+    // baselineFolder, the picked vehicle's baseline recording ("" none),
+    // which the report names by its start, never its folder. The map
+    // writeHealthReport gives (healthreport.h), its words never naming a
+    // path. Logs one line
+    Q_INVOKABLE QVariantMap
+    saveHealthReport(const QUrl& url, int filterIndex,
+                     const QString& baselineFolder = QString());
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,

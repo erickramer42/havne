@@ -178,7 +178,8 @@ TestCase {
     // Open shows the recording: its signal plotted by default, the chart's
     // series over the whole recording, the check's findings listed
     // Save report: the whole recording's (the zoom never narrows it), on
-    // the view's thread, the note and one log line when it ends
+    // the view's thread, the picked vehicle's baseline named, the note and
+    // one log line when it ends
     function test_saveReportWritesTheWholeRecording() {
         const page = openFindings()
         const button = find(page, "saveReport")
@@ -188,6 +189,7 @@ TestCase {
         verify(page.viewT1 - page.viewT0 < 20000, "zoomed in")
         const url = Harness.writeScratchFile("findings.json", "")
         verify(url.toString() !== "")
+        page.vehicles = vehicleBook(startEarlyRow.folder)
         verify(page.saveReportTo(url, 1))
         const note = find(page, "reportNote")
         tryVerify(() => note.text.indexOf("Report saved: ") === 0, 10000, note.text)
@@ -197,6 +199,9 @@ TestCase {
         const report = JSON.parse(Harness.readScratchFile(url))
         compare(report.source.kind, "recording")
         compare(report.source.from_s, 0)
+        verify(report.baseline.read, "the baseline's start-early recording")
+        compare(report.baseline.started, "2026-11-06T15:00:00Z")
+        verify(!report.baseline.is_source, "another recording")
         verify(report.key_values.length > 0, "RPM's value at the end")
 
         // Another recording opened: the note is the old one's no more

@@ -1020,6 +1020,65 @@ report still the whole recording's).
   read with a row's room, so a long one is never cut into another
   number.
 
+**Note of 2026-11-07: the vehicle's baseline named.** A report names the
+vehicle's baseline recording (ADR-0049's appendix "a vehicle's
+baseline") when its caller gives the folder; nothing in core knows which
+recording is a baseline.
+
+- **The option.** The options' first reserved word is an anonymous
+  union of `baseline_folder_utf8` and `baseline_room` (`uint64_t`), so
+  the pointer sits at 48 on either width and the struct keeps its size;
+  `reserved` is three words. NULL or "" names none.
+- **What's read of it:** its `events.log` alone. Its first line must be
+  a recording's (the reader's test: format 2 or 3 by the whole line,
+  format 1 by its ending, a byte order mark skipped); then the header's
+  `utc`, `profile` and `uri` lines (`recording_set.h`'s `read_header`),
+  and its length, the last timed line's time. A line past the reader's
+  room is one line, its rest never a timed line of its own. Nothing else
+  of the folder is opened, so a long baseline adds little to a live
+  report, which the app writes on the GUI thread.
+- **What's written,** after the source: the JSON's `baseline`, null for
+  none; `read` true with `started` (UTC; null without a `utc` line),
+  `length_s` (null with no timed line), `profile`, `backend` (the URI's
+  scheme, `unknown` without one) and `is_source`, whether the report's
+  own recording is it (the same start, so a folder export's copy of it
+  is it too; a session's report never is); or `read` false with `why`:
+  "its folder is gone: it was moved or deleted", "its folder holds no
+  events.log" or "its events.log isn't a recording's". The text's line,
+  after the source's: "Baseline: the vehicle's baseline recording,
+  started <UTC>, <S> s (<backend>), profile <profile>", with ": this
+  recording" at its end when it is, or "Baseline: the vehicle's baseline
+  recording can't be read: <why>"; none, no line. The report is written
+  either way, and `ECUIO_HEALTH_BASELINE_READ` (0x2) in the report's
+  flags says whether it was read.
+- **Never its folder:** the app names a recording's folder by its stamp
+  and the vehicle's label, so neither the folder's name nor its path is
+  written. The name isn't added to the check's values: a label can be
+  any word (a profile's, a unit's), and the report never reads it.
+- **`havne-cli health`** takes `--baseline <recording>` for a session
+  and a recording alike: the CLI has no vehicle book, so the caller
+  names it, as `view`'s overlay does. An empty one is usage. The
+  `health` line gains `baseline`: "none", "read" or "unread".
+- **The app's Save report,** on Diagnostics and in the viewer, passes
+  the picked vehicle's baseline, the one the Recordings page badges and
+  compares with; a folder that's gone is passed too, so the report says
+  so. Its result map gains `baselineRead`.
+- **Python:** `scripts/ctypes_gen.py` writes an anonymous union as a
+  `Union` of its own (`ecuio_health_options_t_u0`) in the struct's
+  `_anonymous_`, so `baseline_folder_utf8` reads as the struct's; a
+  named union fails the script.
+
+Tests: `HealthTest.AReportNamesTheBaselineByItsStartNeverItsFolder`,
+`.TheReportsOwnRecordingAsItsBaselineIsSaidToBeIt`,
+`.ABaselineThatCantBeReadSaysWhyAndTheReportIsWritten`,
+`.ABaselinesEventsLogIsReadAsTheReadersIs` (test_core);
+`CliHealthTest.ABaselineIsNamedForEitherSourceAndTheLineSaysIfRead`,
+`CliHealthRunTest.recording`; `BridgeTest.HealthReportNamesTheBaselineItIsGiven`,
+`RecordingViewTest.HealthReportNamesTheBaselineItIsGiven`;
+`QmlTest.diagnostics`, `QmlTest.recordings` and `QmlTest.phone`'s
+`test_theReportsPagesTakeSettingsVehicles`; `test_c_abi`;
+`PythonTest.test_declarations` on either width.
+
 ## Appendix: the CSV import as built (2026-11-07)
 
 `ECUIO_IMPORT_CSV` makes a recording's folder from another logger's CSV

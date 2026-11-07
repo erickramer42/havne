@@ -17,6 +17,7 @@
 #include "folder_files.h"
 #include "frame_reassembly.h"
 #include "frame_rows.h"
+#include "frames_csv.h" /* read_line */
 #include "health_replies.h"
 #include "json.h"        /* utf8_length */
 #include "pid_support.h" /* ecuio_service01_keyed */
@@ -267,6 +268,18 @@ struct model {
     bool vin = false;
     bool check_matches = false;
     bool ranks = false; /* the set ranks a signal */
+
+    /* the vehicle's baseline recording */
+    bool baseline_named = false;
+    bool baseline_read = false;
+    bool baseline_is_source = false; /* the same start as this recording */
+    bool baseline_has_started = false;
+    bool baseline_has_length = false;
+    std::string baseline_why;
+    std::string baseline_started;
+    std::string baseline_length_s;
+    std::string baseline_profile;
+    std::string baseline_backend;
 };
 
 const ecuio_signal_def_t* def_of(const ecuio_signal_set_t* set, uint32_t id)
@@ -467,6 +480,25 @@ model build(const inputs& in, scrub::values* identity)
         m.utc = utc_text(in.utc_us);
     }
     m.units = in.units == ECUIO_UNITS_IMPERIAL ? "imperial" : "metric";
+    const baseline_facts& b = in.baseline;
+    m.baseline_named = b.named;
+    if (b.named && !b.read) {
+        m.baseline_why = b.why;
+    } else if (b.named) {
+        m.baseline_read = true;
+        m.baseline_has_started = b.started_us != 0;
+        if (m.baseline_has_started) {
+            m.baseline_started = utc_text(b.started_us);
+        }
+        m.baseline_has_length = b.has_length;
+        m.baseline_length_s = fixed(static_cast<double>(b.length_us) / 1e6, 3);
+        m.baseline_profile = b.profile;
+        m.baseline_backend = scheme_word(b.uri);
+        /* A recording's start is its own: a copy of the baseline (the
+         * folder export) has it too, and is the same run */
+        m.baseline_is_source =
+            in.recording && in.started_us != 0 && b.started_us == in.started_us;
+    }
 
     /* The vehicle: the first ECU's VIN that decodes, never the VIN */
     for (uint32_t c = 0; c < in.channels && !m.vin; ++c) {
@@ -729,6 +761,30 @@ std::string json(const model& m)
         j.boolean("frames", m.frames);
     }
     j.close('}');
+    if (!m.baseline_named) {
+        j.null("baseline");
+    } else {
+        j.open("baseline", '{');
+        j.boolean("read", m.baseline_read);
+        if (!m.baseline_read) {
+            j.str("why", m.baseline_why);
+        } else {
+            if (m.baseline_has_started) {
+                j.str("started", m.baseline_started);
+            } else {
+                j.null("started");
+            }
+            if (m.baseline_has_length) {
+                j.raw("length_s", m.baseline_length_s);
+            } else {
+                j.null("length_s");
+            }
+            j.str("profile", m.baseline_profile);
+            j.str("backend", m.baseline_backend);
+            j.boolean("is_source", m.baseline_is_source);
+        }
+        j.close('}');
+    }
     if (m.has_utc) {
         j.str("utc", m.utc);
     } else {
@@ -918,6 +974,21 @@ std::string text(const model& m)
         }
         t += "), profile " + m.profile + "\n";
     }
+    if (m.baseline_named && !m.baseline_read) {
+        t += "Baseline: the vehicle's baseline recording can't be read: " +
+             m.baseline_why + "\n";
+    } else if (m.baseline_named) {
+        t += "Baseline: the vehicle's baseline recording, " +
+             (m.baseline_has_started ? "started " + m.baseline_started
+                                     : std::string("with no start time"));
+        if (m.baseline_has_length) {
+            t += ", " + m.baseline_length_s + " s";
+        }
+        t += " (" + m.baseline_backend + "), profile " +
+             (m.baseline_profile.empty() ? std::string("none")
+                                         : m.baseline_profile);
+        t += m.baseline_is_source ? ": this recording\n" : "\n";
+    }
     if (m.has_utc) {
         t += "Time: " + m.utc + "\n";
     }
@@ -1063,7 +1134,8 @@ void count(const model& m, ecuio_health_report_t* r)
     r->values = static_cast<uint32_t>(m.key_values.size());
     r->left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION] =
         m.identification_left_out;
-    r->flags = m.vin ? ECUIO_HEALTH_VIN_DECODED : 0u;
+    r->flags = (m.vin ? ECUIO_HEALTH_VIN_DECODED : 0u) |
+               (m.baseline_read ? ECUIO_HEALTH_BASELINE_READ : 0u);
 }
 
 } // namespace
@@ -1156,6 +1228,82 @@ struct file_closer {
 struct recording_closer {
     void operator()(ecuio_recording_t* r) const { ecuio_recording_close(r); }
 };
+
+/* The vehicle's baseline recording as its events.log names it: the
+ * header's utc, profile and uri lines (recording_set.h's read_header) and
+ * its length, the last timed line's time. Its folder's name is never
+ * read into the report: it can hold the vehicle's label. A folder that's
+ * gone, or holds no recording's events.log, is named as unread with its
+ * why, never its path. */
+baseline_facts read_baseline(const std::string& folder)
+{
+    namespace rows = ecuio_recording_rows;
+    baseline_facts b;
+    b.named = true;
+    if (!files::exists(folder)) {
+        b.why = "its folder is gone: it was moved or deleted";
+        return b;
+    }
+    std::string why;
+    std::unique_ptr<FILE, file_closer> f(
+        files::open_file(folder + "/events.log", false, &why));
+    if (!f) {
+        b.why = "its folder holds no events.log";
+        return b;
+    }
+    std::vector<char> buf(rows::kRowMax + 2);
+    bool too_long = false;
+    bool rest_of_long = false; /* the pieces of a line past kRowMax */
+    bool first = true;
+    uint64_t last_ms = 0;
+    while (ecuio_frames_csv::read_line(f.get(), buf, &too_long)) {
+        const char* p = buf.data();
+        const size_t n = std::strlen(p);
+        const bool piece = rest_of_long;
+        rest_of_long = too_long;
+        if (first) {
+            /* the reader's test: a byte order mark skipped, format 2 or
+             * 3 by the whole line, format 1 by its ending */
+            first = false;
+            const size_t bom =
+                n >= 3 && std::memcmp(p, "\xEF\xBB\xBF", 3) == 0 ? 3 : 0;
+            const char* line = p + bom;
+            const size_t len = n - bom;
+            const size_t older = std::strlen(rows::kFormat1End);
+            if (too_long || !(rows::equals(line, len, rows::kFormat2) ||
+                              rows::equals(line, len, rows::kFormat3) ||
+                              (len >= older &&
+                               std::memcmp(line + len - older,
+                                           rows::kFormat1End, older) == 0))) {
+                b.why = "its events.log isn't a recording's";
+                return b;
+            }
+            continue;
+        }
+        rows::event_line e;
+        if (!piece && rows::parse_event_line(p, n, &e)) {
+            last_ms = (std::max)(last_ms, e.ms);
+            b.has_length = true;
+        }
+    }
+    const ecuio_recording_set::header h =
+        ecuio_recording_set::read_header(folder);
+    b.read = true;
+    b.started_us = h.utc_us;
+    b.profile = h.profile;
+    b.uri = h.uri;
+    b.length_us = last_ms * 1000;
+    return b;
+}
+
+/* The baseline the options name, NULL or "" none */
+baseline_facts baseline_of(const ecuio_health_options_t& o)
+{
+    if (o.baseline_folder_utf8 == nullptr || o.baseline_folder_utf8[0] == 0) {
+        return {};
+    }
+    return read_baseline(o.baseline_folder_utf8);
+}
 
 /* A recording's report: each ECU's reports from the replies in frames.csv
  * that end in the range (health_replies.h), and each of the set's number
@@ -1343,6 +1491,7 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
     in.units = o.units;
     in.latest_model_year = o.latest_model_year;
     in.utc_us = o.utc_us;
+    in.baseline = baseline_of(o);
     scrub::values identity;
     for (const std::string& v : ident_values) {
         (void)identity.add(v.data(), v.size(),
@@ -1472,6 +1621,7 @@ ecuio_health_export(const ecuio_health_options_t* options,
         in.units = o.units;
         in.latest_model_year = o.latest_model_year;
         in.utc_us = o.utc_us;
+        in.baseline = ecuio_health::baseline_of(o);
         ecuio_scrub::values identity;
         const std::string bytes =
             ecuio_health::write(in, o.format, &r, &identity);

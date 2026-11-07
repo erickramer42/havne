@@ -372,7 +372,8 @@ if(TARGET havne-cli)
         set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
         # The health report (ADR-0054): the mock's, a session whose
         # reports are never asked, the simulated car as an ELM327 adapter
-        # on loopback; a recording of values alone and a range past its end
+        # on loopback; a recording of values alone, a range past its end
+        # and its baseline named
         add_test(NAME CliHealthRunTest.session
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     session $<TARGET_FILE:havne-cli>)

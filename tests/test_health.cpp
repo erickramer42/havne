@@ -11,7 +11,10 @@
 // Then the report from a recording: a hand-written folder of replies
 // (reassembled and as they crossed the bus) rebuilt into the ECU's
 // reports, a range, the replay fixture's frames decoded for its values, a
-// recording of values alone, and a folder export's scrubbed copy. Files
+// recording of values alone, and a folder export's scrubbed copy. Then
+// the vehicle's baseline: named by its events.log's start, length,
+// profile and backend, never its folder; the report's own recording;
+// one that can't be read; the reader's forms of its first line. Files
 // go to a folder of their own under TEMP/TMPDIR, removed at the end.
 
 #include <gtest/gtest.h>
@@ -33,6 +36,7 @@
 #include "ecuio/vin.h"
 #include "health.h"
 #include "json.h"
+#include "recording_rows.h" /* kRowMax */
 #include "scrub.h"
 #include "temp_name.h"
 
@@ -660,9 +664,11 @@ TEST(HealthTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     a = o;
     a.flags = 1;
     EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
-    a = o;
-    a.reserved[3] = 1;
-    EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    for (size_t i = 0; i < sizeof a.reserved / sizeof a.reserved[0]; ++i) {
+        a = o;
+        a.reserved[i] = 1;
+        EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    }
     a = o;
     a.reserved0 = 1;
     EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
@@ -804,7 +810,8 @@ struct Reported {
     std::string out;
 
     Reported(const Folder& f, const std::string& folder, uint32_t format,
-             uint64_t from_us = 0, uint64_t to_us = 0)
+             uint64_t from_us = 0, uint64_t to_us = 0,
+             const char* baseline = nullptr)
     {
         static int n = 0;
         out = f.utf8("report-" + std::to_string(++n) +
@@ -817,6 +824,7 @@ struct Reported {
         o.utc_us = kUtc;
         o.from_us = from_us;
         o.to_us = to_us;
+        o.baseline_folder_utf8 = baseline;
         status = ecuio_health_export(&o, &r);
         detail = ecuio_last_error_detail();
         bytes = read_file(fs::u8path(out));
@@ -1346,6 +1354,224 @@ TEST(HealthTest, ALongNumberIsReadWhole)
     const ecuio_json::Value v = parsed(json.bytes);
     ASSERT_EQ(v.find("key_values")->items.size(), 1u);
     EXPECT_EQ(v.find("key_values")->items[0].find("value")->whole, 850);
+}
+
+// ---- The vehicle's baseline (ADR-0049's appendix "a vehicle's
+// baseline") ----
+
+/* A baseline's folder, named as the app names a recording's: its stamp
+ * and the vehicle's label, which no report may hold */
+const char* const kBaseline = "20261101-090000 Daily driver";
+
+/* A baseline's events.log, all the report reads of it: started 2026-11-01
+ * at 09:00 UTC, 312.4 s long, an ELM327 session's under obd2 */
+std::string baseline_log(const std::string& before = std::string(),
+                         const std::string& after = std::string())
+{
+    return before +
+           "ecuio session recording, format 3 (ADR-0049)\n"
+           "started  2026-11-01 09:00:00.000 (UTC)\n"
+           "utc  2026-11-01T09:00:00.000Z\n"
+           "core  0.6.0\n"
+           "uri  elm327://COM4?profile=obd2\n"
+           "profile  obd2\n"
+           "frame flags  complete\n"
+           "\n"
+           "09:00:01.250  +1.250  link  ok (state 0, 0 episodes)\n" +
+           after +
+           "09:05:12.400  +312.400  end  0 records dropped, 0 notes "
+           "dropped\n";
+}
+
+const char* const kBaselineLine =
+    "\nBaseline: the vehicle's baseline recording, started "
+    "2026-11-01T09:00:00Z, 312.400 s (elm327), profile obd2\n";
+
+/* The report names the baseline by its start, length, backend and
+ * profile, in both formats; nothing else in the report changes, and
+ * neither its folder's name, its label nor its URI's port is written. A
+ * baseline of "" is none, as NULL is. */
+TEST(HealthTest, AReportNamesTheBaselineByItsStartNeverItsFolder)
+{
+    Folder f;
+    car_recording(f);
+    f.write(std::string(kBaseline) + "/events.log", baseline_log());
+    const std::string base = f.utf8(kBaseline);
+    const std::string rec = f.utf8("rec");
+    const Reported json(f, rec, ECUIO_HEALTH_JSON, 0, 0, base.c_str());
+    const Reported text(f, rec, ECUIO_HEALTH_TEXT, 0, 0, base.c_str());
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    ASSERT_EQ(text.status, ECUIO_OK) << text.detail;
+    const ecuio_json::Value v = parsed(json.bytes);
+    const ecuio_json::Value* b = v.find("baseline");
+    ASSERT_NE(b, nullptr);
+    ASSERT_EQ(b->type, ecuio_json::Type::object) << json.bytes;
+    EXPECT_TRUE(b->find("read")->boolean);
+    EXPECT_EQ(b->find("started")->text, "2026-11-01T09:00:00Z");
+    EXPECT_EQ(b->find("length_s")->number, 312.4);
+    EXPECT_EQ(b->find("profile")->text, "obd2");
+    EXPECT_EQ(b->find("backend")->text, "elm327");
+    EXPECT_FALSE(b->find("is_source")->boolean);
+    EXPECT_EQ(b->find("why"), nullptr);
+    EXPECT_EQ(json.r.flags & ECUIO_HEALTH_BASELINE_READ,
+              ECUIO_HEALTH_BASELINE_READ);
+    EXPECT_NE(text.bytes.find(kBaselineLine), std::string::npos) << text.bytes;
+    std::vector<std::string> facts;
+    strings_of(*b, facts);
+    for (const std::string& s : facts) {
+        EXPECT_NE(text.bytes.find(s), std::string::npos)
+            << "the text lacks '" << s << "'";
+    }
+    for (const std::string& out : {json.bytes, text.bytes}) {
+        EXPECT_EQ(out.find("Daily"), std::string::npos);
+        EXPECT_EQ(out.find("20261101"), std::string::npos);
+        EXPECT_EQ(out.find("COM4"), std::string::npos);
+    }
+
+    /* Without one, null and no line; the rest the same bytes */
+    const Reported plain_json(f, rec, ECUIO_HEALTH_JSON);
+    const Reported plain_text(f, rec, ECUIO_HEALTH_TEXT, 0, 0, "");
+    ASSERT_EQ(plain_text.status, ECUIO_OK) << plain_text.detail;
+    EXPECT_EQ(parsed(plain_json.bytes).find("baseline")->type,
+              ecuio_json::Type::null);
+    EXPECT_EQ(plain_json.r.flags & ECUIO_HEALTH_BASELINE_READ, 0u);
+    EXPECT_EQ(plain_text.bytes.find("Baseline"), std::string::npos);
+    std::string without = text.bytes;
+    without.replace(without.find(kBaselineLine), std::strlen(kBaselineLine),
+                    "\n");
+    EXPECT_EQ(without, plain_text.bytes);
+}
+
+/* The report's own recording as its baseline is said to be it, and so is
+ * a copy of it (the same start); a session's report never is */
+TEST(HealthTest, TheReportsOwnRecordingAsItsBaselineIsSaidToBeIt)
+{
+    Folder f;
+    car_recording(f);
+    f.write("copy/events.log", read_file(f.path / "rec" / "events.log"));
+    const std::string rec = f.utf8("rec");
+    for (const std::string& base : {rec, f.utf8("copy")}) {
+        const Reported json(f, rec, ECUIO_HEALTH_JSON, 0, 0, base.c_str());
+        const Reported text(f, rec, ECUIO_HEALTH_TEXT, 0, 0, base.c_str());
+        ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+        EXPECT_TRUE(
+            parsed(json.bytes).find("baseline")->find("is_source")->boolean);
+        EXPECT_NE(text.bytes.find("\nBaseline: the vehicle's baseline "
+                                  "recording, started 2026-11-06T05:30:00Z ("
+                                  "elm327), profile obd2: this recording\n"),
+                  std::string::npos)
+            << text.bytes;
+    }
+
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://Daily driver", &s), ECUIO_OK);
+    const std::string out = f.utf8("session.json");
+    ecuio_health_options_t o{};
+    o.format = ECUIO_HEALTH_JSON;
+    o.session = s;
+    o.out_path_utf8 = out.c_str();
+    o.utc_us = kUtc;
+    o.baseline_folder_utf8 = rec.c_str();
+    ecuio_health_report_t r{};
+    ASSERT_EQ(ecuio_health_export(&o, &r), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_json::Value v = parsed(read_file(f.path / "session.json"));
+    EXPECT_TRUE(v.find("baseline")->find("read")->boolean);
+    EXPECT_FALSE(v.find("baseline")->find("is_source")->boolean);
+    EXPECT_EQ(r.flags & ECUIO_HEALTH_BASELINE_READ, ECUIO_HEALTH_BASELINE_READ);
+    ecuio_session_destroy(s);
+}
+
+/* A baseline that can't be read says why in both formats, never its
+ * path, and the report is still written */
+TEST(HealthTest, ABaselineThatCantBeReadSaysWhyAndTheReportIsWritten)
+{
+    Folder f;
+    car_recording(f);
+    f.write("no-log/frames.csv", "host_us,timestamp_us,id,flags,data\n");
+    f.write("not-a-recording/events.log", "a shopping list\n");
+    const struct {
+        const char* folder;
+        const char* why;
+    } cases[] = {
+        {"gone", "its folder is gone: it was moved or deleted"},
+        {"no-log", "its folder holds no events.log"},
+        {"not-a-recording", "its events.log isn't a recording's"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.folder);
+        const std::string base = f.utf8(c.folder);
+        const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON, 0, 0,
+                            base.c_str());
+        const Reported text(f, f.utf8("rec"), ECUIO_HEALTH_TEXT, 0, 0,
+                            base.c_str());
+        ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+        ASSERT_EQ(text.status, ECUIO_OK) << text.detail;
+        const ecuio_json::Value v = parsed(json.bytes);
+        const ecuio_json::Value* b = v.find("baseline");
+        EXPECT_FALSE(b->find("read")->boolean);
+        EXPECT_EQ(b->find("why")->text, c.why);
+        EXPECT_EQ(b->find("started"), nullptr);
+        EXPECT_EQ(json.r.flags & ECUIO_HEALTH_BASELINE_READ, 0u);
+        EXPECT_NE(text.bytes.find(std::string("\nBaseline: the vehicle's "
+                                              "baseline recording can't be "
+                                              "read: ") +
+                                  c.why + "\n"),
+                  std::string::npos)
+            << text.bytes;
+        for (const std::string& out : {json.bytes, text.bytes}) {
+            EXPECT_EQ(out.find(base), std::string::npos);
+        }
+    }
+}
+
+/* events.log is taken as the reader takes it: a byte order mark skipped,
+ * format 1 by its first line's ending; a baseline with no utc line has
+ * no start, one with no timed line no length; and a line past the
+ * reader's room is one line, its rest never read as a timed line of its
+ * own */
+TEST(HealthTest, ABaselinesEventsLogIsReadAsTheReadersIs)
+{
+    Folder f;
+    car_recording(f);
+    const std::string old_header = "Havne 0.3.2 session recording (ADR-0017)\n"
+                                   "profile  obd2\n"
+                                   "\n";
+    /* the reader's room is kRowMax + 1 bytes a read: the line's rest
+     * starts with a timed line's shape */
+    const std::string note = "09:00:02.000  +2.000  note  ";
+    const std::string long_line =
+        note +
+        std::string(ecuio_recording_rows::kRowMax + 1 - note.size(), 'x') +
+        "09:59:59.000  +9999.000  end  0 records dropped, 0 notes dropped\n";
+    const struct {
+        const char* folder;
+        std::string log;
+        const char* line;
+    } cases[] = {
+        {"bom", baseline_log("\xEF\xBB\xBF"), kBaselineLine},
+        {"long", baseline_log(std::string(), long_line), kBaselineLine},
+        {"older", old_header,
+         "\nBaseline: the vehicle's baseline recording, with no start time "
+         "(unknown), profile obd2\n"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.folder);
+        f.write(std::string(c.folder) + "/events.log", c.log);
+        const std::string base = f.utf8(c.folder);
+        const Reported text(f, f.utf8("rec"), ECUIO_HEALTH_TEXT, 0, 0,
+                            base.c_str());
+        ASSERT_EQ(text.status, ECUIO_OK) << text.detail;
+        EXPECT_NE(text.bytes.find(c.line), std::string::npos) << text.bytes;
+    }
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON, 0, 0,
+                        f.utf8("older").c_str());
+    const ecuio_json::Value v = parsed(json.bytes);
+    const ecuio_json::Value* b = v.find("baseline");
+    EXPECT_TRUE(b->find("read")->boolean);
+    EXPECT_EQ(b->find("started")->type, ecuio_json::Type::null);
+    EXPECT_EQ(b->find("length_s")->type, ecuio_json::Type::null);
+    EXPECT_EQ(b->find("backend")->text, "unknown");
 }
 
 } // namespace

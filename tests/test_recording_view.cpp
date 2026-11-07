@@ -985,6 +985,61 @@ TEST(RecordingViewTest, HealthReportIsTheWholeRecordingsOnItsOwnThread)
     }
 }
 
+// The baseline given goes to core on the report's thread: another
+// recording read by its start, the open one said to be the report's own,
+// a folder that's gone said so with the report still saved, none ("")
+// null; never a folder's name (the vehicle's label) in the file
+TEST(RecordingViewTest, HealthReportNamesTheBaselineItIsGiven)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    const struct {
+        QString folder;
+        bool read;
+        bool own;
+    } cases[] = {
+        {fixture("findings"), true, false},
+        {folder, true, true},
+        {root.path() + QStringLiteral("/vanished-folder"), false, false},
+        {QString(), false, false},
+    };
+    int n = 0;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.folder.toStdString());
+        const QUrl url = QUrl::fromLocalFile(
+            root.path() + QStringLiteral("/report-%1.json").arg(++n));
+        saved.clear();
+        ASSERT_TRUE(v.saveHealthReport(url, 1, c.folder));
+        ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+        ASSERT_TRUE(saved[0].value(QStringLiteral("ok")).toBool())
+            << saved[0].value(QStringLiteral("words")).toString().toStdString();
+        EXPECT_EQ(saved[0].value(QStringLiteral("baselineRead")).toBool(),
+                  c.read);
+        QFile f(url.toLocalFile());
+        ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+        const QByteArray bytes = f.readAll();
+        EXPECT_FALSE(bytes.contains("Daily"));
+        EXPECT_FALSE(bytes.contains("vanished"));
+        const QJsonValue b = QJsonDocument::fromJson(bytes).object().value(
+            QStringLiteral("baseline"));
+        if (c.folder.isEmpty()) {
+            EXPECT_TRUE(b.isNull()) << bytes.toStdString();
+            continue;
+        }
+        EXPECT_EQ(b.toObject().value(QStringLiteral("read")).toBool(), c.read);
+        EXPECT_EQ(b.toObject().value(QStringLiteral("is_source")).toBool(),
+                  c.own);
+    }
+}
+
 // A report under way when the viewer closes or opens another recording
 // ends unannounced: its thread runs out (core's export can't stop
 // midway), and the result is dropped
