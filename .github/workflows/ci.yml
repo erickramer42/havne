@@ -121,9 +121,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # can-utils: candump, which CliTransferRunTest.candump logs vcan0
+      # with (ECUIO_VCAN_REQUIRED fails it without one)
       - name: Build core + tests with ASan and UBSan
         run: |
-          sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev
+          sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev can-utils
           SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHAVNE_BUILD_CORE_ONLY=ON \
             -DCMAKE_C_FLAGS="$SAN" -DCMAKE_CXX_FLAGS="$SAN" \
@@ -554,11 +556,13 @@ jobs:
 
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
       # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
-      # and bpftrace: core's USDT probes and the step that traces them
+      # and bpftrace: core's USDT probes and the step that traces them;
+      # can-utils: candump, which CliTransferRunTest.candump logs vcan0
+      # with (ECUIO_VCAN_REQUIRED fails it without one)
       - name: Build full app
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
-            systemtap-sdt-dev bpftrace
+            systemtap-sdt-dev bpftrace can-utils
           cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"
           cmake --build build
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
