@@ -77,6 +77,15 @@ struct SignalFilterForeign {
     QML_NAMED_ELEMENT(SignalFilter)
 };
 
+// The bridge's Import, named so a page reads its Kind values
+struct RecordingImportForeign
+{
+    Q_GADGET
+    QML_FOREIGN(RecordingImport)
+    QML_NAMED_ELEMENT(RecordingImport)
+    QML_UNCREATABLE("Bridge.recordingImport is the one import")
+};
+
 // The bridge's model properties, typed for qmllint. Not creatable or
 // nameable from QML.
 struct FrameListModelForeign

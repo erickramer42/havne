@@ -131,6 +131,74 @@ TestCase {
         compare(page.series(400).length, 3, "its numbers are plotted")
     }
 
+    // Import: a picked file's kind guessed from its first line; a CSV
+    // waits for its column map, then imports and joins the list; a candump
+    // log of two buses is refused in core's words, the interface field
+    // shows, and the bus named imports; the kind switches; Cancel closes
+    function test_importMakesARecordingOfALoggersFile() {
+        const page = createPage()
+        verify(find(page, "importButton").visible)
+        const panel = find(page, "importPanel")
+        const note = find(page, "importNote")
+        verify(!panel.visible, "closed until a file is picked")
+
+        const csv = Harness.writeScratchFile("import-log.csv",
+                                             "time,rpm,note\n0,800,a\n0.5,900,b\n")
+        const map = Harness.writeScratchFile("import-map.json",
+            '{"havne_column_map": 1, "time": {"column": "time", "unit": "s"}, '
+            + '"signals": [{"column": "rpm", "name": "RPM", "unit": "rpm"}]}')
+        page.chooseImportFile(csv)
+        verify(panel.visible)
+        compare(find(page, "importFileName").text, "Import import-log.csv")
+        verify(find(page, "importKind_csv").selected, "guessed from its first line")
+        compare(find(page, "importMapName").text, "None chosen")
+        verify(!find(page, "importInterface").visible)
+        verify(!find(page, "importStart").enabled, "a CSV waits for its column map")
+        page.importMap = map
+        compare(find(page, "importMapName").text, "import-map.json")
+        verify(find(page, "importStart").enabled)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "Imported 2 values; columns ignored: 1")
+        verify(note.visible)
+        verify(Qt.colorEqual(note.color, Theme.success))
+        verify(!panel.visible, "done with the file")
+        verify(page.recordings.some(r => r.title.endsWith(" · CSV import")),
+               "it joins the list")
+
+        const log = Harness.writeScratchFile("import-two.log",
+            "(1.000000) can0 7E8#01\n(1.100000) can1 123#02\n(1.600000) can1 123#03\n")
+        page.chooseImportFile(log)
+        verify(!note.visible, "a new file, no old words")
+        verify(find(page, "importKind_candump").selected, "guessed from its first line")
+        verify(!find(page, "importMapName").visible, "a candump log has no column map")
+        verify(!find(page, "importInterface").visible, "until core asks for it")
+        verify(find(page, "importStart").enabled)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "the log has several interfaces: name one of can0 and can1")
+        verify(Qt.colorEqual(note.color, Theme.danger))
+        verify(panel.visible, "the file kept")
+        verify(find(page, "importInterface").visible)
+        find(page, "importInterface").text = "can1"
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "Imported 2 frames over 0.5 s")
+        verify(!panel.visible)
+        verify(page.recordings.some(r => r.title.endsWith(" · candump import")))
+
+        page.chooseImportFile(log)
+        find(page, "importKind_csv").clicked()
+        compare(page.importKind, RecordingImport.Csv)
+        verify(!find(page, "importStart").enabled, "now it wants a column map")
+        find(page, "importCancel").clicked()
+        verify(!panel.visible)
+        verify(!note.visible)
+    }
+
     // Replay hands the row's replay:// URI on, for Main to put in
     // Settings' field
     function test_replayHandsItsUriOn() {

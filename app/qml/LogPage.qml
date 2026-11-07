@@ -123,36 +123,6 @@ Pane {
         return r.ok
     }
 
-    // One option of a two-option toggle. Both options stay visible and
-    // the current one is filled, so it doesn't read as a dropdown.
-    component SegmentButton: AbstractButton {
-        id: seg
-        property bool selected: false
-
-        implicitWidth: segLabel.implicitWidth + 24
-        implicitHeight: 30
-        hoverEnabled: true
-        Accessible.checkable: true
-        Accessible.checked: seg.selected
-
-        background: Rectangle {
-            radius: Theme.radius - 2
-            color: seg.selected ? Theme.elevatedLight
-                 : seg.hovered ? Qt.alpha(Theme.text, 0.05)
-                 : "transparent"
-            border.width: seg.visualFocus ? 2 : 0
-            border.color: Theme.text
-        }
-        contentItem: Text {
-            id: segLabel
-            text: seg.text
-            font.pixelSize: 13
-            color: seg.selected ? Theme.text : Theme.textDim
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
     ColumnLayout {
         anchors.fill: parent
         spacing: Theme.spacing

@@ -1122,8 +1122,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(test_bridge
         test_bridge.cpp
         test_recording_view.cpp
+        test_recording_import.cpp
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
+        ../app/recordingimport.cpp
         ../app/healthreport.cpp
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
@@ -1188,6 +1190,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/recordingimport.cpp
         ../app/healthreport.cpp
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
