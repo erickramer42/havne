@@ -373,7 +373,10 @@ TestCase {
         const ids = find(page, "idList")
         verify(ids.visible)
         verify(!find(page, "frameList").visible)
-        tryVerify(() => ids.count >= 2 && ids.itemAtIndex(0) !== null, 3000, "the IDs show")
+        // Shown only now, the list is laid out a frame later: a tap before
+        // that lands on a row with no size
+        tryVerify(() => ids.count >= 2 && ids.itemAtIndex(0) !== null && ids.height > 0
+                  && ids.itemAtIndex(0).width > 0, 3000, "the IDs show, laid out")
         let total = 0
         for (let i = 0; i < ids.count; ++i)
             total += Bridge.frameIds.data(Bridge.frameIds.index(i, 0), 259)   // CountRole
@@ -391,6 +394,46 @@ TestCase {
         compare(page.rateText(0), "-")
         compare(page.rateText(2.25), "2.3/s")
         compare(page.rateText(20.4), "20/s")
+    }
+
+    // One number as a standard and as an extended ID: each By ID row's
+    // tap shows that row's own frames alone, whatever its width
+    function test_aTapShowsItsOwnWidthsFramesAlone() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        let rows = "host_us,timestamp_us,id,flags,data\n"
+        for (let i = 0; i < 6; ++i) {
+            const t = 1000 + i * 100000
+            rows += t + "," + t + ",0x7E8,0x0,04 41 0C 1A F8\n"
+            if (i < 4)
+                rows += (t + 50000) + "," + (t + 50000) + ",0x7E8,0x1,04 62 F1 90 01\n"
+        }
+        const url = Harness.writeScratchFile("two-widths.csv", rows).toString()
+        const path = decodeURIComponent(url.replace(/^file:\/\//, "")).replace(/^\/([A-Za-z]:)/, "$1")
+        compare(Bridge.connectSession("replay://" + path + "?speed=max"), "")
+        tryVerify(() => Bridge.model.heldCount === 10, 5000, "the ten frames arrive")
+
+        for (const extended of [false, true]) {
+            find(page, "table_byId").clicked()
+            const ids = find(page, "idList")
+            tryVerify(() => ids.count === 2 && ids.itemAtIndex(1) !== null && ids.height > 0
+                      && ids.itemAtIndex(1).width > 0, 3000, "both rows, laid out")
+            let at = -1
+            for (let i = 0; i < ids.count; ++i) {
+                if (Bridge.frameIds.data(Bridge.frameIds.index(i, 0), 258) === extended)   // ExtendedRole
+                    at = i
+            }
+            verify(at >= 0, "the row of each width")
+            compare(Bridge.frameIds.data(Bridge.frameIds.index(at, 0), 257), 0x7E8)   // ArbIdRole
+            const row = ids.itemAtIndex(at)
+            mouseClick(row, row.width / 2, row.height / 2)
+            verify(!page.byId, "back to the frames")
+            compare(Bridge.model.count, extended ? 4 : 6,
+                    (extended ? "the extended" : "the standard") + " row's frames alone")
+            find(page, "filterClear").clicked()
+            compare(Bridge.model.count, 10)
+        }
     }
 
     // Export CSV says what it leaves out and that Copy doesn't, then what

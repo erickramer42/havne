@@ -598,13 +598,20 @@ QHash<int, QByteArray> FrameIdModel::roleNames() const
 
 void FrameIdModel::refresh()
 {
-    // The window ends at the newest frame held; a ring shorter than the
-    // window counts over its own span
+    // The window ends at the newest frame held and is half-open,
+    // (newest - window, newest], so N frames a second count N. A log
+    // shorter than the window rates each ID over its own first to last
+    // frame: N frames there are N - 1 intervals (a lone frame, none)
     const quint64 newest = m_frames->newestTimestampUs();
     const quint64 from = newest > RateWindowUs ? newest - RateWindowUs : 0;
     quint64 oldest = newest;
+    struct Seen {
+        quint64 first = std::numeric_limits<quint64>::max();
+        quint64 last = 0;
+        int recent = 0;
+    };
     std::map<quint64, IdRow> byKey;
-    std::map<quint64, int> recent;
+    std::map<quint64, Seen> seen;
     m_frames->forEachShown([&](const FrameListModel::Shown& f) {
         const quint64 key =
             ((f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0 ? (quint64{1} << 32) : 0) | f.id;
@@ -613,17 +620,27 @@ void FrameIdModel::refresh()
         ++row.count;
         row.payload = QByteArray(reinterpret_cast<const char*>(f.data), f.length);
         oldest = std::min(oldest, f.timestampUs);
-        if (f.timestampUs >= from) {
-            ++recent[key];
+        Seen& s = seen[key];
+        s.first = std::min(s.first, f.timestampUs);
+        s.last = std::max(s.last, f.timestampUs);
+        if (f.timestampUs > from) {
+            ++s.recent;
         }
     });
-    const quint64 spanUs = std::min(RateWindowUs, newest - std::min(oldest, newest));
+    const bool shortLog = newest - std::min(oldest, newest) < RateWindowUs;
     std::vector<IdRow> next;
     next.reserve(byKey.size());
     for (auto& [key, row] : byKey) {
-        row.rate = spanUs == 0 ? 0.0
-                               : static_cast<double>(recent[key]) * 1e6 /
-                                     static_cast<double>(spanUs);
+        const Seen& s = seen[key];
+        if (!shortLog) {
+            row.rate = static_cast<double>(s.recent) * 1e6 /
+                       static_cast<double>(RateWindowUs);
+        } else if (row.count > 1 && s.last > s.first) {
+            row.rate = static_cast<double>(row.count - 1) * 1e6 /
+                       static_cast<double>(s.last - s.first);
+        } else {
+            row.rate = 0.0;
+        }
         next.push_back(std::move(row));
     }
     // Both lists are sorted by key: walk them together, so a row that
