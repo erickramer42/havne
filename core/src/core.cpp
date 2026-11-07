@@ -620,6 +620,17 @@ const char* ecuio_version_string(void)
     return ECUIO_VERSION_STRING;
 }
 
+ecuio_status_t ecuio_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
+{
+    if (!major || !minor || !patch) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *major = ECUIO_VERSION_MAJOR;
+    *minor = ECUIO_VERSION_MINOR;
+    *patch = ECUIO_VERSION_PATCH;
+    return ECUIO_OK;
+}
+
 const char* ecuio_status_string(ecuio_status_t status)
 {
     switch (status) {

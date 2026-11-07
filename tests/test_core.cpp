@@ -27,6 +27,7 @@
 #endif
 
 extern "C" {
+#include "ecuio/version.h"
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/signals.h"
@@ -561,6 +562,27 @@ TEST(CoreTest, VersionStringContainsNumbers) {
     EXPECT_TRUE(version != nullptr);
     EXPECT_GT(strlen(version), 0);
     EXPECT_NE(strstr(version, "."), nullptr);
+}
+
+/* ecuio_version (ADR-0053): version.h's numbers, the string's too, and
+ * a NULL refused with nothing written */
+TEST(CoreTest, VersionNumbersAreTheStrings) {
+    uint32_t major = 99, minor = 99, patch = 99;
+    ASSERT_EQ(ecuio_version(&major, &minor, &patch), ECUIO_OK);
+    EXPECT_EQ(major, static_cast<uint32_t>(ECUIO_VERSION_MAJOR));
+    EXPECT_EQ(minor, static_cast<uint32_t>(ECUIO_VERSION_MINOR));
+    EXPECT_EQ(patch, static_cast<uint32_t>(ECUIO_VERSION_PATCH));
+    EXPECT_EQ(std::to_string(major) + "." + std::to_string(minor) + "." +
+                  std::to_string(patch),
+              ecuio_version_string());
+
+    uint32_t a = 7, b = 7, c = 7;
+    EXPECT_EQ(ecuio_version(nullptr, &b, &c), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_version(&a, nullptr, &c), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_version(&a, &b, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(a, 7u);
+    EXPECT_EQ(b, 7u);
+    EXPECT_EQ(c, 7u);
 }
 
 TEST(CoreTest, InitShutdownIdempotent) {
