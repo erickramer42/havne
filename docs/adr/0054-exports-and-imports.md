@@ -472,3 +472,117 @@ scrubbed text value left out instead; no `signals.csv` and a bad row),
 (`tests/golden/recording/replay-obd2`, core's recording of the replay
 fixture, exported and read back by Python's `csv` module row for row,
 twice to the same bytes, and a range).
+
+## Appendix: the folder export as built (2026-11-06)
+
+`ECUIO_EXPORT_FOLDER` writes a scrubbed copy of a recording's folder,
+one a user can send, and `havne-cli export <recording> <out> --format
+folder [--from S] [--to S] [--raw]` is its front end. This appendix's
+note amends the first appendix's "until they're built" for the folder
+export; the CSV import still answers `ECUIO_ERR_NOT_IMPLEMENTED`.
+
+**The caller names the folder.** Section 1's "the folder is named by
+its time stamp alone" is the front ends' to meet: core writes the copy
+at `out_path_utf8` and never carries the source folder's name, which
+holds the vehicle's label when the user gave one. `havne-cli`'s usage
+suggests the stamp form, `20261106-142233`.
+
+**A recording again.** Each file the export knows is rewritten by its
+classes, so the copy opens in the viewer, `havne-cli view` and `info`,
+replays through `replay://` and exports again as any recording does:
+
+| File | In a scrubbed copy |
+|---|---|
+| `frames.csv` | the rows the pcapng export's plan keeps, each as recorded: a message an adapter delivered whole stays one row, not re-segmented, and a frame no CAN frame could carry stays too (the pcapng's rule for those is its format's) |
+| `signals.csv` | the rows the CSV export's classes keep, as recorded, its header with its byte order mark |
+| `events.log` | the header line by line, the export's own line, then the activity lines by kind (below) |
+| `markers.csv` | every row, its label as typed |
+| `latency.csv` | every row |
+| `signals.json` | the whole file |
+| anything else | left out, counted in `files_left_out` |
+
+Each file goes through the file check of its own as it's written,
+against the identity values the plan collects (the identification
+replies' values from `frames.csv`, the text values from `signals.csv`)
+and the VIN shape. The copy is made under `<out>.partial`, renamed into
+place only when every file passes; a match fails the whole copy, names
+the class and the file ("the check found a VIN-shaped token in the
+copy's markers.csv: nothing was written") and removes the partial
+folder. A folder with neither `frames.csv` nor `signals.csv` is refused,
+and so is an `out` that exists.
+
+**Section 1's table, row by row, in `events.log`:**
+
+- **Identification replies** and **text signals**: their frames and
+  values are the files' rows above; the header's `signal` lines stay,
+  as the CSV export keeps a text signal's name with no rows.
+- **The session's URI**: the `uri` line keeps its scheme, then the
+  authority as `<path>` (a replay's file, a J2534 DLL), `<label>` (a
+  mock's, the user's own text) or `<address>` (a serial port, a host and
+  port, a Bluetooth stream, an interface), then only the query pairs
+  core reads whose value is plain (letters, digits and `: , . / _ -`):
+  `profile`, `did`, `baud`, `serial`, `filter`, `txid`, `poll`,
+  `probe`, `identify`, `diagnose`, `pack`, `speed`, `loop`, `from`,
+  `to`. `serial` is ELM327's serial-port rate, not a device's serial
+  number. The profile and `did=` list stay, so the copy finds its set
+  and exports again by the same classes.
+- **The vehicle's label**: the folder's name is the caller's; the
+  bridge's `caller  vehicle  <label>` line becomes `caller  vehicle
+  <vehicle>`. The app's `Vehicle:` lines are notes, left out with them.
+- **Activity lines**: `link`, `drop` and `asleep` are core's words and
+  stay as they are; `end` keeps its counts, its why (the caller's words)
+  as `<why>`; a `note` (the app's activity log, a CLI's end line) and a
+  line of a kind the export doesn't know are left out and counted as
+  `ACTIVITY`. Header lines core writes stay (`started`, `utc`, `core`,
+  `profile`, `frame flags`, `signal`, `label`, `signal file`, `plugin`,
+  `columns`); a `caller` line stays only for the front end's name and
+  version and the surrogate's frame logging; any other header line is
+  left out and counted. A log whose first line isn't format 2 or 3
+  (format 1's, before ADR-0049) is a file the export doesn't know, left
+  out and counted in `files_left_out`.
+- **Numbers** are as recorded.
+
+**Markers are kept, their labels as typed.** The CSV export leaves them
+out, since a label is the user's own text; a copy of the recording is
+the user's recording, sent by the user, and a marker is often the reason
+to send it (where the pull starts). The check covers them, the export's
+line says "their labels as typed", and so does `havne-cli`'s usage.
+
+**A spreadsheet formula's start** in a `signals.csv` name, unit or kept
+text value fails the copy, raw too, as the CSV export's: `signals.csv`
+opens in a spreadsheet as readily as a CSV export does.
+
+**The export's line**, before `columns` in the copy's header:
+
+```
+export  a scrubbed copy (ADR-0054), Havne 0.6.0: frames.csv 2 frames (left out: 1 of identification replies, 0 of text signals' messages, 0 segments of messages that couldn't be reassembled); signals.csv 2 values (left out: 0 of identification signals, 1 of text signals); markers.csv 2 markers, their labels as typed; events.log 2 lines left out (the caller's notes, its other lines and lines of a kind the export doesn't know); other files left out: 1
+```
+
+The `end` line's counts stay the source's: they describe the recording
+as it was recorded, and the export's line says what the copy holds.
+
+**A range** keeps each file's rows by `host_us` (`latency.csv`'s `t_s`,
+the session time to the ms) and the activity lines by their seconds
+since the start; the header and the `end` line stay whole.
+
+**The report** gains `files` and `files_left_out` (uint32 each, at 104
+and 108) from its reserved room (`reserved[2]` is `reserved[1]`; the
+size, 120 bytes, stays), static-asserted and in `test_c_abi`. For a
+folder, `frames` counts the kept rows, `made_up` is 0, `values` and
+`signal_count` are the CSV export's, and `left_out` sums the frames'
+and the values' counts per class with the activity lines under
+`ACTIVITY`. No status code is added. `havne-cli`'s `exported` line adds
+`values`, `signals`, `files` and `files_left_out` for a folder.
+
+**Tests:** `FolderExportTest` (test_core: every file byte for byte, an
+ELM327 URI's port and a key that isn't core's out, the vehicle's label
+and a caller's line and note out, a VIN reply's frame and value out, the
+copy exported again; a range; raw; a mock's label; a VIN typed as a
+marker's label and a calibration ID in `signals.json` failing the copy;
+an existing folder, no recording, a bad row, a formula's start),
+`CliTransferTest` (the `exported` line), `CliTransferRunTest.folder`
+(the findings fixture copied raw, its `info` and replay the source's,
+and scrubbed, its `info` the source's less the torn ISO-TP message the
+scrub leaves out; `tests/golden/recording/replay-obd2`'s copy viewed as
+the source; a mock's recording made with a label, its copy's URI
+`mock://<label>`, its `info` and replay the source's).
