@@ -22,6 +22,7 @@
  * (ECUIO_C_ABI_SHARED, INTERNAL()).
  */
 
+#include "ecuio/queue.h"
 #include "ecuio/obdb.h"
 #include "ecuio/recording.h"
 #include "ecuio/internal.h"
@@ -44,8 +45,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Negative-array-size idiom: valid in ALL C standards including
- * pedantic C89, complementing the header's _Static_assert (C11+). */
 /* An internal hook's call, or the value it gives in the archive's build
  * where the shared core has no such export */
 #ifdef ECUIO_C_ABI_SHARED
@@ -54,6 +53,8 @@
 #define INTERNAL(call, value) (call)
 #endif
 
+/* Negative-array-size idiom: valid in ALL C standards including
+ * pedantic C89, complementing the header's _Static_assert (C11+). */
 typedef char abi_frame_size_check[(sizeof(ecuio_frame_t) == 4120) ? 1 : -1];
 typedef char abi_data_offset_check[(offsetof(ecuio_frame_t, data) == 16) ? 1 : -1];
 typedef char abi_replay_faults_size_check[(sizeof(ecuio_replay_faults_t) == 64) ? 1 : -1];
@@ -163,6 +164,10 @@ typedef char abi_can_state_check[(offsetof(ecuio_can_interface_t, state) == 40) 
 typedef char abi_can_modes_check[(offsetof(ecuio_can_interface_t, modes_supported) == 48) ? 1 : -1];
 typedef char abi_stream_flags_check[(offsetof(ecuio_stream_callbacks_t, flags) == 4 * sizeof(void*)) ? 1 : -1];
 typedef char abi_stream_size_check[(sizeof(void*) != 8 || sizeof(ecuio_stream_callbacks_t) == 56) ? 1 : -1];
+typedef char abi_queue_value_size_check[(sizeof(ecuio_queue_value_t) == 160) ? 1 : -1];
+typedef char abi_queue_value_value_check[(offsetof(ecuio_queue_value_t, value) == 16) ? 1 : -1];
+typedef char abi_queue_value_len_check[(offsetof(ecuio_queue_value_t, text_len) == 24) ? 1 : -1];
+typedef char abi_queue_value_text_check[(offsetof(ecuio_queue_value_t, text) == 32) ? 1 : -1];
 
 int main(void)
 {
@@ -183,6 +188,10 @@ int main(void)
     uint32_t can_count = 0;
     ecuio_vin_info_t vin_info;
     ecuio_sim_t* sim = NULL;
+    ecuio_queue_t* queue = NULL;
+    ecuio_queue_value_t queue_value;
+    uint32_t queue_count = 0;
+    uint64_t queue_dropped = 0;
     ecuio_sim_stats_t sim_stats;
     ecuio_inspection_t inspection;
     ecuio_record_options_t record_options;
@@ -474,6 +483,17 @@ int main(void)
     ecuio_stream_received(NULL, NULL, 0);
     ecuio_stream_failed(NULL, NULL);
     ecuio_j2534_free_devices(NULL);
+    /* The pull queue (ADR-0053 section 4): its NULL refusals */
+    if (ecuio_queue_open(NULL, ECUIO_QUEUE_FRAMES, 1, &queue) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        queue != NULL ||
+        ecuio_queue_read_frames(NULL, &frame, 1, &queue_count, &queue_dropped,
+                                0) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_queue_read_values(NULL, &queue_value, 1, &queue_count,
+                                &queue_dropped, 0) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    ecuio_queue_close(NULL);
     printf("log '%s'\n", INTERNAL(ecuio_j2534_sur_log_path(NULL), ""));
     (void)frame;
     return 0;
