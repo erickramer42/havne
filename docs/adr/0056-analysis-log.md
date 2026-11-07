@@ -103,6 +103,13 @@ slowest picked signal, which is the rate at which every cell is new.
   log's start. Each cell is that signal's newest value at the row's
   time: held, never interpolated or averaged, so a spike is shown as
   read or not at all.
+- **A signal that stops answering never holds up the rest.** One with
+  no new sample for 1 s, or 3x its own usual interval if that is
+  longer, leaves the rule, and rows go on without it; its cells are
+  left empty, never 0 and never its last value, since 0 is a reading
+  and a held value hides the loss. It rejoins the rule with its next
+  sample. Spreadsheets and analysis tools read an empty cell as
+  missing.
 
 ### 5. The export: the wide CSV, sized at export
 
@@ -116,9 +123,20 @@ Time (ms),Engine speed (rpm),Vehicle speed (km/h),Ignition timing (deg)
 ```
 
 - `Time (ms)` first, then each signal as `Name (unit)` in the picked
-  order; every row filled; fixed decimals per signal; comma, CRLF, no
+  order; every cell filled unless its signal is silent (section 4); comma, CRLF, no
   quoting needed (a name or unit holding a comma or a quote is quoted
   per RFC 4180, a formula-shaped one still fails the export as today).
+- **Units:** the app's export in the units the app shows (its metric
+  or imperial choice), `havne-cli`'s by its `--units`, metric by
+  default; both through core's `ecuio_display_convert`.
+- **Decimals:** each signal's own decimal places, as the app shows it
+  (`decimal_places`, 0 to 3, one more where a conversion needs it, kPa
+  to psi). Compared with logs other tools write for the same OBD
+  signals, these match (engine speed, coolant and intake temperature,
+  speed, timing, throttle) or give exactly the PID's resolution (load
+  and fuel trims at one decimal: their steps are 0.39 % and 0.78 %).
+  The one that rounds a step away is the MAF (0.01 g/s shown to one
+  decimal), which goes to two.
 - The long form stays, behind `--layout long` (`havne-cli`) and an
   option in the app, for pandas and R. This is a change in the default:
   a CHANGELOG "Changed" line, in a minor release (ADR-0048).
@@ -142,8 +160,16 @@ log quickly, never cutting it.
 - Zoom and pan over the whole log, the cursor reading every picked
   signal at once (built).
 - Navigation aids, not trims: jump to the next or previous stretch of
-  high load or full throttle, and to steady cruise, found from the
-  signals.
+  high load and of steady cruise, found from the signals, with
+  thresholds the user can change:
+  - high load: throttle at 80 % or more while engine speed rises, for
+    at least 1 s; engine load at 80 % or more where there's no
+    throttle signal;
+  - steady cruise: speed within 2 km/h and throttle within 3 % for at
+    least 10 s.
+
+  The defaults are a starting point, tuned against real logs before
+  the feature ships.
 - The roadmap's chart panes, two cursors and a span's statistics (the
   time between the cursors, each signal's change, lowest, highest and
   mean), which an analyst reaches for first; their own ADR.
@@ -198,15 +224,3 @@ log quickly, never cutting it.
 - What a log of N signals reaches on each adapter is measured, not
   promised: a bench row per transport (J2534, ELM327 over USB, WiFi and
   Bluetooth, SocketCAN) in the run sheets.
-
-## Open questions
-
-1. Units: the export in the units the app shows (its imperial choice)
-   or core's metric with `havne-cli --units`?
-2. Decimals: from each signal's scale, or a signal file's own
-   `decimals` key (a schema change)?
-3. The row rule when one picked signal stops answering: hold its last
-   value and keep writing rows (with a flag column?), or stall rows
-   until it returns?
-4. The navigation aids' thresholds (what counts as high load, as
-   steady cruise), and whether they need throttle or fall back to load.
