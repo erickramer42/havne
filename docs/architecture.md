@@ -434,9 +434,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   starts. `havne-cli export` writes a recording for another tool,
   scrubbed of the car's identity unless `--raw`
   ([ADR-0054](adr/0054-exports-and-imports.md)): pcapng (its frames,
-  for Wireshark) or CSV (its values, one row per sample, after a
+  for Wireshark), CSV (its values, one row per sample, after a
   comment line; pandas reads it with `skiprows=1`, since `comment="#"`
-  would cut a value holding a `#`). `ecuio_recording_check` reads `frames.csv` in one pass for
+  would cut a value holding a `#`) or a folder (a copy of the
+  recording to send, which reads and replays as the original; the
+  caller names it by its time, since the original's name can hold the
+  vehicle's label). `ecuio_recording_check` reads `frames.csv` in one pass for
   what's wrong with it (gaps, rate drops, late IDs, overflows, broken
   ISO-TP sequences) and `events.log` for the link's changes and the
   sleeps, its memory per ID, not per frame; `havne-cli info` prints

@@ -472,3 +472,204 @@ scrubbed text value left out instead; no `signals.csv` and a bad row),
 (`tests/golden/recording/replay-obd2`, core's recording of the replay
 fixture, exported and read back by Python's `csv` module row for row,
 twice to the same bytes, and a range).
+
+## Appendix: the folder export as built (2026-11-06)
+
+`ECUIO_EXPORT_FOLDER` writes a scrubbed copy of a recording's folder,
+one a user can send, and `havne-cli export <recording> <out> --format
+folder [--from S] [--to S] [--raw]` is its front end. This appendix's
+note amends the first appendix's "until they're built" for the folder
+export; the CSV import still answers `ECUIO_ERR_NOT_IMPLEMENTED`.
+
+**The caller names the folder.** Section 1's "the folder is named by
+its time stamp alone" is the front ends' to meet: core writes the copy
+at `out_path_utf8` and never carries the source folder's name, which
+holds the vehicle's label when the user gave one. `havne-cli`'s usage
+suggests the stamp form, `20261106-142233`.
+
+**A recording again.** Each file the export knows is rewritten by its
+classes, so the copy opens in the viewer, `havne-cli view` and `info`,
+replays through `replay://` and exports again as any recording does:
+
+| File | In a scrubbed copy |
+|---|---|
+| `frames.csv` | the rows the pcapng export's plan keeps, each as recorded: a message an adapter delivered whole stays one row, not re-segmented, and a frame no CAN frame could carry stays too (the pcapng's rule for those is its format's) |
+| `signals.csv` | the rows the CSV export's classes keep, as recorded, its header with its byte order mark |
+| `events.log` | the header line by line, the export's own line, then the activity lines by kind (below) |
+| `markers.csv` | every row, its label as typed |
+| `latency.csv` | every row |
+| `signals.json` | the whole file |
+| anything else | left out, counted in `files_left_out` |
+
+Each file goes through the file check of its own as it's written,
+against the identity values the plan collects (the identification
+replies' values from `frames.csv`, the text values from `signals.csv`)
+and the VIN shape. The copy is made under `<out>.partial`, renamed into
+place only when every file passes; a match fails the whole copy, names
+the class and the file ("the check found a VIN-shaped token in the
+copy's markers.csv: nothing was written") and removes the partial
+folder. A folder with neither `frames.csv` nor `signals.csv` is refused,
+and so is an `out` that exists.
+
+**Section 1's table, row by row, in `events.log`:**
+
+- **Identification replies** and **text signals**: their frames and
+  values are the files' rows above; the header's `signal` lines stay,
+  as the CSV export keeps a text signal's name with no rows.
+- **The session's URI**: the `uri` line keeps its scheme, then the
+  authority as `<path>` (a replay's file, a J2534 DLL), `<label>` (a
+  mock's, the user's own text) or `<address>` (a serial port, a host and
+  port, a Bluetooth stream, an interface), then only the query pairs
+  core reads whose value is plain (letters, digits and `: , . / _ -`):
+  `profile`, `did`, `baud`, `serial`, `filter`, `txid`, `poll`,
+  `probe`, `identify`, `diagnose`, `pack`, `speed`, `loop`, `from`,
+  `to`. `serial` is ELM327's serial-port rate, not a device's serial
+  number. The profile and `did=` list stay, so the copy finds its set
+  and exports again by the same classes.
+- **The vehicle's label**: the folder's name is the caller's; the
+  bridge's `caller  vehicle  <label>` line becomes `caller  vehicle
+  <vehicle>`. The app's `Vehicle:` lines are notes, left out with them.
+- **Activity lines**: `link`, `drop` and `asleep` are core's words and
+  stay as they are; `end` keeps its counts, its why (the caller's words)
+  as `<why>`; a `note` (the app's activity log, a CLI's end line) and a
+  line of a kind the export doesn't know are left out and counted as
+  `ACTIVITY`. Header lines core writes stay (`started`, `utc`, `core`,
+  `profile`, `frame flags`, `signal`, `label`, `signal file`, `plugin`,
+  `columns`); a `caller` line stays only for the front end's name and
+  version and the surrogate's frame logging; any other header line is
+  left out and counted. A log whose first line isn't format 2 or 3
+  (format 1's, before ADR-0049) is a file the export doesn't know, left
+  out and counted in `files_left_out`.
+- **Numbers** are as recorded.
+
+**Markers are kept, their labels as typed.** The CSV export leaves them
+out, since a label is the user's own text; a copy of the recording is
+the user's recording, sent by the user, and a marker is often the reason
+to send it (where the pull starts). The check covers them, the export's
+line says "their labels as typed", and so does `havne-cli`'s usage.
+
+**A spreadsheet formula's start** in a `signals.csv` name, unit or kept
+text value fails the copy, raw too, as the CSV export's: `signals.csv`
+opens in a spreadsheet as readily as a CSV export does.
+
+**The export's line**, before `columns` in the copy's header:
+
+```
+export  a scrubbed copy (ADR-0054), Havne 0.6.0: frames.csv 2 frames (left out: 1 of identification replies, 0 of text signals' messages, 0 segments of messages that couldn't be reassembled); signals.csv 2 values (left out: 0 of identification signals, 1 of text signals); markers.csv 2 markers, their labels as typed; events.log 2 lines left out (the caller's notes, its other lines and lines of a kind the export doesn't know); other files left out: 1
+```
+
+The `end` line's counts stay the source's: they describe the recording
+as it was recorded, and the export's line says what the copy holds.
+
+**A range** keeps each file's rows by `host_us` (`latency.csv`'s `t_s`,
+the session time to the ms) and the activity lines by their seconds
+since the start; the header and the `end` line stay whole.
+
+**The report** gains `files` and `files_left_out` (uint32 each, at 104
+and 108) from its reserved room (`reserved[2]` is `reserved[1]`; the
+size, 120 bytes, stays), static-asserted and in `test_c_abi`. For a
+folder, `frames` counts the kept rows, `made_up` is 0, `values` and
+`signal_count` are the CSV export's, and `left_out` sums the frames'
+and the values' counts per class with the activity lines under
+`ACTIVITY`. No status code is added. `havne-cli`'s `exported` line adds
+`values`, `signals`, `files` and `files_left_out` for a folder.
+
+**Tests:** `FolderExportTest` (test_core: every file byte for byte, an
+ELM327 URI's port and a key that isn't core's out, the vehicle's label
+and a caller's line and note out, a VIN reply's frame and value out, the
+copy exported again; a range; raw; a mock's label; a VIN typed as a
+marker's label and a calibration ID in `signals.json` failing the copy;
+an existing folder, no recording, a bad row, a formula's start),
+`CliTransferTest` (the `exported` line), `CliTransferRunTest.folder`
+(the findings fixture copied raw, its `info` and replay the source's,
+and scrubbed, its `info` the source's less the torn ISO-TP message the
+scrub leaves out; `tests/golden/recording/replay-obd2`'s copy viewed as
+the source; a mock's recording made with a label, its copy's URI
+`mock://<label>`, its `info` and replay the source's).
+
+## Appendix: the health report as built (2026-11-06)
+
+Section 2's health report: a car's health as one scrubbed file, in core
+so the app, `havne-cli` and Python share it. It grows in four steps:
+the report over a live session (this appendix's first part), then over
+a recording, then `havne-cli health`, then the app's Save report on
+Diagnostics and the viewer. `folder_utf8` answers
+`ECUIO_ERR_NOT_IMPLEMENTED` until the second.
+
+**The call.** `ecuio_health_export(options, report)` (`recording.h`)
+writes `out_path_utf8` in `ECUIO_HEALTH_JSON` (one object,
+`"havne_health": 1`) or `ECUIO_HEALTH_TEXT` (the same facts for a
+person: a forum post, a shop). One model in core is built once and
+written by either writer, which reads only the model, so the two can't
+hold different facts; `HealthTest` checks that every string the JSON
+holds is in the text. The options put their scalars first and their
+pointers last, so the offsets are the same on either width.
+
+**Deterministic.** Core reads no clock for the report: its time is the
+caller's (`utc_us`, microseconds since 1970 UTC; 0 writes none), and so
+is each value's age. The same inputs give the same bytes, so a test
+compares them. Numbers are written to their def's decimals without the
+locale (a comma under a German one would break both formats).
+
+**What it holds, in order:**
+
+1. **The source:** the session's URI as the folder export scrubs it
+   (`scrub::uri`, now in `scrub.cpp` and shared), its backend, bit rate
+   and profile. No vehicle label, and no adapter version strings, which
+   can carry a serial number.
+2. **The vehicle:** the first ECU's VIN that decodes
+   (`ecuio_identity_vin`, `ecuio_vin_decode` with the caller's
+   `latest_model_year`), as its model year, make and whether the check
+   digit matched. Never the VIN, its WMI or its serial part.
+3. **The inspection:** `ecuio_diag_inspect` over every ECU for that
+   model year (ADR-0045): the verdict, the incomplete monitors by name,
+   the allowance and the reports counted. With no model year (no VIN
+   read, or a recording scrubbed of it) it's the rule for none, which
+   the report states: one incomplete monitor passes either model year's
+   rule, two pass only 1996-2000's (`year_needed`), three or more pass
+   neither.
+4. **Each ECU:** its state (complete, reading, not asked); readiness
+   with the MIL, the confirmed-code count and each monitor (with this
+   drive cycle's where 01 41 answered); the stored, pending and
+   permanent codes with core's titles, a refusal as its reply, "N more"
+   past the held list; the freeze frame, its code and its values by the
+   obd2 defs; **the since-the-codes-were-cleared values**, Service 01
+   PIDs 21 (distance with the MIL on), 30 (warm-ups), 31 (distance), 4D
+   (time with the MIL on) and 4E (time), whenever a value of a def keyed
+   `41 <PID>` on the ECU's reply ID is given, ranked or not, since a
+   shop or a buyer reads those first; and the identification items by
+   name and outcome, their text left out and counted.
+5. **The key values,** as a rule: the session's set's ranked signals
+   (`plot_rank` above 0, the ones a UI plots first, ADR-0039 section 8),
+   numbers and enumerations, among the values the caller gives, by rank
+   and then the set's order, each in the units asked
+   (`ecuio_display_convert`), with its age and marked stale past
+   `ECUIO_VALUE_STALE_US`. An enumeration is its label from the set. The
+   since-cleared PIDs aren't repeated here; the odometer (A6) is a key
+   value only when ranked. A set that ranks nothing says so. Core keeps
+   no newest value per signal, so the caller passes the values it holds
+   (`ecuio_health_value_t`): the app from Live, the CLI from a values
+   callback, Python from a value queue.
+6. **Left out:** the identification texts, counted.
+
+**Then checked.** Every answered identification item's text (the VIN, a
+calibration ID, a serial, an ECU's name) goes into the scrub check's
+values, and the written bytes are searched for them and for the VIN's
+shape before the file is renamed into place from `<out>.partial`. A
+match fails it with the class ("the check found an identification
+reply's value in the report: nothing was written"): a number signal
+that reads an ECU's serial, for one.
+
+**The report** (`ecuio_health_report_t`, 120 bytes) counts the ECUs,
+codes, key values and since-cleared values written, the texts left out
+(by the export's classes, `IDENTIFICATION`), the check's
+`failed_class`, and `ECUIO_HEALTH_VIN_DECODED`. No status code is added.
+
+**Tests:** `HealthTest` (test_core: both formats holding the same facts
+and neither the VIN, a calibration ID or the port; the key values' rule,
+a ranked since-cleared PID kept with its ECU and another ECU's value not
+taken; imperial units; an enumeration's label; the inspection with no
+model year; an identity text echoed by a value failing the report; the
+text of a quiet car byte for byte; numbers and times without the
+locale; the export over a `mock://` session, its label out, the file
+written once; the argument checks), `test_c_abi`.

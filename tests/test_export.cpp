@@ -1,13 +1,14 @@
 // File/layer: tests/test_export.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: ScrubTest, ExportTest, CsvExportTest, ScrubFramesTest
-//          (test_core)
+// Testing: UNIT: ScrubTest, ExportTest, CsvExportTest, FolderExportTest,
+//          ScrubFramesTest (test_core)
 //
 // scrub.h's classifier and check, and ecuio_export's pcapng: each export
 // read back by a pcapng parser of the test's own, its frames' bytes and
 // times, the re-segmented frames reassembled by core's ISO-TP to the
 // stored message, what a scrubbed export leaves out, and both checks
 // failing an export that would carry an identity value; the CSV export's
-// values read back as text, byte for byte; ecuio_scrub_frames
+// values read back as text, byte for byte; the folder export's files
+// read back byte for byte, its copy exported again; ecuio_scrub_frames
 // over frames in memory by the same rules. Each export case writes into a
 // folder of its own under TEMP/TMPDIR, removed at the end.
 
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -834,9 +836,9 @@ TEST(ExportTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
     a.format = 4;
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
-    a.format = ECUIO_EXPORT_FOLDER;
-    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
-    a.format = ECUIO_EXPORT_CSV; /* built: the folder isn't there */
+    a.format = ECUIO_EXPORT_FOLDER; /* built: the folder isn't there */
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_LOAD_FAILED);
+    a.format = ECUIO_EXPORT_CSV;
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_LOAD_FAILED);
 }
 
@@ -1041,6 +1043,400 @@ TEST(CsvExportTest, ARecordingWithoutValuesOrWithABadRowWritesNothing)
     EXPECT_EQ(bad.rc, ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(bad.detail.rfind("signals.csv line 3: ", 0), 0u) << bad.detail;
     expect_no_file(g, "out.csv");
+}
+
+// ---- the folder export: a scrubbed copy of the recording ----
+
+struct FolderExported {
+    ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
+    ecuio_export_report_t report{};
+    std::string detail;
+    std::map<std::string, std::string> files;
+    FolderExported(const Folder& f, uint32_t flags = 0, uint64_t from_us = 0,
+                   uint64_t to_us = 0, const std::string& name = "copy")
+    {
+        const std::string folder = f.utf8("rec");
+        const std::string out = f.utf8(name);
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_FOLDER;
+        o.flags = flags;
+        o.from_us = from_us;
+        o.to_us = to_us;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        rc = ecuio_export(&o, &report);
+        detail = ecuio_last_error_detail();
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(f.path / name, ec)) {
+            files[e.path().filename().generic_u8string()] = read_file(e.path());
+        }
+    }
+};
+
+const char* const kBomHeader = "\xEF\xBB\xBFhost_us,signal,value,unit\n";
+
+const char* const kColumns =
+    "columns  local time, seconds since the recording started (host_us / "
+    "1e6 in the CSV files), kind, text\n";
+
+/* A message an adapter delivered whole, longer than a frame: one row */
+const std::vector<uint8_t> kWholeReply = {0x41, 0x0C, 0x1A, 0xF8, 0x0D,
+                                          0x32, 0x05, 0x5A, 0x04, 0x80};
+/* Twelve bytes with no FD flag, which no CAN frame carries */
+const std::vector<uint8_t> kTwelve = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+
+/* A recording with every file the export knows and one it doesn't: an
+ * ELM327 session through the app, a VIN reply in its frames and its
+ * values, a marker, reply timing and a file of the user's */
+void whole_recording(const Folder& f)
+{
+    f.write("rec/events.log",
+            std::string("ecuio session recording, format 3 (ADR-0049)\n"
+                        "started  2023-11-14 22:13:20.250 (UTC)\n"
+                        "utc  2023-11-14T22:13:20.250Z\n"
+                        "core  0.5.1\n"
+                        "uri  elm327://COM3?profile=obd2&serial=115200&"
+                        "filter=7E8&label=Daily\n"
+                        "profile  obd2\n"
+                        "frame flags  complete\n"
+                        "signal  RPM,number,rpm,0,1\n"
+                        "signal  VIN,text,,0,0\n"
+                        "caller  Havne 0.5.1\n"
+                        "caller  vehicle  Daily driver\n"
+                        "caller  words of the caller's own\n") +
+                kColumns +
+                "\n"
+                "22:13:21.250  +1.000  note  Connected to the Daily driver\n"
+                "22:13:22.250  +2.000  link  vehicle not responding (state "
+                "8, 1 episode)\n"
+                "22:13:23.250  +3.000  asleep  Asleep for 1.0 s: nothing "
+                "was read meanwhile\n"
+                "22:13:24.250  +4.000  end  Disconnected by the user: 3 "
+                "frames, 2 values, 0 records dropped, 0 notes dropped\n");
+    f.write(
+        "rec/frames.csv",
+        "host_us,timestamp_us,id,flags,data\n" +
+            row(1000000, 0x7E8, 0, {0x04, 0x41, 0x0C, 0x1A, 0xF8}) +
+            row(1500000, 0x7E8, kWhole, kWholeReply) +
+            row(2000000, 0x7E8, kWhole, text_bytes({0x49, 0x02, 0x01}, kVin)) +
+            row(3000000, 0x123, 0, {0x01, 0x02, 0x03}) +
+            row(3200000, 0x456, 0, kTwelve));
+    f.write("rec/signals.csv", std::string(kBomHeader) +
+                                   "1000000,RPM,1726,rpm\n"
+                                   "2500000,VIN," +
+                                   kVin + ",\n3000000,RPM,1730,rpm\n");
+    f.write("rec/markers.csv",
+            "host_us,label\n1500000,\"pull, 2nd gear\"\n9000000,late\n");
+    f.write("rec/latency.csv",
+            "t_s,ecu,request,answered\n1.000,7E8,01 0C,5\n3.000,7E8,01 "
+            "0C,9\n");
+    f.write("rec/notes.txt", "the user's own file\n");
+}
+
+std::string export_line(const char* kind, uint64_t frames, uint64_t ident,
+                        uint64_t values, uint64_t text, uint64_t markers,
+                        uint64_t lines, unsigned others)
+{
+    char b[1024];
+    std::snprintf(
+        b, sizeof b,
+        "export  %s (ADR-0054), Havne %s: frames.csv %llu frames (left out: "
+        "%llu of identification replies, 0 of text signals' messages, 0 "
+        "segments of messages that couldn't be reassembled); signals.csv "
+        "%llu values (left out: 0 of identification signals, %llu of text "
+        "signals); markers.csv %llu markers, their labels as typed; "
+        "events.log %llu lines left out (the caller's notes, its other "
+        "lines and lines of a kind the export doesn't know); other files "
+        "left out: %u\n",
+        kind, ecuio_version_string(), static_cast<unsigned long long>(frames),
+        static_cast<unsigned long long>(ident),
+        static_cast<unsigned long long>(values),
+        static_cast<unsigned long long>(text),
+        static_cast<unsigned long long>(markers),
+        static_cast<unsigned long long>(lines), others);
+    return b;
+}
+
+const char* const kHead =
+    "ecuio session recording, format 3 (ADR-0049)\n"
+    "started  2023-11-14 22:13:20.250 (UTC)\n"
+    "utc  2023-11-14T22:13:20.250Z\n"
+    "core  0.5.1\n"
+    "uri  elm327://<address>?profile=obd2&serial=115200&filter=7E8\n"
+    "profile  obd2\n"
+    "frame flags  complete\n"
+    "signal  RPM,number,rpm,0,1\n"
+    "signal  VIN,text,,0,0\n"
+    "caller  Havne 0.5.1\n"
+    "caller  vehicle  <vehicle>\n";
+
+/* Each file rewritten by its classes: the URI's port and a key that
+ * isn't core's out, the vehicle's label, the caller's other line and
+ * its note out, the VIN reply's frame and the VIN's value out, the
+ * kept rows as recorded (a message delivered whole one row, a frame the
+ * pcapng couldn't carry, signals.csv's byte order mark), the user's
+ * file out and counted, the export's own line before the columns */
+TEST(FolderExportTest, EachFileIsCopiedThroughItsClasses)
+{
+    Folder f;
+    whole_recording(f);
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.files.size(), 5u);
+    EXPECT_EQ(e.files["events.log"],
+              std::string(kHead) +
+                  export_line("a scrubbed copy", 4, 1, 2, 1, 2, 2, 1) +
+                  kColumns +
+                  "\n"
+                  "22:13:22.250  +2.000  link  vehicle not responding "
+                  "(state 8, 1 episode)\n"
+                  "22:13:23.250  +3.000  asleep  Asleep for 1.0 s: nothing "
+                  "was read meanwhile\n"
+                  "22:13:24.250  +4.000  end  <why>: 3 frames, 2 values, 0 "
+                  "records dropped, 0 notes dropped\n");
+    EXPECT_EQ(e.files["frames.csv"],
+              "host_us,timestamp_us,id,flags,data\n" +
+                  row(1000000, 0x7E8, 0, {0x04, 0x41, 0x0C, 0x1A, 0xF8}) +
+                  row(1500000, 0x7E8, kWhole, kWholeReply) +
+                  row(3000000, 0x123, 0, {0x01, 0x02, 0x03}) +
+                  row(3200000, 0x456, 0, kTwelve));
+    EXPECT_EQ(e.files["signals.csv"],
+              std::string(kBomHeader) +
+                  "1000000,RPM,1726,rpm\n3000000,RPM,1730,rpm\n");
+    EXPECT_EQ(e.files["markers.csv"],
+              "host_us,label\n1500000,\"pull, 2nd gear\"\n9000000,late\n");
+    EXPECT_EQ(e.files["latency.csv"],
+              "t_s,ecu,request,answered\n1.000,7E8,01 0C,5\n3.000,7E8,01 "
+              "0C,9\n");
+    EXPECT_EQ(e.report.frames, 4u);
+    EXPECT_EQ(e.report.made_up, 0u);
+    EXPECT_EQ(e.report.values, 2u);
+    EXPECT_EQ(e.report.signal_count, 1u);
+    EXPECT_EQ(e.report.files, 5u);
+    EXPECT_EQ(e.report.files_left_out, 1u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 1u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 1u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 2u);
+    EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+
+    /* The copy is a recording: exported again as CSV, its values are
+     * the source's */
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_CSV;
+    const std::string copy = f.utf8("copy");
+    const std::string out = f.utf8("copy.csv");
+    o.folder_utf8 = copy.c_str();
+    o.out_path_utf8 = out.c_str();
+    ecuio_export_report_t r{};
+    ASSERT_EQ(ecuio_export(&o, &r), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_NE(read_file(f.path / "copy.csv")
+                  .find("time_s,signal,unit,value\n1.000000,RPM,rpm,1726\n"),
+              std::string::npos);
+}
+
+/* A range takes each file's rows and lines in it alone; the end line
+ * stays, the header whole */
+TEST(FolderExportTest, ARangeTakesEachFilesRowsInItAlone)
+{
+    Folder f;
+    whole_recording(f);
+    FolderExported e(f, 0, 1500000, 3500000);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.files["events.log"],
+              std::string(kHead) +
+                  export_line("a scrubbed copy", 3, 1, 1, 1, 1, 1, 1) +
+                  kColumns +
+                  "\n"
+                  "22:13:22.250  +2.000  link  vehicle not responding "
+                  "(state 8, 1 episode)\n"
+                  "22:13:23.250  +3.000  asleep  Asleep for 1.0 s: nothing "
+                  "was read meanwhile\n"
+                  "22:13:24.250  +4.000  end  <why>: 3 frames, 2 values, 0 "
+                  "records dropped, 0 notes dropped\n");
+    EXPECT_EQ(e.files["frames.csv"],
+              "host_us,timestamp_us,id,flags,data\n" +
+                  row(1500000, 0x7E8, kWhole, kWholeReply) +
+                  row(3000000, 0x123, 0, {0x01, 0x02, 0x03}) +
+                  row(3200000, 0x456, 0, kTwelve));
+    EXPECT_EQ(e.files["signals.csv"],
+              std::string(kBomHeader) + "3000000,RPM,1730,rpm\n");
+    EXPECT_EQ(e.files["markers.csv"],
+              "host_us,label\n1500000,\"pull, 2nd gear\"\n");
+    EXPECT_EQ(e.files["latency.csv"],
+              "t_s,ecu,request,answered\n3.000,7E8,01 0C,9\n");
+}
+
+/* Raw keeps every row and line as recorded, the user's file still out */
+TEST(FolderExportTest, ARawCopyKeepsEveryRowAndLine)
+{
+    Folder f;
+    whole_recording(f);
+    FolderExported e(f, ECUIO_EXPORT_RAW);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::string source = read_file(f.path / "rec" / "events.log");
+    const size_t columns = source.find("columns  ");
+    EXPECT_EQ(e.files["events.log"],
+              source.substr(0, columns) +
+                  export_line("a raw copy, not scrubbed", 5, 0, 3, 0, 2, 0, 1) +
+                  source.substr(columns));
+    EXPECT_EQ(e.files["frames.csv"], read_file(f.path / "rec" / "frames.csv"));
+    EXPECT_EQ(e.files["signals.csv"],
+              read_file(f.path / "rec" / "signals.csv"));
+    EXPECT_EQ(e.files.count("notes.txt"), 0u);
+    EXPECT_EQ(e.report.files_left_out, 1u);
+}
+
+/* A mock's label is the user's words; its profile and DID list stay, so
+ * the copy decodes as the source did */
+TEST(FolderExportTest, AMocksLabelIsLeftOutOfItsUri)
+{
+    Folder f;
+    recording(f, row(1000, 0x7E8, 0, {0x02, 0x41, 0x00}), "",
+              "uri  mock://Daily driver?profile=uds-generic&did=D802:text,"
+              "D803:u16\nprofile  uds-generic\n");
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_NE(e.files["events.log"].find(
+                  "\nuri  mock://<label>?profile=uds-generic&did=D802:text,"
+                  "D803:u16\n"),
+              std::string::npos)
+        << e.files["events.log"];
+    EXPECT_EQ(e.files["events.log"].find("Daily"), std::string::npos);
+}
+
+/* A log of another format (format 1's, before ADR-0049) is a file the
+ * export doesn't know: left out and counted, the frames still copied */
+TEST(FolderExportTest, AnEventsLogOfAnotherFormatIsLeftOut)
+{
+    Folder f;
+    recording(f, row(1000, 0x123, 0, {0x01}));
+    f.write("rec/events.log", "Havne session recording (ADR-0017)\n"
+                              "uri  elm327://COM3\n");
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.files.size(), 1u);
+    EXPECT_EQ(e.files.count("frames.csv"), 1u);
+    EXPECT_EQ(e.report.files, 1u);
+    EXPECT_EQ(e.report.files_left_out, 1u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 0u);
+}
+
+/* A value the classes don't catch, in any file, fails the whole copy:
+ * the VIN typed as a marker's label, a calibration ID in signals.json,
+ * a DID echoing the VIN across the frames of a segmented reply (which
+ * no row holds whole, so the check reassembles it), a VIN's shape in a
+ * message delivered whole (each message checked as bytes, not only the
+ * rows as text) */
+TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
+{
+    {
+        SCOPED_TRACE("a VIN as a marker's label");
+        Folder f;
+        whole_recording(f);
+        f.write("rec/markers.csv",
+                std::string("host_us,label\n1500000,") + kVin + "\n");
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
+        EXPECT_EQ(e.detail, "the check found a VIN-shaped token in the "
+                            "copy's markers.csv: nothing was written");
+        EXPECT_EQ(e.report.files, 0u);
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+    }
+    {
+        SCOPED_TRACE("a DID echoing the VIN as it crossed the bus");
+        Folder f;
+        recording(
+            f,
+            row(1000, 0x7E8, kWhole, text_bytes({0x49, 0x02, 0x01}, kVin)) +
+                row(2000, 0x7E8, 0,
+                    {0x10, 0x14, 0x62, 0xD8, 0x01, 'Z', 'Z', 'Z'}) +
+                row(2100, 0x7E0, 0, {0x30, 0, 0, 0, 0, 0, 0, 0}) +
+                row(2200, 0x7E8, 0, {0x21, 'F', 'A', 'K', 'E', '1', '1', 'M'}) +
+                row(2300, 0x7E8, 0, {0x22, '0', '0', '0', '0', '0', '0', '1'}),
+            "2000,RPM,1726,rpm\n");
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class,
+                  ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+        EXPECT_EQ(e.detail,
+                  "the check found an identification reply's value in a "
+                  "message the export would write: nothing was written");
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+    }
+    {
+        SCOPED_TRACE("a VIN's shape in a message delivered whole, which "
+                     "frames.csv holds only as hex");
+        Folder f;
+        recording(
+            f, row(2000, 0x7E8, kWhole, text_bytes({0x62, 0xD8, 0x01}, kVin)),
+            "2000,RPM,1726,rpm\n");
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
+        EXPECT_EQ(e.detail,
+                  "the check found a VIN-shaped token in a message the export "
+                  "would write: nothing was written");
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+    }
+    {
+        SCOPED_TRACE("a calibration ID in signals.json");
+        Folder f;
+        recording(f,
+                  row(1000, 0x7E8, kWhole,
+                      text_bytes({0x49, 0x04, 0x01}, "FAKECAL-01")),
+                  "2000,RPM,1726,rpm\n");
+        f.write("rec/signals.json", "{\"notes\": \"FAKECAL-01\"}\n");
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class,
+                  ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+        EXPECT_EQ(e.detail, "the check found an identification reply's "
+                            "value in the copy's signals.json: nothing was "
+                            "written");
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+        EXPECT_FALSE(fs::exists(f.path / "copy.partial"));
+    }
+}
+
+/* A folder that exists, a source with no recording, a bad row, a name
+ * or unit a spreadsheet would run: nothing is written */
+TEST(FolderExportTest, ARefusedCopyWritesNothing)
+{
+    Folder f;
+    whole_recording(f);
+    fs::create_directories(f.path / "copy");
+    FolderExported there(f);
+    EXPECT_EQ(there.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(there.detail, "the folder exists already");
+
+    Folder empty;
+    FolderExported none(empty);
+    EXPECT_EQ(none.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(none.detail, "the folder has no frames.csv or signals.csv");
+    EXPECT_FALSE(fs::exists(empty.path / "copy"));
+
+    Folder bad;
+    whole_recording(bad);
+    bad.write("rec/latency.csv", "t_s,ecu\nsoon,7E8\n");
+    FolderExported b(bad);
+    EXPECT_EQ(b.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(b.detail, "latency.csv line 2: t_s isn't a time in seconds");
+    EXPECT_FALSE(fs::exists(bad.path / "copy.partial"));
+
+    Folder formula;
+    recording(formula, "", "1000,=RPM,1726,rpm\n");
+    FolderExported s(formula);
+    EXPECT_EQ(s.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(s.detail.find("starts as a spreadsheet formula"),
+              std::string::npos)
+        << s.detail;
+    FolderExported raw(formula, ECUIO_EXPORT_RAW);
+    EXPECT_EQ(raw.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_FALSE(fs::exists(formula.path / "copy"));
 }
 
 // ---- frames in memory (ecuio_scrub_frames) ----

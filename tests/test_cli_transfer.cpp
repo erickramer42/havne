@@ -154,6 +154,25 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "\"values\":40,\"signals\":3,\"left_out\":{\"identification\":0,"
               "\"unattributable\":0,\"text_values\":2,\"activity\":0}}");
 
+    Args d({"havne-cli", "export", "rec", "copy", "--format", "folder"});
+    cli::ExportArgs folder;
+    ASSERT_TRUE(cli::parse_export(d.argc(), d.argv.data(), folder, &why));
+    ecuio_export_report_t copied{};
+    copied.frames = 9;
+    copied.values = 40;
+    copied.signal_count = 3;
+    copied.files = 4;
+    copied.files_left_out = 1;
+    copied.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY] = 2;
+    cli::Line fl(buf, sizeof buf);
+    cli::exported_line(fl, folder, copied);
+    EXPECT_EQ(text(fl),
+              "{\"type\":\"exported\",\"format\":\"folder\",\"file\":"
+              "\"copy\",\"scrubbed\":true,\"frames\":9,\"made_up\":0,"
+              "\"values\":40,\"signals\":3,\"files\":4,\"files_left_out\":1,"
+              "\"left_out\":{\"identification\":0,\"unattributable\":0,"
+              "\"text_values\":0,\"activity\":2}}");
+
     r.failed_class = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1;
     cli::Line f(buf, sizeof buf);
     cli::export_failed_line(f, r);

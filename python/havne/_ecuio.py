@@ -142,6 +142,9 @@ ECUIO_FRAME_FLAG_REASSEMBLED = 0x100
 ECUIO_FRAME_FLAG_REMOTE = 2
 ECUIO_FRAME_FLAG_TRUNCATED = 64
 ECUIO_FRAME_FLAG_TX_ECHO = 32
+ECUIO_HEALTH_JSON = 1
+ECUIO_HEALTH_TEXT = 2
+ECUIO_HEALTH_VIN_DECODED = 1
 ECUIO_IDENTITY_ANSWERED = 1
 ECUIO_IDENTITY_COMPLETE = 1
 ECUIO_IDENTITY_MAX_ITEMS = 16
@@ -384,6 +387,15 @@ class ecuio_frame_t(Structure):
     pass
 
 class ecuio_freeze_value_t(Structure):
+    pass
+
+class ecuio_health_options_t(Structure):
+    pass
+
+class ecuio_health_report_t(Structure):
+    pass
+
+class ecuio_health_value_t(Structure):
     pass
 
 class ecuio_identity_item_t(Structure):
@@ -684,7 +696,9 @@ ecuio_export_report_t._fields_ = [
     ('flags', c_uint32),
     ('values', c_uint64),
     ('signal_count', c_uint64),
-    ('reserved', (c_uint64 * 2)),
+    ('files', c_uint32),
+    ('files_left_out', c_uint32),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_frame_t._fields_ = [
     ('timestamp_us', c_uint64),
@@ -694,6 +708,39 @@ ecuio_frame_t._fields_ = [
     ('data', (c_uint8 * 4096)),
     ('flags', c_uint32),
     ('reserved', c_uint32),
+]
+ecuio_health_options_t._fields_ = [
+    ('format', c_uint32),
+    ('flags', c_uint32),
+    ('units', c_uint32),
+    ('latest_model_year', c_uint32),
+    ('from_us', c_uint64),
+    ('to_us', c_uint64),
+    ('utc_us', c_uint64),
+    ('value_count', c_uint32),
+    ('reserved0', c_uint32),
+    ('reserved', (c_uint64 * 4)),
+    ('session', POINTER(ecuio_session_t)),
+    ('folder_utf8', c_char_p),
+    ('values', POINTER(ecuio_health_value_t)),
+    ('out_path_utf8', c_char_p),
+]
+ecuio_health_report_t._fields_ = [
+    ('ecus', c_uint32),
+    ('codes', c_uint32),
+    ('values', c_uint32),
+    ('since_cleared', c_uint32),
+    ('left_out', (c_uint64 * 8)),
+    ('failed_class', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', (c_uint64 * 4)),
+]
+ecuio_health_value_t._fields_ = [
+    ('def_id', c_uint32),
+    ('flags', c_uint32),
+    ('value', c_double),
+    ('age_us', c_uint64),
+    ('reserved', c_uint64),
 ]
 ecuio_import_options_t._fields_ = [
     ('format', c_uint32),
@@ -1042,6 +1089,7 @@ FUNCTIONS = {
     'ecuio_dtc_title_source': (c_char_p, []),  # core.h
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h
+    'ecuio_health_export': (c_int, [POINTER(ecuio_health_options_t), POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h
     'ecuio_identity_vin': (c_int, [POINTER(ecuio_channel_identity_t), c_char_p, c_uint32]),  # core.h
     'ecuio_import': (c_int, [POINTER(ecuio_import_options_t), POINTER(ecuio_import_report_t)]),  # recording.h
