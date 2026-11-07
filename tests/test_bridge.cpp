@@ -3561,11 +3561,13 @@ TEST(BridgeTest, LiveCountsTheRefusalsItCantName)
     QObject::connect(&bridge, &SessionBridge::refusedUnnamedChanged,
                      [&changed]() { ++changed; });
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    // The two refusals past the list can land on either side of a 100 ms
+    // tick, so the text may read "1 more request" first: wait for both
+    const QString both = QStringLiteral("ECU 0x7E8 refused 2 more requests");
     ASSERT_TRUE(
-        spinUntil([&]() { return !bridge.refusedUnnamed().isEmpty(); }, 5000))
-        << "no refusals counted past the list";
-    EXPECT_EQ(bridge.refusedUnnamed(),
-              QStringLiteral("ECU 0x7E8 refused 2 more requests"));
+        spinUntil([&]() { return bridge.refusedUnnamed() == both; }, 5000))
+        << "refusals counted past the list: "
+        << bridge.refusedUnnamed().toStdString();
     EXPECT_GE(changed, 1);
     SignalListModel* model = bridge.signalModel();
     int named = 0;
@@ -9252,11 +9254,11 @@ TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
     EXPECT_EQ(at(0, FrameIdModel::ArbIdRole).toUInt(), 0x7E8u);
     EXPECT_FALSE(at(0, FrameIdModel::ExtendedRole).toBool());
     EXPECT_EQ(at(0, FrameIdModel::CountRole).toInt(), 200);
-    EXPECT_NEAR(at(0, FrameIdModel::RateRole).toDouble(), 10.0, 0.11)
-        << "the last 10 s: 100 frames";
+    EXPECT_DOUBLE_EQ(at(0, FrameIdModel::RateRole).toDouble(), 10.0)
+        << "the last 10 s, its first edge left out: 100 frames";
     EXPECT_EQ(at(0, FrameIdModel::PayloadRole).toString(), QStringLiteral("41 C7"));
     EXPECT_EQ(at(1, FrameIdModel::ArbIdRole).toUInt(), 0x7E9u);
-    EXPECT_NEAR(at(1, FrameIdModel::RateRole).toDouble(), 1.0, 0.11);
+    EXPECT_DOUBLE_EQ(at(1, FrameIdModel::RateRole).toDouble(), 1.0);
     EXPECT_TRUE(at(2, FrameIdModel::ExtendedRole).toBool()) << "29-bit sorts after";
 
     // The filter narrows it; a new ID is inserted in its place
@@ -9285,6 +9287,38 @@ TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
     ids.refresh();
     EXPECT_EQ(ids.count(), 0);
     EXPECT_EQ(mirror.rows, 0);
+}
+
+// A log shorter than the window: each ID's frames less one over its own
+// span, so a 10 Hz ID reads 10/s from its second frame on
+TEST(BridgeTest, FrameIdsRateAShortLogByItsIntervals)
+{
+    FrameListModel frames;
+    FrameIdModel ids(&frames);
+    FrameMaker m;
+    auto rate = [&](int row) {
+        return ids.data(ids.index(row, 0), FrameIdModel::RateRole).toDouble();
+    };
+    for (int i = 0; i <= 10; ++i) {
+        const quint64 t = 3000000 + static_cast<quint64>(i) * 100000;
+        m.add(frames, 0x7E8, {0x41, static_cast<uint8_t>(i)}, t);
+        if (i % 10 == 0) {
+            m.add(frames, 0x7E9, {0x62}, t);
+        }
+        if (i == 5) {
+            m.add(frames, 0x7EA, {0x01}, t);
+            ids.refresh();
+            ASSERT_EQ(ids.count(), 3);
+            EXPECT_DOUBLE_EQ(rate(0), 10.0)
+                << "0.5 s in: 6 frames, 5 intervals";
+            EXPECT_DOUBLE_EQ(rate(1), 0.0) << "one frame so far";
+        }
+    }
+    ids.refresh();
+    ASSERT_EQ(ids.count(), 3);
+    EXPECT_DOUBLE_EQ(rate(0), 10.0) << "1 s in: 11 frames, 10 intervals";
+    EXPECT_DOUBLE_EQ(rate(1), 1.0) << "two frames a second apart";
+    EXPECT_DOUBLE_EQ(rate(2), 0.0) << "a lone frame has no interval";
 }
 
 // ---- Export CSV (ADR-0054's appendix "frames in memory") ----
