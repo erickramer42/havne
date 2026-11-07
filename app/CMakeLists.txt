@@ -33,6 +33,8 @@ qt_add_library(app_ui STATIC
     carryover.h
     framefilter.cpp
     framefilter.h
+    healthreport.cpp
+    healthreport.h
     obdbimport.cpp
     obdbimport.h
     readonce.cpp

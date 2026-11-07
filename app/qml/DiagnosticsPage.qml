@@ -2,8 +2,10 @@
 // Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.diagnostics,
 //          QmlTest.phone (test_qml)
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
@@ -14,7 +16,9 @@ pragma ComponentBehavior: Bound
 // one entry per ECU, its codes already named by core; the page formats
 // nothing but the values' decimals, as Live does. Clearing the codes
 // (ADR-0038) asks first, in place: the confirmation says what a clear
-// erases, and the bridge saves the report before anything is sent.
+// erases, and the bridge saves the report before anything is sent. Save
+// report writes the car's health as one scrubbed file to share (ADR-0054's
+// appendix "the health report as built"), text or JSON.
 Page {
     id: root
     background: Rectangle { color: Theme.bg }
@@ -35,6 +39,9 @@ Page {
     onConfirmingChanged: if (confirming) flick.contentY = 0
     property string savedTo: ""
     property bool clearFailed: false
+    // The last Save report's outcome in words, "" before one
+    property string reportNote: ""
+    property bool reportFailed: false
     readonly property bool clearing: ecus.some(e => e.clearing)
     // A clear needs a session, an ECU the bridge would clear, none under
     // way, and no moving vehicle's question open
@@ -55,6 +62,8 @@ Page {
             if (Bridge.connected) {
                 root.savedTo = ""
                 root.clearFailed = false
+                root.reportNote = ""
+                root.reportFailed = false
             }
         }
     }
@@ -63,6 +72,16 @@ Page {
         confirming = false
         savedTo = Bridge.clearDiagnostics()
         clearFailed = savedTo === ""
+    }
+
+    // The health report to url, its format by the dialog's filter or the
+    // file's name; true when written
+    function saveReportTo(url, filterIndex) {
+        const r = Bridge.saveHealthReport(url, filterIndex)
+        reportFailed = !r.ok
+        reportNote = r.ok ? qsTr("Report saved: %1").arg(r.summary)
+                          : qsTr("Report not saved: %1").arg(r.words)
+        return r.ok
     }
 
     function statusText() {
@@ -222,8 +241,10 @@ Page {
             // under each other rather than push the page past its edge
             Flow {
                 Layout.fillWidth: true
-                Layout.minimumWidth: Math.max(readAgain.implicitWidth, clearCodes.implicitWidth)
-                Layout.preferredWidth: readAgain.implicitWidth + spacing + clearCodes.implicitWidth
+                Layout.minimumWidth: Math.max(readAgain.implicitWidth, clearCodes.implicitWidth,
+                                              saveReport.implicitWidth)
+                Layout.preferredWidth: readAgain.implicitWidth + clearCodes.implicitWidth
+                                       + saveReport.implicitWidth + 2 * spacing
                 layoutDirection: Qt.RightToLeft
                 spacing: Theme.spacing
                 ThemedButton {
@@ -242,7 +263,27 @@ Page {
                     text: qsTr("Read again")
                     onClicked: Bridge.readDiagnostics()
                 }
+                // Whatever the read's state: a report still being read says so
+                ThemedButton {
+                    id: saveReport
+                    objectName: "saveReport"
+                    visible: Bridge.connected
+                    enabled: !root.confirming
+                    text: qsTr("Save report…")
+                    onClicked: reportDialog.open()
+                }
             }
+        }
+
+        FileDialog {
+            id: reportDialog
+            title: qsTr("Save the health report")
+            fileMode: FileDialog.SaveFile
+            defaultSuffix: "txt"
+            nameFilters: [qsTr("Text (*.txt)"), qsTr("JSON (*.json)")]
+            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            onAccepted: root.saveReportTo(reportDialog.selectedFile,
+                                          reportDialog.selectedNameFilter.index)
         }
 
         // Status line; disconnected, the empty state with a way to connect
@@ -263,6 +304,15 @@ Page {
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
             }
+        }
+
+        Label {
+            objectName: "reportNote"
+            visible: root.reportNote !== ""
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            text: root.reportNote
+            color: root.reportFailed ? Theme.danger : Theme.textDim
         }
 
         Flickable {

@@ -148,6 +148,34 @@ TestCase {
 
     // Open shows the recording: its signal plotted by default, the chart's
     // series over the whole recording, the check's findings listed
+    // Save report: the whole recording's (the zoom never narrows it), on
+    // the view's thread, the note and one log line when it ends
+    function test_saveReportWritesTheWholeRecording() {
+        const page = openFindings()
+        const button = find(page, "saveReport")
+        verify(button.visible)
+        verify(button.enabled)
+        page.zoomAt(5000, 0.25)
+        verify(page.viewT1 - page.viewT0 < 20000, "zoomed in")
+        const url = Harness.writeScratchFile("findings.json", "")
+        verify(url.toString() !== "")
+        verify(page.saveReportTo(url, 1))
+        const note = find(page, "reportNote")
+        tryVerify(() => note.text.indexOf("Report saved: ") === 0, 10000, note.text)
+        verify(/^Report saved: \d+ ECUs?, \d+ trouble codes?, \d+ key values?$/.test(note.text),
+               note.text)
+        verify(button.enabled, "free again once it ends")
+        const report = JSON.parse(Harness.readScratchFile(url))
+        compare(report.source.kind, "recording")
+        compare(report.source.from_s, 0)
+        verify(report.key_values.length > 0, "RPM's value at the end")
+
+        // Another recording opened: the note is the old one's no more
+        page.open(earlyRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the next opens")
+        compare(note.text, "")
+    }
+
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)
@@ -866,6 +894,7 @@ TestCase {
         const error = find(page, "openError")
         tryVerify(() => error.visible, 10000, "refused")
         verify(error.text.indexOf("signals.csv") >= 0, error.text)
+        verify(waitForPolish(page.Window.window), "the refusal laid out")
         mouseClick(find(page, "backToList"))
         verify(!page.viewing)
         verify(find(page, "recordingList").visible)

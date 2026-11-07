@@ -5,9 +5,13 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -59,6 +63,41 @@ QVariantMap signalNamed(const RecordingView& v, const char* name)
 QList<double> doubles(const QVariantMap& m, const char* key)
 {
     return m.value(QLatin1String(key)).value<QList<double>>();
+}
+
+// A recording of the car's replies under obd2, frames.csv alone, in a
+// folder named as a vehicle's recording is (its label in the name):
+// readiness (the light on), one stored code, an engine speed
+QString carRecording(const QTemporaryDir& root)
+{
+    const QString folder =
+        root.path() + QStringLiteral("/20261107-100000 Daily driver");
+    QDir().mkpath(folder);
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+    events.write("ecuio session recording, format 2 (ADR-0049)\n"
+                 "started  2026-11-07 10:00:00.000 (local time)\n"
+                 "utc  2026-11-07T16:00:00.000Z\n"
+                 "core  0.5.0\n"
+                 "uri  elm327://COM3?profile=obd2\n"
+                 "profile  obd2\n"
+                 "frame flags  complete\n"
+                 "caller  havne-cli 0.5.0\n"
+                 "\n"
+                 "10:00:01.000  +1.000  end  havne-cli: seconds: 3 frames, 0 "
+                 "values, 0 records dropped, 0 notes dropped\n");
+    events.close();
+    QFile frames(folder + QStringLiteral("/frames.csv"));
+    if (!frames.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+    frames.write("host_us,timestamp_us,id,flags,data\n"
+                 "100000,100000,0x7E8,0x0,06 41 01 83 07 E5 00 00\n"
+                 "200000,200000,0x7E8,0x0,04 43 01 03 01 00 00 00\n"
+                 "300000,300000,0x7E8,0x0,04 41 0C 0C 90 00 00 00\n");
+    return folder;
 }
 
 } // namespace
@@ -797,4 +836,103 @@ TEST(RecordingViewTest, ItsOwnSignalFileDecodesItWhileItMatches)
         << "the recorded profile, which isn't loaded";
     EXPECT_EQ(v.error(),
               QStringLiteral("the profile user.frames-view isn't loaded"));
+}
+
+// ---- The health report, the viewer's Save report (ADR-0054's appendix
+// "the health report as built") ----------------------------------------
+
+// The whole recording's report, on a thread of its own: one at a time,
+// its result posted back, the folder's name (the vehicle's label) in
+// neither the words nor the line
+TEST(RecordingViewTest, HealthReportIsTheWholeRecordingsOnItsOwnThread)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    const QUrl url =
+        QUrl::fromLocalFile(root.path() + QStringLiteral("/report.json"));
+    EXPECT_FALSE(v.saveHealthReport(url, 1)) << "no recording open";
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+
+    QList<QVariantMap> saved;
+    int reportingChanges = 0;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    QObject::connect(&v, &RecordingView::reportingChanged,
+                     [&] { ++reportingChanges; });
+    ASSERT_TRUE(v.saveHealthReport(url, 1));
+    EXPECT_TRUE(v.reporting());
+    EXPECT_FALSE(v.saveHealthReport(url, 1)) << "one at a time";
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(v.reporting());
+    EXPECT_EQ(reportingChanges, 2);
+    ASSERT_EQ(saved.size(), 1);
+    const QVariantMap r = saved[0];
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("ecus")).toInt(), 1);
+    EXPECT_EQ(r.value(QStringLiteral("codes")).toInt(), 1);
+    EXPECT_EQ(r.value(QStringLiteral("values")).toInt(), 1) << "RPM's";
+    EXPECT_EQ(r.value(QStringLiteral("line")).toString().toStdString(),
+              "Health report saved: 1 ECU, 1 trouble code, 1 key value (0 "
+              "identification items left out)");
+
+    QFile f(url.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QByteArray bytes = f.readAll();
+    f.close();
+    EXPECT_FALSE(bytes.contains("Daily"));
+    const QJsonObject doc = QJsonDocument::fromJson(bytes).object();
+    const QJsonObject source = doc.value(QStringLiteral("source")).toObject();
+    EXPECT_EQ(source.value(QStringLiteral("kind")).toString(),
+              QStringLiteral("recording"));
+    EXPECT_EQ(source.value(QStringLiteral("from_s")).toDouble(-1), 0.0)
+        << "the whole recording";
+
+    // A folder isn't a file it can write: core's report made, the copy
+    // refused, in words that name neither
+    saved.clear();
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(root.path()), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(saved[0].value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't write the file");
+    for (const QVariantMap& m : saved) {
+        EXPECT_FALSE(m.value(QStringLiteral("line"))
+                         .toString()
+                         .contains(QStringLiteral("Daily")));
+    }
+}
+
+// A report under way when the viewer closes or opens another recording
+// ends unannounced: its thread runs out (core's export can't stop
+// midway), and the result is dropped
+TEST(RecordingViewTest, AReportEndingAfterACloseIsDropped)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    int saved = 0;
+    QObject::connect(&v, &RecordingView::reportSaved, [&] { ++saved; });
+    const QUrl url =
+        QUrl::fromLocalFile(root.path() + QStringLiteral("/r.txt"));
+    ASSERT_TRUE(v.saveHealthReport(url, 0));
+    v.close();
+    ASSERT_TRUE(waitFor([&] { return !v.reporting(); }));
+    EXPECT_EQ(saved, 0);
+
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_TRUE(v.saveHealthReport(url, 0));
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return !v.reporting() && settled(v); }));
+    EXPECT_EQ(saved, 0) << "another open drops it too";
 }

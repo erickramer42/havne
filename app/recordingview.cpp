@@ -3,6 +3,8 @@
 
 #include "recordingview.h"
 
+#include "healthreport.h"
+
 #include <QByteArray>
 #include <QCryptographicHash>
 #include <QDir>
@@ -166,6 +168,10 @@ RecordingView::RecordingView(QObject* parent) : QObject(parent) {}
 RecordingView::~RecordingView()
 {
     stop();
+    // Its end, posted to this object, is dropped with it
+    if (m_reportWorker.joinable()) {
+        m_reportWorker.join();
+    }
 }
 
 void RecordingView::run(const std::shared_ptr<Result>& res,
@@ -400,6 +406,47 @@ void RecordingView::stop()
     if (m_stale) {
         m_stale = false;
         emit staleChanged();
+    }
+}
+
+bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex)
+{
+    if (m_state != Open || m_reporting) {
+        return false;
+    }
+    if (m_reportWorker.joinable()) {
+        m_reportWorker.join(); // ended: its post is what cleared m_reporting
+    }
+    ecuio_health_options_t o{};
+    o.format = healthFormatFor(url, filterIndex);
+    o.units = m_units;
+    o.latest_model_year = healthLatestModelYear();
+    o.utc_us = healthUtcNow();
+    const quint64 generation = m_generation;
+    const QByteArray folder = m_folder.toUtf8();
+    m_reporting = true;
+    m_reportWorker = std::thread([this, o, folder, url, generation]() mutable {
+        o.folder_utf8 = folder.constData();
+        const QVariantMap result = writeHealthReport(o, url);
+        QMetaObject::invokeMethod(
+            this,
+            [this, result, generation] { reportFinished(result, generation); },
+            Qt::QueuedConnection);
+    });
+    emit reportingChanged();
+    return true;
+}
+
+void RecordingView::reportFinished(const QVariantMap& result,
+                                   quint64 generation)
+{
+    if (m_reportWorker.joinable()) {
+        m_reportWorker.join(); // it posted this as its last act
+    }
+    m_reporting = false;
+    emit reportingChanged();
+    if (generation == m_generation) {
+        emit reportSaved(result);
     }
 }
 

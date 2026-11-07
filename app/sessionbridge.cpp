@@ -3,6 +3,7 @@
 
 #include "sessionbridge.h"
 #include "carryover.h"
+#include "healthreport.h"
 #include "obdbimport.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "recording_signals.h" /* cli/: a replay's own signal file */
@@ -870,6 +871,25 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
     }
 }
 
+std::vector<ecuio_health_value_t> SignalListModel::heldValues() const
+{
+    std::vector<ecuio_health_value_t> held;
+    const qint64 now = m_clock.elapsed();
+    for (const Entry& e : m_entries) {
+        if (e.isText || e.arrivedMs < 0 || e.histCount == 0) {
+            continue;
+        }
+        ecuio_health_value_t v{};
+        v.def_id = e.id;
+        v.value = e.value;
+        v.age_us =
+            static_cast<uint64_t>((std::max)(qint64{0}, now - e.arrivedMs)) *
+            1000u;
+        held.push_back(v);
+    }
+    return held;
+}
+
 QString SignalListModel::labelOf(const Entry& e)
 {
     // An enum's value is its raw number: a whole number from 0 up
@@ -1473,6 +1493,29 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
             {QStringLiteral("written"), written ? csv.written : 0},
             {QStringLiteral("leftOut"), leftOut},
             {QStringLiteral("unattributed"), qulonglong{csv.unattributed}}};
+}
+
+QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex)
+{
+    if (m_session == nullptr || !connected()) {
+        const QString words = QStringLiteral("Not connected");
+        emit logMessage(
+            QStringLiteral("Health report not saved: %1").arg(words));
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("words"), words}};
+    }
+    const std::vector<ecuio_health_value_t> held = m_signalModel->heldValues();
+    ecuio_health_options_t o{};
+    o.format = healthFormatFor(url, filterIndex);
+    o.units = m_signalModel->unitSystem();
+    o.latest_model_year = healthLatestModelYear();
+    o.utc_us = healthUtcNow();
+    o.session = m_session;
+    o.value_count = static_cast<uint32_t>(held.size());
+    o.values = held.empty() ? nullptr : held.data();
+    const QVariantMap r = writeHealthReport(o, url);
+    emit logMessage(r.value(QStringLiteral("line")).toString());
+    return r;
 }
 
 QVariantList SessionBridge::useSignalFiles(const QStringList& shas)

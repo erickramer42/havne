@@ -398,6 +398,12 @@ public:
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int hiddenCount() const { return m_hiddenCount; }
+    // Each number's and enumeration's newest value as core decoded it
+    // (the def's unit, an enumeration's raw number; never the display's
+    // conversion), aged by the model's clock from the window that brought
+    // it, for the health report: core keeps none. Rows with no value yet
+    // and text rows are left out
+    std::vector<ecuio_health_value_t> heldValues() const;
 
     // The signals core reports their ECU doesn't support
     // (ecuio_session_get_unsupported_signals, ADR-0039 section 6): those
@@ -722,6 +728,14 @@ public:
     // replies' and text signals' frames, words never naming the path. A
     // failed check writes nothing. Logs one line
     Q_INVOKABLE QVariantMap exportFrames(const QUrl& url);
+    // Diagnostics' Save report (ADR-0054's appendix "the health report as
+    // built"): the session's health to the file at url (a local file, or
+    // Android's content:// through QFile), in the format healthFormatFor
+    // picks from it and the dialog's filterIndex, with the values Live's
+    // rows hold. No wait: a report still being read says so itself. The
+    // map writeHealthReport gives (healthreport.h), its words never
+    // naming a path. Logs one line
+    Q_INVOKABLE QVariantMap saveHealthReport(const QUrl& url, int filterIndex);
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,
