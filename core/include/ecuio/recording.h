@@ -844,6 +844,123 @@ _Static_assert(sizeof(ecuio_import_report_t) == 80,
 ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
                             ecuio_import_report_t* report);
 
+/* --- The health report (ADR-0054's appendix "the health report as
+ * built") ------------------------------------------------------------ */
+
+/* ecuio_health_options_t.format; append-only */
+#define ECUIO_HEALTH_JSON 1u /* one JSON object, "havne_health": 1 */
+#define ECUIO_HEALTH_TEXT 2u /* the same facts as plain text */
+
+/* ecuio_health_report_t.flags */
+#define ECUIO_HEALTH_VIN_DECODED 0x00000001u /* a VIN was read: the
+                                                vehicle's model year and
+                                                make are its decode's */
+
+/* POD, 32 bytes: a session's newest value of one def, as the caller
+ * holds it (core keeps none), its age by the caller's clock */
+typedef struct ecuio_health_value {
+    uint32_t def_id;   /* the session's set's def */
+    uint32_t flags;    /* zero */
+    double value;      /* in the def's unit, as decoded */
+    uint64_t age_us;   /* from its decode to the report's time */
+    uint64_t reserved; /* zero */
+} ecuio_health_value_t;
+
+/* The scalars first and the pointers last, so every offset but the
+ * pointers' is the same on either width */
+typedef struct ecuio_health_options {
+    uint32_t format;            /* ECUIO_HEALTH_* */
+    uint32_t flags;             /* zero */
+    uint32_t units;             /* ECUIO_UNITS_*: the values' system */
+    uint32_t latest_model_year; /* for the VIN's decode: this year + 1,
+                                   as the front ends pass it; 0 none */
+    uint64_t from_us;           /* a recording's range, host_us as the
+                                   export's; 0 and 0 is all of it */
+    uint64_t to_us;
+    uint64_t utc_us;            /* the report's time, microseconds since
+                                   1970 UTC, the caller's; 0 writes none */
+    uint32_t value_count;       /* entries of values */
+    uint32_t reserved0;         /* zero */
+    uint64_t reserved[4];       /* zero; ABI growth space */
+    ecuio_session_t* session;   /* the source: a live session, or */
+    const char* folder_utf8;    /* a recording's folder (not built:
+                                   ECUIO_ERR_NOT_IMPLEMENTED) */
+    const ecuio_health_value_t* values; /* a session's newest values, or
+                                           NULL with value_count 0 */
+    const char* out_path_utf8;  /* the file to write, refused when it
+                                   exists: <out>.partial first, renamed
+                                   into place once checked */
+} ecuio_health_options_t;
+
+typedef struct ecuio_health_report {
+    uint32_t ecus;          /* ECUs written */
+    uint32_t codes;         /* trouble codes written, every list */
+    uint32_t values;        /* key values written */
+    uint32_t since_cleared; /* the since-the-codes-were-cleared values */
+    uint64_t left_out[8];   /* by ECUIO_EXPORT_LEFT_OUT_*: the
+                               identification items whose text is left
+                               out (IDENTIFICATION) */
+    uint32_t failed_class;  /* the check's, as the export report's */
+    uint32_t flags;         /* ECUIO_HEALTH_VIN_DECODED */
+    uint64_t reserved[4];   /* zero; ABI growth space */
+} ecuio_health_report_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_health_value_t) == 32,
+              "ecuio_health_value_t size is ABI");
+static_assert(offsetof(ecuio_health_value_t, age_us) == 16,
+              "health value age_us offset is ABI");
+static_assert(offsetof(ecuio_health_options_t, utc_us) == 32,
+              "health options utc_us offset is ABI");
+static_assert(offsetof(ecuio_health_options_t, session) == 80,
+              "health options session offset is ABI");
+static_assert(sizeof(ecuio_health_report_t) == 120,
+              "ecuio_health_report_t size is ABI");
+static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
+              "health report failed_class offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_health_value_t) == 32,
+               "ecuio_health_value_t size is ABI");
+_Static_assert(offsetof(ecuio_health_value_t, age_us) == 16,
+               "health value age_us offset is ABI");
+_Static_assert(offsetof(ecuio_health_options_t, utc_us) == 32,
+               "health options utc_us offset is ABI");
+_Static_assert(offsetof(ecuio_health_options_t, session) == 80,
+               "health options session offset is ABI");
+_Static_assert(sizeof(ecuio_health_report_t) == 120,
+               "ecuio_health_report_t size is ABI");
+_Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
+               "health report failed_class offset is ABI");
+#endif
+
+/*
+ * A car's health as one scrubbed file (ADR-0054's appendix "the health
+ * report as built"), in ECUIO_HEALTH_JSON or ECUIO_HEALTH_TEXT, which
+ * hold the same facts: the source (the session's URI as the folder
+ * export scrubs it, its backend and profile; no vehicle label, no
+ * adapter versions), the vehicle (its VIN's decode: model year, make,
+ * whether the check digit matched; never the VIN), the inspection
+ * (ecuio_diag_inspect over every ECU for that model year, the rule for
+ * none when no VIN was read), each ECU's readiness, codes with their
+ * titles, freeze frame, the since-the-codes-were-cleared values
+ * (Service 01 PIDs 21, 30, 31, 4D and 4E, whenever given) and its
+ * identification items by name and outcome (their text left out), then
+ * the key values: the set's ranked signals (plot_rank above 0, numbers
+ * and enumerations) among the values given, in rank order. The file is
+ * checked for the identification texts and the VIN's shape before it's
+ * renamed into place; a match fails it with its class. Deterministic:
+ * the time and each value's age are the caller's. report may be NULL.
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or out path;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format or units, a flag or
+ * reserved field this core doesn't know, a session and a folder both or
+ * neither, NULL values with a count, a value's flags or reserved
+ * nonzero; ECUIO_ERR_NOT_IMPLEMENTED for a folder; ECUIO_ERR_LOAD_FAILED for a
+ * file that exists or can't be written, or a failed check (its words
+ * in the detail, never a value or a path).
+ */
+ecuio_status_t ecuio_health_export(const ecuio_health_options_t* options,
+                                   ecuio_health_report_t* report);
+
 #ifdef __cplusplus
 }
 #endif

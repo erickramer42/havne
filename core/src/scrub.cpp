@@ -1,6 +1,7 @@
 // File/layer: core/src/scrub.cpp | C++17, Qt-free; the classifier and the
 //             check of a scrubbed export (ADR-0054 section 1)
-// Testing: UNIT: ScrubTest, ExportTest (test_core)
+// Testing: UNIT: ScrubTest, ExportTest, FolderExportTest, HealthTest
+//          (test_core)
 
 #include "scrub.h"
 
@@ -246,6 +247,73 @@ const char* failed_words(uint32_t failed_class)
     default:
         return "a value the export leaves out";
     }
+}
+
+namespace {
+
+/* The query keys a scrubbed URI keeps: core's own, each value a number,
+ * an ID, a DID list or a profile's name. `serial` is ELM327's
+ * serial-port rate (elm327_transport.cpp), a number, never a device's
+ * serial. */
+bool kept_query_key(const std::string& key)
+{
+    static const char* const kKeys[] = {
+        "profile", "did",   "baud",  "serial",   "filter",
+        "txid",    "poll",  "probe", "identify", "diagnose",
+        "pack",    "speed", "loop",  "from",     "to"};
+    for (const char* k : kKeys) {
+        if (key == k) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool plain_value(const std::string& v)
+{
+    for (char c : v) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+              (c >= 'A' && c <= 'Z') || std::strchr(":,./_-", c) != nullptr)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+std::string uri(const std::string& uri)
+{
+    const size_t scheme_end = uri.find("://");
+    if (scheme_end == std::string::npos) {
+        return "<address>";
+    }
+    const std::string scheme = uri.substr(0, scheme_end);
+    const std::string rest = uri.substr(scheme_end + 3);
+    const char* ph = (scheme == "replay" || scheme == "j2534") ? "<path>"
+                     : scheme == "mock"                        ? "<label>"
+                                                               : "<address>";
+    std::string out = scheme + "://" + ph;
+    const size_t q = rest.find('?');
+    if (q == std::string::npos) {
+        return out;
+    }
+    std::string kept;
+    size_t at = q + 1;
+    while (at <= rest.size()) {
+        size_t amp = rest.find('&', at);
+        if (amp == std::string::npos) {
+            amp = rest.size();
+        }
+        const std::string pair = rest.substr(at, amp - at);
+        const size_t eq = pair.find('=');
+        if (eq != std::string::npos && kept_query_key(pair.substr(0, eq)) &&
+            plain_value(pair.substr(eq + 1))) {
+            kept += (kept.empty() ? "?" : "&") + pair;
+        }
+        at = amp + 1;
+    }
+    return out + kept;
 }
 
 } // namespace ecuio_scrub
