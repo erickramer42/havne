@@ -25,8 +25,10 @@ chmod +x havne-X.Y.Z-linux-x86_64.AppImage
 ./havne-X.Y.Z-linux-x86_64.AppImage
 ```
 
-It carries Qt, its QML modules and the X11 libraries Qt needs. It takes
-the rest from the system:
+It carries Qt, its QML modules and the X11 libraries Qt needs, with
+their licenses in `usr/share/doc/havne/` inside it
+(`./havne-X.Y.Z-linux-x86_64.AppImage --appimage-extract` unpacks it to
+`squashfs-root/`). It takes the rest from the system:
 
 - **OpenGL and fonts:** `libGL`, `libEGL` and `libGLX` belong to the
   machine's graphics driver, and fontconfig and freetype to the

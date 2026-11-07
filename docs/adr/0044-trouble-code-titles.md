@@ -98,6 +98,12 @@ the binaries and the notices files above. The release notes name both
 sources under "Third-party data". The lookup and the titles beside the
 car's codes stay.
 
+*Amended 2026-11-07:* the Linux AppImage and the Android APK carry the
+notice too, in `packaging/notices/THIRD_PARTY_NOTICES.txt`
+(`usr/share/doc/havne/` and `assets/havne/`), and
+`NoticesTest.EachNoticeCarriesCoresData` checks that it and the Windows
+notice hold `core/THIRD_PARTY_NOTICES.txt`'s sections word for word.
+
 Havne's own license stays MIT.
 
 ### 4. Each front end
