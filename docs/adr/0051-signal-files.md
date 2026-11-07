@@ -494,6 +494,8 @@ the tools around it reach one front end only:
 - **The OBDb import is `havne-cli`'s.** `signals import obdb` writes a
   signal file, which the app then imports as any other; the app has no
   import of its own. It is placed in v0.6.0, whose scope is imports.
+  (Note, 2026-11-06: the app imports a set itself, the appendix "the
+  OBDb import in the app".)
 
 ## Appendix: a refused signal shown as refused (2026-11-06)
 
@@ -591,3 +593,47 @@ for other repositories, which lint their files with it in CI:
   `havne-cli signals check`, which must give each one verdict.
 - **Naming it:** a file can't carry `"$schema"`, an unknown key, so an
   editor maps the schema to files by name or folder.
+
+## Appendix: the OBDb import in the app (2026-11-06)
+
+Section 7's import reaches the app, so a set needs no `havne-cli`:
+
+- **The import.** Settings' Vehicle section has **Import an OBDb set**
+  beside **Import a signal file**. The picked file's bytes go to
+  `ecuio_obdb_import` (`app/obdbimport.{h,cpp}`, the bridge's
+  `previewObdb`), read through `QFile` as any import is, so Android's
+  `content://` from its document picker works the same. The file
+  extends `obd2`, so the vehicle keeps Service 01's signals; the app
+  knows no URL or commit, and the `source` block names OBDb, its
+  contributors and the license all the same. A set of 1 MiB, core's
+  most, converts in well under the 100 ms that would move it off the
+  GUI thread.
+- **The model year** is the one typed beside the button, else ADR-0043's
+  decode of a VIN: the one typed under **Look up a VIN**, or the
+  connected car's once its VIN key names the picked vehicle. The year
+  stays on the page after the session ends, as the plugins' matches do
+  (ADR-0052 section 5); the VIN stays in the bridge (ADR-0027 section 3)
+  and the year is never stored. Empty is none, and the report says the
+  commands for some years only are left out.
+- **The report before the file is kept.** The notes come sorted: the
+  signals converted, counted; each field that differs; each signal left
+  out with its line and why; the set's own notes. A list shows its
+  first 50 rows and counts the rest. The converted text waits in the
+  bridge, kept by **Keep** through the same store as any signal file
+  (`SignalStore`, its copy by its SHA-256) and the same rules
+  (`VehicleBook.profileProblem`), or dropped by **Discard**.
+- **Named for the vehicle, replaced when read again.** The file is
+  "<label> OBDb" (`VehicleBook.obdbName`), past every profile another
+  file makes ("<label> OBDb 2" and on). When the picked vehicle has a
+  file of that very name that the import wrote (its `source` block is
+  the importer's, `ObdbImport::isConversion`), the new one replaces it
+  (`VehicleBook.replaceSignals`), the report saying so before **Keep**
+  and the note after. A file whose name the user chose is never
+  replaced. Settings changes no vehicle while a session runs, so the
+  buttons wait for none; the bridge also refuses, with words and
+  nothing changed, to replace a file a session decodes with, the import
+  kept waiting for the disconnect.
+
+Tested at the bridge (`ObdbImportTest`, `BridgeTest.Obdb*`, on
+`tests/fixtures/obdb/`) and in QML (`QmlTest.settings`,
+`QmlTest.vehiclebook`).

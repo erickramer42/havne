@@ -197,6 +197,20 @@ Pane {
             signalProblem = r.words
             return false
         }
+        return addKeptFile(r)
+    }
+
+    // What a kept file's import said, as the notes put it
+    function keptText(r) {
+        return r.extends === "obd2"
+            ? qsTr("obd2 and %1 of your own, profile %2").arg(r.own).arg(r.profile)
+            : r.count === 1 ? qsTr("1 signal, profile %1").arg(r.profile)
+            : qsTr("%1 signals, profile %2").arg(r.count).arg(r.profile)
+    }
+
+    // A file the store kept (importSignalFile's map, or an OBDb import's)
+    // into the picked vehicle; true when added
+    function addKeptFile(r) {
         const file = { sha256: r.sha256, name: r.name, profile: r.profile }
         const problem = VehicleBook.profileProblem(vehicles, file, "")
         if (problem !== "") {
@@ -210,11 +224,7 @@ Pane {
             return false
         }
         saveVehicles(VehicleBook.addSignals(vehicles, file))
-        signalNote = r.extends === "obd2"
-            ? qsTr("%1 added: obd2 and %2 of your own, profile %3").arg(r.name).arg(r.own)
-                  .arg(r.profile)
-            : r.count === 1 ? qsTr("%1 added: 1 signal, profile %2").arg(r.name).arg(r.profile)
-            : qsTr("%1 added: %2 signals, profile %3").arg(r.name).arg(r.count).arg(r.profile)
+        signalNote = qsTr("%1 added: %2").arg(r.name).arg(keptText(r))
         // The field on an adapter reading Default, obd2, with no profile=
         // of its own: the file that now stands in for obd2 is read
         // instead, and the note says so. A profile the user picked stays
@@ -225,6 +235,140 @@ Pane {
                              .arg(r.name).arg(r.profile)
         }
         return true
+    }
+
+    // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06) ----
+    // The report of the set read and not yet kept (the bridge's
+    // previewObdb map, null for none), and the vehicle's earlier import
+    // it replaces ("" for none)
+    property var obdbReport: null
+    property string obdbReplaces: ""
+    property string obdbVehicle: "" // the id of the vehicle it was read for
+    // A list's rows shown at most, the rest counted: a set of thousands
+    // of signals would otherwise lay out thousands of labels on a phone
+    readonly property int obdbRowsShown: 50
+    readonly property bool obdbShown: obdbReport !== null && pickedVehicle !== null
+                                      && pickedVehicle.id === obdbVehicle
+
+    // The connected car's model year once its VIN names the picked
+    // vehicle (its VIN key), kept while the page lives, as the plugins'
+    // matches stay once the session ends; the VIN itself stays in the
+    // bridge, and the year is never stored
+    property int obdbCarYear: 0
+    property string obdbCarVehicle: ""
+
+    function noteCarYear() {
+        if (pickedVehicle === null || pickedVehicle.vinKey === ""
+                || Bridge.vinKey(vehicles.salt) !== pickedVehicle.vinKey)
+            return
+        obdbCarYear = Bridge.vinModelYear("")
+        obdbCarVehicle = pickedVehicle.id
+    }
+
+    // The model year a VIN gives: the lookup's typed one, else the
+    // connected car's when it was the picked vehicle, else 0
+    function obdbVinYear() {
+        if (vinLookupField.text.trim() !== "")
+            return Bridge.vinModelYear(vinLookupField.text)
+        return pickedVehicle !== null && pickedVehicle.id === obdbCarVehicle ? obdbCarYear : 0
+    }
+
+    // The year field as a number: 0 when empty, -1 when it isn't a year
+    function obdbYear() {
+        const t = obdbYearField.text.trim()
+        if (t === "")
+            return 0
+        const y = Number(t)
+        return /^[0-9]{4}$/.test(t) && y >= 1980 && y <= 2039 ? y : -1
+    }
+
+    // The picked file read for the picked vehicle: its report shown, or
+    // the bridge's words why not. True when there's a report
+    function previewObdb(url) {
+        signalNote = ""
+        obdbReport = null
+        if (pickedVehicle === null)
+            return false
+        const year = obdbYear()
+        if (year < 0) {
+            signalProblem = qsTr("A model year is 1980 to 2039, or empty for none")
+            return false
+        }
+        const n = VehicleBook.obdbName(vehicles, pickedVehicle.label,
+                                       sha => Bridge.isObdbImport(sha))
+        const r = Bridge.previewObdb(url, year, n.name)
+        if (!r.ok) {
+            signalProblem = r.words
+            return false
+        }
+        signalProblem = ""
+        obdbReplaces = n.replaces
+        obdbVehicle = pickedVehicle.id
+        obdbReport = r
+        return true
+    }
+
+    // The report's summary line
+    function obdbSummary(r) {
+        if (r === null)
+            return ""
+        const parts = [r.converted === 1 ? qsTr("1 signal converted")
+                                         : qsTr("%1 signals converted").arg(r.converted),
+                       r.changed.length === 1 ? qsTr("1 field differs")
+                                              : qsTr("%1 fields differ").arg(r.changed.length),
+                       qsTr("%1 left out").arg(r.skipped.length),
+                       r.year > 0 ? qsTr("model year %1").arg(r.year)
+                                  : qsTr("no model year, so the commands OBDb gives for some years only are left out")]
+        let s = qsTr("%1 from OBDb: %2").arg(r.name).arg(parts.join(", "))
+        if (obdbReplaces !== "")
+            s += qsTr("; replaces the vehicle's earlier OBDb import")
+        return s
+    }
+
+    // The report kept: the file into the picked vehicle, in its earlier
+    // import's place when it replaces one. True when the vehicle has it
+    function keepObdb() {
+        signalNote = ""
+        if (!obdbShown)
+            return false
+        const replaces = obdbReplaces
+        const r = Bridge.keepObdb(replaces)
+        if (!r.ok) {
+            // A session reading the earlier import keeps the report up,
+            // so Keep works once it has disconnected
+            signalProblem = r.words
+            return false
+        }
+        obdbReport = null
+        obdbReplaces = ""
+        if (replaces === "" || !pickedVehicle.signals.some(f => f.sha256 === replaces))
+            return addKeptFile(r)
+        if (r.sha256 === replaces) {
+            signalProblem = ""
+            signalNote = qsTr("%1 is this vehicle's already").arg(r.name)
+            return true
+        }
+        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
+        const problem = VehicleBook.profileProblem(vehicles, file, replaces)
+        if (problem !== "") {
+            signalProblem = problem
+            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+            return false
+        }
+        signalProblem = ""
+        saveVehicles(VehicleBook.replaceSignals(vehicles, replaces, file))
+        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+        signalNote = qsTr("%1 replaced the vehicle's earlier OBDb import: %2")
+                         .arg(r.name).arg(keptText(r))
+        return true
+    }
+
+    function discardObdb() {
+        Bridge.dropObdb()
+        obdbReport = null
+        obdbReplaces = ""
+        signalProblem = ""
+        signalNote = ""
     }
 
     // ---- The app's plugins (ADR-0052) ----
@@ -1101,6 +1245,7 @@ Pane {
         function onVehicleIdentified() {
             page.recognizeVehicle()
             page.refreshMatches()
+            page.noteCarYear()
         }
 
         function onRecordingChanged() {
@@ -1709,6 +1854,33 @@ Pane {
                         enabled: page.idle && page.confirming === ""
                         onClicked: importDialog.open()
                     }
+                    // An OBDb set (ADR-0051's appendix of 2026-11-06):
+                    // its report shows before the file is kept
+                    ThemedButton {
+                        objectName: "obdbImport"
+                        text: qsTr("Import an OBDb set")
+                        enabled: page.idle && page.confirming === ""
+                        onClicked: {
+                            if (obdbYearField.text.trim() === "") {
+                                const y = page.obdbVinYear()
+                                obdbYearField.text = y > 0 ? String(y) : ""
+                            }
+                            obdbDialog.open()
+                        }
+                    }
+                }
+
+                LabeledFlow {
+                    visible: page.pickedVehicle !== null
+                    label: qsTr("OBDb model year:")
+                    TextField {
+                        id: obdbYearField
+                        objectName: "obdbYearField"
+                        width: Math.min(120, parent.width)
+                        maximumLength: 4
+                        placeholderText: qsTr("from the VIN")
+                        inputMethodHints: Qt.ImhDigitsOnly
+                    }
                 }
 
                 Label {
@@ -1728,11 +1900,120 @@ Pane {
                     Layout.fillWidth: true
                 }
 
+                // The OBDb import's report, before the file is kept: what
+                // converted, each field that differs, each signal left out
+                ColumnLayout {
+                    objectName: "obdbReport"
+                    visible: page.obdbShown
+                    spacing: Theme.spacing / 2
+                    Layout.fillWidth: true
+
+                    Label {
+                        objectName: "obdbSummary"
+                        text: page.obdbSummary(page.obdbReport)
+                        color: Theme.text
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        visible: page.obdbReport !== null && page.obdbReport.changed.length > 0
+                        text: qsTr("Differs from OBDb:")
+                        color: Theme.text
+                        font.bold: true
+                    }
+                    Repeater {
+                        objectName: "obdbChanged"
+                        model: page.obdbReport !== null
+                               ? page.obdbReport.changed.slice(0, page.obdbRowsShown) : []
+                        Label {
+                            required property var modelData
+                            text: qsTr("%1, %2: %3")
+                                      .arg(modelData.key !== "" ? modelData.key : modelData.signal)
+                                      .arg(modelData.field).arg(modelData.text)
+                            color: Theme.textDim
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Label {
+                        objectName: "obdbChangedMore"
+                        readonly property int more: page.obdbReport === null ? 0
+                            : page.obdbReport.changed.length - page.obdbRowsShown
+                        visible: more > 0
+                        text: qsTr("and %1 more").arg(more)
+                        color: Theme.textDim
+                    }
+                    Label {
+                        visible: page.obdbReport !== null && page.obdbReport.skipped.length > 0
+                        text: qsTr("Left out:")
+                        color: Theme.text
+                        font.bold: true
+                    }
+                    Repeater {
+                        objectName: "obdbSkipped"
+                        model: page.obdbReport !== null
+                               ? page.obdbReport.skipped.slice(0, page.obdbRowsShown) : []
+                        Label {
+                            required property var modelData
+                            text: qsTr("%1 (line %2): %3")
+                                      .arg(modelData.signal !== "" ? modelData.signal : qsTr("the set"))
+                                      .arg(modelData.line).arg(modelData.text)
+                            color: Theme.textDim
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Label {
+                        objectName: "obdbSkippedMore"
+                        readonly property int more: page.obdbReport === null ? 0
+                            : page.obdbReport.skipped.length - page.obdbRowsShown
+                        visible: more > 0
+                        text: qsTr("and %1 more").arg(more)
+                        color: Theme.textDim
+                    }
+                    Repeater {
+                        objectName: "obdbFileNotes"
+                        model: page.obdbReport !== null ? page.obdbReport.file : []
+                        Label {
+                            required property var modelData
+                            text: modelData.field !== ""
+                                  ? qsTr("The set's %1: %2").arg(modelData.field).arg(modelData.text)
+                                  : qsTr("The set: %1").arg(modelData.text)
+                            color: Theme.textDim
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+                        ThemedButton {
+                            objectName: "obdbKeep"
+                            text: page.obdbReplaces !== "" ? qsTr("Keep, replacing the earlier")
+                                                           : qsTr("Keep")
+                            highlighted: true
+                            enabled: page.idle && page.confirming === ""
+                            onClicked: page.keepObdb()
+                        }
+                        ThemedButton {
+                            objectName: "obdbDiscard"
+                            text: qsTr("Discard")
+                            onClicked: page.discardObdb()
+                        }
+                    }
+                }
+
                 FileDialog {
                     id: importDialog
                     title: qsTr("Import a signal file")
                     nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
                     onAccepted: page.importSignalFile(importDialog.selectedFile)
+                }
+                FileDialog {
+                    id: obdbDialog
+                    title: qsTr("Import an OBDb set")
+                    nameFilters: [qsTr("OBDb signal sets (*.json)"), qsTr("All files (*)")]
+                    onAccepted: page.previewObdb(obdbDialog.selectedFile)
                 }
                 FileDialog {
                     id: saveDialog

@@ -235,6 +235,43 @@ TestCase {
         compare(VehicleBook.picked(VehicleBook.removeSignals(d, shaA)).own, shaC)
     }
 
+    // An OBDb import's name: the vehicle's own earlier import of that
+    // name is replaced, a name some other file's profile holds is passed
+    function test_anObdbImportsName() {
+        const imports = sha => sha === shaB
+        const none = sha => false
+        let d = book()
+        compare(VehicleBook.obdbName(d, "Daily driver", imports),
+                { name: "Daily driver OBDb", replaces: "" })
+        const earlier = { sha256: shaB, name: "Daily driver OBDb", profile: "user.daily-driver-obdb" }
+        d = VehicleBook.addSignals(d, earlier)
+        compare(VehicleBook.obdbName(d, "Daily driver", imports),
+                { name: "Daily driver OBDb", replaces: shaB })
+        compare(VehicleBook.obdbName(d, "Daily driver", none),
+                { name: "Daily driver OBDb 2", replaces: "" }, "a file the user wrote")
+        compare(VehicleBook.obdbName(VehicleBook.pick(d, "v2"), "Daily driver", imports),
+                { name: "Daily driver OBDb 2", replaces: "" }, "another vehicle's")
+        const sameProfile = { sha256: shaC, name: "Daily-driver OBDb", profile: "user.daily-driver-obdb" }
+        const other = VehicleBook.addSignals(book(), sameProfile)
+        compare(VehicleBook.obdbName(other, "Daily driver", sha => true),
+                { name: "Daily driver OBDb 2", replaces: "" }, "only a file of that very name")
+    }
+
+    // An import read again takes its earlier file's place
+    function test_anObdbImportReplacesItsEarlierFile() {
+        const earlier = { sha256: shaB, name: "Daily driver OBDb", profile: "user.daily-driver-obdb" }
+        const later = { sha256: shaC, name: "Daily driver OBDb", profile: "user.daily-driver-obdb" }
+        const d = VehicleBook.addSignals(book(), earlier)
+        const r = VehicleBook.replaceSignals(d, shaB, later)
+        compare(VehicleBook.picked(r).signals, [fileA(), later], "in its place")
+        compare(VehicleBook.picked(d).signals, [fileA(), earlier], "the given document is unchanged")
+        compare(VehicleBook.replaceSignals(d, shaB, earlier), d, "the same file again")
+        compare(VehicleBook.replaceSignals(book(), shaB, later), book(), "nothing to replace")
+        const shared = VehicleBook.pick(VehicleBook.addSignals(VehicleBook.pick(d, "v2"), earlier), "v1")
+        compare(VehicleBook.replaceSignals(shared, shaB, later), shared,
+                "another vehicle keeps the earlier file, so its profile is taken")
+    }
+
     function test_theFilesTheStoreKeeps() {
         let d = VehicleBook.addSignals(VehicleBook.pick(book(), "v2"), fileA())
         d = VehicleBook.setOwn(d, { sha256: shaC, name: "Mine", profile: "user.mine" })

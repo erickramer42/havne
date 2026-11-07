@@ -807,6 +807,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
+        ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -835,6 +836,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+        ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -865,6 +867,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -914,6 +917,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+        ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

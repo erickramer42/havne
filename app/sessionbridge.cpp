@@ -3,6 +3,7 @@
 
 #include "sessionbridge.h"
 #include "carryover.h"
+#include "obdbimport.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
@@ -10,6 +11,7 @@
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
+#include "ecuio/obdb.h"
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
 #include "ecuio/signal_sets.h"
@@ -1127,6 +1129,87 @@ QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
 int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
 {
     return m_signalStore.deleteUnused(keep);
+}
+
+QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
+                                       const QString& name)
+{
+    m_obdbPending.clear();
+    const uint32_t year = modelYear > 0 ? static_cast<uint32_t>(modelYear) : 0u;
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    ObdbImport::Preview p;
+    if (!file.open(QIODevice::ReadOnly)) {
+        p.words = QStringLiteral("Couldn't read the file");
+    } else if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
+        p.words = QStringLiteral("The file is over %1 MiB, an OBDb set's most")
+                      .arg(ECUIO_OBDB_MAX_BYTES / (1024 * 1024));
+    } else {
+        p = ObdbImport::read(file.read(ECUIO_OBDB_MAX_BYTES + 1), year, name);
+    }
+    if (p.ok) {
+        m_obdbPending = p.json;
+    }
+    emit logMessage(
+        p.ok ? QStringLiteral("OBDb set read for %1: %2 converted, %3 fields "
+                              "differ, %4 left out (model year %5)")
+                   .arg(name)
+                   .arg(p.converted)
+                   .arg(p.changed.size())
+                   .arg(p.skipped.size())
+                   .arg(year == 0 ? QStringLiteral("none")
+                                  : QString::number(year))
+             : QStringLiteral("OBDb set refused: %1").arg(p.words));
+    return ObdbImport::report(p, name, year);
+}
+
+QVariantMap SessionBridge::keepObdb(const QString& replacing)
+{
+    QVariantMap result;
+    if (m_obdbPending.isEmpty()) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("No OBDb set is waiting: import it again")}};
+    } else if (!replacing.isEmpty() && m_session != nullptr &&
+               m_signalStore.shaFor(ecuio_session_signal_set(m_session)) ==
+                   replacing) {
+        // The session decodes with the file this replaces: the import
+        // waits, so Keep works once it has disconnected
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("The session reads the earlier import: "
+                                  "disconnect, then keep it")}};
+    } else {
+        result = m_signalStore.import(m_obdbPending);
+        m_obdbPending.clear();
+    }
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Signal file from OBDb: %1 (%2, %3)%4")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("profile")).toString(),
+                       signalCountText(
+                           result.value(QStringLiteral("count")).toInt()),
+                       replacing.isEmpty()
+                           ? QString()
+                           : QStringLiteral(", replacing %1")
+                                 .arg(replacing.left(12)))
+            : QStringLiteral("OBDb set not kept: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+bool SessionBridge::isObdbImport(const QString& sha) const
+{
+    QString words;
+    return ObdbImport::isConversion(SignalStore::bytes(sha, &words));
+}
+
+int SessionBridge::vinModelYear(const QString& typedVin) const
+{
+    return ObdbImport::modelYear(
+        typedVin.trimmed().isEmpty() ? m_vin : typedVin,
+        QDate::currentDate().year() + 1);
 }
 
 QVariantList SessionBridge::plugins()

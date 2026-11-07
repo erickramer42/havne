@@ -243,6 +243,47 @@ QtObject {
                                                  profile: file.profile }))
     }
 
+    // An OBDb import read again: file in place of replaced among the
+    // picked vehicle's; the document as it was when the vehicle doesn't
+    // have replaced, file is replaced (the same bytes again) or
+    // profileProblem refuses file
+    function replaceSignals(doc, replaced, file) {
+        const v = picked(doc)
+        if (v === null || file.sha256 === replaced
+                || !(v.signals || []).some(f => f.sha256 === replaced)
+                || profileProblem(doc, file, replaced) !== "")
+            return doc
+        return change(doc, e => {
+            e.signals = e.signals.filter(f => f.sha256 !== file.sha256)
+                                 .map(f => f.sha256 !== replaced ? f
+                                      : { sha256: file.sha256, name: file.name,
+                                          profile: file.profile })
+        })
+    }
+
+    // The name an OBDb import takes for the picked vehicle, and the file
+    // it replaces: "<label> OBDb", else "<label> OBDb 2" and on, the
+    // first whose profile no file in any vehicle makes, unless the picked
+    // vehicle's own file of that very name is an earlier import
+    // (isImport(sha256), the bridge's word), which it then replaces. A
+    // file the user named is never replaced. { name, replaces }, replaces
+    // "" for none
+    function obdbName(doc, label, isImport) {
+        const v = picked(doc)
+        const base = qsTr("%1 OBDb").arg(String(label).trim())
+        for (let n = 1; n < 100; ++n) {
+            const name = n === 1 ? base : base + " " + n
+            const profile = profileOf(name)
+            const mine = v === null ? undefined
+                : (v.signals || []).find(f => f.profile === profile)
+            if (mine !== undefined && mine.name === name && isImport(mine.sha256))
+                return { name: name, replaces: mine.sha256 }
+            if (!doc.list.some(w => (w.signals || []).some(f => f.profile === profile)))
+                return { name: name, replaces: "" }
+        }
+        return { name: base, replaces: "" }
+    }
+
     // The file by sha256 out of the picked vehicle's, own too if it was
     function removeSignals(doc, sha256) {
         return change(doc, v => {

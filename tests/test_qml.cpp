@@ -69,12 +69,19 @@ class Harness : public QObject
     Q_PROPERTY(QString replayFixtures READ replayFixtures CONSTANT)
     // The directory of the recordings the Recordings page opens (ADR-0049)
     Q_PROPERTY(QString recordingFixtures READ recordingFixtures CONSTANT)
+    // The synthetic OBDb set (tests/fixtures/obdb), as a picker's URL
+    Q_PROPERTY(QUrl obdbFixture READ obdbFixture CONSTANT)
 
 public:
     QString replayFixtures() const { return QStringLiteral(ECUIO_REPLAY_FIXTURES); }
     QString recordingFixtures() const
     {
         return QStringLiteral(ECUIO_RECORDING_FIXTURES);
+    }
+
+    QUrl obdbFixture() const
+    {
+        return QUrl::fromLocalFile(QStringLiteral(ECUIO_OBDB_FIXTURE));
     }
 
     QString fakeDllPath() const
