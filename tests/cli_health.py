@@ -18,10 +18,15 @@
 # uds-generic, whose identification outlasts the values' quiet: the
 # report waits for it, no item left unasked. recording: a recording of
 # values alone to JSON (no ECU and why, its key values), and a range
-# that starts after it ends refused.
+# that starts after it ends refused; then with --baseline: the recording
+# itself and a copy in a folder named as the app names one (its stamp
+# and a vehicle's label), each read and said to be the report's own, the
+# label in neither the file nor the line, and a folder that's gone
+# unread with its why, the report still written.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -172,8 +177,31 @@ def recording(cli, values_only):
         if not detail.startswith("the range starts at 100000 s, after the "
                                  "recording ends at ") or os.path.exists(past):
             raise SystemExit(f"FAIL  a range past the end: {lines}")
-    print(f"ok    a recording of values alone ({h['values']} values) and a "
-          "range past its end")
+        named = os.path.join(d, "20261101-090000 Daily driver")
+        os.makedirs(named)
+        shutil.copy(os.path.join(values_only, "events.log"), named)
+        gone = os.path.join(d, "gone")
+        for n, (base, word) in enumerate(((values_only, "read"),
+                                          (named, "read"),
+                                          (gone, "unread"))):
+            out = os.path.join(d, f"base-{n}.json")
+            lines, stdout, _ = run(cli, ["health", values_only, out, "--format",
+                                         "json", "--baseline", base])
+            h = one(lines, "health")
+            text = read(out)
+            b = json.loads(text)["baseline"]
+            ok = h["baseline"] == word and "Daily" not in text + stdout
+            if word == "read":
+                ok = ok and b["read"] and b["is_source"] and \
+                    b["started"] == "2026-11-03T04:10:27Z" and \
+                    b["profile"] == "obd2" and b["backend"] == "replay"
+            else:
+                ok = ok and not b["read"] and \
+                    b["why"] == "its folder is gone: it was moved or deleted"
+            if not ok:
+                raise SystemExit(f"FAIL  --baseline {base}: {h} {b}")
+    print(f"ok    a recording of values alone ({h['values']} values), a "
+          "range past its end, and its baseline read, copied and gone")
     return 0
 
 

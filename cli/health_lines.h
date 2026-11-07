@@ -5,10 +5,11 @@
 //
 // `health <uri | recording> <out> --format json|text [--units
 // metric|imperial] [--from S] [--to S] [--seconds S] [--signals <file> |
-// --plugin <pkg>]`: its arguments, the live session's wait, and its lines
-// in core's words: `health` with the report's counts (never the VIN or an
-// identification text), `health_failed` naming the class a failed check
-// found, never its value.
+// --plugin <pkg>] [--baseline <recording>]`: its arguments, the live
+// session's wait, and its lines in core's words: `health` with the
+// report's counts and whether the baseline was read (never the VIN, an
+// identification text or the baseline's folder), `health_failed` naming
+// the class a failed check found, never its value.
 
 #ifndef HAVNE_CLI_HEALTH_LINES_H
 #define HAVNE_CLI_HEALTH_LINES_H
@@ -45,6 +46,7 @@ struct HealthArgs {
     uint64_t seconds = kHealthWaitSeconds;
     const char* signals = nullptr;
     const char* plugin = nullptr;
+    const char* baseline = nullptr; /* the vehicle's baseline recording */
     ecuio_health_options_t options{};
 };
 
@@ -112,6 +114,12 @@ inline bool parse_health(int argc, char** argv, HealthArgs& a, std::string* why)
             a.signals = argv[++i];
         } else if (s == "--plugin" && has_value) {
             a.plugin = argv[++i];
+        } else if (s == "--baseline" && has_value) {
+            a.baseline = argv[++i];
+            if (*a.baseline == '\0') {
+                *why = "--baseline takes a recording's folder";
+                return false;
+            }
         } else if (s.rfind("--", 0) == 0) {
             *why = "unexpected '" + s + "'";
             return false;
@@ -156,6 +164,9 @@ inline bool parse_health(int argc, char** argv, HealthArgs& a, std::string* why)
         a.options.folder_utf8 = a.source;
     }
     a.options.out_path_utf8 = a.out;
+    /* the CLI has no vehicle book: the caller names the baseline, as
+     * view's overlay does (ADR-0049's appendix "a vehicle's baseline") */
+    a.options.baseline_folder_utf8 = a.baseline;
     return true;
 }
 
@@ -285,8 +296,10 @@ inline size_t health_line_bytes(const HealthArgs& a)
 
 /* {"type":"health","format":...,"file":...,"source":"session"|"recording",
  *  "ecus":N,"codes":N,"values":N,"since_cleared":N,
- *  "left_out":{"identification":N},"vin_decoded":bool}; a session's adds
- *  "settled":bool, whether every asked report had settled */
+ *  "left_out":{"identification":N},"vin_decoded":bool,
+ *  "baseline":"none"|"read"|"unread"}; a session's adds "settled":bool,
+ *  whether every asked report had settled. A baseline is "unread" when
+ *  --baseline named one the report couldn't read: the report says why */
 inline void health_line(Line& l, const HealthArgs& a,
                         const ecuio_health_report_t& r, bool settled)
 {
@@ -311,6 +324,11 @@ inline void health_line(Line& l, const HealthArgs& a,
     l.ch('}');
     l.key("vin_decoded");
     l.raw((r.flags & ECUIO_HEALTH_VIN_DECODED) != 0 ? "true" : "false");
+    l.key("baseline");
+    l.string(a.baseline == nullptr                         ? "none"
+             : (r.flags & ECUIO_HEALTH_BASELINE_READ) != 0 ? "read"
+                                                           : "unread",
+             SIZE_MAX);
     if (a.live) {
         l.key("settled");
         l.raw(settled ? "true" : "false");

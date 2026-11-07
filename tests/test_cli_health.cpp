@@ -131,6 +131,46 @@ TEST(CliHealthTest, ItsBadFormsAreUsage)
               "unexpected '--raw'");
 }
 
+/* --baseline names the vehicle's baseline for a session and a recording
+ * alike, an empty one usage; the line says whether core read it, never
+ * its folder */
+TEST(CliHealthTest, ABaselineIsNamedForEitherSourceAndTheLineSaysIfRead)
+{
+    for (const char* source : {"mock://x", "C:/rec/20261106-142233"}) {
+        SCOPED_TRACE(source);
+        Args a({"havne-cli", "health", source, "car.json", "--format", "json",
+                "--baseline", "C:/rec/20261101-090000 Daily driver"});
+        cli::HealthArgs h;
+        std::string why;
+        ASSERT_TRUE(cli::parse_health(a.argc(), a.argv.data(), h, &why)) << why;
+        EXPECT_STREQ(h.options.baseline_folder_utf8,
+                     "C:/rec/20261101-090000 Daily driver");
+        ecuio_health_report_t r{};
+        char buf[1024];
+        for (const bool read : {true, false}) {
+            r.flags = read ? ECUIO_HEALTH_BASELINE_READ : 0u;
+            cli::Line l(buf, sizeof buf);
+            cli::health_line(l, h, r, true);
+            const std::string line = text_of(l);
+            EXPECT_NE(line.find(read ? "\"baseline\":\"read\""
+                                     : "\"baseline\":\"unread\""),
+                      std::string::npos)
+                << line;
+            EXPECT_EQ(line.find("Daily"), std::string::npos) << line;
+        }
+    }
+    Args none(
+        {"havne-cli", "health", "mock://x", "car.json", "--format", "json"});
+    cli::HealthArgs n;
+    std::string why;
+    ASSERT_TRUE(cli::parse_health(none.argc(), none.argv.data(), n, &why))
+        << why;
+    EXPECT_EQ(n.options.baseline_folder_utf8, nullptr);
+    EXPECT_EQ(health_why({"havne-cli", "health", "mock://x", "out", "--format",
+                          "json", "--baseline", ""}),
+              "--baseline takes a recording's folder");
+}
+
 /* Only an asked report is waited for: diagnostics outside obd2 and the
  * mock are never asked, and an ECU identified with nothing to ask has no
  * items */
@@ -291,7 +331,8 @@ TEST(CliHealthTest, TheLinesCarryCountsAndNoIdentity)
               "{\"type\":\"health\",\"format\":\"json\",\"file\":\"car.json\","
               "\"source\":\"session\",\"ecus\":2,\"codes\":3,\"values\":14,"
               "\"since_cleared\":5,\"left_out\":{\"identification\":2},"
-              "\"vin_decoded\":true,\"settled\":false}\n");
+              "\"vin_decoded\":true,\"baseline\":\"none\","
+              "\"settled\":false}\n");
 
     Args b({"havne-cli", "health", "rec", "car.txt", "--format", "text"});
     cli::HealthArgs rec;
@@ -303,7 +344,7 @@ TEST(CliHealthTest, TheLinesCarryCountsAndNoIdentity)
               "{\"type\":\"health\",\"format\":\"text\",\"file\":\"car.txt\","
               "\"source\":\"recording\",\"ecus\":0,\"codes\":0,\"values\":0,"
               "\"since_cleared\":0,\"left_out\":{\"identification\":0},"
-              "\"vin_decoded\":false}\n");
+              "\"vin_decoded\":false,\"baseline\":\"none\"}\n");
 
     ecuio_health_report_t failed{};
     failed.failed_class = ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1;
