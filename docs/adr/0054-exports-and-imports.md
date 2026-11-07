@@ -1275,3 +1275,135 @@ handed to core, Python's None start a 0), and the app's 6 (the list
 taking frames alone, a row without frames still replaying, a decode
 of no frames going ahead, the check run on no frames, the decode
 choice and Replay in Settings shown without frames).
+
+## Appendix: a column map guessed from the header (2026-11-07)
+
+Accepted 2026-11-07, not built.
+
+The CSV import (the appendix "the CSV import as built") takes a column
+map and refuses a file without one. Writing JSON for an ordinary file
+is more than a user should have to do, and the files people import
+mostly say what they are in their header row: a time column first, then
+`Name (unit)` or `Name [unit]` columns. Havne's own wide CSV
+(ADR-0056) is one of them. So core guesses the map from the file, and
+every front end shows or prints the guess before it imports. The map
+stays: a guess is a map, in the same format, through the same strict
+`parse_map`, and a map file still overrides it.
+
+### 1. The call
+
+```c
+/* Reads the start of a CSV file and writes a column map (JSON text,
+ * havne_column_map 1) to map_out. Imports nothing, writes no file.
+ * ECUIO_ERR_BUFFER_TOO_SMALL with *needed set when cap is short. */
+ecuio_status_t ecuio_import_csv_guess(const char* path_utf8,
+                                      char* map_out, size_t cap,
+                                      size_t* needed,
+                                      ecuio_csv_guess_t* report);
+
+typedef struct ecuio_csv_guess {
+    uint32_t flags;          /* ECUIO_CSV_GUESS_* below */
+    uint32_t columns;        /* signal columns in the map */
+    uint32_t left_out;       /* header columns left out (notes say why) */
+    uint32_t rows_read;      /* rows the guess looked at */
+    char     notes_utf8[1024]; /* one line per choice worth saying, column
+                                * names as the header has them, never a
+                                * cell's value or the file's path */
+    uint64_t reserved[4];
+} ecuio_csv_guess_t;
+
+#define ECUIO_CSV_GUESS_TIME_UNIT_KNOWN  0x1u /* the map's time unit is set */
+#define ECUIO_CSV_GUESS_DECIMAL_COMMA    0x2u
+#define ECUIO_CSV_GUESS_PREAMBLE         0x4u /* header_row above 1 */
+```
+
+Append-only, as every addition is: a new function, a new struct with
+`flags` and `reserved`, no change to `ecuio_import`. The file's
+contents never reach a log; a refusal names the line, as the reader's
+do.
+
+### 2. What it reads
+
+The first 64 KiB or 200 rows after the header, whichever ends first,
+through the import's own RFC 4180 reader (quotes, the BOM, CRLF or LF).
+The same file always gives the same map.
+
+- **The delimiter:** `,`, `;` or a tab, whichever splits the candidate
+  header and the rows below it into the same number of cells (at least
+  two); a tie goes in that order.
+- **The header row:** the first row, within the map's 1000, whose cells
+  are mostly not numbers while the rows below have its cell count and
+  are mostly numbers. The rows above are a preamble: `header_row` says
+  so and the flag is set.
+- **The decimal comma:** only with a `;` or tab delimiter, when number
+  cells hold a comma and none a point.
+- **The time column:** a header named like time (`time`, `timestamp`,
+  `t`, `elapsed`, `time stamp`, any case, before its unit), else the
+  first column when its cells only rise. Its unit:
+  - from the name's unit: `(s)`, `[s]`, `sec`; `(ms)`, `[ms]`; `(us)`,
+    `[us]` and the micro sign's spelling;
+  - from the cells: ISO 8601 times give `iso8601`, which needs no unit;
+  - otherwise **unknown**: the map has no `unit`, the flag is clear, and
+    the import refuses it until one is given (section 3). A number
+    column of times without a unit could be seconds, ms or us, and a
+    wrong pick scales the whole log by 1000 without a word, so it is
+    never guessed. A time of day (`hh:mm:ss`) needs a date and a UTC
+    offset the file doesn't hold: unknown too.
+  - `start` is never guessed: a made-up start lines a recording up
+    wrong (the appendix's rule).
+- **Each other column** becomes a signal, in the header's order:
+  - `name`: the header text before a trailing `(unit)` or `[unit]`,
+    trimmed; cut to 31 bytes on a character boundary, and a name that
+    then repeats another gets ` 2`, ` 3`; each cut or rename is a note.
+  - `unit`: the bracketed text, up to 15 bytes; a longer one is
+    dropped with a note.
+  - `kind`: `number` when every cell in the sample that isn't empty or
+    a placeholder reads as a number, else `text`.
+  - `decimals`: the most fraction digits seen, at most 3.
+  - `rank` the map's order, `group` 0, as the map's defaults.
+- **Placeholders** (`missing`): any of `---`, `--`, `NaN`, `nan`, `N/A`,
+  `n/a` seen in a column that is otherwise numbers.
+- **Left out, each with a note:** a header cell that is empty (a
+  trailing delimiter gives one), a column empty in every sampled row,
+  and a column the map would refuse (a name starting as a spreadsheet
+  formula). The preview can put each back.
+
+The guess is checked by `parse_map` before it is returned: a guess core
+would refuse is never handed out.
+
+### 3. The front ends
+
+- **The app:** the Recordings page's Import panel shows the guess
+  before anything is imported: the time column and its unit (a choice
+  of s, ms and us when unknown, Import waiting on it), each column with
+  a checkbox, its name, unit and kind, and the first rows. An edit
+  changes the map the import gets. **Save as map** writes it to the
+  settings folder's `maps/`, offered next time; **Column map...** still
+  picks a file, which skips the guess.
+- **`havne-cli import csv <file> <folder>`:** without `--map` it
+  guesses; `--time-unit s|ms|us` gives the unit when the header
+  doesn't, and with none known it refuses, naming the option.
+  `--print-map` prints the guessed map and imports nothing, so it can
+  be saved and edited. `--map` behaves as today.
+- **Python:** `havne.guess_csv_map(path)` returns the map as a dict
+  (with the report's notes); `havne.import_csv(path, folder,
+  column_map=None, time_unit=None)` guesses when no map is given.
+
+### 4. Tests
+
+- One case per rule above, each refusal and note in its words, in
+  `CsvImportTest`'s style; a guess that `parse_map` would refuse never
+  returned.
+- Round trips: synthetic files shaped like common loggers (a preamble,
+  `;` with decimal commas, ISO times, a trailing delimiter, an always
+  empty column), each guessed, imported and viewed; Havne's wide CSV
+  once ADR-0056's export exists.
+- `fuzz_csv_import` grows to run the guess, and the import with each
+  guess it makes.
+- The app's preview at 384 px, the CLI's `--print-map` and refusal,
+  Python's two calls.
+
+### 5. Steps
+
+1. Core's call and its tests, the CLI and Python (one branch).
+2. The preview on the Import panel (after step 1).
