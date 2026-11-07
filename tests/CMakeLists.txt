@@ -813,6 +813,65 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
+# The shared core (HAVNE_SHARED_CORE, ADR-0053's appendix "the shared
+# core as built"): test_c_abi.c again, linked against the library rather
+# than the archive, so each call resolves through its export table
+# (internal.h's hooks left out: ECUIO_C_ABI_SHARED); and ExportsTest
+# (scripts/exports_check.py): the library exports the public headers'
+# functions and nothing else, read with the platform's own tool, and
+# everything a header hands out has its release there. Absent, not
+# failing, where the option is off (Android, iOS, a fuzzing tree).
+if(HAVNE_SHARED_CORE)
+    add_executable(test_c_abi_shared test_c_abi.c)
+    set_target_properties(test_c_abi_shared PROPERTIES C_EXTENSIONS OFF)
+    app_enable_warnings(test_c_abi_shared)
+    if(NOT MSVC)
+        target_compile_options(test_c_abi_shared PRIVATE -pedantic)
+    endif()
+    target_compile_definitions(test_c_abi_shared PRIVATE ECUIO_C_ABI_SHARED=1)
+    target_include_directories(test_c_abi_shared PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+    target_link_libraries(test_c_abi_shared PRIVATE ecuio)
+    if(WIN32)
+        # ecuio.dll beside the test: Windows finds a DLL in the exe's folder
+        add_custom_command(TARGET test_c_abi_shared POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:test_c_abi_shared> $<TARGET_FILE_DIR:test_c_abi_shared>
+            COMMAND_EXPAND_LISTS)
+    endif()
+    add_test(NAME c_abi_shared COMMAND test_c_abi_shared)
+    set_tests_properties(c_abi_shared PROPERTIES LABELS "abi")
+
+    if(MSVC)
+        # dumpbin ships beside link.exe, in the toolset's own folder (the
+        # x86 one in a Win32 tree)
+        get_filename_component(_app_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+        find_program(APP_DUMPBIN dumpbin HINTS "${_app_linker_dir}" NO_DEFAULT_PATH)
+        set(_app_exports_format dumpbin)
+        set(_app_exports_tool "${APP_DUMPBIN}")
+    elseif(APPLE)
+        set(_app_exports_format macho)
+        set(_app_exports_tool "${CMAKE_NM}")
+    else()
+        set(_app_exports_format elf)
+        set(_app_exports_tool "${CMAKE_NM}")
+    endif()
+    if(NOT _app_exports_tool)
+        message(FATAL_ERROR "HAVNE_SHARED_CORE: no ${_app_exports_format} tool to read the "
+            "shared core's exports with (dumpbin beside link.exe, or CMAKE_NM)")
+    endif()
+    add_test(NAME ExportsTest.TheLibraryExportsTheDeclarations
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/exports_check.py exports
+            $<TARGET_FILE:ecuio> ${_app_exports_format} ${_app_exports_tool}
+            ${ECUIO_PUBLIC_HEADER_PATHS})
+    add_test(NAME ExportsTest.EachAllocationHasItsRelease
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/exports_check.py releasers
+            ${ECUIO_PUBLIC_HEADER_PATHS})
+    add_test(NAME ExportsTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/exports_check.py selftest)
+    set_tests_properties(ExportsTest.TheLibraryExportsTheDeclarations
+        ExportsTest.EachAllocationHasItsRelease ExportsTest.SelfTest PROPERTIES LABELS "abi")
+endif()
+
 # Core's USDT probes (ADR-0034 section 4) in each binary that links core and
 # ships or runs here: their ELF notes, which is all a tracer reads.
 # Only where core was built with them (Linux with <sys/sdt.h>).

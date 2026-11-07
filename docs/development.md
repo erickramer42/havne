@@ -308,9 +308,13 @@ when the env-gated routing case skips in the cross-arch step, since
 that means the x86 paths are wrong. The cross-arch line names each
 case that skipped: any other skip is reported, not failed (the
 surrogate's session-log case skips while another checkout's run holds
-its fixed log name). The trees must already be configured. Off
-Windows, or without `build-win32`, the Win32 and cross-arch steps are
-left out.
+its fixed log name). Where `build-win32` has the shared core
+(`HAVNE_SHARED_CORE`, on by default), the Win32 step also builds the
+x86 `ecuio.dll` and `test_c_abi_shared`, and the cross-arch step runs
+`c_abi_shared` and `ExportsTest.TheLibraryExportsTheDeclarations` in
+`build-win32` (its line adds `x86 core 2/2`), since CI never builds the
+x86 DLL. The trees must already be configured. Off Windows, or without
+`build-win32`, the Win32 and cross-arch steps are left out.
 
 For any change touching the surrogate, the fakes, or the J2534
 client/transport: in this order:
@@ -825,13 +829,16 @@ optional Quick plugins this app never uses.
 the newest `vX.Y.Z` tag, or a tag, commit or source folder named as
 its argument. It runs on Linux, with libabigail (`abigail-tools` on
 Ubuntu): each tree's core-only build has its static archive linked
-into a shared object that exports only the public `ecuio_` names, as an
-FFI consumer would load it (none that `internal.h` declares: core
-uses those across its own files and never installs them); `abidw`
+into a shared object that exports what the shared core `ecuio` exports
+([ADR-0053](adr/0053-python-bindings.md)'s appendix), as an FFI
+consumer would load it: the functions the tree's public headers
+declare, listed by `scripts/ecuio_exports.py` (none that `internal.h`
+declares: core uses those across its own files and never installs
+them); `abidw`
 dumps the functions and the types the public headers declare, and
 `abidiff` compares the two. Before the builds, `scripts/api_check.py`
 compares the installed headers themselves (core/CMakeLists.txt's
-install list), as declarations: comments and formatting never count.
+`ECUIO_PUBLIC_HEADERS`), as declarations: comments and formatting never count.
 Output goes to `build-abi/` (`report.txt`, and `api.txt` for the
 headers); either half failing fails the check.
 

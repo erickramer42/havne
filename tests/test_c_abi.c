@@ -13,6 +13,13 @@
  * transport seam, the vendor types, the surrogate's wire), so they're
  * compiled here too and can't take a C++-only construct unnoticed;
  * j2534_ptypes.h comes in through j2534_surrogate.h.
+ *
+ * c_abi_shared builds this file again against the shared core
+ * (HAVNE_SHARED_CORE, ADR-0053), which exports the public headers'
+ * functions and nothing else: there each call resolves through the
+ * library's export table, and the calls it never exports (internal.h's
+ * test hooks, the surrogate client's log path) are left out
+ * (ECUIO_C_ABI_SHARED, INTERNAL()).
  */
 
 #include "ecuio/obdb.h"
@@ -31,6 +38,7 @@
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 #include "ecuio/core.h"
+#include "ecuio/version.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -38,6 +46,14 @@
 
 /* Negative-array-size idiom: valid in ALL C standards including
  * pedantic C89, complementing the header's _Static_assert (C11+). */
+/* An internal hook's call, or the value it gives in the archive's build
+ * where the shared core has no such export */
+#ifdef ECUIO_C_ABI_SHARED
+#define INTERNAL(call, value) (value)
+#else
+#define INTERNAL(call, value) (call)
+#endif
+
 typedef char abi_frame_size_check[(sizeof(ecuio_frame_t) == 4120) ? 1 : -1];
 typedef char abi_data_offset_check[(offsetof(ecuio_frame_t, data) == 16) ? 1 : -1];
 typedef char abi_replay_faults_size_check[(sizeof(ecuio_replay_faults_t) == 64) ? 1 : -1];
@@ -191,6 +207,7 @@ int main(void)
     ecuio_import_report_t import_report;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
+    uint32_t version_major = 0, version_minor = 0, version_patch = 0;
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -201,6 +218,15 @@ int main(void)
      * regressions at link time. */
     printf("%s %s\n", ecuio_version_string(),
            ecuio_status_string(ECUIO_ERR_SESSION_CLOSED));
+    if (ecuio_version(&version_major, &version_minor, &version_patch) !=
+            ECUIO_OK ||
+        version_major != ECUIO_VERSION_MAJOR ||
+        version_minor != ECUIO_VERSION_MINOR ||
+        version_patch != ECUIO_VERSION_PATCH ||
+        ecuio_version(NULL, &version_minor, &version_patch) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
     printf("detail '%s'\n", ecuio_last_error_detail());
     printf("clock %llu slept %llu\n", (unsigned long long)ecuio_clock_us(),
            (unsigned long long)ecuio_clock_slept_us());
@@ -347,7 +373,7 @@ int main(void)
         ecuio_recorder_get_folder(NULL, NULL, 0, &folder_len) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_close(NULL, NULL) != ECUIO_OK ||
-        ecuio_recorder_test_syncs(NULL) != 0) {
+        INTERNAL(ecuio_recorder_test_syncs(NULL), 0) != 0) {
         return 1;
     }
     /* The reader (ADR-0049 section 5): its layout and its NULL refusals */
@@ -386,7 +412,7 @@ int main(void)
                                 &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_find(NULL, &reading_find, 0, &reading_at) !=
             ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_recording_test_table_bytes(NULL) != 0) {
+        INTERNAL(ecuio_recording_test_table_bytes(NULL), 0) != 0) {
         return 1;
     }
     ecuio_recording_close(NULL);
@@ -446,7 +472,7 @@ int main(void)
     ecuio_stream_received(NULL, NULL, 0);
     ecuio_stream_failed(NULL, NULL);
     ecuio_j2534_free_devices(NULL);
-    printf("log '%s'\n", ecuio_j2534_sur_log_path(NULL));
+    printf("log '%s'\n", INTERNAL(ecuio_j2534_sur_log_path(NULL), ""));
     (void)frame;
     return 0;
 }

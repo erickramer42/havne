@@ -169,6 +169,11 @@ typedef enum {
 ecuio_status_t ecuio_init(void);
 void ecuio_shutdown(void);
 const char* ecuio_version_string(void);
+/* The same version as numbers, version.h's ECUIO_VERSION_MAJOR, _MINOR
+ * and _PATCH as the library was built, for a program that loads core by
+ * path and checks which one it got (ADR-0053). ECUIO_ERR_NULL_ARGUMENT,
+ * writing nothing, when any of the three is NULL. */
+ecuio_status_t ecuio_version(uint32_t* major, uint32_t* minor, uint32_t* patch);
 const char* ecuio_status_string(ecuio_status_t status);
 
 /* The host clock session time runs on (ADR-0033): microseconds that keep
