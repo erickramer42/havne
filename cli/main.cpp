@@ -2,7 +2,8 @@
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
 //          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
-//          CliViewTest, CliInfoTest, CliSignalFileTest (test_cli); BENCH
+//          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest
+//          (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
 
@@ -10,6 +11,7 @@
 #include "clear_run.h"
 #include "diagnostics_line.h"
 #include "elm327_listener.h"
+#include "health_lines.h"
 #include "info_lines.h"
 #include "timing_line.h"
 #include "transfer_lines.h"
@@ -1825,6 +1827,12 @@ void usage(FILE* to)
         "       havne-cli export <recording> <out> --format folder|csv|pcapng\n"
         "                      [--from S] [--to S] [--raw]\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
+        "       havne-cli health <uri> <out> --format json|text "
+        "[--units metric|imperial]\n"
+        "                      [--seconds S] [--signals <file> | --plugin "
+        "<pkg>]\n"
+        "       havne-cli health <recording> <out> --format json|text\n"
+        "                      [--units metric|imperial] [--from S] [--to S]\n"
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
@@ -1922,6 +1930,19 @@ void usage(FILE* to)
         "         identification replies and text signals left out, then\n"
         "         each file checked for the car's identity; a check that\n"
         "         finds any writes nothing.\n"
+        "health   writes a car's health as one scrubbed file, JSON or a\n"
+        "         text for a person: the vehicle from its VIN (model year,\n"
+        "         make, check digit; never the VIN), the inspection's\n"
+        "         verdict, each ECU's readiness, trouble codes with their\n"
+        "         titles, freeze frame, values since the codes were "
+        "cleared\n"
+        "         and identification by name only, then the profile's\n"
+        "         ranked values. From a session it reads only (Services 01,\n"
+        "         02, 03, 07, 09 and 0A, never a clear), parked or driving,\n"
+        "         until every report it asks is in and the values have\n"
+        "         come, or --seconds (30); from a recording, its replies\n"
+        "         and values from --from to --to seconds. The file is\n"
+        "         checked for the car's identity before it's written.\n"
         "import   reads a candump -L log (one bus: --interface names it\n"
         "         when the log has several) into a recording's folder that\n"
         "         view --frames, info and replay:// read.\n"
@@ -2539,6 +2560,185 @@ int run_clear_command(const char* uri, uint32_t flags)
         return kExitFailed;
     }
     return std::strcmp(r.reason, "cleared") == 0 ? kExitOk : kExitFailed;
+}
+
+// ---- health (ADR-0054's appendix "the health report as built") ----
+
+// Microseconds since 1970 UTC: the report's time, the CLI's to give
+uint64_t utc_now_us()
+{
+    const auto since = std::chrono::system_clock::now().time_since_epoch();
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(since).count());
+}
+
+// A live report's values: each def's newest and when it came
+// (ecuio_clock_us, 0 none), a slot for every def ID so the worker's
+// callback allocates nothing
+struct HealthValues {
+    std::mutex mutex;
+    std::vector<double> value;
+    std::vector<uint64_t> at_us;
+};
+
+void on_health_values(const ecuio_value_batch_t* batch, void* user_data)
+{
+    auto* h = static_cast<HealthValues*>(user_data);
+    const uint64_t now = ecuio_clock_us();
+    std::lock_guard<std::mutex> lock(h->mutex);
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        if (v.kind == ECUIO_VALUE_TEXT || v.kind == ECUIO_VALUE_HEX) {
+            continue;
+        }
+        h->value[v.signal_id] = v.value;
+        h->at_us[v.signal_id] = now != 0 ? now : 1;
+    }
+}
+
+// The report's line, or a failed check's class then the error line
+int write_health_result(Output& out, const cli::HealthArgs& a,
+                        ecuio_status_t rc, const ecuio_health_report_t& r,
+                        bool settled)
+{
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    if (rc != ECUIO_OK) {
+        if (r.failed_class != 0) {
+            cli::health_failed_line(l, r);
+            write_line(out, l);
+        }
+        write_error(out, rc);
+        out.flush();
+        return out.ok() ? kExitConnect : kExitFailed;
+    }
+    cli::health_line(l, a, r, settled);
+    write_line(out, l);
+    out.flush();
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A recording's report: core reads the folder, the CLI gives the time
+int run_health_recording(cli::HealthArgs& a)
+{
+    Output out;
+    write_start(out);
+    a.options.utc_us = utc_now_us();
+    a.options.latest_model_year = latest_model_year();
+    ecuio_health_report_t r{};
+    const ecuio_status_t rc = ecuio_health_export(&a.options, &r);
+    return write_health_result(out, a, rc, r, true);
+}
+
+// A live session's report: start, session, then once every asked report
+// has settled (cli::reports_settled) and no shown signal has gained its
+// first value for kHealthQuietUs, or at --seconds or Ctrl+C, the report
+// with what's held, each value aged from its arrival. Reads only: core's
+// diagnostics and identification ask 01, 02, 03, 07, 09 and 0A, never 04.
+int run_health_session(cli::HealthArgs& a, const char* uri)
+{
+    Output out;
+    write_start(out);
+    auto values =
+        std::unique_ptr<HealthValues>(new (std::nothrow) HealthValues);
+    try {
+        if (!values) {
+            throw std::bad_alloc();
+        }
+        values->value.assign(65536, 0.0);
+        values->at_us.assign(65536, 0);
+    } catch (const std::bad_alloc&) {
+        std::fprintf(stderr, "havne-cli: out of memory for the values\n");
+        return kExitFailed;
+    }
+    ecuio_session_t* session = nullptr;
+    std::string detail;
+    ecuio_status_t st = create_within(out, uri, &session, &detail);
+    if (st != ECUIO_OK) {
+        write_error(out, st, detail.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    ecuio_session_get_info(session, &info);
+    write_session(out, info);
+    out.flush();
+    ecuio_register_values_callback(session, on_health_values, values.get());
+    install_handlers();
+    st = ecuio_session_start(session);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        ecuio_session_destroy(session);
+        return kExitConnect;
+    }
+    const uint32_t channels =
+        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? info.channel_count
+            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    const auto settled_now = [&]() {
+        bool all = true;
+        for (uint32_t c = 0; c < channels; ++c) {
+            ecuio_channel_diagnostics_t d{};
+            ecuio_channel_identity_t id{};
+            (void)ecuio_session_get_channel_diagnostics(session, c, &d);
+            (void)ecuio_session_get_channel_identity(session, c, &id);
+            all = all && cli::reports_settled(d, id);
+        }
+        return all;
+    };
+    const auto shown_with_value = [&]() {
+        uint32_t n = 0;
+        std::lock_guard<std::mutex> lock(values->mutex);
+        for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
+            if (cli::shown_def(set->defs[i]) &&
+                values->at_us[set->defs[i].id] != 0) {
+                ++n;
+            }
+        }
+        return n;
+    };
+    const uint64_t deadline = ecuio_clock_us() + a.seconds * 1000000u;
+    cli::ValuesQuiet quiet;
+    for (;;) {
+        const uint64_t now = ecuio_clock_us();
+        if (settled_now() &&
+            quiet.quiet(shown_with_value(), now, cli::kHealthQuietUs)) {
+            break;
+        }
+        if (now >= deadline || g_interrupted.load()) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    const bool settled = settled_now();
+    std::vector<ecuio_health_value_t> held;
+    {
+        const uint64_t now = ecuio_clock_us();
+        std::lock_guard<std::mutex> lock(values->mutex);
+        for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
+            const uint16_t id = set->defs[i].id;
+            if (values->at_us[id] != 0) {
+                ecuio_health_value_t v{};
+                v.def_id = id;
+                v.value = values->value[id];
+                v.age_us =
+                    now > values->at_us[id] ? now - values->at_us[id] : 0;
+                held.push_back(v);
+            }
+        }
+    }
+    a.options.session = session;
+    a.options.values = held.empty() ? nullptr : held.data();
+    a.options.value_count = static_cast<uint32_t>(held.size());
+    a.options.utc_us = utc_now_us();
+    a.options.latest_model_year = latest_model_year();
+    ecuio_health_report_t r{};
+    const ecuio_status_t rc = ecuio_health_export(&a.options, &r);
+    ecuio_session_destroy(session);
+    return write_health_result(out, a, rc, r, settled);
 }
 
 // The simulated ECU as an ELM327 adapter on a TCP port (ADR-0055), on
@@ -3795,6 +3995,41 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
         return run_info(info);
+    }
+    if (command == "health") {
+        cli::HealthArgs h;
+        std::string why;
+        if (!cli::parse_health(argc, argv, h, &why)) {
+            std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (!h.live) {
+            return run_health_recording(h);
+        }
+        const char* uri = h.source;
+        std::string opened;
+        if (h.plugin != nullptr) {
+            const int rc = use_plugin(h.plugin, uri);
+            if (rc >= 0) {
+                return rc;
+            }
+        } else if (h.signals != nullptr) {
+            const int rc = use_signal_file(h.signals, uri, &opened);
+            if (rc >= 0) {
+                return rc;
+            }
+            uri = opened.c_str();
+        } else {
+            const int rc = use_recording_signals(uri, &opened);
+            if (rc >= 0) {
+                return rc;
+            }
+            if (!opened.empty()) {
+                uri = opened.c_str();
+            }
+        }
+        return run_health_session(h, uri);
     }
     if (command == "export") {
         cli::ExportArgs ex;
