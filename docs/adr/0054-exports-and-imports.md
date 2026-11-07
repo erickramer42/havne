@@ -367,6 +367,8 @@ by the same rules instead, through one more append-only call:
 writes each frame as it comes, unscrubbed, and keeps no ring to export.
 `havne-cli export --format csv` over a recording is still to come:
 `ECUIO_EXPORT_CSV` answers `ECUIO_ERR_NOT_IMPLEMENTED` until it's built.
+(Note of 2026-11-06: built; see the appendix "the CSV export as
+built".)
 
 **Tests:** `ScrubFramesTest` (test_core: an identification reply whole
 and as it crossed the bus, a torn segment on a reply ID, a text def's
@@ -376,3 +378,97 @@ reply, the refusals and a cancel), `BridgeTest.FrameCsv*` and
 `.ExportFrames*` (test_bridge: the file byte for byte, the filter, a
 noted set after its file is freed, a failed check leaving the file as
 it was), `QmlTest.log`'s Export CSV case, and `test_c_abi`.
+
+## Appendix: the CSV export as built (2026-11-06)
+
+`ECUIO_EXPORT_CSV` writes a recording's values, `havne-cli export
+<recording> <out> --format csv [--from S] [--to S] [--raw]` its front
+end. This appendix's note amends the first appendix's "until they're
+built" for the CSV export; the folder export and the CSV import still
+answer `ECUIO_ERR_NOT_IMPLEMENTED`.
+
+**Values, not frames.** The frames already have their export, pcapng,
+which the tools that read frames open. Section 1's context names this
+one "CSV of signals over a time range", for a spreadsheet, pandas or R,
+and one file with two kinds of row would serve neither. The Log page's
+CSV is frames because the page holds no values (the appendix "frames in
+memory").
+
+**One row a sample, in `signals.csv`'s order:**
+
+```
+# Havne 0.6.0, a scrubbed export (ADR-0054): 4 values of 3 signals, 0.001000 s to 0.003000 s; left out: 0 values of identification signals, 0 of text signals
+time_s,signal,unit,value
+0.001000,RPM,rpm,1726
+```
+
+- **The comment line** names Havne's version, scrubbed or raw, the
+  values written, the signals they're of, the span, and each class's
+  count. A reader skips it: pandas with `skiprows=1`, not `comment="#"`,
+  which would cut a value or name holding a `#`.
+- **`time_s`** is the row's `host_us` in seconds, to the microsecond:
+  the clock the viewer, `havne-cli view` and `info` and the pcapng
+  export's range use. `from_us` and `to_us` take it as the pcapng export
+  does.
+- **The long form.** Each row is a reading the ECU sent, with nothing
+  filled in. One column per signal would leave most cells blank under
+  `obd2`, where each PID comes in a frame of its own, and pairs of
+  columns, ADR-0049 section 8's sheet layout, are ragged in a CSV. pandas
+  and R take the long form as it is.
+- **RFC 4180 quotes** a name, unit or value holding a comma, a quote or
+  a line end, and nothing else.
+- **Markers aren't written.** A label is the user's own text, which
+  section 1's table doesn't classify, so leaving it out fails closed.
+  The viewer's Export can take them up with the check over them.
+
+**The classes, by the def first.** The recording's set is found as the
+pcapng export finds it (its `signals.json`, else uds-generic's from the
+URI's `did=` list, else its profile by name), and each `signals.csv`
+signal is matched to its def by name.
+
+- A text or hex signal's values are left out, counted as text values:
+  by its def, by the header's `signal` line declaring it text, or by a
+  value that isn't a number (`parse_number` takes it whole, or it isn't
+  one). Its name and unit stay out with them, since it has no rows.
+- A signal whose def is keyed as an identification reply (49 xx, or 62
+  with a DID in F180-F1FF) is left out even when its values are
+  numbers, counted as identification: the pcapng export leaves those
+  frames out, so the CSV doesn't let their decoded values through. The
+  def's mux key goes through the same `scrub::identification` the frames
+  do, so the two can't drift.
+- Numbers are written as recorded.
+
+**Then checked.** A recording with frames gets the pcapng export's
+first pass over `frames.csv` for the identification replies' values;
+`signals.csv`'s text values join them as section 1 says. The written
+bytes then go through the same file check, and a match fails the export
+with its class, leaving no file. A recording with no `frames.csv`
+(values alone) is exported from `signals.csv` with the check over the
+text values and the VIN shape; one with no `signals.csv` is refused.
+
+**Spreadsheet formulas, with no escape** (ADR-0049 section 8). A name or
+unit that starts with `=`, `+`, `-`, `@`, a tab or a carriage return
+fails the export, naming the signal, and so does a text value starting
+so in a raw export. A number is exempt: one `parse_number` takes whole,
+such as `-12.5`, starts with `-` and is read as a number. Core's own
+defs can't carry such a name or unit (the validator refuses one), but a
+recording someone sends can.
+
+**The report** gains `values` and `signal_count` from its reserved room (not `signals`, a Qt macro that a Qt program including the header would expand)
+(`reserved[4]` is `reserved[2]`; the size, 120 bytes, and
+`failed_class` at 80 stay; `values` at 88), both static-asserted and in
+`test_c_abi`. For CSV, `frames` and `made_up` are 0 and `left_out`
+counts values. `havne-cli`'s `exported` line adds `values` and
+`signals` for CSV only, so the pcapng line is as it was.
+
+**Tests:** `CsvExportTest` (test_core: the file byte for byte, a
+negative number, a quoted name and no `frames.csv`; a range and an
+empty one; a text DID, an identification-keyed number DID, a text value
+and a header-declared text signal left out, raw keeping them; a unit
+echoing a frame's calibration ID and a VIN-shaped name failing it; a
+formula's start in a name, a unit and a raw text value failing it, the
+scrubbed text value left out instead; no `signals.csv` and a bad row),
+`CliTransferTest` (the `exported` line), `CliTransferRunTest.csv`
+(`tests/golden/recording/replay-obd2`, core's recording of the replay
+fixture, exported and read back by Python's `csv` module row for row,
+twice to the same bytes, and a range).

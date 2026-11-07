@@ -441,6 +441,7 @@ int main(void)
     import_options.format = ECUIO_IMPORT_CANDUMP;
     if (sizeof(ecuio_export_report_t) != 120 ||
         offsetof(ecuio_export_report_t, failed_class) != 80 ||
+        offsetof(ecuio_export_report_t, values) != 88 ||
         offsetof(ecuio_export_options_t, folder_utf8) != 24 ||
         sizeof(ecuio_import_report_t) != 80 ||
         offsetof(ecuio_import_options_t, in_path_utf8) != 8 ||

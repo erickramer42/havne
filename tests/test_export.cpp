@@ -1,11 +1,13 @@
 // File/layer: tests/test_export.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: ScrubTest, ExportTest, ScrubFramesTest (test_core)
+// Testing: UNIT: ScrubTest, ExportTest, CsvExportTest, ScrubFramesTest
+//          (test_core)
 //
 // scrub.h's classifier and check, and ecuio_export's pcapng: each export
 // read back by a pcapng parser of the test's own, its frames' bytes and
 // times, the re-segmented frames reassembled by core's ISO-TP to the
 // stored message, what a scrubbed export leaves out, and both checks
-// failing an export that would carry an identity value; ecuio_scrub_frames
+// failing an export that would carry an identity value; the CSV export's
+// values read back as text, byte for byte; ecuio_scrub_frames
 // over frames in memory by the same rules. Each export case writes into a
 // folder of its own under TEMP/TMPDIR, removed at the end.
 
@@ -834,8 +836,211 @@ TEST(ExportTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
     a.format = ECUIO_EXPORT_FOLDER;
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
-    a.format = ECUIO_EXPORT_CSV;
-    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
+    a.format = ECUIO_EXPORT_CSV; /* built: the folder isn't there */
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_LOAD_FAILED);
+}
+
+// ---- the CSV export: signals.csv's values as samples ----
+
+struct CsvExported {
+    ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
+    ecuio_export_report_t report{};
+    std::string detail;
+    std::string bytes;
+    CsvExported(const Folder& f, uint32_t flags = 0, uint64_t from_us = 0,
+                uint64_t to_us = 0, const std::string& name = "out.csv")
+    {
+        const std::string folder = f.utf8("rec");
+        const std::string out = f.utf8(name);
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_CSV;
+        o.flags = flags;
+        o.from_us = from_us;
+        o.to_us = to_us;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        rc = ecuio_export(&o, &report);
+        detail = ecuio_last_error_detail();
+        if (fs::exists(f.path / name)) {
+            bytes = read_file(f.path / name);
+        }
+    }
+};
+
+std::string csv_head(const char* kind, const std::string& counts,
+                     uint64_t ident, uint64_t text)
+{
+    char b[512];
+    std::snprintf(b, sizeof b,
+                  "# Havne %s, %s (ADR-0054): %s; left out: %llu values of "
+                  "identification signals, %llu of text signals\n"
+                  "time_s,signal,unit,value\n",
+                  ecuio_version_string(), kind, counts.c_str(),
+                  static_cast<unsigned long long>(ident),
+                  static_cast<unsigned long long>(text));
+    return b;
+}
+
+/* Each value a row, in host_us order, as recorded: a negative number
+ * (which starts with '-' and is no formula), a name a comma makes CSV
+ * quote, and no frames.csv at all (its values alone are a recording) */
+TEST(CsvExportTest, EachValueIsARowAsRecorded)
+{
+    Folder f;
+    recording(f, "",
+              "1000,RPM,1726,rpm\n2000,Coolant,-12.5,C\n"
+              "2500,\"Trim, bank 1\",3.1,%\n3000,RPM,1730,rpm\n");
+    fs::remove(f.path / "rec" / "frames.csv");
+    CsvExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes,
+              csv_head("a scrubbed export",
+                       "4 values of 3 signals, 0.001000 s to 0.003000 s", 0,
+                       0) +
+                  "0.001000,RPM,rpm,1726\n"
+                  "0.002000,Coolant,C,-12.5\n"
+                  "0.002500,\"Trim, bank 1\",%,3.1\n"
+                  "0.003000,RPM,rpm,1730\n");
+    EXPECT_EQ(e.report.values, 4u);
+    EXPECT_EQ(e.report.signal_count, 3u);
+    EXPECT_EQ(e.report.frames, 0u);
+    EXPECT_EQ(e.report.made_up, 0u);
+
+    /* A range takes its values alone, and says where they run */
+    CsvExported mid(f, 0, 1500, 2600, "mid.csv");
+    ASSERT_EQ(mid.rc, ECUIO_OK) << mid.detail;
+    EXPECT_EQ(mid.bytes,
+              csv_head("a scrubbed export",
+                       "2 values of 2 signals, 0.002000 s to 0.002500 s", 0,
+                       0) +
+                  "0.002000,Coolant,C,-12.5\n"
+                  "0.002500,\"Trim, bank 1\",%,3.1\n");
+    CsvExported none(f, 0, 9000, 0, "none.csv");
+    ASSERT_EQ(none.rc, ECUIO_OK) << none.detail;
+    EXPECT_EQ(none.bytes,
+              csv_head("a scrubbed export", "0 values of 0 signals", 0, 0));
+}
+
+/* By the def first: a text DID's values and a number DID keyed in the
+ * identification block (62 F18C) are left out, as the pcapng leaves
+ * their frames out; then by kind: a value that isn't a number, and a
+ * signal the header declares text even where its value reads as one.
+ * Raw keeps every value. */
+TEST(CsvExportTest, TextAndIdentificationSignalsAreLeftOut)
+{
+    const std::string header =
+        "uri  elm327://COM3?profile=uds-generic&did=D802:text,D803:u16,"
+        "F18C:u16\n"
+        "profile  uds-generic\n"
+        "signal  Code,text,,0,0\n";
+    Folder f;
+    recording(f, "",
+              "1000,DID D802,ECM-HavneSim,\n2000,DID D803,4660,\n"
+              "3000,DID F18C,424242,\n4000,DID D803,4661,\n"
+              "5000,Note,hello there,\n6000,Code,123456,\n",
+              header);
+    CsvExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes,
+              csv_head("a scrubbed export",
+                       "2 values of 1 signals, 0.002000 s to 0.004000 s", 1,
+                       3) +
+                  "0.002000,DID D803,,4660\n"
+                  "0.004000,DID D803,,4661\n");
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 1u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 3u);
+
+    CsvExported raw(f, ECUIO_EXPORT_RAW, 0, 0, "raw.csv");
+    ASSERT_EQ(raw.rc, ECUIO_OK) << raw.detail;
+    EXPECT_EQ(raw.report.values, 6u);
+    EXPECT_EQ(raw.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 0u);
+    EXPECT_NE(raw.bytes.find("a raw export, not scrubbed"), std::string::npos);
+    EXPECT_NE(raw.bytes.find("0.005000,Note,,hello there\n"),
+              std::string::npos);
+}
+
+/* The check over the written bytes: a unit echoing an identification
+ * reply's value from frames.csv, a name shaped as a VIN */
+TEST(CsvExportTest, AnIdentityValueInTheFileFailsTheExport)
+{
+    {
+        SCOPED_TRACE("a calibration ID from the frames, as a unit");
+        Folder f;
+        recording(f,
+                  row(1000, 0x7E8, kWhole,
+                      text_bytes({0x49, 0x04, 0x01}, "FAKECAL-01")),
+                  "2000,RPM,1726,FAKECAL-01\n");
+        CsvExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class,
+                  ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+        EXPECT_EQ(e.detail,
+                  "the check found an identification reply's value in the "
+                  "export's file: nothing was written");
+        expect_no_file(f, "out.csv");
+    }
+    {
+        SCOPED_TRACE("a VIN-shaped name");
+        Folder f;
+        recording(f, "", std::string("2000,") + kVin + ",1,\n");
+        CsvExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
+        EXPECT_EQ(e.detail.find(kVin), std::string::npos);
+        expect_no_file(f, "out.csv");
+    }
+}
+
+/* A spreadsheet runs a cell that starts with = + - @, a tab or a CR: a
+ * name, a unit or a raw text value starting so fails the export (no
+ * escape, ADR-0049 section 8); a number never does */
+TEST(CsvExportTest, AFormulasStartFailsTheExport)
+{
+    const auto refused = [](const std::string& signals, uint32_t flags,
+                            const char* expected) {
+        Folder f;
+        recording(f, "", signals);
+        CsvExported e(f, flags);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED) << signals;
+        EXPECT_EQ(e.detail, expected);
+        expect_no_file(f, "out.csv");
+    };
+    refused("1000,Boost,3,-x\n", 0,
+            "the signal 'Boost''s unit starts as a spreadsheet formula does "
+            "(=, +, -, @, a tab or a carriage return): nothing was written");
+    refused("1000,=SUM(A1),3,kPa\n", 0,
+            "the signal '=SUM(A1)''s name starts as a spreadsheet formula "
+            "does (=, +, -, @, a tab or a carriage return): nothing was "
+            "written");
+    refused("1000,Note,@cmd,\n", ECUIO_EXPORT_RAW,
+            "the signal 'Note''s text value starts as a spreadsheet formula "
+            "does (=, +, -, @, a tab or a carriage return): nothing was "
+            "written");
+
+    /* Scrubbed, that text value is left out, so nothing fails */
+    Folder f;
+    recording(f, "", "1000,Note,@cmd,\n2000,Boost,-3,kPa\n");
+    CsvExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.report.values, 1u);
+    EXPECT_NE(e.bytes.find("0.002000,Boost,kPa,-3\n"), std::string::npos);
+}
+
+TEST(CsvExportTest, ARecordingWithoutValuesOrWithABadRowWritesNothing)
+{
+    Folder f;
+    recording(f, row(1000, 0x7E8, 0, {0x02, 0x41, 0x0C}));
+    CsvExported e(f);
+    EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(e.detail, "the folder has no signals.csv");
+    expect_no_file(f, "out.csv");
+
+    Folder g;
+    recording(g, "", "1000,RPM,1726,rpm\nnot a row\n");
+    CsvExported bad(g);
+    EXPECT_EQ(bad.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(bad.detail.rfind("signals.csv line 3: ", 0), 0u) << bad.detail;
+    expect_no_file(g, "out.csv");
 }
 
 // ---- frames in memory (ecuio_scrub_frames) ----

@@ -1,6 +1,6 @@
 // File/layer: core/src/export.cpp | C++17, Qt-free; a recording out to
 //             another tool's format (ADR-0054 sections 1 and 3)
-// Testing: UNIT: ExportTest (test_core)
+// Testing: UNIT: ExportTest, CsvExportTest (test_core)
 //
 // ecuio_export: frames.csv read twice. The first pass classifies every
 // frame (scrub.h), the frames of ISO-TP messages as they crossed the bus
@@ -15,12 +15,18 @@
 // into the frames a sender would have sent, each marked as made up. The
 // written bytes are checked as they go out, and the file is renamed into
 // place only when both checks pass.
+//
+// The CSV export (ADR-0054's appendix "the CSV export as built"): the
+// same first pass for the identity values, then signals.csv read twice,
+// to count and then to write each value a scrubbed export keeps, one row
+// a sample (time_s,signal,unit,value), through the same file check.
 
 #include "error_detail.h"
 #include "folder_files.h"
 #include "frame_reassembly.h"
 #include "frames_csv.h"
 #include "isotp.h"
+#include "json.h" /* quoted */
 #include "pcapng.h"
 #include "recording_check.h" /* iso15765_id */
 #include "recording_rows.h"
@@ -181,11 +187,11 @@ bool re_segmentable(const ecuio_frame_t& f)
            f.data_length <= ECUIO_ISOTP_MAX;
 }
 
-/* The export's two passes */
-class pcapng_export
+/* An export's passes: the plan over frames.csv, then the format's */
+class recording_export
 {
 public:
-    pcapng_export(const ecuio_export_options_t& o, ecuio_export_report_t& r)
+    recording_export(const ecuio_export_options_t& o, ecuio_export_report_t& r)
         : o_(o), r_(r), raw_((o.flags & ECUIO_EXPORT_RAW) != 0),
           made_(new ecuio_frame_t{}), probe_(new ecuio_frame_t{}),
           tx_(new isotp_tx)
@@ -193,10 +199,19 @@ public:
 
     bool run(const std::string& folder, const std::string& out, bool* made)
     {
+        const bool csv_out = o_.format == ECUIO_EXPORT_CSV;
         if (!read_header(folder) ||
             (!raw_ && (!read_text_values(folder) || !text_defs(folder))) ||
-            !plan(folder)) {
+            (plan_frames(folder, csv_out) && !plan(folder))) {
             return false;
+        }
+        if (csv_out) {
+            /* The plan's frame counts are the pcapng's; the CSV counts
+             * values */
+            r_ = ecuio_export_report_t{};
+            if (!values(folder, false)) {
+                return false;
+            }
         }
         if (files::exists(out)) {
             return fail("the file exists already");
@@ -208,7 +223,7 @@ public:
             return fail("the export can't be written: %s", why);
         }
         *made = true;
-        if (!write(folder)) {
+        if (!(csv_out ? write_csv(folder) : write(folder))) {
             return false;
         }
         if (std::fclose(file_.release()) != 0) {
@@ -229,7 +244,7 @@ private:
     }
 
     /* events.log's header: the utc line, the recording's start (none
-     * gives 0), its profile and URI */
+     * gives 0), its profile and URI, and each signal's declared kind */
     bool read_header(const std::string& folder)
     {
         std::string why;
@@ -250,9 +265,42 @@ private:
                 profile_.assign(buf.data() + 9, n - 9);
             } else if (rows::starts_with(buf.data(), n, "uri  ")) {
                 uri_.assign(buf.data() + 5, n - 5);
+            } else if (rows::starts_with(buf.data(), n, "signal  ")) {
+                rows::header_signal hs;
+                const char* bad = nullptr;
+                if (rows::parse_header_signal(buf.data() + 8, n - 8, hs,
+                                              &bad) &&
+                    hs.text) {
+                    text_names_.insert(hs.name);
+                }
             }
         }
         return true;
+    }
+
+    /* The plan's pass over frames.csv: always for the pcapng; for the
+     * CSV only scrubbed, for the identity values the check searches for,
+     * and only when the recording holds frames */
+    bool plan_frames(const std::string& folder, bool csv_out) const
+    {
+        return !csv_out || (!raw_ && files::exists(folder + "/frames.csv"));
+    }
+
+    /* A def keyed as an identification reply is (49 xx, 62 F180-F1FF):
+     * its key at the message's start, judged by the classifier the
+     * frames go through */
+    static bool identification_def(const ecuio_signal_def_t& d)
+    {
+        if (d.mux_length == 0 || d.mux_length > 3 || d.mux_offset != 0) {
+            return false;
+        }
+        uint8_t key[3] = {};
+        for (uint8_t i = 0; i < d.mux_length; ++i) {
+            key[i] = static_cast<uint8_t>(
+                d.mux_key >>
+                (8u * static_cast<unsigned>(d.mux_length - 1 - i)));
+        }
+        return scrub::identification(key, d.mux_length);
     }
 
     /* The recording's text and hex defs (ADR-0054 section 1): its own
@@ -292,9 +340,14 @@ private:
         if (set != nullptr) {
             for (uint32_t i = 0; i < set->count; ++i) {
                 const ecuio_signal_def_t& d = set->defs[i];
-                if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0 &&
-                    (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX)) {
+                if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+                    continue;
+                }
+                if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
                     text_.push_back(&d);
+                    text_names_.insert(d.name);
+                } else if (identification_def(d)) {
+                    ident_names_.insert(d.name);
                 }
             }
         }
@@ -682,6 +735,185 @@ private:
         return true;
     }
 
+    /* A spreadsheet runs a cell starting with one of these as a formula
+     * (ADR-0049 section 8). A number is exempt: one parse_number takes
+     * whole, such as -12.5, is read as a number. */
+    static bool formula_start(const std::string& s)
+    {
+        return !s.empty() && std::strchr("=+-@\t\r", s[0]) != nullptr;
+    }
+
+    /* signals.csv in host_us order, each value a scrubbed export keeps:
+     * counted (write false: the values, the signals, the times written)
+     * or written. The same decisions both times. */
+    bool values(const std::string& folder, bool write)
+    {
+        std::string why;
+        file_ptr f(files::open_file(folder + "/signals.csv", false, &why));
+        if (!f) {
+            return fail("the folder has no signals.csv");
+        }
+        std::vector<char> buf(rows::kRowMax + 2);
+        bool too_long = false;
+        bool torn = false;
+        uint64_t line = 0;
+        rows::signal_row row;
+        std::unordered_set<std::string> signals;
+        while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            ++line;
+            if (line == 1) {
+                continue; /* the header */
+            }
+            const char* bad = nullptr;
+            if (too_long ||
+                !rows::parse_signal_row(buf.data(), std::strlen(buf.data()),
+                                        row, &bad)) {
+                ecuio_detail_set("signals.csv line %llu: %s",
+                                 static_cast<unsigned long long>(line),
+                                 too_long ? "the row is too long" : bad);
+                return false;
+            }
+            if (!in_range(row.host_us)) {
+                continue;
+            }
+            if (!raw_ && ident_names_.count(row.name) != 0) {
+                r_.left_out[kIdentification] += write ? 0u : 1u;
+                continue;
+            }
+            double v = 0.0;
+            const bool number =
+                rows::parse_number(row.value.data(), row.value.size(), &v);
+            if (!raw_ && (!number || text_names_.count(row.name) != 0)) {
+                r_.left_out[kTextValues] += write ? 0u : 1u;
+                continue;
+            }
+            if (!write && !check_formula(row, number)) {
+                return false;
+            }
+            if (!write) {
+                ++r_.values;
+                signals.insert(row.name);
+                first_us_ = r_.values == 1 ? row.host_us : first_us_;
+                last_us_ = row.host_us;
+                continue;
+            }
+            put_row(row);
+            ++written_;
+            if (!flush(false)) {
+                return false;
+            }
+        }
+        if (!write) {
+            r_.signal_count = signals.size();
+        }
+        return true;
+    }
+
+    /* A name, a unit or a raw text value that a spreadsheet would run */
+    static bool check_formula(const rows::signal_row& row, bool number)
+    {
+        const char* what = nullptr;
+        if (formula_start(row.name)) {
+            what = "name";
+        } else if (formula_start(row.unit)) {
+            what = "unit";
+        } else if (!number && formula_start(row.value)) {
+            what = "text value";
+        }
+        if (what == nullptr) {
+            return true;
+        }
+        ecuio_detail_set("the signal %s's %s starts as a spreadsheet formula "
+                         "does (=, +, -, @, a tab or a carriage return): "
+                         "nothing was written",
+                         ecuio_json::quoted(row.name).c_str(), what);
+        return false;
+    }
+
+    /* One CSV field, RFC 4180's quotes only where it holds a comma, a
+     * quote or a line end */
+    void put_field(const std::string& s)
+    {
+        if (s.find_first_of(",\"\r\n") == std::string::npos) {
+            buf_ += s;
+            return;
+        }
+        buf_ += '"';
+        for (char c : s) {
+            buf_ += c;
+            if (c == '"') {
+                buf_ += '"';
+            }
+        }
+        buf_ += '"';
+    }
+
+    static std::string seconds(uint64_t us)
+    {
+        char b[32];
+        std::snprintf(b, sizeof b, "%llu.%06llu",
+                      static_cast<unsigned long long>(us / 1000000u),
+                      static_cast<unsigned long long>(us % 1000000u));
+        return b;
+    }
+
+    void put_row(const rows::signal_row& row)
+    {
+        buf_ += seconds(row.host_us);
+        buf_ += ',';
+        put_field(row.name);
+        buf_ += ',';
+        put_field(row.unit);
+        buf_ += ',';
+        put_field(row.value);
+        buf_ += '\n';
+    }
+
+    std::string csv_comment() const
+    {
+        const std::string span = r_.values == 0
+                                     ? std::string()
+                                     : ", " + seconds(first_us_) + " s to " +
+                                           seconds(last_us_) + " s";
+        char buf[384];
+        std::snprintf(
+            buf, sizeof buf,
+            "# Havne %s, %s (ADR-0054): %llu values of %llu signals%s; left "
+            "out: %llu values of identification signals, %llu of text "
+            "signals\n",
+            ecuio_version_string(),
+            raw_ ? "a raw export, not scrubbed" : "a scrubbed export",
+            static_cast<unsigned long long>(r_.values),
+            static_cast<unsigned long long>(r_.signal_count), span.c_str(),
+            static_cast<unsigned long long>(r_.left_out[kIdentification]),
+            static_cast<unsigned long long>(r_.left_out[kTextValues]));
+        return buf;
+    }
+
+    /* The CSV's second pass */
+    bool write_csv(const std::string& folder)
+    {
+        file_check_.reset(new scrub::check(values_));
+        buf_ = csv_comment();
+        buf_ += "time_s,signal,unit,value\n";
+        if (!values(folder, true) || !flush(true)) {
+            return false;
+        }
+        if (written_ != r_.values) {
+            return fail("the recording changed while it was exported");
+        }
+        if (!raw_) {
+            const uint32_t found = file_check_->finish();
+            if (found != 0) {
+                r_.failed_class = found;
+                return fail("the check found %s in the export's file: nothing "
+                            "was written",
+                            scrub::failed_words(found));
+            }
+        }
+        return true;
+    }
+
     const ecuio_export_options_t& o_;
     ecuio_export_report_t& r_;
     const bool raw_;
@@ -699,6 +931,12 @@ private:
     std::unique_ptr<ecuio_signal_file_t, signal_file_free> file_set_;
     std::unique_ptr<ecuio_uds_session> uds_;
     std::vector<const ecuio_signal_def_t*> text_;
+    /* Signals whose values a scrubbed CSV leaves out: text or hex by the
+     * def or the header, and numbers keyed as identification replies */
+    std::unordered_set<std::string> text_names_;
+    std::unordered_set<std::string> ident_names_;
+    uint64_t first_us_ = 0;
+    uint64_t last_us_ = 0;
     std::string made_up_;
     std::string made_up_flow_;
     uint64_t written_ = 0;
@@ -727,9 +965,9 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
     }
     switch (options->format) {
     case ECUIO_EXPORT_PCAPNG:
+    case ECUIO_EXPORT_CSV:
         break;
     case ECUIO_EXPORT_FOLDER:
-    case ECUIO_EXPORT_CSV:
         return ECUIO_ERR_NOT_IMPLEMENTED;
     default:
         return ECUIO_ERR_INVALID_ARGUMENT;
@@ -745,7 +983,7 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
     bool made = false;
     bool ok = false;
     try {
-        pcapng_export e(*options, r);
+        recording_export e(*options, r);
         ok = e.run(folder, out, &made);
     } catch (const std::bad_alloc&) {
         if (made) {

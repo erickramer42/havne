@@ -630,7 +630,7 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
 /* ecuio_export_options_t.format; append-only */
 #define ECUIO_EXPORT_FOLDER 1u /* a scrubbed copy of the folder: not built,
                                   ECUIO_ERR_NOT_IMPLEMENTED */
-#define ECUIO_EXPORT_CSV    2u /* signals over a range: not built */
+#define ECUIO_EXPORT_CSV    2u /* the values over a range, a row each */
 #define ECUIO_EXPORT_PCAPNG 3u /* the frames for Wireshark (section 3) */
 
 /* ecuio_export_options_t.flags */
@@ -671,15 +671,18 @@ typedef struct ecuio_export_options {
 } ecuio_export_options_t;
 
 typedef struct ecuio_export_report {
-    uint64_t frames;   /* written, made-up ones among them */
+    uint64_t frames;   /* written, made-up ones among them; 0 for CSV */
     uint64_t made_up;  /* re-segmented from a reassembled message, each
                           marked so (section 3) */
-    uint64_t left_out[8]; /* by ECUIO_EXPORT_LEFT_OUT_*, the frames or
-                             values each class left out */
+    uint64_t left_out[8];  /* by ECUIO_EXPORT_LEFT_OUT_*, the frames
+                              (pcapng) or values (CSV) each class left
+                              out */
     uint32_t failed_class; /* the check's: a class plus one, 0 when it
                               passed or didn't run */
     uint32_t flags;        /* zero */
-    uint64_t reserved[4];  /* zero; ABI growth space */
+    uint64_t values;       /* CSV: the values written; 0 for pcapng */
+    uint64_t signal_count; /* CSV: the signals they're of */
+    uint64_t reserved[2];  /* zero; ABI growth space */
 } ecuio_export_report_t;
 
 #if defined(__cplusplus)
@@ -689,12 +692,16 @@ static_assert(sizeof(ecuio_export_report_t) == 120,
               "ecuio_export_report_t size is ABI");
 static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
               "export report failed_class offset is ABI");
+static_assert(offsetof(ecuio_export_report_t, values) == 88,
+              "export report values offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(ECUIO_EXPORT_LEFT_OUT_COUNT <= 8, "the report holds 8 classes");
 _Static_assert(sizeof(ecuio_export_report_t) == 120,
                "ecuio_export_report_t size is ABI");
 _Static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
                "export report failed_class offset is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, values) == 88,
+               "export report values offset is ABI");
 #endif
 
 /*
@@ -705,15 +712,23 @@ _Static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
  * written bytes, and every message as it was before any segmenting,
  * searched for the recording's own identity values and VIN-shaped
  * tokens; one match fails the export, leaving no file, with the class
- * in report->failed_class. Deterministic: the same recording and
- * options give the same bytes. report may be NULL. ECUIO_OK;
+ * in report->failed_class. ECUIO_EXPORT_CSV writes signals.csv's values
+ * as samples, a comment line of counts first (pandas: skiprows=1),
+ * then time_s,signal,unit,value: a text or hex signal's values and a
+ * signal keyed as an identification reply are left out unless RAW; a
+ * name, unit or raw text value that starts as a spreadsheet formula
+ * does (=, +, -, @, a tab, a CR) fails it, while a number written as
+ * recorded, such as -12.5, is exempt. Markers aren't written.
+ * Deterministic: the same recording and options give the same bytes.
+ * report may be NULL. ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
  * field this core doesn't know, or a to_us other than 0 before from_us;
  * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
  * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
- * 12: ...", never a path), a file that exists or can't be written,
- * and a failed check (the class's words, never the value).
+ * 12: ...", never a path; for CSV, a folder with no signals.csv), a
+ * file that exists or can't be written, a formula's start, and a failed
+ * check (the class's words, never the value).
  */
 ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
                             ecuio_export_report_t* report);
