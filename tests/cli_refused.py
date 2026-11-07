@@ -99,6 +99,19 @@ def fake_bitmap(cli, dll):
             json.dump(BITMAP_FILE, f)
         run, lines = stream(cli, "j2534://%s?identify=0&diagnose=0" % dll,
                             ["--signals", path], env)
+    # The premise: the fake's bitmaps left the ten out (04 Engine Load and
+    # 05 Coolant Temp among them, never a value) while RPM (0C) still
+    # reads, so the report held more drops than its list and the refusal
+    # was named only for coming first
+    ids = ids_by_name(lines)
+    valued = {v.get("id") for l in lines if l.get("type") == "values"
+              for v in l.get("values", [])}
+    withheld = [n for n in ("Engine Load", "Coolant Temp") if ids.get(n) in valued]
+    if "RPM" not in ids or ids["RPM"] not in valued or withheld:
+        print("the fake withheld nothing: RPM %s, %s took values"
+              % ("read" if ids.get("RPM") in valued else "never read",
+                 ", ".join(withheld) or "no withheld PID"))
+        return 1
     return check(run, lines, "DID F1FE")
 
 
