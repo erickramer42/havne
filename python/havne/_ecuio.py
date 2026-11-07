@@ -10,7 +10,7 @@ from ctypes import (CFUNCTYPE, POINTER, Structure, c_bool, c_char, c_char_p,
 
 HEADERS = ('core.h', 'j2534.h', 'obdb.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
 
-# --- constants: the numeric ECUIO_ macros, then the enumerators -------
+# --- constants: the ECUIO_ macros, then the enumerators ---------------
 ECUIO_ABSENT_AFTER_FRAMES = 3
 ECUIO_BACKEND_ELM327 = 5
 ECUIO_BACKEND_J2534_INPROC = 2
@@ -211,6 +211,7 @@ ECUIO_RECORDING_FORMAT_OLDER = 1
 ECUIO_RECORDING_FORMAT_UNKNOWN = 0
 ECUIO_RECORDING_INFO_FRAMES = 2
 ECUIO_RECORDING_INFO_NO_SUMMARY = 1
+ECUIO_RECORDING_NONE = 0xffffffffffffffff
 ECUIO_RECORDING_REASON_LEN = 128
 ECUIO_RECORDING_SIGNALS_MATCH = 4
 ECUIO_RECORDING_SIGNALS_NAMED = 1
@@ -261,6 +262,7 @@ ECUIO_TIMING_CLOCK_ADAPTER = 2
 ECUIO_TIMING_CLOCK_HOST = 1
 ECUIO_TIMING_CLOCK_KERNEL = 3
 ECUIO_TIMING_CLOCK_NONE = 0
+ECUIO_TIMING_COLUMNS = 't_s,ecu,request,answered,refused,timeouts,packed,latency_p50_us,latency_p99_us,latency_p999_us,latency_max_us,intervals,intervals_mixed,interval_p50_us,interval_p99_us,interval_p999_us,interval_max_us,interval_clock'
 ECUIO_TIMING_INTERVAL_P99 = 4
 ECUIO_TIMING_INTERVAL_P999 = 8
 ECUIO_TIMING_ISOTP = 1
@@ -1108,8 +1110,8 @@ FUNCTIONS = {
     'ecuio_monitor_name': (c_char_p, [c_uint8, c_uint32]),  # core.h
     'ecuio_monitor_short_name': (c_char_p, [c_uint8, c_uint32]),  # core.h
     'ecuio_obd2_signal_set': (POINTER(ecuio_signal_set_t), []),  # signals.h
-    'ecuio_obdb_free': (None, [c_char_p]),  # obdb.h
-    'ecuio_obdb_import': (c_int, [c_char_p, c_size_t, POINTER(ecuio_obdb_options_t), ecuio_obdb_note_fn, c_void_p, POINTER(c_char_p), POINTER(c_size_t)]),  # obdb.h
+    'ecuio_obdb_free': (None, [POINTER(c_char)]),  # obdb.h
+    'ecuio_obdb_import': (c_int, [c_char_p, c_size_t, POINTER(ecuio_obdb_options_t), ecuio_obdb_note_fn, c_void_p, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # obdb.h
     'ecuio_plugin_fixture': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_free': (c_int, [POINTER(ecuio_plugin_t)]),  # plugin.h
     'ecuio_plugin_info': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_info_t)]),  # plugin.h
