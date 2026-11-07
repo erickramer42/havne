@@ -1,5 +1,6 @@
 // File/layer: core/include/ecuio/sim.h | C ABI, public interface
-// Testing: UNIT: SimEcuTest, SimRecordingTest, SimDidsTest (test_obd2);
+// Testing: UNIT: SimEcuTest, SimRecordingTest, SimDidsTest, SimAskTest
+//          (test_obd2);
 //          SimTest (test_socketcan); HARNESS: SimBusTest (test_vcan)
 
 #ifndef ECUIO_SIM_H
@@ -169,6 +170,103 @@ ecuio_status_t ecuio_sim_set_value(ecuio_sim_t* sim, uint16_t signal_id,
 /* Stops answering (a reply under way ends) and frees it. NULL is a
  * no-op. */
 void ecuio_sim_destroy(ecuio_sim_t* sim);
+
+/*
+ * A simulated ECU on no bus (ADR-0055): the same car, answering only
+ * ecuio_sim_ask, on every platform. It never opens a socket or reaches
+ * a bus; a caller that puts its replies somewhere (havne-cli's ELM327
+ * emulator, a script) chooses where.
+ *
+ * CONTRACTS:
+ * - NULL uri or out: ECUIO_ERR_NULL_ARGUMENT.
+ * - options: none is defined yet; any bit is ECUIO_ERR_INVALID_ARGUMENT,
+ *   after the NULL checks.
+ * - The URI, its profile and its recording as ecuio_sim_create's, in
+ *   that order, on every platform: BAD_URI, UNKNOWN_PROFILE,
+ *   INVALID_ARGUMENT, LOAD_FAILED.
+ * - ecuio_sim_get_stats, ecuio_sim_set_value and ecuio_sim_destroy work
+ *   on it as on a sim on a bus; its flags stay 0.
+ */
+ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
+                                        ecuio_sim_t** out);
+
+/* ecuio_sim_ask's time_us: the sim's own clock, steady time since
+ * create */
+#define ECUIO_SIM_NOW (-1)
+
+/* The most replies one request gets: each ECU's (the engine ECU and up
+ * to four modules), each with a 7F <service> 78 ahead of it */
+#define ECUIO_SIM_MAX_REPLIES 10u
+
+/* ecuio_sim_reply_t flags */
+#define ECUIO_SIM_REPLY_PENDING      0x00000001u /* 7F <service> 78: the
+                                                    same ECU's reply follows
+                                                    in a later entry */
+#define ECUIO_SIM_REPLY_LATE         0x00000002u /* put off by the late
+                                                    fault (delay_us) */
+#define ECUIO_SIM_REPLY_BAD_SEQUENCE 0x00000004u /* segmented: its last
+                                                    Consecutive Frame's
+                                                    sequence number skips
+                                                    one */
+#define ECUIO_SIM_REPLY_STALLED      0x00000008u /* segmented: its last
+                                                    Consecutive Frame comes
+                                                    160 ms after the one
+                                                    before */
+
+/* One ECU's reply to a request. POD, 4136 bytes, no hidden padding;
+ * pinned by the assertions below. */
+typedef struct ecuio_sim_reply {
+    uint32_t reply_id;    /* the 11-bit CAN ID it is sent on */
+    uint32_t flags;       /* ECUIO_SIM_REPLY_* */
+    int64_t delay_us;     /* when it starts, after the request */
+    uint32_t length;      /* bytes of data: 1..4095, ISO-TP's longest */
+    uint32_t reserved[5]; /* zero; ABI growth space */
+    uint8_t data[ECUIO_FRAME_DATA_MAX]; /* the whole message, from its
+                                           service byte; zero past
+                                           length */
+} ecuio_sim_reply_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_sim_reply_t) == 4136,
+              "ecuio_sim_reply_t size is ABI");
+static_assert(offsetof(ecuio_sim_reply_t, delay_us) == 8,
+              "sim reply delay_us offset is ABI");
+static_assert(offsetof(ecuio_sim_reply_t, data) == 40,
+              "sim reply data offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_sim_reply_t) == 4136,
+               "ecuio_sim_reply_t size is ABI");
+_Static_assert(offsetof(ecuio_sim_reply_t, delay_us) == 8,
+               "sim reply delay_us offset is ABI");
+_Static_assert(offsetof(ecuio_sim_reply_t, data) == 40,
+               "sim reply data offset is ABI");
+#endif
+
+/*
+ * One whole request on request_id, as a tester sends it, to a sim made
+ * by ecuio_sim_create_unbound: every ECU that hears request_id (its own
+ * request ID, or 0x7DF) answers as it would on a bus, faults included,
+ * each reply in an entry, in the ECUs' order. time_us is the ECU's time
+ * when the request comes, in microseconds since create on the caller's
+ * clock (the drive cycle and a recording's replies follow it), or
+ * ECUIO_SIM_NOW; a time before the last ask's is taken as the last's.
+ * An ID no ECU hears gets no reply and isn't counted.
+ *
+ * CONTRACTS:
+ * - NULL sim, request or count, or NULL replies with a capacity:
+ *   ECUIO_ERR_NULL_ARGUMENT.
+ * - A sim on a bus (ecuio_sim_create_with): ECUIO_ERR_INVALID_ARGUMENT,
+ *   which its own worker answers; so is a length of 0 or past 4095, or
+ *   a time_us below ECUIO_SIM_NOW.
+ * - *count is every reply, and the first capacity are copied (capacity
+ *   0 with replies NULL counts them); at most ECUIO_SIM_MAX_REPLIES.
+ * - One caller at a time; ecuio_sim_get_stats and ecuio_sim_set_value
+ *   from any thread meanwhile.
+ */
+ecuio_status_t ecuio_sim_ask(ecuio_sim_t* sim, uint32_t request_id,
+                             const uint8_t* request, uint32_t length,
+                             int64_t time_us, ecuio_sim_reply_t* replies,
+                             uint32_t capacity, uint32_t* count);
 
 #ifdef __cplusplus
 }
