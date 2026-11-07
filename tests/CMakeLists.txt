@@ -1061,8 +1061,30 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
             COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/tests/wheel_installed.py ${_app_wheel_args})
         set_tests_properties(WheelTest.Installed PROPERTIES
             SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
+        set(_app_wheel_registered 1)
     endif()
+    list(LENGTH _app_python_tests _app_python_count)
 endif()
+# What the probes above left out, judged at test time: under
+# ECUIO_PYTEST_REQUIRED=1 a tree with no PythonTest.* case, or a 64-bit
+# tree without sanitizers with no WheelTest.Installed, fails
+# (tests/python_registered.cmake); elsewhere it says so and skips
+if(NOT DEFINED _app_python_count)
+    set(_app_python_count 0)
+endif()
+if(NOT DEFINED _app_wheel_registered)
+    set(_app_wheel_registered 0)
+endif()
+set(_app_wheel_expected 0)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}" MATCHES "-fsanitize")
+    set(_app_wheel_expected 1)
+endif()
+add_test(NAME RequiredTest.ThePythonTestsAreRegistered
+    COMMAND ${CMAKE_COMMAND} -DPYTHON_TESTS=${_app_python_count}
+            -DWHEEL=${_app_wheel_registered} -DWHEEL_EXPECTED=${_app_wheel_expected}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/python_registered.cmake)
+set_tests_properties(RequiredTest.ThePythonTestsAreRegistered PROPERTIES
+    SKIP_REGULAR_EXPRESSION "skipped:" LABELS "python")
 
 # Core's USDT probes (ADR-0034 section 4) in each binary that links core and
 # ships or runs here: their ELF notes, which is all a tracer reads.
