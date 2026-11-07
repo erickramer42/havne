@@ -17,10 +17,13 @@ threads onto the GUI thread.
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    │                   havne-cli (cli/): a session as JSON lines on
    │                   standard output, the public headers alone (ADR-0031)
+   │                   python/havne (the havne package): the shared core
+   │                   ecuio through ctypes, a wheel per release (ADR-0053)
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
-   │         socketcan.h · vin.h · sim.h · recording.h · plugin.h · obdb.h
+   │         socketcan.h · vin.h · sim.h · recording.h · plugin.h · obdb.h · queue.h
  ecuio-core (core/)           no Qt, ever
-   │  sessions + callbacks · profiles + decode · transports
+   │  sessions + callbacks · profiles + decode · transports · pull queues
+   │  recordings, exports, imports, health reports · the simulated ECU
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
    ├── elm327://  worker thread → a serial port (USB, Bluetooth SPP), a
@@ -54,14 +57,18 @@ threads onto the GUI thread.
    versions. Every public name carries the core's own prefix,
    `ecuio_` or `ECUIO_` (ECU I/O). It names the domain rather than
    the product, so a product rename leaves the ABI alone. A strict-C
-   compile of every public header pins it.
+   compile of every public header pins it. Core also builds as a
+   shared library (`ecuio`, ADR-0053) that exports those functions
+   and nothing else, for programs that load it by path, and a caller
+   that can't take a callback on the worker reads a session through a
+   pull queue (`queue.h`) on a thread of its own.
 
 ## A frame's journey
 
 | Step | Where | Thread |
 |---|---|---|
-| 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, or a J2534 read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp` | transport worker |
-| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)); a recording session also puts the frame and its values into its recorder's ring, which the recorder's thread writes to the folder ([ADR-0049](adr/0049-recordings-in-core.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
+| 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, a J2534 read, an ELM327 reply's lines reassembled, or a SocketCAN read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp`, `elm327_transport.cpp`, `socketcan_transport.cpp` | transport worker |
+| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)); a recording session also puts the frame and its values into its recorder's ring, which the recorder's thread writes to the folder ([ADR-0049](adr/0049-recordings-in-core.md)); each pull queue a caller opened gets a copy of the frame, or of its values, which the caller reads on its own thread ([ADR-0053](adr/0053-python-bindings.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `SessionBridge::onFrame`, `onValues` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
 | 5. Every 100 ms the staging is swapped out: each signal's window (newest, lowest and highest, at their frames' times) goes into the signal model; link health and the recording's state are polled | coalesce timer | GUI |
@@ -118,13 +125,15 @@ Every scheme shares one strict query grammar (`core/src/uri_query.h`).
 `ecuio_session_create` splits the query once and refuses any key the
 scheme's transport doesn't take, before anything attaches; `mock://`
 takes `profile` and `did`, both core's, and `diagnose` for its ECU's
-trouble codes, and `replay://` adds `speed` (0.1 to 100, or `max`) and
-`loop`. `j2534://` and `elm327://` share the request keys (`filter`,
-`txid`, `poll`, `probe`, `identify`, `diagnose`)
+trouble codes, and `replay://` adds `speed` (0.1 to 100, or `max`),
+`loop`, a stretch (`from`, `to`) and fault injection (`faults`, `seed`,
+[ADR-0041](adr/0041-replay-fault-injection.md)). `j2534://`,
+`elm327://` and `socketcan://` share the request keys (`filter`,
+`txid`, `poll`, `probe`, `identify`, `diagnose`, `pack`, `scan`)
 and derive their channels and requests the same way
 (`core/src/request_setup.h`), so a run sheet's query means the same on
-either; `baud` is the CAN rate on both, and `elm327://` adds `serial`,
-the serial port's rate for a wired adapter.
+each; `baud` is the CAN rate on all three, `j2534://` adds `flags`, and
+`elm327://` adds `serial`, the serial port's rate for a wired adapter.
 
 A **replay** plays a recording's `frames.csv` ([ADR-0017](adr/0017-session-recording.md))
 back through the frame API, each frame when the recording's own
@@ -168,7 +177,7 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   extend `obd2`. Core never opens a path: the app and `havne-cli`
   read the file, so a phone's picked file goes through the same load.
   `havne-cli signals import obdb` converts an OBDb signal set into one
-  (`obdb.h`). A recording holds the file it decoded with as
+  (`obdb.h`), and so does Settings (`app/obdbimport.h`). A recording holds the file it decoded with as
   `signals.json`, its hash in `events.log`'s header, and a replay of
   that recording decodes through that copy when it still matches,
   under the recorded name or one of its own, so a file edited or
@@ -278,7 +287,8 @@ The full reference is [j2534.md](j2534.md).
   confirms a clear there, its engine and vehicle speeds and then `04`,
   at 0 km/h unless the user confirms once more for a moving vehicle
   ([ADR-0038](adr/0038-clearing-trouble-codes.md) and its appendix of
-  2026-11-01).
+  2026-11-01). `havne-cli clear <uri> --yes` runs the same clear from a
+  script, each ECU at the report it wrote first.
 - **Teardown order is a hard contract:** join the worker, then stop the
   filters, disconnect, close and unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.
@@ -289,8 +299,9 @@ The full reference is [j2534.md](j2534.md).
 ## ELM327
 
 `elm327://` drives an ELM327-compatible adapter, an OBDLink's STN chip
-or the OBDX in its ELM mode, over a serial port that core opens itself:
-`\\.\COMn` on Windows, `termios` elsewhere. A paired Bluetooth SPP
+or the OBDX in its ELM mode, over a serial port that core opens itself
+(`\\.\COMn` on Windows, `termios` elsewhere), a WiFi adapter's TCP
+socket, or a link the app opens for it. A paired Bluetooth SPP
 adapter is a serial port on every desktop system, so core never touches
 a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
 
@@ -355,9 +366,22 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
 
 The full reference is [elm327.md](elm327.md).
 
+## The simulated ECU
+
+`sim.h` is a car with no car ([ADR-0046](adr/0046-simulated-ecu.md)):
+the mock's drive cycle or canned values, or a recording's replies, with
+a second module, a signal file's or a plugin's DIDs, and faults on
+demand. On Linux `havne-cli sim <uri> --on <vcan>` answers requests on a
+virtual bus as the engine ECU. Unbound, it takes one request at a time
+and returns each ECU's reply on the caller's clock (`ecuio_sim_ask`),
+which is how `havne-cli sim <uri> --elm327 tcp:<port>` serves it as an
+ELM327 adapter on a TCP port, on every desktop system, for Havne's own
+`elm327://127.0.0.1:<port>`, python-OBD and ELM327 apps
+([ADR-0055](adr/0055-elm327-emulator.md)).
+
 ## Link health
 
-The J2534 and ELM327 workers judge every read and write
+The J2534, ELM327 and SocketCAN workers judge every read and write
 (`core/src/link_health.h`) and publish one state. An ELM327's `NO DATA`
 leaves the request engine's wait to time the request out, `CAN ERROR`
 is a write that failed, and a port that fails, or no prompt within 5 s,
@@ -427,7 +451,15 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   lowest and highest from the summaries, or from the raw rows when
   zoomed in. `havne-cli view` writes what it reads as JSON lines,
   several recordings aligned on a threshold, a marker or their UTC
-  starts. `ecuio_recording_check` reads `frames.csv` in one pass for
+  starts. `havne-cli export` writes a recording for another tool,
+  scrubbed of the car's identity unless `--raw`
+  ([ADR-0054](adr/0054-exports-and-imports.md)): pcapng (its frames,
+  for Wireshark), CSV (its values, one row per sample, after a
+  comment line; pandas reads it with `skiprows=1`, since `comment="#"`
+  would cut a value holding a `#`) or a folder (a copy of the
+  recording to send, which reads and replays as the original; the
+  caller names it by its time, since the original's name can hold the
+  vehicle's label). `ecuio_recording_check` reads `frames.csv` in one pass for
   what's wrong with it (gaps, rate drops, late IDs, overflows, broken
   ISO-TP sequences) and `events.log` for the link's changes and the
   sleeps, its memory per ID, not per frame; `havne-cli info` prints
@@ -437,7 +469,19 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   alignments on the GUI thread), drawn by Live's chart
   (`StripChart.qml`); a second recording overlays the first, aligned
   as `havne-cli view` aligns them, and the header's Mark writes a
-  marker while recording.
+  marker while recording. `ecuio_recording_open_frames` reads a
+  recording through its frames instead, decoded by a profile, so a raw
+  recording has values and a signal file written later decodes an
+  older one (the viewer's decode choice, `havne-cli view --frames`).
+  `havne-cli import` makes a recording's folder from another tool's
+  log: a `candump -L` log's frames, or a logger's CSV of values through
+  a column map ([ADR-0054](adr/0054-exports-and-imports.md)). A health
+  report (`ecuio_health_export`, `havne-cli health`, Save report on the
+  Diagnostics and Recordings pages) writes a car's readiness, trouble
+  codes, freeze frame and key values from a session or a recording as
+  one JSON or text file, checked for the car's identity like an export.
+  A vehicle keeps a baseline recording, which the viewer overlays on
+  another, the two lined up on their engine starts.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial
@@ -447,9 +491,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   history and recordings keep the decoded values.
 - **Pages:** **Home** (status), **Dashboard** (gauges and shift
   lights), **Live** (value table and strip chart), **Diagnostics**
-  (trouble codes, readiness, the freeze frame), **Log** (the activity
-  log; in developer mode, the raw frames), **Recordings** (the
-  recordings list and the viewer), **Settings**
+  (trouble codes, readiness, the freeze frame, clearing the codes, a
+  health report), **Log** (the activity log; in developer mode, the raw
+  frames, filtered, by ID, and exported as CSV with the car's identity
+  left out), **Recordings** (the recordings list and the viewer, with a
+  vehicle's baseline and a health report), **Settings**
   (vehicles with their own signals and plugins, device picker, URI,
   developer mode). Live and the
   Recordings page share one signal filter (`SignalFilterBar.qml`, its
@@ -521,11 +567,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 |---|---|
 | Unit | Core logic, decode, the C ABI |
 | Bridge | The bridge and its models, headless, against the real mock worker |
+| Python | The `havne` package against the shared core under pytest, every example script, and a wheel built from the tree and installed into a fresh venv |
 | QML | The app's own QML module against a real bridge, offscreen: properties, not pixels |
 | HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate; the ELM327 transport against a fake ELM327 behind its port, and on Linux and macOS the serial port code over a pseudo-terminal |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
-| Fuzzing | Each parser of outside input (frames and replies, ELM327 text, ISO-TP, the replay and recording readers, JSON, signal files, plugins, OBDb sets, VINs) and the set validator under libFuzzer, 60 s each in CI, the structured formats starting from seeds built from the committed fixtures ([fuzz/README.md](../fuzz/README.md)) |
+| Fuzzing | Each parser of outside input (frames and replies, ELM327 text and the emulator's hosts, ISO-TP, SocketCAN's netlink and frames, the replay and recording readers, candump logs and CSV imports, the exports, JSON, signal files, plugins, OBDb sets, VINs, trouble codes, `?did=`), the simulated ECU, the diagnostics rules and the set validator under libFuzzer, 60 s each in CI, the structured formats starting from seeds built from the committed fixtures ([fuzz/README.md](../fuzz/README.md)) |
 | Static analysis | clang-tidy's analyzer and bug-finding checks over core, the surrogate, `havne-cli` and the desktop app, any warning failing CI; CodeQL too |
 | Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |
@@ -549,6 +596,7 @@ Detail and gaps: [testing.md](testing.md).
 | How to write a file of your own signals: DIDs and PIDs, enumerations, computed signals | [signal-files.md](signal-files.md) |
 | How to install Havne on an iPhone for testing, and what works there | [ios.md](ios.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
+| Why the design and checks are enough for what Havne does, and where they stop | [security-assurance.md](security-assurance.md) |
 | What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |
 | How it got here, and the lessons along the way | [engineering-log.md](engineering-log.md) |
 | Real-hardware sessions and run sheets | [bench-sessions/](bench-sessions/bench-runsheet.md) |

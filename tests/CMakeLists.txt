@@ -23,7 +23,9 @@ endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_check.cpp test_sha256.cpp)
+    test_recorder.cpp test_recording.cpp test_recording_check.cpp
+    test_recording_frames.cpp test_candump_import.cpp test_export.cpp
+    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -36,16 +38,26 @@ target_link_libraries(test_core PRIVATE
     GTest::gtest_main
 )
 
-# The scrubbed real-bus recording replay:// plays (ADR-0023), and the
-# signal file a recording copies (ADR-0051 section 4)
+# The scrubbed real-bus recording replay:// plays (ADR-0023), the
+# signal file a recording copies (ADR-0051 section 4), and a recording of
+# values alone (the health report, ADR-0054); the made-up loggers' CSV
+# files an import reads (ADR-0054 section 5)
 target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     ECUIO_SIGNAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals"
     ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+    ECUIO_GOLDEN_RECORDING="${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2"
+    ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
 )
 
 app_enable_warnings(test_core)
-gtest_discover_tests(test_core)
+gtest_discover_tests(test_core DISCOVERY_TIMEOUT 60)
+# Discovery runs each test binary at build time, and its default 5 s
+# is less than a cold runner can take: every call names 60 s, which
+# tests/discovery_timeout.cmake checks across this file
+add_test(NAME DiscoveryTimeoutTest.EveryDiscoveryWaits
+    COMMAND ${CMAKE_COMMAND} -DFILE=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/discovery_timeout.cmake)
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
@@ -77,7 +89,7 @@ target_compile_definitions(test_signals PRIVATE
     ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins")
 
 app_enable_warnings(test_signals)
-gtest_discover_tests(test_signals)
+gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 
 # --- OBD-II set + request engine tests: MUST stay Qt-free (UNIT tier) ---
 # obd2_signal_sets.cpp is ALL-platform (signal data is transport-
@@ -107,7 +119,7 @@ target_compile_definitions(test_obd2 PRIVATE
 )
 
 app_enable_warnings(test_obd2)
-gtest_discover_tests(test_obd2)
+gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 
 # --- ELM327 tests: MUST stay Qt-free (UNIT and HARNESS tiers, ADR-0026) ---
 # test_elm327.cpp: elm327_protocol.h, header-only and internal like
@@ -130,7 +142,7 @@ if(WIN32)
     target_link_libraries(test_elm327 PRIVATE ws2_32)
 endif()
 app_enable_warnings(test_elm327)
-gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
+gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
 # --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
@@ -143,7 +155,7 @@ target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 target_compile_definitions(test_socketcan PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay")
 app_enable_warnings(test_socketcan)
-gtest_discover_tests(test_socketcan)
+gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 
 # --- The simulated CAN bus: Qt-free, Linux only (SocketCAN) ---
 # test_vcan.cpp: vcan_bus.h's fake ECU through the kernel's ISO-TP and a
@@ -170,7 +182,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # core/src: isotp.h, pure and internal (test_socketcan's precedent)
     target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
     app_enable_warnings(test_vcan)
-    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+    gtest_discover_tests(test_vcan DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()
 
 # --- Golden-output comparator: Python 3, no packages ---
@@ -196,12 +208,21 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # packaging/python/make_wheel.py, the havne wheel (ADR-0053 section 6):
+    # made-up PE, ELF and Mach-O files and a made-up package
+    add_test(NAME WheelTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/packaging/python/make_wheel.py selftest)
     # scripts/vpic_wmi.py, the VIN table's generator (ADR-0043 section 2)
     add_test(NAME VpicWmiTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/vpic_wmi.py --selftest)
     # scripts/dtc_titles.py, the trouble-code titles' generator (ADR-0044)
     add_test(NAME DtcTitlesTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/dtc_titles.py --selftest)
+    # schema/'s objects against the loaders' only_keys sets and word lists
+    # (ADR-0051, ADR-0052): a key on one side alone fails
+    add_test(NAME SchemaKeysTest.EachObjectsKeysAreItsLoaders
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_keys.py
+                ${CMAKE_SOURCE_DIR})
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -212,12 +233,13 @@ endif()
 # too, which is the host's clock). Rewrite one after a deliberate change
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
-    add_executable(test_cli test_cli.cpp)
+    add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
+        test_cli_health.cpp test_cli_partial.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
-    gtest_discover_tests(test_cli PROPERTIES TIMEOUT 30)
+    gtest_discover_tests(test_cli DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
     if(Python3_Interpreter_FOUND)
         set(_cli_golden ${CMAKE_CURRENT_SOURCE_DIR}/golden/cli)
@@ -286,6 +308,101 @@ if(TARGET havne-cli)
         app_cli_golden(SimRefusesARelativeRecording sim-relative-recording.jsonl
             --exit 3
             -- $<TARGET_FILE:havne-cli> sim "replay://recordings/run?loop=1" --on vcan0)
+        # The ELM327 emulator (ADR-0055) parses its URI as the bus's sim
+        # does, before it listens: the same refusal, every platform
+        app_cli_golden(SimElm327RefusesABadUri sim-bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0"
+               --elm327 tcp:0)
+        # The emulator on 127.0.0.1, a port the system picks: a host's
+        # ELM327 exchange, core's own elm327:// session, a second module's
+        # DID, a plugin's DIDs, and python-OBD (skipped without it)
+        function(app_cli_elm327 name mode)
+            add_test(NAME CliElm327RunTest.${name}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_elm327.py
+                        ${mode} $<TARGET_FILE:havne-cli>
+                        ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+            set_tests_properties(CliElm327RunTest.${name} PROPERTIES
+                TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endfunction()
+        app_cli_elm327(AHostSpeaksElm327ToIt adapter)
+        app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
+        app_cli_elm327(ASecondModulesDidAnswers modules)
+        app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(PythonObdReadsIt python-obd)
+        # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
+        # first, its clear at the key-on's 0 rpm, the report read again;
+        # and with the word on the engine, its 0 km/h read too
+        app_cli_golden(ClearClearsTheMock clear-mock.jsonl
+            -- $<TARGET_FILE:havne-cli> clear mock://golden --yes)
+        app_cli_golden(ClearWithTheWordOnTheEngine clear-mock-running.jsonl
+            -- $<TARGET_FILE:havne-cli> clear mock://golden --yes --engine-running)
+        app_cli_golden(ClearRefusesABadUri bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> clear "mock://golden?speed=2" --yes)
+        # export and import (ADR-0054): a candump log in, read through
+        # obd2 and out to pcapng, read back by struct; the refusals; and
+        # tshark's reading where it's installed (skip 77)
+        foreach(_mode roundtrip refusals tshark)
+            add_test(NAME CliTransferRunTest.${_mode}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                        ${_mode} $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliTransferRunTest.${_mode} PROPERTIES
+                TIMEOUT 60 SKIP_RETURN_CODE 77)
+        endforeach()
+        # The CSV export of a recording core wrote, read back by Python's
+        # csv module row for row against its signals.csv
+        add_test(NAME CliTransferRunTest.csv
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    csv $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.csv PROPERTIES TIMEOUT 60)
+        # Folder copies, each read and replayed as its source: the
+        # findings fixture, a recording of values alone, a mock's
+        add_test(NAME CliTransferRunTest.folder
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    folder $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
+        # The made-up loggers' CSVs imported by their column maps and
+        # viewed; a missing map, a refused one, a folder already there
+        add_test(NAME CliTransferRunTest.csv-import
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    csv-import $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
+        set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
+        # The health report (ADR-0054): the mock's, a session whose
+        # reports are never asked, the simulated car as an ELM327 adapter
+        # on loopback; a recording of values alone and a range past its end
+        add_test(NAME CliHealthRunTest.session
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
+                    session $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 180)
+        add_test(NAME CliHealthRunTest.recording
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
+                    recording $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliHealthRunTest.recording PROPERTIES TIMEOUT 60)
+        # Output that fails only at its flush (standard output a file open
+        # for reading) is exit 1 with words, for each command that writes
+        # a few lines and returns
+        add_test(NAME CliExitTest.AFailedWriteIsExit1
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_write_fail.py
+                    $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliExitTest.AFailedWriteIsExit1 PROPERTIES TIMEOUT 120)
+        # A candump -L log of the simulated car on vcan0 imported and read
+        # through obd2: its values the direct session's (Linux; skipped
+        # without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED; serial:
+        # the sim answers 0x7E0 for the bus)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliTransferRunTest.candump
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                        candump $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliTransferRunTest.candump PROPERTIES
+                TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
@@ -323,6 +440,24 @@ if(TARGET havne-cli)
                         sim $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
                 PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
+        # A clear through core's gate against the fake DLL's ECU (Windows)
+        # or the simulated ECU on vcan0 (Linux; skipped without it unless
+        # ECUIO_VCAN_REQUIRED, and serial: it answers 0x7E0 for the bus)
+        if(WIN32)
+            foreach(_case EngineRunningIsNotCleared EngineOffIsCleared
+                    ARefusalIsNamed MovingIsNotCleared TheWordOnMovingClears)
+                add_test(NAME CliClearRunTest.${_case}
+                    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
+                            ${_case} $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+                set_tests_properties(CliClearRunTest.${_case} PROPERTIES TIMEOUT 90)
+            endforeach()
+        elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliClearRunTest.TheSimulatedEcuIsCleared
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
+                        TheSimulatedEcuIsCleared $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliClearRunTest.TheSimulatedEcuIsCleared
+                PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
         endif()
         # Every path havne-cli takes, under a folder named outside any one
         # code page: on Windows its arguments come as UTF-16
@@ -440,6 +575,16 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream
                "mock://x?profile=plugin.example-sim.base"
                --plugin ${_cli_example} --values --count 6)
+        # schema/ (ADR-0051, ADR-0052) through the jsonschema package:
+        # every committed signal file, manifest, data file and fixture file
+        # validates, tests/fixtures/schema/'s refused ones fail it and
+        # havne-cli's check alike, and edge cases get one verdict from
+        # both; skipped without jsonschema unless ECUIO_SCHEMA_REQUIRED
+        add_test(NAME SchemaFixturesTest.TheSchemasAndTheLoadersAgree
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_fixtures.py
+                    ${CMAKE_SOURCE_DIR} $<TARGET_FILE:havne-cli>)
+        set_tests_properties(SchemaFixturesTest.TheSchemasAndTheLoadersAgree
+            PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
         # Every plugin in the repository with its fixtures answered by the
         # simulated ECU on vcan0 and decoded back (ADR-0052 section 8), and
         # a test plugin giving one signal a value in each of two files;
@@ -453,11 +598,20 @@ if(TARGET havne-cli)
                         ${_cli_plugins}/repeat)
             set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
                 PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+            # python/examples/isotp_fuzz.py against havne-cli's sim on
+            # vcan0 (ADR-0053's appendix "the examples as built"): outside
+            # pytest, so the sanitizer tree runs it on its ASan havne-cli
+            add_test(NAME ExampleTest.isotp_fuzz_cli
+                COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_isotp_fuzz.py
+                        $<TARGET_FILE:havne-cli>)
+            set_tests_properties(ExampleTest.isotp_fuzz_cli
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "python")
         endif()
         # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
         # model year, its notes and the file written whole, beside nothing
         # else, against committed ones; an --out that can't be written
-        # writes nothing and names no path; a file that isn't a set refused
+        # writes nothing and names no path; other writers' partials of the
+        # same --out are left alone; a file that isn't a set refused
         set(_cli_obdb ${CMAKE_CURRENT_SOURCE_DIR}/cli_obdb_import.py)
         set(_obdb_set ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json)
         add_test(NAME CliObdbImportTest.ASetConvertsToTheCommittedFile
@@ -467,12 +621,23 @@ if(TARGET havne-cli)
         add_test(NAME CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing
             COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} unwritable
                     $<TARGET_FILE:havne-cli> ${_obdb_set})
+        add_test(NAME CliObdbImportTest.OtherWritersPartialsAreLeftAlone
+            COMMAND ${Python3_EXECUTABLE} ${_cli_obdb} beside
+                    $<TARGET_FILE:havne-cli> ${_obdb_set})
         set_tests_properties(CliObdbImportTest.ASetConvertsToTheCommittedFile
-            CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing PROPERTIES TIMEOUT 60)
+            CliObdbImportTest.AnOutThatCantBeWrittenWritesNothing
+            CliObdbImportTest.OtherWritersPartialsAreLeftAlone PROPERTIES TIMEOUT 60)
         app_cli_golden(SignalsImportRefusesWhatIsntAnObdbSet obdb-not-a-set.jsonl
             --exit 3
             -- $<TARGET_FILE:havne-cli> signals import obdb ${_cli_signals}/extras.json
                --out never-written.json)
+        # A column map with a typo refused in core's words, naming the key
+        # and never a path, before any folder is made
+        set(_cli_csv ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
+        app_cli_golden(ImportCsvRefusesAMapsUnknownKey import-csv-unknown-key.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> import csv ${_cli_csv}/logger-a/log.csv
+               never-made --map ${_cli_csv}/unknown-key.json)
         # A format 3 recording (written by hand): an enum's line carries its
         # labels, its columns its raw numbers
         app_cli_golden(ViewShowsAnEnumsLabels view-enum.jsonl
@@ -491,8 +656,47 @@ if(TARGET havne-cli)
         app_cli_golden(ViewLeavesOutARecordingItCantAlign view-unaligned.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
                --align-on rise:RPM:2010 --hysteresis 30 --columns 2 --signal RPM)
+        # A vehicle's baseline (ADR-0049's appendix of 2026-11-06): two key
+        # ons at 0 rpm and their starts 7 s apart (start-early's unit
+        # "RPM", start-late's "rpm"), lined up on their engine starts, and
+        # a pull whose engine runs from its first sample, found nowhere
+        app_cli_golden(ViewAlignsOnTheEngineStarts view-engine-start.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/start-early
+               ${_cli_pulls}/start-late ${_cli_pulls}/pull-early
+               --align-on engine-start --from -6 --to 4 --columns 10
+               --at 0.5 --signal RPM)
         app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
+        # view --frames (ADR-0049's appendix of 2026-11-06): a SocketCAN
+        # listener's wire frames through the profile its header names, the
+        # replay fixture (frames.csv alone) through obd2, the packed
+        # replies through a signal file extending obd2, and a folder that
+        # names no profile
+        set(_cli_frames ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay)
+        app_cli_golden(ViewFramesDecodesAListenersWireFrames view-frames.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/findings --frames
+               --columns 4)
+        app_cli_golden(ViewFramesDecodesARecordingWithNoSignals
+            view-frames-replay.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/2026-10-25-engine-start
+               --frames --profile obd2 --columns 3 --signal RPM
+               --signal "Vehicle Speed")
+        app_cli_golden(ViewFramesDecodesThroughASignalFile
+            view-frames-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
+               --frames --signals
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json
+               --columns 2)
+        app_cli_golden(ViewFramesRefusesAFolderThatNamesNoProfile
+            view-frames-no-profile.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
+               --frames)
+        # A folder that isn't there: the reader's refusal (no frames.csv),
+        # not a profile to name, as the app's viewer says
+        app_cli_golden(ViewFramesRefusesAMissingFolder
+            view-frames-missing-folder.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view
+               ${CMAKE_CURRENT_BINARY_DIR}/never-there --frames)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
@@ -592,6 +796,18 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    app_cli_usage(SimOnAndElm327IsUsage "sim|mock://sim|--on|vcan0|--elm327|tcp:0")
+    app_cli_usage(SimElm327DeskBusIsUsage "sim|mock://sim|--elm327|tcp:0|--desk-bus")
+    app_cli_usage(SimElm327WithoutAnAddressIsUsage "sim|mock://sim|--elm327")
+    app_cli_usage(SimElm327NotTcpIsUsage "sim|mock://sim|--elm327|udp:35000")
+    app_cli_usage(SimElm327APortPastTheRangeIsUsage "sim|mock://sim|--elm327|tcp:65536")
+    app_cli_usage(SimElm327AShortAddressIsUsage "sim|mock://sim|--elm327|tcp:127.0.1:35000")
+    app_cli_usage(SimElm327AHostNameIsUsage "sim|mock://sim|--elm327|tcp:localhost:35000")
+    app_cli_usage(ClearWithoutYesIsUsage "clear|mock://x")
+    app_cli_usage(ClearWithoutAUriIsUsage "clear|--yes")
+    app_cli_usage(ClearTwoUrisIsUsage "clear|mock://a|mock://b|--yes")
+    app_cli_usage(ClearMovingWithoutRunningIsUsage "clear|mock://x|--yes|--moving")
+    app_cli_usage(ClearAnUnknownOptionIsUsage "clear|mock://x|--yes|--force")
     # view's refusals come before any recording opens, but for a name no
     # recording has, which comes after the opens and before any line
     app_cli_usage(ViewWithoutARecordingIsUsage "view")
@@ -603,6 +819,9 @@ if(TARGET havne-cli)
         "view|x|--align-on|marker:pull|--hysteresis|5")
     app_cli_usage(ViewANegativeHysteresisIsUsage
         "view|x|--align-on|rise:RPM:1|--hysteresis|-1")
+    app_cli_usage(ViewHysteresisWithAnEngineStartIsUsage
+        "view|x|--align-on|engine-start|--hysteresis|400")
+    app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
     app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
     app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
     app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
@@ -614,12 +833,46 @@ if(TARGET havne-cli)
     app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
     app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
         "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
+    app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
+    app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
+    app_cli_usage(ViewSignalsAndAPluginIsUsage
+        "view|x|--frames|--signals|a.json|--plugin|b")
+    app_cli_usage(ViewAProfileThatIsntTheSignalFilesIsUsage
+        "view|${_cli_pull_early}|--frames|--profile|obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json")
+    app_cli_usage(ViewAProfileThatIsntAVariantIsUsage
+        "view|${_cli_pull_early}|--frames|--profile|obd2|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim")
     app_cli_usage(InfoWithoutARecordingIsUsage "info")
     app_cli_usage(InfoTwoRecordingsIsUsage "info|x|y")
     app_cli_usage(InfoAGapOfZeroIsUsage "info|x|--gap|0")
     app_cli_usage(InfoARateDropOfOneIsUsage "info|x|--rate-drop|1")
     app_cli_usage(InfoSettleThatIsntSecondsIsUsage "info|x|--settle|soon")
     app_cli_usage(InfoAnUnknownOptionIsUsage "info|x|--fast")
+    # export and import (ADR-0054): refused before any file is read
+    app_cli_usage(ExportWithoutAFileIsUsage "export|rec")
+    app_cli_usage(ExportWithoutAFormatIsUsage "export|rec|out")
+    app_cli_usage(ExportAnUnknownFormatIsUsage "export|rec|out|--format|blf")
+    app_cli_usage(ExportToBeforeFromIsUsage
+        "export|rec|out|--format|pcapng|--from|5|--to|4")
+    app_cli_usage(ExportANegativeFromIsUsage "export|rec|out|--format|pcapng|--from|-1")
+    app_cli_usage(ExportAnUnknownOptionIsUsage "export|rec|out|--format|pcapng|--scrub")
+    app_cli_usage(ImportWithoutCandumpIsUsage "import|bus.log|rec")
+    # health (ADR-0054): refused before a session opens or a file is read
+    app_cli_usage(HealthWithoutAFileIsUsage "health|mock://x")
+    app_cli_usage(HealthWithoutAFormatIsUsage "health|mock://x|out")
+    app_cli_usage(HealthAnUnknownFormatIsUsage "health|mock://x|out|--format|pdf")
+    app_cli_usage(HealthARangeOnASessionIsUsage
+        "health|mock://x|out|--format|json|--from|1")
+    app_cli_usage(HealthSecondsOnARecordingIsUsage
+        "health|rec|out|--format|json|--seconds|5")
+    app_cli_usage(HealthSignalsAndAPluginIsUsage
+        "health|mock://x|out|--format|json|--signals|a.json|--plugin|p")
+    app_cli_usage(ImportWithoutAFolderIsUsage "import|candump|bus.log")
+    app_cli_usage(ImportAnUnknownOptionIsUsage "import|candump|bus.log|rec|--map|m.json")
+    app_cli_usage(ImportCsvWithoutAMapIsUsage "import|csv|log.csv|rec")
+    app_cli_usage(ImportCsvWithAnInterfaceIsUsage
+        "import|csv|log.csv|rec|--map|m.json|--interface|can0")
+    app_cli_usage(ImportCsvWithoutAFolderIsUsage "import|csv|log.csv|--map|m.json")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
     # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
     # deadline
@@ -671,6 +924,179 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
+# The shared core (HAVNE_SHARED_CORE, ADR-0053's appendix "the shared
+# core as built"): test_c_abi.c again, linked against the library rather
+# than the archive, so each call resolves through its export table
+# (internal.h's hooks left out: ECUIO_C_ABI_SHARED); and ExportsTest
+# (scripts/exports_check.py): the library exports the public headers'
+# functions and nothing else, read with the platform's own tool, and
+# everything a header hands out has its release there. Absent, not
+# failing, where the option is off (Android, iOS, a fuzzing tree).
+if(HAVNE_SHARED_CORE)
+    add_executable(test_c_abi_shared test_c_abi.c)
+    set_target_properties(test_c_abi_shared PROPERTIES C_EXTENSIONS OFF)
+    app_enable_warnings(test_c_abi_shared)
+    if(NOT MSVC)
+        target_compile_options(test_c_abi_shared PRIVATE -pedantic)
+    endif()
+    target_compile_definitions(test_c_abi_shared PRIVATE ECUIO_C_ABI_SHARED=1)
+    target_include_directories(test_c_abi_shared PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+    target_link_libraries(test_c_abi_shared PRIVATE ecuio)
+    if(WIN32)
+        # ecuio.dll beside the test: Windows finds a DLL in the exe's folder
+        add_custom_command(TARGET test_c_abi_shared POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:test_c_abi_shared> $<TARGET_FILE_DIR:test_c_abi_shared>
+            COMMAND_EXPAND_LISTS)
+    endif()
+    add_test(NAME c_abi_shared COMMAND test_c_abi_shared)
+    set_tests_properties(c_abi_shared PROPERTIES LABELS "abi")
+
+    if(MSVC)
+        # dumpbin ships beside link.exe, in the toolset's own folder (the
+        # x86 one in a Win32 tree)
+        get_filename_component(_app_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+        find_program(APP_DUMPBIN dumpbin HINTS "${_app_linker_dir}" NO_DEFAULT_PATH)
+        set(_app_exports_format dumpbin)
+        set(_app_exports_tool "${APP_DUMPBIN}")
+    elseif(APPLE)
+        set(_app_exports_format macho)
+        set(_app_exports_tool "${CMAKE_NM}")
+    else()
+        set(_app_exports_format elf)
+        set(_app_exports_tool "${CMAKE_NM}")
+    endif()
+    if(NOT _app_exports_tool)
+        message(FATAL_ERROR "HAVNE_SHARED_CORE: no ${_app_exports_format} tool to read the "
+            "shared core's exports with (dumpbin beside link.exe, or CMAKE_NM)")
+    endif()
+    add_test(NAME ExportsTest.TheLibraryExportsTheDeclarations
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/exports_check.py exports
+            $<TARGET_FILE:ecuio> ${_app_exports_format} ${_app_exports_tool}
+            ${ECUIO_PUBLIC_HEADER_PATHS})
+    add_test(NAME ExportsTest.EachAllocationHasItsRelease
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/exports_check.py releasers
+            ${ECUIO_PUBLIC_HEADER_PATHS})
+    add_test(NAME ExportsTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/exports_check.py selftest)
+    set_tests_properties(ExportsTest.TheLibraryExportsTheDeclarations
+        ExportsTest.EachAllocationHasItsRelease ExportsTest.SelfTest PROPERTIES LABELS "abi")
+endif()
+
+# The havne Python package (python/, ADR-0053 and its appendix "the havne
+# package as built"): each python/tests/test_*.py a ctest of its own,
+# PythonTest.<file>, under pytest through python/tests/run.py, which
+# exits 77 (a skip) without pytest or when every case in the file
+# skipped. The package loads this tree's shared core (HAVNE_LIBRARY); on
+# Windows the J2534 case finds the fake DLL and this tree's surrogate
+# (x64, or build-win32's x86) through the environment, as a wheel's
+# package sets the surrogates from its own folder. test_vcan shares vcan0
+# with test_vcan's suites: RUN_SERIAL. Only where the tests' Python has
+# the tree's pointer size: a 64-bit Python can't load build-win32's x86
+# core, so that tree registers them only when configured with a 32-bit
+# Python (verify.sh's cross-arch step, HAVNE_PYTHON32).
+set(_app_python_pointer 0)
+if(HAVNE_SHARED_CORE AND Python3_Interpreter_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import struct; print(struct.calcsize('P'))"
+        OUTPUT_VARIABLE _app_python_pointer OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _app_python_rc)
+    if(NOT _app_python_rc EQUAL 0)
+        set(_app_python_pointer 0)
+    endif()
+endif()
+if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_app_surrogate_var ECUIO_SURROGATE_X64_EXE)
+    else()
+        set(_app_surrogate_var ECUIO_SURROGATE_EXE)
+    endif()
+    file(GLOB _app_python_tests CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/python/tests/test_*.py)
+    foreach(_app_py IN LISTS _app_python_tests)
+        get_filename_component(_app_name ${_app_py} NAME_WE)
+        add_test(NAME PythonTest.${_app_name}
+            COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/python/tests/run.py ${_app_py}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/python/tests)
+        set(_app_env "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>" "PYTHONDONTWRITEBYTECODE=1")
+        if(WIN32)
+            list(APPEND _app_env "HAVNE_FAKE_J2534_DLL=$<TARGET_FILE:fake_j2534>"
+                 "${_app_surrogate_var}=$<TARGET_FILE:ecuio-j2534-surrogate>")
+        endif()
+        if(TARGET havne-cli)   # test_read_pids' ELM327 emulator
+            list(APPEND _app_env "HAVNE_CLI=$<TARGET_FILE:havne-cli>")
+        endif()
+        set_tests_properties(PythonTest.${_app_name} PROPERTIES
+            ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
+        if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")   # vcan0
+            set_tests_properties(PythonTest.${_app_name} PROPERTIES RUN_SERIAL TRUE)
+        endif()
+    endforeach()
+
+    # python/examples/ecu_states.ipynb run top to bottom (tests/example_notebook.py);
+    # skips without scikit-learn, nbconvert or ipykernel, as in CI
+    add_test(NAME ExampleTest.notebook
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_notebook.py)
+    set_tests_properties(ExampleTest.notebook PROPERTIES
+        ENVIRONMENT "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>;PYTHONDONTWRITEBYTECODE=1"
+        SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
+
+    # The wheel itself (tests/wheel_installed.py): made from this tree's
+    # shared core, installed in a fresh venv and used from outside the
+    # tree. 64-bit trees only, since no x86 wheel ships. On Windows the x86
+    # surrogate is build-win32's when there is one (HAVNE_SURROGATE_SOURCE
+    # or the sibling tree, as the app's copy finds it). Not in a sanitizer
+    # tree (core-sanitizers): its library needs the sanitizers' runtimes,
+    # which make_wheel.py refuses as no wheel can count on them.
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}" MATCHES "-fsanitize")
+        set(_app_wheel_args --library $<TARGET_FILE:ecuio>)
+        if(WIN32)
+            list(APPEND _app_wheel_args
+                --surrogate-x64 $<TARGET_FILE:ecuio-j2534-surrogate>
+                --fake-dll $<TARGET_FILE:fake_j2534>)
+            set(_app_wheel_x86 "${HAVNE_SURROGATE_SOURCE}")
+            if(NOT _app_wheel_x86 AND EXISTS
+                    "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
+                set(_app_wheel_x86 "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
+            endif()
+            if(_app_wheel_x86)
+                list(APPEND _app_wheel_args --surrogate-x86 ${_app_wheel_x86})
+                # the Win32 tree's fake beside it, run through the wheel's x86 surrogate
+                get_filename_component(_app_wheel_win32 "${_app_wheel_x86}/../../.." ABSOLUTE)
+                if(EXISTS "${_app_wheel_win32}/tests/Release/fake_j2534.dll")
+                    list(APPEND _app_wheel_args --fake-dll-x86 "${_app_wheel_win32}/tests/Release/fake_j2534.dll")
+                endif()
+            endif()
+        endif()
+        add_test(NAME WheelTest.Installed
+            COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/tests/wheel_installed.py ${_app_wheel_args})
+        set_tests_properties(WheelTest.Installed PROPERTIES
+            SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
+        set(_app_wheel_registered 1)
+    endif()
+    list(LENGTH _app_python_tests _app_python_count)
+endif()
+# What the probes above left out, judged at test time: under
+# ECUIO_PYTEST_REQUIRED=1 a tree with no PythonTest.* case, or a 64-bit
+# tree without sanitizers with no WheelTest.Installed, fails
+# (tests/python_registered.cmake); elsewhere it says so and skips
+if(NOT DEFINED _app_python_count)
+    set(_app_python_count 0)
+endif()
+if(NOT DEFINED _app_wheel_registered)
+    set(_app_wheel_registered 0)
+endif()
+set(_app_wheel_expected 0)
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}" MATCHES "-fsanitize")
+    set(_app_wheel_expected 1)
+endif()
+add_test(NAME RequiredTest.ThePythonTestsAreRegistered
+    COMMAND ${CMAKE_COMMAND} -DPYTHON_TESTS=${_app_python_count}
+            -DWHEEL=${_app_wheel_registered} -DWHEEL_EXPECTED=${_app_wheel_expected}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/python_registered.cmake)
+set_tests_properties(RequiredTest.ThePythonTestsAreRegistered PROPERTIES
+    SKIP_REGULAR_EXPRESSION "skipped:" LABELS "python")
+
 # Core's USDT probes (ADR-0034 section 4) in each binary that links core and
 # ships or runs here: their ELF notes, which is all a tracer reads.
 # Only where core was built with them (Linux with <sys/sdt.h>).
@@ -698,6 +1124,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
+        ../app/healthreport.cpp
+        ../app/framefilter.cpp
+        ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -721,11 +1150,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     )
 
     # The engine-start fixture, which both decode paths read (ADR-0024),
-    # and the recordings RecordingViewTest opens (ADR-0049)
+    # the recordings RecordingViewTest opens (ADR-0049) and the files it
+    # imports (ADR-0054)
     target_compile_definitions(test_bridge PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+        ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -756,6 +1188,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/healthreport.cpp
+        ../app/framefilter.cpp
+        ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -799,12 +1234,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     )
     # Run with no -input, it runs every file in this directory. The
     # engine-start fixture feeds the Dashboard's peak hold (ADR-0023); the
-    # Recordings page opens the recording fixtures (ADR-0049)
+    # Recordings page opens the recording fixtures (ADR-0049) and lists a
+    # CSV fixture's import (ADR-0054)
     target_compile_definitions(test_qml PRIVATE
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+        ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
 
     # Windows: deployed like the app, into a directory of its own (the
@@ -884,7 +1322,7 @@ if(WIN32)
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
     app_enable_warnings(test_j2534_discovery)
-    gtest_discover_tests(test_j2534_discovery
+    gtest_discover_tests(test_j2534_discovery DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -973,7 +1411,7 @@ if(WIN32)
     add_dependencies(test_j2534_load fake_j2534_legacy)
     app_deploy_surrogate(test_j2534_load)
     app_enable_warnings(test_j2534_load)
-    gtest_discover_tests(test_j2534_load
+    gtest_discover_tests(test_j2534_load DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -997,7 +1435,7 @@ if(WIN32)
     add_dependencies(test_j2534_stream fake_j2534)
     app_deploy_surrogate(test_j2534_stream)
     app_enable_warnings(test_j2534_stream)
-    gtest_discover_tests(test_j2534_stream
+    gtest_discover_tests(test_j2534_stream DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1031,7 +1469,7 @@ if(WIN32)
     # (it then skips, and verify.sh's cross-arch step fails on a skip).
     # The suite is about 14 s; CMake 3.22's TEST_FILTER could serialize
     # that one case alone.
-    gtest_discover_tests(test_j2534_surrogate
+    gtest_discover_tests(test_j2534_surrogate DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS} RUN_SERIAL TRUE
     )
 endif()
@@ -1054,7 +1492,7 @@ if(WIN32)
     add_dependencies(test_j2534_health fake_j2534)
     app_deploy_surrogate(test_j2534_health)
     app_enable_warnings(test_j2534_health)
-    gtest_discover_tests(test_j2534_health
+    gtest_discover_tests(test_j2534_health DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1077,7 +1515,7 @@ if(WIN32)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
     app_deploy_surrogate(test_j2534_connect)
     app_enable_warnings(test_j2534_connect)
-    gtest_discover_tests(test_j2534_connect
+    gtest_discover_tests(test_j2534_connect DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
@@ -1099,7 +1537,7 @@ if(WIN32)
     add_dependencies(test_j2534_routing fake_j2534)
     app_deploy_surrogate(test_j2534_routing)
     app_enable_warnings(test_j2534_routing)
-    gtest_discover_tests(test_j2534_routing
+    gtest_discover_tests(test_j2534_routing DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()

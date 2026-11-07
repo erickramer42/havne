@@ -147,12 +147,14 @@ struct Recording {
     std::string folder;
 
     Recording(const Root& root, const char* uri, uint32_t ring_bytes = 0,
-              const char* label = nullptr, std::vector<const char*> header = {})
+              const char* label = nullptr, std::vector<const char*> header = {},
+              uint32_t note_lines = 0)
     {
         EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
             << ecuio_last_error_detail();
         ecuio_record_options_t o{};
         o.ring_bytes = ring_bytes;
+        o.note_lines = note_lines;
         const std::string keep = root.utf8();
         o.root_utf8 = keep.c_str();
         o.label_utf8 = label;
@@ -794,11 +796,20 @@ std::vector<EventLine> events_of(const std::string& events, const char* kind)
 constexpr uint32_t kFrameRecord = 65;
 constexpr uint32_t kExactRing = 7 * kFrameRecord;
 
-/* The writer held, once any drain under way has ended */
+/* The writer held and parked at its check. A wake counts itself, then
+ * reads the hold, so a loop that read it before the hold went in can
+ * still drain, however long it was held up first: the frames the case
+ * puts in next would make room. A second wake after the hold starts a
+ * loop that begins wholly after it (two, not one: the hold and the count
+ * are separate atomics). A wake comes every 10 ms busy, 100 ms idle */
 void hold_writer(ecuio_recorder_t* r)
 {
     ecuio_recorder_test_hold(r, 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const uint64_t from = ecuio_recorder_test_wakes(r);
+    ASSERT_TRUE(eventually(
+        [&] { return ecuio_recorder_test_wakes(r) >= from + 2; }, 10000))
+        << "the writer woke " << ecuio_recorder_test_wakes(r) - from
+        << " times in 10 s after the hold, not twice";
 }
 
 /* A request's reply timing as a worker publishes it */
@@ -892,6 +903,52 @@ TEST(RecorderTest, AReplayThatStopsEarlySaysSoInALinkLine)
                              "was opened (state 16, 1 episode)");
 }
 
+/* hold_writer waits out a loop under way: a loop that read no hold, then
+ * spent its time on the notes queued ahead of the ring, takes none of
+ * the frames the case puts in once hold_writer returns. The notes keep
+ * that loop going past the hold longer than a fixed wait covers, as a
+ * loaded machine's scheduler can */
+TEST(RecorderTest, HoldWriterWaitsOutALoopUnderWay)
+{
+    constexpr uint32_t kNotes = 200000;
+    register_profile();
+    Root root;
+    Recording rec(root, "mock://parked?profile=rec-test", kExactRing, nullptr,
+                  {}, kNotes);
+    ASSERT_NE(rec.recorder, nullptr);
+    ecuio_recorder_test_hold(rec.recorder, 1);
+    for (uint32_t i = 0; i < kNotes; ++i) {
+        ASSERT_EQ(ecuio_recorder_note(rec.recorder, "a queued note"), ECUIO_OK);
+    }
+    /* The next wake's loop reads no hold and takes the notes */
+    const uint64_t woke = ecuio_recorder_test_wakes(rec.recorder);
+    ecuio_recorder_test_hold(rec.recorder, 0);
+    ASSERT_TRUE(eventually(
+        [&] { return ecuio_recorder_test_wakes(rec.recorder) > woke; }, 2000));
+    ASSERT_NO_FATAL_FAILURE(hold_writer(rec.recorder));
+    for (int i = 0; i < 7; ++i) {
+        dispatch(rec.session, kNumberId, std::string(1, static_cast<char>(i)));
+    }
+    /* Two more wakes: any loop under way has ended and drained what it
+     * would */
+    const uint64_t held = ecuio_recorder_test_wakes(rec.recorder);
+    ASSERT_TRUE(eventually(
+        [&] { return ecuio_recorder_test_wakes(rec.recorder) >= held + 2; },
+        5000));
+    ecuio_recorder_state_t st{};
+    ASSERT_EQ(ecuio_recorder_get_state(rec.recorder, &st), ECUIO_OK);
+    EXPECT_EQ(st.frame_rows, 0u) << "the held writer wrote frames";
+    EXPECT_EQ(st.records_dropped, 0u);
+    ecuio_recorder_test_hold(rec.recorder, 0);
+    ASSERT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(rec.recorder, &st);
+            return st.frame_rows == 7;
+        },
+        2000));
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+}
+
 /* A transition that finds the ring full is carried: a later one takes
  * its place, and the latest goes in ahead of the next record that fits,
  * so a drop loses frames but never the link's state */
@@ -903,7 +960,7 @@ TEST(RecorderTest, ALinkTransitionThatFindsTheRingFullIsCarried)
     ASSERT_NE(rec.recorder, nullptr);
     link_health h(rec.session->last_error, rec.session->error_count,
                   rec.session->record_link.get());
-    hold_writer(rec.recorder);
+    ASSERT_NO_FATAL_FAILURE(hold_writer(rec.recorder));
     for (int i = 0; i < 100; ++i) {
         dispatch(rec.session, kNumberId, std::string(1, static_cast<char>(i)));
     }
@@ -945,7 +1002,7 @@ TEST(RecorderTest, AStateStillCarriedAtTheEndIsWritten)
     ASSERT_NE(rec.recorder, nullptr);
     link_health h(rec.session->last_error, rec.session->error_count,
                   rec.session->record_link.get());
-    hold_writer(rec.recorder);
+    ASSERT_NO_FATAL_FAILURE(hold_writer(rec.recorder));
     for (int i = 0; i < 100; ++i) {
         dispatch(rec.session, kNumberId, std::string(1, static_cast<char>(i)));
     }
@@ -1039,7 +1096,7 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
         }
     };
 
-    hold_writer(rec.recorder);
+    ASSERT_NO_FATAL_FAILURE(hold_writer(rec.recorder));
     fill();
     ecuio_recorder_state_t st{};
     ecuio_recorder_get_state(rec.recorder, &st);
@@ -1063,7 +1120,7 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
             return st.frame_rows == 100 - frames_dropped;
         },
         2000));
-    hold_writer(rec.recorder);
+    ASSERT_NO_FATAL_FAILURE(hold_writer(rec.recorder));
     fill();
     ecuio_recorder_get_state(rec.recorder, &st);
     const uint64_t before = st.records_dropped;

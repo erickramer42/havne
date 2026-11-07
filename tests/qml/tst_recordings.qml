@@ -102,6 +102,35 @@ TestCase {
         verify(page.recordings[0].folder !== "", "a row knows its folder")
     }
 
+    // A CSV import (ADR-0054's appendix "the CSV import as built") is
+    // listed and opens from its row: values alone, so no Replay, no frames
+    // check, no decode through a profile, and its numbers plotted
+    function test_aCsvImportIsListedAndOpensWithoutFrames() {
+        const folder = Harness.importCsvFixture("logger-a", "20261105-220322 Logger A")
+        verify(folder !== "", "the fixture imports")
+        const page = createPage()
+        page.refresh()
+        const at = page.recordings.findIndex(r => r.folder.endsWith("/20261105-220322 Logger A"))
+        verify(at >= 0, "the import is listed")
+        compare(page.recordings[at].title, "2026-11-05 22:03:22 · Logger A")
+        compare(page.recordings[at].frames, false)
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(at) !== null, 2000, "the row has a delegate")
+        const row = list.itemAtIndex(at)
+        compare(find(row, "recordingDetail").text,
+                "values alone: the recording has no frames to replay")
+        verify(!find(row, "replayButton").visible, "nothing to replay")
+        mouseClick(find(row, "recordingRowArea"))
+        verify(page.viewing, "the viewer replaces the list")
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the import opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
+        compare(find(page, "signalRows").count, 3)
+        compare(find(page, "checkSummary").text, "Frames check: the recording has no frames")
+        verify(!find(page, "replayView").visible, "no Replay in Settings")
+        verify(!find(page, "decodeChoice").visible, "no frames to decode")
+        compare(page.series(400).length, 3, "its numbers are plotted")
+    }
+
     // Replay hands the row's replay:// URI on, for Main to put in
     // Settings' field
     function test_replayHandsItsUriOn() {
@@ -148,6 +177,34 @@ TestCase {
 
     // Open shows the recording: its signal plotted by default, the chart's
     // series over the whole recording, the check's findings listed
+    // Save report: the whole recording's (the zoom never narrows it), on
+    // the view's thread, the note and one log line when it ends
+    function test_saveReportWritesTheWholeRecording() {
+        const page = openFindings()
+        const button = find(page, "saveReport")
+        verify(button.visible)
+        verify(button.enabled)
+        page.zoomAt(5000, 0.25)
+        verify(page.viewT1 - page.viewT0 < 20000, "zoomed in")
+        const url = Harness.writeScratchFile("findings.json", "")
+        verify(url.toString() !== "")
+        verify(page.saveReportTo(url, 1))
+        const note = find(page, "reportNote")
+        tryVerify(() => note.text.indexOf("Report saved: ") === 0, 10000, note.text)
+        verify(/^Report saved: \d+ ECUs?, \d+ trouble codes?, \d+ key values?$/.test(note.text),
+               note.text)
+        verify(button.enabled, "free again once it ends")
+        const report = JSON.parse(Harness.readScratchFile(url))
+        compare(report.source.kind, "recording")
+        compare(report.source.from_s, 0)
+        verify(report.key_values.length > 0, "RPM's value at the end")
+
+        // Another recording opened: the note is the old one's no more
+        page.open(earlyRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the next opens")
+        compare(note.text, "")
+    }
+
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)
@@ -167,6 +224,32 @@ TestCase {
         // Unticked, nothing is plotted
         page.togglePlotted(0)
         compare(page.series(400).length, 0)
+    }
+
+    // The values from the frames (ADR-0049's appendix of 2026-11-06): the
+    // choice offers the app's profiles, the open goes through the one
+    // picked, the info says so, and "as recorded" goes back to signals.csv
+    function test_theValuesCanComeFromTheFramesThroughAProfile() {
+        const page = openFindings()
+        const choice = find(page, "decodeChoice")
+        verify(choice.visible)
+        compare(choice.currentIndex, 0, "as recorded")
+        const obd2 = choice.indexOfValue("obd2")
+        verify(obd2 > 0, "obd2 is offered")
+        verify(choice.indexOfValue("mock") > 0, "so is the mock")
+        compare(choice.indexOfValue("signals.json"), -1, "it has no file of its own")
+        choice.activated(obd2)
+        const info = find(page, "recordingInfo")
+        tryVerify(() => info.visible
+                  && info.text.indexOf("values decoded from its frames through obd2") > 0,
+                  10000, "the frames open")
+        compare(choice.currentIndex, obd2)
+        compare(find(page, "signalRows").count, 1)
+        verify(page.series(400).length === 1, "RPM is plotted")
+        choice.activated(0)
+        tryVerify(() => info.visible && info.text.indexOf("values decoded") < 0,
+                  10000, "signals.csv again")
+        compare(choice.currentIndex, 0)
     }
 
     // The ticks start at the recording's default: its ranked numbers, never
@@ -582,6 +665,155 @@ TestCase {
         compare(page.alignLabel, "")
     }
 
+    // Two key ons and their engine starts, 5.6 s and 12.6 s in
+    // (tests/golden/cli/view-engine-start.jsonl)
+    readonly property var startEarlyRow: ({
+        title: "2026-11-06 09:00:00 · Start early", uri: "replay://s?profile=test",
+        folder: Harness.recordingFixtures + "/start-early", source: "", profile: "test" })
+    readonly property var startLateRow: ({
+        title: "2026-11-06 10:00:00 · Start late", uri: "replay://t?profile=test",
+        folder: Harness.recordingFixtures + "/start-late", source: "", profile: "test" })
+
+    // Settings' vehicles: two, the first picked, its baseline the folder
+    // given
+    function vehicleBook(baseline) {
+        const entry = (id, label, folder) => ({
+            id: id, label: label, vinKey: "", uri: "", plotted: [], unplotted: [],
+            signals: [], own: "", plugin: "", baseline: folder })
+        return { salt: "", picked: "v1",
+                 list: [entry("v1", "Daily driver", baseline), entry("v2", "Weekend car", "")] }
+    }
+
+    SignalSpy {
+        id: vehiclesSpy
+        signalName: "vehiclesEdited"
+    }
+
+    // A page that stores its vehicle edits as Settings would
+    function createBookPage(baseline) {
+        const page = createPage()
+        page.vehiclesEdited.connect(doc => { page.vehicles = doc })
+        vehiclesSpy.target = page
+        vehiclesSpy.clear()
+        page.vehicles = vehicleBook(baseline)
+        return page
+    }
+
+    function openRow(page, row) {
+        page.open(row)
+        tryVerify(() => find(page, "recordingInfo").visible, 10000, "the recording opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
+    }
+
+    // Aligned on the engine starts where havne-cli view lines them up, and
+    // a clear word when either has none: pull-early's engine runs from its
+    // first sample
+    function test_theEngineStartsAlignAsHavneClisDo() {
+        const page = createPage()
+        page.recordings = [startLateRow, startEarlyRow, earlyRow, lateRow]
+        openRow(page, startEarlyRow)
+        const choice = find(page, "alignChoice")
+        const status = find(page, "compareStatus")
+        page.compareWith(startLateRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        choice.currentIndex = choice.indexOfValue("engine")
+        verify(choice.currentIndex > 0, "the choice is offered")
+        compare(choice.currentText, "Align engine starts")
+        choice.activated(choice.currentIndex)
+        compare(page.alignOn, "engine")
+        verify(page.compareAligned)
+        compare(page.compareOffsetMs, -7000)
+        compare(page.viewT0, -7000, "from the compared one's start")
+        compare(status.text, "Dashed: " + startLateRow.title
+                + ", aligned on their engine starts, at 5.6 s here and 12.6 s there")
+
+        page.compareWith(earlyRow)
+        tryVerify(() => status.text.indexOf("isn't drawn") > 0, 10000, status.text)
+        compare(status.text, earlyRow.title + " isn't drawn: it has no engine start"
+                + " (RPM reaching 500 after being below 100)")
+        verify(!page.compareAligned)
+        compare(page.viewT0, 0, "the first alone")
+        compare(page.series(400).length, 2, "its own traces alone")
+
+        openRow(page, earlyRow)
+        page.setAlignOn("engine")
+        page.compareWith(startEarlyRow)
+        tryVerify(() => status.text.indexOf("isn't drawn") > 0, 10000, status.text)
+        verify(status.text.indexOf("this recording has no engine start") > 0, status.text)
+        page.compareWith(lateRow)
+        tryVerify(() => status.text.indexOf("neither") > 0, 10000, status.text)
+        verify(!page.compareAligned)
+    }
+
+    // The picked vehicle's baseline: an open recording becomes it, its row
+    // carries the badge, and another recording overlays it aligned on the
+    // engine starts. Another vehicle picked has its own; none picked, none
+    function test_aRecordingBecomesTheVehiclesBaseline() {
+        const page = createBookPage("")
+        page.recordings = [startLateRow, startEarlyRow]
+        openRow(page, startEarlyRow)
+        const use = find(page, "useAsBaseline")
+        const versus = find(page, "compareBaseline")
+        const mine = find(page, "isBaseline")
+        verify(use.visible)
+        compare(use.text, "Use as Daily driver's baseline")
+        verify(!versus.visible, "no baseline yet")
+        verify(!mine.visible)
+        mouseClick(use)
+        compare(vehiclesSpy.count, 1)
+        compare(VehicleBook.picked(page.vehicles).baseline, startEarlyRow.folder)
+        compare(VehicleBook.find(page.vehicles, "v2").baseline, "", "only the picked vehicle's")
+        verify(!use.visible)
+        verify(mine.visible)
+        compare(mine.text, "Daily driver's baseline")
+        verify(!versus.visible, "never compared with itself")
+
+        // The list marks its row
+        find(page, "backToList").clicked()
+        page.recordings = [startLateRow, startEarlyRow]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(1) !== null, 2000, "the rows have delegates")
+        verify(find(list.itemAtIndex(1), "baselineBadge").visible)
+        compare(find(list.itemAtIndex(1), "baselineBadge").text, "Baseline")
+        verify(!find(list.itemAtIndex(0), "baselineBadge").visible)
+
+        // Another recording overlays it, aligned on the engine starts
+        openRow(page, startLateRow)
+        verify(versus.visible)
+        verify(use.visible, "this one can take its place")
+        mouseClick(versus)
+        tryVerify(() => page.compareAligned, 10000, "the baseline opens")
+        compare(page.alignOn, "engine")
+        compare(find(page, "alignChoice").currentValue, "engine")
+        compare(page.compareTitle, "start-early", "its folder's name")
+        compare(page.compareOffsetMs, 7000, "12.6 s here, 5.6 s there")
+
+        page.vehicles = VehicleBook.pick(page.vehicles, "v2")
+        verify(!versus.visible, "the other vehicle has none")
+        compare(use.text, "Use as Weekend car's baseline")
+        page.vehicles = VehicleBook.pick(page.vehicles, "")
+        verify(!find(page, "baselineRow").visible, "no vehicle picked")
+        compare(vehiclesSpy.count, 1)
+    }
+
+    // A baseline whose folder is gone says so on the list and in the
+    // viewer, offers no overlay, and Clear it clears it
+    function test_aBaselineWhoseFolderIsGoneSaysSo() {
+        const page = createBookPage(Harness.recordingFixtures + "/no-such-recording")
+        page.recordings = [startEarlyRow]
+        const gone = find(page, "baselineGone")
+        verify(gone.visible)
+        compare(gone.text, "Daily driver's baseline recording is gone: its folder was moved or deleted.")
+        openRow(page, startEarlyRow)
+        verify(gone.visible, "in the viewer too")
+        verify(!find(page, "compareBaseline").visible)
+        verify(find(page, "useAsBaseline").visible)
+        find(page, "clearBaseline").clicked()
+        compare(vehiclesSpy.count, 1)
+        compare(VehicleBook.picked(page.vehicles).baseline, "")
+        verify(!gone.visible)
+    }
+
     // A finding's row centers the view on it and puts the cursor at its
     // start
     function test_aFindingsRowCentersTheView() {
@@ -691,6 +923,7 @@ TestCase {
         const error = find(page, "openError")
         tryVerify(() => error.visible, 10000, "refused")
         verify(error.text.indexOf("signals.csv") >= 0, error.text)
+        verify(waitForPolish(page.Window.window), "the refusal laid out")
         mouseClick(find(page, "backToList"))
         verify(!page.viewing)
         verify(find(page, "recordingList").visible)

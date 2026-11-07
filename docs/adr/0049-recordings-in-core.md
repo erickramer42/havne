@@ -1,7 +1,9 @@
 # ADR-0049: Recordings in core: a shared writer and an indexed reader
 
 - **Status:** Accepted. Built: section 10's steps 1 to 5 (2026-11-02
-  and 2026-11-03); step 6, the export, comes with v0.6.0's sharing.
+  and 2026-11-03), and the reader's decode of `frames.csv` (its
+  appendix of 2026-11-06); step 6, section 8's `.xlsx` export, isn't
+  built (the note of 2026-11-07).
 - **Date:** 2026-11-02.
 - **Builds on:** [ADR-0017](0017-session-recording.md) (the recording
   folder and its files, whose "recorder in core" alternative this
@@ -482,6 +484,9 @@ How it works:
   `frames.csv` through a profile at open, which makes a whole-bus
   recording viewable, belongs with listening to the whole bus
   (v0.8.0).
+  *Amended 2026-11-06:* it comes in v0.6.0, by its own call
+  (`ecuio_recording_open_frames`); the appendix "the reader decodes
+  frames.csv".
 - **Older recordings** have no signal kinds in their header: a signal
   is text there if any of its values doesn't parse as a number. They
   have no UTC start either, so they align on markers and thresholds
@@ -1327,3 +1332,132 @@ header line. The reader keeps reading formats 1 and 2.
 > decodes has `plugin  <id>,<version>,<variant>` after the signal file
 > line ([ADR-0052](0052-plugin-framework.md)'s appendix "a variant's
 > recording"); optional too, and read past by the reader.
+
+## Appendix: the reader decodes frames.csv (2026-11-06)
+
+Section 5 left a `raw` recording without values and put decoding
+`frames.csv` at the open with listening to the whole bus (v0.8.0). It
+comes in v0.6.0 instead, for two cases that need no more of v0.8.0: a
+`raw` recording, a SocketCAN listener's among them, then has something
+to plot, and a signal file written since decodes an older recording
+(or the replay fixture, which holds `frames.csv` alone).
+
+**One decode, shared.** The session's per-frame decode (ADR-0024
+section 4: the def index, a packed reply's split with the lengths it
+learns, the computed signals' newest inputs, the text slots) is
+`core/src/frame_decoder.{h,cpp}`. The session's worker decodes through
+it, and so does the reader, so a recording's frames decode to the
+values Live showed and `signals.csv` holds. A number goes through
+`signals.csv`'s own text (12 significant digits) and back, so it is the
+same double either way.
+
+**The call.** `ecuio_recording_open_frames(folder, set, progress, user,
+&out)`, appended to `recording.h`, reads `frames.csv` in `signals.csv`'s
+place, and every other reader call answers alike on the handle. The
+reader copies the set, so a caller may free a signal file once the open
+returns. The signals are the set's defs that decoded at least once, in
+the set's order, each named, typed and ranked as its def; `events.log`'s
+own `signal` and `label` lines aren't read. `ECUIO_RECORDING_INFO_FRAMES`
+(0x2) says where the values came from. The ABI only grows.
+
+**Frames as they crossed the bus.** A frame on ISO 15765-4's IDs that
+isn't `REASSEMBLED` and carries a Single, First or Consecutive Frame's
+PCI goes through core's ISO-TP receiver (`isotp.h`, N_Cr timed on
+`host_us`) first: the message it completes decodes, stamped with its
+last frame's times; a Flow Control decodes nothing. A whole message on
+those IDs starts with its service byte, 0x41 to 0x7F for a reply, so
+the PCI test never takes one for a frame. A listener can hear another
+tester's conversation: a First Frame on an ID with a message under way
+ends both rather than splicing one into the other.
+
+**Reading a second again.** Closer than a second a column, the reader
+decodes the second's frames again. A decode depends on what came before
+(a packed reply's learned lengths, a computed signal's other input, a
+message begun in the second before), so the open keeps a mark for each
+second with frames: the row a re-read starts from, the last at which no
+message was under way, so ISO-TP rebuilds the same state from it; the
+learned lengths when they changed; and the computed signals' inputs'
+newest values. Section 5's bound gains 16 bytes for each second with
+frames, 24 for each computed signal's input in each such second, and
+256 each time the learned lengths change. A text value's second is read
+again for `ecuio_recording_text_at`, since no row holds its text.
+
+**The front ends.** `havne-cli view --frames` picks the set by
+`cli/view_frames.h`'s rules, which the app's viewer shares: `--profile`
+(a `--signals` file's or a `--plugin` variant's once registered), else
+the recording's own `signals.json` while it hashes to the header's,
+else the header's profile when it has signals of its own; `raw`,
+`uds-generic` (whose sets come from a session's `did=` list) and no
+profile at all are refused with what to give. Its `opened` line adds
+`frames`, the profile or `"signals.json"`. The viewer offers the same
+choices beside the recording's own values, copies the set on the GUI
+thread before its open's thread starts, and opens a folder with
+`frames.csv` and no `signals.csv` through its frames. Tests:
+`RecordingFramesTest` (test_core: two recordings opened both ways and
+compared query by query, the mock's computed boost among them; wire
+frames, interleaved senders, a message across a second, the marks),
+`CliViewFramesTest`, the `view-frames*` goldens, `RecordingViewTest`'s
+frames cases and `QmlTest.recordings`.
+
+## Appendix: a vehicle's baseline (2026-11-06)
+
+A vehicle keeps one recording as its baseline, and a new run is overlaid
+on it, the two lined up where each engine starts.
+
+**The engine start.** `ecuio_recording_find` takes a third kind,
+`ECUIO_RECORDING_FIND_ENGINE_START` (3): the engine-speed signal
+reaching `ECUIO_ENGINE_START_RPM` (500) after being below
+`ECUIO_ENGINE_STOPPED_RPM` (100): the threshold kind's rising rule with a
+level of 500 and a hysteresis of 400. A starter cranks an engine at
+150-300 rpm and an idle runs past 500, so the rise to 500 is the engine
+catching, not the starter; a dip below 500 while it runs arms nothing,
+and a stall to under 100 arms the next start. A recording that starts
+with the engine running finds nothing until it stops and starts again.
+A start is the one event every run of a car shares whatever was done
+after it, and its time in each recording is the car's, not the
+recorder's: two runs started minutes apart from the key line up to the
+sample. The engine-speed signal is the number signal whose unit is
+"rpm", ASCII case ignored (obd2's and the mock's PID 0C both say
+"RPM"); of several, the one of the lowest nonzero plot rank, else the
+first in the recording's order; with none, nothing is found. The kind
+takes no signal, direction, level or hysteresis (each 0, else
+`ECUIO_ERR_INVALID_ARGUMENT`), so every front end finds the same start.
+The mock's drive cycle (15 s of key on at 0 rpm, then a 2 s start)
+finds its start after its key on. Tests: `RecordingTest` (a key on and a
+start, a stall and a restart, an engine already running, no signal in
+rpm, the ranks, the refusals, a recording of `mock://demo`).
+
+**The vehicle's field.** Each entry of the vehicles' document
+(ADR-0027) gains `baseline`, the folder of its baseline recording as
+the Recordings page names it (the app's recordings folder, Android's
+app-private one included), "" for none. An entry stored before it reads
+as none; one that isn't text drops the document, as any bad field does.
+Duplicate leaves it out: a baseline is a recording of that car. On the
+Recordings page an open recording becomes the picked vehicle's baseline
+("Use as <vehicle>'s baseline"), its row in the list carries a Baseline
+badge, and "Compare with the baseline" overlays the baseline on another
+open recording, aligned on the engine starts ("Align engine starts",
+also among the compare's alignments). The button shows only while the
+baseline's folder still holds a recording and isn't the one open; a
+baseline whose folder was moved or deleted says so, with a way to clear
+it. The page reads the document from Settings and hands its edits back
+to Settings, which stores it. Tests: `QmlTest.vehiclebook`,
+`QmlTest.recordings`, `RecordingViewTest.TheEngineStartIsHavneClisOwn`,
+`BridgeTest.ARecordingRowIsTheListsRowWhileItsFolderHoldsItsValues`.
+
+**The CLI.** `havne-cli view` takes `--align-on engine-start`, and
+`view <run> <baseline> --align-on engine-start` is the overlay's
+equivalent. The CLI has no vehicle book, so it can't name a vehicle's
+baseline: the caller names the folder. Golden `view-engine-start.jsonl`
+(two key ons whose starts are 7 s apart, and a pull found nowhere),
+`CliViewTest`, `CliUsageTest.View*EngineStart*`.
+
+**Later.** A health report that names the vehicle's baseline takes it
+from its caller, as the CLI does; nothing in core knows which recording
+is a baseline.
+
+**Note of 2026-11-07: the spreadsheet export.** v0.6.0's sharing is
+[ADR-0054](0054-exports-and-imports.md)'s exports. Section 8's `.xlsx`
+export isn't built: ADR-0054's CSV export, with its formula rule, is
+how a recording opens in a spreadsheet, and step 6 waits for a release
+to name it.

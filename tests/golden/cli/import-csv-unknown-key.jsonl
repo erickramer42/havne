@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 7, "detail": "the column map: unknown key 'decimal' in signal 1", "message": "couldn't open what was named", "type": "error"}

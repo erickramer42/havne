@@ -1,6 +1,6 @@
 // File/layer: core/src/recording_reader.cpp | C++17, Qt-free; the reader
 //             (ADR-0049 section 5)
-// Testing: UNIT: RecordingTest (test_core)
+// Testing: UNIT: RecordingTest, RecordingFramesTest (test_core)
 //
 // One pass at open reads events.log's header (the format, the UTC start,
 // each signal's kind, decimal places and plot rank) and signals.csv, and
@@ -8,9 +8,19 @@
 // in, beside each second's byte offset in signals.csv. Queries answer
 // from the summaries, and closer than a second a column from the raw
 // rows of the seconds they need, which a cache of 8 MiB keeps.
+//
+// ecuio_recording_open_frames reads frames.csv in signals.csv's place,
+// each frame decoded as a session decodes it (frame_decoder.h), raw
+// ISO-TP frames reassembled first (isotp.h). Its raw rows are a second's
+// frames decoded again, from a mark the open kept at the second's start:
+// where a re-read starts (the last row with no message under way, so
+// ISO-TP rebuilds the same state) and the decoder's state then.
 
 #include "error_detail.h"
-#include "frames_csv.h" /* native_path, file_size, seek_to */
+#include "frame_decoder.h"
+#include "frames_csv.h" /* native_path, file_size, seek_to, parse_row */
+#include "isotp.h"
+#include "recording_check.h" /* iso15765_id */
 #include "recording_rows.h"
 #include "sha256.h"
 
@@ -18,6 +28,7 @@
 #include "ecuio/recording.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -196,6 +207,146 @@ file_ptr open_file(const std::string& utf8)
     return file_ptr(p.open());
 }
 
+/* The caller's set, copied: the reader decodes with it after the open
+ * returns, when the caller may have freed its own */
+struct set_copy {
+    std::vector<ecuio_signal_def_t> defs;
+    std::vector<ecuio_channel_decl_t> channels;
+    std::vector<ecuio_enum_entry_t> enums;
+    std::vector<ecuio_computed_t> computed;
+    ecuio_signal_set_t set{};
+
+    explicit set_copy(const ecuio_signal_set_t& s)
+        : defs(s.defs, s.defs + (s.defs != nullptr ? s.count : 0)),
+          channels(s.channels,
+                   s.channels + (s.channels != nullptr ? s.channel_count : 0)),
+          enums(s.enums, s.enums + (s.enums != nullptr ? s.enum_count : 0)),
+          computed(s.computed,
+                   s.computed + (s.computed != nullptr ? s.computed_count : 0))
+    {
+        set = s;
+        set.defs = defs.empty() ? nullptr : defs.data();
+        set.channels = channels.empty() ? nullptr : channels.data();
+        set.enums = enums.empty() ? nullptr : enums.data();
+        set.computed = computed.empty() ? nullptr : computed.data();
+    }
+    set_copy(const set_copy&) = delete;
+    set_copy& operator=(const set_copy&) = delete;
+};
+
+/* A second of frames.csv's mark, beside its index entry: the row a re-read
+ * starts from, the packed replies' lengths then (an index into the
+ * reader's copies; none for all unlearned) and the computed signals'
+ * inputs then (their first in the reader's pool; none without computed
+ * signals). 16 bytes, the bound's figure. */
+struct frame_mark {
+    uint64_t rescan;
+    uint32_t lengths;
+    uint32_t latest;
+};
+static_assert(sizeof(frame_mark) == 16, "the memory bound's 16 bytes");
+
+constexpr uint32_t kNoMark = UINT32_MAX;
+
+/* A computed input's newest value at a mark: its decode counted back from
+ * the mark's (kNoMark's width: none yet). 24 bytes, the bound's figure. */
+struct saved_latest {
+    double value;
+    uint64_t time_us;
+    uint64_t age;
+};
+static_assert(sizeof(saved_latest) == 24, "the memory bound's 24 bytes");
+
+/* A restored decoder counts its decodes from here, so an input's age
+ * gives back a decode before it */
+constexpr uint64_t kDecodeBase = uint64_t{1} << 40;
+
+/* One pass over frames.csv's rows (the open's, or a re-read's): the
+ * session's decode, and core's ISO-TP for frames as they crossed the bus.
+ * Rows go into row(); take gives what each one has to decode. */
+class frame_scan
+{
+public:
+    explicit frame_scan(const ecuio_signal_set_t* set)
+        : iso_(new isotp_rx), row_(new ecuio_frame_t{}),
+          whole_(new ecuio_frame_t{})
+    {
+        iso_->timed = true;
+        decoder.prepare(set, false);
+    }
+
+    ecuio_frame_decoder decoder;
+
+    ecuio_frame_t& row() { return *row_; }
+
+    /* What the row read at host_us has to decode: itself, the message it
+     * completes, or nothing (a frame of a message under way, a Flow
+     * Control, a First Frame that tears a message on its ID) */
+    const ecuio_frame_t* take(uint64_t host_us)
+    {
+        const auto now = static_cast<int64_t>(host_us);
+        (void)isotp_expire(*iso_, now);
+        const ecuio_frame_t& f = *row_;
+        if (!on_the_wire(f)) {
+            return &f;
+        }
+        isotp_can c;
+        c.id = f.arbitration_id;
+        c.len = static_cast<uint8_t>(f.data_length);
+        std::memcpy(c.data, f.data, f.data_length);
+        if (isotp_kind(c) == isotp_pci::first) {
+            /* Two senders on one ID (a second tester on the bus) would
+             * splice their messages: both end */
+            isotp_rx_slot* open = isotp_rx_find(*iso_, c.id);
+            if (open != nullptr) {
+                open->active = false;
+                ++iso_->dropped;
+                return nullptr;
+            }
+        }
+        isotp_message m;
+        if (isotp_take(*iso_, c, now, &m) != isotp_result::complete) {
+            return nullptr;
+        }
+        whole_->arbitration_id = f.arbitration_id;
+        whole_->flags = f.flags | ECUIO_FRAME_FLAG_REASSEMBLED;
+        whole_->timestamp_us = f.timestamp_us;
+        std::memcpy(whole_->data, m.data, m.len);
+        whole_->data_length = m.len;
+        return whole_.get();
+    }
+
+    /* No message under way: a pass from the next row rebuilds this state */
+    bool idle() const
+    {
+        for (const isotp_rx_slot& s : iso_->slots) {
+            if (s.active) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+private:
+    /* A frame as it crossed the bus on ISO 15765-4's IDs: no adapter
+     * reassembled it, and its first nibble is a PCI's. A whole message
+     * there starts with its service byte, 0x41 to 0x7F for a reply. */
+    static bool on_the_wire(const ecuio_frame_t& f)
+    {
+        return (f.flags &
+                (ECUIO_FRAME_FLAG_REASSEMBLED | ECUIO_FRAME_FLAG_ERROR)) == 0 &&
+               f.data_length >= 1 && f.data_length <= 8 &&
+               (f.data[0] >> 4) <= 3 &&
+               ecuio_check::iso15765_id(f.arbitration_id,
+                                        (f.flags & ECUIO_FRAME_FLAG_EXTENDED) !=
+                                            0);
+    }
+
+    std::unique_ptr<isotp_rx> iso_;
+    std::unique_ptr<ecuio_frame_t> row_;
+    std::unique_ptr<ecuio_frame_t> whole_;
+};
+
 void copy_cut(char* out, size_t cap, const std::string& s)
 {
     size_t n = (std::min)(s.size(), cap - 1);
@@ -212,14 +363,29 @@ void copy_cut(char* out, size_t cap, const std::string& s)
 } // namespace
 
 struct ecuio_recording {
-    std::string signals_path;
-    uint64_t end_offset = 0; /* past signals.csv's last row the open read */
+    /* signals.csv, or frames.csv for a recording opened through its frames */
+    std::string source_path;
+    uint64_t end_offset = 0; /* past the source's last row the open read */
     ecuio_recording_info_t info{};
     ecuio_recording_signals_t signal_file{};
     std::vector<signal_entry> signals;
     std::unordered_map<std::string, uint32_t> by_name;
     std::vector<index_entry> index;
     std::vector<marker_entry> markers;
+
+    /* Opened through its frames: the set they decode with, each def's
+     * signal (UINT32_MAX for one that never decoded), each def by its id,
+     * a mark per index entry, the packed replies' lengths at the marks
+     * where they changed, the defs the computed signals read and their
+     * newest values at each mark */
+    bool from_frames = false;
+    std::unique_ptr<set_copy> frame_set;
+    std::vector<uint32_t> def_signal;
+    std::unordered_map<uint16_t, uint32_t> def_of_id;
+    std::vector<frame_mark> marks;
+    std::vector<std::array<uint8_t, 256>> lengths;
+    std::vector<uint32_t> inputs;
+    std::vector<saved_latest> latest_pool;
 
     /* The raw rows' cache: the seconds parsed last, newest first */
     struct block {
@@ -238,6 +404,13 @@ struct ecuio_recording {
     void read_signal_file(const std::string& folder);
     bool read_signals(ecuio_open_progress_t progress, void* user,
                       bool* canceled);
+    void take_set(const ecuio_signal_set_t& set);
+    bool read_frames(ecuio_open_progress_t progress, void* user,
+                     bool* canceled);
+    frame_mark mark(const frame_scan& s, uint64_t rescan);
+    void restore(frame_scan& s, const frame_mark& m) const;
+    template <typename Fn>
+    ecuio_status_t scan_frames(FILE* f, const index_entry& e, Fn fn) const;
     bool read_markers(const std::string& folder);
     void finish();
 
@@ -389,8 +562,11 @@ bool ecuio_recording::read_events(const std::string& folder)
                 continue;
             }
             const char* why = nullptr;
-            if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
-                rows::starts_with(p, n, "label  ")) {
+            if (from_frames && (rows::starts_with(p, n, "label  ") ||
+                                rows::starts_with(p, n, "signal  "))) {
+                /* the caller's set names the signals */
+            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+                       rows::starts_with(p, n, "label  ")) {
                 if (!read_label(p + 7, n - 7, &why)) {
                     ecuio_detail_set("events.log line %llu: %s",
                                      static_cast<unsigned long long>(line_no),
@@ -488,7 +664,7 @@ bool ecuio_recording::read_events(const std::string& folder)
 bool ecuio_recording::read_signals(ecuio_open_progress_t progress, void* user,
                                    bool* canceled)
 {
-    file_ptr f = open_file(signals_path);
+    file_ptr f = open_file(source_path);
     if (!f) {
         ecuio_detail_set("the folder has no signals.csv");
         return false;
@@ -612,6 +788,220 @@ bool ecuio_recording::read_signals(ecuio_open_progress_t progress, void* user,
     return true;
 }
 
+/* The set's defs as the signals, in its order, before frames.csv's pass:
+ * each def's signal is its index until finish drops those with no sample */
+void ecuio_recording::take_set(const ecuio_signal_set_t& set)
+{
+    frame_set.reset(new set_copy(set));
+    const ecuio_signal_set_t& s = frame_set->set;
+    for (uint32_t i = 0; i < s.count; ++i) {
+        const ecuio_signal_def_t& d = s.defs[i];
+        signal_entry e;
+        std::memcpy(e.pub.name, d.name, strnlen(d.name, sizeof d.name));
+        std::memcpy(e.pub.unit, d.unit, strnlen(d.unit, sizeof d.unit));
+        e.pub.first_us = ECUIO_RECORDING_NONE;
+        e.pub.last_us = ECUIO_RECORDING_NONE;
+        e.known_kind = true;
+        const bool text =
+            d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX;
+        e.pub.flags = text                         ? ECUIO_RECORDING_SIGNAL_TEXT
+                      : d.kind == ECUIO_VALUE_ENUM ? ECUIO_RECORDING_SIGNAL_ENUM
+                                                   : 0;
+        e.pub.decimal_places = d.decimal_places;
+        e.pub.plot_rank = d.plot_rank;
+        e.pub.group = d.group;
+        if (d.kind == ECUIO_VALUE_ENUM && s.enums != nullptr) {
+            e.labels.assign(s.enums + d.table_first,
+                            s.enums + d.table_first + d.table_count);
+        }
+        signals.push_back(std::move(e));
+        def_signal.push_back(i);
+        def_of_id.emplace(d.id, i);
+    }
+}
+
+/* The decoder's state before a second's first row, and rescan: the row a
+ * re-read of the second starts from */
+frame_mark ecuio_recording::mark(const frame_scan& s, uint64_t rescan)
+{
+    frame_mark m{rescan, kNoMark, kNoMark};
+    const ecuio_frame_decoder& d = s.decoder;
+    if (d.record_frame) {
+        static const uint8_t kNone[256] = {};
+        const uint8_t* last = lengths.empty() ? kNone : lengths.back().data();
+        if (std::memcmp(d.learned_lengths, last, sizeof kNone) != 0) {
+            lengths.emplace_back();
+            std::memcpy(lengths.back().data(), d.learned_lengths, sizeof kNone);
+        }
+        if (!lengths.empty()) {
+            m.lengths = static_cast<uint32_t>(lengths.size() - 1);
+        }
+    }
+    if (!inputs.empty()) {
+        m.latest = static_cast<uint32_t>(latest_pool.size());
+        for (const uint32_t j : inputs) {
+            const ecuio_frame_decoder::latest_value& l = d.latest[j];
+            latest_pool.push_back(saved_latest{
+                l.value, l.time_us,
+                l.decode == 0 ? UINT64_MAX : d.decodes - l.decode});
+        }
+    }
+    return m;
+}
+
+void ecuio_recording::restore(frame_scan& s, const frame_mark& m) const
+{
+    ecuio_frame_decoder& d = s.decoder;
+    if (m.lengths != kNoMark) {
+        std::memcpy(d.learned_lengths, lengths[m.lengths].data(),
+                    sizeof d.learned_lengths);
+    }
+    if (m.latest != kNoMark) {
+        d.decodes = kDecodeBase;
+        for (size_t k = 0; k < inputs.size(); ++k) {
+            const saved_latest& v = latest_pool[m.latest + k];
+            d.latest[inputs[k]] = {v.value, v.time_us,
+                                   v.age == UINT64_MAX ? 0
+                                                       : kDecodeBase - v.age};
+        }
+    }
+}
+
+/* frames.csv in signals.csv's place: each row decoded as its session
+ * decoded it, each value to signals.csv's text and back, so a number is
+ * the double signals.csv would give */
+bool ecuio_recording::read_frames(ecuio_open_progress_t progress, void* user,
+                                  bool* canceled)
+{
+    file_ptr f = open_file(source_path);
+    if (!f) {
+        ecuio_detail_set("the folder has no frames.csv");
+        return false;
+    }
+    const uint64_t total = file_size(f.get());
+    if (progress != nullptr && progress(0, total, user) != 0) {
+        *canceled = true;
+        return false;
+    }
+    line_reader lines(f.get(), 0);
+    std::string line;
+    bool ended = false;
+    bool too_long = false;
+    if (!lines.next(line, &ended, &too_long) || !ended || too_long) {
+        ecuio_detail_set("frames.csv has no header row");
+        return false;
+    }
+    const size_t bom = rows::bom_length(line.data(), line.size());
+    if (!rows::equals(line.data() + bom, line.size() - bom,
+                      ecuio_frames_csv::kHeader)) {
+        ecuio_detail_set("frames.csv's header row isn't %s",
+                         ecuio_frames_csv::kHeader);
+        return false;
+    }
+    end_offset = lines.offset();
+    frame_scan scan(&frame_set->set);
+    for (const ecuio_frame_decoder::computed_plan& c : scan.decoder.computed) {
+        for (uint32_t k = 0; k < c.program->input_count; ++k) {
+            if (std::find(inputs.begin(), inputs.end(), c.inputs[k]) ==
+                inputs.end()) {
+                inputs.push_back(c.inputs[k]);
+            }
+        }
+    }
+    uint64_t rescan = lines.offset();
+    uint64_t line_no = 1;
+    uint64_t prev_us = 0;
+    uint64_t next_progress = kProgressBytes;
+    ecuio_frames_csv::row r;
+    std::string value;
+    while (lines.next(line, &ended, &too_long)) {
+        ++line_no;
+        if (!ended) {
+            ++info.rows_torn; /* section 7: a write cut short */
+            break;
+        }
+        const char* why = nullptr;
+        if (too_long) {
+            why = "the row is longer than a recording's rows can be";
+        } else if (!ecuio_frames_csv::parse_row(line.c_str(), &r, &scan.row(),
+                                                &why)) {
+            /* why is set */
+        } else if (r.host_us < prev_us) {
+            why = "host_us is earlier than the row before it";
+        } else if (r.host_us / kSecondUs > UINT32_MAX) {
+            why = "host_us is past what a recording spans";
+        }
+        if (why != nullptr) {
+            ecuio_detail_set("frames.csv line %llu: %s",
+                             static_cast<unsigned long long>(line_no), why);
+            return false;
+        }
+        prev_us = r.host_us;
+        const auto second = static_cast<uint32_t>(r.host_us / kSecondUs);
+        const uint64_t at = lines.line_start();
+        if (index.empty() || index.back().second != second) {
+            index.push_back(index_entry{at, second, 0});
+            marks.push_back(mark(scan, rescan));
+        }
+        end_offset = lines.offset();
+        const ecuio_frame_t* msg = scan.take(r.host_us);
+        const uint32_t n = msg != nullptr ? scan.decoder.decode(msg) : 0;
+        for (uint32_t k = 0; k < n; ++k) {
+            const ecuio_value_t& v = scan.decoder.values[k];
+            signal_entry& s = signals[def_of_id.at(v.signal_id)];
+            double x = 0.0;
+            if (!s.text()) {
+                value.clear();
+                rows::append_value(value, v.value);
+                if (!rows::parse_number(value.data(), value.size(), &x) ||
+                    !std::isfinite(x)) {
+                    continue; /* not finite: no number to plot */
+                }
+            }
+            ecuio_recording_signal_t& pub = s.pub;
+            ++pub.samples;
+            if (pub.first_us == ECUIO_RECORDING_NONE) {
+                pub.first_us = r.host_us;
+            }
+            pub.last_us = r.host_us;
+            if (s.text()) {
+                if (s.texts.empty() || s.texts.back().second != second) {
+                    /* no row to read back: text_at decodes its second */
+                    s.texts.push_back(
+                        text_second{second, 1, ECUIO_RECORDING_NONE});
+                } else {
+                    ++s.texts.back().count;
+                }
+                continue;
+            }
+            if (s.numbers.empty() || s.numbers.back().second != second) {
+                s.numbers.push_back(number_second{second, 0, NAN, NAN, x});
+            }
+            number_second& ns = s.numbers.back();
+            ++ns.count;
+            ns.last = x;
+            merge(ns.lowest, ns.highest, x);
+            merge(s.lowest, s.highest, x);
+        }
+        if (scan.idle()) {
+            rescan = lines.offset();
+        }
+        if (progress != nullptr && lines.offset() >= next_progress) {
+            next_progress = lines.offset() + kProgressBytes;
+            if (progress(lines.offset(), total, user) != 0) {
+                *canceled = true;
+                return false;
+            }
+        }
+    }
+    info.duration_us = (std::max)(info.duration_us, prev_us);
+    if (progress != nullptr && progress(total, total, user) != 0) {
+        *canceled = true;
+        return false;
+    }
+    return true;
+}
+
 bool ecuio_recording::read_markers(const std::string& folder)
 {
     file_ptr f = open_file(folder + "/markers.csv");
@@ -664,6 +1054,21 @@ bool ecuio_recording::read_markers(const std::string& folder)
 /* Kinds settled, the tables trimmed to the bound */
 void ecuio_recording::finish()
 {
+    if (from_frames) {
+        std::vector<signal_entry> kept;
+        for (uint32_t& k : def_signal) {
+            if (signals[k].pub.samples == 0) {
+                k = UINT32_MAX;
+                continue;
+            }
+            kept.push_back(std::move(signals[k]));
+            k = static_cast<uint32_t>(kept.size() - 1);
+        }
+        signals.swap(kept);
+        marks.shrink_to_fit();
+        lengths.shrink_to_fit();
+        latest_pool.shrink_to_fit();
+    }
     for (signal_entry& s : signals) {
         if (!s.known_kind) {
             s.pub.flags = s.not_number ? ECUIO_RECORDING_SIGNAL_TEXT : 0;
@@ -696,10 +1101,72 @@ const index_entry* ecuio_recording::index_of(uint32_t second) const
 /* Each row of one second, read again from the file: fn(signal, host_us,
  * value text, the row's offset). A row that no longer parses, or isn't
  * the second's, means the file changed after the open. */
+/* A second of frames.csv decoded again from its mark: the rows from the
+ * mark's rescan to the second's first feed ISO-TP alone, then the
+ * second's rows decode, fn(signal, host_us, value text, the row's
+ * offset) for each value */
+template <typename Fn>
+ecuio_status_t ecuio_recording::scan_frames(FILE* f, const index_entry& e,
+                                            Fn fn) const
+{
+    const frame_mark& m = marks[static_cast<size_t>(&e - index.data())];
+    if (!seek_to(f, m.rescan)) {
+        return ECUIO_ERR_RECORDING_CHANGED;
+    }
+    frame_scan scan(&frame_set->set);
+    restore(scan, m);
+    line_reader lines(f, m.rescan);
+    std::string line;
+    std::string value;
+    bool ended = false;
+    bool too_long = false;
+    ecuio_frames_csv::row r;
+    const char* why = nullptr;
+    bool first = true;
+    while (lines.offset() < end_offset && lines.next(line, &ended, &too_long)) {
+        if (!ended || too_long ||
+            !ecuio_frames_csv::parse_row(line.c_str(), &r, &scan.row(), &why)) {
+            return ECUIO_ERR_RECORDING_CHANGED;
+        }
+        const ecuio_frame_t* msg = scan.take(r.host_us);
+        if (lines.line_start() < e.offset) {
+            continue; /* before the second: ISO-TP's state alone */
+        }
+        if (r.host_us / kSecondUs != e.second) {
+            if (first) {
+                return ECUIO_ERR_RECORDING_CHANGED;
+            }
+            break;
+        }
+        first = false;
+        const uint32_t n = msg != nullptr ? scan.decoder.decode(msg) : 0;
+        for (uint32_t k = 0; k < n; ++k) {
+            const ecuio_value_t& v = scan.decoder.values[k];
+            const auto it = def_of_id.find(v.signal_id);
+            const uint32_t signal =
+                it != def_of_id.end() ? def_signal[it->second] : UINT32_MAX;
+            if (signal == UINT32_MAX) {
+                return ECUIO_ERR_RECORDING_CHANGED; /* none at the open */
+            }
+            value.clear();
+            if (signals[signal].text()) {
+                value.assign(v.text, v.text_len);
+            } else {
+                rows::append_value(value, v.value);
+            }
+            fn(signal, r.host_us, value, lines.line_start());
+        }
+    }
+    return first ? ECUIO_ERR_RECORDING_CHANGED : ECUIO_OK;
+}
+
 template <typename Fn>
 ecuio_status_t ecuio_recording::scan_second(FILE* f, const index_entry& e,
                                             Fn fn) const
 {
+    if (from_frames) {
+        return scan_frames(f, e, fn);
+    }
     if (!seek_to(f, e.offset)) {
         return ECUIO_ERR_RECORDING_CHANGED;
     }
@@ -775,7 +1242,7 @@ ecuio_recording::rows_of(FILE*& f, file_ptr& owner, const index_entry& e,
         }
     }
     if (f == nullptr) {
-        owner = open_file(signals_path);
+        owner = open_file(source_path);
         if (!owner) {
             return ECUIO_ERR_RECORDING_CHANGED;
         }
@@ -790,7 +1257,9 @@ ecuio_recording::rows_of(FILE*& f, file_ptr& owner, const index_entry& e,
             double v = 0.0;
             if (!signals[signal].text() &&
                 !rows::parse_number(value.data(), value.size(), &v)) {
-                bad = true;
+                /* a frames open dropped a number that isn't finite too */
+                bad = !from_frames;
+                return;
             }
             parsed->push_back(raw_row{host_us, signal, 0, v});
         });
@@ -839,10 +1308,52 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
                (folder.back() == '/' || folder.back() == '\\')) {
             folder.pop_back();
         }
-        r->signals_path = folder + "/signals.csv";
+        r->source_path = folder + "/signals.csv";
         bool canceled = false;
         if (!r->read_events(folder) ||
             !r->read_signals(progress, user_data, &canceled) ||
+            !r->read_markers(folder)) {
+            return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
+        }
+        r->read_signal_file(folder);
+        r->finish();
+        *out = r.release();
+        return ECUIO_OK;
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
+                                           const ecuio_signal_set_t* signal_set,
+                                           ecuio_open_progress_t progress,
+                                           void* user_data,
+                                           ecuio_recording_t** out)
+{
+    if (out != nullptr) {
+        *out = nullptr;
+    }
+    if (folder_utf8 == nullptr || signal_set == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    ecuio_detail_clear();
+    if (ecuio_validate_signal_set(signal_set, nullptr) != ECUIO_VALIDATE_OK) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    try {
+        std::unique_ptr<ecuio_recording> r(new ecuio_recording);
+        std::string folder = folder_utf8;
+        while (folder.size() > 1 &&
+               (folder.back() == '/' || folder.back() == '\\')) {
+            folder.pop_back();
+        }
+        r->from_frames = true;
+        r->info.flags |= ECUIO_RECORDING_INFO_FRAMES;
+        r->source_path = folder + "/frames.csv";
+        r->take_set(*signal_set);
+        bool canceled = false;
+        if (!r->read_events(folder) ||
+            !r->read_frames(progress, user_data, &canceled) ||
             !r->read_markers(folder)) {
             return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
         }
@@ -1117,7 +1628,7 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
         return ECUIO_OK;
     }
     try {
-        file_ptr f = open_file(r->signals_path);
+        file_ptr f = open_file(r->source_path);
         if (!f) {
             return ECUIO_ERR_RECORDING_CHANGED;
         }
@@ -1165,49 +1676,17 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
     }
 }
 
-ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
-                                    const ecuio_recording_find_t* what,
-                                    uint64_t from_us, uint64_t* at_us)
+namespace {
+
+/* The first sample of a number signal from from_us on that reaches level
+ * (rising: at or above it; falling: at or below) after a sample past
+ * hysteresis from it (rising: below level - hysteresis) armed it */
+ecuio_status_t find_crossing(const ecuio_recording_t* r, uint32_t signal,
+                             bool rising, double level, double hysteresis,
+                             uint64_t from_us, uint64_t* at_us)
 {
-    if (r == nullptr || what == nullptr || at_us == nullptr) {
-        return ECUIO_ERR_NULL_ARGUMENT;
-    }
-    for (uint64_t v : what->reserved) {
-        if (v != 0) {
-            return ECUIO_ERR_INVALID_ARGUMENT;
-        }
-    }
-    if (what->flags != 0) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
-    *at_us = ECUIO_RECORDING_NONE;
-    if (what->kind == ECUIO_RECORDING_FIND_MARKER) {
-        if (what->label_utf8 == nullptr) {
-            return ECUIO_ERR_NULL_ARGUMENT;
-        }
-        for (const marker_entry& m : r->markers) {
-            if (m.host_us >= from_us && m.label == what->label_utf8) {
-                *at_us = m.host_us;
-                break;
-            }
-        }
-        return ECUIO_OK;
-    }
-    if (what->kind != ECUIO_RECORDING_FIND_THRESHOLD ||
-        what->signal >= r->signals.size() ||
-        (what->direction != ECUIO_RECORDING_FIND_RISING &&
-         what->direction != ECUIO_RECORDING_FIND_FALLING) ||
-        !(what->hysteresis >= 0.0) || std::isnan(what->level)) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
-    const signal_entry& s = r->signals[what->signal];
-    if (s.text()) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
-    const bool rising = what->direction == ECUIO_RECORDING_FIND_RISING;
-    const double level = what->level;
-    const double arm_at =
-        rising ? level - what->hysteresis : level + what->hysteresis;
+    const signal_entry& s = r->signals[signal];
+    const double arm_at = rising ? level - hysteresis : level + hysteresis;
     auto arms = [&](double v) { return rising ? v < arm_at : v > arm_at; };
     auto fires = [&](double v) { return rising ? v >= level : v <= level; };
     bool armed = false;
@@ -1240,7 +1719,7 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                 return rc;
             }
             for (const raw_row& row : *rows) {
-                if (row.signal != what->signal || row.host_us < from_us) {
+                if (row.signal != signal || row.host_us < from_us) {
                     continue;
                 }
                 if (armed && fires(row.value)) {
@@ -1258,6 +1737,101 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
     }
 }
 
+/* "rpm" in any ASCII case, the whole unit */
+bool is_rpm(const char* unit)
+{
+    static const char kRpm[] = "rpm";
+    for (size_t i = 0; i < sizeof kRpm; ++i) {
+        char c = unit[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (c != kRpm[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The engine-speed signal: a number signal in rpm, the lowest nonzero
+ * rank among several, else the first; UINT32_MAX with none */
+uint32_t engine_speed_signal(const ecuio_recording_t* r)
+{
+    uint32_t best = UINT32_MAX;
+    for (uint32_t k = 0; k < r->signals.size(); ++k) {
+        const signal_entry& s = r->signals[k];
+        if (s.text() || !is_rpm(s.pub.unit)) {
+            continue;
+        }
+        const uint8_t rank = s.pub.plot_rank;
+        if (best == UINT32_MAX ||
+            (rank != 0 && (r->signals[best].pub.plot_rank == 0 ||
+                           rank < r->signals[best].pub.plot_rank))) {
+            best = k;
+        }
+    }
+    return best;
+}
+
+} // namespace
+
+ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
+                                    const ecuio_recording_find_t* what,
+                                    uint64_t from_us, uint64_t* at_us)
+{
+    if (r == nullptr || what == nullptr || at_us == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    for (uint64_t v : what->reserved) {
+        if (v != 0) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    if (what->flags != 0) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *at_us = ECUIO_RECORDING_NONE;
+    if (what->kind == ECUIO_RECORDING_FIND_MARKER) {
+        if (what->label_utf8 == nullptr) {
+            return ECUIO_ERR_NULL_ARGUMENT;
+        }
+        for (const marker_entry& m : r->markers) {
+            if (m.host_us >= from_us && m.label == what->label_utf8) {
+                *at_us = m.host_us;
+                break;
+            }
+        }
+        return ECUIO_OK;
+    }
+    if (what->kind == ECUIO_RECORDING_FIND_ENGINE_START) {
+        /* A NaN is refused too: it equals nothing */
+        if (what->signal != 0 || what->direction != 0 || what->level != 0.0 ||
+            what->hysteresis != 0.0) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        const uint32_t rpm = engine_speed_signal(r);
+        if (rpm == UINT32_MAX) {
+            return ECUIO_OK;
+        }
+        return find_crossing(r, rpm, true, ECUIO_ENGINE_START_RPM,
+                             ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM,
+                             from_us, at_us);
+    }
+    if (what->kind != ECUIO_RECORDING_FIND_THRESHOLD ||
+        what->signal >= r->signals.size() ||
+        (what->direction != ECUIO_RECORDING_FIND_RISING &&
+         what->direction != ECUIO_RECORDING_FIND_FALLING) ||
+        !(what->hysteresis >= 0.0) || std::isnan(what->level)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (r->signals[what->signal].text()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    return find_crossing(r, what->signal,
+                         what->direction == ECUIO_RECORDING_FIND_RISING,
+                         what->level, what->hysteresis, from_us, at_us);
+}
+
 void ecuio_recording_close(ecuio_recording_t* r)
 {
     delete r;
@@ -1268,7 +1842,10 @@ uint64_t ecuio_recording_test_table_bytes(const ecuio_recording_t* r)
     if (r == nullptr) {
         return 0;
     }
-    uint64_t n = r->index.capacity() * sizeof(index_entry);
+    uint64_t n = r->index.capacity() * sizeof(index_entry) +
+                 r->marks.capacity() * sizeof(frame_mark) +
+                 r->lengths.capacity() * 256 +
+                 r->latest_pool.capacity() * sizeof(saved_latest);
     for (const signal_entry& s : r->signals) {
         n += s.numbers.capacity() * sizeof(number_second) +
              s.texts.capacity() * sizeof(text_second);

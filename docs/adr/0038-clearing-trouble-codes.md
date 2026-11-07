@@ -4,7 +4,8 @@
   and mock transports, the app's saved report, log lines and page; not
   yet run on a car (BENCH prep #29). Where the build differs, the
   appendix of 2026-10-30. A clear with the engine running, on the
-  user's word: the appendix of 2026-11-01.
+  user's word: the appendix of 2026-11-01. `havne-cli clear`: the
+  appendix of 2026-11-06.
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0037](0037-reading-trouble-codes.md) (the report
   a clear needs first, its generation, Read again's path through the
@@ -261,3 +262,45 @@ with no codes stored
 the engine running, `cleared (747 rpm, 0 mph)`, and with it off,
 `cleared (0 rpm, 0 mph)`; each read after showed the readiness monitors
 incomplete. A stored code erased is still to see.
+
+## Appendix: havne-cli clear (2026-11-06)
+
+Answers section 7's first item: a script clears codes through the same
+gate, and the question of who confirms has the script's own answer.
+
+**The word.** `havne-cli clear <uri> --yes [--engine-running
+[--moving]]`. `--yes` is the user's word that the codes may go, given
+where a script gives it: on its command line. Without it the command is
+a usage error (exit 2) that sends nothing, so a clear never happens by
+default or by a mistyped command. `--engine-running` is
+`ECUIO_CLEAR_ALLOW_RUNNING` and `--moving` (only with it)
+`ECUIO_CLEAR_ALLOW_MOVING`: the words of the appendix of 2026-11-01,
+each a flag of its own. Core's gate is unchanged: the report's
+generation, `01 0C` (and `01 0D` under the word), each ECU by its own
+request ID through `ecuio_session_clear_diagnostics_with`.
+
+**The report first, as `diagnostics` lines.** The app saves the report
+to a file of its own before it clears (section 5); the command writes it
+to its output instead, where a script already keeps what it reads. Once
+every ECU's read has completed (30 s at most), each ECU's `diagnostics`
+line goes out, in `havne-cli stream`'s form, and the output is flushed;
+output that fails then asks no clear at all, as a failed write stops the
+app's. Each clear is asked at the generation of the line written, so a
+report read again in between is refused unsent (`report-changed`). An
+ECU whose read never completed is never cleared (`not-read`).
+
+**Then each outcome, and the read after.** A `clear` line per ECU as its
+clear settles: `rx`, `outcome` (`cleared`, `refused`, `unanswered`,
+`engine-running`, `no-engine-speed`, `moving`, `no-vehicle-speed`,
+`report-changed`, `not-read`, `no-outcome` for one that never settled
+within 30 s), `reply` for a refusal's bytes (`7F 04 22`, or `01 0C`'s
+or `01 0D`'s), and `rpm` and `kmh`, what the clear read, null for none.
+After a `44` or no answer the report is read again and its `diagnostics`
+line follows. The `end` line counts `cleared` and `not_cleared`, its
+reason `cleared` only when every ECU answered `44`, and the exit is 0
+then and 1 otherwise, so a script can tell.
+
+Built in `cli/clear_run.h` (public headers only); tested against the
+mock (`CliGoldenTest.ClearClearsTheMock`, `.ClearWithTheWordOnTheEngine`),
+the fake DLL's ECU on Windows and the simulated ECU on vcan0 on Linux
+(`CliClearRunTest`), and `CliClearTest`. Not run on a car.

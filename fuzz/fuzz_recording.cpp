@@ -3,6 +3,7 @@
 
 #include <ecuio/core.h>
 #include <ecuio/recording.h>
+#include <ecuio/signals.h>
 
 #include "recording_check.h" /* core/src: pure, iso15765_id */
 #include "recording_rows.h" /* core/src: pure */
@@ -193,11 +194,17 @@ struct opened {
     ecuio_recording_info_t info{};
 };
 
-opened open_and_query()
+/* The folder through signals.csv (set NULL), or through its frames.csv
+ * decoded with set (ecuio_recording_open_frames: ISO-TP on the wire
+ * frames, the marks a second is read again from) */
+opened open_and_query(const ecuio_signal_set_t* set)
 {
     opened o;
     ecuio_recording_t* r = nullptr;
-    o.rc = ecuio_recording_open(folder().c_str(), nullptr, nullptr, &r);
+    o.rc = set != nullptr
+               ? ecuio_recording_open_frames(folder().c_str(), set, nullptr,
+                                             nullptr, &r)
+               : ecuio_recording_open(folder().c_str(), nullptr, nullptr, &r);
     const char* detail = ecuio_last_error_detail();
     if (detail == nullptr || strlen(detail) >= 512 ||
         strchr(detail, '\n') != nullptr ||
@@ -211,7 +218,9 @@ opened open_and_query()
         }
         return o;
     }
-    if (r == nullptr || ecuio_recording_get_info(r, &o.info) != ECUIO_OK) {
+    if (r == nullptr || ecuio_recording_get_info(r, &o.info) != ECUIO_OK ||
+        ((o.info.flags & ECUIO_RECORDING_INFO_FRAMES) != 0) !=
+            (set != nullptr)) {
         abort();
     }
     for (uint32_t k = 0; k < o.info.signal_count; ++k) {
@@ -274,6 +283,30 @@ opened open_and_query()
                                   16) != ECUIO_OK ||
             cols[0].samples == 0) {
             abort();
+        }
+        /* Half-second columns over a short recording read every second
+         * of it again: the same count and range as the open found */
+        if (t1 <= 64000000) {
+            const auto n = static_cast<uint32_t>((t1 + 499999) / 500000);
+            std::vector<ecuio_recording_column_t> half(n);
+            if (ecuio_recording_query(r, &k, 1, 0, n * 500000ull, half.data(),
+                                      n) != ECUIO_OK) {
+                abort();
+            }
+            uint64_t sum = 0;
+            double lo = NAN;
+            double hi = NAN;
+            for (const ecuio_recording_column_t& c : half) {
+                sum += c.samples;
+                if (c.samples > 0 && !text) {
+                    lo = std::isnan(lo) || c.lowest < lo ? c.lowest : lo;
+                    hi = std::isnan(hi) || c.highest > hi ? c.highest : hi;
+                }
+            }
+            if (sum != s.samples ||
+                (!text && sum > 0 && (lo != s.lowest || hi != s.highest))) {
+                abort();
+            }
         }
         char buf[64];
         uint64_t at = 0;
@@ -421,11 +454,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     write_file("signals.csv", parts[1], lens[1], count > 1);
     write_file("markers.csv", parts[2], lens[2], count > 2);
     write_file("frames.csv", parts[3], lens[3], count > 3);
-    const opened a = open_and_query();
-    const opened b = open_and_query();
-    if (a.rc != b.rc || a.detail != b.detail ||
-        memcmp(&a.info, &b.info, sizeof a.info) != 0) {
-        abort();
+    /* signals.csv, then the frames through obd2 (packed replies split)
+     * and the mock's set (a computed signal), each twice alike */
+    const ecuio_signal_set_t* sets[] = {nullptr, ecuio_obd2_signal_set(),
+                                        ecuio_mock_signal_set()};
+    for (const ecuio_signal_set_t* set : sets) {
+        const opened a = open_and_query(set);
+        const opened b = open_and_query(set);
+        if (a.rc != b.rc || a.detail != b.detail ||
+            memcmp(&a.info, &b.info, sizeof a.info) != 0) {
+            abort();
+        }
     }
     const checked x = check_folder(0);
     const checked y = check_folder(0);

@@ -13,8 +13,16 @@
  * transport seam, the vendor types, the surrogate's wire), so they're
  * compiled here too and can't take a C++-only construct unnoticed;
  * j2534_ptypes.h comes in through j2534_surrogate.h.
+ *
+ * c_abi_shared builds this file again against the shared core
+ * (HAVNE_SHARED_CORE, ADR-0053), which exports the public headers'
+ * functions and nothing else: there each call resolves through the
+ * library's export table, and the calls it never exports (internal.h's
+ * test hooks, the surrogate client's log path) are left out
+ * (ECUIO_C_ABI_SHARED, INTERNAL()).
  */
 
+#include "ecuio/queue.h"
 #include "ecuio/obdb.h"
 #include "ecuio/recording.h"
 #include "ecuio/internal.h"
@@ -31,10 +39,19 @@
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 #include "ecuio/core.h"
+#include "ecuio/version.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+
+/* An internal hook's call, or the value it gives in the archive's build
+ * where the shared core has no such export */
+#ifdef ECUIO_C_ABI_SHARED
+#define INTERNAL(call, value) (value)
+#else
+#define INTERNAL(call, value) (call)
+#endif
 
 /* Negative-array-size idiom: valid in ALL C standards including
  * pedantic C89, complementing the header's _Static_assert (C11+). */
@@ -125,6 +142,15 @@ typedef char abi_inspection_flags_check[(offsetof(ecuio_inspection_t, diag_flags
 typedef char abi_sim_stats_size_check[(sizeof(ecuio_sim_stats_t) == 96) ? 1 : -1];
 typedef char abi_sim_stats_flags_check[(offsetof(ecuio_sim_stats_t, flags) == 72) ? 1 : -1];
 typedef char abi_sim_stats_pending_check[(offsetof(ecuio_sim_stats_t, pending) == 80) ? 1 : -1];
+typedef char
+    abi_sim_reply_size_check[(sizeof(ecuio_sim_reply_t) == 4136) ? 1 : -1];
+typedef char abi_sim_reply_delay_check
+    [(offsetof(ecuio_sim_reply_t, delay_us) == 8) ? 1 : -1];
+typedef char abi_sim_reply_length_check
+    [(offsetof(ecuio_sim_reply_t, length) == 16) ? 1 : -1];
+typedef char abi_sim_reply_data_check[(offsetof(ecuio_sim_reply_t, data) == 40)
+                                          ? 1
+                                          : -1];
 typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_plugin_info_size_check[(sizeof(ecuio_plugin_info_t) == 136) ? 1 : -1];
@@ -138,6 +164,10 @@ typedef char abi_can_state_check[(offsetof(ecuio_can_interface_t, state) == 40) 
 typedef char abi_can_modes_check[(offsetof(ecuio_can_interface_t, modes_supported) == 48) ? 1 : -1];
 typedef char abi_stream_flags_check[(offsetof(ecuio_stream_callbacks_t, flags) == 4 * sizeof(void*)) ? 1 : -1];
 typedef char abi_stream_size_check[(sizeof(void*) != 8 || sizeof(ecuio_stream_callbacks_t) == 56) ? 1 : -1];
+typedef char abi_queue_value_size_check[(sizeof(ecuio_queue_value_t) == 160) ? 1 : -1];
+typedef char abi_queue_value_value_check[(offsetof(ecuio_queue_value_t, value) == 16) ? 1 : -1];
+typedef char abi_queue_value_len_check[(offsetof(ecuio_queue_value_t, text_len) == 24) ? 1 : -1];
+typedef char abi_queue_value_text_check[(offsetof(ecuio_queue_value_t, text) == 32) ? 1 : -1];
 
 int main(void)
 {
@@ -158,6 +188,10 @@ int main(void)
     uint32_t can_count = 0;
     ecuio_vin_info_t vin_info;
     ecuio_sim_t* sim = NULL;
+    ecuio_queue_t* queue = NULL;
+    ecuio_queue_value_t queue_value;
+    uint32_t queue_count = 0;
+    uint64_t queue_dropped = 0;
     ecuio_sim_stats_t sim_stats;
     ecuio_inspection_t inspection;
     ecuio_record_options_t record_options;
@@ -176,8 +210,15 @@ int main(void)
     char reading_text[8];
     ecuio_check_options_t check_options;
     ecuio_check_summary_t check_summary;
+    ecuio_export_options_t export_options;
+    ecuio_export_report_t export_report;
+    ecuio_import_options_t import_options;
+    ecuio_import_report_t import_report;
+    ecuio_health_options_t health_options;
+    ecuio_health_report_t health_report;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
+    uint32_t version_major = 0, version_minor = 0, version_patch = 0;
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -188,6 +229,15 @@ int main(void)
      * regressions at link time. */
     printf("%s %s\n", ecuio_version_string(),
            ecuio_status_string(ECUIO_ERR_SESSION_CLOSED));
+    if (ecuio_version(&version_major, &version_minor, &version_patch) !=
+            ECUIO_OK ||
+        version_major != ECUIO_VERSION_MAJOR ||
+        version_minor != ECUIO_VERSION_MINOR ||
+        version_patch != ECUIO_VERSION_PATCH ||
+        ecuio_version(NULL, &version_minor, &version_patch) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
     printf("detail '%s'\n", ecuio_last_error_detail());
     printf("clock %llu slept %llu\n", (unsigned long long)ecuio_clock_us(),
            (unsigned long long)ecuio_clock_slept_us());
@@ -307,6 +357,15 @@ int main(void)
         ECUIO_SIM_ALLOW_DESK_BUS != 1u) {
         return 1;
     }
+    /* The unbound sim (ADR-0055) */
+    if (ecuio_sim_create_unbound(NULL, 0, &sim) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_ask(NULL, 0x7E0u, NULL, 0, ECUIO_SIM_NOW, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        sim != NULL || ECUIO_SIM_MAX_REPLIES != 10u ||
+        ECUIO_SIM_REPLY_PENDING != 1u || ECUIO_SIM_REPLY_LATE != 2u ||
+        ECUIO_SIM_REPLY_BAD_SEQUENCE != 4u || ECUIO_SIM_REPLY_STALLED != 8u) {
+        return 1;
+    }
     ecuio_sim_destroy(NULL);
     /* The recorder (ADR-0049): its layout and its NULL refusals */
     memset(&record_options, 0, sizeof record_options);
@@ -325,7 +384,7 @@ int main(void)
         ecuio_recorder_get_folder(NULL, NULL, 0, &folder_len) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_close(NULL, NULL) != ECUIO_OK ||
-        ecuio_recorder_test_syncs(NULL) != 0) {
+        INTERNAL(ecuio_recorder_test_syncs(NULL), 0) != 0) {
         return 1;
     }
     /* The reader (ADR-0049 section 5): its layout and its NULL refusals */
@@ -342,6 +401,8 @@ int main(void)
         offsetof(ecuio_recording_signals_t, sha256) != 16 ||
         ECUIO_RECORDING_SIGNALS_MATCH != 0x4u || ECUIO_ERR_CANCELED != 19 ||
         ECUIO_RECORDING_NONE != UINT64_MAX || ECUIO_ERR_IN_USE != 20 ||
+        ECUIO_RECORDING_FIND_ENGINE_START != 3u ||
+        ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM != 400.0 ||
         ecuio_plugin_free(NULL) != ECUIO_OK ||
         ecuio_plugin_values(NULL, NULL, 0, NULL, 0, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
@@ -364,7 +425,7 @@ int main(void)
                                 &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_find(NULL, &reading_find, 0, &reading_at) !=
             ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_recording_test_table_bytes(NULL) != 0) {
+        INTERNAL(ecuio_recording_test_table_bytes(NULL), 0) != 0) {
         return 1;
     }
     ecuio_recording_close(NULL);
@@ -386,6 +447,48 @@ int main(void)
                               &check_summary) != ECUIO_ERR_INVALID_ARGUMENT) {
         return 1;
     }
+    /* Exports and imports (ADR-0054): their layouts and refusals */
+    memset(&export_options, 0, sizeof export_options);
+    memset(&import_options, 0, sizeof import_options);
+    export_options.format = ECUIO_EXPORT_PCAPNG;
+    import_options.format = ECUIO_IMPORT_CANDUMP;
+    if (sizeof(ecuio_export_report_t) != 120 ||
+        offsetof(ecuio_export_report_t, failed_class) != 80 ||
+        offsetof(ecuio_export_report_t, values) != 88 ||
+        offsetof(ecuio_export_report_t, files) != 104 ||
+        offsetof(ecuio_export_report_t, files_left_out) != 108 ||
+        offsetof(ecuio_export_options_t, folder_utf8) != 24 ||
+        sizeof(ecuio_import_report_t) != 80 ||
+        offsetof(ecuio_import_report_t, duration_us) != 40 ||
+        offsetof(ecuio_import_report_t, values) != 48 ||
+        offsetof(ecuio_import_report_t, columns_ignored) != 56 ||
+        offsetof(ecuio_import_report_t, reserved) != 64 ||
+        offsetof(ecuio_import_options_t, in_path_utf8) != 8 ||
+        ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED != 4u ||
+        ECUIO_EXPORT_LEFT_OUT_COUNT != 5u ||
+        ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
+        ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_scrub_frames(0, NULL, NULL, NULL, 0, NULL, &export_report) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    /* The health report (ADR-0054's appendix): its layouts and refusals */
+    memset(&health_options, 0, sizeof health_options);
+    health_options.format = ECUIO_HEALTH_JSON;
+    if (sizeof(ecuio_health_value_t) != 32 ||
+        offsetof(ecuio_health_value_t, age_us) != 16 ||
+        offsetof(ecuio_health_options_t, utc_us) != 32 ||
+        offsetof(ecuio_health_options_t, session) != 80 ||
+        sizeof(ecuio_health_report_t) != 120 ||
+        offsetof(ecuio_health_report_t, failed_class) != 80 ||
+        ECUIO_HEALTH_TEXT != 2u || ECUIO_HEALTH_VIN_DECODED != 1u ||
+        ecuio_health_export(NULL, &health_report) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
     if (ecuio_obdb_import("{}", 2, NULL, NULL, NULL, NULL, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ECUIO_OBDB_NOTE_SKIPPED != 2u || ECUIO_OBDB_ALONE != 1u) {
@@ -405,7 +508,18 @@ int main(void)
     ecuio_stream_received(NULL, NULL, 0);
     ecuio_stream_failed(NULL, NULL);
     ecuio_j2534_free_devices(NULL);
-    printf("log '%s'\n", ecuio_j2534_sur_log_path(NULL));
+    /* The pull queue (ADR-0053 section 4): its NULL refusals */
+    if (ecuio_queue_open(NULL, ECUIO_QUEUE_FRAMES, 1, &queue) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        queue != NULL ||
+        ecuio_queue_read_frames(NULL, &frame, 1, &queue_count, &queue_dropped,
+                                0) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_queue_read_values(NULL, &queue_value, 1, &queue_count,
+                                &queue_dropped, 0) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    ecuio_queue_close(NULL);
+    printf("log '%s'\n", INTERNAL(ecuio_j2534_sur_log_path(NULL), ""));
     (void)frame;
     return 0;
 }

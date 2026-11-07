@@ -126,8 +126,13 @@ void frame(const uint8_t* data, size_t size)
     const uint32_t known = ECUIO_FRAME_FLAG_EXTENDED | ECUIO_FRAME_FLAG_REMOTE |
                            ECUIO_FRAME_FLAG_FD |
                            ECUIO_FRAME_FLAG_BITRATE_SWITCH |
-                           ECUIO_FRAME_FLAG_ERROR;
+                           ECUIO_FRAME_FLAG_FD_ESI | ECUIO_FRAME_FLAG_ERROR;
     if (f->flags & ~known)
+        abort();
+    /* BRS and ESI are an FD frame's alone */
+    const uint32_t fd_only =
+        ECUIO_FRAME_FLAG_BITRATE_SWITCH | ECUIO_FRAME_FLAG_FD_ESI;
+    if ((f->flags & fd_only) && !(f->flags & ECUIO_FRAME_FLAG_FD))
         abort();
     if (f->data_length > room)
         abort();

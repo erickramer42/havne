@@ -158,6 +158,12 @@ Dates are commit dates.
 | 2026-11-06 | A requesting worker waits out the engine's floor on a high-resolution timer: against the fake, about 21 ms a module from 31; and the charts draw on the GPU, a tap on the test phone's chart about 50 ms from 150 | `ebf9866`, `a448a92` |
 | 2026-11-06 | The car run of v0.5.0's own signals through the VX and the MX+ ([2026-11-06-own-signals-car](bench-sessions/2026-11-06-own-signals-car.md)): every feature read passed; the VX's lost second-module replies filed as Known Issue #42, and the phone, vehicle and viewer fixes it found | `4b6e40d`, `f0fb945` |
 | 2026-11-06 | v0.5.1's review fixes: the support report lists refusals before the bitmap's drops and the front ends count those past its eight, numbers read as their nearest double, `havne-cli`'s paths as UTF-16 on Windows, a VIN's pick keeping no other vehicle's file, refused rows out of the default plot, and the pace tests on the fakes' own stamps | `b8dfdd0`, `6898b2e`, `1ee8b94` |
+| 2026-11-06 | The ELM327 emulator ([ADR-0055](adr/0055-elm327-emulator.md)): `havne-cli sim --elm327` serves the simulated car as an ELM327 adapter on TCP, read by Havne, python-OBD and ELM327 apps, over core's simulated ECU answering with no bus | `7b54f0a`, `1ea44d7` |
+| 2026-11-06 | `havne-cli clear` through core's clear gate, the viewer reading a recording's frames through a profile, JSON Schemas for signal files and plugins, an OBDb set imported in Settings, and CI's downloads from the Actions cache | `fbf16be`, `36db852`, `b60100d`, `670686e`, `ad54ccd` |
+| 2026-11-06 | Exports and imports scrubbed by construction ([ADR-0054](adr/0054-exports-and-imports.md)): pcapng for Wireshark, candump import, the Log page's filter, By ID view and Export CSV through `ecuio_scrub_frames`, a recording's values as CSV, and a scrubbed copy of a recording's folder | `b4c5bb0`, `2208774`, `1f359fb`, `2b3c144`, `f91c1c0`, `9c5180e`, `10d8f5c` |
+| 2026-11-06 | The shared core exporting the C API and nothing else, the pull queue for callers that can't take a callback, and the `havne` Python package over them through ctypes ([ADR-0053](adr/0053-python-bindings.md)) | `bb76988`, `31c9fef`, `66f6ff8`, `8015fd6` |
+| 2026-11-07 | A vehicle's baseline recording aligned on its engine start, the health report from a session or a recording in core, `havne-cli health` and the app, the wheel for each platform with the shared core inside, the Python examples, and another logger's CSV imported by a column map | `106e368`, `eeeda26`, `2156fa8`, `fe9357d`, `42f660d`, `c4ba99c`, `ea2292d`, `6c72831`, `39629a4`, `f762678` |
+| 2026-11-07 | v0.6.0's review fixes: the scrub reads identification replies in both addressing layouts and CAN FD's forms on any ID, joins segments on any ID, finds a VIN run into other characters by its check digit, and never renames over a name; the exports leave nothing behind out of memory; `havne-cli` fails when its output can't be written; the health report waits for each supported value; the Python package closes what a script drops. Scrubbed exports of every archived car, bench and phone recording hold none of their identity values | `c0cc077`, `9f0da36`, `1a077e9`, `06500d4`, `8c49351`, `ab762e4`, `63cd98f`, `41b77f2`, `c3e89f5`, `8ae67a8`, `02a5f16` |
 
 ## Lessons learned
 
@@ -1275,3 +1281,19 @@ under load, as an empty recording the replay refused. That looked like
 the recorder losing frames at its close until a throwaway probe printed
 the recording's files: one line of header, and a session connected and
 disconnected within a millisecond. The waits read whether a value came.
+
+**2026-11-07: v0.6.0's review.** **A scrub that reads more forms has to
+be measured for what it takes, not only for what it finds.** The export's
+rule for identification replies on other IDs was widened to read both
+ISO-TP addressing layouts and CAN FD's forms, so a manufacturer's reply
+would be left out however it was framed, and its tests passed. Run over
+every recording on hand before the merge, it left out 2,003 frames that
+weren't identification and refused one export: adapters' payloads with
+no ISO-TP header, read in the extended layout, and CAN FD frames whose
+second byte happened to be a Service 09 reply's. Their bytes became
+"identity values", and the check then found them in frames it kept.
+Limiting the reads to the forms the standards give on each ID (normal
+addressing on ISO 15765-4's IDs, each Single Frame form only at the
+frame lengths ISO 15765-2 allows) brought both counts back to zero with
+every test still passing. A rule that fails closed can still cost the
+user their data; the corpus, not the unit tests, shows how much.

@@ -1,6 +1,7 @@
 // File/layer: tests/qml/tst_log.qml | Qt Quick Test, QML tier
 // Testing: QML: QmlTest.log (test_qml)
 
+import QtCore
 import QtQuick
 import QtTest
 import App
@@ -29,6 +30,7 @@ TestCase {
         Theme.developerMode = false
         Bridge.model.newestFirst = true
         Bridge.model.clearSelection()
+        Bridge.model.setFilter("", "", 0, 0)
         Bridge.logPaused = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -141,10 +143,10 @@ TestCase {
         compare(where(), before, "and back in the Activity view")
     }
 
-    // Either order button, and Latest, goes to the newest row: the top in
-    // newest-first order, the end in oldest-first, from wherever the view
-    // was scrolled, and whether or not the order changes
-    function test_theOrderButtonsGoToTheNewestRow() {
+    // The Time header turns the order and goes to the newest row: the top
+    // in newest-first order, the end in oldest-first, from wherever the
+    // view was scrolled; Latest goes there too
+    function test_theTimeHeaderTurnsTheOrder() {
         Theme.developerMode = true
         Bridge.model.newestFirst = true
         const page = create(logComponent)
@@ -155,17 +157,22 @@ TestCase {
         compare(Bridge.connectSession("mock://demo"), "")
         tryVerify(() => list.contentHeight > 3 * list.height, 15000, "enough rows to scroll")
 
+        const order = find(page, "orderToggle")
+        compare(order.contentItem.text, "Time ↓ (s)")
         list.positionViewAtEnd()
         verify(!list.atYBeginning, "scrolled away from the newest")
         verify(latest.visible, "Latest offered in newest-first order too")
-        find(page, "order_newest").clicked()
-        tryVerify(() => list.atYBeginning, 2000, "the same order: back to the top")
+        latest.clicked()
+        tryVerify(() => list.atYBeginning, 2000, "Latest: back to the top")
         verify(!latest.visible)
 
-        find(page, "order_oldest").clicked()
+        order.clicked()
+        verify(!Bridge.model.newestFirst)
+        compare(order.contentItem.text, "Time ↑ (s)")
         tryVerify(() => list.atYEnd, 2000, "oldest-first: the end")
 
-        find(page, "order_newest").clicked()
+        order.clicked()
+        verify(Bridge.model.newestFirst)
         tryVerify(() => list.atYBeginning, 2000, "newest-first from oldest-first: the top")
 
         list.positionViewAtEnd()
@@ -224,7 +231,9 @@ TestCase {
         find(page, "view_frames").clicked()
         const list = find(page, "frameList")
         const copy = find(page, "copyFrames")
-        verify(copy.visible && !copy.enabled, "Copy waits for a selection")
+        const tools = find(page, "frameTools")
+        const bar = find(page, "selectionBar")
+        verify(!bar.visible && tools.visible, "the selection bar waits for a selection")
         compare(Bridge.connectSession("mock://demo"), "")
         tryVerify(() => list.count >= 4 && list.itemAtIndex(3) !== null, 5000, "rows show")
         Bridge.logPaused = true   // holds the rows still under the taps
@@ -233,8 +242,9 @@ TestCase {
         mouseClick(row0, row0.width / 2, row0.height / 2)
         compare(Bridge.model.selectedCount, 1, "a tap selects the row")
         verify(Qt.colorEqual(row0.color, Qt.alpha(Theme.info, 0.22)), "and marks it")
-        verify(copy.enabled)
-        verify(find(page, "selectedLabel").visible)
+        verify(bar.visible && !tools.visible, "the selection bar in the tools' place")
+        verify(copy.visible && copy.enabled)
+        compare(find(page, "selectedLabel").text, "1 selected")
 
         const row2 = list.itemAtIndex(2)
         mouseClick(row2, row2.width / 2, row2.height / 2, Qt.LeftButton, Qt.ShiftModifier)
@@ -256,7 +266,7 @@ TestCase {
         const none = find(page, "selectNone")
         none.clicked()
         compare(Bridge.model.selectedCount, 0)
-        verify(!copy.enabled && !none.enabled)
+        verify(!bar.visible && tools.visible, "the tools come back")
     }
 
     // Ctrl+C (Cmd+C on a Mac) copies the selected rows as Copy does
@@ -284,6 +294,187 @@ TestCase {
         compare(lines[0], "time_s\tdlc\text\tid\tdata")
         verify(/^\d+\.\d{6}\t\d+\t[-E]\t0x[0-9A-F]+\t[0-9A-F ]*$/.test(lines[1]),
                "a row's columns: " + lines[1])
+    }
+
+    // ---- The filter and By ID (framefilter.h) ----
+
+    // The frames a mock session puts in the table, held still
+    function heldFrames(page) {
+        find(page, "view_frames").clicked()
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.model.heldCount >= 40, 10000, "frames arrive")
+        Bridge.logPaused = true
+    }
+
+    // The filter's fields narrow the table, the toggle counts them, the
+    // status says how many of how many show; Clear the filter shows all
+    function test_theFilterNarrowsTheTable() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        heldFrames(page)
+        const toggle = find(page, "filterToggle")
+        const panel = find(page, "filterPanel")
+        verify(!panel.visible, "closed until asked for")
+        compare(toggle.text, "Filter")
+        toggle.clicked()
+        verify(panel.visible)
+
+        const held = Bridge.model.heldCount
+        const ids = find(page, "filterIds")
+        ids.text = "C0"
+        page.applyFilter()
+        compare(toggle.text, "Filter (1)")
+        verify(Bridge.model.count > 0 && Bridge.model.count < held,
+               Bridge.model.count + " of " + held)
+        const list = find(page, "frameList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "a row shows")
+        for (let i = 0; i < Math.min(list.count, 5); ++i)
+            compare(Bridge.model.data(Bridge.model.index(i, 0), 261), 0xC0)   // ArbitrationIdRole
+        const status = find(page, "filterStatus")
+        verify(status.visible)
+        compare(status.text, "Showing " + Bridge.model.count + " of " + held)
+
+        // A field that doesn't parse says why and keeps the filter
+        const count = Bridge.model.count
+        find(page, "filterData").text = "1G"
+        page.applyFilter()
+        compare(find(page, "filterDataProblem").text, "\"1G\" isn't a hex byte or ??")
+        compare(Bridge.model.count, count)
+        find(page, "filterData").text = ""
+        page.applyFilter()
+        verify(!find(page, "filterDataProblem").visible)
+
+        // A flag no mock frame carries shows none, and the table says so
+        const flag = find(page, "filterFlag")
+        flag.currentIndex = 7   // Error
+        page.applyFilter()
+        compare(Bridge.model.count, 0)
+        compare(toggle.text, "Filter (2)")
+
+        // Sent: no transport reports its own frames yet, and it says so
+        verify(!find(page, "sentNote").visible)
+        find(page, "direction_2").clicked()
+        verify(find(page, "sentNote").visible)
+
+        find(page, "filterClear").clicked()
+        compare(Bridge.model.filterTerms, 0)
+        compare(Bridge.model.count, held)
+        compare(ids.text, "")
+        verify(!status.visible)
+    }
+
+    // By ID: one row per ID over what the filter shows; a tap on one reads
+    // its frames in the table
+    function test_byIdListsEachIdAndATapReadsIts() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        heldFrames(page)
+        find(page, "table_byId").clicked()
+        const ids = find(page, "idList")
+        verify(ids.visible)
+        verify(!find(page, "frameList").visible)
+        // Shown only now, the list is laid out a frame later: a tap before
+        // that lands on a row with no size
+        tryVerify(() => ids.count >= 2 && ids.itemAtIndex(0) !== null && ids.height > 0
+                  && ids.itemAtIndex(0).width > 0, 3000, "the IDs show, laid out")
+        let total = 0
+        for (let i = 0; i < ids.count; ++i)
+            total += Bridge.frameIds.data(Bridge.frameIds.index(i, 0), 259)   // CountRole
+        compare(total, Bridge.model.heldCount, "every frame held, counted once")
+
+        const first = Bridge.frameIds.data(Bridge.frameIds.index(0, 0), 257)   // ArbIdRole
+        const row = ids.itemAtIndex(0)
+        mouseClick(row, row.width / 2, row.height / 2)
+        verify(!page.byId, "back to the frames")
+        verify(find(page, "filterPanel").visible)
+        compare(find(page, "filterIds").text, first.toString(16).toUpperCase())
+        verify(Bridge.model.count > 0)
+        for (let i = 0; i < Math.min(Bridge.model.count, 5); ++i)
+            compare(Bridge.model.data(Bridge.model.index(i, 0), 261), first)
+        compare(page.rateText(0), "-")
+        compare(page.rateText(2.25), "2.3/s")
+        compare(page.rateText(20.4), "20/s")
+    }
+
+    // One number as a standard and as an extended ID: each By ID row's
+    // tap shows that row's own frames alone, whatever its width
+    function test_aTapShowsItsOwnWidthsFramesAlone() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        let rows = "host_us,timestamp_us,id,flags,data\n"
+        for (let i = 0; i < 6; ++i) {
+            const t = 1000 + i * 100000
+            rows += t + "," + t + ",0x7E8,0x0,04 41 0C 1A F8\n"
+            if (i < 4)
+                rows += (t + 50000) + "," + (t + 50000) + ",0x7E8,0x1,04 62 F1 90 01\n"
+        }
+        const url = Harness.writeScratchFile("two-widths.csv", rows).toString()
+        const path = decodeURIComponent(url.replace(/^file:\/\//, "")).replace(/^\/([A-Za-z]:)/, "$1")
+        compare(Bridge.connectSession("replay://" + path + "?speed=max"), "")
+        tryVerify(() => Bridge.model.heldCount === 10, 5000, "the ten frames arrive")
+
+        for (const extended of [false, true]) {
+            find(page, "table_byId").clicked()
+            const ids = find(page, "idList")
+            tryVerify(() => ids.count === 2 && ids.itemAtIndex(1) !== null && ids.height > 0
+                      && ids.itemAtIndex(1).width > 0, 3000, "both rows, laid out")
+            let at = -1
+            for (let i = 0; i < ids.count; ++i) {
+                if (Bridge.frameIds.data(Bridge.frameIds.index(i, 0), 258) === extended)   // ExtendedRole
+                    at = i
+            }
+            verify(at >= 0, "the row of each width")
+            compare(Bridge.frameIds.data(Bridge.frameIds.index(at, 0), 257), 0x7E8)   // ArbIdRole
+            const row = ids.itemAtIndex(at)
+            mouseClick(row, row.width / 2, row.height / 2)
+            verify(!page.byId, "back to the frames")
+            compare(Bridge.model.count, extended ? 4 : 6,
+                    (extended ? "the extended" : "the standard") + " row's frames alone")
+            find(page, "filterClear").clicked()
+            compare(Bridge.model.count, 10)
+        }
+    }
+
+    // Export CSV says what it leaves out and that Copy doesn't, then what
+    // it did; a target it can't write says so (the file itself:
+    // BridgeTest.ExportFramesWritesTheFileAndLogsOneLine)
+    function test_exportCsvSaysItLeavesIdentificationOut() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        heldFrames(page)
+        const button = find(page, "exportFrames")
+        verify(button.visible && button.enabled)
+        const words = find(page, "exportWords")
+        verify(words.visible)
+        compare(words.text, "Export CSV leaves identification replies out; "
+                            + "Copy copies the rows as they are.")
+        verify(Qt.colorEqual(words.color, Theme.textDim))
+        const folder = StandardPaths.writableLocation(StandardPaths.TempLocation)
+        verify(!page.exportFramesTo(folder), "a folder isn't a file")
+        compare(words.text, "Couldn't write the file")
+        verify(Qt.colorEqual(words.color, Theme.danger))
+    }
+
+    // The narrowest phone, 320 px, with the filter open, By ID shown and
+    // rows selected: nothing lies past the page's edge
+    function test_theFilterAndByIdFitAPhone() {
+        Theme.developerMode = true
+        const page = createTemporaryObject(logComponent, testCase.parent,
+                                           { width: 320, height: 832 })
+        heldFrames(page)
+        find(page, "filterToggle").clicked()
+        find(page, "direction_2").clicked()
+        waitForRendering(page)
+        compare(pastTheEdge(page, page, []).join("; "), "", "the frames and the filter")
+        find(page, "table_byId").clicked()
+        tryVerify(() => find(page, "idList").itemAtIndex(0) !== null, 3000, "the IDs show")
+        waitForRendering(page)
+        compare(pastTheEdge(page, page, []).join("; "), "", "By ID")
+        Bridge.model.toggleSelected(0)
+        find(page, "table_frames").clicked()
+        waitForRendering(page)
+        compare(pastTheEdge(page, page, []).join("; "), "", "the selection bar")
     }
 
     // A phone can't select the log's text: Copy puts all of it on the

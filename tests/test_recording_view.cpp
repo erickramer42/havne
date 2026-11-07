@@ -4,9 +4,15 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -16,6 +22,10 @@
 #include <vector>
 
 #include "recordingview.h"
+
+#include "ecuio/profile.h"
+#include "ecuio/recording.h"
+#include "ecuio/signals.h"
 
 namespace {
 
@@ -55,6 +65,41 @@ QVariantMap signalNamed(const RecordingView& v, const char* name)
 QList<double> doubles(const QVariantMap& m, const char* key)
 {
     return m.value(QLatin1String(key)).value<QList<double>>();
+}
+
+// A recording of the car's replies under obd2, frames.csv alone, in a
+// folder named as a vehicle's recording is (its label in the name):
+// readiness (the light on), one stored code, an engine speed
+QString carRecording(const QTemporaryDir& root)
+{
+    const QString folder =
+        root.path() + QStringLiteral("/20261107-100000 Daily driver");
+    QDir().mkpath(folder);
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+    events.write("ecuio session recording, format 2 (ADR-0049)\n"
+                 "started  2026-11-07 10:00:00.000 (local time)\n"
+                 "utc  2026-11-07T16:00:00.000Z\n"
+                 "core  0.5.0\n"
+                 "uri  elm327://COM3?profile=obd2\n"
+                 "profile  obd2\n"
+                 "frame flags  complete\n"
+                 "caller  havne-cli 0.5.0\n"
+                 "\n"
+                 "10:00:01.000  +1.000  end  havne-cli: seconds: 3 frames, 0 "
+                 "values, 0 records dropped, 0 notes dropped\n");
+    events.close();
+    QFile frames(folder + QStringLiteral("/frames.csv"));
+    if (!frames.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+    frames.write("host_us,timestamp_us,id,flags,data\n"
+                 "100000,100000,0x7E8,0x0,06 41 01 83 07 E5 00 00\n"
+                 "200000,200000,0x7E8,0x0,04 43 01 03 01 00 00 00\n"
+                 "300000,300000,0x7E8,0x0,04 41 0C 0C 90 00 00 00\n");
+    return folder;
 }
 
 } // namespace
@@ -124,21 +169,29 @@ TEST(RecordingViewTest, OpensAndChecksARecording)
 }
 
 // A folder with no frames.csv is still a recording to view: its check
-// didn't run, and says why
+// didn't run and says the recording has no frames, and a decode through
+// a profile is refused in the same words
 TEST(RecordingViewTest, AFolderWithNoFramesOpensUnchecked)
 {
     RecordingView v;
     v.open(fixture("pull-early"));
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.hasFrames());
     EXPECT_FALSE(v.check().value(QStringLiteral("ran")).toBool());
-    EXPECT_TRUE(v.check()
-                    .value(QStringLiteral("error"))
-                    .toString()
-                    .contains(QStringLiteral("frames.csv")))
-        << v.check().value(QStringLiteral("error")).toString().toStdString();
+    EXPECT_EQ(v.check().value(QStringLiteral("error")).toString(),
+              QStringLiteral("the recording has no frames"));
     EXPECT_TRUE(v.findings().isEmpty());
     EXPECT_EQ(v.signalList().size(), 4);
+
+    /* Its frames through a profile: refused at once, in the same words,
+     * never a pass that fails or waits */
+    v.openFrames(fixture("pull-early"), QStringLiteral("obd2"));
+    EXPECT_EQ(v.state(), RecordingView::Failed);
+    EXPECT_EQ(v.error(), QStringLiteral("the recording has no frames"));
+    v.open(fixture("findings"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_TRUE(v.hasFrames());
 }
 
 // A folder the reader refuses fails in core's words, never with the path
@@ -286,6 +339,73 @@ TEST(RecordingViewTest, ColumnsHoldEachColumnsRange)
     EXPECT_FALSE(v.stale());
 }
 
+// logger-a's CSV imported by its column map into dir's "rec": the folder,
+// or "" (the case failed) when the fixture or the import fails
+QString importedCsv(const QTemporaryDir& dir)
+{
+    const QString base = QStringLiteral(ECUIO_IMPORT_FIXTURES "/csv/logger-a");
+    QFile mapFile(base + QStringLiteral("/map.json"));
+    if (!mapFile.open(QIODevice::ReadOnly)) {
+        ADD_FAILURE() << "no map.json";
+        return QString();
+    }
+    const QByteArray map = mapFile.readAll();
+    const QByteArray in = (base + QStringLiteral("/log.csv")).toUtf8();
+    const QByteArray out = (dir.path() + QStringLiteral("/rec")).toUtf8();
+    ecuio_import_options_t o{};
+    o.format = ECUIO_IMPORT_CSV;
+    o.in_path_utf8 = in.constData();
+    o.out_folder_utf8 = out.constData();
+    o.column_map_utf8 = map.constData();
+    ecuio_import_report_t r{};
+    if (ecuio_import(&o, &r) != ECUIO_OK) {
+        ADD_FAILURE() << ecuio_last_error_detail();
+        return QString();
+    }
+    return QString::fromUtf8(out);
+}
+
+// A logger's CSV imported by its column map (ADR-0054's appendix "the CSV
+// import as built") opens as any recording: no frames, so unchecked; its
+// signals ranked in the map's order, so plotted; its columns its samples
+TEST(RecordingViewTest, AnImportedCsvOpensAndPlots)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = importedCsv(dir);
+    ASSERT_FALSE(folder.isEmpty());
+
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.hasFrames());
+    EXPECT_FALSE(v.check().value(QStringLiteral("ran")).toBool());
+    EXPECT_EQ(v.check().value(QStringLiteral("error")).toString(),
+              QStringLiteral("the recording has no frames"));
+    EXPECT_EQ(v.signalList().size(), 3);
+    for (const char* name : {"RPM", "Engine Load", "Lambda"}) {
+        EXPECT_TRUE(
+            signalNamed(v, name).value(QStringLiteral("plotted")).toBool())
+            << name;
+    }
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    const QVariantList cols = v.columns({rpm}, 0, 2000, 2);
+    ASSERT_EQ(cols.size(), 1);
+    const QVariantMap c = cols[0].toMap();
+    const QList<double> lows = doubles(c, "lows");
+    const QList<double> highs = doubles(c, "highs");
+    const QList<double> samples = doubles(c, "samples");
+    ASSERT_EQ(lows.size(), 2);
+    EXPECT_EQ(lows[0], 780.5);
+    EXPECT_EQ(highs[0], 2100.0);
+    EXPECT_EQ(samples[0], 4.0) << "0 to 0.75 s";
+    EXPECT_EQ(lows[1], 900.0);
+    EXPECT_EQ(highs[1], 3420.25);
+    EXPECT_EQ(samples[1], 4.0) << "1 to 1.75 s";
+}
+
 // A window from before the start (a view aligned on another recording):
 // the columns wholly before it empty, and every sample counted once
 // wherever the start falls in a column, narrow or a second and wider
@@ -378,6 +498,30 @@ TEST(RecordingViewTest, TheAlignmentFindsAreHavneClisOwn)
 
     RecordingView closed;
     EXPECT_EQ(closed.findMarker(QStringLiteral("pull")), -1);
+}
+
+// The engine starts, as havne-cli view --align-on engine-start finds them
+// (tests/golden/cli/view-engine-start.jsonl): units of either case, in
+// whatever units the page shows; none where the engine runs from the
+// first sample
+TEST(RecordingViewTest, TheEngineStartIsHavneClisOwn)
+{
+    RecordingView early;
+    RecordingView late;
+    RecordingView pull;
+    early.open(fixture("start-early"));
+    late.open(fixture("start-late"));
+    pull.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor(
+        [&] { return settled(early) && settled(late) && settled(pull); }));
+    EXPECT_EQ(early.findEngineStart(), 5600);
+    EXPECT_EQ(late.findEngineStart(), 12600);
+    EXPECT_EQ(pull.findEngineStart(), -1) << "running from its first sample";
+    late.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(late.findEngineStart(), 12600) << "rpm doesn't convert";
+
+    RecordingView closed;
+    EXPECT_EQ(closed.findEngineStart(), -1);
 }
 
 // The cursor's readout: the value in force at a time, its decimals, and
@@ -592,4 +736,328 @@ TEST(RecordingViewTest, DestroyedWhileOpeningIsSafe)
     }
     waitFor([] { return false; }, 100);
     SUCCEED();
+}
+
+// ---- The values from the frames (ADR-0049's appendix of 2026-11-06) ----
+
+namespace {
+
+const QString kReplayFixtures = QStringLiteral(ECUIO_REPLAY_FIXTURES);
+
+void writeFile(const QString& path, const QByteArray& bytes)
+{
+    QFile f(path);
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    f.write(bytes);
+}
+
+// A signal file of one DID on 0x7E8, its profile user.frames-view
+const QByteArray kOneDid = R"({
+  "havne_signals": 1,
+  "name": "Frames view",
+  "source": { "name": "Written for the test" },
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "signals": [
+    { "key": "a", "name": "Input A", "ecu": "pcm",
+      "read": { "service": "22", "number": "1111" },
+      "field": { "byte": 0, "bits": 8 } }
+  ]
+})";
+
+// Three of that DID's replies as a listener saw them, Single Frames
+const QByteArray kOneDidFrames = "host_us,timestamp_us,id,flags,data\n"
+                                 "100000,100000,0x7E8,0x0,04 62 11 11 07\n"
+                                 "200000,200000,0x7E8,0x0,04 62 11 11 08\n"
+                                 "300000,300000,0x7E8,0x0,04 62 11 11 09\n";
+
+} // namespace
+
+// A listener's wire frames through the profile its header names, as
+// havne-cli view --frames reads them
+TEST(RecordingViewTest, AListenersFramesDecodeThroughItsRecordedProfile)
+{
+    RecordingView v;
+    v.openFrames(fixture("findings"), QString());
+    EXPECT_EQ(v.state(), RecordingView::Opening);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("obd2"));
+    EXPECT_EQ(v.recordedProfile(), QStringLiteral("obd2"));
+    EXPECT_FALSE(v.ownSignalFile());
+    EXPECT_TRUE(v.check().value(QStringLiteral("ran")).toBool());
+    const QVariantMap rpm = signalNamed(v, "RPM");
+    EXPECT_EQ(rpm.value(QStringLiteral("samples")).toDouble(), 307.0);
+    EXPECT_EQ(rpm.value(QStringLiteral("lowest")).toDouble(), 804.0);
+    EXPECT_EQ(rpm.value(QStringLiteral("firstMs")).toDouble(), 100.0)
+        << "the frame's time, not signals.csv's";
+    EXPECT_TRUE(rpm.value(QStringLiteral("plotted")).toBool());
+
+    v.open(fixture("findings"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_TRUE(v.decodedWith().isEmpty()) << "signals.csv again";
+}
+
+// The replay fixture holds frames.csv alone: open goes to the frames, and
+// with no header to name a profile it says to pick one
+TEST(RecordingViewTest, AFolderOfFramesAloneOpensThroughAProfile)
+{
+    const QString folder =
+        kReplayFixtures + QStringLiteral("/2026-10-25-engine-start");
+    RecordingView v;
+    v.open(folder);
+    EXPECT_EQ(v.state(), RecordingView::Failed) << "nothing names a profile";
+    EXPECT_EQ(v.error(),
+              QStringLiteral("it names no profile: pick one to decode its "
+                             "frames with"));
+    v.openFrames(folder, QStringLiteral("obd2"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("obd2"));
+    EXPECT_EQ(signalNamed(v, "RPM").value(QStringLiteral("highest")).toDouble(),
+              1261.25);
+}
+
+// What can't decode fails at once, in words that never name the path
+TEST(RecordingViewTest, AProfileThatCantDecodeFailsAtOnce)
+{
+    RecordingView v;
+    const struct {
+        const char* profile;
+        const char* words;
+    } cases[] = {
+        {"raw", "the profile raw has no signals to decode with"},
+        {"user.not-loaded", "the profile user.not-loaded isn't loaded"},
+        {"signals.json",
+         "its signals.json isn't the file it was recorded with"},
+    };
+    for (const auto& c : cases) {
+        v.openFrames(fixture("findings"), QString::fromLatin1(c.profile));
+        EXPECT_EQ(v.state(), RecordingView::Failed) << c.profile;
+        EXPECT_EQ(v.error(), QString::fromLatin1(c.words));
+        EXPECT_TRUE(v.decodedWith().isEmpty());
+    }
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    writeFile(dir.filePath(QStringLiteral("events.log")),
+              "ecuio session recording, format 2 (ADR-0049)\n"
+              "profile  raw\n\n");
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    v.openFrames(dir.path(), QString());
+    EXPECT_EQ(v.state(), RecordingView::Failed);
+    EXPECT_EQ(v.error(),
+              QStringLiteral("it was recorded under raw, which decodes "
+                             "nothing: pick a profile to decode its frames "
+                             "with"));
+    EXPECT_FALSE(v.error().contains(dir.path()));
+}
+
+// The set is copied before the open's thread starts: a profile gone the
+// moment after still decodes the open under way
+TEST(RecordingViewTest, TheSetIsCopiedBeforeTheOpenRuns)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(kOneDid.constData(),
+                                     static_cast<size_t>(kOneDid.size()),
+                                     &file),
+              ECUIO_OK);
+    const char* profile = ecuio_signal_file_profile(file);
+    ASSERT_STREQ(profile, "user.frames-view");
+    ASSERT_EQ(
+        ecuio_profile_register(profile, ecuio_signal_file_set(file), nullptr),
+        ECUIO_OK);
+    RecordingView v;
+    v.openFrames(dir.path(), QStringLiteral("user.frames-view"));
+    ASSERT_EQ(ecuio_profile_unregister(profile), ECUIO_OK);
+    ecuio_signal_file_free(file);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QVariantMap a = signalNamed(v, "Input A");
+    EXPECT_EQ(a.value(QStringLiteral("samples")).toDouble(), 3.0);
+    EXPECT_EQ(a.value(QStringLiteral("highest")).toDouble(), 9.0);
+}
+
+// The recording's own signals.json, while it hashes to the one its header
+// names: offered, and what the default picks; changed, it isn't
+TEST(RecordingViewTest, ItsOwnSignalFileDecodesItWhileItMatches)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QByteArray sha =
+        QCryptographicHash::hash(kOneDid, QCryptographicHash::Sha256).toHex();
+    writeFile(dir.filePath(QStringLiteral("signals.json")), kOneDid);
+    writeFile(dir.filePath(QStringLiteral("events.log")),
+              "ecuio session recording, format 3 (ADR-0049)\n"
+              "profile  user.frames-view\n"
+              "signal file  signals.json," +
+                  sha + "\n\n");
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    RecordingView v;
+    v.open(dir.path());
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_TRUE(v.ownSignalFile());
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("signals.json"));
+    EXPECT_EQ(
+        signalNamed(v, "Input A").value(QStringLiteral("samples")).toDouble(),
+        3.0);
+
+    writeFile(dir.filePath(QStringLiteral("signals.json")),
+              kOneDid + QByteArray("\n"));
+    v.openFrames(dir.path(), QString());
+    EXPECT_FALSE(v.ownSignalFile());
+    EXPECT_EQ(v.state(), RecordingView::Failed)
+        << "the recorded profile, which isn't loaded";
+    EXPECT_EQ(v.error(),
+              QStringLiteral("the profile user.frames-view isn't loaded"));
+}
+
+// ---- The health report, the viewer's Save report (ADR-0054's appendix
+// "the health report as built") ----------------------------------------
+
+// The whole recording's report, on a thread of its own: one at a time,
+// its result posted back, the folder's name (the vehicle's label) in
+// neither the words nor the line
+TEST(RecordingViewTest, HealthReportIsTheWholeRecordingsOnItsOwnThread)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    const QUrl url =
+        QUrl::fromLocalFile(root.path() + QStringLiteral("/report.json"));
+    EXPECT_FALSE(v.saveHealthReport(url, 1)) << "no recording open";
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+
+    QList<QVariantMap> saved;
+    int reportingChanges = 0;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    QObject::connect(&v, &RecordingView::reportingChanged,
+                     [&] { ++reportingChanges; });
+    ASSERT_TRUE(v.saveHealthReport(url, 1));
+    EXPECT_TRUE(v.reporting());
+    EXPECT_FALSE(v.saveHealthReport(url, 1)) << "one at a time";
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(v.reporting());
+    EXPECT_EQ(reportingChanges, 2);
+    ASSERT_EQ(saved.size(), 1);
+    const QVariantMap r = saved[0];
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("ecus")).toInt(), 1);
+    EXPECT_EQ(r.value(QStringLiteral("codes")).toInt(), 1);
+    EXPECT_EQ(r.value(QStringLiteral("values")).toInt(), 1) << "RPM's";
+    EXPECT_EQ(r.value(QStringLiteral("line")).toString().toStdString(),
+              "Health report saved: 1 ECU, 1 trouble code, 1 key value (0 "
+              "identification items left out)");
+
+    QFile f(url.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QByteArray bytes = f.readAll();
+    f.close();
+    EXPECT_FALSE(bytes.contains("Daily"));
+    const QJsonObject doc = QJsonDocument::fromJson(bytes).object();
+    const QJsonObject source = doc.value(QStringLiteral("source")).toObject();
+    EXPECT_EQ(source.value(QStringLiteral("kind")).toString(),
+              QStringLiteral("recording"));
+    EXPECT_EQ(source.value(QStringLiteral("from_s")).toDouble(-1), 0.0)
+        << "the whole recording";
+
+    // A folder isn't a file it can write: core's report made, the copy
+    // refused, in words that name neither
+    saved.clear();
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(root.path()), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(saved[0].value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't write the file");
+    for (const QVariantMap& m : saved) {
+        EXPECT_FALSE(m.value(QStringLiteral("line"))
+                         .toString()
+                         .contains(QStringLiteral("Daily")));
+    }
+}
+
+// A report under way when the viewer closes or opens another recording
+// ends unannounced: its thread runs out (core's export can't stop
+// midway), and the result is dropped
+TEST(RecordingViewTest, AReportEndingAfterACloseIsDropped)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    int saved = 0;
+    QObject::connect(&v, &RecordingView::reportSaved, [&] { ++saved; });
+    const QUrl url =
+        QUrl::fromLocalFile(root.path() + QStringLiteral("/r.txt"));
+    ASSERT_TRUE(v.saveHealthReport(url, 0));
+    v.close();
+    ASSERT_TRUE(waitFor([&] { return !v.reporting(); }));
+    EXPECT_EQ(saved, 0);
+
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_TRUE(v.saveHealthReport(url, 0));
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return !v.reporting() && settled(v); }));
+    EXPECT_EQ(saved, 0) << "another open drops it too";
+}
+
+// A CSV import holds values alone, and Save report stays offered on it:
+// core's report takes a folder with no frames.csv, which has no ECU and
+// says so, so the save ends and succeeds rather than failing on frames
+TEST(RecordingViewTest, AnImportedCsvsReportEndsWithNoEcu)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = importedCsv(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    ASSERT_FALSE(v.hasFrames());
+
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    const QUrl url =
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/report.json"));
+    ASSERT_TRUE(v.saveHealthReport(url, 1));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(v.reporting());
+    const QVariantMap r = saved[0];
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("ecus")).toInt(), 0);
+    EXPECT_EQ(r.value(QStringLiteral("line")).toString().toStdString(),
+              "Health report saved: 0 ECUs, 0 trouble codes, 0 key values (0 "
+              "identification items left out)");
+
+    // The report says why it has no ECU, in the viewer's words, and is
+    // the whole import's: its raw profile ranks nothing, so no key values
+    QFile f(url.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QJsonObject doc = QJsonDocument::fromJson(f.readAll()).object();
+    EXPECT_TRUE(doc.value(QStringLiteral("ecus")).toArray().isEmpty());
+    EXPECT_EQ(doc.value(QStringLiteral("ecus_note")).toString(),
+              QStringLiteral("the recording has no frames"));
+    EXPECT_TRUE(doc.value(QStringLiteral("key_values")).toArray().isEmpty());
+    const QJsonObject source = doc.value(QStringLiteral("source")).toObject();
+    EXPECT_EQ(source.value(QStringLiteral("kind")).toString(),
+              QStringLiteral("recording"));
+    EXPECT_FALSE(source.value(QStringLiteral("frames")).toBool(true));
+    EXPECT_EQ(source.value(QStringLiteral("from_s")).toDouble(-1), 0.0);
+    EXPECT_EQ(source.value(QStringLiteral("to_s")).toDouble(-1), 1.75);
 }

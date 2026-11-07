@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Havne
-    VERSION 0.5.1
+    VERSION 0.6.0
     DESCRIPTION "Cross-platform ECU reading, logging, and tuning"
     LANGUAGES C CXX
 )
@@ -54,6 +54,29 @@ option(HAVNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 # of their own, never in ctest. The CI 'fuzz' job builds and runs them;
 # fuzz/README.md has the local recipe.
 option(ECUIO_BUILD_FUZZERS "Build libFuzzer harnesses (Clang or MSVC)" OFF)
+
+# The shared core (ADR-0053, its appendix "the shared core as built"):
+# libecuio / ecuio.dll, the same archive linked whole, exporting the
+# functions the public headers declare and nothing else, for a program
+# that loads core by path (the Python package). The static archive stays
+# what the app, havne-cli and the tests link. On by default where a
+# program can load it: not Android or iOS, whose apps link core into
+# themselves, and not a fuzzing tree, whose instrumented core only the
+# harnesses can link.
+if(ANDROID OR IOS OR ECUIO_BUILD_FUZZERS)
+    set(_app_shared_default OFF)
+else()
+    set(_app_shared_default ON)
+endif()
+option(HAVNE_SHARED_CORE "Build the shared core library (ecuio) beside the archive"
+    ${_app_shared_default})
+if(HAVNE_SHARED_CORE AND ECUIO_BUILD_FUZZERS)
+    message(FATAL_ERROR
+        "HAVNE_SHARED_CORE=ON in a fuzzing tree: ECUIO_BUILD_FUZZERS "
+        "instruments ecuio-core for libFuzzer, and a shared library made "
+        "from it would miss the coverage callbacks only a harness links. "
+        "Configure this tree with -DHAVNE_SHARED_CORE=OFF.")
+endif()
 
 # Symbols for every MSVC Release build (ADR-0034 section 1): a PDB beside each
 # binary, with the optimizations /DEBUG would turn off kept, so the code

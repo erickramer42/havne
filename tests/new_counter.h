@@ -1,6 +1,7 @@
 // File/layer: tests/new_counter.h | test-only, C++17, Qt-free
 // Testing: the seam itself; CoreTest.Dispatch* and *AllocatesNothing
-//          show it counts (a five-callback dispatch is seen allocating)
+//          show it counts (a five-callback dispatch is seen allocating);
+//          *.OutOfMemoryAnywhere* show fail_new fails the allocation named
 //
 // Replaces the global operator new with one that counts the calls made
 // on each thread, so a test can show a path allocates nothing it could
@@ -28,11 +29,20 @@
 
 namespace new_counter {
 inline thread_local unsigned long t_news = 0;
+inline thread_local unsigned long t_fail_at = 0; /* 0: none */
 
 /* operator new calls made on this thread so far */
 inline unsigned long on_this_thread()
 {
     return t_news;
+}
+
+/* The nth operator new call on this thread from now fails once (throws
+ * bad_alloc, or a nothrow form returns null), so a test can run a call
+ * out of memory at each of its allocations in turn; 0 fails none */
+inline void fail_new(unsigned long n)
+{
+    t_fail_at = n == 0 ? 0 : t_news + n;
 }
 } // namespace new_counter
 
@@ -40,6 +50,10 @@ namespace new_counter {
 inline void* counted(std::size_t size) noexcept
 {
     ++t_news;
+    if (t_fail_at != 0 && t_news == t_fail_at) {
+        t_fail_at = 0;
+        return nullptr;
+    }
     return std::malloc(size != 0 ? size : 1);
 }
 } // namespace new_counter

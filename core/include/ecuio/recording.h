@@ -179,6 +179,11 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
                                                 the process crashed or the
                                                 power went; drops counted
                                                 from its drop lines */
+#define ECUIO_RECORDING_INFO_FRAMES                                            \
+    0x2u /* the values were decoded from
+                                                frames.csv at the open
+                                                (ecuio_recording_open_frames),
+                                                not read from signals.csv */
 
 /* ecuio_recording_info_t.format: events.log's header */
 #define ECUIO_RECORDING_FORMAT_UNKNOWN 0u /* none, or a first line the
@@ -288,9 +293,16 @@ _Static_assert(sizeof(ecuio_recording_column_t) == 24,
                "ecuio_recording_column_t size is ABI");
 #endif
 
-/* ecuio_recording_find_t.kind */
-#define ECUIO_RECORDING_FIND_THRESHOLD 1u
-#define ECUIO_RECORDING_FIND_MARKER    2u
+/* ecuio_recording_find_t.kind: an engine start is the engine speed
+ * rising from a stop (ecuio_recording_find) */
+#define ECUIO_RECORDING_FIND_THRESHOLD    1u
+#define ECUIO_RECORDING_FIND_MARKER       2u
+#define ECUIO_RECORDING_FIND_ENGINE_START 3u
+/* An engine start's levels, in rpm: the engine-speed signal reaching
+ * ECUIO_ENGINE_START_RPM after being below ECUIO_ENGINE_STOPPED_RPM. A
+ * starter cranks an engine at 150-300 rpm, and an idle runs past 500. */
+#define ECUIO_ENGINE_START_RPM   500
+#define ECUIO_ENGINE_STOPPED_RPM 100
 /* ecuio_recording_find_t.direction, for a threshold */
 #define ECUIO_RECORDING_FIND_RISING  1u /* reaches level after being below
                                            level - hysteresis */
@@ -372,6 +384,39 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
                                     ecuio_recording_t** out);
 
 /*
+ * Opens the recording in folder_utf8 with its values decoded from its
+ * frames.csv through signal_set, as a session under that set decodes
+ * them (ADR-0049's appendix of 2026-11-06): so a raw recording, or one
+ * made before a signal file was written, has values. signals.csv isn't
+ * read; events.log, markers.csv and signals.json are, as by
+ * ecuio_recording_open, and every other reader call answers alike on the
+ * handle, with ECUIO_RECORDING_INFO_FRAMES set. The reader keeps its own
+ * copy of the set, which the caller may free once this returns. The
+ * signals are the set's defs that decoded at least once, in the set's
+ * order, each with its def's name, unit, decimal places, plot rank,
+ * group and kind (TEXT and HEX are text, an ENUM has its labels); a
+ * number reads as signals.csv would hold it, to 12 significant digits.
+ * A frame on ISO 15765-4's IDs that isn't REASSEMBLED and carries a
+ * Single, First or Consecutive Frame's PCI is a frame as it crossed the
+ * bus: the message it completes decodes, at the time of its last frame;
+ * a First Frame while a message on its ID is under way (two senders)
+ * ends both. Memory beside ecuio_recording_open's: 16 bytes for each
+ * second with frames, 24 for each computed signal's input in each such
+ * second, and 256 each time a packed reply's lengths change.
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL folder, set or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a set ecuio_validate_signal_set refuses;
+ * ECUIO_ERR_LOAD_FAILED for a folder with no frames.csv or a file the
+ * reader refuses ("frames.csv line 12: ...", never the path);
+ * ECUIO_ERR_CANCELED and ECUIO_ERR_OUT_OF_MEMORY as for
+ * ecuio_recording_open, progress following frames.csv.
+ */
+ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
+                                           const ecuio_signal_set_t* signal_set,
+                                           ecuio_open_progress_t progress,
+                                           void* user_data,
+                                           ecuio_recording_t** out);
+
+/*
  * The getters. Every reader call returns ECUIO_ERR_NULL_ARGUMENT for a
  * NULL handle or out pointer and ECUIO_ERR_INVALID_ARGUMENT for a signal
  * or marker index past the count. Signals are in the header's order,
@@ -447,12 +492,22 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
 
 /*
  * The first time at or after from_us that what describes: a threshold's
- * sample reaching its level, counting only samples from from_us on, or
- * a marker with the label. Nothing found is ECUIO_OK with *at_us
+ * sample reaching its level, counting only samples from from_us on, a
+ * marker with the label, or an engine start. An engine start is the
+ * engine-speed signal's rising threshold at ECUIO_ENGINE_START_RPM with
+ * a hysteresis of ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM: a
+ * sample below ECUIO_ENGINE_STOPPED_RPM arms it, so a recording that
+ * starts with the engine running finds nothing until a later start. The
+ * engine-speed signal is the number signal whose unit is "rpm", ASCII
+ * case ignored (obd2's and the mock's say "RPM"): of several, the one of
+ * the lowest nonzero plot_rank, else the first in the recording's order;
+ * with none, nothing is found. Its signal, direction, level and
+ * hysteresis are 0. Nothing found is ECUIO_OK with *at_us
  * ECUIO_RECORDING_NONE. ECUIO_ERR_INVALID_ARGUMENT also for an unknown
  * kind or direction, a negative or NaN hysteresis, nonzero flags or
- * reserved, or a threshold on a text signal; ECUIO_ERR_NULL_ARGUMENT for
- * a marker's NULL label.
+ * reserved, a threshold on a text signal, or an engine start with a
+ * nonzero signal, direction, level or hysteresis;
+ * ECUIO_ERR_NULL_ARGUMENT for a marker's NULL label.
  */
 ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                                     const ecuio_recording_find_t* what,
@@ -587,7 +642,380 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
                                      void* user_data,
                                      ecuio_check_summary_t* out);
 
-/* The export (v0.6.0) joins this header later; ADR-0049 section 8. */
+/* --- Exports and imports (ADR-0054) --------------------------------- */
+
+/* ecuio_export_options_t.format; append-only */
+#define ECUIO_EXPORT_FOLDER 1u /* a scrubbed copy of the folder */
+#define ECUIO_EXPORT_CSV    2u /* the values over a range, a row each */
+#define ECUIO_EXPORT_PCAPNG 3u /* the frames for Wireshark (section 3) */
+
+/* ecuio_export_options_t.flags */
+#define ECUIO_EXPORT_RAW 0x1u /* the recording as it is, not scrubbed: an
+                                 explicit choice, never the default */
+
+/* What a scrubbed export leaves out, by class (section 1): the indexes of
+ * ecuio_export_report_t.left_out. A failed check's class is its index
+ * plus one (ecuio_export_report_t.failed_class, 0 for none). */
+#define ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION 0u /* identification replies'
+                                                   frames, every segment of
+                                                   a segmented one: Service
+                                                   09, 62 F180-F1FF */
+#define ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE 1u /* segments on a diagnostic
+                                                   reply ID whose message
+                                                   can't be reassembled */
+#define ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES    2u /* text signals' values */
+#define ECUIO_EXPORT_LEFT_OUT_ACTIVITY       3u /* activity lines of a kind
+                                                   the export doesn't know */
+#define ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED     4u /* the check alone: a token
+                                                   of 17 VIN characters; an
+                                                   export holding one fails,
+                                                   so its count stays 0 */
+#define ECUIO_EXPORT_LEFT_OUT_COUNT          5u
+
+typedef struct ecuio_export_options {
+    uint32_t format;           /* ECUIO_EXPORT_* */
+    uint32_t flags;            /* ECUIO_EXPORT_RAW, or 0 */
+    uint64_t from_us;          /* host_us, from_us to to_us inclusive;
+                                  to_us 0 is the end, so 0 and 0 is all
+                                  of it */
+    uint64_t to_us;
+    const char* folder_utf8;   /* the recording's folder */
+    const char* out_path_utf8; /* the file to write, refused when it
+                                  exists: written under a name of its
+                                  own beside it, renamed into place
+                                  once checked */
+    uint64_t reserved[4];      /* zero; ABI growth space */
+} ecuio_export_options_t;
+
+typedef struct ecuio_export_report {
+    uint64_t frames;   /* written, made-up ones among them; 0 for CSV */
+    uint64_t made_up;  /* re-segmented from a reassembled message, each
+                          marked so (section 3) */
+    uint64_t left_out[8];  /* by ECUIO_EXPORT_LEFT_OUT_*, the frames
+                              (pcapng) or values (CSV) each class left
+                              out */
+    uint32_t failed_class; /* the check's: a class plus one, 0 when it
+                              passed or didn't run */
+    uint32_t flags;        /* zero */
+    uint64_t values;       /* CSV, folder: the values written; 0 for pcapng */
+    uint64_t signal_count; /* CSV, folder: the signals they're of */
+    uint32_t files;          /* folder: the files written */
+    uint32_t files_left_out; /* folder: the files it doesn't know */
+    uint64_t reserved[1];    /* zero; ABI growth space */
+} ecuio_export_report_t;
+
+#if defined(__cplusplus)
+static_assert(ECUIO_EXPORT_LEFT_OUT_COUNT <= 8,
+              "the report holds 8 classes");
+static_assert(sizeof(ecuio_export_report_t) == 120,
+              "ecuio_export_report_t size is ABI");
+static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
+              "export report failed_class offset is ABI");
+static_assert(offsetof(ecuio_export_report_t, values) == 88,
+              "export report values offset is ABI");
+static_assert(offsetof(ecuio_export_report_t, files) == 104,
+              "export report files offset is ABI");
+static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
+              "export report files_left_out offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(ECUIO_EXPORT_LEFT_OUT_COUNT <= 8, "the report holds 8 classes");
+_Static_assert(sizeof(ecuio_export_report_t) == 120,
+               "ecuio_export_report_t size is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
+               "export report failed_class offset is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, values) == 88,
+               "export report values offset is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, files) == 104,
+               "export report files offset is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
+               "export report files_left_out offset is ABI");
+#endif
+
+/*
+ * Writes the recording in options->folder_utf8 to options->out_path_utf8
+ * in options->format, its frames between from_us and to_us, scrubbed by
+ * construction unless ECUIO_EXPORT_RAW (ADR-0054 section 1): each
+ * class's frames or values left out and counted in *report, then the
+ * written bytes, and every message as it was before any segmenting,
+ * searched for the recording's own identity values and VIN-shaped
+ * tokens; one match fails the export, leaving no file, with the class
+ * in report->failed_class. ECUIO_EXPORT_CSV writes signals.csv's values
+ * as samples, a comment line of counts first (pandas: skiprows=1),
+ * then time_s,signal,unit,value: a text or hex signal's values and a
+ * signal keyed as an identification reply are left out unless RAW; a
+ * name, unit or raw text value that starts as a spreadsheet formula
+ * does (=, +, -, @, a tab, a CR) fails it, while a number written as
+ * recorded, such as -12.5, is exempt. Markers aren't written.
+ * ECUIO_EXPORT_FOLDER makes out_path_utf8 a scrubbed copy of the
+ * folder (the caller names it; the source's name, which may hold the
+ * vehicle's label, is never carried): frames.csv's kept rows as
+ * recorded, signals.csv by the CSV's classes, events.log's header and
+ * its link, drop, asleep and end lines (the URI's authority as
+ * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
+ * caller's notes left out), markers.csv with its labels as typed,
+ * latency.csv and signals.json, each file through the check; a file it
+ * doesn't know is left out and counted (files_left_out).
+ * Deterministic: the same recording and options give the same bytes.
+ * report may be NULL. ECUIO_OK;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
+ * field this core doesn't know, or a to_us other than 0 before from_us;
+ * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
+ * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
+ * 12: ...", never a path; for CSV, a folder with no signals.csv), a
+ * file that exists or can't be written, a formula's start, and a failed
+ * check (the class's words, never the value).
+ */
+ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
+                            ecuio_export_report_t* report);
+
+/* Puts frame index of the caller's frames in *out (zeroed first); nonzero
+ * cancels. Called on the caller's thread before ecuio_scrub_frames
+ * returns, never later, so a binding can pass a plain foreign function. */
+typedef int (*ecuio_scrub_frame_callback_t)(void* user_data, size_t index,
+                                            ecuio_frame_t* out);
+
+/*
+ * Frames in memory scrubbed as ecuio_export scrubs a recording's (ADR-0054
+ * section 1 and its appendix "frames in memory"): get is called for each
+ * index from 0 to count - 1 in the order the frames arrived, twice, and
+ * must give the same frame both times. The frames of ISO-TP messages as
+ * they crossed the bus are reassembled first, on their timestamp_us. An
+ * identification reply's frames (every segment of a segmented one), a
+ * torn message's segments on a diagnostic reply ID and the messages a
+ * text or hex def of set applies to (set may be NULL) are left out:
+ * keep[i] is 0 for those and 1 for every other frame. Then each kept
+ * frame, and each whole message a kept frame carries, is searched for
+ * the identity values the left-out replies carry and for VIN-shaped
+ * tokens; one match fails it, the same as ecuio_export, with keep all
+ * zero and the class in report->failed_class. report: frames kept,
+ * left_out by class, made_up 0 (nothing is re-segmented). report may be
+ * NULL. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL get, or a NULL keep
+ * with a count; ECUIO_ERR_INVALID_ARGUMENT for a flag (none is defined)
+ * or a frame whose data_length is past ECUIO_FRAME_DATA_MAX;
+ * ECUIO_ERR_CANCELED when get returned nonzero; ECUIO_ERR_LOAD_FAILED
+ * for a failed check (the class's words, never the value);
+ * ECUIO_ERR_OUT_OF_MEMORY. On any failure keep is all zero.
+ */
+ecuio_status_t ecuio_scrub_frames(size_t count,
+                                  ecuio_scrub_frame_callback_t get,
+                                  void* user_data,
+                                  const ecuio_signal_set_t* set, uint32_t flags,
+                                  uint8_t* keep, ecuio_export_report_t* report);
+
+/* ecuio_import_options_t.format; append-only */
+#define ECUIO_IMPORT_CANDUMP 1u /* can-utils' log (section 4) */
+#define ECUIO_IMPORT_CSV     2u /* another logger's signals (section 5),
+                                   through its column map */
+
+typedef struct ecuio_import_options {
+    uint32_t format;               /* ECUIO_IMPORT_* */
+    uint32_t flags;                /* zero */
+    const char* in_path_utf8;
+    const char* out_folder_utf8;   /* the recording's folder, made here and
+                                      refused when it exists */
+    const char* interface_utf8;    /* candump: the bus to take; NULL for
+                                      the log's only one. NULL for CSV */
+    const char* column_map_utf8;   /* CSV: its column map, JSON text
+                                      (ADR-0054's appendix "the CSV import
+                                      as built"); NULL for candump */
+    uint64_t reserved[4];          /* zero; ABI growth space */
+} ecuio_import_options_t;
+
+typedef struct ecuio_import_report {
+    uint64_t lines;           /* read */
+    uint64_t frames;          /* written, error frames among them; 0 for
+                                 CSV */
+    uint64_t error_frames;
+    uint64_t interfaces;      /* the log's, the one taken among them */
+    uint64_t utc_start_us;    /* the first frame's or row's time,
+                                 microseconds since 1970-01-01 UTC; 0 for
+                                 a CSV whose map and times give none */
+    uint64_t duration_us;     /* the last frame's or row's time since the
+                                 first */
+    uint64_t values;          /* CSV: the samples written */
+    uint64_t columns_ignored; /* CSV: the header's columns the map
+                                 doesn't name */
+    uint64_t reserved[2];     /* zero; ABI growth space */
+} ecuio_import_report_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_import_report_t) == 80,
+              "ecuio_import_report_t size is ABI");
+static_assert(offsetof(ecuio_import_report_t, values) == 48,
+              "ecuio_import_report_t layout is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_import_report_t) == 80,
+               "ecuio_import_report_t size is ABI");
+_Static_assert(offsetof(ecuio_import_report_t, values) == 48,
+               "ecuio_import_report_t layout is ABI");
+#endif
+
+/*
+ * Reads options->in_path_utf8 in options->format and writes a recording
+ * folder at options->out_folder_utf8 (ADR-0054 section 4): frames.csv
+ * with each frame as it arrived (never REASSEMBLED), and an events.log
+ * header naming the import as its source, the first frame's time as its
+ * UTC start, profile raw. It has no signals.csv: its values come from
+ * ecuio_recording_open_frames. One recording is one bus: a log with
+ * several interfaces takes the one interface_utf8 names, and refuses
+ * none named, its detail listing them. A frame stamped up to 100 ms
+ * before the one before it takes that one's time (candump stamps on the
+ * CPU that received it); further back is refused. The folder is written
+ * under a name of its own beside it and renamed once whole, so a failed
+ * import leaves none.
+ *
+ * A CSV (section 5) through options->column_map_utf8: RFC 4180, strict
+ * and bounded, checked whole before anything is written; signals.csv
+ * with the mapped columns' samples (an empty cell, or one of the map's
+ * "missing" texts, no sample) and a format 3 events.log whose signal
+ * lines are the map's, its utc line the map's start or the file's first
+ * time (none for a relative time with no start); no frames.csv. A row up
+ * to 100 ms before the one before it takes that one's time; further back
+ * is refused. report may be NULL.
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
+ * field this core doesn't know, a column map given to candump or missing
+ * for CSV, or an interface given to CSV; ECUIO_ERR_LOAD_FAILED for a map
+ * or line it refuses ("the column map: ...", "line 12: ...", never a
+ * path), a log with no frames of the interface, a CSV with no rows, a
+ * folder that exists or can't be written.
+ */
+ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
+                            ecuio_import_report_t* report);
+
+/* --- The health report (ADR-0054's appendix "the health report as
+ * built") ------------------------------------------------------------ */
+
+/* ecuio_health_options_t.format; append-only */
+#define ECUIO_HEALTH_JSON 1u /* one JSON object, "havne_health": 1 */
+#define ECUIO_HEALTH_TEXT 2u /* the same facts as plain text */
+
+/* ecuio_health_report_t.flags */
+#define ECUIO_HEALTH_VIN_DECODED 0x00000001u /* a VIN was read: the
+                                                vehicle's model year and
+                                                make are its decode's */
+
+/* POD, 32 bytes: a session's newest value of one def, as the caller
+ * holds it (core keeps none), its age by the caller's clock */
+typedef struct ecuio_health_value {
+    uint32_t def_id;   /* the session's set's def */
+    uint32_t flags;    /* zero */
+    double value;      /* in the def's unit, as decoded */
+    uint64_t age_us;   /* from its decode to the report's time */
+    uint64_t reserved; /* zero */
+} ecuio_health_value_t;
+
+/* The scalars first and the pointers last, so every offset but the
+ * pointers' is the same on either width */
+typedef struct ecuio_health_options {
+    uint32_t format;            /* ECUIO_HEALTH_* */
+    uint32_t flags;             /* zero */
+    uint32_t units;             /* ECUIO_UNITS_*: the values' system */
+    uint32_t latest_model_year; /* for the VIN's decode: this year + 1,
+                                   as the front ends pass it; 0 none */
+    uint64_t from_us;           /* a recording's range, host_us as the
+                                   export's; 0 and 0 is all of it, and
+                                   a session's must be */
+    uint64_t to_us;
+    uint64_t utc_us;            /* the report's time, microseconds since
+                                   1970 UTC, the caller's; 0 writes none */
+    uint32_t value_count;       /* entries of values; 0 for a folder */
+    uint32_t reserved0;         /* zero */
+    uint64_t reserved[4];       /* zero; ABI growth space */
+    ecuio_session_t* session;   /* the source: a live session, or */
+    const char* folder_utf8;    /* a recording's folder */
+    const ecuio_health_value_t* values; /* a session's newest values, or
+                                           NULL with value_count 0 */
+    const char* out_path_utf8;  /* the file to write, refused when it
+                                   exists: written under a name of its
+                                   own beside it, renamed into place
+                                   once checked */
+} ecuio_health_options_t;
+
+typedef struct ecuio_health_report {
+    uint32_t ecus;          /* ECUs written */
+    uint32_t codes;         /* trouble codes written, every list */
+    uint32_t values;        /* key values written */
+    uint32_t since_cleared; /* the since-the-codes-were-cleared values */
+    uint64_t left_out[8];   /* by ECUIO_EXPORT_LEFT_OUT_*: the
+                               identification items whose text is left
+                               out (IDENTIFICATION) */
+    uint32_t failed_class;  /* the check's, as the export report's */
+    uint32_t flags;         /* ECUIO_HEALTH_VIN_DECODED */
+    uint64_t reserved[4];   /* zero; ABI growth space */
+} ecuio_health_report_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_health_value_t) == 32,
+              "ecuio_health_value_t size is ABI");
+static_assert(offsetof(ecuio_health_value_t, age_us) == 16,
+              "health value age_us offset is ABI");
+static_assert(offsetof(ecuio_health_options_t, utc_us) == 32,
+              "health options utc_us offset is ABI");
+static_assert(offsetof(ecuio_health_options_t, session) == 80,
+              "health options session offset is ABI");
+static_assert(sizeof(ecuio_health_report_t) == 120,
+              "ecuio_health_report_t size is ABI");
+static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
+              "health report failed_class offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_health_value_t) == 32,
+               "ecuio_health_value_t size is ABI");
+_Static_assert(offsetof(ecuio_health_value_t, age_us) == 16,
+               "health value age_us offset is ABI");
+_Static_assert(offsetof(ecuio_health_options_t, utc_us) == 32,
+               "health options utc_us offset is ABI");
+_Static_assert(offsetof(ecuio_health_options_t, session) == 80,
+               "health options session offset is ABI");
+_Static_assert(sizeof(ecuio_health_report_t) == 120,
+               "ecuio_health_report_t size is ABI");
+_Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
+               "health report failed_class offset is ABI");
+#endif
+
+/*
+ * A car's health as one scrubbed file (ADR-0054's appendix "the health
+ * report as built"), in ECUIO_HEALTH_JSON or ECUIO_HEALTH_TEXT, which
+ * hold the same facts: the source (the session's URI as the folder
+ * export scrubs it, its backend and profile; no vehicle label, no
+ * adapter versions), the vehicle (its VIN's decode: model year, make,
+ * whether the check digit matched; never the VIN), the inspection
+ * (ecuio_diag_inspect over every ECU for that model year, the rule for
+ * none when no VIN was read), each ECU's readiness, codes with their
+ * titles, freeze frame, the since-the-codes-were-cleared values
+ * (Service 01 PIDs 21, 30, 31, 4D and 4E, whenever given) and its
+ * identification items by name and outcome (their text left out), then
+ * the key values: the set's ranked signals (plot_rank above 0, numbers
+ * and enumerations) among the values given, in rank order. From a
+ * recording's folder, each ECU's reports are rebuilt from its replies in
+ * frames.csv that end in the range (an ECU: a reply ID with a positive
+ * diagnostic or identification reply; the last of each kind; one with
+ * none "not recorded"), and the values are the set's (its signals.json,
+ * else its uds-generic DIDs, else its profile) in force at the range's
+ * end, from signals.csv or, with none, decoded from frames.csv, each aged
+ * from that end; a recording with no frames.csv has no ECU and says so.
+ * The file is checked for the identification texts and the VIN's shape
+ * before it's renamed into place; a match fails it with its class.
+ * Deterministic: the time and each value's age are the caller's, or the
+ * recording's. report may be NULL; a report not written counts nothing
+ * but a failed check's class.
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or out path;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format or units, a flag or
+ * reserved field this core doesn't know, a session and a folder both or
+ * neither, NULL values with a count, values with a folder, a value's
+ * flags or reserved nonzero, a nonzero to_us before from_us, a range
+ * (from_us or to_us nonzero) with a session, whose values are its
+ * newest; ECUIO_ERR_LOAD_FAILED for a folder with
+ * neither frames.csv nor signals.csv, a row the reader refuses
+ * ("frames.csv line N: ..."), a range that starts after the recording
+ * ends, a file that exists or can't be written, or
+ * a failed check (its words in the detail, never a value or a path);
+ * the reader's own codes for a recording that changes while it's read.
+ */
+ecuio_status_t ecuio_health_export(const ecuio_health_options_t* options,
+                                   ecuio_health_report_t* report);
 
 #ifdef __cplusplus
 }

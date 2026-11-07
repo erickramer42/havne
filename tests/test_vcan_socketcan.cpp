@@ -243,7 +243,7 @@ TEST_F(SocketCanBusTest, FramesArriveInOrderWithTheirFlags)
     for (size_t i = 0; i < twelve.size(); ++i) {
         twelve[i] = static_cast<uint8_t>(0xA0 + i);
     }
-    ASSERT_TRUE(send(w.get(), 0x0C0, twelve, true, CANFD_BRS));
+    ASSERT_TRUE(send(w.get(), 0x0C0, twelve, true, CANFD_BRS | CANFD_ESI));
     ASSERT_TRUE(wait_for([&] { return c.count.load() >= 4; }))
         << c.count.load();
 
@@ -259,8 +259,9 @@ TEST_F(SocketCanBusTest, FramesArriveInOrderWithTheirFlags)
     EXPECT_EQ(f[2].flags, static_cast<uint32_t>(ECUIO_FRAME_FLAG_REMOTE));
     EXPECT_TRUE(f[2].data.empty());
     EXPECT_EQ(f[3].id, 0x0C0u);
-    EXPECT_EQ(f[3].flags,
-              ECUIO_FRAME_FLAG_FD | ECUIO_FRAME_FLAG_BITRATE_SWITCH);
+    EXPECT_EQ(f[3].flags, ECUIO_FRAME_FLAG_FD |
+                              ECUIO_FRAME_FLAG_BITRATE_SWITCH |
+                              ECUIO_FRAME_FLAG_FD_ESI);
     EXPECT_EQ(f[3].data, twelve);
     for (size_t i = 1; i < f.size(); ++i) {
         EXPECT_GE(f[i].t_us, f[i - 1].t_us) << "frame " << i;

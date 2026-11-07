@@ -1,5 +1,5 @@
 // File/layer: core/src/json.h | internal, C++17, Qt-free; ALL platforms
-// Testing: UNIT: JsonTest (test_core); FUZZ: fuzz_json
+// Testing: UNIT: JsonTest, HealthTest (test_core); FUZZ: fuzz_json
 //
 // A strict JSON reader (RFC 8259) for the files core reads: signal files
 // (ADR-0051 section 1) and what their loader and importers build on. Not
@@ -136,6 +136,11 @@ std::string number_text(double v);
  * width (the soft hyphen U+00AD, U+200B to U+200D, U+2060 to U+2064,
  * U+FEFF); 0 for any other */
 size_t invisible_length(const char* p, size_t n);
+
+/* The length of the valid UTF-8 sequence at [p, end), p < end, or 0
+ * (Unicode 15, table 3-7: no overlong forms, no surrogates, nothing past
+ * U+10FFFF): the rule the reader holds a string to, for a writer's own */
+size_t utf8_length(const unsigned char* p, const unsigned char* end);
 
 /* Text from the input shown in words: single-quoted, control characters
  * and the characters invisible_length finds as '?', cut to 32 characters

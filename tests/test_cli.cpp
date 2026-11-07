@@ -2,7 +2,10 @@
 // Testing: UNIT (test_cli): this file's suites
 
 #include "can_line.h"
+#include "clear_run.h"
 #include "diagnostics_line.h"
+#include "elm327_emulator.h"
+#include "elm327_lines.h"
 #include "info_lines.h"
 #include "jsonl.h"
 #include "line_ring.h"
@@ -15,6 +18,7 @@
 #include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
+#include "view_frames.h"
 #include "view_lines.h"
 #include "vin_line.h"
 
@@ -876,7 +880,7 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
                   counts + "\"failed\":false,\"yielded\":true}");
 }
 
-TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)
+TEST(CliViewTest, AlignOnTakesItsFiveFormsAndNothingElse)
 {
     cli::AlignOn a;
     ASSERT_TRUE(cli::parse_align_on("rise:RPM:4000", a));
@@ -891,11 +895,15 @@ TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)
     ASSERT_TRUE(cli::parse_align_on("marker:lap: 2", a));
     EXPECT_EQ(a.kind, cli::AlignOn::marker);
     EXPECT_EQ(a.label, "lap: 2");
+    ASSERT_TRUE(cli::parse_align_on("engine-start", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::engine_start);
     ASSERT_TRUE(cli::parse_align_on("utc", a));
     EXPECT_EQ(a.kind, cli::AlignOn::utc);
-    for (const char* bad : {"", "UTC", "rise", "rise:RPM", "rise::4000",
-                            "rise:RPM:", "rise:RPM:fast", "rise:RPM:inf",
-                            "rise:RPM:4000x", "marker:", "sideways:RPM:1"}) {
+    for (const char* bad :
+         {"", "UTC", "rise", "rise:RPM", "rise::4000",
+          "rise:RPM:", "rise:RPM:fast", "rise:RPM:inf", "rise:RPM:4000x",
+          "marker:", "sideways:RPM:1", "Engine-Start", "engine-start:RPM",
+          "engine", "engine-start "}) {
         EXPECT_FALSE(cli::parse_align_on(bad, a)) << bad;
     }
     EXPECT_EQ(a.kind, cli::AlignOn::utc) << "a refusal leaves it as it was";
@@ -1978,4 +1986,566 @@ TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
     EXPECT_STREQ(cli::nrc_name(0x7F), "serviceNotSupportedInActiveSession");
     EXPECT_STREQ(cli::nrc_name(0x00), "");
     EXPECT_STREQ(cli::nrc_name(0x99), "");
+}
+
+/* ---------- havne-cli clear (ADR-0038's appendix of 2026-11-06) ---------- */
+
+namespace {
+
+std::string clear_text(const ecuio_channel_diagnostics_t& d,
+                       const char* word = nullptr)
+{
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::clear_line(l, d, word);
+    return std::string(l.data(), l.size());
+}
+
+/* A mock session started, destroyed at the end */
+struct MockSession {
+    ecuio_session_t* s = nullptr;
+    explicit MockSession(const char* uri)
+    {
+        EXPECT_EQ(ecuio_session_create(uri, &s), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
+    }
+    ~MockSession() { ecuio_session_destroy(s); }
+    MockSession(const MockSession&) = delete;
+    MockSession& operator=(const MockSession&) = delete;
+};
+
+/* Each line's type, and the lines, as run_clear wrote them */
+struct Written {
+    std::vector<std::string> lines;
+    bool flush_ok = true;
+    int flushes = 0;
+    cli::ClearIo io()
+    {
+        cli::ClearIo io;
+        io.write = [this](cli::Line& l) {
+            lines.emplace_back(l.data(), l.size());
+        };
+        io.flush = [this] {
+            ++flushes;
+            return flush_ok;
+        };
+        io.stop = [] { return false; };
+        return io;
+    }
+    std::vector<std::string> types() const
+    {
+        std::vector<std::string> t;
+        for (const std::string& l : lines) {
+            const size_t a = l.find("\"type\":\"") + 8;
+            t.push_back(l.substr(a, l.find('"', a) - a));
+        }
+        return t;
+    }
+};
+
+} // namespace
+
+TEST(CliClearTest, TheOutcomesInWords)
+{
+    const char* const words[] = {
+        "none",           "cleared",        "refused",
+        "unanswered",     "engine-running", "no-engine-speed",
+        "report-changed", "moving",         "no-vehicle-speed"};
+    for (uint8_t i = 0; i < 9; ++i) {
+        EXPECT_STREQ(cli::clear_outcome_word(i), words[i]) << int{i};
+    }
+    EXPECT_STREQ(cli::clear_outcome_word(9), "unknown");
+    EXPECT_TRUE(cli::clear_reads_again(ECUIO_CLEAR_CLEARED));
+    EXPECT_TRUE(cli::clear_reads_again(ECUIO_CLEAR_UNANSWERED));
+    EXPECT_FALSE(cli::clear_reads_again(ECUIO_CLEAR_REFUSED));
+    EXPECT_FALSE(cli::clear_reads_again(ECUIO_CLEAR_ENGINE_RUNNING));
+}
+
+TEST(CliClearTest, TheLineNamesTheReplyAndWhatWasRead)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.rx_id = 0x7E8;
+    d.clear = ECUIO_CLEAR_REFUSED;
+    d.clear_nrc = 0x22;
+    d.clear_rpm = 812;
+    d.flags = ECUIO_DIAG_CLEAR_RPM;
+    EXPECT_EQ(clear_text(d), "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                             "\"outcome\":\"refused\",\"reply\":\"7F 04 22\","
+                             "\"rpm\":812,\"kmh\":null}");
+    d.clear = ECUIO_CLEAR_NO_ENGINE_SPEED;
+    d.clear_nrc = 0x12;
+    d.flags = 0;
+    EXPECT_EQ(clear_text(d), "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                             "\"outcome\":\"no-engine-speed\","
+                             "\"reply\":\"7F 01 12\",\"rpm\":null,"
+                             "\"kmh\":null}")
+        << "01 0C's refusal";
+    d.clear = ECUIO_CLEAR_CLEARED;
+    d.clear_nrc = 0;
+    d.clear_rpm = 0;
+    d.clear_kmh = 30;
+    d.flags = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
+    EXPECT_EQ(clear_text(d), "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                             "\"outcome\":\"cleared\",\"rpm\":0,\"kmh\":30}")
+        << "a 0 read is a 0, not a null";
+    d.clear_nrc = 0x22;
+    EXPECT_EQ(clear_text(d, "not-read"),
+              "{\"type\":\"clear\",\"rx\":\"0x7E8\",\"outcome\":\"not-read\","
+              "\"rpm\":null,\"kmh\":null}")
+        << "the run's own word: nothing of the report's";
+
+    cli::ClearResult r;
+    r.reason = "not-cleared";
+    r.cleared = 1;
+    r.not_cleared = 2;
+    char buf[256];
+    cli::Line l(buf, sizeof buf);
+    cli::clear_end_line(l, r);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"end\",\"reason\":\"not-cleared\",\"cleared\":1,"
+              "\"not_cleared\":2}");
+}
+
+// The worker takes a clear by moving the generation on (outcome none,
+// clearing) and settles it by moving it on again with an outcome
+TEST(CliClearTest, AClearSettlesPastItsGeneration)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.generation = 5;
+    d.clear = ECUIO_CLEAR_CLEARED; /* an earlier clear's */
+    EXPECT_FALSE(cli::clear_settled(d, 5)) << "not taken yet";
+    d.generation = 6;
+    d.clear = ECUIO_CLEAR_NONE;
+    d.flags = ECUIO_DIAG_CLEARING;
+    EXPECT_FALSE(cli::clear_settled(d, 5)) << "under way";
+    d.generation = 7;
+    d.flags = 0;
+    EXPECT_FALSE(cli::clear_settled(d, 5)) << "no outcome";
+    d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
+    EXPECT_TRUE(cli::clear_settled(d, 5));
+    d.clear = ECUIO_CLEAR_CLEARED;
+    d.generation = 8; /* the read after, started */
+    EXPECT_TRUE(cli::clear_settled(d, 5));
+}
+
+// The report first, flushed, then the clear, then the read after a 44
+TEST(CliClearTest, TheReportComesFirstAndTheReadAfter)
+{
+    MockSession m("mock://clear");
+    ASSERT_NE(m.s, nullptr);
+    Written w;
+    const cli::ClearResult r =
+        cli::run_clear(m.s, 1, 0, w.io(), std::chrono::seconds(10));
+    EXPECT_STREQ(r.reason, "cleared");
+    EXPECT_EQ(r.cleared, 1u);
+    EXPECT_EQ(r.not_cleared, 0u);
+    ASSERT_EQ(w.types(), (std::vector<std::string>{"diagnostics", "clear",
+                                                   "diagnostics"}));
+    EXPECT_NE(w.lines[0].find("\"P0301\""), std::string::npos) << w.lines[0];
+    EXPECT_EQ(w.lines[1], "{\"type\":\"clear\",\"rx\":\"0x7E8\","
+                          "\"outcome\":\"cleared\",\"rpm\":0,\"kmh\":null}");
+    EXPECT_EQ(w.lines[2].find("\"P0301\""), std::string::npos) << w.lines[2];
+    EXPECT_GE(w.flushes, 1);
+}
+
+// Output that fails before the clear asks none: the report the ECU holds
+// is the one nobody kept
+TEST(CliClearTest, AFailedOutputAsksNoClear)
+{
+    MockSession m("mock://clear");
+    ASSERT_NE(m.s, nullptr);
+    ecuio_channel_diagnostics_t before{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(m.s, 0, &before), ECUIO_OK);
+    Written w;
+    w.flush_ok = false;
+    const cli::ClearResult r =
+        cli::run_clear(m.s, 1, 0, w.io(), std::chrono::seconds(10));
+    EXPECT_STREQ(r.reason, "output-failed");
+    EXPECT_EQ(r.cleared, 0u);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ecuio_channel_diagnostics_t after{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(m.s, 0, &after), ECUIO_OK);
+    EXPECT_EQ(after.generation, before.generation) << "no clear was taken";
+    EXPECT_EQ(after.clear, ECUIO_CLEAR_NONE);
+    EXPECT_EQ(w.types(), (std::vector<std::string>{"diagnostics"}));
+}
+
+// A session that reads no diagnostics has nothing to save: no clear
+TEST(CliClearTest, NothingReadIsNothingCleared)
+{
+    MockSession m("mock://clear?diagnose=0");
+    ASSERT_NE(m.s, nullptr);
+    Written w;
+    const cli::ClearResult r =
+        cli::run_clear(m.s, 1, 0, w.io(), std::chrono::milliseconds(300));
+    EXPECT_STREQ(r.reason, "nothing-read");
+    EXPECT_EQ(r.not_cleared, 1u);
+    ASSERT_EQ(w.lines.size(), 1u);
+    EXPECT_NE(w.lines[0].find("\"outcome\":\"not-read\""), std::string::npos);
+}
+
+// view --frames' choice of a set (cli/view_frames.h)
+TEST(CliViewFramesTest, TheGivenProfileThenTheOwnFileThenTheRecordedOne)
+{
+    cli::RecordedSignals rec;
+    rec.profile = "user.extras";
+    rec.sha256 = std::string(64, 'a');
+    cli::FramesSource s = cli::frames_source("obd2", rec, true);
+    EXPECT_FALSE(s.own_file);
+    EXPECT_EQ(s.profile, "obd2") << "--profile first";
+    s = cli::frames_source("", rec, true);
+    EXPECT_TRUE(s.own_file) << "the own file while it matches";
+    EXPECT_TRUE(s.profile.empty());
+    s = cli::frames_source("", rec, false);
+    EXPECT_FALSE(s.own_file);
+    EXPECT_EQ(s.profile, "user.extras") << "a changed copy: the recorded name";
+    rec.sha256.clear();
+    rec.profile = "obd2";
+    s = cli::frames_source("", rec, true);
+    EXPECT_FALSE(s.own_file) << "no file named, none to match";
+    EXPECT_EQ(s.profile, "obd2");
+}
+
+TEST(CliViewFramesTest, ARecordingWithNoSignalsOfItsOwnSaysWhatToGive)
+{
+    cli::RecordedSignals rec;
+    cli::FramesSource s = cli::frames_source("", rec, false);
+    EXPECT_TRUE(s.profile.empty());
+    EXPECT_FALSE(s.own_file);
+    EXPECT_EQ(s.why,
+              "its events.log names no profile: name one with --profile");
+    rec.profile = "raw";
+    s = cli::frames_source("", rec, false);
+    EXPECT_TRUE(s.profile.empty());
+    EXPECT_EQ(s.why, "it was recorded under raw, which decodes nothing: name a "
+                     "profile with --profile");
+    rec.profile = "uds-generic";
+    s = cli::frames_source("", rec, false);
+    EXPECT_TRUE(s.profile.empty());
+    EXPECT_EQ(s.why, "uds-generic's signals come from its session's did= "
+                     "list: give a --signals file");
+    EXPECT_EQ(cli::frames_source("raw", rec, false).profile, "raw")
+        << "a given one is looked up, and refused there";
+}
+
+TEST(CliViewFramesTest, AProfileWithNothingToDecodeIsRefused)
+{
+    EXPECT_EQ(cli::profile_refusal("obd2", true, 120), "");
+    EXPECT_EQ(cli::profile_refusal("user.gone", false, 0),
+              "no profile 'user.gone' is loaded: give its --signals file or "
+              "--plugin");
+    EXPECT_EQ(cli::profile_refusal("raw", true, 0),
+              "the profile 'raw' has no signals to decode with");
+}
+
+/* ---------- The ELM327 emulator (ADR-0055) ---------- */
+
+namespace {
+
+/* The emulator before an unbound sim, at times the test gives */
+struct Emu {
+    ecuio_sim_t* sim = nullptr;
+    cli::Elm327Emulator* emu = nullptr;
+    int64_t t = 1000000; /* the next command's time, us */
+
+    explicit Emu(const char* uri = "mock://emu?values=canned")
+    {
+        EXPECT_EQ(ecuio_sim_create_unbound(uri, 0, &sim), ECUIO_OK)
+            << ecuio_last_error_detail();
+        emu = new cli::Elm327Emulator(sim);
+    }
+    ~Emu()
+    {
+        delete emu;
+        ecuio_sim_destroy(sim);
+    }
+    Emu(const Emu&) = delete;
+    Emu& operator=(const Emu&) = delete;
+
+    /* What's due by at */
+    std::string heard(int64_t at)
+    {
+        std::string s;
+        uint8_t buf[256];
+        for (;;) {
+            const size_t n = emu->to_host(buf, sizeof buf, at);
+            if (n == 0) {
+                return s;
+            }
+            s.append(reinterpret_cast<const char*>(buf), n);
+        }
+    }
+
+    /* cmd and its CR at t, and everything it answers within 10 s; t
+     * moves past it */
+    std::string say(const std::string& cmd)
+    {
+        const std::string line = cmd + "\r";
+        emu->from_host(reinterpret_cast<const uint8_t*>(line.data()),
+                       line.size(), t);
+        const std::string got = heard(t + 10000000);
+        t += 20000000;
+        return got;
+    }
+
+    /* cmd at t, without reading it: heard() then takes it at its times */
+    void send(const std::string& cmd)
+    {
+        const std::string line = cmd + "\r";
+        emu->from_host(reinterpret_cast<const uint8_t*>(line.data()),
+                       line.size(), t);
+    }
+
+    /* The power-on echo off, line feeds off */
+    void quiet() { (void)say("ATE0"); }
+};
+
+/* AT ST's default wait, 0x32 x 4.096 ms */
+constexpr int64_t kWait = 0x32 * 4096;
+
+} // namespace
+
+TEST(CliElm327Test, TheResetAndTheSettings)
+{
+    Emu e;
+    EXPECT_EQ(e.say("ATZ"), "ATZ\r\r\rELM327 v1.4b\r\r>") << "echo on";
+    EXPECT_EQ(e.say("at e0"), "at e0\rOK\r\r>") << "lower case, spaces";
+    EXPECT_EQ(e.say("ATI"), "ELM327 v1.4b\r\r>");
+    EXPECT_EQ(e.say(""), "ELM327 v1.4b\r\r>") << "a CR alone repeats it";
+    EXPECT_EQ(e.say("AT@1"), "OBDII to RS232 Interpreter\r\r>");
+    EXPECT_EQ(e.say("ATRV"), "13.8V\r\r>");
+    EXPECT_EQ(e.say("ATL1"), "OK\r\n\r\n>");
+    EXPECT_EQ(e.say("ATL0"), "OK\r\r>");
+    EXPECT_EQ(e.say("ATXYZ"), "?\r\r>");
+    EXPECT_EQ(e.say("STI"), "?\r\r>") << "a plain ELM327";
+    EXPECT_EQ(e.say("ATBRD10"), "?\r\r>") << "no baud change over TCP";
+    EXPECT_EQ(e.say("0G"), "?\r\r>") << "not hex";
+    EXPECT_EQ(e.say("0102030405060708"), "?\r\r>")
+        << "8 bytes: past a Single Frame";
+    EXPECT_EQ(e.say("ATD"), "OK\r\r>");
+    EXPECT_EQ(e.say("ATI"), "ATI\rELM327 v1.4b\r\r>")
+        << "the defaults: echo on";
+    e.emu->power_on();
+    EXPECT_EQ(e.say("ATI"), "ATI\rELM327 v1.4b\r\r>");
+    EXPECT_EQ(e.emu->commands, 16u);
+}
+
+TEST(CliElm327Test, TheSearchAndTheProtocols)
+{
+    Emu e;
+    e.quiet();
+    EXPECT_EQ(e.say("ATDPN"), "0\r\r>");
+    EXPECT_EQ(e.say("ATDP"), "AUTO\r\r>");
+    /* the reply prints as it comes, the prompt after the adapter waited
+     * for more */
+    const int64_t at = e.t;
+    e.send("0100");
+    EXPECT_EQ(e.heard(at), "SEARCHING...\r41 00 9F FF 9F E3\r");
+    EXPECT_EQ(e.heard(at + kWait - 1), "");
+    EXPECT_EQ(e.heard(at + kWait), "\r>");
+    e.t += 20000000;
+    EXPECT_EQ(e.say("0100"), "41 00 9F FF 9F E3\r\r>") << "searched once";
+    EXPECT_EQ(e.say("ATDPN"), "A6\r\r>");
+    EXPECT_EQ(e.say("ATDP"), "AUTO, ISO 15765-4 (CAN 11/500)\r\r>");
+    EXPECT_EQ(e.say("ATSP6"), "OK\r\r>");
+    EXPECT_EQ(e.say("ATDPN"), "6\r\r>");
+    EXPECT_EQ(e.say("010C"), "41 0C 1F 40\r\r>") << "the canned 2000 rpm";
+    EXPECT_EQ(e.say("ATSP7"), "OK\r\r>");
+    EXPECT_EQ(e.say("0100"), "NO DATA\r\r>") << "no 29-bit ECU";
+    EXPECT_EQ(e.say("ATSP8"), "OK\r\r>");
+    EXPECT_EQ(e.say("0100"), "CAN ERROR\r\r>")
+        << "250 kbaud on a 500 kbaud bus";
+    EXPECT_EQ(e.say("ATTP3"), "OK\r\r>");
+    EXPECT_EQ(e.say("0100"), "UNABLE TO CONNECT\r\r>");
+    EXPECT_EQ(e.say("ATSPA6"), "OK\r\r>");
+    EXPECT_EQ(e.say("0100"), "SEARCHING...\r41 00 9F FF 9F E3\r\r>");
+    EXPECT_EQ(e.emu->requests, 7u);
+}
+
+TEST(CliElm327Test, HeadersSpacesAndTheDlc)
+{
+    Emu e;
+    e.quiet();
+    (void)e.say("ATSP6");
+    EXPECT_EQ(e.say("ATH1"), "OK\r\r>");
+    EXPECT_EQ(e.say("010C"), "7E8 04 41 0C 1F 40 00 00 00\r\r>")
+        << "padded with zeros, as the vcan sim does";
+    (void)e.say("ATD1");
+    EXPECT_EQ(e.say("010C"), "7E8 8 04 41 0C 1F 40 00 00 00\r\r>");
+    (void)e.say("ATS0");
+    EXPECT_EQ(e.say("010C"), "7E8804410C1F40000000\r\r>");
+    (void)e.say("ATD0");
+    (void)e.say("ATS1");
+    EXPECT_EQ(e.say("0902"), "7E8 10 14 49 02 01 5A 5A 5A\r"
+                             "7E8 21 46 41 4B 45 31 31 4D\r"
+                             "7E8 22 30 30 30 30 30 30 31\r\r>");
+    (void)e.say("ATH0");
+    EXPECT_EQ(e.say("0902"),
+              "014\r0: 49 02 01 5A 5A 5A\r1: 46 41 4B 45 31 31 4D\r"
+              "2: 30 30 30 30 30 30 31\r\r>");
+    (void)e.say("ATS0");
+    EXPECT_EQ(e.say("03"), "008\r0:430303010420\r1:C100\r\r>")
+        << "a long message's last line holds its own bytes alone";
+}
+
+TEST(CliElm327Test, TheCountDigitEndsAtItsLine)
+{
+    Emu e;
+    e.quiet();
+    (void)e.say("ATSP6");
+    (void)e.say("ATH1");
+    const int64_t at = e.t;
+    e.send("09021");
+    EXPECT_EQ(e.heard(at), "7E8 10 14 49 02 01 5A 5A 5A\r\r>")
+        << "the first line, the prompt at once";
+    e.t += 20000000;
+    EXPECT_EQ(e.say("09022"),
+              "7E8 10 14 49 02 01 5A 5A 5A\r7E8 21 46 41 4B 45 31 31 4D\r\r>");
+    EXPECT_EQ(e.say("0902G"), "?\r\r>");
+}
+
+TEST(CliElm327Test, TheHeaderAndTheReceiveFilterPickTheEcu)
+{
+    Emu e("mock://emu?modules=2");
+    e.quiet();
+    (void)e.say("ATSP6");
+    (void)e.say("ATH1");
+    EXPECT_EQ(e.say("22D101"), "7E9 04 62 D1 01 03 00 00 00\r\r>")
+        << "functional: the engine ECU's refusal is never sent";
+    EXPECT_EQ(e.say("ATSH7E0"), "OK\r\r>");
+    EXPECT_EQ(e.say("22D101"), "7E8 03 7F 22 31 00 00 00 00\r\r>");
+    EXPECT_EQ(e.say("ATSH7E1"), "OK\r\r>");
+    EXPECT_EQ(e.say("22D101"), "7E9 04 62 D1 01 03 00 00 00\r\r>");
+    (void)e.say("ATSH7DF");
+    EXPECT_EQ(e.say("ATCRA7E8"), "OK\r\r>");
+    EXPECT_EQ(e.say("22D101"), "NO DATA\r\r>") << "the filter keeps 0x7E9 out";
+    (void)e.say("ATCRA");
+    (void)e.say("ATCF7E0");
+    (void)e.say("ATCM7F0");
+    EXPECT_EQ(e.say("22D101"), "7E9 04 62 D1 01 03 00 00 00\r\r>");
+    (void)e.say("ATCM7FF");
+    EXPECT_EQ(e.say("22D101"), "NO DATA\r\r>");
+    (void)e.say("ATAR");
+    EXPECT_EQ(e.say("22D101"), "7E9 04 62 D1 01 03 00 00 00\r\r>");
+}
+
+TEST(CliElm327Test, FaultsAsAnAdapterSeesThem)
+{
+    {
+        /* 7F 01 78 at once; the adapter waits P2* for the reply 300 ms on */
+        Emu e("mock://emu?values=canned&faults=pending:1");
+        e.quiet();
+        (void)e.say("ATSP6");
+        const int64_t at = e.t;
+        e.send("010C");
+        EXPECT_EQ(e.heard(at), "7F 01 78\r");
+        EXPECT_EQ(e.heard(at + 299999), "");
+        EXPECT_EQ(e.heard(at + 300000), "41 0C 1F 40\r");
+        EXPECT_EQ(e.heard(at + 300000 + kWait), "\r>");
+    }
+    {
+        /* 130 ms late: inside the default wait, past AT ST 19's */
+        Emu e("mock://emu?values=canned&faults=late:1");
+        e.quiet();
+        (void)e.say("ATSP6");
+        const int64_t at = e.t;
+        e.send("010C");
+        EXPECT_EQ(e.heard(at + 129999), "");
+        EXPECT_EQ(e.heard(at + 130000), "41 0C 1F 40\r");
+        EXPECT_EQ(e.heard(at + 130000 + kWait), "\r>");
+        e.t += 20000000;
+        EXPECT_EQ(e.say("ATST19"), "OK\r\r>");
+        const int64_t at2 = e.t;
+        e.send("010C");
+        EXPECT_EQ(e.heard(at2 + 0x19 * 4096), "NO DATA\r\r>") << "lost";
+    }
+    {
+        /* the last Consecutive Frame 160 ms after the one before */
+        Emu e("mock://emu?values=canned&faults=stalled:1");
+        e.quiet();
+        (void)e.say("ATSP6");
+        (void)e.say("ATH1");
+        EXPECT_EQ(e.say("0902"), "7E8 10 14 49 02 01 5A 5A 5A\r"
+                                 "7E8 21 46 41 4B 45 31 31 4D\r"
+                                 "7E8 22 30 30 30 30 30 30 31\r\r>");
+        (void)e.say("ATST19");
+        EXPECT_EQ(e.say("0902"), "7E8 10 14 49 02 01 5A 5A 5A\r"
+                                 "7E8 21 46 41 4B 45 31 31 4D\r\r>")
+            << "past the shorter wait, the last frame is lost";
+    }
+    {
+        Emu e("mock://emu?values=canned&faults=bad_sequence:1");
+        e.quiet();
+        (void)e.say("ATSP6");
+        (void)e.say("ATH1");
+        EXPECT_EQ(e.say("0902"), "7E8 10 14 49 02 01 5A 5A 5A\r"
+                                 "7E8 21 46 41 4B 45 31 31 4D\r"
+                                 "7E8 23 30 30 30 30 30 30 31\r\r>")
+            << "the last frame's number skips one";
+    }
+    {
+        Emu e("mock://emu?values=canned&faults=silent:1");
+        e.quiet();
+        (void)e.say("ATSP6");
+        EXPECT_EQ(e.say("010C"), "NO DATA\r\r>");
+    }
+}
+
+TEST(CliElm327Test, ResponsesOffAndTheMonitor)
+{
+    Emu e;
+    e.quiet();
+    (void)e.say("ATSP6");
+    EXPECT_EQ(e.say("ATR0"), "OK\r\r>");
+    EXPECT_EQ(e.say("04"), ">") << "sent, nothing printed";
+    ecuio_sim_stats_t s{};
+    ASSERT_EQ(ecuio_sim_get_stats(e.sim, &s), ECUIO_OK);
+    EXPECT_EQ(s.clears, 1u);
+    (void)e.say("ATR1");
+    EXPECT_EQ(e.say("ATMA"), "") << "nothing else on the bus";
+    EXPECT_TRUE(e.emu->monitoring());
+    const uint8_t space = ' ';
+    e.emu->from_host(&space, 1, e.t);
+    EXPECT_EQ(e.heard(e.t), "STOPPED\r\r>") << "any byte stops it";
+    EXPECT_FALSE(e.emu->monitoring());
+    EXPECT_EQ(e.say("ATMA"), "");
+    EXPECT_EQ(e.say("x"), "STOPPED\r\r>");
+    EXPECT_TRUE(e.emu->monitoring())
+        << "the CR after the stop is a CR alone: it repeats AT MA";
+}
+
+TEST(CliElm327Test, AddressesAndLines)
+{
+    cli::Elm327Address a;
+    ASSERT_TRUE(cli::parse_elm327_address("tcp:35000", &a));
+    EXPECT_EQ(a.ip, 0x7F000001u);
+    EXPECT_EQ(a.port, 35000);
+    ASSERT_TRUE(cli::parse_elm327_address("tcp:0", &a));
+    EXPECT_EQ(a.port, 0);
+    ASSERT_TRUE(cli::parse_elm327_address("tcp:192.168.4.1:65535", &a));
+    EXPECT_EQ(a.ip, 0xC0A80401u);
+    EXPECT_EQ(a.port, 65535);
+    ASSERT_TRUE(cli::parse_elm327_address("tcp:0.0.0.0:23", &a));
+    EXPECT_EQ(a.ip, 0u);
+    for (const char* bad :
+         {"35000", "udp:35000", "tcp:", "tcp:65536", "tcp:035000", "tcp:-1",
+          "tcp:1.2.3:5", "tcp:1.2.3.4.5:5", "tcp:256.0.0.1:5", "tcp:01.2.3.4:5",
+          "tcp:localhost:5", "tcp:1.2.3.4:", "tcp::5", "tcp:1..3.4:5",
+          "tcp:[::1]:5"}) {
+        EXPECT_FALSE(cli::parse_elm327_address(bad, &a)) << bad;
+    }
+    EXPECT_EQ(cli::address_text(0x7F000001u, 35000), "127.0.0.1:35000");
+
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::elm327_line(l, "mock://emu?modules=2", "127.0.0.1:35000");
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"elm327\",\"uri\":\"mock://emu?modules=2\","
+              "\"listen\":\"127.0.0.1:35000\"}");
+    cli::Line c(buf, sizeof buf);
+    cli::client_line(c, "refused", "127.0.0.1:50123");
+    EXPECT_EQ(std::string(c.data(), c.size()),
+              "{\"type\":\"client\",\"event\":\"refused\","
+              "\"peer\":\"127.0.0.1:50123\"}");
 }

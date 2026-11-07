@@ -1,5 +1,5 @@
 // File/layer: tests/test_bridge.cpp | GTest + QtCore/Network, app-layer tests
-// Testing: BRIDGE: BridgeTest, ReadOnceTest (test_bridge)
+// Testing: BRIDGE: BridgeTest, ReadOnceTest, ObdbImportTest (test_bridge)
 
 #include <cmath>
 #include <gtest/gtest.h>
@@ -45,16 +45,20 @@
 #include "btconnect.h"
 #include "btretire.h"
 #include "carryover.h"
+#include "healthreport.h"
 #include "fake_bt_socket.h"
+#include "obdbimport.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
+#include <ecuio/version.h>
 #include <ecuio/serial.h>
 #include <ecuio/signal_sets.h>
 #include "ecuio/internal.h" // core's recorder seams (a failed write)
+#include <ecuio/obdb.h> // ECUIO_OBDB_MAX_BYTES
 #include "pid_support.h" // core/src: core's judgment, fed to the model
 
 #ifdef _WIN32
@@ -3557,11 +3561,13 @@ TEST(BridgeTest, LiveCountsTheRefusalsItCantName)
     QObject::connect(&bridge, &SessionBridge::refusedUnnamedChanged,
                      [&changed]() { ++changed; });
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    // The two refusals past the list can land on either side of a 100 ms
+    // tick, so the text may read "1 more request" first: wait for both
+    const QString both = QStringLiteral("ECU 0x7E8 refused 2 more requests");
     ASSERT_TRUE(
-        spinUntil([&]() { return !bridge.refusedUnnamed().isEmpty(); }, 5000))
-        << "no refusals counted past the list";
-    EXPECT_EQ(bridge.refusedUnnamed(),
-              QStringLiteral("ECU 0x7E8 refused 2 more requests"));
+        spinUntil([&]() { return bridge.refusedUnnamed() == both; }, 5000))
+        << "refusals counted past the list: "
+        << bridge.refusedUnnamed().toStdString();
     EXPECT_GE(changed, 1);
     SignalListModel* model = bridge.signalModel();
     int named = 0;
@@ -5683,6 +5689,91 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_TRUE(bridge.recentRecordings(0).isEmpty());
     bridge.setRecordingsRootForTesting(root.path() + QStringLiteral("/none"));
     EXPECT_TRUE(bridge.recentRecordings(10).isEmpty()) << "no folder yet";
+}
+
+/* The list takes what the viewer opens, the rule recordingRow keeps: a
+ * folder holding a signals.csv (a CSV import's values alone, ADR-0054's
+ * appendix "the CSV import as built") or a frames.csv; each row says
+ * whether it has frames to replay */
+TEST(BridgeTest, TheRecordingsListTakesAFolderOfValuesAlone)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const auto make = [&root](const char* name,
+                              std::initializer_list<const char*> files) {
+        const QString dir =
+            root.path() + QLatin1Char('/') + QString::fromUtf8(name);
+        ASSERT_TRUE(QDir().mkpath(dir));
+        for (const char* f : files) {
+            QFile file(dir + QLatin1Char('/') + QString::fromUtf8(f));
+            ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        }
+    };
+    make("20261107-090000", {"signals.csv", "events.log"});
+    make("20261106-090000", {"frames.csv"});
+    make("20261105-090000", {"frames.csv", "signals.csv"});
+    make("20261104-090000", {"events.log"});
+    make("20261103-090000", {});
+
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 3) << "an events.log alone or nothing isn't one";
+    const auto row = [&rows](int i) { return rows.at(i).toMap(); };
+    EXPECT_EQ(row(0).value(QStringLiteral("title")).toString(),
+              QStringLiteral("2026-11-07 09:00:00"));
+    EXPECT_FALSE(row(0).value(QStringLiteral("frames")).toBool())
+        << "values alone: nothing to replay";
+    EXPECT_TRUE(row(1).value(QStringLiteral("frames")).toBool());
+    EXPECT_TRUE(row(2).value(QStringLiteral("frames")).toBool());
+    for (int i = 0; i < rows.size(); ++i) {
+        const QString folder =
+            row(i).value(QStringLiteral("folder")).toString();
+        EXPECT_EQ(bridge.recordingRow(folder), row(i))
+            << "the list's rule is recordingRow's: " << folder.toStdString();
+    }
+    EXPECT_TRUE(
+        bridge.recordingRow(root.path() + QStringLiteral("/20261104-090000"))
+            .isEmpty());
+}
+
+/* A vehicle's baseline (ADR-0049's appendix of 2026-11-06): one folder's
+ * row, its title and URI as the list gives them, its folder as stored,
+ * while it holds a signals.csv or a frames.csv; nothing once it's gone */
+TEST(BridgeTest, ARecordingRowIsTheListsRowWhileItsFolderHoldsItsValues)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir =
+        root.path() + QStringLiteral("/20261106-091500 Weekend car");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    for (const char* name : {"/frames.csv", "/signals.csv"}) {
+        QFile f(dir + QString::fromUtf8(name));
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    QFile events(dir + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+    events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                 "uri  mock://demo\n");
+    events.close();
+
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantMap listed = bridge.recentRecordings(1).value(0).toMap();
+    const QVariantMap row = bridge.recordingRow(dir);
+    EXPECT_EQ(row, listed);
+    EXPECT_EQ(row.value(QStringLiteral("title")).toString().toStdString(),
+              "2026-11-06 09:15:00 \xC2\xB7 Weekend car");
+    EXPECT_EQ(row.value(QStringLiteral("profile")).toString(),
+              QStringLiteral("mock"));
+
+    EXPECT_TRUE(bridge.recordingRow(QString()).isEmpty());
+    ASSERT_TRUE(QFile::remove(dir + QStringLiteral("/signals.csv")));
+    EXPECT_EQ(bridge.recordingRow(dir), row) << "its frames still open";
+    ASSERT_TRUE(QFile::remove(dir + QStringLiteral("/frames.csv")));
+    EXPECT_TRUE(bridge.recordingRow(dir).isEmpty()) << "nothing to open";
+    ASSERT_TRUE(QDir(dir).removeRecursively());
+    EXPECT_TRUE(bridge.recordingRow(dir).isEmpty()) << "the folder is gone";
 }
 
 /* With Record on, a replay isn't recorded: it would copy the recording
@@ -8480,4 +8571,1117 @@ TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
     refused(sha, QUrl::fromLocalFile(out.path() + QStringLiteral("/b.json")),
             "Its copy has changed since it was kept: import the file again");
     EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
+}
+
+// ---- An OBDb set imported in the app (ADR-0051's appendix of 2026-11-06)
+
+namespace {
+
+QByteArray obdbFixture()
+{
+    return readFile(QStringLiteral(ECUIO_OBDB_FIXTURE));
+}
+
+QUrl obdbUrl()
+{
+    return QUrl::fromLocalFile(QStringLiteral(ECUIO_OBDB_FIXTURE));
+}
+
+// Whether the registered profile reads this DID
+bool profileReadsDid(const char* profile, uint32_t did)
+{
+    const ecuio_signal_set_t* set = nullptr;
+    if (ecuio_profile_lookup(profile, &set) != ECUIO_OK || set == nullptr) {
+        return false;
+    }
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].mux_key == (0x620000u | did)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QStringList fieldsOf(const QVariantList& notes, const QString& key)
+{
+    QStringList out;
+    for (const QVariant& v : notes) {
+        out << v.toMap().value(key).toString();
+    }
+    return out;
+}
+
+} // namespace
+
+/* The model year picks the commands OBDb gives for some years only, and
+ * the notes come sorted: converted counted, each field that differs,
+ * each signal left out, the set's own keys */
+TEST(ObdbImportTest, TheYearPicksTheCommands)
+{
+    const QByteArray set = obdbFixture();
+    ASSERT_FALSE(set.isEmpty());
+
+    const ObdbImport::Preview none = ObdbImport::read(set, 0, QString());
+    ASSERT_TRUE(none.ok) << none.words.toStdString();
+    EXPECT_EQ(none.converted, 6);
+    EXPECT_EQ(none.changed.size(), 5);
+    EXPECT_EQ(none.skipped.size(), 6);
+    EXPECT_EQ(fieldsOf(none.file, QStringLiteral("field")),
+              (QStringList{QStringLiteral("signalGroups"),
+                           QStringLiteral("freq")}));
+    EXPECT_FALSE(none.json.contains("D200"));
+    EXPECT_FALSE(none.json.contains("D201"));
+    const QVariantMap first = none.skipped.value(0).toMap();
+    EXPECT_EQ(first.value(QStringLiteral("signal")).toString().toStdString(),
+              "EXAMPLE_BOOST_TARGET");
+    EXPECT_EQ(first.value(QStringLiteral("line")).toInt(), 46);
+    EXPECT_EQ(first.value(QStringLiteral("text")).toString().toStdString(),
+              "its command is for some model years only: give the "
+              "vehicle's model year");
+    const QVariantMap changed = none.changed.value(0).toMap();
+    EXPECT_EQ(changed.value(QStringLiteral("key")).toString().toStdString(),
+              "example_speed");
+    EXPECT_EQ(changed.value(QStringLiteral("signal")).toString().toStdString(),
+              "EXAMPLE_SPEED");
+    EXPECT_EQ(changed.value(QStringLiteral("field")).toString().toStdString(),
+              "max");
+    EXPECT_EQ(changed.value(QStringLiteral("line")).toInt(), 10);
+
+    const ObdbImport::Preview y2019 = ObdbImport::read(set, 2019, QString());
+    ASSERT_TRUE(y2019.ok);
+    EXPECT_EQ(y2019.converted, 7);
+    EXPECT_EQ(y2019.skipped.size(), 5);
+    EXPECT_TRUE(y2019.json.contains("\"D200\""));
+    EXPECT_FALSE(y2019.json.contains("\"D201\""));
+
+    const ObdbImport::Preview y2021 =
+        ObdbImport::read(set, 2021, QStringLiteral("Daily driver OBDb"));
+    ASSERT_TRUE(y2021.ok);
+    EXPECT_EQ(y2021.converted, 7);
+    EXPECT_TRUE(y2021.json.contains("\"D201\""));
+    EXPECT_FALSE(y2021.json.contains("\"D200\""));
+    EXPECT_TRUE(y2021.json.contains("\"name\": \"Daily driver OBDb\""));
+    EXPECT_TRUE(y2021.json.contains("\"extends\": \"obd2\""))
+        << "the vehicle keeps Service 01's signals";
+
+    const QVariantMap r = ObdbImport::report(
+        y2021, QStringLiteral("Daily driver OBDb"), 2021);
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("name")).toString().toStdString(),
+              "Daily driver OBDb");
+    EXPECT_EQ(r.value(QStringLiteral("year")).toInt(), 2021);
+    EXPECT_EQ(r.value(QStringLiteral("converted")).toInt(), 7);
+    EXPECT_EQ(r.value(QStringLiteral("changed")).toList().size(), 6);
+    EXPECT_EQ(r.value(QStringLiteral("skipped")).toList().size(), 5);
+    EXPECT_EQ(r.value(QStringLiteral("file")).toList().size(), 2);
+}
+
+/* Only the importer's own source block marks a file as a conversion */
+TEST(ObdbImportTest, AConversionIsKnownByItsSourceBlock)
+{
+    const ObdbImport::Preview p = ObdbImport::read(obdbFixture(), 0, QString());
+    ASSERT_TRUE(p.ok);
+    EXPECT_TRUE(ObdbImport::isConversion(p.json));
+    EXPECT_FALSE(ObdbImport::isConversion(signalFile(QStringLiteral("X"))));
+    QByteArray byHand = p.json;
+    byHand.replace("Converted to Havne's signal-file format", "By hand");
+    EXPECT_FALSE(ObdbImport::isConversion(byHand));
+    QByteArray otherSource = p.json;
+    otherSource.replace("OBDb editors and contributors", "Someone");
+    EXPECT_FALSE(ObdbImport::isConversion(otherSource));
+    EXPECT_FALSE(ObdbImport::isConversion(QByteArray()));
+}
+
+/* What isn't an OBDb set is refused with core's words; more than core
+ * reads is refused before core sees it */
+TEST(ObdbImportTest, NotASetIsRefused)
+{
+    ObdbImport::Preview p = ObdbImport::read("{\"ecu\": 1}", 0, QString());
+    EXPECT_FALSE(p.ok);
+    EXPECT_TRUE(
+        p.words.startsWith(QStringLiteral("Not an OBDb set Havne can read: ")))
+        << p.words.toStdString();
+    EXPECT_TRUE(p.json.isEmpty());
+    p = ObdbImport::read(QByteArray(static_cast<qsizetype>(ECUIO_OBDB_MAX_BYTES) + 1, ' '), 0,
+                         QString());
+    EXPECT_FALSE(p.ok);
+    EXPECT_EQ(p.words.toStdString(),
+              "The file is over 1 MiB, an OBDb set's most");
+    const QVariantMap r = ObdbImport::report(p, QStringLiteral("X"), 0);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(r.contains(QStringLiteral("converted")));
+}
+
+/* ADR-0043's year: a typed VIN's, spaces dropped and upper-cased; none
+ * for a position 10 that isn't a year code or a text that isn't a VIN */
+TEST(ObdbImportTest, AVinGivesItsModelYear)
+{
+    EXPECT_EQ(ObdbImport::modelYear(QStringLiteral("1FAFAKE10M0000001"), 2027),
+              2021);
+    EXPECT_EQ(
+        ObdbImport::modelYear(QStringLiteral("1fa fake10m 0000001"), 2027),
+        2021);
+    EXPECT_EQ(ObdbImport::modelYear(QStringLiteral("1FAFAKE13Y0000001"), 2027),
+              2000)
+        << "2030 is still ahead";
+    EXPECT_EQ(ObdbImport::modelYear(QStringLiteral("ZZZFAKE10U0000001"), 2027),
+              0);
+    EXPECT_EQ(ObdbImport::modelYear(QStringLiteral("1FAFAKE10M"), 2027), 0);
+    EXPECT_EQ(ObdbImport::modelYear(QString(), 2027), 0);
+}
+
+/* The bridge's year: the typed VIN's, or with "" the session's */
+TEST(BridgeTest, ObdbYearComesFromTheTypedVinOrTheSessions)
+{
+    SessionBridge bridge;
+    EXPECT_EQ(bridge.vinModelYear(QString()), 0);
+    EXPECT_EQ(bridge.vinModelYear(QStringLiteral("1FAFAKE10M0000001")), 2021);
+    bridge.identifyForTesting(QStringLiteral("1FAFAKE13Y0000001"));
+    EXPECT_EQ(bridge.vinModelYear(QString()), 2000);
+    EXPECT_EQ(bridge.vinModelYear(QStringLiteral("  ")), 2000);
+    EXPECT_EQ(bridge.vinModelYear(QStringLiteral("1FAFAKE10M0000001")), 2021)
+        << "a typed VIN is the one asked about";
+}
+
+/* Preview converts and holds the file; only keep puts it in the store,
+ * once, as any signal file's copy */
+TEST(BridgeTest, ObdbPreviewKeepsNothingUntilKept)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    QVariantMap r = bridge.previewObdb(obdbUrl(), 2021,
+                                       QStringLiteral("Daily driver OBDb"));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("name")).toString().toStdString(),
+              "Daily driver OBDb");
+    EXPECT_EQ(r.value(QStringLiteral("year")).toInt(), 2021);
+    EXPECT_EQ(r.value(QStringLiteral("converted")).toInt(), 7);
+    EXPECT_TRUE(storeFiles(dir.store()).isEmpty()) << "nothing kept yet";
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "OBDb set read for Daily driver OBDb: 7 converted, 6 fields differ, "
+        "5 left out (model year 2021)")))
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    r = bridge.keepObdb(QString());
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QString sha = r.value(QStringLiteral("sha256")).toString();
+    EXPECT_EQ(r.value(QStringLiteral("profile")).toString().toStdString(),
+              "user.daily-driver-obdb");
+    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(),
+              "obd2");
+    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 7);
+    EXPECT_EQ(storeFiles(dir.store()),
+              QStringList{sha + QStringLiteral(".json")});
+    EXPECT_TRUE(bridge.isObdbImport(sha));
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Signal file from OBDb: Daily driver OBDb "
+                       "(user.daily-driver-obdb, %1 signals)")
+            .arg(r.value(QStringLiteral("count")).toInt())))
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    // Kept once: a second keep, or one after a drop, has nothing to keep
+    r = bridge.keepObdb(QString());
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "No OBDb set is waiting: import it again");
+    ASSERT_TRUE(
+        bridge.previewObdb(obdbUrl(), 2019, QStringLiteral("Other OBDb"))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    bridge.dropObdb();
+    EXPECT_FALSE(
+        bridge.keepObdb(QString()).value(QStringLiteral("ok")).toBool());
+    // A refused preview leaves none pending either
+    ASSERT_TRUE(
+        bridge.previewObdb(obdbUrl(), 2019, QStringLiteral("Other OBDb"))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    QTemporaryDir from;
+    EXPECT_FALSE(bridge
+                     .previewObdb(writeScratch(from.path(), "x.json", "[]"), 0,
+                                  QStringLiteral("Other OBDb"))
+                     .value(QStringLiteral("ok"))
+                     .toBool());
+    EXPECT_FALSE(
+        bridge.keepObdb(QString()).value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
+    EXPECT_FALSE(bridge.isObdbImport(QString(64, QLatin1Char('a'))));
+}
+
+/* A refusal is core's words or the bridge's, never the path */
+TEST(BridgeTest, ObdbRefusalNamesNoPath)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    const QString folder = from.path() + QStringLiteral("/jdoe-private");
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    QVariantMap r = bridge.previewObdb(
+        writeScratch(folder, "car.json", "{\"commands\": 3}"), 0,
+        QStringLiteral("A OBDb"));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    const QString words = r.value(QStringLiteral("words")).toString();
+    EXPECT_TRUE(words.startsWith(QStringLiteral("Not an OBDb set")))
+        << words.toStdString();
+    r = bridge.previewObdb(
+        QUrl::fromLocalFile(folder + QStringLiteral("/gone.json")), 0,
+        QStringLiteral("A OBDb"));
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't read the file");
+    ASSERT_EQ(log.size(), 2);
+    for (const QString& line : log + QStringList{words}) {
+        EXPECT_FALSE(line.contains(QStringLiteral("jdoe")))
+            << line.toStdString();
+        EXPECT_FALSE(line.contains(QStringLiteral("car.json")))
+            << line.toStdString();
+    }
+    EXPECT_TRUE(storeFiles(dir.store()).isEmpty());
+}
+
+/* The set read again for another year replaces the earlier import: the
+ * profile's defs are the new year's */
+TEST(BridgeTest, ObdbReimportReplacesTheEarlierImport)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    const QString name = QStringLiteral("Daily driver OBDb");
+    ASSERT_TRUE(bridge.previewObdb(obdbUrl(), 2019, name)
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QString earlier =
+        bridge.keepObdb(QString()).value(QStringLiteral("sha256")).toString();
+    ASSERT_FALSE(earlier.isEmpty());
+    ASSERT_EQ(bridge.useSignalFiles({earlier}).size(), 1);
+    EXPECT_TRUE(profileReadsDid("user.daily-driver-obdb", 0xD200));
+    EXPECT_FALSE(profileReadsDid("user.daily-driver-obdb", 0xD201));
+
+    ASSERT_TRUE(bridge.previewObdb(obdbUrl(), 2021, name)
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QVariantMap r = bridge.keepObdb(earlier);
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QString later = r.value(QStringLiteral("sha256")).toString();
+    EXPECT_NE(later, earlier);
+    // The book swaps them; the store registers the one it's given
+    const QVariantList used = bridge.useSignalFiles({later});
+    ASSERT_EQ(used.size(), 1);
+    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(profileReadsDid("user.daily-driver-obdb", 0xD201));
+    EXPECT_FALSE(profileReadsDid("user.daily-driver-obdb", 0xD200));
+    EXPECT_EQ(bridge.deleteUnusedSignalFiles({later}), 1);
+    bridge.useSignalFiles({});
+}
+
+/* While a session decodes with the earlier import, keep refuses to
+ * replace it and changes nothing; the import waits for the disconnect */
+TEST(BridgeTest, ObdbReplaceWhileItsSessionReadsIsRefused)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    const QString name = QStringLiteral("Daily driver OBDb");
+    ASSERT_TRUE(bridge.previewObdb(obdbUrl(), 2019, name)
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QString earlier =
+        bridge.keepObdb(QString()).value(QStringLiteral("sha256")).toString();
+    ASSERT_EQ(bridge.useSignalFiles({earlier}).size(), 1);
+
+    // A session on another profile doesn't hold it
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://plain")).isEmpty());
+    ASSERT_TRUE(bridge.previewObdb(obdbUrl(), 2019, name)
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    QVariantMap r = bridge.keepObdb(earlier);
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("sha256")).toString(), earlier)
+        << "the same year's bytes again";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    ASSERT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://demo?profile=user.daily-driver-obdb"))
+                    .isEmpty());
+    ASSERT_TRUE(bridge.previewObdb(obdbUrl(), 2021, name)
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    r = bridge.keepObdb(earlier);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(
+        r.value(QStringLiteral("words")).toString().toStdString(),
+        "The session reads the earlier import: disconnect, then keep it");
+    EXPECT_EQ(storeFiles(dir.store()),
+              QStringList{earlier + QStringLiteral(".json")})
+        << "nothing changed";
+    EXPECT_TRUE(profileReadsDid("user.daily-driver-obdb", 0xD200));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    r = bridge.keepObdb(earlier);
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_NE(r.value(QStringLiteral("sha256")).toString(), earlier);
+    EXPECT_EQ(storeFiles(dir.store()).size(), 2);
+    bridge.useSignalFiles({});
+}
+
+// ---- The Log page's filter and By ID view (framefilter.h) ----
+
+namespace {
+
+// A frame for the model: its ID, flags, time and payload
+struct FrameMaker {
+    std::unique_ptr<ecuio_frame_t> frame = std::make_unique<ecuio_frame_t>();
+    FrameMaker() { *frame = ecuio_frame_t{}; }
+    void add(FrameListModel& model, uint32_t id, std::initializer_list<uint8_t> bytes,
+             quint64 timeUs, uint32_t flags = 0)
+    {
+        frame->arbitration_id = id;
+        frame->flags = flags;
+        frame->timestamp_us = timeUs;
+        uint16_t n = 0;
+        for (uint8_t b : bytes) {
+            frame->data[n++] = b;
+        }
+        frame->data_length = n;
+        model.appendFrame(*frame, n);
+    }
+};
+
+// Counts rows as the model's signals say, so a view that trusts them
+// sees what rowCount says
+struct RowMirror {
+    int rows = 0;
+    explicit RowMirror(QAbstractItemModel& m)
+    {
+        rows = m.rowCount();
+        QObject::connect(&m, &QAbstractItemModel::rowsInserted,
+                         [this](const QModelIndex&, int first, int last) {
+                             rows += last - first + 1;
+                         });
+        QObject::connect(&m, &QAbstractItemModel::rowsRemoved,
+                         [this](const QModelIndex&, int first, int last) {
+                             rows -= last - first + 1;
+                         });
+        QObject::connect(&m, &QAbstractItemModel::modelReset,
+                         [this, &m]() { rows = m.rowCount(); });
+    }
+};
+
+QStringList idsShown(const FrameListModel& model)
+{
+    QStringList out;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        out << QString::number(
+                   model.data(model.index(row, 0), FrameListModel::ArbitrationIdRole)
+                       .toUInt(),
+                   16)
+                   .toUpper();
+    }
+    return out;
+}
+
+bool passes(const QString& ids, const QString& data, uint32_t id,
+            std::initializer_list<uint8_t> bytes, uint32_t flags = 0)
+{
+    FrameFilter f;
+    EXPECT_EQ(FrameFilter::parseIds(ids, &f.ids).toStdString(), "");
+    EXPECT_EQ(FrameFilter::parseData(data, &f.data, &f.anchored).toStdString(), "");
+    std::vector<uint8_t> payload(bytes);
+    return f.matches(id, flags, payload.data(), static_cast<int>(payload.size()));
+}
+
+} // namespace
+
+/* The ID field: hex IDs and ranges, commas between, "0x" optional;
+ * what doesn't parse says which item and why */
+TEST(FrameFilterTest, TheIdFieldTakesIdsAndRanges)
+{
+    std::vector<FrameFilter::IdRange> r;
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral(" 7E8, 0x7e0-7EF ,18DAF110"), &r)
+                  .toStdString(),
+              "");
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_EQ(r[0].first, 0x7E8u);
+    EXPECT_EQ(r[0].last, 0x7E8u);
+    EXPECT_EQ(r[1].first, 0x7E0u);
+    EXPECT_EQ(r[1].last, 0x7EFu);
+    EXPECT_EQ(r[2].first, 0x18DAF110u);
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("  "), &r).toStdString(), "");
+    EXPECT_TRUE(r.empty());
+
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7E8,,7E9"), &r).toStdString(),
+              "an empty item between commas");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7G8"), &r).toStdString(),
+              "\"7G8\" isn't a hex ID (up to 1FFFFFFF) or a range like 7E0-7EF");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("20000000"), &r).toStdString(),
+              "\"20000000\" isn't a hex ID (up to 1FFFFFFF) or a range like 7E0-7EF");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7EF-7E0"), &r).toStdString(),
+              "\"7EF-7E0\" runs backward");
+    EXPECT_EQ(FrameFilter::parseIds(QStringLiteral("7E0-"), &r).toStdString(),
+              "\"7E0-\" isn't a hex ID (up to 1FFFFFFF) or a range like 7E0-7EF");
+    EXPECT_TRUE(r.empty()) << "a refusal leaves nothing";
+}
+
+/* The data field: hex bytes and ??, anywhere unless ^ anchors them */
+TEST(FrameFilterTest, TheDataFieldTakesBytesAndWildcards)
+{
+    std::vector<int> d;
+    bool anchored = true;
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("62 f1 ??"), &d, &anchored)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(d, (std::vector<int>{0x62, 0xF1, -1}));
+    EXPECT_FALSE(anchored);
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("^ 620D"), &d, &anchored)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(d, (std::vector<int>{0x62, 0x0D}));
+    EXPECT_TRUE(anchored);
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("^"), &d, &anchored).toStdString(),
+              "\"^\" needs bytes after it");
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("62 F"), &d, &anchored).toStdString(),
+              "\"F\" isn't whole bytes: two hex digits each, or ??");
+    EXPECT_EQ(FrameFilter::parseData(QStringLiteral("6Z"), &d, &anchored).toStdString(),
+              "\"6Z\" isn't a hex byte or ??");
+    EXPECT_TRUE(d.empty());
+}
+
+/* What passes: the IDs (an ID past 0x7FF only an extended frame's), the
+ * bytes anywhere or at byte 0, the direction and the one flag */
+TEST(FrameFilterTest, AFrameMatchesEveryFieldInForce)
+{
+    EXPECT_TRUE(passes(QStringLiteral("7E0-7EF"), QString(), 0x7E8, {0x41}));
+    EXPECT_FALSE(passes(QStringLiteral("7E0-7EF"), QString(), 0x7DF, {0x41}));
+    EXPECT_TRUE(passes(QStringLiteral("7E8"), QString(), 0x7E8, {0x41},
+                       ECUIO_FRAME_FLAG_EXTENDED))
+        << "a 29-bit 0x7E8 is still 0x7E8";
+    EXPECT_FALSE(passes(QStringLiteral("18DAF110"), QString(), 0x18DAF110, {0x41}))
+        << "no 11-bit frame carries a 29-bit ID";
+    EXPECT_TRUE(passes(QStringLiteral("18DAF110"), QString(), 0x18DAF110, {0x41},
+                       ECUIO_FRAME_FLAG_EXTENDED));
+
+    EXPECT_TRUE(passes(QString(), QStringLiteral("F1 ?? 01"), 0x7E8, {0x62, 0xF1, 0x90, 0x01}));
+    EXPECT_FALSE(passes(QString(), QStringLiteral("^F1"), 0x7E8, {0x62, 0xF1}));
+    EXPECT_TRUE(passes(QString(), QStringLiteral("^62 F1"), 0x7E8, {0x62, 0xF1}));
+    EXPECT_FALSE(passes(QString(), QStringLiteral("62 F1 90"), 0x7E8, {0x62, 0xF1}))
+        << "longer than the payload";
+    EXPECT_TRUE(passes(QString(), QStringLiteral("??"), 0x7E8, {0x00}));
+    EXPECT_FALSE(passes(QString(), QStringLiteral("??"), 0x7E8, {}));
+
+    FrameFilter f;
+    f.direction = FrameFilter::Sent;
+    const uint8_t b[] = {0x01};
+    EXPECT_FALSE(f.matches(0x7E0, 0, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    f.direction = FrameFilter::Received;
+    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    f.direction = FrameFilter::AnyDirection;
+    const std::pair<int, uint32_t> flags[] = {
+        {FrameFilter::Extended, ECUIO_FRAME_FLAG_EXTENDED},
+        {FrameFilter::Fd, ECUIO_FRAME_FLAG_FD},
+        {FrameFilter::Reassembled, ECUIO_FRAME_FLAG_REASSEMBLED},
+        {FrameFilter::Truncated, ECUIO_FRAME_FLAG_TRUNCATED},
+        {FrameFilter::Overflow, ECUIO_FRAME_FLAG_OVERFLOW},
+        {FrameFilter::Error, ECUIO_FRAME_FLAG_ERROR}};
+    for (const auto& [flag, bit] : flags) {
+        f.flag = flag;
+        EXPECT_TRUE(f.matches(0x7E0, bit, b, 1)) << flag;
+        EXPECT_FALSE(f.matches(0x7E0, 0, b, 1)) << flag;
+    }
+    f.flag = FrameFilter::Standard;
+    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_EXTENDED, b, 1));
+    EXPECT_EQ(f.terms(), 1);
+    f.flag = FrameFilter::AnyFlag;
+    EXPECT_EQ(f.terms(), 0);
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_ERROR, b, 1)) << "no filter";
+}
+
+/* The table shows what the filter passes, in either order, as frames
+ * come and the ring wraps; the rows its signals report are rowCount's */
+TEST(BridgeTest, FrameFilterShowsWhatItPasses)
+{
+    FrameListModel model;
+    RowMirror mirror(model);
+    FrameMaker m;
+    quint64 t = 0;
+    for (int i = 0; i < 6; ++i) {
+        m.add(model, i % 2 == 0 ? 0x7E8 : 0x7E9, {0x41, static_cast<uint8_t>(i)}, ++t);
+    }
+    QVariantMap words = model.setFilter(QStringLiteral("7E9"), QString(), 0, 0);
+    EXPECT_EQ(words.value(QStringLiteral("ids")).toString().toStdString(), "");
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 3);
+    EXPECT_EQ(model.heldCount(), 6);
+    EXPECT_EQ(mirror.rows, 3);
+    EXPECT_EQ(idsShown(model), (QStringList{"7E9", "7E9", "7E9"}));
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::PayloadRole).toString(),
+              QStringLiteral("41 05"))
+        << "newest first";
+
+    // A frame the filter passes is a row; one it doesn't isn't
+    m.add(model, 0x7E8, {0x41, 6}, ++t);
+    EXPECT_EQ(mirror.rows, 3);
+    m.add(model, 0x7E9, {0x41, 7}, ++t);
+    EXPECT_EQ(mirror.rows, 4);
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::PayloadRole).toString(),
+              QStringLiteral("41 07"));
+
+    // A field that doesn't parse keeps its part in force and says why
+    words = model.setFilter(QStringLiteral("7E9,"), QStringLiteral("^41"), 0, 0);
+    EXPECT_EQ(words.value(QStringLiteral("ids")).toString().toStdString(),
+              "an empty item between commas");
+    EXPECT_EQ(model.filterTerms(), 2);
+    EXPECT_EQ(model.count(), 4);
+
+    // Oldest first, then no filter: every frame again
+    model.setNewestFirst(false);
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::PayloadRole).toString(),
+              QStringLiteral("41 01"));
+    model.setFilter(QString(), QString(), 0, 0);
+    EXPECT_EQ(model.filterTerms(), 0);
+    EXPECT_EQ(model.count(), 8);
+    EXPECT_EQ(mirror.rows, 8);
+}
+
+/* At the cap, the oldest frame leaves the view only when the view shows
+ * it; the selection stays on its frames and lets go at a filter change */
+TEST(BridgeTest, FrameFilterHoldsAsTheRingWraps)
+{
+    FrameListModel model;
+    RowMirror mirror(model);
+    FrameMaker m;
+    quint64 t = 0;
+    model.setFilter(QStringLiteral("100"), QString(), 0, 0);
+    for (int i = 0; i < FrameListModel::MaxFrames; ++i) {
+        m.add(model, i % 10 == 0 ? 0x100 : 0x200, {static_cast<uint8_t>(i)}, ++t);
+    }
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10);
+    EXPECT_EQ(mirror.rows, model.count());
+    model.toggleSelected(0);   // the newest 0x100 frame
+    const QString selected = model.selectedText();
+
+    // The oldest frame, a 0x100, leaves; the next ones (0x200) leave the
+    // ring unseen
+    m.add(model, 0x200, {0xAA}, ++t);
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10 - 1);
+    EXPECT_EQ(mirror.rows, model.count());
+    for (int i = 0; i < 9; ++i) {
+        m.add(model, 0x200, {0xAA}, ++t);
+    }
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10 - 1);
+    // A 0x100 comes as the next 0x100 leaves
+    m.add(model, 0x100, {0xBB}, ++t);
+    EXPECT_EQ(model.count(), FrameListModel::MaxFrames / 10 - 1);
+    EXPECT_EQ(mirror.rows, model.count());
+    EXPECT_EQ(model.heldCount(), FrameListModel::MaxFrames);
+    EXPECT_EQ(model.selectedCount(), 1);
+    EXPECT_EQ(model.selectedText(), selected) << "the selection kept its frame";
+    EXPECT_TRUE(
+        model.data(model.index(1, 0), FrameListModel::SelectedRole).toBool());
+
+    model.setFilter(QStringLiteral("100"), QStringLiteral("BB"), 0, 0);
+    EXPECT_EQ(model.selectedCount(), 0);
+    EXPECT_EQ(model.count(), 1);
+    model.clear();
+    EXPECT_EQ(model.count(), 0);
+    EXPECT_EQ(model.filterTerms(), 2) << "Clear empties the table, not the filter";
+}
+
+/* A row's flags in words, for the table's Flags column */
+TEST(BridgeTest, FrameFlagsReadAsWords)
+{
+    EXPECT_EQ(FrameListModel::flagWords(0).toStdString(), "");
+    EXPECT_EQ(FrameListModel::flagWords(ECUIO_FRAME_FLAG_EXTENDED).toStdString(), "")
+        << "the Ext column says it";
+    EXPECT_EQ(FrameListModel::flagWords(ECUIO_FRAME_FLAG_FD |
+                                        ECUIO_FRAME_FLAG_BITRATE_SWITCH |
+                                        ECUIO_FRAME_FLAG_REASSEMBLED)
+                  .toStdString(),
+              "FD BRS reassembled");
+    EXPECT_EQ(FrameListModel::flagWords(ECUIO_FRAME_FLAG_FD | ECUIO_FRAME_FLAG_TRUNCATED |
+                                        ECUIO_FRAME_FLAG_OVERFLOW | ECUIO_FRAME_FLAG_ERROR |
+                                        ECUIO_FRAME_FLAG_TX_ECHO |
+                                        ECUIO_FRAME_FLAG_REMOTE)
+                  .toStdString(),
+              "FD remote truncated after a loss error sent");
+    FrameListModel model;
+    FrameMaker m;
+    m.add(model, 0x7E8, {0x41}, 1, ECUIO_FRAME_FLAG_REASSEMBLED);
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::FlagsTextRole).toString(),
+              QStringLiteral("reassembled"));
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::FlagsRole).toUInt(),
+              ECUIO_FRAME_FLAG_REASSEMBLED);
+}
+
+/* By ID: one row per ID and width over the frames shown, its count, its
+ * rate over the last 10 s and its newest payload; rows keep their places */
+TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
+{
+    FrameListModel frames;
+    FrameIdModel ids(&frames);
+    RowMirror mirror(ids);
+    FrameMaker m;
+    // 0x7E8 every 100 ms for 20 s; 0x7E9 every second; a 29-bit 0x7E8
+    // once
+    for (int i = 0; i < 200; ++i) {
+        const quint64 t = static_cast<quint64>(i) * 100000;
+        m.add(frames, 0x7E8, {0x41, static_cast<uint8_t>(i)}, t);
+        if (i % 10 == 0) {
+            m.add(frames, 0x7E9, {0x62}, t);
+        }
+    }
+    m.add(frames, 0x7E8, {0x01}, 19900000, ECUIO_FRAME_FLAG_EXTENDED);
+    ids.refresh();
+    ASSERT_EQ(ids.count(), 3);
+    EXPECT_EQ(mirror.rows, 3);
+    auto at = [&](int row, int role) { return ids.data(ids.index(row, 0), role); };
+    EXPECT_EQ(at(0, FrameIdModel::ArbIdRole).toUInt(), 0x7E8u);
+    EXPECT_FALSE(at(0, FrameIdModel::ExtendedRole).toBool());
+    EXPECT_EQ(at(0, FrameIdModel::CountRole).toInt(), 200);
+    EXPECT_DOUBLE_EQ(at(0, FrameIdModel::RateRole).toDouble(), 10.0)
+        << "the last 10 s, its first edge left out: 100 frames";
+    EXPECT_EQ(at(0, FrameIdModel::PayloadRole).toString(), QStringLiteral("41 C7"));
+    EXPECT_EQ(at(1, FrameIdModel::ArbIdRole).toUInt(), 0x7E9u);
+    EXPECT_DOUBLE_EQ(at(1, FrameIdModel::RateRole).toDouble(), 1.0);
+    EXPECT_TRUE(at(2, FrameIdModel::ExtendedRole).toBool()) << "29-bit sorts after";
+
+    // The filter narrows it; a new ID is inserted in its place
+    frames.setFilter(QStringLiteral("7E9-7EA"), QString(), 0, 0);
+    ids.refresh();
+    EXPECT_EQ(ids.count(), 1);
+    EXPECT_EQ(mirror.rows, 1);
+    int resets = 0;
+    QObject::connect(&ids, &QAbstractItemModel::modelReset, [&resets]() { ++resets; });
+    m.add(frames, 0x7EA, {0x01}, 20000000);
+    ids.refresh();
+    EXPECT_EQ(ids.count(), 2);
+    EXPECT_EQ(mirror.rows, 2);
+    EXPECT_EQ(resets, 0) << "inserted, not reset";
+    EXPECT_EQ(at(1, FrameIdModel::ArbIdRole).toUInt(), 0x7EAu);
+    EXPECT_EQ(at(1, FrameIdModel::RateRole).toDouble(), 0.1)
+        << "one frame in the 10 s window";
+
+    // One frame alone has no span to rate over
+    FrameListModel lone;
+    FrameIdModel loneIds(&lone);
+    m.add(lone, 0x123, {0x01}, 5);
+    loneIds.refresh();
+    EXPECT_EQ(loneIds.data(loneIds.index(0, 0), FrameIdModel::RateRole).toDouble(), 0.0);
+    frames.clear();
+    ids.refresh();
+    EXPECT_EQ(ids.count(), 0);
+    EXPECT_EQ(mirror.rows, 0);
+}
+
+// A log shorter than the window: each ID's frames less one over its own
+// span, so a 10 Hz ID reads 10/s from its second frame on
+TEST(BridgeTest, FrameIdsRateAShortLogByItsIntervals)
+{
+    FrameListModel frames;
+    FrameIdModel ids(&frames);
+    FrameMaker m;
+    auto rate = [&](int row) {
+        return ids.data(ids.index(row, 0), FrameIdModel::RateRole).toDouble();
+    };
+    for (int i = 0; i <= 10; ++i) {
+        const quint64 t = 3000000 + static_cast<quint64>(i) * 100000;
+        m.add(frames, 0x7E8, {0x41, static_cast<uint8_t>(i)}, t);
+        if (i % 10 == 0) {
+            m.add(frames, 0x7E9, {0x62}, t);
+        }
+        if (i == 5) {
+            m.add(frames, 0x7EA, {0x01}, t);
+            ids.refresh();
+            ASSERT_EQ(ids.count(), 3);
+            EXPECT_DOUBLE_EQ(rate(0), 10.0)
+                << "0.5 s in: 6 frames, 5 intervals";
+            EXPECT_DOUBLE_EQ(rate(1), 0.0) << "one frame so far";
+        }
+    }
+    ids.refresh();
+    ASSERT_EQ(ids.count(), 3);
+    EXPECT_DOUBLE_EQ(rate(0), 10.0) << "1 s in: 11 frames, 10 intervals";
+    EXPECT_DOUBLE_EQ(rate(1), 1.0) << "two frames a second apart";
+    EXPECT_DOUBLE_EQ(rate(2), 0.0) << "a lone frame has no interval";
+}
+
+// ---- Export CSV (ADR-0054's appendix "frames in memory") ----
+
+// The VIN reply delivered whole, a value, another ECU's value, the
+// tester's own request, then a text signal's DID
+void heldForExport(FrameListModel& model, FrameMaker& m)
+{
+    m.add(model, 0x7E8, {0x49, 0x02, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+                         '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          1000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    m.add(model, 0x7E8, {0x04, 0x41, 0x0C, 0x1A, 0xF8}, 2000);
+    m.add(model, 0x7E9, {0x03, 0x41, 0x05, 0x7B}, 3000);
+    m.add(model, 0x7E0, {0x02, 0x01, 0x0C}, 4000, ECUIO_FRAME_FLAG_TX_ECHO);
+    m.add(model, 0x7E8,
+          {0x62, 0xD8, 0x02, 'E', 'C', 'M', '-', 'H', 'a', 'v', 'n', 'e'}, 5000,
+          ECUIO_FRAME_FLAG_REASSEMBLED);
+}
+
+std::string csvHead(int written, const char* filter, int held, int ident,
+                    int text)
+{
+    char line[512];
+    std::snprintf(line, sizeof line,
+                  "# Havne %s, the Log page's frames, scrubbed (ADR-0054): %d "
+                  "written%s; left out of the %d held: %d frames of "
+                  "identification replies, %d of text signals' messages, 0 "
+                  "segments of messages that couldn't be reassembled\n"
+                  "time_s,id,ext,dir,dlc,flags,data\n",
+                  ecuio_version_string(), written, filter, held, ident, text);
+    return line;
+}
+
+// Core's scrub leaves the identification reply out, a text def of a
+// session's set leaves its message out (the set noted, the session long
+// gone), and the filter picks among the frames kept
+TEST(BridgeTest, FrameCsvLeavesIdentificationOutAndWritesWhatTheFilterShows)
+{
+    FrameListModel model;
+    FrameMaker m;
+    heldForExport(model, m);
+
+    FrameListModel::ScrubbedCsv csv = model.scrubbedCsv();
+    ASSERT_TRUE(csv.ok) << csv.words.toStdString();
+    EXPECT_EQ(csv.bytes.toStdString(),
+              csvHead(4, "", 5, 1, 0) +
+                  "0.002000,0x7E8,0,rx,5,,04 41 0C 1A F8\n"
+                  "0.003000,0x7E9,0,rx,4,,03 41 05 7B\n"
+                  "0.004000,0x7E0,0,tx,3,sent,02 01 0C\n"
+                  "0.005000,0x7E8,0,rx,12,reassembled,62 D8 02 45 43 4D 2D 48 "
+                  "61 76 6E 65\n");
+    EXPECT_EQ(csv.written, 4);
+    EXPECT_EQ(csv.identification, 1u);
+
+    const std::string json =
+        R"({"havne_signals": 1, "name": "Scrub test", )"
+        R"("source": {"name": "test_bridge"}, )"
+        R"("ecus": [{"id": "pcm", "rx": "7E8"}], )"
+        R"("signals": [{"key": "ecu_name", "name": "ECU name", "ecu": "pcm", )"
+        R"("read": {"service": "22", "number": "D802"}, )"
+        R"("field": {"byte": 0}, "kind": "text"}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    model.noteTextDefs(ecuio_signal_file_set(file));
+    model.noteTextDefs(ecuio_signal_file_set(file));
+    ecuio_signal_file_free(file); // the copies stay
+
+    model.setFilter(QStringLiteral("7E8"), QString(), 0, 0);
+    csv = model.scrubbedCsv();
+    ASSERT_TRUE(csv.ok) << csv.words.toStdString();
+    EXPECT_EQ(csv.bytes.toStdString(),
+              csvHead(1, " (those the filter shows)", 5, 1, 1) +
+                  "0.002000,0x7E8,0,rx,5,,04 41 0C 1A F8\n");
+    EXPECT_EQ(csv.textValues, 1u);
+
+    // A frame echoing the VIN fails the check: no bytes, the class alone
+    FrameListModel echo;
+    m.add(echo, 0x7E8, {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+                        '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          1000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    csv = echo.scrubbedCsv();
+    EXPECT_FALSE(csv.ok);
+    EXPECT_TRUE(csv.bytes.isEmpty());
+    EXPECT_EQ(csv.words.toStdString(),
+              "The check found a VIN-shaped token in a frame the export would "
+              "write: nothing was written");
+}
+
+// The bridge writes the file whole, answers with the counts and logs one
+// line naming no path; a failed check or a target it can't write leaves
+// what was there
+TEST(BridgeTest, ExportFramesWritesTheFileAndLogsOneLine)
+{
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    QStringList lines;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&](const QString& line) { lines << line; });
+    FrameMaker m;
+    heldForExport(*bridge.model(), m);
+
+    const QString target = out.path() + QStringLiteral("/frames.csv");
+    const QVariantMap r = bridge.exportFrames(QUrl::fromLocalFile(target));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("written")).toInt(), 4);
+    EXPECT_EQ(r.value(QStringLiteral("leftOut")).toULongLong(), 1u);
+    EXPECT_EQ(r.value(QStringLiteral("unattributed")).toULongLong(), 0u);
+    QFile f(target);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QByteArray bytes = f.readAll();
+    f.close();
+    EXPECT_TRUE(bytes.startsWith(QByteArray(csvHead(4, "", 5, 1, 0).c_str())));
+    EXPECT_FALSE(bytes.contains("FAKE11M")) << "the VIN reply left out";
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_EQ(lines[0].toStdString(),
+              "Frames exported: 4 written, 1 left out (identification and text "
+              "signals), 0 segments unattributed");
+
+    // A frame echoing the VIN: nothing written, the file as it was
+    m.add(*bridge.model(), 0x7E8,
+          {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+           '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          6000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    lines.clear();
+    const QVariantMap no = bridge.exportFrames(QUrl::fromLocalFile(target));
+    EXPECT_FALSE(no.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(no.value(QStringLiteral("written")).toInt(), 0);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), bytes);
+    f.close();
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_TRUE(lines[0].startsWith(
+        QStringLiteral("Frames not exported: The check found")))
+        << lines[0].toStdString();
+
+    // A folder isn't a file it can write
+    bridge.model()->clear();
+    heldForExport(*bridge.model(), m);
+    const QVariantMap folder =
+        bridge.exportFrames(QUrl::fromLocalFile(out.path()));
+    EXPECT_FALSE(folder.value(QStringLiteral("ok")).toBool());
+    const QString words = folder.value(QStringLiteral("words")).toString();
+    EXPECT_EQ(words.toStdString(), "Couldn't write the file");
+    for (const QString& line : lines) {
+        EXPECT_FALSE(line.contains(out.path())) << line.toStdString();
+    }
+}
+
+// ---- The health report, Diagnostics' Save report (ADR-0054's appendix
+// "the health report as built") ----------------------------------------
+
+/* The temporary folder core writes the report in: TMP, TEMP and TMPDIR
+ * pointed at a folder of the test's own while it lives, so a case can
+ * see the report's own folder go */
+struct TempDirScope {
+    EnvRestore tmp{"TMP"};
+    EnvRestore temp{"TEMP"};
+    EnvRestore tmpdir{"TMPDIR"};
+    QTemporaryDir dir;
+    TempDirScope()
+    {
+        const QByteArray path = QDir::toNativeSeparators(dir.path()).toUtf8();
+        qputenv("TMP", path);
+        qputenv("TEMP", path);
+        qputenv("TMPDIR", path);
+    }
+    QStringList left() const
+    {
+        return QDir(dir.path())
+            .entryList(QDir::AllEntries | QDir::NoDotAndDotDot);
+    }
+};
+
+TEST(BridgeTest, HealthFormatIsTheFiltersOrTheNames)
+{
+    const QUrl txt = QUrl::fromLocalFile(QStringLiteral("/x/report.txt"));
+    const QUrl json = QUrl::fromLocalFile(QStringLiteral("/x/report.JSON"));
+    const QUrl content(QStringLiteral("content://provider/document/1234"));
+    EXPECT_EQ(healthFormatFor(txt, 0), ECUIO_HEALTH_TEXT);
+    EXPECT_EQ(healthFormatFor(txt, 1), ECUIO_HEALTH_JSON);
+    EXPECT_EQ(healthFormatFor(json, 0), ECUIO_HEALTH_JSON);
+    EXPECT_EQ(healthFormatFor(content, 0), ECUIO_HEALTH_TEXT);
+    EXPECT_EQ(healthFormatFor(content, 1), ECUIO_HEALTH_JSON);
+    EXPECT_EQ(healthFormatFor(content, -1), ECUIO_HEALTH_TEXT);
+}
+
+/* Each count's noun as the count wants it: one, none and many */
+TEST(BridgeTest, HealthReportWordsEachCount)
+{
+    ecuio_health_report_t one{};
+    one.ecus = 1;
+    one.codes = 1;
+    one.values = 1;
+    one.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION] = 1;
+    EXPECT_EQ(healthSummary(one).toStdString(),
+              "1 ECU, 1 trouble code, 1 key value");
+    EXPECT_EQ(healthSavedLine(one).toStdString(),
+              "Health report saved: 1 ECU, 1 trouble code, 1 key value (1 "
+              "identification item left out)");
+    ecuio_health_report_t many{};
+    many.ecus = 2;
+    many.codes = 0;
+    many.values = 14;
+    many.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION] = 13;
+    many.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES] = 1;
+    EXPECT_EQ(healthSummary(many).toStdString(),
+              "2 ECUs, 0 trouble codes, 14 key values");
+    EXPECT_EQ(healthSavedLine(many).toStdString(),
+              "Health report saved: 2 ECUs, 0 trouble codes, 14 key values (13 "
+              "identification items left out)");
+}
+
+/* The mock's report written where the user chose: text, then JSON by
+ * the filter or the name, over a file that exists; its label never in
+ * the file or the lines; core's temporary folder gone each time */
+TEST(BridgeTest, HealthReportOfTheMockIsWrittenWhereChosen)
+{
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    QStringList lines;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&](const QString& line) { lines << line; });
+
+    TempDirScope temp;
+    ASSERT_TRUE(temp.dir.isValid());
+    const QString target = out.path() + QStringLiteral("/report.txt");
+    const QVariantMap none =
+        bridge.saveHealthReport(QUrl::fromLocalFile(target), 0);
+    EXPECT_FALSE(none.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(none.value(QStringLiteral("words")).toString().toStdString(),
+              "Not connected");
+    EXPECT_FALSE(QFile::exists(target));
+
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://Daily driver")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+
+    {
+        QFile old(target);
+        ASSERT_TRUE(old.open(QIODevice::WriteOnly));
+        old.write("the old report");
+    }
+    lines.clear();
+    const QVariantMap r =
+        bridge.saveHealthReport(QUrl::fromLocalFile(target), 0);
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("ecus")).toInt(), 1);
+    const int codes = r.value(QStringLiteral("codes")).toInt();
+    EXPECT_GT(codes, 0);
+    EXPECT_FALSE(r.value(QStringLiteral("vinDecoded")).toBool());
+    const QByteArray text = readFile(target);
+    EXPECT_FALSE(text.contains("the old report"));
+    EXPECT_TRUE(text.contains("mock://<label>")) << text.toStdString();
+    EXPECT_FALSE(text.contains("Daily"));
+    EXPECT_FALSE(text.startsWith("{"));
+    EXPECT_TRUE(temp.left().isEmpty()) << temp.left().join(' ').toStdString();
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_EQ(lines[0],
+              QStringLiteral("Health report saved: 1 ECU, %1 trouble codes, "
+                             "0 key values (0 identification items left out)")
+                  .arg(codes));
+    EXPECT_EQ(
+        r.value(QStringLiteral("summary")).toString(),
+        QStringLiteral("1 ECU, %1 trouble codes, 0 key values").arg(codes));
+
+    // JSON by the dialog's filter, a .txt name notwithstanding, and by the
+    // name alone
+    const QVariantMap byFilter =
+        bridge.saveHealthReport(QUrl::fromLocalFile(target), 1);
+    ASSERT_TRUE(byFilter.value(QStringLiteral("ok")).toBool());
+    const QJsonDocument doc = QJsonDocument::fromJson(readFile(target));
+    ASSERT_TRUE(doc.isObject());
+    EXPECT_EQ(doc.object().value(QStringLiteral("havne_health")).toInt(), 1);
+    EXPECT_EQ(doc.object().value(QStringLiteral("ecus")).toArray().size(), 1);
+    const QString named = out.path() + QStringLiteral("/report.json");
+    ASSERT_TRUE(bridge.saveHealthReport(QUrl::fromLocalFile(named), 0)
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    EXPECT_TRUE(QJsonDocument::fromJson(readFile(named)).isObject());
+    EXPECT_TRUE(temp.left().isEmpty()) << temp.left().join(' ').toStdString();
+
+    // A folder isn't a file it can write: nothing there, the words plain
+    lines.clear();
+    const QVariantMap folder =
+        bridge.saveHealthReport(QUrl::fromLocalFile(out.path()), 0);
+    EXPECT_FALSE(folder.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(folder.value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't write the file");
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_EQ(lines[0].toStdString(),
+              "Health report not saved: Couldn't write the file");
+    EXPECT_TRUE(temp.left().isEmpty()) << temp.left().join(' ').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    for (const QString& line : lines) {
+        EXPECT_FALSE(line.contains(out.path())) << line.toStdString();
+    }
+}
+
+/* Live's rows hold each value as core decoded it, in the def's unit:
+ * the display's conversion never reaches the report, which converts for
+ * itself; each value aged from the window that brought it */
+TEST(BridgeTest, HeldValuesAreCoresInTheDefsUnit)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    std::memset(defs[0].unit, 0, sizeof defs[0].unit);
+    std::memcpy(defs[0].unit, "km/h", 4);
+    model.setSignalSet(&set);
+    EXPECT_TRUE(model.heldValues().empty()) << "no value yet";
+    model.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    model.updateValues({{uint16_t(1001), 100.0}});
+    spinLoop(300);
+    const std::vector<ecuio_health_value_t> held = model.heldValues();
+    ASSERT_EQ(held.size(), 1u) << "only the row with a value";
+    EXPECT_EQ(held[0].def_id, 1001u);
+    EXPECT_EQ(held[0].value, 100.0) << "km/h as decoded, not mph";
+    EXPECT_GE(held[0].age_us, 250000u);
+    EXPECT_LT(held[0].age_us, 10000000u);
+    EXPECT_EQ(held[0].flags, 0u);
+    EXPECT_EQ(held[0].reserved, 0u);
+}
+
+/* A replay under obd2: Live's ranked values are the report's key values,
+ * shown in the app's units (core converts them for the file) */
+TEST(BridgeTest, HealthReportCarriesLivesValuesInTheAppsUnits)
+{
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    bridge.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    const QString uri =
+        QStringLiteral(
+            "replay://%1/2026-10-25-engine-start?profile=obd2&speed=10")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    ASSERT_EQ(bridge.connectSession(uri), QString());
+    ASSERT_TRUE(spinUntil(
+        [&]() { return bridge.signalModel()->heldValues().size() >= 5; },
+        10000));
+    const QString target = out.path() + QStringLiteral("/report.json");
+    const QVariantMap r =
+        bridge.saveHealthReport(QUrl::fromLocalFile(target), 1);
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_GT(r.value(QStringLiteral("values")).toInt(), 0);
+    const QJsonObject doc = QJsonDocument::fromJson(readFile(target)).object();
+    const QJsonArray values = doc.value(QStringLiteral("key_values")).toArray();
+    ASSERT_FALSE(values.isEmpty());
+    QStringList units;
+    for (const QJsonValue& v : values) {
+        units << v.toObject().value(QStringLiteral("unit")).toString();
+    }
+    EXPECT_TRUE(units.contains(QStringLiteral("mph")) ||
+                units.contains(QString::fromUtf8("\xC2\xB0"
+                                                 "F")))
+        << units.join(' ').toStdString();
+    EXPECT_FALSE(units.contains(QStringLiteral("km/h")));
 }

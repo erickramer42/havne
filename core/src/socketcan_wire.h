@@ -29,6 +29,7 @@ constexpr uint32_t SOCKETCAN_ERR_FLAG = 0x20000000u;   /* CAN_ERR_FLAG */
 constexpr uint32_t SOCKETCAN_SFF_MASK = 0x000007FFu;   /* CAN_SFF_MASK */
 constexpr uint32_t SOCKETCAN_EFF_MASK = 0x1FFFFFFFu;   /* CAN_EFF_MASK */
 constexpr uint8_t SOCKETCAN_FD_BRS = 0x01;             /* CANFD_BRS */
+constexpr uint8_t SOCKETCAN_FD_ESI = 0x02;             /* CANFD_ESI */
 constexpr size_t SOCKETCAN_MTU = 16;                   /* CAN_MTU */
 constexpr size_t SOCKETCAN_FD_MTU = 72;                /* CANFD_MTU */
 constexpr uint32_t SOCKETCAN_ERR_CRTL = 0x00000004u;   /* CAN_ERR_CRTL */
@@ -918,6 +919,9 @@ inline void socketcan_to_frame(const socketcan_raw& in, ecuio_frame_t* out)
         out->flags |= ECUIO_FRAME_FLAG_FD;
         if (in.fd_flags & SOCKETCAN_FD_BRS) {
             out->flags |= ECUIO_FRAME_FLAG_BITRATE_SWITCH;
+        }
+        if (in.fd_flags & SOCKETCAN_FD_ESI) {
+            out->flags |= ECUIO_FRAME_FLAG_FD_ESI;
         }
     }
     /* A remote frame's length is the one it asks for: it carries no data */

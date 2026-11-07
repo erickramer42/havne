@@ -996,6 +996,188 @@ TestCase {
         compare(Harness.storedSignalFiles().length, 1)
     }
 
+    // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06) ----
+
+    function obdbPreview(page, year) {
+        find(page, "obdbYearField").text = year
+        return page.previewObdb(Harness.obdbFixture)
+    }
+
+    // The report shows what converted, what differs and what's left out,
+    // and nothing is kept until Keep
+    function test_anObdbSetShowsItsReportBeforeItIsKept() {
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        verify(find(page, "obdbImport").enabled)
+        verify(!find(page, "obdbReport").visible)
+        verify(obdbPreview(page, "2021"))
+        verify(find(page, "obdbReport").visible)
+        compare(find(page, "obdbSummary").text,
+                "Daily driver OBDb from OBDb: 7 signals converted, 6 fields differ, "
+                + "5 left out, model year 2021")
+        compare(find(page, "obdbChanged").count, 6)
+        compare(find(page, "obdbSkipped").count, 5)
+        compare(find(page, "obdbFileNotes").count, 2)
+        compare(find(page, "obdbKeep").text, "Keep")
+        compare(page.pickedVehicle.signals, [], "nothing kept yet")
+        compare(Harness.storedSignalFiles(), [])
+
+        press(page, "obdbKeep")
+        verify(!find(page, "obdbReport").visible)
+        compare(page.pickedVehicle.signals.length, 1)
+        compare(page.pickedVehicle.signals[0].profile, "user.daily-driver-obdb")
+        compare(find(page, "signalNote").text,
+                "Daily driver OBDb added: obd2 and 7 of your own, profile user.daily-driver-obdb")
+        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
+        verify(Bridge.isObdbImport(page.pickedVehicle.signals[0].sha256))
+    }
+
+    function test_anObdbSetDiscardedIsNotKept() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(obdbPreview(page, ""))
+        compare(find(page, "obdbSummary").text,
+                "Vehicle 1 OBDb from OBDb: 6 signals converted, 5 fields differ, 6 left out, "
+                + "no model year, so the commands OBDb gives for some years only are left out")
+        press(page, "obdbDiscard")
+        verify(!find(page, "obdbReport").visible)
+        compare(page.pickedVehicle.signals, [])
+        compare(Harness.storedSignalFiles(), [])
+        verify(!page.keepObdb(), "nothing to keep")
+        compare(page.pickedVehicle.signals, [])
+
+        // A report is the vehicle's it was read for
+        verify(obdbPreview(page, "2021"))
+        press(page, "vehicleNew")
+        verify(!find(page, "obdbReport").visible, "another vehicle picked")
+        verify(!page.keepObdb())
+        compare(page.pickedVehicle.signals, [])
+    }
+
+    // The set read again replaces the vehicle's earlier import, and says
+    // so before Keep; a file the user named is never replaced
+    function test_anObdbSetReadAgainReplacesTheEarlierImport() {
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        verify(obdbPreview(page, "2019"))
+        press(page, "obdbKeep")
+        const earlier = page.pickedVehicle.signals[0].sha256
+
+        verify(obdbPreview(page, "2021"))
+        verify(find(page, "obdbSummary").text.endsWith(
+                   "; replaces the vehicle's earlier OBDb import"),
+               find(page, "obdbSummary").text)
+        compare(find(page, "obdbKeep").text, "Keep, replacing the earlier")
+        // The report at a phone's width, as test_everyItemFitsAPhonesWidth
+        const width = page.width
+        page.width = 320
+        const column = find(page, "settingsColumn")
+        tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
+        waitForPolish(column)
+        compare(pastTheEdge(column, column, []).join("; "), "",
+                "nothing past the column's right edge, " + column.width)
+        page.width = width
+        press(page, "obdbKeep")
+        compare(page.pickedVehicle.signals.length, 1)
+        verify(page.pickedVehicle.signals[0].sha256 !== earlier)
+        compare(page.pickedVehicle.signals[0].profile, "user.daily-driver-obdb")
+        compare(find(page, "signalNote").text,
+                "Daily driver OBDb replaced the vehicle's earlier OBDb import: obd2 and 7 "
+                + "of your own, profile user.daily-driver-obdb")
+        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"],
+                "the earlier copy went")
+
+        // The same year again is the same file
+        verify(obdbPreview(page, "2021"))
+        press(page, "obdbKeep")
+        compare(page.pickedVehicle.signals.length, 1)
+        compare(find(page, "signalNote").text, "Daily driver OBDb is this vehicle's already")
+
+        // A file the user named so is the user's: the import takes a name
+        // of its own beside it
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        verify(importFile(page, "mine.json", "Weekend car OBDb"))
+        verify(obdbPreview(page, "2021"))
+        verify(!find(page, "obdbSummary").text.includes("replaces"))
+        press(page, "obdbKeep")
+        compare(page.pickedVehicle.signals.map(f => f.name),
+                ["Weekend car OBDb", "Weekend car OBDb 2"])
+    }
+
+    // The year: typed, else a typed VIN's, else the connected car's once
+    // its VIN names the picked vehicle, kept once the session ends; one
+    // that isn't a year is refused before the file is read
+    function test_theObdbYearComesFromAVin() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        compare(page.obdbVinYear(), 0)
+        find(page, "vinLookupField").text = "1FAFAKE10M0000001"
+        compare(page.obdbVinYear(), 2021)
+        find(page, "vinLookupField").text = "not one"
+        compare(page.obdbVinYear(), 0)
+        find(page, "vinLookupField").text = ""
+
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        verify(!find(page, "obdbImport").enabled, "nothing changes the vehicle while it runs")
+        Bridge.identifyForTesting("1FAFAKE13Y0000001")
+        compare(page.obdbVinYear(), 0, "not the picked vehicle's VIN")
+        const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
+        const doc = VehicleBook.copy(page.vehicles)
+        doc.salt = salt
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
+        Bridge.identifyForTesting("1FAFAKE13Y0000001")
+        compare(page.obdbVinYear(), 2000)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        compare(Bridge.vinModelYear(""), 0, "the VIN went with the session")
+        compare(page.obdbVinYear(), 2000, "its year stays")
+        verify(find(page, "obdbImport").enabled)
+
+        find(page, "obdbYearField").text = "19x"
+        verify(!page.previewObdb(Harness.obdbFixture))
+        compare(find(page, "signalProblem").text, "A model year is 1980 to 2039, or empty for none")
+        find(page, "obdbYearField").text = "1979"
+        verify(!page.previewObdb(Harness.obdbFixture))
+        verify(!find(page, "obdbReport").visible)
+    }
+
+    // A long report shows a list's first rows and counts the rest
+    function test_aLongObdbReportCountsWhatItDoesNotShow() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const commands = [{ hdr: "7E0", rax: "7E8", cmd: { "22": "D100" }, freq: 1,
+                            signals: [{ id: "KEPT", name: "Kept", fmt: { len: 8, unit: "scalar" } }] }]
+        for (let i = 0; i < 120; ++i)
+            commands.push({ hdr: "7E0", rax: "7E8", cmd: { "22": (0x2000 + i).toString(16) },
+                            freq: 1, signals: [{ id: "HIDDEN_" + i, hidden: true, name: "H",
+                                                 fmt: { len: 8, unit: "scalar" } }] })
+        const url = Harness.writeScratchFile("long.json", JSON.stringify({ commands: commands }))
+        find(page, "obdbYearField").text = ""
+        verify(page.previewObdb(url))
+        compare(page.obdbReport.skipped.length, 120)
+        compare(find(page, "obdbSkipped").count, page.obdbRowsShown)
+        compare(find(page, "obdbSkippedMore").text, "and " + (120 - page.obdbRowsShown) + " more")
+        verify(find(page, "obdbSkippedMore").visible)
+        verify(!find(page, "obdbChangedMore").visible)
+    }
+
+    function test_aFileThatIsNotAnObdbSetIsRefused() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        find(page, "obdbYearField").text = ""
+        verify(!page.previewObdb(Harness.writeScratchFile("notobdb.json", "{\"ecu\": 1}")))
+        const words = find(page, "signalProblem").text
+        verify(words.startsWith("Not an OBDb set Havne can read"), words)
+        verify(!words.includes("notobdb.json"), "never the path")
+        verify(!find(page, "obdbReport").visible)
+        compare(Harness.storedSignalFiles(), [])
+    }
+
     // A copy goes when no vehicle keeps it; the vehicle's own file asks first
     function test_removeAndForgetDeleteTheCopiesNoVehicleKeeps() {
         const page = createPage()

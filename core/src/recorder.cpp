@@ -15,6 +15,7 @@
 #include "recorder.h"
 
 #include "error_detail.h"
+#include "recording_lines.h" /* csv_quoted, signal_line */
 #include "recording_rows.h" /* kFormat3, the first line */
 #include "session.h"
 #include "sha256.h"
@@ -129,29 +130,8 @@ bool is_text_kind(uint8_t kind)
     return kind == ECUIO_VALUE_TEXT || kind == ECUIO_VALUE_HEX;
 }
 
-/* A CSV field, quoted only when it has to be, as the app's recorder
- * quotes it; a line break, which no line or row may hold, a space */
-std::string csv_quoted(const char* text, size_t len)
-{
-    std::string f(text, len);
-    for (char& c : f) {
-        if (c == '\r' || c == '\n') {
-            c = ' ';
-        }
-    }
-    if (f.find_first_of(",\"") == std::string::npos) {
-        return f;
-    }
-    std::string q = "\"";
-    for (char c : f) {
-        if (c == '"') {
-            q += '"';
-        }
-        q += c;
-    }
-    q += '"';
-    return q;
-}
+/* recording_lines.h's, which the CSV import writes with too */
+using ecuio_recording_lines::csv_quoted;
 
 void append_u64(std::string& out, uint64_t v)
 {
@@ -166,26 +146,6 @@ void append_hex(std::string& out, uint32_t v)
     char buf[16];
     const int n = std::snprintf(buf, sizeof buf, "0x%X", v);
     out.append(buf, static_cast<size_t>(n));
-}
-
-/* The value to 12 significant digits (the app's 'g', 12), with a '.'
- * whatever the process's locale: a Qt program sets LC_NUMERIC from the
- * environment, where the decimal point may be a comma */
-void append_value(std::string& out, double v)
-{
-    char buf[40];
-    const int n = std::snprintf(buf, sizeof buf, "%.12g", v);
-    if (n <= 0) {
-        return;
-    }
-    /* The locale is set once at startup (Qt sets LC_NUMERIC), before any
-     * recorder runs; this only reads its decimal point */
-    // NOLINTNEXTLINE(concurrency-mt-unsafe)
-    const char* point = std::localeconv()->decimal_point;
-    const char p = (point != nullptr && point[0] != '\0') ? point[0] : '.';
-    for (int i = 0; i < n; ++i) {
-        out += (buf[i] == p) ? '.' : buf[i];
-    }
 }
 
 /* Seconds since the start to the millisecond, rounded, as "+1.234" */
@@ -940,7 +900,7 @@ struct ecuio_recorder {
                 } else {
                     double x;
                     std::memcpy(&x, body + at, sizeof x);
-                    append_value(value_out, x);
+                    ecuio_recording_rows::append_value(value_out, x);
                 }
                 value_out += ',';
                 value_out += d->unit;
@@ -1588,14 +1548,13 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             const bool enumeration = d.kind == ECUIO_VALUE_ENUM;
             const std::string name =
                 csv_quoted(d.name, strnlen(d.name, sizeof d.name));
-            header += "signal  " + name +
-                      (is_text_kind(d.kind) ? ",text,"
-                       : enumeration        ? ",enum,"
-                                            : ",number,") +
-                      csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)) + "," +
-                      std::to_string(d.decimal_places) + "," +
-                      std::to_string(d.plot_rank) + "," +
-                      std::to_string(d.group) + "\n";
+            header += ecuio_recording_lines::signal_line(
+                name,
+                is_text_kind(d.kind) ? "text"
+                : enumeration        ? "enum"
+                                     : "number",
+                csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)),
+                d.decimal_places, d.plot_rank, d.group);
             if (std::find(named.begin(), named.end(), name) == named.end()) {
                 header += label_lines(set, d, name);
                 named.push_back(name);

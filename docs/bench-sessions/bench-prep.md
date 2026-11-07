@@ -13,7 +13,7 @@ The numbers are stable: run sheets, session sheets and ADRs cite them
 
 So far the J2534 hardware is one adapter, the OBDX Pro VX, through the
 x86 surrogate, and one car, its engine ECU on 11-bit `0x7E8`. The
-ELM327 items (#11 on) are settled but #17:
+ELM327 items (#11 on) are settled but #11, #17, #19 and #25:
 the VX on the bench (its
 port, answers and a cable pull, no bus; its monitor, #18; its WiFi,
 #20) and both
