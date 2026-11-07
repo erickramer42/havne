@@ -31,7 +31,11 @@
 #               shared core (HAVNE_SHARED_CORE), its own c_abi_shared and
 #               ExportsTest.TheLibraryExportsTheDeclarations: the x86 DLL's
 #               export table, undecorated names included, which CI never
-#               builds; the line adds "x86 core N/2".
+#               builds; and PythonTest.*, the havne package against the
+#               x86 core, where build-win32 was configured with a 32-bit
+#               Python (the main checkout's build-py32-venv) and so
+#               registers them; the line adds "x86 core N/M", M being 2
+#               plus those.
 #
 # --build-only runs win32 and build and stops: fresh binaries without the
 # suite, for a machine that only runs them (the laptop at the car).
@@ -162,17 +166,21 @@ if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
         line cross-arch FAIL "$dur" "$summary ($skips): the routing case skipped, so the x86 paths are wrong"
         exit 1
     fi
-    # The x86 shared core's two checks, in build-win32's own ctest
+    # The x86 shared core's two checks, and the Python package's tests
+    # where a 32-bit Python registered them, in build-win32's own ctest
     x86=""
     if grep -q '^HAVNE_SHARED_CORE:BOOL=ON' build-win32/CMakeCache.txt; then
         cross_dur=$dur
+        py32=$(ctest --test-dir build-win32 -C Release -N -R '^PythonTest\.' 2>/dev/null \
+            | sed -n 's/^Total Tests: //p' | tr -d '\r')
+        want=$((2 + ${py32:-0}))
         run cross-arch-core ctest --test-dir build-win32 -C Release --output-on-failure \
-            --no-tests=error -R '^(c_abi_shared|ExportsTest\.TheLibraryExportsTheDeclarations)$'
+            --no-tests=error -R '^(c_abi_shared|ExportsTest\.TheLibraryExportsTheDeclarations|PythonTest\..*)$'
         dur=$((cross_dur + dur))
         [ "$rc" = 0 ] || ctest_failed cross-arch-core
         x86="; x86 core $(ctest_summary "$LOGDIR/cross-arch-core.log" | cut -d' ' -f1)"
-        [ "$x86" = "; x86 core 2/2" ] || {
-            line cross-arch FAIL "$dur" "$summary$x86: the x86 shared core's two checks didn't both run"
+        [ "$x86" = "; x86 core $want/$want" ] || {
+            line cross-arch FAIL "$dur" "$summary$x86: the x86 shared core's $want checks didn't all run"
             exit 1
         }
     fi

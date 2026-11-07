@@ -879,6 +879,54 @@ if(HAVNE_SHARED_CORE)
         ExportsTest.EachAllocationHasItsRelease ExportsTest.SelfTest PROPERTIES LABELS "abi")
 endif()
 
+# The havne Python package (python/, ADR-0053 and its appendix "the havne
+# package as built"): each python/tests/test_*.py a ctest of its own,
+# PythonTest.<file>, under pytest through python/tests/run.py, which
+# exits 77 (a skip) without pytest or when every case in the file
+# skipped. The package loads this tree's shared core (HAVNE_LIBRARY); on
+# Windows the J2534 case finds the fake DLL and this tree's surrogate
+# (x64, or build-win32's x86) through the environment, as a wheel's
+# package sets the surrogates from its own folder. test_vcan shares vcan0
+# with test_vcan's suites: RUN_SERIAL. Only where the tests' Python has
+# the tree's pointer size: a 64-bit Python can't load build-win32's x86
+# core, so that tree registers them only when configured with a 32-bit
+# Python (verify.sh's cross-arch step, HAVNE_PYTHON32).
+set(_app_python_pointer 0)
+if(HAVNE_SHARED_CORE AND Python3_Interpreter_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import struct; print(struct.calcsize('P'))"
+        OUTPUT_VARIABLE _app_python_pointer OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _app_python_rc)
+    if(NOT _app_python_rc EQUAL 0)
+        set(_app_python_pointer 0)
+    endif()
+endif()
+if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_app_surrogate_var ECUIO_SURROGATE_X64_EXE)
+    else()
+        set(_app_surrogate_var ECUIO_SURROGATE_EXE)
+    endif()
+    file(GLOB _app_python_tests CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/python/tests/test_*.py)
+    foreach(_app_py IN LISTS _app_python_tests)
+        get_filename_component(_app_name ${_app_py} NAME_WE)
+        add_test(NAME PythonTest.${_app_name}
+            COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/python/tests/run.py ${_app_py}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/python/tests)
+        set(_app_env "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>" "PYTHONDONTWRITEBYTECODE=1")
+        if(WIN32)
+            list(APPEND _app_env "HAVNE_FAKE_J2534_DLL=$<TARGET_FILE:fake_j2534>"
+                 "${_app_surrogate_var}=$<TARGET_FILE:ecuio-j2534-surrogate>")
+        endif()
+        set_tests_properties(PythonTest.${_app_name} PROPERTIES
+            ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
+        if(_app_name STREQUAL "test_vcan")
+            set_tests_properties(PythonTest.${_app_name} PROPERTIES RUN_SERIAL TRUE)
+        endif()
+    endforeach()
+endif()
+
 # Core's USDT probes (ADR-0034 section 4) in each binary that links core and
 # ships or runs here: their ELF notes, which is all a tracer reads.
 # Only where core was built with them (Linux with <sys/sdt.h>).
