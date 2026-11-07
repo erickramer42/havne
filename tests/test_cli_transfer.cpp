@@ -139,6 +139,21 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "\"left_out\":{\"identification\":3,\"unattributable\":1,"
               "\"text_values\":0,\"activity\":0}}");
 
+    Args c({"havne-cli", "export", "rec", "out.csv", "--format", "csv"});
+    cli::ExportArgs csv;
+    ASSERT_TRUE(cli::parse_export(c.argc(), c.argv.data(), csv, &why));
+    ecuio_export_report_t v{};
+    v.values = 40;
+    v.signal_count = 3;
+    v.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES] = 2;
+    cli::Line cl(buf, sizeof buf);
+    cli::exported_line(cl, csv, v);
+    EXPECT_EQ(text(cl),
+              "{\"type\":\"exported\",\"format\":\"csv\",\"file\":"
+              "\"out.csv\",\"scrubbed\":true,\"frames\":0,\"made_up\":0,"
+              "\"values\":40,\"signals\":3,\"left_out\":{\"identification\":0,"
+              "\"unattributable\":0,\"text_values\":2,\"activity\":0}}");
+
     r.failed_class = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1;
     cli::Line f(buf, sizeof buf);
     cli::export_failed_line(f, r);

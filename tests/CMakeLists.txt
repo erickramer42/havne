@@ -333,6 +333,13 @@ if(TARGET havne-cli)
             set_tests_properties(CliTransferRunTest.${_mode} PROPERTIES
                 TIMEOUT 60 SKIP_RETURN_CODE 77)
         endforeach()
+        # The CSV export of a recording core wrote, read back by Python's
+        # csv module row for row against its signals.csv
+        add_test(NAME CliTransferRunTest.csv
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    csv $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.csv PROPERTIES TIMEOUT 60)
         # A candump -L log of the simulated car on vcan0 imported and read
         # through obd2: its values the direct session's (Linux; skipped
         # without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED; serial:

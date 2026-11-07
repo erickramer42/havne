@@ -6,6 +6,7 @@
 #   python tests/cli_transfer.py refusals <havne-cli>
 #   python tests/cli_transfer.py tshark <havne-cli>
 #   python3 tests/cli_transfer.py candump <havne-cli>          (Linux)
+#   python tests/cli_transfer.py csv <havne-cli> <recording>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -18,8 +19,13 @@
 # car (canned values) on vcan0 answering a direct obd2 session while
 # candump -L logs the bus; the log imported and read through obd2 by
 # view --frames holds each signal's values as the session read them;
-# exit 77 without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED=1.
+# exit 77 without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED=1. csv: a
+# recording core wrote (the replay fixture under obd2) exported as CSV and
+# read back with the standard library's csv module after its comment line:
+# each row its signals.csv row, host_us as seconds; the same bytes twice;
+# a range its rows alone.
 
+import csv
 import json
 import os
 import shutil
@@ -287,9 +293,59 @@ def candump(cli):
     return 0
 
 
+def csv_rows(path):
+    """The comment line, then the rows under the header"""
+    with open(path, encoding="utf-8", newline="") as f:
+        comment = f.readline()
+        rows = list(csv.reader(f))
+    if rows[0] != ["time_s", "signal", "unit", "value"]:
+        raise SystemExit(f"FAIL  the header reads {rows[0]}")
+    return comment, rows[1:]
+
+
+def csv_export(cli, recording):
+    with open(os.path.join(recording, "signals.csv"), encoding="utf-8-sig",
+              newline="") as f:
+        recorded = list(csv.reader(f))[1:]
+    want = [[f"{int(t) // 1000000}.{int(t) % 1000000:06d}", name, unit, value]
+            for t, name, value, unit in recorded]
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "values.csv")
+        exported = one(run(cli, ["export", recording, out, "--format", "csv"]),
+                       "exported")
+        names = {r[1] for r in want}
+        if (exported["values"], exported["signals"], exported["frames"],
+                exported["scrubbed"]) != (len(want), len(names), 0, True):
+            raise SystemExit(f"FAIL  exported {exported}")
+        comment, rows = csv_rows(out)
+        if not comment.startswith("# Havne ") or                 f"{len(want)} values of {len(names)} signals" not in comment:
+            raise SystemExit(f"FAIL  the comment reads {comment!r}")
+        for got, row in zip(rows, want):
+            if got != row:
+                raise SystemExit(f"FAIL  a row reads {got}, not {row}")
+        if len(rows) != len(want):
+            raise SystemExit(f"FAIL  {len(rows)} rows, not {len(want)}")
+        again = os.path.join(d, "again.csv")
+        run(cli, ["export", recording, again, "--format", "csv"])
+        with open(out, "rb") as a, open(again, "rb") as b:
+            if a.read() != b.read():
+                raise SystemExit("FAIL  two exports differ")
+        part = os.path.join(d, "part.csv")
+        cut = one(run(cli, ["export", recording, part, "--format", "csv",
+                            "--from", "10", "--to", "20"]), "exported")
+        inside = [r for r in want if 10.0 <= float(r[0]) <= 20.0]
+        if cut["values"] != len(inside) or csv_rows(part)[1] != inside:
+            raise SystemExit(f"FAIL  the range wrote {cut}")
+    print(f"ok    {len(want)} values of {len(names)} signals exported as CSV "
+          "and read back")
+    return 0
+
+
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
+    if len(sys.argv) == 4 and sys.argv[1] == "csv":
+        sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) != 3 or sys.argv[1] not in modes:
         print(__doc__ or "usage: cli_transfer.py roundtrip|refusals|tshark "
               "<havne-cli>")

@@ -166,7 +166,8 @@ inline const char* left_out_word(uint32_t cls)
 }
 
 // {"type":"exported","format":...,"file":...,"scrubbed":...,"frames":N,
-//  "made_up":N,"left_out":{"identification":N,...}}
+//  "made_up":N,"left_out":{"identification":N,...}}; csv adds "values":N
+//  and "signals":N after made_up
 inline void exported_line(Line& l, const ExportArgs& a,
                           const ecuio_export_report_t& r)
 {
@@ -181,6 +182,12 @@ inline void exported_line(Line& l, const ExportArgs& a,
     l.u64(r.frames);
     l.key("made_up");
     l.u64(r.made_up);
+    if (a.options.format == ECUIO_EXPORT_CSV) {
+        l.key("values");
+        l.u64(r.values);
+        l.key("signals");
+        l.u64(r.signal_count);
+    }
     l.key("left_out");
     l.ch('{');
     for (uint32_t c = 0; c < ECUIO_EXPORT_LEFT_OUT_COUNT; ++c) {
