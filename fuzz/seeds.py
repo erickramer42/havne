@@ -6,7 +6,8 @@
 # into <out>/<harness>/, one file each, from the files the tree commits:
 # the signal-file and OBDb fixtures, the example plugin and the recording
 # fixtures; the ELM327 emulator's, the conversations its hosts open with;
-# and candump's, a log's lines in each form. Each seed is in the harness's own form (fuzz/README.md): the
+# candump's, a log's lines in each form; and the CSV import's, each
+# made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording harness's a
 # folder ('F'), with the pieces cut at 0x1E bytes. Started from
@@ -170,6 +171,16 @@ def main(argv):
           b"(1.004500) can0 7E0#3000000000000000\n"
           b"(1.005000) can0 7E8#2144454647484950\n"
           b"(1.005500) can0 7E8#2251525354555657\n")
+
+    # The CSV import: the first line a column map's JSON, the rest the file
+    for cmap_path in sorted(glob.glob(os.path.join(ROOT, "tests", "fixtures", "import",
+                                                   "csv", "*", "map.json"))):
+        folder = os.path.dirname(cmap_path)
+        with open(cmap_path, encoding="utf-8") as f:
+            cmap = json.dumps(json.load(f), separators=(",", ":")).encode("utf-8")
+        with open(os.path.join(folder, "log.csv"), "rb") as f:
+            log = f.read()
+        write(out, "fuzz_csv_import", os.path.basename(folder), cmap + b"\n" + log)
     return 0
 
 

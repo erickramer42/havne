@@ -102,9 +102,11 @@ TEST(CliTransferTest, ImportTakesACandumpLogAFolderAndAnInterface)
     EXPECT_STREQ(im.options.in_path_utf8, "bus.log");
     EXPECT_STREQ(im.options.out_folder_utf8, "rec");
     EXPECT_STREQ(im.options.interface_utf8, "can1");
+    EXPECT_EQ(im.map_path, nullptr);
     EXPECT_EQ(import_why({"havne-cli", "import", "bus.log", "rec"}),
-              "import takes candump");
-    EXPECT_EQ(import_why({"havne-cli", "import"}), "import takes candump");
+              "import takes candump or csv");
+    EXPECT_EQ(import_why({"havne-cli", "import"}),
+              "import takes candump or csv");
     EXPECT_EQ(import_why({"havne-cli", "import", "candump", "bus.log"}),
               "import needs the log and the folder to make");
     EXPECT_EQ(import_why({"havne-cli", "import", "candump", "a", "b", "c"}),
@@ -112,6 +114,34 @@ TEST(CliTransferTest, ImportTakesACandumpLogAFolderAndAnInterface)
     EXPECT_EQ(import_why({"havne-cli", "import", "candump", "a", "b", "--map",
                           "m.json"}),
               "unexpected '--map'");
+}
+
+TEST(CliTransferTest, ImportTakesACsvAFolderAndItsMap)
+{
+    Args a(
+        {"havne-cli", "import", "csv", "log.csv", "rec", "--map", "map.json"});
+    cli::ImportArgs im;
+    std::string why;
+    ASSERT_TRUE(cli::parse_import(a.argc(), a.argv.data(), im, &why)) << why;
+    EXPECT_EQ(im.options.format, ECUIO_IMPORT_CSV);
+    EXPECT_STREQ(im.options.in_path_utf8, "log.csv");
+    EXPECT_STREQ(im.options.out_folder_utf8, "rec");
+    EXPECT_STREQ(im.map_path, "map.json");
+    EXPECT_EQ(im.options.interface_utf8, nullptr);
+    EXPECT_EQ(im.options.column_map_utf8, nullptr); // main reads the file
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec"}),
+              "import csv needs --map <map.json>, the file's column map");
+    EXPECT_EQ(import_why(
+                  {"havne-cli", "import", "csv", "log.csv", "--map", "m.json"}),
+              "import needs the file and the folder to make");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "a", "b", "c", "--map",
+                          "m.json"}),
+              "import takes one file and one folder");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "a", "b", "--map"}),
+              "unexpected '--map'");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "a", "b", "--map",
+                          "m.json", "--interface", "can0"}),
+              "unexpected '--interface'");
 }
 
 std::string text(const cli::Line& l)
@@ -196,6 +226,28 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
         "\"interface\":null,\"lines\":7,\"frames\":6,\"error_frames\":1,"
         "\"interfaces\":1,\"utc_start_us\":1700000000250000,"
         "\"duration_us\":105000}");
+
+    Args s({"havne-cli", "import", "csv", "log.csv", "rec", "--map", "m.json"});
+    cli::ImportArgs csv_im;
+    ASSERT_TRUE(cli::parse_import(s.argc(), s.argv.data(), csv_im, &why));
+    ecuio_import_report_t cr{};
+    cr.lines = 11;
+    cr.values = 22;
+    cr.columns_ignored = 1;
+    cr.duration_us = 3500000;
+    cli::Line c0(buf, sizeof buf);
+    cli::imported_line(c0, csv_im, cr);
+    EXPECT_EQ(text(c0),
+              "{\"type\":\"imported\",\"format\":\"csv\",\"folder\":\"rec\","
+              "\"lines\":11,\"values\":22,\"columns_ignored\":1,"
+              "\"utc_start_us\":null,\"duration_us\":3500000}");
+    cr.utc_start_us = 1793883802250000u;
+    cli::Line c1(buf, sizeof buf);
+    cli::imported_line(c1, csv_im, cr);
+    EXPECT_EQ(text(c1),
+              "{\"type\":\"imported\",\"format\":\"csv\",\"folder\":\"rec\","
+              "\"lines\":11,\"values\":22,\"columns_ignored\":1,"
+              "\"utc_start_us\":1793883802250000,\"duration_us\":3500000}");
 }
 
 } // namespace

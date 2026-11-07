@@ -65,6 +65,9 @@ bool signedUs(double ms, int64_t* out)
     return true;
 }
 
+// Why a folder of values alone (a CSV import) has no check or decode
+constexpr const char* kNoFrames = "the recording has no frames";
+
 QString detailOr(ecuio_status_t rc)
 {
     const char* detail = ecuio_last_error_detail();
@@ -199,6 +202,9 @@ void RecordingView::run(const std::shared_ptr<Result>& res,
                                       &res->reader);
     if (res->rc != ECUIO_OK) {
         res->detail = detailOr(res->rc);
+    } else if (!dir.exists(QStringLiteral("frames.csv"))) {
+        /* Values alone (a CSV import): nothing for the check to read */
+        res->checkDetail = QString::fromUtf8(kNoFrames);
     } else {
         Pass checking{
             cancel,          view, generation,     openShare,
@@ -233,6 +239,10 @@ void RecordingView::openFrames(const QString& folder, const QString& profile)
 {
     stop();
     readHeader(folder);
+    if (!m_hasFrames) {
+        fail(folder, QString::fromUtf8(kNoFrames));
+        return;
+    }
     const cli::FramesSource source = cli::frames_source(
         profile == QStringLiteral("signals.json") ? std::string()
                                                   : profile.toStdString(),
@@ -349,6 +359,7 @@ void RecordingView::readHeader(const QString& folder)
     }
     m_recordedProfile = QString::fromStdString(recorded.profile);
     m_recordedSha = QString::fromStdString(recorded.sha256);
+    m_hasFrames = QDir(folder).exists(QStringLiteral("frames.csv"));
     m_ownSignalFile = false;
     if (recorded.names_file()) {
         QFile own(QDir(folder).filePath(QStringLiteral("signals.json")));
@@ -373,6 +384,7 @@ void RecordingView::close()
     m_recordedProfile.clear();
     m_recordedSha.clear();
     m_ownSignalFile = false;
+    m_hasFrames = false;
     m_state = Closed;
     m_progress = 0;
     emit progressChanged();

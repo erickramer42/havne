@@ -19,6 +19,7 @@
 #include "recordingview.h"
 
 #include "ecuio/profile.h"
+#include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
 namespace {
@@ -128,21 +129,29 @@ TEST(RecordingViewTest, OpensAndChecksARecording)
 }
 
 // A folder with no frames.csv is still a recording to view: its check
-// didn't run, and says why
+// didn't run and says the recording has no frames, and a decode through
+// a profile is refused in the same words
 TEST(RecordingViewTest, AFolderWithNoFramesOpensUnchecked)
 {
     RecordingView v;
     v.open(fixture("pull-early"));
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.hasFrames());
     EXPECT_FALSE(v.check().value(QStringLiteral("ran")).toBool());
-    EXPECT_TRUE(v.check()
-                    .value(QStringLiteral("error"))
-                    .toString()
-                    .contains(QStringLiteral("frames.csv")))
-        << v.check().value(QStringLiteral("error")).toString().toStdString();
+    EXPECT_EQ(v.check().value(QStringLiteral("error")).toString(),
+              QStringLiteral("the recording has no frames"));
     EXPECT_TRUE(v.findings().isEmpty());
     EXPECT_EQ(v.signalList().size(), 4);
+
+    /* Its frames through a profile: refused at once, in the same words,
+     * never a pass that fails or waits */
+    v.openFrames(fixture("pull-early"), QStringLiteral("obd2"));
+    EXPECT_EQ(v.state(), RecordingView::Failed);
+    EXPECT_EQ(v.error(), QStringLiteral("the recording has no frames"));
+    v.open(fixture("findings"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_TRUE(v.hasFrames());
 }
 
 // A folder the reader refuses fails in core's words, never with the path
@@ -288,6 +297,58 @@ TEST(RecordingViewTest, ColumnsHoldEachColumnsRange)
     EXPECT_TRUE(v.columns({99}, 0, 1000, 1).isEmpty()) << "no such signal";
     EXPECT_TRUE(v.columns({rpm}, 0, 1000, 0).isEmpty()) << "no columns";
     EXPECT_FALSE(v.stale());
+}
+
+// A logger's CSV imported by its column map (ADR-0054's appendix "the CSV
+// import as built") opens as any recording: no frames, so unchecked; its
+// signals ranked in the map's order, so plotted; its columns its samples
+TEST(RecordingViewTest, AnImportedCsvOpensAndPlots)
+{
+    const QString base = QStringLiteral(ECUIO_IMPORT_FIXTURES "/csv/logger-a");
+    QFile mapFile(base + QStringLiteral("/map.json"));
+    ASSERT_TRUE(mapFile.open(QIODevice::ReadOnly));
+    const QByteArray map = mapFile.readAll();
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QByteArray in = (base + QStringLiteral("/log.csv")).toUtf8();
+    const QByteArray out = (dir.path() + QStringLiteral("/rec")).toUtf8();
+    ecuio_import_options_t o{};
+    o.format = ECUIO_IMPORT_CSV;
+    o.in_path_utf8 = in.constData();
+    o.out_folder_utf8 = out.constData();
+    o.column_map_utf8 = map.constData();
+    ecuio_import_report_t r{};
+    ASSERT_EQ(ecuio_import(&o, &r), ECUIO_OK) << ecuio_last_error_detail();
+
+    RecordingView v;
+    v.open(QString::fromUtf8(out));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.hasFrames());
+    EXPECT_FALSE(v.check().value(QStringLiteral("ran")).toBool());
+    EXPECT_EQ(v.check().value(QStringLiteral("error")).toString(),
+              QStringLiteral("the recording has no frames"));
+    EXPECT_EQ(v.signalList().size(), 3);
+    for (const char* name : {"RPM", "Engine Load", "Lambda"}) {
+        EXPECT_TRUE(
+            signalNamed(v, name).value(QStringLiteral("plotted")).toBool())
+            << name;
+    }
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    const QVariantList cols = v.columns({rpm}, 0, 2000, 2);
+    ASSERT_EQ(cols.size(), 1);
+    const QVariantMap c = cols[0].toMap();
+    const QList<double> lows = doubles(c, "lows");
+    const QList<double> highs = doubles(c, "highs");
+    const QList<double> samples = doubles(c, "samples");
+    ASSERT_EQ(lows.size(), 2);
+    EXPECT_EQ(lows[0], 780.5);
+    EXPECT_EQ(highs[0], 2100.0);
+    EXPECT_EQ(samples[0], 4.0) << "0 to 0.75 s";
+    EXPECT_EQ(lows[1], 900.0);
+    EXPECT_EQ(highs[1], 3420.25);
+    EXPECT_EQ(samples[1], 4.0) << "1 to 1.75 s";
 }
 
 // A window from before the start (a view aligned on another recording):

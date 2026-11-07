@@ -516,7 +516,9 @@ Page {
         }
         if (here < 0 || there < 0) {
             compareStatus = alignOn === "utc"
-                ? qsTr("%1 isn't drawn: an older recording has no UTC start").arg(compareTitle)
+                ? (here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has a UTC start").arg(compareTitle)
+                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no UTC start").arg(compareTitle)
+                   : qsTr("%1 isn't drawn: it has no UTC start").arg(compareTitle))
                 : alignOn === "engine"
                 ? (here < 0 && there < 0
                    ? qsTr("%1 isn't drawn: neither has an engine start (RPM reaching 500 after being below 100)")
@@ -625,6 +627,9 @@ Page {
     }
     function checkText() {
         const check = recording.check
+        // A folder of values alone (a CSV import): nothing to check
+        if (!recording.hasFrames)
+            return qsTr("Frames check: the recording has no frames")
         if (!check.ran)
             return qsTr("Frames check: didn't run (%1)").arg(check.error)
         const n = recording.findings.length
@@ -841,7 +846,11 @@ Page {
                         }
                         Label {
                             objectName: "recordingDetail"
-                            text: recordingRow.modelData.source !== ""
+                            // A row without frames (a CSV import's values) has
+                            // nothing to replay; a row that doesn't say has
+                            text: recordingRow.modelData.frames === false
+                                  ? qsTr("values alone: the recording has no frames to replay")
+                                  : recordingRow.modelData.source !== ""
                                   ? qsTr("%1 · replays as %2").arg(recordingRow.modelData.source)
                                                               .arg(recordingRow.modelData.profile)
                                   : qsTr("replays as %1").arg(recordingRow.modelData.profile)
@@ -874,6 +883,7 @@ Page {
                     }
                     ThemedButton {
                         objectName: "replayButton"
+                        visible: recordingRow.modelData.frames !== false
                         text: qsTr("Replay")
                         // Darker than its row, so it reads as a button there
                         baseColor: Theme.surface
@@ -909,7 +919,7 @@ Page {
             // session runs, as the list's is
             ThemedButton {
                 objectName: "replayView"
-                visible: recording.state === RecordingView.Open
+                visible: recording.state === RecordingView.Open && recording.hasFrames
                 enabled: !(Bridge.connected || Bridge.connecting)
                 text: qsTr("Replay in Settings")
                 Accessible.name: qsTr("Put the part in view in Settings, to replay it as a session")
@@ -955,8 +965,10 @@ Page {
         ComboBox {
             id: decodeChoice
             objectName: "decodeChoice"
+            // Values alone have no frames to decode through a profile
             visible: (recording.state === RecordingView.Open
                       || recording.state === RecordingView.Failed) && !root.chartMaximized
+                     && recording.hasFrames
             Layout.fillWidth: true
             textRole: "text"
             valueRole: "value"

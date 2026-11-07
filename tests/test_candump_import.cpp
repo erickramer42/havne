@@ -554,9 +554,13 @@ TEST(ImportTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     a = o;
     a.column_map_utf8 = "{}";
     EXPECT_EQ(ecuio_import(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    /* A CSV needs its column map, and takes no interface */
     a = o;
     a.format = ECUIO_IMPORT_CSV;
-    EXPECT_EQ(ecuio_import(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
+    EXPECT_EQ(ecuio_import(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a.column_map_utf8 = "{}";
+    a.interface_utf8 = "can0";
+    EXPECT_EQ(ecuio_import(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
 }
 
 } // namespace

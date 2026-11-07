@@ -31,9 +31,11 @@ struct ExportArgs {
 };
 
 struct ImportArgs {
+    const char* format_word = nullptr; /* candump or csv */
     const char* in = nullptr;
     const char* folder = nullptr;
-    const char* interface_name = nullptr;
+    const char* interface_name = nullptr; /* candump */
+    const char* map_path = nullptr;       /* csv: --map, read by main */
     ecuio_import_options_t options{};
 };
 
@@ -112,17 +114,24 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
     return true;
 }
 
-// The arguments after `import`; false with *why, a usage error
+// The arguments after `import`; false with *why, a usage error. The
+// CSV's map is read by main from map_path into options.column_map_utf8
 inline bool parse_import(int argc, char** argv, ImportArgs& a, std::string* why)
 {
-    if (argc < 3 || std::strcmp(argv[2], "candump") != 0) {
-        *why = "import takes candump";
+    const bool candump = argc >= 3 && std::strcmp(argv[2], "candump") == 0;
+    const bool csv = argc >= 3 && std::strcmp(argv[2], "csv") == 0;
+    if (!candump && !csv) {
+        *why = "import takes candump or csv";
         return false;
     }
+    a.format_word = argv[2];
+    const char* what = candump ? "log" : "file";
     for (int i = 3; i < argc; ++i) {
         const std::string s = argv[i];
-        if (s == "--interface" && i + 1 < argc) {
+        if (candump && s == "--interface" && i + 1 < argc) {
             a.interface_name = argv[++i];
+        } else if (csv && s == "--map" && i + 1 < argc) {
+            a.map_path = argv[++i];
         } else if (s.rfind("--", 0) == 0) {
             *why = "unexpected '" + s + "'";
             return false;
@@ -131,15 +140,20 @@ inline bool parse_import(int argc, char** argv, ImportArgs& a, std::string* why)
         } else if (a.folder == nullptr) {
             a.folder = argv[i];
         } else {
-            *why = "import takes one log and one folder";
+            *why = std::string("import takes one ") + what + " and one folder";
             return false;
         }
     }
     if (a.in == nullptr || a.folder == nullptr) {
-        *why = "import needs the log and the folder to make";
+        *why =
+            std::string("import needs the ") + what + " and the folder to make";
         return false;
     }
-    a.options.format = ECUIO_IMPORT_CANDUMP;
+    if (csv && a.map_path == nullptr) {
+        *why = "import csv needs --map <map.json>, the file's column map";
+        return false;
+    }
+    a.options.format = candump ? ECUIO_IMPORT_CANDUMP : ECUIO_IMPORT_CSV;
     a.options.in_path_utf8 = a.in;
     a.options.out_folder_utf8 = a.folder;
     a.options.interface_utf8 = a.interface_name;
@@ -224,10 +238,33 @@ inline void export_failed_line(Line& l, const ecuio_export_report_t& r)
 
 // {"type":"imported","format":"candump","folder":...,"interface":...|null,
 //  "lines":N,"frames":N,"error_frames":N,"interfaces":N,
-//  "utc_start_us":N,"duration_us":N}
+//  "utc_start_us":N,"duration_us":N}; csv's: "format":"csv","folder":...,
+//  "lines":N,"values":N,"columns_ignored":N,"utc_start_us":N|null,
+//  "duration_us":N
 inline void imported_line(Line& l, const ImportArgs& a,
                           const ecuio_import_report_t& r)
 {
+    if (a.options.format == ECUIO_IMPORT_CSV) {
+        l.raw("{\"type\":\"imported\",\"format\":\"csv\"");
+        l.key("folder");
+        l.string(a.folder, SIZE_MAX);
+        l.key("lines");
+        l.u64(r.lines);
+        l.key("values");
+        l.u64(r.values);
+        l.key("columns_ignored");
+        l.u64(r.columns_ignored);
+        l.key("utc_start_us");
+        if (r.utc_start_us == 0) {
+            l.raw("null");
+        } else {
+            l.u64(r.utc_start_us);
+        }
+        l.key("duration_us");
+        l.u64(r.duration_us);
+        l.ch('}');
+        return;
+    }
     l.raw("{\"type\":\"imported\",\"format\":\"candump\"");
     l.key("folder");
     l.string(a.folder, SIZE_MAX);

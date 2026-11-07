@@ -1,18 +1,22 @@
 // File/layer: core/src/import.cpp | C++17, Qt-free; a log from another tool
-//             as a recording (ADR-0054 section 4)
-// Testing: UNIT: ImportTest (test_core)
+//             as a recording (ADR-0054 sections 4 and 5)
+// Testing: UNIT: ImportTest, CsvImportTest (test_core)
 //
 // ecuio_import: a candump log read twice, first to check every line and
 // list the interfaces (so a refusal comes before anything is written),
 // then to write the chosen interface's frames as a recording folder:
 // frames.csv as they arrived, and an events.log header naming the import.
+// A CSV the same way through its column map (csv_import.h's pass, run to
+// check and then to write): signals.csv and a format 3 header, no frames.
 // The folder is written as <folder>.partial and renamed once whole.
 
 #include "candump.h"
+#include "csv_import.h"
 #include "error_detail.h"
 #include "folder_files.h"
-#include "frames_csv.h"     /* kHeader */
-#include "recording_rows.h" /* kFormat2 */
+#include "frames_csv.h"      /* kHeader */
+#include "recording_lines.h" /* csv_quoted, signal_line */
+#include "recording_rows.h"  /* kFormat2, kFormat3, append_value */
 
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
@@ -394,6 +398,228 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
     return true;
 }
 
+/* ---- CSV (section 5) ---- */
+
+namespace csv = ecuio_csv_import;
+
+struct file_source {
+    FILE* f;
+    int get()
+    {
+        const int c = std::fgetc(f);
+        return c == EOF ? -1 : c;
+    }
+};
+
+/* The second pass's sink: signals.csv's rows, written in chunks */
+struct rows_writer {
+    FILE* out;
+    std::vector<std::string> names; /* quoted */
+    std::vector<std::string> units; /* quoted */
+    std::string rows;
+    std::string error;
+
+    bool flush()
+    {
+        if (!rows.empty() &&
+            std::fwrite(rows.data(), 1, rows.size(), out) != rows.size()) {
+            error =
+                "signals.csv can't be written: " + files::errno_words(errno);
+            return false;
+        }
+        rows.clear();
+        return true;
+    }
+
+    void head(uint64_t host_us, size_t s)
+    {
+        append_u64(rows, host_us);
+        rows += ',';
+        rows += names[s];
+        rows += ',';
+    }
+
+    bool tail(size_t s)
+    {
+        rows += ',';
+        rows += units[s];
+        rows += '\n';
+        return rows.size() < kWriteChunk || flush();
+    }
+
+    bool number(uint64_t host_us, size_t s, double v)
+    {
+        head(host_us, s);
+        ecuio_recording_rows::append_value(rows, v);
+        return tail(s);
+    }
+
+    bool text(uint64_t host_us, size_t s, const std::string& v)
+    {
+        head(host_us, s);
+        rows += ecuio_recording_lines::csv_quoted(v);
+        return tail(s);
+    }
+
+    std::string failure() const { return error; }
+};
+
+const char* unit_words(csv::time_unit u)
+{
+    switch (u) {
+    case csv::time_unit::s:
+        return "seconds";
+    case csv::time_unit::ms:
+        return "milliseconds";
+    case csv::time_unit::us:
+        return "microseconds";
+    case csv::time_unit::iso8601:
+        return "ISO 8601 times";
+    case csv::time_unit::time_of_day:
+        return "times of day";
+    }
+    return "";
+}
+
+/* The recording's events.log: format 3's header with the map's signals,
+ * the import as its source (never the file's name, which can name a car
+ * or a person), a utc line only when the file or the map gives one */
+std::string csv_events_log(const csv::column_map& m, const csv::outcome& o)
+{
+    namespace lines = ecuio_recording_lines;
+    std::string e = std::string(ecuio_recording_rows::kFormat3) + "\n";
+    if (o.has_utc) {
+        e += "started  " + utc_text(o.utc_start_us, ' ') + " (UTC)\n";
+        e += "utc  " + utc_text(o.utc_start_us, 'T') + "Z\n";
+    }
+    e += std::string("core  ") + ecuio_version_string() + "\n";
+    e += "import  CSV, its time from the column " +
+         ecuio_json::quoted(m.time_column) + " as " + unit_words(m.unit) + "\n";
+    if (!o.ignored.empty()) {
+        e += "import  columns ignored: ";
+        append_u64(e, o.ignored.size());
+        e += " (";
+        for (size_t i = 0; i < o.ignored.size() && i < csv::kIgnoredListed;
+             ++i) {
+            e += i == 0 ? "" : ", ";
+            e += ecuio_json::quoted(o.ignored[i]);
+        }
+        if (o.ignored.size() > csv::kIgnoredListed) {
+            e += " and ";
+            append_u64(e, o.ignored.size() - csv::kIgnoredListed);
+            e += " more";
+        }
+        e += ")\n";
+    }
+    e += "profile  raw\n";
+    for (const csv::signal_spec& s : m.signals) {
+        e += lines::signal_line(
+            lines::csv_quoted(s.name), s.text ? "text" : "number",
+            lines::csv_quoted(s.unit), s.decimals, s.rank, s.group);
+    }
+    e += o.has_utc ? "columns  UTC time" : "columns  time since the start";
+    e += ", seconds since the recording started (host_us / 1e6 in the CSV "
+         "files), kind, text\n";
+    e += "\n";
+    e += line_stamp(o.utc_start_us + o.duration_us, o.duration_us) +
+         "  end  import: 0 frames, ";
+    append_u64(e, o.values);
+    e += " values, 0 records dropped, 0 notes dropped\n";
+    return e;
+}
+
+bool import_csv(const ecuio_import_options_t& o, const std::string& out,
+                ecuio_import_report_t& r, bool* made)
+{
+    std::string why;
+    csv::column_map m;
+    const char* map = o.column_map_utf8;
+    if (!csv::parse_map(map, strnlen(map, ecuio_json::kMaxBytes + 1), m,
+                        &why)) {
+        return fail("%s", why);
+    }
+    std::unique_ptr<FILE, file_closer> in(
+        files::open_file(o.in_path_utf8, false, &why));
+    if (!in) {
+        return fail("the file can't be opened: %s", why);
+    }
+    csv::outcome first;
+    {
+        file_source src{in.get()};
+        csv::counting_sink count;
+        if (!csv::run(src, m, count, first, &why)) {
+            return fail("%s", why);
+        }
+        if (std::ferror(in.get()) != 0) {
+            return fail("the file can't be read");
+        }
+    }
+    if (files::exists(out)) {
+        return fail("the recording's folder exists already");
+    }
+    const std::string partial = out + ".partial";
+    if (!files::make_folder(partial, &why)) {
+        return fail("the recording's folder can't be made: %s", why);
+    }
+    *made = true;
+    if (!ecuio_frames_csv::seek_to(in.get(), 0)) {
+        return fail("the file can't be read again");
+    }
+    csv::outcome second;
+    {
+        std::unique_ptr<FILE, file_closer> sig(
+            files::open_file(partial + "/signals.csv", true, &why));
+        if (!sig) {
+            return fail("signals.csv can't be written: %s", why);
+        }
+        rows_writer w{sig.get(), {}, {}, {}, {}};
+        for (const csv::signal_spec& s : m.signals) {
+            w.names.push_back(ecuio_recording_lines::csv_quoted(s.name));
+            w.units.push_back(ecuio_recording_lines::csv_quoted(s.unit));
+        }
+        w.rows = std::string("\xEF\xBB\xBF") +
+                 ecuio_recording_rows::kSignalsHeader + "\n";
+        file_source src{in.get()};
+        if (!csv::run(src, m, w, second, &why)) {
+            return fail("%s", why.empty()
+                                  ? std::string("the file changed while "
+                                                "it was read")
+                                  : why);
+        }
+        if (second.values != first.values || second.rows != first.rows) {
+            return fail("the file changed while it was read");
+        }
+        if (!w.flush()) {
+            return fail("%s", w.error);
+        }
+        if (std::fclose(sig.release()) != 0) {
+            return fail("signals.csv can't be written: %s",
+                        files::errno_words(errno));
+        }
+    }
+    const std::string log = csv_events_log(m, second);
+    std::unique_ptr<FILE, file_closer> events(
+        files::open_file(partial + "/events.log", true, &why));
+    if (!events) {
+        return fail("events.log can't be written: %s", why);
+    }
+    if (std::fwrite(log.data(), 1, log.size(), events.get()) != log.size() ||
+        std::fclose(events.release()) != 0) {
+        return fail("events.log can't be written: %s",
+                    files::errno_words(errno));
+    }
+    if (!files::rename_to(partial, out, false, &why)) {
+        return fail("the recording's folder can't be put in place: %s", why);
+    }
+    *made = false;
+    r.lines = second.lines;
+    r.values = second.values;
+    r.columns_ignored = second.ignored.size();
+    r.utc_start_us = second.has_utc ? second.utc_start_us : 0;
+    r.duration_us = second.duration_us;
+    return true;
+}
+
 } // namespace
 
 extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
@@ -415,10 +641,11 @@ extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
                                 options->format != ECUIO_IMPORT_CSV)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    if (options->format == ECUIO_IMPORT_CSV) {
-        return ECUIO_ERR_NOT_IMPLEMENTED;
-    }
-    if (options->column_map_utf8 != nullptr) {
+    const bool is_csv = options->format == ECUIO_IMPORT_CSV;
+    /* A column map is the CSV's alone, and it needs one; an interface is
+     * candump's alone */
+    if ((options->column_map_utf8 != nullptr) != is_csv ||
+        (is_csv && options->interface_utf8 != nullptr)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     ecuio_detail_clear();
@@ -429,10 +656,12 @@ extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
     ecuio_import_report_t r{};
     bool made = false;
     try {
-        const bool ok = import_candump(*options, out, r, &made);
+        const bool ok = is_csv ? import_csv(*options, out, r, &made)
+                               : import_candump(*options, out, r, &made);
         if (made) {
             const std::string partial = out + ".partial";
             files::remove_file(partial + "/frames.csv");
+            files::remove_file(partial + "/signals.csv");
             files::remove_file(partial + "/events.log");
             files::remove_folder(partial);
         }

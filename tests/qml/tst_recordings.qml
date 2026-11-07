@@ -102,6 +102,35 @@ TestCase {
         verify(page.recordings[0].folder !== "", "a row knows its folder")
     }
 
+    // A CSV import (ADR-0054's appendix "the CSV import as built") is
+    // listed and opens from its row: values alone, so no Replay, no frames
+    // check, no decode through a profile, and its numbers plotted
+    function test_aCsvImportIsListedAndOpensWithoutFrames() {
+        const folder = Harness.importCsvFixture("logger-a", "20261105-220322 Logger A")
+        verify(folder !== "", "the fixture imports")
+        const page = createPage()
+        page.refresh()
+        const at = page.recordings.findIndex(r => r.folder.endsWith("/20261105-220322 Logger A"))
+        verify(at >= 0, "the import is listed")
+        compare(page.recordings[at].title, "2026-11-05 22:03:22 · Logger A")
+        compare(page.recordings[at].frames, false)
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(at) !== null, 2000, "the row has a delegate")
+        const row = list.itemAtIndex(at)
+        compare(find(row, "recordingDetail").text,
+                "values alone: the recording has no frames to replay")
+        verify(!find(row, "replayButton").visible, "nothing to replay")
+        mouseClick(find(row, "recordingRowArea"))
+        verify(page.viewing, "the viewer replaces the list")
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the import opens")
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
+        compare(find(page, "signalRows").count, 3)
+        compare(find(page, "checkSummary").text, "Frames check: the recording has no frames")
+        verify(!find(page, "replayView").visible, "no Replay in Settings")
+        verify(!find(page, "decodeChoice").visible, "no frames to decode")
+        compare(page.series(400).length, 3, "its numbers are plotted")
+    }
+
     // Replay hands the row's replay:// URI on, for Main to put in
     // Settings' field
     function test_replayHandsItsUriOn() {

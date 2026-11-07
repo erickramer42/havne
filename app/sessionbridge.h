@@ -871,8 +871,10 @@ public:
     // nothing is opened. Empty elsewhere.
     Q_INVOKABLE QVariantList discoverCanInterfaces() const;
     // The newest recordings first, at most limit, for the Recordings page
-    // to open or replay by a tap: one map per folder holding a frames.csv,
-    // { title, uri, folder, source, profile } as QStrings. title is the
+    // to open or replay by a tap: one map per folder holding a signals.csv
+    // or a frames.csv (what the viewer opens; a CSV import holds values
+    // alone), { title, uri, folder, source, profile } as QStrings and
+    // frames, true when it holds a frames.csv (what Replay plays). title is the
     // folder's date and label ("2026-10-28 14:30:12 · Daily driver"), uri
     // its replay:// URI (replayUriFor), folder its path, source the recorded URI as the pill shows it
     // (uriLabelFor), "" when events.log doesn't name one. Reads the

@@ -1,6 +1,7 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
-//          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest (ctest);
+//          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest,
+//          CliTransferRunTest (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
 //          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest
 //          (test_cli); BENCH
@@ -1827,6 +1828,7 @@ void usage(FILE* to)
         "       havne-cli export <recording> <out> --format folder|csv|pcapng\n"
         "                      [--from S] [--to S] [--raw]\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
+        "       havne-cli import csv <file> <folder> --map <map.json>\n"
         "       havne-cli health <uri> <out> --format json|text "
         "[--units metric|imperial]\n"
         "                      [--seconds S] [--signals <file> | --plugin "
@@ -1948,7 +1950,10 @@ void usage(FILE* to)
         "         checked for the car's identity before it's written.\n"
         "import   reads a candump -L log (one bus: --interface names it\n"
         "         when the log has several) into a recording's folder that\n"
-        "         view --frames, info and replay:// read.\n"
+        "         view --frames, info and replay:// read. import csv reads\n"
+        "         a logger's CSV by its column map (--map: the time column\n"
+        "         and each signal's column, name and unit) into a\n"
+        "         recording's folder that view and info read.\n"
         "signals  check reads a signal file as a session would: what it\n"
         "         holds, each unit that never converts, or why it's "
         "refused.\n"
@@ -4072,6 +4077,17 @@ int run(int argc, char** argv)
         }
         Output out;
         write_start(out);
+        // A CSV's column map: core takes its text, up to the JSON reader's
+        // 1 MiB, and refuses a larger one in its own words
+        std::string map;
+        if (im.map_path != nullptr) {
+            if (!read_whole(im.map_path, size_t{1} << 20, "column map", &map,
+                            &why)) {
+                write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+                return out.ok() ? kExitConnect : kExitFailed;
+            }
+            im.options.column_map_utf8 = map.c_str();
+        }
         ecuio_import_report_t report{};
         const ecuio_status_t rc = ecuio_import(&im.options, &report);
         if (rc != ECUIO_OK) {

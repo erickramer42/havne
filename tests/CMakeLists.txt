@@ -25,7 +25,7 @@ endif()
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
-    test_sha256.cpp test_queue.cpp test_health.cpp)
+    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -40,12 +40,14 @@ target_link_libraries(test_core PRIVATE
 
 # The scrubbed real-bus recording replay:// plays (ADR-0023), the
 # signal file a recording copies (ADR-0051 section 4), and a recording of
-# values alone (the health report, ADR-0054)
+# values alone (the health report, ADR-0054); the made-up loggers' CSV
+# files an import reads (ADR-0054 section 5)
 target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     ECUIO_SIGNAL_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals"
     ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     ECUIO_GOLDEN_RECORDING="${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2"
+    ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
 )
 
 app_enable_warnings(test_core)
@@ -355,6 +357,13 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
+        # The made-up loggers' CSVs imported by their column maps and
+        # viewed; a missing map, a refused one, a folder already there
+        add_test(NAME CliTransferRunTest.csv-import
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    csv-import $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
+        set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
         # The health report (ADR-0054): the mock's, a session whose
         # reports are never asked, the simulated car as an ELM327 adapter
         # on loopback; a recording of values alone and a range past its end
@@ -593,6 +602,13 @@ if(TARGET havne-cli)
             --exit 3
             -- $<TARGET_FILE:havne-cli> signals import obdb ${_cli_signals}/extras.json
                --out never-written.json)
+        # A column map with a typo refused in core's words, naming the key
+        # and never a path, before any folder is made
+        set(_cli_csv ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
+        app_cli_golden(ImportCsvRefusesAMapsUnknownKey import-csv-unknown-key.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> import csv ${_cli_csv}/logger-a/log.csv
+               never-made --map ${_cli_csv}/unknown-key.json)
         # A format 3 recording (written by hand): an enum's line carries its
         # labels, its columns its raw numbers
         app_cli_golden(ViewShowsAnEnumsLabels view-enum.jsonl
@@ -818,6 +834,10 @@ if(TARGET havne-cli)
         "health|mock://x|out|--format|json|--signals|a.json|--plugin|p")
     app_cli_usage(ImportWithoutAFolderIsUsage "import|candump|bus.log")
     app_cli_usage(ImportAnUnknownOptionIsUsage "import|candump|bus.log|rec|--map|m.json")
+    app_cli_usage(ImportCsvWithoutAMapIsUsage "import|csv|log.csv|rec")
+    app_cli_usage(ImportCsvWithAnInterfaceIsUsage
+        "import|csv|log.csv|rec|--map|m.json|--interface|can0")
+    app_cli_usage(ImportCsvWithoutAFolderIsUsage "import|csv|log.csv|--map|m.json")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
     # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
     # deadline
@@ -1064,10 +1084,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     )
 
     # The engine-start fixture, which both decode paths read (ADR-0024),
-    # and the recordings RecordingViewTest opens (ADR-0049)
+    # the recordings RecordingViewTest opens (ADR-0049) and the files it
+    # imports (ADR-0054)
     target_compile_definitions(test_bridge PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
@@ -1145,11 +1167,13 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     )
     # Run with no -input, it runs every file in this directory. The
     # engine-start fixture feeds the Dashboard's peak hold (ADR-0023); the
-    # Recordings page opens the recording fixtures (ADR-0049)
+    # Recordings page opens the recording fixtures (ADR-0049) and lists a
+    # CSV fixture's import (ADR-0054)
     target_compile_definitions(test_qml PRIVATE
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
+        ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )

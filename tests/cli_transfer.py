@@ -8,6 +8,7 @@
 #   python3 tests/cli_transfer.py candump <havne-cli>          (Linux)
 #   python tests/cli_transfer.py csv <havne-cli> <recording>
 #   python tests/cli_transfer.py folder <havne-cli> <findings> <values>
+#   python tests/cli_transfer.py csv-import <havne-cli> <csv fixtures>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -28,7 +29,10 @@
 # frames; raw, then scrubbed, which leaves its torn ISO-TP message out),
 # a recording of values alone and a mock's recording made with a label;
 # each copy's info, view or replay the source's, the mock's label in
-# neither the copy's URI nor its name.
+# neither the copy's URI nor its name. csv-import: the made-up loggers'
+# CSVs imported by their column maps and viewed (each signal's samples and
+# range, the UTC start or null); a missing map, a map core refuses and a
+# folder already there each exit 3 with words, leaving nothing made.
 
 import csv
 import json
@@ -421,9 +425,76 @@ def folder_export(cli, findings, values):
     return 0
 
 
+LOGGERS = [
+    # name, lines, values, columns ignored, utc start, duration, each
+    # signal (name, text, samples, lowest, highest)
+    ("logger-a", 11, 22, 1, None, 1750000,
+     [("RPM", False, 8, 780.5, 3420.25), ("Engine Load", False, 7, 12, 88.5),
+      ("Lambda", False, 7, 0.86, 1.98)]),
+    ("logger-b", 9, 16, 2, 1793883802250000, 3500000,
+     [("Vehicle Speed", False, 8, 0, 48.5), ("Gear", True, 8, None, None)]),
+]
+
+
+def csv_import(cli, fixtures):
+    with tempfile.TemporaryDirectory() as d:
+        for name, lines, values, ignored, utc, duration, signals in LOGGERS:
+            base = os.path.join(fixtures, name)
+            log = os.path.join(base, "log.csv")
+            cmap = os.path.join(base, "map.json")
+            rec = os.path.join(d, name)
+            imported = one(run(cli, ["import", "csv", log, rec, "--map", cmap]),
+                           "imported")
+            want = {"type": "imported", "format": "csv", "folder": rec,
+                    "lines": lines, "values": values,
+                    "columns_ignored": ignored, "utc_start_us": utc,
+                    "duration_us": duration}
+            same(f"{name}'s imported line", want, imported)
+            if sorted(os.listdir(rec)) != ["events.log", "signals.csv"]:
+                raise SystemExit(f"FAIL  {name} made {os.listdir(rec)}")
+            viewed = run(cli, ["view", rec, "--columns", "4"])
+            opened = one(viewed, "opened")
+            if (opened["utc_start_us"], opened["duration_us"]) != (utc,
+                                                                    duration):
+                raise SystemExit(f"FAIL  {name} opened {opened}")
+            got = [(s["name"], s["text"], s["samples"], s.get("lowest"),
+                    s.get("highest"))
+                   for s in viewed if s["type"] == "signal"]
+            same(f"{name}'s signals", signals, got)
+        # Refused, each exit 3 with words and no folder: no map file, a map
+        # core refuses, a folder already there
+        a = os.path.join(fixtures, "logger-a")
+        log = os.path.join(a, "log.csv")
+        rec = os.path.join(d, "refused")
+        error = one(run(cli, ["import", "csv", log, rec, "--map",
+                              os.path.join(d, "none.json")], 3), "error")
+        if error["detail"] != ("the column map can't be read: there's no "
+                               "such file"):
+            raise SystemExit(f"FAIL  a missing map said {error}")
+        bad = os.path.join(d, "bad.json")
+        with open(bad, "w", newline="\n") as f:
+            f.write('{"havne_column_map": 1, "shade": "red"}\n')
+        error = one(run(cli, ["import", "csv", log, rec, "--map", bad], 3),
+                    "error")
+        if "'shade'" not in error["detail"]:
+            raise SystemExit(f"FAIL  an unknown key said {error}")
+        if os.path.exists(rec) or os.path.exists(rec + ".partial"):
+            raise SystemExit("FAIL  a refused import left a folder")
+        there = os.path.join(d, "logger-a")
+        error = one(run(cli, ["import", "csv", log, there, "--map",
+                              os.path.join(a, "map.json")], 3), "error")
+        if sorted(os.listdir(there)) != ["events.log", "signals.csv"]:
+            raise SystemExit(f"FAIL  the folder there changed: {error}")
+    print(f"ok    {len(LOGGERS)} loggers' CSVs imported and viewed; a missing "
+          "map, a refused map and a folder already there refused")
+    return 0
+
+
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
+    if len(sys.argv) == 4 and sys.argv[1] == "csv-import":
+        sys.exit(csv_import(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 5 and sys.argv[1] == "folder":

@@ -1,12 +1,15 @@
 # File/layer: python/havne/recording.py | Python 3.11+, the havne package
-# Testing: PythonTest.test_recording
+# Testing: PythonTest.test_recording, PythonTest.test_import
 #
 # A recording read offline (ADR-0049 section 5, recording.h): its
 # signals with their ranges, its markers, range queries, the value in
 # force at a time, and finding a threshold's crossing or a marker. Times
-# are the recording's host_us, microseconds from its start.
+# are the recording's host_us, microseconds from its start. import_csv and
+# import_candump make a recording's folder from a logger's file
+# (ADR-0054, ecuio_import).
 
 import ctypes
+import json
 from collections import namedtuple
 
 from . import _ecuio as e
@@ -18,6 +21,10 @@ Signal.__doc__ = ("A recording's signal: kind 'number', 'text' or 'enum'; a numb
                   "first_us and last_us None without samples")
 Marker = namedtuple("Marker", "host_us label")
 Column = namedtuple("Column", "lowest highest samples")
+Imported = namedtuple("Imported", "folder lines frames error_frames interfaces values "
+                                  "columns_ignored utc_start_us duration_us")
+Imported.__doc__ = ("What an import made: its folder and core's counts; utc_start_us None "
+                    "when the file gave no UTC time")
 
 NONE = (1 << 64) - 1   # ECUIO_RECORDING_NONE
 
@@ -132,3 +139,42 @@ class Recording:
         check(lib.ecuio_recording_find(self._r, ctypes.byref(what), from_us, ctypes.byref(at)),
               "ecuio_recording_find")
         return None if at.value == NONE else at.value
+
+
+def _import(options, folder):
+    report = e.ecuio_import_report_t()
+    check(lib.ecuio_import(ctypes.byref(options), ctypes.byref(report)), "ecuio_import")
+    return Imported(folder, report.lines, report.frames, report.error_frames,
+                    report.interfaces, report.values, report.columns_ignored,
+                    report.utc_start_us or None, report.duration_us)
+
+
+def import_csv(path, folder, column_map):
+    """A logger's CSV at path made into a recording's folder (signals.csv
+    and events.log) at folder, which must not exist yet, by column_map: a
+    dict or its JSON text (ADR-0054's column map: the time column and each
+    signal's column, name and unit). Returns an Imported; a refused file or
+    map raises Error with core's words, leaving nothing made."""
+    if isinstance(column_map, dict):
+        column_map = json.dumps(column_map)
+    elif not isinstance(column_map, str):
+        raise TypeError("column_map is a dict or its JSON text")
+    o = e.ecuio_import_options_t()
+    o.format = e.ECUIO_IMPORT_CSV
+    o.in_path_utf8 = utf8(str(path))
+    o.out_folder_utf8 = utf8(str(folder))
+    o.column_map_utf8 = utf8(column_map)
+    return _import(o, str(folder))
+
+
+def import_candump(path, folder, interface=None):
+    """A candump -L log at path made into a recording's folder (frames.csv
+    and events.log) at folder, which must not exist yet; interface names
+    the bus when the log holds several. Returns an Imported; a refused log
+    raises Error with core's words, leaving nothing made."""
+    o = e.ecuio_import_options_t()
+    o.format = e.ECUIO_IMPORT_CANDUMP
+    o.in_path_utf8 = utf8(str(path))
+    o.out_folder_utf8 = utf8(str(folder))
+    o.interface_utf8 = None if interface is None else utf8(interface)
+    return _import(o, str(folder))

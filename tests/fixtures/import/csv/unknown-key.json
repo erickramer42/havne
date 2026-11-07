@@ -1,0 +1,7 @@
+{
+  "havne_column_map": 1,
+  "time": {"column": "Time [s]", "unit": "s"},
+  "signals": [
+    {"column": "Engine Speed [rpm]", "name": "RPM", "unit": "rpm", "decimal": 0}
+  ]
+}

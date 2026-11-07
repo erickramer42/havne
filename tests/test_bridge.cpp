@@ -5688,6 +5688,52 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_TRUE(bridge.recentRecordings(10).isEmpty()) << "no folder yet";
 }
 
+/* The list takes what the viewer opens, the rule recordingRow keeps: a
+ * folder holding a signals.csv (a CSV import's values alone, ADR-0054's
+ * appendix "the CSV import as built") or a frames.csv; each row says
+ * whether it has frames to replay */
+TEST(BridgeTest, TheRecordingsListTakesAFolderOfValuesAlone)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const auto make = [&root](const char* name,
+                              std::initializer_list<const char*> files) {
+        const QString dir =
+            root.path() + QLatin1Char('/') + QString::fromUtf8(name);
+        ASSERT_TRUE(QDir().mkpath(dir));
+        for (const char* f : files) {
+            QFile file(dir + QLatin1Char('/') + QString::fromUtf8(f));
+            ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        }
+    };
+    make("20261107-090000", {"signals.csv", "events.log"});
+    make("20261106-090000", {"frames.csv"});
+    make("20261105-090000", {"frames.csv", "signals.csv"});
+    make("20261104-090000", {"events.log"});
+    make("20261103-090000", {});
+
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 3) << "an events.log alone or nothing isn't one";
+    const auto row = [&rows](int i) { return rows.at(i).toMap(); };
+    EXPECT_EQ(row(0).value(QStringLiteral("title")).toString(),
+              QStringLiteral("2026-11-07 09:00:00"));
+    EXPECT_FALSE(row(0).value(QStringLiteral("frames")).toBool())
+        << "values alone: nothing to replay";
+    EXPECT_TRUE(row(1).value(QStringLiteral("frames")).toBool());
+    EXPECT_TRUE(row(2).value(QStringLiteral("frames")).toBool());
+    for (int i = 0; i < rows.size(); ++i) {
+        const QString folder =
+            row(i).value(QStringLiteral("folder")).toString();
+        EXPECT_EQ(bridge.recordingRow(folder), row(i))
+            << "the list's rule is recordingRow's: " << folder.toStdString();
+    }
+    EXPECT_TRUE(
+        bridge.recordingRow(root.path() + QStringLiteral("/20261104-090000"))
+            .isEmpty());
+}
+
 /* A vehicle's baseline (ADR-0049's appendix of 2026-11-06): one folder's
  * row, its title and URI as the list gives them, its folder as stored,
  * while it holds a signals.csv or a frames.csv; nothing once it's gone */

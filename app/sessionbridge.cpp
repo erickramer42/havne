@@ -2025,8 +2025,16 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
 
 namespace {
 
+// A folder the viewer opens: one holding a signals.csv (values, a CSV
+// import's alone) or a frames.csv (frames, decoded through a profile)
+bool holdsRecording(const QString& folder)
+{
+    return QFileInfo::exists(folder + QStringLiteral("/signals.csv")) ||
+           QFileInfo::exists(folder + QStringLiteral("/frames.csv"));
+}
+
 // A recording folder's row for the Recordings page: { title, uri, folder,
-// source, profile } (recentRecordings says what each holds)
+// source, profile, frames } (recentRecordings says what each holds)
 QVariantMap recordingRowOf(const QFileInfo& info)
 {
     // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder)
@@ -2067,6 +2075,8 @@ QVariantMap recordingRowOf(const QFileInfo& info)
     // After the query's "?profile=", the last ? in it
     row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)
                          .section(QLatin1Char('&'), 0, 0);
+    // Replay plays frames.csv: a folder of values alone has none to play
+    row["frames"] = QFileInfo::exists(folder + QStringLiteral("/frames.csv"));
     return row;
 }
 
@@ -2095,8 +2105,7 @@ QVariantList SessionBridge::recentRecordings(int limit) const
         if (out.size() >= limit) {
             break;
         }
-        if (QFileInfo::exists(info.absoluteFilePath() +
-                              QStringLiteral("/frames.csv"))) {
+        if (holdsRecording(info.absoluteFilePath())) {
             out.append(recordingRowOf(info));
         }
     }
@@ -2105,9 +2114,7 @@ QVariantList SessionBridge::recentRecordings(int limit) const
 
 QVariantMap SessionBridge::recordingRow(const QString& folder) const
 {
-    if (folder.isEmpty() ||
-        (!QFileInfo::exists(folder + QStringLiteral("/signals.csv")) &&
-         !QFileInfo::exists(folder + QStringLiteral("/frames.csv")))) {
+    if (folder.isEmpty() || !holdsRecording(folder)) {
         return {};
     }
     QVariantMap row = recordingRowOf(QFileInfo(folder));

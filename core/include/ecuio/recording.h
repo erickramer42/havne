@@ -804,8 +804,8 @@ ecuio_status_t ecuio_scrub_frames(size_t count,
 
 /* ecuio_import_options_t.format; append-only */
 #define ECUIO_IMPORT_CANDUMP 1u /* can-utils' log (section 4) */
-#define ECUIO_IMPORT_CSV     2u /* another logger's signals (section 5):
-                                   not built, ECUIO_ERR_NOT_IMPLEMENTED */
+#define ECUIO_IMPORT_CSV     2u /* another logger's signals (section 5),
+                                   through its column map */
 
 typedef struct ecuio_import_options {
     uint32_t format;               /* ECUIO_IMPORT_* */
@@ -813,29 +813,41 @@ typedef struct ecuio_import_options {
     const char* in_path_utf8;
     const char* out_folder_utf8;   /* the recording's folder, made here and
                                       refused when it exists */
-    const char* interface_utf8;    /* the bus to take; NULL for the log's
-                                      only one */
-    const char* column_map_utf8;   /* CSV only; NULL otherwise */
+    const char* interface_utf8;    /* candump: the bus to take; NULL for
+                                      the log's only one. NULL for CSV */
+    const char* column_map_utf8;   /* CSV: its column map, JSON text
+                                      (ADR-0054's appendix "the CSV import
+                                      as built"); NULL for candump */
     uint64_t reserved[4];          /* zero; ABI growth space */
 } ecuio_import_options_t;
 
 typedef struct ecuio_import_report {
-    uint64_t lines;        /* read */
-    uint64_t frames;       /* written, error frames among them */
+    uint64_t lines;           /* read */
+    uint64_t frames;          /* written, error frames among them; 0 for
+                                 CSV */
     uint64_t error_frames;
-    uint64_t interfaces;   /* the log's, the one taken among them */
-    uint64_t utc_start_us; /* the first frame's time, microseconds since
-                              1970-01-01 UTC */
-    uint64_t duration_us;  /* the last frame's time since the first */
-    uint64_t reserved[4];  /* zero; ABI growth space */
+    uint64_t interfaces;      /* the log's, the one taken among them */
+    uint64_t utc_start_us;    /* the first frame's or row's time,
+                                 microseconds since 1970-01-01 UTC; 0 for
+                                 a CSV whose map and times give none */
+    uint64_t duration_us;     /* the last frame's or row's time since the
+                                 first */
+    uint64_t values;          /* CSV: the samples written */
+    uint64_t columns_ignored; /* CSV: the header's columns the map
+                                 doesn't name */
+    uint64_t reserved[2];     /* zero; ABI growth space */
 } ecuio_import_report_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_import_report_t) == 80,
               "ecuio_import_report_t size is ABI");
+static_assert(offsetof(ecuio_import_report_t, values) == 48,
+              "ecuio_import_report_t layout is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_import_report_t) == 80,
                "ecuio_import_report_t size is ABI");
+_Static_assert(offsetof(ecuio_import_report_t, values) == 48,
+               "ecuio_import_report_t layout is ABI");
 #endif
 
 /*
@@ -850,13 +862,24 @@ _Static_assert(sizeof(ecuio_import_report_t) == 80,
  * before the one before it takes that one's time (candump stamps on the
  * CPU that received it); further back is refused. The folder is written
  * as <folder>.partial and renamed once whole, so a failed import leaves
- * none. report may be NULL. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
- * options or path; ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a
- * flag or reserved field this core doesn't know, or a column map given
- * to candump; ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
- * ECUIO_ERR_LOAD_FAILED for a line it refuses ("line 12: ...", never a
- * path), a log with no frames of the interface, a folder that exists or
- * can't be written.
+ * none.
+ *
+ * A CSV (section 5) through options->column_map_utf8: RFC 4180, strict
+ * and bounded, checked whole before anything is written; signals.csv
+ * with the mapped columns' samples (an empty cell, or one of the map's
+ * "missing" texts, no sample) and a format 3 events.log whose signal
+ * lines are the map's, its utc line the map's start or the file's first
+ * time (none for a relative time with no start); no frames.csv. A row up
+ * to 100 ms before the one before it takes that one's time; further back
+ * is refused. report may be NULL.
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
+ * field this core doesn't know, a column map given to candump or missing
+ * for CSV, or an interface given to CSV; ECUIO_ERR_LOAD_FAILED for a map
+ * or line it refuses ("the column map: ...", "line 12: ...", never a
+ * path), a log with no frames of the interface, a CSV with no rows, a
+ * folder that exists or can't be written.
  */
 ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
                             ecuio_import_report_t* report);

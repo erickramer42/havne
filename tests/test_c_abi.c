@@ -459,6 +459,10 @@ int main(void)
         offsetof(ecuio_export_report_t, files_left_out) != 108 ||
         offsetof(ecuio_export_options_t, folder_utf8) != 24 ||
         sizeof(ecuio_import_report_t) != 80 ||
+        offsetof(ecuio_import_report_t, duration_us) != 40 ||
+        offsetof(ecuio_import_report_t, values) != 48 ||
+        offsetof(ecuio_import_report_t, columns_ignored) != 56 ||
+        offsetof(ecuio_import_report_t, reserved) != 64 ||
         offsetof(ecuio_import_options_t, in_path_utf8) != 8 ||
         ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED != 4u ||
         ECUIO_EXPORT_LEFT_OUT_COUNT != 5u ||

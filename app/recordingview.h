@@ -50,8 +50,8 @@ class RecordingView : public QObject
     // (ECUIO_CHECK_*), id (-1 for the whole bus), extended, atMs,
     // lengthMs, count, code }
     Q_PROPERTY(QVariantList findings READ findings NOTIFY stateChanged)
-    // The check's outcome: { ran, error (why it didn't: no frames.csv,
-    // a row it refused), frames, ids, isotpSkipped, isotpFlagsUnknown,
+    // The check's outcome: { ran, error (why it didn't: "the recording
+    // has no frames", a row it refused), frames, ids, isotpSkipped, isotpFlagsUnknown,
     // isotpNoWire, tornRows }
     Q_PROPERTY(QVariantMap check READ check NOTIFY stateChanged)
     // A query found the file changed since the open (a row that no
@@ -65,6 +65,9 @@ class RecordingView : public QObject
     // the folder's signals.json is the file it names, its bytes unchanged
     Q_PROPERTY(QString recordedProfile READ recordedProfile NOTIFY stateChanged)
     Q_PROPERTY(bool ownSignalFile READ ownSignalFile NOTIFY stateChanged)
+    // Whether the folder holds a frames.csv: a CSV import holds values
+    // alone, so it has no frames to check, decode or replay
+    Q_PROPERTY(bool hasFrames READ hasFrames NOTIFY stateChanged)
 
 public:
     enum State { Closed, Opening, Open, Failed };
@@ -93,6 +96,7 @@ public:
     QString decodedWith() const { return m_decodedWith; }
     QString recordedProfile() const { return m_recordedProfile; }
     bool ownSignalFile() const { return m_ownSignalFile; }
+    bool hasFrames() const { return m_hasFrames; }
 
     // Opens the recording in folder (the one holding signals.csv), closing
     // any open or opening one first. The state goes to Opening at once,
@@ -192,6 +196,7 @@ private:
     QString m_recordedProfile;
     QString m_recordedSha;
     bool m_ownSignalFile = false;
+    bool m_hasFrames = false;
 
     ecuio_recording_t* m_reader = nullptr;
     ecuio_recording_info_t m_info{};
