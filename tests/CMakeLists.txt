@@ -23,7 +23,8 @@ endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_check.cpp test_sha256.cpp)
+    test_recorder.cpp test_recording.cpp test_recording_check.cpp
+    test_recording_frames.cpp test_sha256.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -493,6 +494,30 @@ if(TARGET havne-cli)
                --align-on rise:RPM:2010 --hysteresis 30 --columns 2 --signal RPM)
         app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
+        # view --frames (ADR-0049's appendix of 2026-11-06): a SocketCAN
+        # listener's wire frames through the profile its header names, the
+        # replay fixture (frames.csv alone) through obd2, the packed
+        # replies through a signal file extending obd2, and a folder that
+        # names no profile
+        set(_cli_frames ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay)
+        app_cli_golden(ViewFramesDecodesAListenersWireFrames view-frames.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/findings --frames
+               --columns 4)
+        app_cli_golden(ViewFramesDecodesARecordingWithNoSignals
+            view-frames-replay.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/2026-10-25-engine-start
+               --frames --profile obd2 --columns 3 --signal RPM
+               --signal "Vehicle Speed")
+        app_cli_golden(ViewFramesDecodesThroughASignalFile
+            view-frames-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
+               --frames --signals
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json
+               --columns 2)
+        app_cli_golden(ViewFramesRefusesAFolderThatNamesNoProfile
+            view-frames-no-profile.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_frames}/packed-replies
+               --frames)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
@@ -614,6 +639,15 @@ if(TARGET havne-cli)
     app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
     app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
         "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
+    app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
+    app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
+    app_cli_usage(ViewSignalsAndAPluginIsUsage
+        "view|x|--frames|--signals|a.json|--plugin|b")
+    app_cli_usage(ViewAProfileThatIsntTheSignalFilesIsUsage
+        "view|${_cli_pull_early}|--frames|--profile|obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json")
+    app_cli_usage(ViewAProfileThatIsntAVariantIsUsage
+        "view|${_cli_pull_early}|--frames|--profile|obd2|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim")
     app_cli_usage(InfoWithoutARecordingIsUsage "info")
     app_cli_usage(InfoTwoRecordingsIsUsage "info|x|y")
     app_cli_usage(InfoAGapOfZeroIsUsage "info|x|--gap|0")

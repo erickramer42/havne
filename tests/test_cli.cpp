@@ -15,6 +15,7 @@
 #include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
+#include "view_frames.h"
 #include "view_lines.h"
 #include "vin_line.h"
 
@@ -1978,4 +1979,58 @@ TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
     EXPECT_STREQ(cli::nrc_name(0x7F), "serviceNotSupportedInActiveSession");
     EXPECT_STREQ(cli::nrc_name(0x00), "");
     EXPECT_STREQ(cli::nrc_name(0x99), "");
+}
+
+// view --frames' choice of a set (cli/view_frames.h)
+TEST(CliViewFramesTest, TheGivenProfileThenTheOwnFileThenTheRecordedOne)
+{
+    cli::RecordedSignals rec;
+    rec.profile = "user.extras";
+    rec.sha256 = std::string(64, 'a');
+    cli::FramesSource s = cli::frames_source("obd2", rec, true);
+    EXPECT_FALSE(s.own_file);
+    EXPECT_EQ(s.profile, "obd2") << "--profile first";
+    s = cli::frames_source("", rec, true);
+    EXPECT_TRUE(s.own_file) << "the own file while it matches";
+    EXPECT_TRUE(s.profile.empty());
+    s = cli::frames_source("", rec, false);
+    EXPECT_FALSE(s.own_file);
+    EXPECT_EQ(s.profile, "user.extras") << "a changed copy: the recorded name";
+    rec.sha256.clear();
+    rec.profile = "obd2";
+    s = cli::frames_source("", rec, true);
+    EXPECT_FALSE(s.own_file) << "no file named, none to match";
+    EXPECT_EQ(s.profile, "obd2");
+}
+
+TEST(CliViewFramesTest, ARecordingWithNoSignalsOfItsOwnSaysWhatToGive)
+{
+    cli::RecordedSignals rec;
+    cli::FramesSource s = cli::frames_source("", rec, false);
+    EXPECT_TRUE(s.profile.empty());
+    EXPECT_FALSE(s.own_file);
+    EXPECT_EQ(s.why,
+              "its events.log names no profile: name one with --profile");
+    rec.profile = "raw";
+    s = cli::frames_source("", rec, false);
+    EXPECT_TRUE(s.profile.empty());
+    EXPECT_EQ(s.why, "it was recorded under raw, which decodes nothing: name a "
+                     "profile with --profile");
+    rec.profile = "uds-generic";
+    s = cli::frames_source("", rec, false);
+    EXPECT_TRUE(s.profile.empty());
+    EXPECT_EQ(s.why, "uds-generic's signals come from its session's did= "
+                     "list: give a --signals file");
+    EXPECT_EQ(cli::frames_source("raw", rec, false).profile, "raw")
+        << "a given one is looked up, and refused there";
+}
+
+TEST(CliViewFramesTest, AProfileWithNothingToDecodeIsRefused)
+{
+    EXPECT_EQ(cli::profile_refusal("obd2", true, 120), "");
+    EXPECT_EQ(cli::profile_refusal("user.gone", false, 0),
+              "no profile 'user.gone' is loaded: give its --signals file or "
+              "--plugin");
+    EXPECT_EQ(cli::profile_refusal("raw", true, 0),
+              "the profile 'raw' has no signals to decode with");
 }

@@ -606,6 +606,12 @@ public:
     // section 3); { sha256, id, name, variant, profile } each, none
     // without a VIN. A proposal only: the user picks
     Q_INVOKABLE QVariantList pluginMatches(const QString& typedVin) const;
+    // The profiles a recording's frames can decode through in the viewer
+    // (RecordingView::openFrames; ADR-0049's appendix of 2026-11-06): the
+    // built-in obd2 and mock, each signal file the vehicles' book has
+    // registered, then each loaded plugin's variants; { profile, name }
+    // each, name the file's or "<plugin> <variant>", "" for a built-in
+    Q_INVOKABLE QVariantList decodeProfiles();
     QVariantMap gaugeSignals() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }

@@ -528,9 +528,36 @@ Page {
         return kind === 7 ? Theme.info : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
     }
 
+    // Where the values can come from (ADR-0049's appendix of 2026-11-06):
+    // as recorded (signals.csv), or the frames decoded through the
+    // recording's own signal file or a profile the app has loaded
+    function decodeChoices() {
+        const out = [{ text: qsTr("Values as recorded"), value: "" }]
+        if (recording.ownSignalFile)
+            out.push({ text: qsTr("Its frames through its own signal file"), value: "signals.json" })
+        for (const p of Bridge.decodeProfiles())
+            out.push({ text: qsTr("Its frames through %1").arg(p.name !== "" ? p.name : p.profile),
+                       value: p.profile })
+        return out
+    }
+    function decodeWith(value) {
+        if (value === recording.decodedWith && recording.state === RecordingView.Open)
+            return
+        if (value === "")
+            recording.open(recording.folder)
+        else
+            recording.openFrames(recording.folder, value)
+    }
+
     function infoText() {
         const info = recording.info
         let text = qsTr("%1 long").arg(lengthText(recording.durationMs))
+        if (recording.decodedWith === "signals.json")
+            text += qsTr(" · values decoded from its frames through its own signal file")
+        else if (recording.decodedWith !== "")
+            text += qsTr(" · values decoded from its frames through %1").arg(recording.decodedWith)
+        else if (recording.signalList.every(s => s.samples === 0))
+            text += qsTr(" · no values were recorded: decode its frames with a profile")
         if (info.utcStartMs > 0)
             text += qsTr(" · started %1").arg(new Date(info.utcStartMs).toLocaleString(Qt.locale(), Locale.ShortFormat))
         if (info.recordsDropped > 0)
@@ -818,6 +845,22 @@ Page {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             text: recording.state === RecordingView.Open ? root.infoText() : ""
+        }
+
+        // Where the values come from: offered once it opened, or failed
+        // (a profile that can't decode it, a folder with frames alone)
+        ComboBox {
+            id: decodeChoice
+            objectName: "decodeChoice"
+            visible: (recording.state === RecordingView.Open
+                      || recording.state === RecordingView.Failed) && !root.chartMaximized
+            Layout.fillWidth: true
+            textRole: "text"
+            valueRole: "value"
+            model: visible ? root.decodeChoices() : []
+            currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
+            Accessible.name: qsTr("Where the values come from")
+            onActivated: index => root.decodeWith(valueAt(index))
         }
 
         // Another recording to overlay, and how the two line up

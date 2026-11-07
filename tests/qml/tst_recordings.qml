@@ -169,6 +169,32 @@ TestCase {
         compare(page.series(400).length, 0)
     }
 
+    // The values from the frames (ADR-0049's appendix of 2026-11-06): the
+    // choice offers the app's profiles, the open goes through the one
+    // picked, the info says so, and "as recorded" goes back to signals.csv
+    function test_theValuesCanComeFromTheFramesThroughAProfile() {
+        const page = openFindings()
+        const choice = find(page, "decodeChoice")
+        verify(choice.visible)
+        compare(choice.currentIndex, 0, "as recorded")
+        const obd2 = choice.indexOfValue("obd2")
+        verify(obd2 > 0, "obd2 is offered")
+        verify(choice.indexOfValue("mock") > 0, "so is the mock")
+        compare(choice.indexOfValue("signals.json"), -1, "it has no file of its own")
+        choice.activated(obd2)
+        const info = find(page, "recordingInfo")
+        tryVerify(() => info.visible
+                  && info.text.indexOf("values decoded from its frames through obd2") > 0,
+                  10000, "the frames open")
+        compare(choice.currentIndex, obd2)
+        compare(find(page, "signalRows").count, 1)
+        verify(page.series(400).length === 1, "RPM is plotted")
+        choice.activated(0)
+        tryVerify(() => info.visible && info.text.indexOf("values decoded") < 0,
+                  10000, "signals.csv again")
+        compare(choice.currentIndex, 0)
+    }
+
     // The ticks start at the recording's default: its ranked numbers, never
     // a text signal (pull-early: RPM, Throttle and Coolant, then the VIN)
     // A pan keeps each column's samples together: the columns lie on a

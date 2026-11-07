@@ -13,7 +13,9 @@
 #ifndef ECUIO_RECORDING_ROWS_H
 #define ECUIO_RECORDING_ROWS_H
 
+#include <clocale>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -184,6 +186,28 @@ inline double nearest_double(const char* p, size_t n)
     text += 'e';
     text += std::to_string(e);
     return c_strtod(text.c_str());
+}
+
+/* A value as signals.csv holds it: 12 significant digits (the app's 'g',
+ * 12), with a '.' whatever the process's locale: a Qt program sets
+ * LC_NUMERIC from the environment, where the decimal point may be a
+ * comma. The recorder writes it and the reader decoding frames.csv forms
+ * it, so both read back the same double. */
+inline void append_value(std::string& out, double v)
+{
+    char buf[40];
+    const int n = std::snprintf(buf, sizeof buf, "%.12g", v);
+    if (n <= 0) {
+        return;
+    }
+    /* The locale is set once at startup (Qt sets LC_NUMERIC), before any
+     * recorder or reader runs; this only reads its decimal point */
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    const char* point = std::localeconv()->decimal_point;
+    const char p = (point != nullptr && point[0] != '\0') ? point[0] : '.';
+    for (int i = 0; i < n; ++i) {
+        out += (buf[i] == p) ? '.' : buf[i];
+    }
 }
 
 /* A number as "%.12g" writes it (and "inf", "-inf", "nan"), the whole of

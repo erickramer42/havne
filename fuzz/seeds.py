@@ -4,10 +4,11 @@
 #
 # Writes the seed inputs of the harnesses that read a structured format
 # into <out>/<harness>/, one file each, from the files the tree commits:
-# the signal-file and OBDb fixtures and the example plugin. Each seed is
-# in the harness's own form (fuzz/README.md): the JSON harness's first
-# byte picks its bounds, the OBDb harness's its options, the plugin
-# harness's its form, with the pieces cut at 0x1E bytes. Started from
+# the signal-file and OBDb fixtures, the example plugin and the recording
+# fixtures. Each seed is in the harness's own form (fuzz/README.md): the
+# JSON harness's first byte picks its bounds, the OBDb harness's its
+# options, the plugin harness's its form, the recording harness's a
+# folder ('F'), with the pieces cut at 0x1E bytes. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
 # nothing, it barely leaves the reader. Built from the fixtures, never
 # copies of them, so the seeds follow the formats as the fixtures do.
@@ -95,6 +96,38 @@ def main(argv):
     packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
     text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
     write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
+
+    # The recording harness: a folder, 'F' then events.log, signals.csv,
+    # markers.csv and frames.csv cut at 0x1E, each opened through
+    # signals.csv and through its frames. The findings fixture (a
+    # listener's wire frames, every part), the packed replies (frames
+    # alone), and frames written for the ISO-TP paths: a packed reply in
+    # a First and a Consecutive Frame with the tester's Flow Control
+    # between, two senders' First Frames on one ID, and a message whose
+    # Consecutive Frame comes the next second
+    findings = "tests/fixtures/recording/findings/"
+    write(out, "fuzz_recording", "findings",
+          b"F" + SEP.join(read(findings + n) for n in
+                          ("events.log", "signals.csv", "markers.csv", "frames.csv")))
+    write(out, "fuzz_recording", "packed-replies",
+          b"F" + SEP + SEP + SEP + read("tests/fixtures/replay/packed-replies/frames.csv"))
+    header = b"host_us,timestamp_us,id,flags,data\n"
+    wire = header + (
+        b"100000,100000,0x7DF,0x0,02 01 0C 00 00 00 00 00\n"
+        b"110000,110000,0x7E8,0x0,04 41 0C 1A F8 00 00 00\n"
+        b"200000,200000,0x7E8,0x0,10 0A 41 0C 1B 58 0D 32\n"
+        b"201000,201000,0x7E0,0x0,30 00 00 00 00 00 00 00\n"
+        b"210000,210000,0x7E8,0x0,21 05 7B 0F 41 00 00 00\n"
+        b"300000,300000,0x7E8,0x0,10 0A 41 0C 11 11 0D 01\n"
+        b"310000,310000,0x7E8,0x0,10 0A 41 0C 22 22 0D 02\n"
+        b"320000,320000,0x7E8,0x0,21 05 7B 0F 41 00 00 00\n"
+        b"990000,990000,0x7E8,0x0,10 0A 41 0C 1A 00 0D 32\n"
+        b"1005000,1005000,0x7E8,0x0,21 05 7B 0F 41 00 00 00\n"
+        b"1500000,1500000,0x7E8,0x100,41 0C 1A 0D 32\n")
+    events = (b"ecuio session recording, format 2 (ADR-0049)\n"
+              b"profile  obd2\n\n")
+    write(out, "fuzz_recording", "wire-frames",
+          b"F" + events + SEP + SEP + SEP + wire)
     return 0
 
 

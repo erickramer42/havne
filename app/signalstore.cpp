@@ -268,6 +268,26 @@ QString SignalStore::profileOf(const QString& sha) const
     return held != m_held.end() ? held->second.profile : QString();
 }
 
+QVariantList SignalStore::registered() const
+{
+    QVariantList out;
+    for (const auto& [sha, held] : m_held) {
+        if (m_registered.contains(sha)) {
+            out.append(entryOf(sha, held));
+        }
+    }
+    std::stable_sort(
+        out.begin(), out.end(), [](const QVariant& a, const QVariant& b) {
+            return a.toMap()
+                       .value(QStringLiteral("name"))
+                       .toString()
+                       .localeAwareCompare(
+                           b.toMap().value(QStringLiteral("name")).toString()) <
+                   0;
+        });
+    return out;
+}
+
 int SignalStore::deleteUnused(const QStringList& keep)
 {
     QDir dir(root());

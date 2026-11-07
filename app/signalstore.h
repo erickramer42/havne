@@ -75,6 +75,10 @@ public:
     // the store's own (ADR-0051 section 4)
     QString profileOf(const QString& sha) const;
 
+    // Every file whose profile is registered, as use() gives its entry,
+    // by name: the profiles a recording's frames can decode through
+    QVariantList registered() const;
+
     // Unregisters, then deletes, every copy that keep doesn't name; the
     // folder too when it ends empty. Returns how many copies went.
     int deleteUnused(const QStringList& keep);

@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
@@ -16,6 +17,9 @@
 #include <vector>
 
 #include "recordingview.h"
+
+#include "ecuio/profile.h"
+#include "ecuio/signals.h"
 
 namespace {
 
@@ -592,4 +596,181 @@ TEST(RecordingViewTest, DestroyedWhileOpeningIsSafe)
     }
     waitFor([] { return false; }, 100);
     SUCCEED();
+}
+
+// ---- The values from the frames (ADR-0049's appendix of 2026-11-06) ----
+
+namespace {
+
+const QString kReplayFixtures = QStringLiteral(ECUIO_REPLAY_FIXTURES);
+
+void writeFile(const QString& path, const QByteArray& bytes)
+{
+    QFile f(path);
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    f.write(bytes);
+}
+
+// A signal file of one DID on 0x7E8, its profile user.frames-view
+const QByteArray kOneDid = R"({
+  "havne_signals": 1,
+  "name": "Frames view",
+  "source": { "name": "Written for the test" },
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "signals": [
+    { "key": "a", "name": "Input A", "ecu": "pcm",
+      "read": { "service": "22", "number": "1111" },
+      "field": { "byte": 0, "bits": 8 } }
+  ]
+})";
+
+// Three of that DID's replies as a listener saw them, Single Frames
+const QByteArray kOneDidFrames = "host_us,timestamp_us,id,flags,data\n"
+                                 "100000,100000,0x7E8,0x0,04 62 11 11 07\n"
+                                 "200000,200000,0x7E8,0x0,04 62 11 11 08\n"
+                                 "300000,300000,0x7E8,0x0,04 62 11 11 09\n";
+
+} // namespace
+
+// A listener's wire frames through the profile its header names, as
+// havne-cli view --frames reads them
+TEST(RecordingViewTest, AListenersFramesDecodeThroughItsRecordedProfile)
+{
+    RecordingView v;
+    v.openFrames(fixture("findings"), QString());
+    EXPECT_EQ(v.state(), RecordingView::Opening);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("obd2"));
+    EXPECT_EQ(v.recordedProfile(), QStringLiteral("obd2"));
+    EXPECT_FALSE(v.ownSignalFile());
+    EXPECT_TRUE(v.check().value(QStringLiteral("ran")).toBool());
+    const QVariantMap rpm = signalNamed(v, "RPM");
+    EXPECT_EQ(rpm.value(QStringLiteral("samples")).toDouble(), 307.0);
+    EXPECT_EQ(rpm.value(QStringLiteral("lowest")).toDouble(), 804.0);
+    EXPECT_EQ(rpm.value(QStringLiteral("firstMs")).toDouble(), 100.0)
+        << "the frame's time, not signals.csv's";
+    EXPECT_TRUE(rpm.value(QStringLiteral("plotted")).toBool());
+
+    v.open(fixture("findings"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_TRUE(v.decodedWith().isEmpty()) << "signals.csv again";
+}
+
+// The replay fixture holds frames.csv alone: open goes to the frames, and
+// with no header to name a profile it says to pick one
+TEST(RecordingViewTest, AFolderOfFramesAloneOpensThroughAProfile)
+{
+    const QString folder =
+        kReplayFixtures + QStringLiteral("/2026-10-25-engine-start");
+    RecordingView v;
+    v.open(folder);
+    EXPECT_EQ(v.state(), RecordingView::Failed) << "nothing names a profile";
+    EXPECT_EQ(v.error(),
+              QStringLiteral("it names no profile: pick one to decode its "
+                             "frames with"));
+    v.openFrames(folder, QStringLiteral("obd2"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("obd2"));
+    EXPECT_EQ(signalNamed(v, "RPM").value(QStringLiteral("highest")).toDouble(),
+              1261.25);
+}
+
+// What can't decode fails at once, in words that never name the path
+TEST(RecordingViewTest, AProfileThatCantDecodeFailsAtOnce)
+{
+    RecordingView v;
+    const struct {
+        const char* profile;
+        const char* words;
+    } cases[] = {
+        {"raw", "the profile raw has no signals to decode with"},
+        {"user.not-loaded", "the profile user.not-loaded isn't loaded"},
+        {"signals.json",
+         "its signals.json isn't the file it was recorded with"},
+    };
+    for (const auto& c : cases) {
+        v.openFrames(fixture("findings"), QString::fromLatin1(c.profile));
+        EXPECT_EQ(v.state(), RecordingView::Failed) << c.profile;
+        EXPECT_EQ(v.error(), QString::fromLatin1(c.words));
+        EXPECT_TRUE(v.decodedWith().isEmpty());
+    }
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    writeFile(dir.filePath(QStringLiteral("events.log")),
+              "ecuio session recording, format 2 (ADR-0049)\n"
+              "profile  raw\n\n");
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    v.openFrames(dir.path(), QString());
+    EXPECT_EQ(v.state(), RecordingView::Failed);
+    EXPECT_EQ(v.error(),
+              QStringLiteral("it was recorded under raw, which decodes "
+                             "nothing: pick a profile to decode its frames "
+                             "with"));
+    EXPECT_FALSE(v.error().contains(dir.path()));
+}
+
+// The set is copied before the open's thread starts: a profile gone the
+// moment after still decodes the open under way
+TEST(RecordingViewTest, TheSetIsCopiedBeforeTheOpenRuns)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(kOneDid.constData(),
+                                     static_cast<size_t>(kOneDid.size()),
+                                     &file),
+              ECUIO_OK);
+    const char* profile = ecuio_signal_file_profile(file);
+    ASSERT_STREQ(profile, "user.frames-view");
+    ASSERT_EQ(
+        ecuio_profile_register(profile, ecuio_signal_file_set(file), nullptr),
+        ECUIO_OK);
+    RecordingView v;
+    v.openFrames(dir.path(), QStringLiteral("user.frames-view"));
+    ASSERT_EQ(ecuio_profile_unregister(profile), ECUIO_OK);
+    ecuio_signal_file_free(file);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QVariantMap a = signalNamed(v, "Input A");
+    EXPECT_EQ(a.value(QStringLiteral("samples")).toDouble(), 3.0);
+    EXPECT_EQ(a.value(QStringLiteral("highest")).toDouble(), 9.0);
+}
+
+// The recording's own signals.json, while it hashes to the one its header
+// names: offered, and what the default picks; changed, it isn't
+TEST(RecordingViewTest, ItsOwnSignalFileDecodesItWhileItMatches)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QByteArray sha =
+        QCryptographicHash::hash(kOneDid, QCryptographicHash::Sha256).toHex();
+    writeFile(dir.filePath(QStringLiteral("signals.json")), kOneDid);
+    writeFile(dir.filePath(QStringLiteral("events.log")),
+              "ecuio session recording, format 3 (ADR-0049)\n"
+              "profile  user.frames-view\n"
+              "signal file  signals.json," +
+                  sha + "\n\n");
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    RecordingView v;
+    v.open(dir.path());
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_TRUE(v.ownSignalFile());
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("signals.json"));
+    EXPECT_EQ(
+        signalNamed(v, "Input A").value(QStringLiteral("samples")).toDouble(),
+        3.0);
+
+    writeFile(dir.filePath(QStringLiteral("signals.json")),
+              kOneDid + QByteArray("\n"));
+    v.openFrames(dir.path(), QString());
+    EXPECT_FALSE(v.ownSignalFile());
+    EXPECT_EQ(v.state(), RecordingView::Failed)
+        << "the recorded profile, which isn't loaded";
+    EXPECT_EQ(v.error(),
+              QStringLiteral("the profile user.frames-view isn't loaded"));
 }
