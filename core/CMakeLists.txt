@@ -98,7 +98,8 @@ endif()
 
 # The shared core (HAVNE_SHARED_CORE, the root CMakeLists.txt; ADR-0053's
 # appendix "the shared core as built"): libecuio.so, libecuio.dylib or
-# ecuio.dll, the archive linked whole, exporting the list
+# ecuio.dll, the archive linked whole (on MSVC, core's sources compiled
+# again with the C runtime linked in, below), exporting the list
 # scripts/ecuio_exports.py makes from ECUIO_PUBLIC_HEADERS at build time
 # (generated/ecuio/: .def for link.exe, a version script for GNU ld, an
 # exported symbols list for Apple's ld), so it lets out every declared
@@ -134,7 +135,11 @@ if(HAVNE_SHARED_CORE)
     # src/shared_core.cpp is empty: a library needs a source of its own
     add_library(ecuio SHARED src/shared_core.cpp ${_ecuio_gen}/ecuio.exports)
     set_source_files_properties(${_ecuio_gen}/ecuio.exports PROPERTIES HEADER_FILE_ONLY ON)
-    target_link_libraries(ecuio PRIVATE ecuio-core)
+    # The archive's objects (linked whole below), except on MSVC, whose
+    # library takes core's sources compiled /MT instead
+    if(NOT MSVC)
+        target_link_libraries(ecuio PRIVATE ecuio-core)
+    endif()
     target_include_directories(ecuio INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/generated>)
@@ -150,8 +155,26 @@ if(HAVNE_SHARED_CORE)
         VERSION ${Havne_VERSION}
         SOVERSION ${_ecuio_soversion})
     if(MSVC)
-        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def)
-        target_link_options(ecuio PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:ecuio-core>")
+        # The C runtime linked in (/MT), as the surrogates do (ADR-0053's
+        # appendix "the wheel as built"): a program loading ecuio.dll may
+        # already hold an older msvcp140.dll, which Windows would hand
+        # this library too, and a DLL built with a newer STL can crash
+        # against an older one (std::mutex, VS 2022 17.10 and
+        # msvcp140.dll before 14.40). So core's sources compile once more
+        # here, /MT, beside the archive's /MD for the app; the separate
+        # heap is safe, since every allocation has its release in core
+        # (ExportsTest.EachAllocationHasItsRelease).
+        get_target_property(_ecuio_core_sources ecuio-core SOURCES)
+        add_library(ecuio-core-mt OBJECT ${_ecuio_core_sources})
+        target_include_directories(ecuio-core-mt PRIVATE
+            $<TARGET_PROPERTY:ecuio-core,INCLUDE_DIRECTORIES>)
+        target_compile_definitions(ecuio-core-mt PRIVATE
+            $<TARGET_PROPERTY:ecuio-core,COMPILE_DEFINITIONS>)
+        app_enable_warnings(ecuio-core-mt)
+        set_target_properties(ecuio-core-mt ecuio PROPERTIES
+            MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def $<TARGET_OBJECTS:ecuio-core-mt>)
+        target_link_libraries(ecuio PRIVATE bcrypt ws2_32)
     elseif(APPLE)
         set_source_files_properties(${_ecuio_gen}/ecuio.exp PROPERTIES HEADER_FILE_ONLY ON)
         target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.exp)
