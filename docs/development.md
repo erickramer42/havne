@@ -759,10 +759,10 @@ Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the JSON, signal-file, plugin and OBDb harnesses; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
 | `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app. Any warning fails it. Only the app's moc output is built. |
-| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. |
-| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. |
+| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
+| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `win-coverage` | Windows, MSVC 2022 | Installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs `scripts/coverage.sh` and uploads the report to Codecov ([testing.md](testing.md#coverage)). |
-| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). |
+| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
@@ -988,6 +988,13 @@ A version tag publishes these downloads through
   and a tarball ([Linux: the core packages](#linux-the-core-packages)),
   built on Ubuntu 24.04, so they run where glibc is 2.39 or later
   (on a Raspberry Pi, the 64-bit Raspberry Pi OS 13).
+- **The Python wheel,** one for Windows x64
+  (`havne-<version>-py3-none-win_amd64.whl`), Linux x86_64 and aarch64
+  (`manylinux_2_39`: glibc 2.39 or later) and macOS arm64 (13.0 or
+  later): the `havne` package with core's shared library, the Visual
+  C++ runtime linked into it, and on Windows both J2534 surrogates
+  ([ADR-0053](adr/0053-python-bindings.md)). An `-rcN` tag's wheel is
+  `<version>rcN` (PEP 440).
 
 Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
 SPDX SBOM of every download, `SHA256SUMS.txt`, and one build
@@ -996,7 +1003,9 @@ provenance over every file.
 **To release:**
 
 1. In one commit, set `project(Havne VERSION X.Y.Z)` in the root
-   `CMakeLists.txt`, move CHANGELOG.md's "Unreleased" entries under
+   `CMakeLists.txt` and `__version__` in `python/havne/_version.py`
+   (`PythonTest.test_version` holds them together; `make_wheel.py`
+   refuses a release whose two differ), move CHANGELOG.md's "Unreleased" entries under
    `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
    add `docs/releases/vX.Y.Z.md`, the release notes, starting from
    those entries. Open with a Downloads table linking the file each
@@ -1094,8 +1103,21 @@ provenance over every file.
   `make-appimage.sh`, dated by the commit, then
   `make-core-packages.sh`: the same scripts and checks CI ran on the
   commit.
-- **`publish`: the SBOM.** `sbom.py build` over the zip, the APK, and
-  each architecture's AppImage, deb and tarball (the symbols and debug files carry
+- **`windows`, `linux`, `macos`: the wheel.** `packaging/python/make_wheel.py`
+  packs each platform's wheel under its tag (`win_amd64` with both
+  surrogates; `manylinux_2_39_<arch>` from `make-core-packages.sh`'s
+  tree, its debug info stripped; `macosx_13_0_arm64`) and refuses a
+  library that doesn't fit it. `check_wheel.py` then installs it into a
+  fresh venv and runs `read_pids.py mock://` through it, under
+  `ECUIO_PYTEST_REQUIRED=1`, so it can't skip. Each wheel's
+  `.components.json` is a job artifact for the SBOM, never a release
+  file.
+- **`macos`: the shared core** (macOS arm64): a core-only tree with
+  `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` (Qt 6.12 needs 14.4, core no more
+  than 13.0); the only build at 13.0, so a release candidate is its
+  first run.
+- **`publish`: the SBOM.** `sbom.py build` over the zip, the APK,
+  each architecture's AppImage, deb and tarball, and the four wheels (the symbols and debug files carry
   no component of their own), dated by the commit, then validated by
   `pyspdxtools` before anything is published.
 - **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
