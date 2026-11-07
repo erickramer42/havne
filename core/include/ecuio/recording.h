@@ -625,7 +625,157 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
                                      void* user_data,
                                      ecuio_check_summary_t* out);
 
-/* The export (v0.6.0) joins this header later; ADR-0049 section 8. */
+/* --- Exports and imports (ADR-0054) --------------------------------- */
+
+/* ecuio_export_options_t.format; append-only */
+#define ECUIO_EXPORT_FOLDER 1u /* a scrubbed copy of the folder: not built,
+                                  ECUIO_ERR_NOT_IMPLEMENTED */
+#define ECUIO_EXPORT_CSV    2u /* signals over a range: not built */
+#define ECUIO_EXPORT_PCAPNG 3u /* the frames for Wireshark (section 3) */
+
+/* ecuio_export_options_t.flags */
+#define ECUIO_EXPORT_RAW 0x1u /* the recording as it is, not scrubbed: an
+                                 explicit choice, never the default */
+
+/* What a scrubbed export leaves out, by class (section 1): the indexes of
+ * ecuio_export_report_t.left_out. A failed check's class is its index
+ * plus one (ecuio_export_report_t.failed_class, 0 for none). */
+#define ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION 0u /* identification replies'
+                                                   frames, every segment of
+                                                   a segmented one: Service
+                                                   09, 62 F180-F1FF */
+#define ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE 1u /* segments on a diagnostic
+                                                   reply ID whose message
+                                                   can't be reassembled */
+#define ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES    2u /* text signals' values */
+#define ECUIO_EXPORT_LEFT_OUT_ACTIVITY       3u /* activity lines of a kind
+                                                   the export doesn't know */
+#define ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED     4u /* the check alone: a token
+                                                   of 17 VIN characters; an
+                                                   export holding one fails,
+                                                   so its count stays 0 */
+#define ECUIO_EXPORT_LEFT_OUT_COUNT          5u
+
+typedef struct ecuio_export_options {
+    uint32_t format;           /* ECUIO_EXPORT_* */
+    uint32_t flags;            /* ECUIO_EXPORT_RAW, or 0 */
+    uint64_t from_us;          /* host_us, from_us to to_us inclusive;
+                                  to_us 0 is the end, so 0 and 0 is all
+                                  of it */
+    uint64_t to_us;
+    const char* folder_utf8;   /* the recording's folder */
+    const char* out_path_utf8; /* the file to write, refused when it
+                                  exists: <out>.partial first, renamed
+                                  into place once checked */
+    uint64_t reserved[4];      /* zero; ABI growth space */
+} ecuio_export_options_t;
+
+typedef struct ecuio_export_report {
+    uint64_t frames;   /* written, made-up ones among them */
+    uint64_t made_up;  /* re-segmented from a reassembled message, each
+                          marked so (section 3) */
+    uint64_t left_out[8]; /* by ECUIO_EXPORT_LEFT_OUT_*, the frames or
+                             values each class left out */
+    uint32_t failed_class; /* the check's: a class plus one, 0 when it
+                              passed or didn't run */
+    uint32_t flags;        /* zero */
+    uint64_t reserved[4];  /* zero; ABI growth space */
+} ecuio_export_report_t;
+
+#if defined(__cplusplus)
+static_assert(ECUIO_EXPORT_LEFT_OUT_COUNT <= 8,
+              "the report holds 8 classes");
+static_assert(sizeof(ecuio_export_report_t) == 120,
+              "ecuio_export_report_t size is ABI");
+static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
+              "export report failed_class offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(ECUIO_EXPORT_LEFT_OUT_COUNT <= 8, "the report holds 8 classes");
+_Static_assert(sizeof(ecuio_export_report_t) == 120,
+               "ecuio_export_report_t size is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
+               "export report failed_class offset is ABI");
+#endif
+
+/*
+ * Writes the recording in options->folder_utf8 to options->out_path_utf8
+ * in options->format, its frames between from_us and to_us, scrubbed by
+ * construction unless ECUIO_EXPORT_RAW (ADR-0054 section 1): each
+ * class's frames or values left out and counted in *report, then the
+ * written bytes, and every message as it was before any segmenting,
+ * searched for the recording's own identity values and VIN-shaped
+ * tokens; one match fails the export, leaving no file, with the class
+ * in report->failed_class. Deterministic: the same recording and
+ * options give the same bytes. report may be NULL. ECUIO_OK;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
+ * field this core doesn't know, or a to_us other than 0 before from_us;
+ * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
+ * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
+ * 12: ...", never a path), a file that exists or can't be written,
+ * and a failed check (the class's words, never the value).
+ */
+ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
+                            ecuio_export_report_t* report);
+
+/* ecuio_import_options_t.format; append-only */
+#define ECUIO_IMPORT_CANDUMP 1u /* can-utils' log (section 4) */
+#define ECUIO_IMPORT_CSV     2u /* another logger's signals (section 5):
+                                   not built, ECUIO_ERR_NOT_IMPLEMENTED */
+
+typedef struct ecuio_import_options {
+    uint32_t format;               /* ECUIO_IMPORT_* */
+    uint32_t flags;                /* zero */
+    const char* in_path_utf8;
+    const char* out_folder_utf8;   /* the recording's folder, made here and
+                                      refused when it exists */
+    const char* interface_utf8;    /* the bus to take; NULL for the log's
+                                      only one */
+    const char* column_map_utf8;   /* CSV only; NULL otherwise */
+    uint64_t reserved[4];          /* zero; ABI growth space */
+} ecuio_import_options_t;
+
+typedef struct ecuio_import_report {
+    uint64_t lines;        /* read */
+    uint64_t frames;       /* written, error frames among them */
+    uint64_t error_frames;
+    uint64_t interfaces;   /* the log's, the one taken among them */
+    uint64_t utc_start_us; /* the first frame's time, microseconds since
+                              1970-01-01 UTC */
+    uint64_t duration_us;  /* the last frame's time since the first */
+    uint64_t reserved[4];  /* zero; ABI growth space */
+} ecuio_import_report_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_import_report_t) == 80,
+              "ecuio_import_report_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_import_report_t) == 80,
+               "ecuio_import_report_t size is ABI");
+#endif
+
+/*
+ * Reads options->in_path_utf8 in options->format and writes a recording
+ * folder at options->out_folder_utf8 (ADR-0054 section 4): frames.csv
+ * with each frame as it arrived (never REASSEMBLED), and an events.log
+ * header naming the import as its source, the first frame's time as its
+ * UTC start, profile raw. It has no signals.csv: its values come from
+ * ecuio_recording_open_frames. One recording is one bus: a log with
+ * several interfaces takes the one interface_utf8 names, and refuses
+ * none named, its detail listing them. A frame stamped up to 100 ms
+ * before the one before it takes that one's time (candump stamps on the
+ * CPU that received it); further back is refused. The folder is written
+ * as <folder>.partial and renamed once whole, so a failed import leaves
+ * none. report may be NULL. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
+ * options or path; ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a
+ * flag or reserved field this core doesn't know, or a column map given
+ * to candump; ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
+ * ECUIO_ERR_LOAD_FAILED for a line it refuses ("line 12: ...", never a
+ * path), a log with no frames of the interface, a folder that exists or
+ * can't be written.
+ */
+ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
+                            ecuio_import_report_t* report);
 
 #ifdef __cplusplus
 }

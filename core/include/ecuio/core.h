@@ -36,6 +36,10 @@ typedef struct ecuio_session ecuio_session_t;
                                                          adapter's), not a
                                                          frame as it crossed
                                                          the bus (ADR-0049) */
+#define ECUIO_FRAME_FLAG_FD_ESI           0x00000200u /* an FD frame's error
+                                                         state indicator: its
+                                                         sender was error
+                                                         passive (ADR-0054) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled

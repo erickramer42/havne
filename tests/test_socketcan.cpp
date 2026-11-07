@@ -765,6 +765,11 @@ TEST(SocketCanTest, AKernelFrameKeepsItsIdFlagsAndBytes)
     EXPECT_EQ(f.flags, ECUIO_FRAME_FLAG_FD | ECUIO_FRAME_FLAG_BITRATE_SWITCH);
     EXPECT_EQ(f.data_length, 12u);
     EXPECT_EQ(f.data[11], 0xAB);
+    /* ESI: the sender error passive */
+    f = converted(0x0C0, twelve, true, SOCKETCAN_FD_ESI);
+    EXPECT_EQ(f.flags, ECUIO_FRAME_FLAG_FD | ECUIO_FRAME_FLAG_FD_ESI);
+    f = converted(0x0C0, twelve, false, SOCKETCAN_FD_ESI);
+    EXPECT_EQ(f.flags, 0u) << "a classic frame has no FD flags";
 
     /* A length past the frame's room is cut to it */
     f = converted(0x100, {1, 2, 3, 4, 5, 6, 7, 8}, false, 0, 15);

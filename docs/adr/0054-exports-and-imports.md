@@ -205,3 +205,114 @@ recording; a CSV from another logger plots in the viewer.
   struct; the CLI by two commands.
 - The import formats become inputs from strangers, so their parsers
   carry fuzz targets from the start.
+
+## Appendix: the C API as built (2026-11-06)
+
+What v0.6.0 builds of this decision: the pcapng export and the candump
+import, in core and `havne-cli`. The folder and CSV exports and the CSV
+import keep their place in the API and answer
+`ECUIO_ERR_NOT_IMPLEMENTED` until they're built.
+
+**The calls** take option structs in place of section 2's argument
+lists, so each can grow through its `reserved` words:
+`ecuio_export(options, report)` names the recording by its folder, and
+`ecuio_import(options, report)` the folder it makes (`recording.h`).
+An unknown format, flag bit or nonzero reserved word is
+`ECUIO_ERR_INVALID_ARGUMENT`. The export's classes are named,
+`ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION` (0), `_UNATTRIBUTABLE` (1),
+`_TEXT_VALUES` (2), `_ACTIVITY` (3) and `_VIN_SHAPED` (4, the check's
+alone, so its count stays 0), indexes of the report's `left_out`; a
+failed check's class is `failed_class`, the index plus one, 0 for none.
+The report is 120 bytes, `failed_class` at 80, the import's report 80,
+both static-asserted.
+
+**One recording is one bus.** A candump log with several interfaces
+imports the one `interface_utf8` names; with none named it is refused,
+the detail listing them. This replaces section 4's "keeps them apart":
+a recording holds no bus of its own in its frames, so two buses in one
+folder would read as one.
+
+**CAN FD's error state indicator** is a frame flag of its own,
+`ECUIO_FRAME_FLAG_FD_ESI` (0x200), appended rather than dropped: the
+SocketCAN transport sets it from `CANFD_ESI`, `havne-cli play` writes
+it, candump's flags digit carries it (0x2), `frames.csv` and replay
+keep the flags as they are, and pcapng writes it in the FD flags byte.
+
+**Classification is by the def, then checked by value**
+(`core/src/scrub.{h,cpp}`, shared by every format to come):
+
+- An identification reply's frames are left out, every segment: a
+  message (reassembled from the wire, or delivered whole) starting
+  `49`, or `62` with a DID in `F180`-`F1FF`.
+- A message a text or hex def of the recording's own set applies to (by
+  its message ID and mux key: a uds-generic DID, a signal file's read)
+  is left out whole, counted as text values. The set is the
+  recording's `signals.json`, else uds-generic's built from its URI's
+  `did=` list, else its profile by name; an enumeration's frames stay,
+  since its labels come from the def. Section 1's table puts text
+  signals in a class left out and counted; failing is the check's job,
+  for what classification misses.
+- A segment on a diagnostic reply ID (`0x7E8`-`0x7EF`, `18DAF1xx`)
+  whose message can't be reassembled is left out as unattributable, by
+  the reader's own rules (ADR-0049's appendix of 2026-11-06: N_Cr on
+  `host_us`, two First Frames on one ID end both).
+- **The check runs twice:** over each message the export writes, as it
+  was before any segmenting, and over the written bytes as they go out.
+  It searches for the recording's identification values (the bytes
+  after each reply's header) and `signals.csv`'s text values, each as
+  bytes and as hex in upper and lower case, spaced and not, and for any
+  VIN-shaped token: 17 of the VIN alphabet with a letter and a digit,
+  not all hex, alone between bytes that aren't letters or digits. A
+  value under 6 bytes, its padding trimmed, isn't searched for: the
+  short identity values (a CVN's 4 bytes) sit in Service 09 frames,
+  which classification removes, so the search adds nothing for them
+  and only risks chance matches in a large file.
+
+**The pcapng file** (`core/src/pcapng.h`, `core/src/export.cpp`): one
+section, one interface (`LINKTYPE_CAN_SOCKETCAN`, `if_tsresol` 6), each
+packet as libpcap captures SocketCAN's frames (16 bytes classic, 72 FD
+with `CANFD_FDF` set, the ID and its flags big-endian), our own
+transmits marked outbound (`epb_flags`). Times are the `utc` line's
+start plus each frame's `host_us`, the clock the start is stamped
+against. A message delivered whole is written as its Single Frame, or
+its First Frame, the Flow Control a tester sends on the physical
+request ID (`isotp_flow_control_id`), and its Consecutive Frames, all at
+the message's time, each with a comment saying it was made up. The
+section's comment names Havne's version, scrubbed or raw, the frames,
+the made-up ones and each class's count. A frame no CAN frame can be (a
+message cut short or empty, a classic one past 8 bytes) is left out as
+unattributable, raw exports too. `to_us` 0 is the end of the
+recording; an output file that exists is refused, as the import refuses
+a folder that exists.
+
+**The candump import** (`core/src/candump.h`, `core/src/import.cpp`):
+can-utils' `(sec.usec) iface frame [ R| T]`, every form `cansend`
+writes, CAN XL refused, as is an FD error frame (SocketCAN's error
+frames are classic). A blank line is skipped, as `canplayer` skips one;
+any other line that doesn't parse refuses the whole log as `line N:
+why`. A frame stamped up to 100 ms before the one before it takes that
+one's time, the SocketCAN transport's rule; further back is refused.
+The folder is written as `<folder>.partial` and renamed once whole.
+
+**havne-cli:** `export <recording> <out> --format pcapng [--from S]
+[--to S] [--raw]` writes `exported` (format, file, scrubbed, frames,
+made_up, left_out by class), or `export_failed` (the class) then the
+error line, exit 3; `import candump <log> <folder> [--interface
+<name>]` writes `imported` (the report's counts). Their words and lines
+are `cli/transfer_lines.h`.
+
+**Tests:** `CandumpTest`, `ImportTest`, `ScrubTest` and `ExportTest`
+(test_core; each export read back by a pcapng parser in the test, its
+made-up frames reassembled by core's ISO-TP to the stored message; a DID
+echoing the fake VIN in a segmented reply, delivered whole and as it
+crossed the bus, fails the export; a uds-generic recording's text and
+hex DIDs are left out and counted, and the same value in a number DID's
+frames still fails it); `CliTransferTest` (test_cli);
+`CliTransferRunTest.roundtrip`, `.refusals` (Python's `struct`),
+`.tshark` (where it's installed: the re-segmented frames reassembled by
+its ISO-TP dissector to the stored message) and `.candump` (Linux: the
+simulated car on vcan0 logged by `candump -L` while a direct session
+reads it; the import's values through obd2 are the session's);
+`fuzz_candump`. Mutation-checked 2026-11-06 (35: among them a class
+written as it is, a segment of a segmented VIN reply kept, and each
+check skipped).

@@ -12,6 +12,7 @@
 #include "elm327_listener.h"
 #include "info_lines.h"
 #include "timing_line.h"
+#include "transfer_lines.h"
 #include "view_frames.h"
 #include "view_lines.h"
 #include "vin_line.h"
@@ -1821,6 +1822,9 @@ void usage(FILE* to)
         "                      [--signals <file> | --plugin <pkg>]]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
+        "       havne-cli export <recording> <out> --format pcapng [--from S]\n"
+        "                      [--to S] [--raw]\n"
+        "       havne-cli import candump <log> <folder> [--interface <name>]\n"
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
@@ -1906,6 +1910,15 @@ void usage(FILE* to)
         "         interval passed --rate-drop times its median (10), ID first\n"
         "         seen over --settle seconds in (2), overflow, broken ISO-TP\n"
         "         sequence, link change and sleep, then a summary.\n"
+        "export   writes a recording's frames from --from to --to seconds\n"
+        "         to <out> for another tool: pcapng for Wireshark, a message\n"
+        "         an adapter delivered whole as the frames its ECU sent, each\n"
+        "         marked made up. Scrubbed unless --raw: identification\n"
+        "         replies left out, then the file checked for the car's\n"
+        "         identity; a check that finds any writes nothing.\n"
+        "import   reads a candump -L log (one bus: --interface names it\n"
+        "         when the log has several) into a recording's folder that\n"
+        "         view --frames, info and replay:// read.\n"
         "signals  check reads a signal file as a session would: what it\n"
         "         holds, each unit that never converts, or why it's "
         "refused.\n"
@@ -3362,8 +3375,9 @@ void on_play(const ecuio_frame_t* f, void* user)
             std::memset(&cf, 0, sizeof cf);
             cf.can_id = id;
             cf.len = static_cast<uint8_t>(fd_length(len));
-            cf.flags =
-                (f->flags & ECUIO_FRAME_FLAG_BITRATE_SWITCH) ? CANFD_BRS : 0;
+            cf.flags = static_cast<uint8_t>(
+                ((f->flags & ECUIO_FRAME_FLAG_BITRATE_SWITCH) ? CANFD_BRS : 0) |
+                ((f->flags & ECUIO_FRAME_FLAG_FD_ESI) ? CANFD_ESI : 0));
             std::memcpy(cf.data, f->data, len);
             ok = write(p->fd, &cf, sizeof cf) == static_cast<ssize_t>(sizeof cf);
         } else {
@@ -3775,6 +3789,54 @@ int run(int argc, char** argv)
             return kExitUsage;
         }
         return run_info(info);
+    }
+    if (command == "export") {
+        cli::ExportArgs ex;
+        std::string why;
+        if (!cli::parse_export(argc, argv, ex, &why)) {
+            std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+            usage(stderr);
+            return kExitUsage;
+        }
+        Output out;
+        write_start(out);
+        ecuio_export_report_t report{};
+        const ecuio_status_t rc = ecuio_export(&ex.options, &report);
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        if (rc != ECUIO_OK) {
+            if (report.failed_class != 0) {
+                cli::export_failed_line(l, report);
+                write_line(out, l);
+            }
+            write_error(out, rc);
+            return out.ok() ? kExitConnect : kExitFailed;
+        }
+        cli::exported_line(l, ex, report);
+        write_line(out, l);
+        return out.ok() ? kExitOk : kExitFailed;
+    }
+    if (command == "import") {
+        cli::ImportArgs im;
+        std::string why;
+        if (!cli::parse_import(argc, argv, im, &why)) {
+            std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+            usage(stderr);
+            return kExitUsage;
+        }
+        Output out;
+        write_start(out);
+        ecuio_import_report_t report{};
+        const ecuio_status_t rc = ecuio_import(&im.options, &report);
+        if (rc != ECUIO_OK) {
+            write_error(out, rc);
+            return out.ok() ? kExitConnect : kExitFailed;
+        }
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::imported_line(l, im, report);
+        write_line(out, l);
+        return out.ok() ? kExitOk : kExitFailed;
     }
     if (command == "play") {
 #if HAVNE_CLI_PLAY

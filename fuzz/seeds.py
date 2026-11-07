@@ -5,8 +5,8 @@
 # Writes the seed inputs of the harnesses that read a structured format
 # into <out>/<harness>/, one file each, from the files the tree commits:
 # the signal-file and OBDb fixtures, the example plugin and the recording
-# fixtures; and the ELM327 emulator's, the conversations its hosts open
-# with. Each seed is in the harness's own form (fuzz/README.md): the
+# fixtures; the ELM327 emulator's, the conversations its hosts open with;
+# and candump's, a log's lines in each form. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording harness's a
 # folder ('F'), with the pieces cut at 0x1E bytes. Started from
@@ -149,6 +149,27 @@ def main(argv):
         for mode in range(4):
             write(out, "fuzz_elm327_emulator", "%s_mode%d" % (name, mode),
                   bytes([mode]) + text)
+
+    # candump -L's lines (ADR-0054 section 4), one of each form the parser
+    # reads: classic, 29-bit, a DLC past 8, remote, CAN FD, an error
+    # frame, candump -x's direction; and a request, its reply segmented,
+    # the tester's Flow Control
+    write(out, "fuzz_candump", "forms",
+          b"(1700000000.250000) can0 7DF#0201000000000000\n"
+          b"(1700000000.254000) can0 18DAF110#0441057B\n"
+          b"(1700000000.255000) can0 123#1122334455667788_C\n"
+          b"(1700000000.256000) can0 123#R\n"
+          b"(1700000000.257000) can0 123#R8_9\n"
+          b"(1700000000.258000) vcan0 456##3AABBCCDDEEFF.0011\n"
+          b"(1700000000.259000) can0 20000004#0000080000000000\n"
+          b"(1700000000.260000) can0 7E0#02010C T\n"
+          b"(1700000000.261000) can0 7E8#04410C1AF8 R\r\n")
+    write(out, "fuzz_candump", "segmented",
+          b"(1.000000) can0 7E0#0209020000000000\n"
+          b"(1.004000) can0 7E8#1014490201414243\n"
+          b"(1.004500) can0 7E0#3000000000000000\n"
+          b"(1.005000) can0 7E8#2144454647484950\n"
+          b"(1.005500) can0 7E8#2251525354555657\n")
     return 0
 
 

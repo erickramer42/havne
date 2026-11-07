@@ -185,6 +185,10 @@ int main(void)
     char reading_text[8];
     ecuio_check_options_t check_options;
     ecuio_check_summary_t check_summary;
+    ecuio_export_options_t export_options;
+    ecuio_export_report_t export_report;
+    ecuio_import_options_t import_options;
+    ecuio_import_report_t import_report;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     frame.arbitration_id = 0x7FF;
@@ -402,6 +406,25 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_check(".", &check_options, NULL, NULL, NULL,
                               &check_summary) != ECUIO_ERR_INVALID_ARGUMENT) {
+        return 1;
+    }
+    /* Exports and imports (ADR-0054): their layouts and refusals */
+    memset(&export_options, 0, sizeof export_options);
+    memset(&import_options, 0, sizeof import_options);
+    export_options.format = ECUIO_EXPORT_PCAPNG;
+    import_options.format = ECUIO_IMPORT_CANDUMP;
+    if (sizeof(ecuio_export_report_t) != 120 ||
+        offsetof(ecuio_export_report_t, failed_class) != 80 ||
+        offsetof(ecuio_export_options_t, folder_utf8) != 24 ||
+        sizeof(ecuio_import_report_t) != 80 ||
+        offsetof(ecuio_import_options_t, in_path_utf8) != 8 ||
+        ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED != 4u ||
+        ECUIO_EXPORT_LEFT_OUT_COUNT != 5u ||
+        ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
+        ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     if (ecuio_obdb_import("{}", 2, NULL, NULL, NULL, NULL, NULL) !=
