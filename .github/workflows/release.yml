@@ -115,19 +115,36 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      # The same Qt install as ci.yml's win-build; see the notes there.
+      # The same Qt install as ci.yml's win-build, from the kit main's CI
+      # saved when there is one (a tag reads the default branch's
+      # caches, as android's and linux's install-qt-action do); see the
+      # notes there. A release never saves it.
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}\Qt
+          key: qt-windows-6.12.0-win64_msvc2022_64-aqt-076e1659
+
       - name: Install aqtinstall (pinned master commit)
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
 
       # A mirror that stops answering fails the step at 10 minutes (an
       # install takes about half of one), not the job at 30, so a re-run
       # of the failed job can follow soon after
       - name: Install Qt 6.12.0
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
         run: |
           $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
           New-Item -ItemType Directory -Force -Path $prefix | Out-Null
           python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
+
+      - name: Point the build at Qt
+        run: |
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          if (-not (Test-Path "$prefix\bin\qmake.exe")) { Write-Error "no Qt at $prefix"; exit 1 }
           "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # build-win32 first: the app's configure finds its x86 surrogate and
@@ -207,6 +224,18 @@ jobs:
           [ -n "${JAVA_HOME_21_X64:-}" ] || { echo "::error::JAVA_HOME_21_X64 is not set on this runner image"; exit 1; }
           echo "APP_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
           echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      # ci.yml android-build's Gradle cache, read only (see the notes
+      # there); a miss downloads as before
+      - name: Restore Gradle's downloads from the cache
+        id: gradle-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/wrapper/dists
+            ~/.gradle/caches/modules-2
+            !~/.gradle/caches/modules-2/*.lock
+          key: gradle-android-qt-6.12.0
 
       # Release, unlike CI's Debug build: optimized, not debuggable, and
       # unsigned until the next step
@@ -311,6 +340,15 @@ jobs:
           t=$(git log -1 --format=%ct)
           echo "SOURCE_DATE_EPOCH=$t" >> "$GITHUB_ENV"
           echo "QT_RCC_SOURCE_DATE_OVERRIDE=$t" >> "$GITHUB_ENV"
+
+      # ci.yml linux-appimage's linuxdeploy cache, read only (see the
+      # notes there); the script checks each file's SHA-256 either way
+      - name: Restore linuxdeploy from the cache
+        id: linuxdeploy-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/havne-linuxdeploy
+          key: linuxdeploy-${{ runner.arch }}-${{ hashFiles('packaging/linux/make-appimage.sh') }}
 
       - name: Build and pack the AppImage
         run: |

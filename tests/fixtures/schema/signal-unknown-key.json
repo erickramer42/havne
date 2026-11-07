@@ -1,0 +1,16 @@
+{
+  "havne_signals": 1,
+  "name": "Schema unknown key",
+  "notes": "Synthetic: its signal gives units for unit, a key the loader doesn't know",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "road_speed",
+      "name": "Road Speed",
+      "read": { "service": "01", "number": "0D" },
+      "field": { "byte": 0, "bits": 8 },
+      "units": "km/h"
+    }
+  ]
+}

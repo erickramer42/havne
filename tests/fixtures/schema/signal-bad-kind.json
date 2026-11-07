@@ -1,0 +1,17 @@
+{
+  "havne_signals": 1,
+  "name": "Schema bad kind",
+  "notes": "Synthetic: its signal's kind is one no loader reads",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "road_speed",
+      "name": "Road Speed",
+      "kind": "float",
+      "read": { "service": "01", "number": "0D" },
+      "field": { "byte": 0, "bits": 32 },
+      "unit": "km/h"
+    }
+  ]
+}
