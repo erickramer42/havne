@@ -123,11 +123,12 @@ if [ "$tests_only" = 0 ]; then
             --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
         [ "$rc" = 0 ] || build_failed win32
         # The x86 shared core, once the build above has configured the
-        # option (an older tree's cache gets it there)
+        # option (an older tree's cache gets it there), and the x86
+        # havne-cli, whose ELM327 emulator PythonTest.test_read_pids runs
         if grep -q '^HAVNE_SHARED_CORE:BOOL=ON' build-win32/CMakeCache.txt; then
             win32_dur=$dur
             run win32-shared cmake --build build-win32 --config Release --parallel \
-                --target ecuio test_c_abi_shared
+                --target ecuio test_c_abi_shared havne-cli
             [ "$rc" = 0 ] || build_failed win32-shared
             cat "$LOGDIR/win32-shared.log" >> "$LOGDIR/win32.log"
             dur=$((win32_dur + dur))

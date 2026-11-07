@@ -200,6 +200,10 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # packaging/python/make_wheel.py, the havne wheel (ADR-0053 section 6):
+    # made-up PE, ELF and Mach-O files and a made-up package
+    add_test(NAME WheelTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/packaging/python/make_wheel.py selftest)
     # scripts/vpic_wmi.py, the VIN table's generator (ADR-0043 section 2)
     add_test(NAME VpicWmiTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/vpic_wmi.py --selftest)
@@ -964,12 +968,48 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
             list(APPEND _app_env "HAVNE_FAKE_J2534_DLL=$<TARGET_FILE:fake_j2534>"
                  "${_app_surrogate_var}=$<TARGET_FILE:ecuio-j2534-surrogate>")
         endif()
+        if(TARGET havne-cli)   # test_read_pids' ELM327 emulator
+            list(APPEND _app_env "HAVNE_CLI=$<TARGET_FILE:havne-cli>")
+        endif()
         set_tests_properties(PythonTest.${_app_name} PROPERTIES
             ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
         if(_app_name STREQUAL "test_vcan")
             set_tests_properties(PythonTest.${_app_name} PROPERTIES RUN_SERIAL TRUE)
         endif()
     endforeach()
+
+    # The wheel itself (tests/wheel_installed.py): made from this tree's
+    # shared core, installed in a fresh venv and used from outside the
+    # tree. 64-bit trees only, since no x86 wheel ships. On Windows the x86
+    # surrogate is build-win32's when there is one (HAVNE_SURROGATE_SOURCE
+    # or the sibling tree, as the app's copy finds it). Not in a sanitizer
+    # tree (core-sanitizers): its library needs the sanitizers' runtimes,
+    # which make_wheel.py refuses as no wheel can count on them.
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT "${CMAKE_C_FLAGS} ${CMAKE_CXX_FLAGS}" MATCHES "-fsanitize")
+        set(_app_wheel_args --library $<TARGET_FILE:ecuio>)
+        if(WIN32)
+            list(APPEND _app_wheel_args
+                --surrogate-x64 $<TARGET_FILE:ecuio-j2534-surrogate>
+                --fake-dll $<TARGET_FILE:fake_j2534>)
+            set(_app_wheel_x86 "${HAVNE_SURROGATE_SOURCE}")
+            if(NOT _app_wheel_x86 AND EXISTS
+                    "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
+                set(_app_wheel_x86 "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
+            endif()
+            if(_app_wheel_x86)
+                list(APPEND _app_wheel_args --surrogate-x86 ${_app_wheel_x86})
+                # the Win32 tree's fake beside it, run through the wheel's x86 surrogate
+                get_filename_component(_app_wheel_win32 "${_app_wheel_x86}/../../.." ABSOLUTE)
+                if(EXISTS "${_app_wheel_win32}/tests/Release/fake_j2534.dll")
+                    list(APPEND _app_wheel_args --fake-dll-x86 "${_app_wheel_win32}/tests/Release/fake_j2534.dll")
+                endif()
+            endif()
+        endif()
+        add_test(NAME WheelTest.Installed
+            COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/tests/wheel_installed.py ${_app_wheel_args})
+        set_tests_properties(WheelTest.Installed PROPERTIES
+            SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
+    endif()
 endif()
 
 # Core's USDT probes (ADR-0034 section 4) in each binary that links core and

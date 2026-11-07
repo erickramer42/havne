@@ -125,11 +125,42 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   and a plugin's variants, over core's shared library through ctypes,
   with no compiler at install time
   ([ADR-0053](docs/adr/0053-python-bindings.md)). It runs from the source
-  tree against a built shared core (`HAVNE_LIBRARY`); the wheel comes
-  with the release.
+  tree against a built shared core (`HAVNE_LIBRARY`), or installs from
+  a release's wheel (below).
 - Core's pull queue tells a replay's end: once a replay that doesn't loop
   has played its last frame, a read returns `ECUIO_ERR_STREAM_ENDED`, so
   a loop over a replay's values finishes.
+- A vehicle's baseline recording: on the Recordings page, "Use as
+  <vehicle>'s baseline" keeps an open recording as the baseline of the
+  vehicle picked in Settings, a Baseline badge marks its row, and
+  "Compare with the baseline" overlays it on another recording, the two
+  lined up on their engine starts (RPM reaching 500 after being below
+  100). A baseline whose folder was moved or deleted says so, with a way
+  to clear it. The compare's alignments gain "Align engine starts", and
+  `havne-cli view <run> <baseline> --align-on engine-start` lines up the
+  same two recordings
+  ([ADR-0049](docs/adr/0049-recordings-in-core.md)'s appendix "a
+  vehicle's baseline").
+- A Python wheel with each release, for Windows x64, Linux x86_64 and
+  64-bit ARM, and macOS on Apple silicon (13 or later):
+  `pip install havne-<version>-py3-none-<platform>.whl` installs the
+  `havne` package with core's library inside, and on Windows the J2534
+  surrogates, so no build, `HAVNE_LIBRARY` or Visual C++
+  redistributable is needed. Python 3.11 or later
+  ([ADR-0053](docs/adr/0053-python-bindings.md)).
+- `python/examples/read_pids.py <uri>` prints the engine speed, vehicle
+  speed and coolant temperature from any session: `mock://`, SocketCAN,
+  an ELM327 adapter or the ELM327 emulator.
+- `havne-cli health` writes a car's health as one file, JSON or text to
+  share with a shop or a buyer: the vehicle from its VIN (model year,
+  make, check digit; never the VIN itself), the emissions inspection's
+  verdict, each ECU's readiness, trouble codes with their titles,
+  freeze frame and the values since the codes were cleared, the
+  identification by name only, then the profile's key values. It reads
+  a live session (reads only, parked or driving) or a recording, and
+  checks the file for the car's identity before writing it
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix "the
+  health report as built").
 
 ## [0.5.1] - 2026-11-06
 

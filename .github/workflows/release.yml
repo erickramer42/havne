@@ -5,7 +5,9 @@ name: Release
 # Visual C++ runtime, running without Qt or Visual Studio), an Android
 # arm64-v8a APK signed with the release key (ADR-0030), a Linux AppImage,
 # and core alone for Linux as a deb and a tarball (ADR-0035), each Linux
-# file for x86_64 and for aarch64 (arm64);
+# file for x86_64 and for aarch64 (arm64); the Python package as a wheel
+# for Windows x64, Linux x86_64 and aarch64 (manylinux_2_39) and macOS
+# arm64 (13.0 and later), each holding the shared core (ADR-0053);
 # beside them the Windows executables' PDBs in a zip of their own
 # (ADR-0034) and havne-cli's Linux debug info as a -dbgsym deb and a
 # -debug tarball. Each comes with its SHA-256, and one signed build
@@ -21,11 +23,14 @@ name: Release
 # A manual run rebuilds an existing tag and replaces the release's files:
 #   gh workflow run release.yml -f tag=v0.3.1
 #
-# Jobs: gate (the tag and CI) -> windows, android and linux, side by side
-# -> publish (the SBOM, checksums, provenance, the release). Each build
-# job writes a <download>.components.json beside its download for the
-# SBOM (packaging/sbom.py). Only android reads the
-# signing key, from the "release" environment's secrets.
+# Jobs: gate (the tag and CI) -> windows, android, linux and macos, side
+# by side -> publish (the SBOM, checksums, provenance, the release). Each
+# build job writes a <download>.components.json beside its download for
+# the SBOM (packaging/sbom.py); those lists are job artifacts only, never
+# release files. Each wheel is installed into a fresh venv and
+# python/examples/read_pids.py run through it before it's uploaded.
+# Only android reads the signing key, from the "release" environment's
+# secrets.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+']
@@ -166,10 +171,28 @@ jobs:
           LINK: /PDBALTPATH:%_PDB%
         run: |
           cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DBUILD_TESTING=OFF
-          cmake --build build --config Release --target havne
+          cmake --build build --config Release --target havne ecuio
 
       - name: Stage, check and zip
         run: pwsh -NoProfile -File packaging/windows/stage.ps1 -Version $env:VERSION
+
+      # The shared core (its C runtime linked in) and both surrogates;
+      # make_wheel.py refuses one that imports a CRT DLL, as stage.ps1
+      # refuses a surrogate that does
+      - name: The wheel
+        env:
+          ECUIO_PYTEST_REQUIRED: '1'   # check_wheel.py fails, never skips
+        run: |
+          # pwsh goes on past a native command's failure: each is checked
+          python -c "import sys; assert sys.version_info >= (3, 11), sys.version"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python packaging/python/make_wheel.py build --version $env:VERSION `
+            --library build/core/Release/ecuio.dll --platform-tag win_amd64 `
+            --surrogate-x86 build-win32/surrogate/Release/ecuio-j2534-surrogate.exe `
+            --surrogate-x64 build/surrogate/Release/ecuio-j2534-surrogate-x64.exe --out dist
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python packaging/python/check_wheel.py (Get-Item dist/havne-*-py3-none-win_amd64.whl).FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Upload the zips
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -179,6 +202,8 @@ jobs:
             dist/havne-${{ env.VERSION }}-windows-x64.zip
             dist/havne-${{ env.VERSION }}-windows-x64.zip.components.json
             dist/havne-${{ env.VERSION }}-windows-x64-symbols.zip
+            dist/havne-*-py3-none-win_amd64.whl
+            dist/havne-*-py3-none-win_amd64.whl.components.json
           if-no-files-found: error
           retention-days: 1
 
@@ -359,6 +384,23 @@ jobs:
       - name: Build the core packages
         run: bash packaging/linux/make-core-packages.sh "$VERSION" build-packages dist
 
+      # The packages' tree built the shared core too, reproducibly and
+      # with -g: the wheel takes it with its debug info stripped (the
+      # build ID stays). manylinux_2_39 is this runner's glibc, 24.04's;
+      # make_wheel.py refuses a library that needs a later one or links
+      # a library manylinux leaves out
+      - name: The wheel
+        env:
+          ECUIO_PYTEST_REQUIRED: '1'   # check_wheel.py fails, never skips
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+          lib="$RUNNER_TEMP/$(basename "$(readlink -f build-packages/core/libecuio.so)")"
+          cp "$(readlink -f build-packages/core/libecuio.so)" "$lib"
+          strip --strip-debug "$lib"
+          python3 packaging/python/make_wheel.py build --version "$VERSION" --library "$lib" \
+            --platform-tag "manylinux_2_39_$(uname -m)" --out dist
+          python3 packaging/python/check_wheel.py dist/havne-*-py3-none-manylinux_2_39_"$(uname -m)".whl
+
       - name: Upload the Linux files
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -366,11 +408,57 @@ jobs:
           path: |
             dist/havne-${{ env.VERSION }}-linux-${{ matrix.arch }}.AppImage*
             dist/havne-core*
+            dist/havne-*-py3-none-manylinux_2_39_${{ matrix.arch }}.whl*
+          if-no-files-found: error
+          retention-days: 1
+
+  # The shared core alone, for the wheel: Qt 6.12 needs macOS 14.4, but
+  # core needs nothing past 13.0, so this tree is core-only and the
+  # whole of it targets 13.0 (ADR-0053's appendix "the wheel as built").
+  # ci.yml's macos-build builds the app at Qt's own minimum; this build
+  # is the only one at 13.0, which the rc's run checks
+  macos:
+    needs: gate
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Build the shared core for macOS 13.0
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build --target ecuio --parallel 4
+
+      - name: The wheel
+        env:
+          ECUIO_PYTEST_REQUIRED: '1'   # check_wheel.py fails, never skips
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+          python3 packaging/python/make_wheel.py build --version "$VERSION" \
+            --library "$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' build/core/libecuio.dylib)" \
+            --platform-tag macosx_13_0_arm64 --out dist
+          python3 packaging/python/check_wheel.py dist/havne-*-py3-none-macosx_13_0_arm64.whl
+
+      - name: Upload the wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: |
+            dist/havne-*-py3-none-macosx_13_0_arm64.whl
+            dist/havne-*-py3-none-macosx_13_0_arm64.whl.components.json
           if-no-files-found: error
           retention-days: 1
 
   publish:
-    needs: [gate, windows, android, linux]
+    needs: [gate, windows, android, linux, macos]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -416,6 +504,12 @@ jobs:
             echo "TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64.tar.gz"
             echo "DEBUG_TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64-debug.tar.gz"
             echo "SBOM=dist/havne-$VERSION.spdx.json"
+            # the wheels carry the version as PEP 440 spells it: 0.6.0rc1
+            wheel="dist/havne-${VERSION/-rc/rc}-py3-none"
+            echo "WHEEL_WIN=$wheel-win_amd64.whl"
+            echo "WHEEL_LINUX=$wheel-manylinux_2_39_x86_64.whl"
+            echo "WHEEL_LINUX_ARM=$wheel-manylinux_2_39_aarch64.whl"
+            echo "WHEEL_MACOS=$wheel-macosx_13_0_arm64.whl"
           } >> "$GITHUB_ENV"
 
       # One document over every download but the debug files, which carry
@@ -425,7 +519,7 @@ jobs:
         run: |
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python3 packaging/sbom.py build \
             --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL" \
-            "$APPIMAGE_ARM" "$DEB_ARM" "$TARBALL_ARM"
+            "$APPIMAGE_ARM" "$DEB_ARM" "$TARBALL_ARM" "$WHEEL_WIN" "$WHEEL_LINUX" "$WHEEL_LINUX_ARM" "$WHEEL_MACOS"
           python3 -m venv "$RUNNER_TEMP/spdx"
           "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
           "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$SBOM"
@@ -435,7 +529,8 @@ jobs:
           (cd dist && sha256sum "${ZIP#dist/}" "${SYMBOLS#dist/}" "${APK#dist/}" "${APPIMAGE#dist/}" \
             "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" \
             "${APPIMAGE_ARM#dist/}" "${DEB_ARM#dist/}" "${DBGSYM_ARM#dist/}" "${TARBALL_ARM#dist/}" \
-            "${DEBUG_TARBALL_ARM#dist/}" "${SBOM#dist/}" \
+            "${DEBUG_TARBALL_ARM#dist/}" "${WHEEL_WIN#dist/}" "${WHEEL_LINUX#dist/}" \
+            "${WHEEL_LINUX_ARM#dist/}" "${WHEEL_MACOS#dist/}" "${SBOM#dist/}" \
             > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 
@@ -458,6 +553,10 @@ jobs:
             ${{ env.DBGSYM_ARM }}
             ${{ env.TARBALL_ARM }}
             ${{ env.DEBUG_TARBALL_ARM }}
+            ${{ env.WHEEL_WIN }}
+            ${{ env.WHEEL_LINUX }}
+            ${{ env.WHEEL_LINUX_ARM }}
+            ${{ env.WHEEL_MACOS }}
 
       # Checked with gh attestation verify <download> -R erickramer42/havne
       # --predicate-type https://spdx.dev/Document/v2.3
@@ -474,6 +573,10 @@ jobs:
             ${{ env.APPIMAGE_ARM }}
             ${{ env.DEB_ARM }}
             ${{ env.TARBALL_ARM }}
+            ${{ env.WHEEL_WIN }}
+            ${{ env.WHEEL_LINUX }}
+            ${{ env.WHEEL_LINUX_ARM }}
+            ${{ env.WHEEL_MACOS }}
 
       # The same signed provenance (a Sigstore bundle) as one release
       # file. OpenSSF Scorecard's Signed-Releases check reads release
@@ -489,6 +592,7 @@ jobs:
         run: |
           files=("$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"
             "$APPIMAGE_ARM" "$DEB_ARM" "$DBGSYM_ARM" "$TARBALL_ARM" "$DEBUG_TARBALL_ARM"
+            "$WHEEL_WIN" "$WHEEL_LINUX" "$WHEEL_LINUX_ARM" "$WHEEL_MACOS"
             "$SBOM" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber

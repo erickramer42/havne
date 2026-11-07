@@ -208,8 +208,9 @@ background too ([roadmap](#roadmap)).
   - **The UI:** Dashboard gauges with peak hold and stale dimming,
     Live's table and strip chart, the Log page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
-    findings, two runs overlaid and aligned, and a Mark while
-    recording), one signal filter on Live and the viewer (words, plotted
+    findings, two runs overlaid and aligned, a vehicle's baseline
+    recording overlaid on a new run aligned on the engine starts, and a
+    Mark while recording), one signal filter on Live and the viewer (words, plotted
     only, the part of the car), and Settings composing the URI. Live's
     and the viewer's chart can take the whole page (a button, a
     double-click or `F`; on a phone on its side by default), a splitter
@@ -379,7 +380,8 @@ background too ([roadmap](#roadmap)).
     exported by `havne-cli export` as pcapng (its frames), CSV (its
     values, one row per sample) or a folder (a copy that reads and
     replays as the original), scrubbed by construction and checked
-    ([ADR-0054](docs/adr/0054-exports-and-imports.md)), and a
+    ([ADR-0054](docs/adr/0054-exports-and-imports.md)), summed up as
+    a scrubbed health report by `havne-cli health`, and a
     `candump -L` log imported as a recording (`havne-cli import
     candump`); the app exports only the Log page's frames and imports
     nothing yet, and a surrogate
@@ -582,18 +584,35 @@ append-only.
   - the `havne` Python package over the shared core, its tests in CI
     (step 3 of ADR-0053; its appendix "the havne package as built"),
     and a replay's end told through the pull queue
-    (`ECUIO_ERR_STREAM_ENDED`).
-- **In progress:** the bindings' wheel (step 4); the health report
-  (ADR-0054's appendix "the health report as built"): one scrubbed
-  file of a car's health in JSON or text, in core over a live session,
-  a recording's, `havne-cli health` and the app's Save report to come;
-  a vehicle's baseline recording.
+    (`ECUIO_ERR_STREAM_ENDED`);
+  - a vehicle's baseline recording, one per vehicle, overlaid on a new
+    run aligned on its engine start (core's
+    `ECUIO_RECORDING_FIND_ENGINE_START`, the Recordings page, `havne-cli
+    view --align-on engine-start`; ADR-0049's appendix "a vehicle's
+    baseline");
+  - the wheel (step 4 of ADR-0053; its appendix "the wheel as
+    built"): one per platform with the shared core inside, each release
+    job installing it into a fresh venv and running
+    `python/examples/read_pids.py` through it, which also reads
+    SocketCAN on `vcan0` and the ELM327 emulator. Left: the macOS 13.0
+    build and `gh attestation verify` on a wheel run first on v0.6.0's
+    release candidate;
+  - the health report (ADR-0054's appendix "the health report as
+    built"): one scrubbed file of a car's health in JSON or text, from
+    a live session or a recording (each ECU's reports rebuilt from its
+    replies in frames.csv), in core and `havne-cli health`.
+- **In progress:** the health report's Save report in the app, on
+  Diagnostics and in the log viewer.
 - **To come:** CSV import, and the Python examples against the
   simulated ECU.
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
-the values (met: `PythonTest.test_vcan`, the simulated ECU on `vcan0`);
-an export of a recording passes the leak check; a recording
+the values, and the same script runs on Windows against the ELM327
+emulator and on every platform against `mock://` (met:
+`python/examples/read_pids.py`, through `PythonTest.test_vcan` on
+`vcan0`, `PythonTest.test_read_pids` and each wheel's install check);
+the wheel installs from a release's downloads and passes `gh
+attestation verify` (v0.6.0's release candidate); an export of a recording passes the leak check; a recording
 opens in Wireshark (met: `CliTransferRunTest.tshark`, its ISO-TP
 reassembled); python-OBD reads the simulated car through the ELM327
 emulator on Windows (met: `CliElm327RunTest.PythonObdReadsIt`).

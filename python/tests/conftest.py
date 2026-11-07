@@ -3,12 +3,14 @@
 #
 # The tree's own fixtures, by path from here: the replay fixture (a
 # scrubbed recording of the test car's engine start), the signal files
-# and the example plugin. The package comes from python/ (ctest's
+# and the example plugin; run_example runs a python/examples/ script as a
+# user would, in a child Python. The package comes from python/ (ctest's
 # PYTHONPATH) and its library from HAVNE_LIBRARY. Every connect in these
 # tests is mock://, replay://, the simulated ECU, vcan0 or the fake J2534
 # DLL: never a real bus.
 
 import os
+import subprocess
 import sys
 
 import pytest
@@ -20,10 +22,23 @@ sys.path.insert(0, os.path.join(ROOT, "python"))
 REPLAY = os.path.join(ROOT, "tests", "fixtures", "replay", "2026-10-25-engine-start")
 SIGNALS = os.path.join(ROOT, "tests", "fixtures", "signals")
 PLUGINS = os.path.join(ROOT, "plugins")
+EXAMPLES = os.path.join(ROOT, "python", "examples")
 
 
 def replay_uri(query=""):
     return "replay://" + REPLAY.replace("\\", "/") + query
+
+
+def run_example(name, *args, timeout=120):
+    """python/examples/<name> in a child Python, the tree's package and
+    this tree's library (HAVNE_LIBRARY passes through): its exit status,
+    output and errors"""
+    env = {**os.environ, "PYTHONPATH": os.path.join(ROOT, "python"),
+           "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"}
+    run = subprocess.run([sys.executable, "-B", os.path.join(EXAMPLES, name), *args],
+                         capture_output=True, text=True, encoding="utf-8", env=env,
+                         timeout=timeout)
+    return run.returncode, run.stdout, run.stderr
 
 
 @pytest.fixture

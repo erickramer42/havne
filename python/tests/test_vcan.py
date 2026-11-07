@@ -4,16 +4,17 @@
 #          prints the values"
 #
 # The simulated ECU answers on vcan0 as the engine ECU (havne-cli sim's),
-# and a script opens socketcan://vcan0 under obd2, reads the decoded PIDs
-# from a values stream and prints them, exactly as a user's script would.
-# Skips without Linux or vcan0, and fails instead under
+# and python/examples/read_pids.py, the Done-when's script, opens
+# socketcan://vcan0 under obd2 and prints the decoded PIDs, run as a user
+# runs it. Skips without Linux or vcan0, and fails instead under
 # ECUIO_VCAN_REQUIRED=1, as the C++ vcan suites do (CI's linux-build).
 
 import os
 import sys
-import time
 
 import pytest
+
+from conftest import run_example
 
 import havne
 
@@ -36,22 +37,12 @@ if why and os.environ.get("ECUIO_VCAN_REQUIRED") != "1":
     pytest.skip(why, allow_module_level=True)
 
 
-def test_a_script_opens_socketcan_decodes_pids_and_prints_them(capsys):
+def test_a_script_opens_socketcan_decodes_pids_and_prints_them():
     assert why is None, why
-    wanted = {"RPM", "Vehicle Speed", "Coolant Temp"}
-    seen = {}
     with havne.Sim("mock://sim?values=canned", interface=IFACE):
-        with havne.Session(f"socketcan://{IFACE}?profile=obd2") as s:
-            values = s.values()
-            s.start()
-            until = time.monotonic() + 20
-            while not wanted <= seen.keys() and time.monotonic() < until:
-                for v in values.read(0.2):
-                    if v.name in wanted:
-                        seen[v.name] = v
-                        print(f"{v.name}: {v.value:g} {v.unit}")
-    assert wanted <= seen.keys(), f"decoded only {sorted(seen)}"
-    assert seen["RPM"].value == 2000          # the canned engine speed
-    assert seen["RPM"].id == 0x7E8
-    out = capsys.readouterr().out
-    assert "RPM: 2000 RPM" in out
+        rc, out, err = run_example("read_pids.py", f"socketcan://{IFACE}?profile=obd2")
+    assert rc == 0, err
+    printed = out.splitlines()
+    assert "RPM: 2000 RPM" in printed                     # the canned engine speed
+    assert any(line.startswith("Vehicle Speed: ") for line in printed)
+    assert any(line.startswith("Coolant Temp: ") for line in printed)
