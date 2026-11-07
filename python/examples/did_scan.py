@@ -53,7 +53,9 @@ def did_scan(uri, first=0xF180, last=0xF1FF, ecus=(0x7E8,), seconds=60.0, out=sy
         s.start()
         until = time.monotonic() + seconds
         done, settle = False, None
-        while time.monotonic() < until:
+        # A stream that ends (a replay's last frame, the session closed)
+        # brings no more answers: the scan stops with it, as read_pids.py
+        while time.monotonic() < until and not values.ended:
             for v in values.read(0.1):
                 name = v.name.split()
                 if v.kind != havne.c.ECUIO_VALUE_HEX or "DID" not in name:
@@ -71,6 +73,9 @@ def did_scan(uri, first=0xF180, last=0xF1FF, ecus=(0x7E8,), seconds=60.0, out=sy
                     settle = time.monotonic() + 0.5   # the last answers' values
             elif time.monotonic() >= settle:
                 break
+        if values.ended and not done:
+            print(f"the stream ended before the scan completed ({values.ended})",
+                  file=out, flush=True)
         for sup in channels(s, ecus):
             if sup.scan_total:
                 print(f"{sup.rx_id:X}  scanned {sup.scan_done} of {sup.scan_total}, "

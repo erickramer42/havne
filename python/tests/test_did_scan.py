@@ -3,12 +3,15 @@
 #          vcan0 for the sim)
 #
 # python/examples/did_scan.py run as a user runs it: core's DID scan
-# (ADR-0020) through a session. The mock answers every DID itself; on
+# (ADR-0020) through a session. A stream that ends ends the scan. The
+# mock answers every DID itself; on
 # vcan0 the simulated ECU's second module answers its own DIDs and the
 # engine ECU refuses Service 0x22, and the unbound sim, asked each DID of
 # the range, is the oracle for what the scan must print.
 
-from conftest import need_vcan, run_example
+import time
+
+from conftest import need_vcan, replay_uri, run_example
 
 import havne
 
@@ -32,6 +35,16 @@ def test_the_mock_answers_every_did_of_the_range():
     found = printed(out)
     assert sorted(found) == [(0x7E8, d) for d in range(0xF180, 0xF190)]
     assert "7E8  found 16: the transport answers DIDs itself" in out
+
+
+def test_a_stream_that_ends_ends_the_scan():
+    # A replay answers no DID and ends after its last frame: the scan
+    # stops with it, well inside --seconds
+    t = time.monotonic()
+    rc, out, err = run_example("did_scan.py", replay_uri("?speed=max"), "--seconds", "30")
+    assert time.monotonic() - t < 15, "the scan waited out --seconds"
+    assert rc == 1, out + err
+    assert "the stream ended before the scan completed (stream ended)" in out, out
 
 
 def test_a_bad_range_or_a_uri_with_a_profile_is_refused():
