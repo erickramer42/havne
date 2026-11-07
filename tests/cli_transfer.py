@@ -52,7 +52,10 @@ UTC = 1700000000250000
 
 
 def run(cli, args, want=0):
-    done = subprocess.run([cli] + args, capture_output=True)
+    # No standard input: stream --record reads it as marks, and a test
+    # run's own input (a script fed to a shell) would become markers
+    done = subprocess.run([cli] + args, capture_output=True,
+                          stdin=subprocess.DEVNULL)
     lines = [json.loads(l) for l in done.stdout.decode("utf-8").splitlines()]
     if done.returncode != want:
         raise SystemExit(f"FAIL  {' '.join(args)} exited {done.returncode}, "
