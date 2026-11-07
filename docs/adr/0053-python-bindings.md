@@ -1,6 +1,6 @@
 # ADR-0053: Python bindings: ctypes over the C ABI, a wheel per platform
 
-- **Status:** Proposed.
+- **Status:** Accepted.
 - **Date:** 2026-11-06.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary, the product's name only where a user
@@ -76,6 +76,26 @@ the `abi` job's version script on Linux, an exports list on macOS and a
 are never exported. The static archive stays as it is for the app,
 `havne-cli` and the tests.
 
+The list is generated from the installed public headers' declarations,
+never kept by hand, and CI checks the built library against it:
+
+- **The exports equal the declarations:** every public function is
+  exported, and nothing else is (`dumpbin /exports` on Windows, `nm -D`
+  on Linux and macOS, compared with the headers' list).
+- **Every allocation has its free:** a public function that hands the
+  caller memory core allocated names its own `_free` in the same
+  header (`ecuio_obdb_free` and `ecuio_signal_file_free` today), and
+  the check fails on one that doesn't. A program that frees core's
+  memory with its own C runtime is the classic crash across a Windows
+  DLL boundary, since the two runtimes keep separate heaps.
+
+### 2a. A numeric version
+
+Core gains `ecuio_version(uint32_t* major, uint32_t* minor, uint32_t*
+patch)`, an append-only addition beside `ecuio_version_string`, so a
+program that loads the library compares numbers instead of parsing
+text. The package's load-time check (section 6) uses it.
+
 ### 3. The surrogates travel with the library
 
 On Windows the wheel carries both surrogate executables beside
@@ -123,6 +143,14 @@ every frame records the session and reads the recording.
 - The simulated ECU (ADR-0046), and its direct `ecuio_sim_ask`
   (ADR-0055): a script asks it a request and reads each node's reply
   with no bus, on every platform.
+- **Signal sets through signal files:** a script defines its own
+  signals as a signal file (ADR-0051's JSON, given as text or a path)
+  and loads it through `ecuio_signal_file_*`, never by filling
+  `ecuio_signal_def_t` structs in Python. `ecuio_validate_signal_set`
+  refuses any set whose `layout_version` isn't core's, and the layout's
+  next version (a wider bit length for a DBC signal's 64 bits, say)
+  would refuse every script that built one by hand; a signal file
+  reads the same across layouts.
 - The clear goes through core's own gate (ADR-0038). The binding takes
   `confirm=True` as `havne-cli clear --yes` does, and writes nothing
   core wouldn't. The bindings add no write of their own: a write that
@@ -139,8 +167,9 @@ every frame records the session and reads the recording.
   oldest one still supported upstream when the wheel is built
   (3.11 today), tested in CI.
 - **Versioned with Havne:** the wheel's version is the release's. The
-  package reads core's version through `ecuio_version_string` at load and
-  refuses a library of another major version, with words naming both.
+  package reads core's version through `ecuio_version` (section 2a) at
+  load and refuses a library of another major version, with words
+  naming both.
 - **Attached to each release** beside the other downloads, in
   `SHA256SUMS.txt`, the provenance bundle and the SBOM (ADR-0035's
   pattern), built by `release.yml` from the tagged commit.
@@ -208,7 +237,12 @@ release's downloads and passes `gh attestation verify`.
   becomes a promise: a public function added is exported, and the
   `abi` job's comparison covers what the wheel loads.
 - Every public function needs a ctypes declaration in the same change,
-  which the header test enforces.
+  which the header test enforces, and an entry in the generated export
+  list, which the exports check enforces.
+- A public struct that grows only through its reserved room, and an
+  array element (`ecuio_enum_entry_t`, `ecuio_channel_decl_t`,
+  `ecuio_obdb_note_t`, whose size is the array's stride) or a struct
+  with none (`ecuio_dtc_list_t`), grows as a new struct beside it.
 - Core's ABI grows by the pull queue, which the app and `havne-cli`
   don't need and which every other language's binding can use.
 - The release grows by four wheels, and its checks (checksums,
