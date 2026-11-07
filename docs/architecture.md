@@ -168,7 +168,7 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   extend `obd2`. Core never opens a path: the app and `havne-cli`
   read the file, so a phone's picked file goes through the same load.
   `havne-cli signals import obdb` converts an OBDb signal set into one
-  (`obdb.h`). A recording holds the file it decoded with as
+  (`obdb.h`), and so does Settings (`app/obdbimport.h`). A recording holds the file it decoded with as
   `signals.json`, its hash in `events.log`'s header, and a replay of
   that recording decodes through that copy when it still matches,
   under the recorded name or one of its own, so a file edited or
