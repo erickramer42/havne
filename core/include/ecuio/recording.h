@@ -628,8 +628,7 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
 /* --- Exports and imports (ADR-0054) --------------------------------- */
 
 /* ecuio_export_options_t.format; append-only */
-#define ECUIO_EXPORT_FOLDER 1u /* a scrubbed copy of the folder: not built,
-                                  ECUIO_ERR_NOT_IMPLEMENTED */
+#define ECUIO_EXPORT_FOLDER 1u /* a scrubbed copy of the folder */
 #define ECUIO_EXPORT_CSV    2u /* the values over a range, a row each */
 #define ECUIO_EXPORT_PCAPNG 3u /* the frames for Wireshark (section 3) */
 
@@ -680,9 +679,11 @@ typedef struct ecuio_export_report {
     uint32_t failed_class; /* the check's: a class plus one, 0 when it
                               passed or didn't run */
     uint32_t flags;        /* zero */
-    uint64_t values;       /* CSV: the values written; 0 for pcapng */
-    uint64_t signal_count; /* CSV: the signals they're of */
-    uint64_t reserved[2];  /* zero; ABI growth space */
+    uint64_t values;       /* CSV, folder: the values written; 0 for pcapng */
+    uint64_t signal_count; /* CSV, folder: the signals they're of */
+    uint32_t files;          /* folder: the files written */
+    uint32_t files_left_out; /* folder: the files it doesn't know */
+    uint64_t reserved[1];    /* zero; ABI growth space */
 } ecuio_export_report_t;
 
 #if defined(__cplusplus)
@@ -694,6 +695,10 @@ static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
               "export report failed_class offset is ABI");
 static_assert(offsetof(ecuio_export_report_t, values) == 88,
               "export report values offset is ABI");
+static_assert(offsetof(ecuio_export_report_t, files) == 104,
+              "export report files offset is ABI");
+static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
+              "export report files_left_out offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(ECUIO_EXPORT_LEFT_OUT_COUNT <= 8, "the report holds 8 classes");
 _Static_assert(sizeof(ecuio_export_report_t) == 120,
@@ -702,6 +707,10 @@ _Static_assert(offsetof(ecuio_export_report_t, failed_class) == 80,
                "export report failed_class offset is ABI");
 _Static_assert(offsetof(ecuio_export_report_t, values) == 88,
                "export report values offset is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, files) == 104,
+               "export report files offset is ABI");
+_Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
+               "export report files_left_out offset is ABI");
 #endif
 
 /*
@@ -719,6 +728,15 @@ _Static_assert(offsetof(ecuio_export_report_t, values) == 88,
  * name, unit or raw text value that starts as a spreadsheet formula
  * does (=, +, -, @, a tab, a CR) fails it, while a number written as
  * recorded, such as -12.5, is exempt. Markers aren't written.
+ * ECUIO_EXPORT_FOLDER makes out_path_utf8 a scrubbed copy of the
+ * folder (the caller names it; the source's name, which may hold the
+ * vehicle's label, is never carried): frames.csv's kept rows as
+ * recorded, signals.csv by the CSV's classes, events.log's header and
+ * its link, drop, asleep and end lines (the URI's authority as
+ * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
+ * caller's notes left out), markers.csv with its labels as typed,
+ * latency.csv and signals.json, each file through the check; a file it
+ * doesn't know is left out and counted (files_left_out).
  * Deterministic: the same recording and options give the same bytes.
  * report may be NULL. ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;

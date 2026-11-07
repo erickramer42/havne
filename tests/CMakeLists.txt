@@ -340,6 +340,14 @@ if(TARGET havne-cli)
                     csv $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.csv PROPERTIES TIMEOUT 60)
+        # Folder copies, each read and replayed as its source: the
+        # findings fixture, a recording of values alone, a mock's
+        add_test(NAME CliTransferRunTest.folder
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    folder $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
         # A candump -L log of the simulated car on vcan0 imported and read
         # through obd2: its values the direct session's (Linux; skipped
         # without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED; serial:

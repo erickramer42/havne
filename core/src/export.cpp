@@ -1,6 +1,6 @@
 // File/layer: core/src/export.cpp | C++17, Qt-free; a recording out to
 //             another tool's format (ADR-0054 sections 1 and 3)
-// Testing: UNIT: ExportTest, CsvExportTest (test_core)
+// Testing: UNIT: ExportTest, CsvExportTest, FolderExportTest (test_core)
 //
 // ecuio_export: frames.csv read twice. The first pass classifies every
 // frame (scrub.h), the frames of ISO-TP messages as they crossed the bus
@@ -20,6 +20,13 @@
 // same first pass for the identity values, then signals.csv read twice,
 // to count and then to write each value a scrubbed export keeps, one row
 // a sample (time_s,signal,unit,value), through the same file check.
+//
+// The folder export (ADR-0054's appendix "the folder export as built"): a
+// scrubbed copy of the recording, each file it knows rewritten by the
+// classes (frames.csv by the plan, kept rows as recorded; signals.csv by
+// the CSV's classes; events.log line by line; markers.csv, latency.csv
+// and signals.json as they are), each through its own file check, under
+// <out>.partial until every one passes.
 
 #include "error_detail.h"
 #include "folder_files.h"
@@ -41,6 +48,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -135,6 +143,8 @@ public:
     }
 
     uint64_t host_us() const { return row_.host_us; }
+    /* The row as it was read, its line end taken off */
+    const char* line() const { return buf_.data(); }
     const ecuio_frame_t& frame() const { return *frame_; }
 
 private:
@@ -193,12 +203,15 @@ class recording_export
 public:
     recording_export(const ecuio_export_options_t& o, ecuio_export_report_t& r)
         : o_(o), r_(r), raw_((o.flags & ECUIO_EXPORT_RAW) != 0),
-          made_(new ecuio_frame_t{}), probe_(new ecuio_frame_t{}),
-          tx_(new isotp_tx)
+          folder_(o.format == ECUIO_EXPORT_FOLDER), made_(new ecuio_frame_t{}),
+          probe_(new ecuio_frame_t{}), tx_(new isotp_tx)
     {}
 
     bool run(const std::string& folder, const std::string& out, bool* made)
     {
+        if (folder_) {
+            return run_folder(folder, out);
+        }
         const bool csv_out = o_.format == ECUIO_EXPORT_CSV;
         if (!read_header(folder) ||
             (!raw_ && (!read_text_values(folder) || !text_defs(folder))) ||
@@ -465,7 +478,7 @@ private:
                 continue;
             }
             if ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0) {
-                if (!re_segmentable(f)) {
+                if (!folder_ && !re_segmentable(f)) {
                     left_out(s, kUnattributable, false);
                 } else if (!raw_ &&
                            scrub::identification(f.data, f.data_length)) {
@@ -476,6 +489,8 @@ private:
                 } else if (!raw_ && text_message(f.arbitration_id, f.flags,
                                                  f.data, f.data_length)) {
                     left_out(s, kTextValues, false);
+                } else if (folder_ && in_range(s.host_us)) {
+                    ++r_.frames; /* kept whole, one row */
                 } else if (in_range(s.host_us)) {
                     const uint64_t n =
                         segments(f.arbitration_id,
@@ -488,7 +503,7 @@ private:
             }
             uint8_t bytes[pc::kFdBytes];
             uint32_t n = 0;
-            if (!pc::socketcan(f, bytes, &n)) {
+            if (!folder_ && !pc::socketcan(f, bytes, &n)) {
                 left_out(s, kUnattributable, false);
             } else if (!raw_ && text_message(f.arbitration_id, f.flags, f.data,
                                              f.data_length)) {
@@ -762,7 +777,11 @@ private:
         while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
             ++line;
             if (line == 1) {
-                continue; /* the header */
+                if (write && folder_) {
+                    buf_ += buf.data(); /* the header, its BOM with it */
+                    buf_ += '\n';
+                }
+                continue;
             }
             const char* bad = nullptr;
             if (too_long ||
@@ -797,7 +816,12 @@ private:
                 last_us_ = row.host_us;
                 continue;
             }
-            put_row(row);
+            if (folder_) {
+                buf_ += buf.data();
+                buf_ += '\n';
+            } else {
+                put_row(row);
+            }
             ++written_;
             if (!flush(false)) {
                 return false;
@@ -914,9 +938,558 @@ private:
         return true;
     }
 
+    // ---- The folder export ----
+
+    /* The query keys a scrubbed copy keeps: core's own, each value a
+     * number, an ID, a DID list or a profile's name. `serial` is
+     * ELM327's serial-port rate (elm327_transport.cpp), a number, never a
+     * device's serial. */
+    static bool kept_query_key(const std::string& key)
+    {
+        static const char* const kKeys[] = {
+            "profile", "did",   "baud",  "serial",   "filter",
+            "txid",    "poll",  "probe", "identify", "diagnose",
+            "pack",    "speed", "loop",  "from",     "to"};
+        for (const char* k : kKeys) {
+            if (key == k) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static bool plain_value(const std::string& v)
+    {
+        for (char c : v) {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
+                  (c >= 'A' && c <= 'Z') ||
+                  std::strchr(":,./_-", c) != nullptr)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /* The session's URI with its scheme and core's own query keys: the
+     * authority as <path> (a replay's file, a J2534 DLL), <label> (a
+     * mock's, the user's text) or <address> (a port, a host and port, a
+     * Bluetooth address, an interface) */
+    static std::string scrubbed_uri(const std::string& uri)
+    {
+        const size_t scheme_end = uri.find("://");
+        if (scheme_end == std::string::npos) {
+            return "<address>";
+        }
+        const std::string scheme = uri.substr(0, scheme_end);
+        const std::string rest = uri.substr(scheme_end + 3);
+        const char* ph = (scheme == "replay" || scheme == "j2534") ? "<path>"
+                         : scheme == "mock" ? "<label>"
+                                            : "<address>";
+        std::string out = scheme + "://" + ph;
+        const size_t q = rest.find('?');
+        if (q == std::string::npos) {
+            return out;
+        }
+        std::string kept;
+        size_t at = q + 1;
+        while (at <= rest.size()) {
+            size_t amp = rest.find('&', at);
+            if (amp == std::string::npos) {
+                amp = rest.size();
+            }
+            const std::string pair = rest.substr(at, amp - at);
+            const size_t eq = pair.find('=');
+            if (eq != std::string::npos && kept_query_key(pair.substr(0, eq)) &&
+                plain_value(pair.substr(eq + 1))) {
+                kept += (kept.empty() ? "?" : "&") + pair;
+            }
+            at = amp + 1;
+        }
+        return out + kept;
+    }
+
+    /* A caller line's text a scrubbed copy keeps, rewritten; false to
+     * leave it out: the front end's name and version, the surrogate's
+     * frame logging, and the vehicle's label as <vehicle> */
+    static bool kept_caller(const std::string& text, std::string* out)
+    {
+        if (rows::starts_with(text.data(), text.size(), "Havne ") ||
+            rows::starts_with(text.data(), text.size(), "havne-cli ") ||
+            rows::starts_with(text.data(), text.size(),
+                              "surrogate frame logging  ")) {
+            *out = text;
+            return true;
+        }
+        if (rows::starts_with(text.data(), text.size(), "vehicle  ")) {
+            *out = "vehicle  <vehicle>";
+            return true;
+        }
+        return false;
+    }
+
+    /* events.log, header line by line, then the activity lines by kind,
+     * into events_head_ and events_body_; the lines left out counted */
+    bool plan_events(const std::string& folder)
+    {
+        std::string why;
+        file_ptr f(files::open_file(folder + "/events.log", false, &why));
+        if (!f) {
+            return true;
+        }
+        std::vector<char> buf(rows::kRowMax + 2);
+        bool too_long = false;
+        bool header = true;
+        bool first = true;
+        while (csv::read_line(f.get(), buf, &too_long)) {
+            if (too_long) {
+                return fail("events.log holds a line longer than a row's");
+            }
+            const std::string line = buf.data();
+            if (first) {
+                first = false;
+                if (line != rows::kFormat2 && line != rows::kFormat3) {
+                    /* Another format's log: a file the export doesn't
+                     * know */
+                    ++r_.files_left_out;
+                    return true;
+                }
+                has_events_ = true;
+                events_head_.push_back(line);
+                continue;
+            }
+            if (header) {
+                if (line.empty()) {
+                    header = false;
+                } else {
+                    head_line(line);
+                }
+                continue;
+            }
+            if (!line.empty()) {
+                activity_line(line);
+            }
+        }
+        return true;
+    }
+
+    void head_line(const std::string& line)
+    {
+        const char* p = line.data();
+        const size_t n = line.size();
+        if (raw_) {
+            events_head_.push_back(line);
+            return;
+        }
+        static const char* const kKept[] = {
+            "started  ",     "utc  ",    "core  ",  "profile  ",
+            "frame flags  ", "signal  ", "label  ", "columns  "};
+        for (const char* k : kKept) {
+            if (rows::starts_with(p, n, k)) {
+                events_head_.push_back(line);
+                return;
+            }
+        }
+        if (rows::starts_with(p, n, rows::kSignalFileKey) ||
+            rows::starts_with(p, n, rows::kPluginKey)) {
+            events_head_.push_back(line);
+            return;
+        }
+        if (rows::starts_with(p, n, "uri  ")) {
+            events_head_.push_back("uri  " + scrubbed_uri(line.substr(5)));
+            return;
+        }
+        std::string text;
+        if (rows::starts_with(p, n, "caller  ") &&
+            kept_caller(line.substr(8), &text)) {
+            events_head_.push_back("caller  " + text);
+            return;
+        }
+        ++events_left_;
+    }
+
+    void activity_line(const std::string& line)
+    {
+        rows::event_line e;
+        const char* text = nullptr;
+        size_t text_len = 0;
+        size_t kind_len = 0;
+        if (!rows::parse_event_line(line.data(), line.size(), &e) ||
+            !rows::split_kind(e.rest, e.rest_len, &text, &text_len,
+                              &kind_len)) {
+            ++events_left_;
+            return;
+        }
+        const std::string kind(e.rest, kind_len);
+        const std::string head(line.data(),
+                               static_cast<size_t>(e.rest - line.data()));
+        if (kind == "end") {
+            uint64_t records = 0;
+            uint64_t notes = 0;
+            if (raw_) {
+                events_body_.push_back(line);
+                return;
+            }
+            if (!rows::parse_end(text, text_len, &records, &notes)) {
+                ++events_left_;
+                return;
+            }
+            /* The counts from the last ": ", the why the caller's words */
+            const std::string all(text, text_len);
+            const size_t at = all.rfind(": ");
+            events_body_.push_back(head + "end  <why>" + all.substr(at));
+            return;
+        }
+        if (!in_range(e.ms * 1000)) {
+            return;
+        }
+        if (raw_ || kind == "link" || kind == "drop" || kind == "asleep") {
+            events_body_.push_back(line);
+            return;
+        }
+        ++events_left_; /* a note, the caller's text, or a kind unknown */
+    }
+
+    /* markers.csv or latency.csv: the header and the rows in the range,
+     * as they are */
+    bool plan_rows(const std::string& folder, const char* name, bool markers,
+                   std::vector<std::string>& out, bool* present)
+    {
+        std::string why;
+        file_ptr f(files::open_file(folder + "/" + name, false, &why));
+        *present = static_cast<bool>(f);
+        if (!f) {
+            return true;
+        }
+        std::vector<char> buf(rows::kRowMax + 2);
+        bool too_long = false;
+        bool torn = false;
+        uint64_t line = 0;
+        std::string field;
+        while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            ++line;
+            if (line == 1) {
+                out.emplace_back(buf.data());
+                continue;
+            }
+            const size_t n = std::strlen(buf.data());
+            uint64_t host_us = 0;
+            const char* bad = "the row is too long";
+            bool ok = !too_long;
+            if (ok && markers) {
+                ok = rows::parse_marker_row(buf.data(), n, &host_us, field,
+                                            &bad);
+            } else if (ok) {
+                /* t_s, seconds to the ms, then the counts */
+                const char* comma =
+                    static_cast<const char*>(std::memchr(buf.data(), ',', n));
+                double t = 0.0;
+                ok = comma != nullptr &&
+                     rows::parse_number(buf.data(),
+                                        static_cast<size_t>(comma - buf.data()),
+                                        &t) &&
+                     t >= 0.0 && t < 1e12;
+                bad = "t_s isn't a time in seconds";
+                host_us = static_cast<uint64_t>(std::llround(t * 1e6));
+            }
+            if (!ok) {
+                ecuio_detail_set("%s line %llu: %s", name,
+                                 static_cast<unsigned long long>(line), bad);
+                return false;
+            }
+            if (in_range(host_us)) {
+                out.emplace_back(buf.data());
+            }
+        }
+        return true;
+    }
+
+    /* The files a folder holds that the export doesn't know */
+    void count_unknown(const std::string& folder)
+    {
+        static const char* const kKnown[] = {"events.log",  "frames.csv",
+                                             "signals.csv", "markers.csv",
+                                             "latency.csv", "signals.json"};
+        std::vector<std::string> names;
+        if (!files::list_folder(folder, &names)) {
+            return;
+        }
+        for (const std::string& name : names) {
+            bool known = false;
+            for (const char* k : kKnown) {
+                known = known || name == k;
+            }
+            r_.files_left_out += known ? 0u : 1u;
+        }
+    }
+
+    std::string export_line() const
+    {
+        const uint64_t vi =
+            r_.left_out[kIdentification] - frames_left_[kIdentification];
+        const uint64_t vt =
+            r_.left_out[kTextValues] - frames_left_[kTextValues];
+        char buf[1024];
+        std::snprintf(
+            buf, sizeof buf,
+            "export  %s (ADR-0054), Havne %s: frames.csv %llu frames (left "
+            "out: %llu of identification replies, %llu of text signals' "
+            "messages, %llu segments of messages that couldn't be "
+            "reassembled); signals.csv %llu values (left out: %llu of "
+            "identification signals, %llu of text signals); markers.csv %llu "
+            "markers, their labels as typed; events.log %llu lines left out "
+            "(the caller's notes, its other lines and lines of a kind the "
+            "export doesn't know); other files left out: %u",
+            raw_ ? "a raw copy, not scrubbed" : "a scrubbed copy",
+            ecuio_version_string(), static_cast<unsigned long long>(r_.frames),
+            static_cast<unsigned long long>(frames_left_[kIdentification]),
+            static_cast<unsigned long long>(frames_left_[kTextValues]),
+            static_cast<unsigned long long>(frames_left_[kUnattributable]),
+            static_cast<unsigned long long>(r_.values),
+            static_cast<unsigned long long>(vi),
+            static_cast<unsigned long long>(vt),
+            static_cast<unsigned long long>(
+                markers_.empty() ? 0 : markers_.size() - 1),
+            static_cast<unsigned long long>(events_left_), r_.files_left_out);
+        return buf;
+    }
+
+    /* A file of the copy: written under partial, checked as it goes */
+    bool begin_file(const std::string& partial, const char* name)
+    {
+        std::string why;
+        const std::string path = partial + "/" + name;
+        file_.reset(files::open_file(path, true, &why));
+        if (!file_) {
+            return fail("the export can't be written: %s", why);
+        }
+        written_paths_.push_back(path);
+        file_check_.reset(new scrub::check(values_));
+        buf_.clear();
+        return true;
+    }
+
+    bool end_file(const char* name)
+    {
+        if (!flush(true)) {
+            return false;
+        }
+        if (std::fclose(file_.release()) != 0) {
+            return fail("the export can't be written: %s",
+                        files::errno_words(errno));
+        }
+        if (!raw_) {
+            const uint32_t found = file_check_->finish();
+            if (found != 0) {
+                r_.failed_class = found;
+                ecuio_detail_set("the check found %s in the copy's %s: "
+                                 "nothing was written",
+                                 scrub::failed_words(found), name);
+                return false;
+            }
+        }
+        ++r_.files;
+        return true;
+    }
+
+    bool put_lines(const std::vector<std::string>& lines)
+    {
+        for (const std::string& l : lines) {
+            buf_ += l;
+            buf_ += '\n';
+            if (!flush(false)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /* frames.csv's kept rows as recorded, each message a kept row
+     * carries checked before segmenting, as the pcapng's second pass */
+    bool write_frames(const std::string& folder)
+    {
+        buf_ += "host_us,timestamp_us,id,flags,data\n";
+        frame_rows rows_in;
+        if (!rows_in.open(folder)) {
+            return false;
+        }
+        reassembly rs;
+        std::vector<message_end> ends;
+        uint64_t index = 0;
+        int got = 0;
+        written_ = 0;
+        while ((got = rows_in.next()) == 1) {
+            const ecuio_frame_t& f = rows_in.frame();
+            const seg s{index++, rows_in.host_us()};
+            const bool wire = reassembly::on_the_wire(f);
+            if (wire) {
+                ends.clear();
+                (void)rs.take(s, f, ends);
+                if (!check_ends(ends)) {
+                    return false;
+                }
+            }
+            if (!in_range(s.host_us) || is_dropped(s.index)) {
+                continue;
+            }
+            if (!wire && !check_message(f.data, f.data_length)) {
+                return false;
+            }
+            buf_ += rows_in.line();
+            buf_ += '\n';
+            ++written_;
+            if (!flush(false)) {
+                return false;
+            }
+        }
+        if (got < 0) {
+            return false;
+        }
+        ends.clear();
+        rs.finish(ends);
+        if (!check_ends(ends)) {
+            return false;
+        }
+        if (written_ != r_.frames) {
+            return fail("the recording changed while it was exported");
+        }
+        return true;
+    }
+
+    bool copy_signal_file(const std::string& folder)
+    {
+        std::string why;
+        file_ptr f(files::open_file(folder + "/signals.json", false, &why));
+        if (!f) {
+            return true;
+        }
+        if (!begin_file(partial_, "signals.json")) {
+            return false;
+        }
+        char chunk[1u << 14];
+        size_t n = 0;
+        while ((n = std::fread(chunk, 1, sizeof chunk, f.get())) > 0) {
+            buf_.append(chunk, n);
+            if (!flush(false)) {
+                return false;
+            }
+        }
+        return end_file("signals.json");
+    }
+
+    bool write_folder(const std::string& folder)
+    {
+        if (has_events_) {
+            std::vector<std::string> head;
+            bool placed = false;
+            for (const std::string& l : events_head_) {
+                if (!placed &&
+                    rows::starts_with(l.data(), l.size(), "columns  ")) {
+                    head.push_back(export_line());
+                    placed = true;
+                }
+                head.push_back(l);
+            }
+            if (!placed) {
+                head.push_back(export_line());
+            }
+            if (!begin_file(partial_, "events.log") || !put_lines(head)) {
+                return false;
+            }
+            buf_ += '\n';
+            if (!put_lines(events_body_) || !end_file("events.log")) {
+                return false;
+            }
+        }
+        if (has_frames_ && (!begin_file(partial_, "frames.csv") ||
+                            !write_frames(folder) || !end_file("frames.csv"))) {
+            return false;
+        }
+        if (has_values_) {
+            written_ = 0;
+            if (!begin_file(partial_, "signals.csv") || !values(folder, true) ||
+                !end_file("signals.csv")) {
+                return false;
+            }
+            if (written_ != r_.values) {
+                return fail("the recording changed while it was exported");
+            }
+        }
+        if (has_markers_ &&
+            (!begin_file(partial_, "markers.csv") || !put_lines(markers_) ||
+             !end_file("markers.csv"))) {
+            return false;
+        }
+        if (has_latency_ &&
+            (!begin_file(partial_, "latency.csv") || !put_lines(latency_) ||
+             !end_file("latency.csv"))) {
+            return false;
+        }
+        return copy_signal_file(folder);
+    }
+
+    /* The folder export's passes: every count first, then each file */
+    bool run_folder(const std::string& folder, const std::string& out)
+    {
+        has_frames_ = files::exists(folder + "/frames.csv");
+        has_values_ = files::exists(folder + "/signals.csv");
+        if (!has_frames_ && !has_values_) {
+            return fail("the folder has no frames.csv or signals.csv");
+        }
+        if (!read_header(folder) ||
+            (!raw_ && (!read_text_values(folder) || !text_defs(folder))) ||
+            (has_frames_ && !plan(folder))) {
+            return false;
+        }
+        for (uint32_t c = 0; c < ECUIO_EXPORT_LEFT_OUT_COUNT; ++c) {
+            frames_left_[c] = r_.left_out[c];
+        }
+        if ((has_values_ && !values(folder, false)) || !plan_events(folder) ||
+            !plan_rows(folder, "markers.csv", true, markers_, &has_markers_) ||
+            !plan_rows(folder, "latency.csv", false, latency_, &has_latency_)) {
+            return false;
+        }
+        r_.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY] += events_left_;
+        count_unknown(folder);
+        if (files::exists(out)) {
+            return fail("the folder exists already");
+        }
+        partial_ = out + ".partial";
+        std::string why;
+        if (!files::make_folder(partial_, &why)) {
+            return fail("the export can't be written: %s", why);
+        }
+        bool ok = false;
+        try {
+            ok = write_folder(folder);
+        } catch (const std::bad_alloc&) {
+            remove_partial();
+            throw;
+        }
+        file_.reset();
+        if (ok && !files::rename_to(partial_, out, false, &why)) {
+            ok = fail("the export can't be put in place: %s", why);
+        }
+        if (!ok) {
+            remove_partial();
+        }
+        return ok;
+    }
+
+    /* The partial folder and the files written into it */
+    void remove_partial()
+    {
+        file_.reset();
+        for (const std::string& path : written_paths_) {
+            files::remove_file(path);
+        }
+        files::remove_folder(partial_);
+        r_.files = 0;
+    }
+
     const ecuio_export_options_t& o_;
     ecuio_export_report_t& r_;
     const bool raw_;
+    const bool folder_;
     uint64_t utc_us_ = 0;
     scrub::values values_;
     std::vector<uint64_t> dropped_;
@@ -937,6 +1510,20 @@ private:
     std::unordered_set<std::string> ident_names_;
     uint64_t first_us_ = 0;
     uint64_t last_us_ = 0;
+    /* The folder export's */
+    std::string partial_;
+    std::vector<std::string> written_paths_;
+    uint64_t frames_left_[ECUIO_EXPORT_LEFT_OUT_COUNT] = {};
+    bool has_frames_ = false;
+    bool has_values_ = false;
+    bool has_events_ = false;
+    bool has_markers_ = false;
+    bool has_latency_ = false;
+    std::vector<std::string> events_head_;
+    std::vector<std::string> events_body_;
+    std::vector<std::string> markers_;
+    std::vector<std::string> latency_;
+    uint64_t events_left_ = 0;
     std::string made_up_;
     std::string made_up_flow_;
     uint64_t written_ = 0;
@@ -966,9 +1553,8 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
     switch (options->format) {
     case ECUIO_EXPORT_PCAPNG:
     case ECUIO_EXPORT_CSV:
-        break;
     case ECUIO_EXPORT_FOLDER:
-        return ECUIO_ERR_NOT_IMPLEMENTED;
+        break;
     default:
         return ECUIO_ERR_INVALID_ARGUMENT;
     }

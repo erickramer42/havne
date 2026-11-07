@@ -1,6 +1,6 @@
 // File/layer: core/src/folder_files.h | internal, C++17, Qt-free; files and
 //             folders by UTF-8 path, for the imports and exports (ADR-0054)
-// Testing: UNIT: ImportTest, ExportTest (test_core)
+// Testing: UNIT: ImportTest, ExportTest, FolderExportTest (test_core)
 //
 // A file written whole under a temporary name and renamed into place, a
 // folder made only when the name is free, each failure in words that
@@ -13,11 +13,13 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #include "win_utf8.h"
 #include <share.h>
 #else
+#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -192,6 +194,50 @@ inline void remove_folder(const std::string& utf8)
     }
 #else
     rmdir(utf8.c_str());
+#endif
+}
+
+/* The names a folder holds, files and folders alike, "." and ".." left
+ * out, in the order the system gives; false when it can't be read */
+inline bool list_folder(const std::string& utf8,
+                        std::vector<std::string>* names)
+{
+    names->clear();
+#ifdef _WIN32
+    const std::wstring w = wide(utf8 + "\\*");
+    if (w.empty()) {
+        return false;
+    }
+    WIN32_FIND_DATAW fd{};
+    HANDLE find = FindFirstFileW(w.c_str(), &fd);
+    if (find == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    do {
+        char name[MAX_PATH * 4];
+        if (std::wcscmp(fd.cFileName, L".") == 0 ||
+            std::wcscmp(fd.cFileName, L"..") == 0) {
+            continue;
+        }
+        names->push_back(ecuio_wide_to_utf8(fd.cFileName, name, sizeof name)
+                             ? std::string(name)
+                             : std::string("?"));
+    } while (FindNextFileW(find, &fd));
+    FindClose(find);
+    return true;
+#else
+    DIR* d = opendir(utf8.c_str());
+    if (d == nullptr) {
+        return false;
+    }
+    while (const dirent* e = readdir(d)) {
+        if (std::strcmp(e->d_name, ".") != 0 &&
+            std::strcmp(e->d_name, "..") != 0) {
+            names->push_back(e->d_name);
+        }
+    }
+    closedir(d);
+    return true;
 #endif
 }
 

@@ -7,6 +7,7 @@
 #   python tests/cli_transfer.py tshark <havne-cli>
 #   python3 tests/cli_transfer.py candump <havne-cli>          (Linux)
 #   python tests/cli_transfer.py csv <havne-cli> <recording>
+#   python tests/cli_transfer.py folder <havne-cli> <findings> <values>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -23,7 +24,11 @@
 # recording core wrote (the replay fixture under obd2) exported as CSV and
 # read back with the standard library's csv module after its comment line:
 # each row its signals.csv row, host_us as seconds; the same bytes twice;
-# a range its rows alone.
+# a range its rows alone. folder: copies of the findings fixture (its
+# frames; raw, then scrubbed, which leaves its torn ISO-TP message out),
+# a recording of values alone and a mock's recording made with a label;
+# each copy's info, view or replay the source's, the mock's label in
+# neither the copy's URI nor its name.
 
 import csv
 import json
@@ -341,11 +346,85 @@ def csv_export(cli, recording):
     return 0
 
 
+def replayed(cli, folder):
+    """The frame lines and the end line of the folder's replay at max"""
+    uri = f"replay://{os.path.abspath(folder).replace(os.sep, '/')}?speed=max"
+    lines = run(cli, ["stream", uri])
+    end = one(lines, "end")
+    return [l for l in lines if l["type"] == "frame"], end["frames"]
+
+
+def folder_copy(cli, source, out, want_files, raw=False):
+    exported = one(run(cli, ["export", source, out, "--format", "folder"] +
+                       (["--raw"] if raw else [])), "exported")
+    if (exported["format"], exported["scrubbed"], exported["files"],
+            exported["files_left_out"]) != ("folder", not raw, want_files, 0):
+        raise SystemExit(f"FAIL  exported {exported}")
+    if os.path.exists(out + ".partial"):
+        raise SystemExit("FAIL  the partial folder is left")
+    return exported
+
+
+def same(what, a, b):
+    if a != b:
+        raise SystemExit(f"FAIL  {what} differs: {a} then {b}")
+
+
+def folder_export(cli, findings, values):
+    with tempfile.TemporaryDirectory() as d:
+        # The findings fixture: a raw copy's info and replay are the
+        # source's; the scrubbed copy's too, less the torn ISO-TP message
+        # on the reply ID, the one frame it leaves out as unattributable
+        source = run(cli, ["info", findings])
+        raw = os.path.join(d, "20261103-100000-raw")
+        folder_copy(cli, findings, raw, 4, raw=True)
+        same("the raw copy's info", source, run(cli, ["info", raw]))
+        frames, n = replayed(cli, raw)
+        same("the raw copy's replay", replayed(cli, findings), (frames, n))
+        copy = os.path.join(d, "20261103-100000")
+        scrubbed = folder_copy(cli, findings, copy, 4)
+        if (scrubbed["frames"], scrubbed["left_out"]["unattributable"]) != (
+                n - 1, 1):
+            raise SystemExit(f"FAIL  the scrubbed copy exported {scrubbed}")
+        want = [l for l in source if l.get("kind") != "isotp"]
+        summary = one(want, "summary")
+        summary["frames"] -= 1
+        summary["findings"]["isotp"] = 0
+        same("the scrubbed copy's info", want, run(cli, ["info", copy]))
+        # Values alone: view reads the copy as the source
+        vcopy = os.path.join(d, "20261102-221027")
+        folder_copy(cli, values, vcopy, 2)
+        same("view", run(cli, ["view", values, "--columns", "20"]),
+             run(cli, ["view", vcopy, "--columns", "20"]))
+        # A mock's recording, its label in the URI and the folder's name:
+        # neither in the copy, which replays and reads as the source
+        root = os.path.join(d, "recordings")
+        run(cli, ["stream", "mock://Daily driver", "--count", "40",
+                  "--record", root, "--label", "Daily driver"])
+        [name] = os.listdir(root)
+        mock = os.path.join(root, name)
+        mcopy = os.path.join(d, name.split(" ")[0])
+        folder_copy(cli, mock, mcopy, 3)
+        with open(os.path.join(mcopy, "events.log"), encoding="utf-8") as f:
+            events = f.read()
+        if "\nuri  mock://<label>\n" not in events or "Daily" in events:
+            raise SystemExit(f"FAIL  the copy's events.log reads {events}")
+        mframes, mn = replayed(cli, mcopy)
+        same("the mock's replay", replayed(cli, mock), (mframes, mn))
+        same("the mock's info", run(cli, ["info", mock]),
+             run(cli, ["info", mcopy]))
+    print(f"ok    copies of three recordings ({n}, {mn} frames and values "
+          "alone) read and replay as their sources")
+    return 0
+
+
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 5 and sys.argv[1] == "folder":
+        sys.exit(folder_export(sys.argv[2], sys.argv[3], sys.argv[4]))
     if len(sys.argv) != 3 or sys.argv[1] not in modes:
         print(__doc__ or "usage: cli_transfer.py roundtrip|refusals|tshark "
               "<havne-cli>")
