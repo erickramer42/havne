@@ -384,6 +384,30 @@ TEST(RecordingViewTest, TheAlignmentFindsAreHavneClisOwn)
     EXPECT_EQ(closed.findMarker(QStringLiteral("pull")), -1);
 }
 
+// The engine starts, as havne-cli view --align-on engine-start finds them
+// (tests/golden/cli/view-engine-start.jsonl): units of either case, in
+// whatever units the page shows; none where the engine runs from the
+// first sample
+TEST(RecordingViewTest, TheEngineStartIsHavneClisOwn)
+{
+    RecordingView early;
+    RecordingView late;
+    RecordingView pull;
+    early.open(fixture("start-early"));
+    late.open(fixture("start-late"));
+    pull.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor(
+        [&] { return settled(early) && settled(late) && settled(pull); }));
+    EXPECT_EQ(early.findEngineStart(), 5600);
+    EXPECT_EQ(late.findEngineStart(), 12600);
+    EXPECT_EQ(pull.findEngineStart(), -1) << "running from its first sample";
+    late.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(late.findEngineStart(), 12600) << "rpm doesn't convert";
+
+    RecordingView closed;
+    EXPECT_EQ(closed.findEngineStart(), -1);
+}
+
 // The cursor's readout: the value in force at a time, its decimals, and
 // nothing before a signal's first sample
 TEST(RecordingViewTest, ValuesAtAreTheValuesInForce)

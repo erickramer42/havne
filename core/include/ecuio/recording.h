@@ -293,9 +293,16 @@ _Static_assert(sizeof(ecuio_recording_column_t) == 24,
                "ecuio_recording_column_t size is ABI");
 #endif
 
-/* ecuio_recording_find_t.kind */
-#define ECUIO_RECORDING_FIND_THRESHOLD 1u
-#define ECUIO_RECORDING_FIND_MARKER    2u
+/* ecuio_recording_find_t.kind: an engine start is the engine speed
+ * rising from a stop (ecuio_recording_find) */
+#define ECUIO_RECORDING_FIND_THRESHOLD    1u
+#define ECUIO_RECORDING_FIND_MARKER       2u
+#define ECUIO_RECORDING_FIND_ENGINE_START 3u
+/* An engine start's levels, in rpm: the engine-speed signal reaching
+ * ECUIO_ENGINE_START_RPM after being below ECUIO_ENGINE_STOPPED_RPM. A
+ * starter cranks an engine at 150-300 rpm, and an idle runs past 500. */
+#define ECUIO_ENGINE_START_RPM   500
+#define ECUIO_ENGINE_STOPPED_RPM 100
 /* ecuio_recording_find_t.direction, for a threshold */
 #define ECUIO_RECORDING_FIND_RISING  1u /* reaches level after being below
                                            level - hysteresis */
@@ -485,12 +492,22 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
 
 /*
  * The first time at or after from_us that what describes: a threshold's
- * sample reaching its level, counting only samples from from_us on, or
- * a marker with the label. Nothing found is ECUIO_OK with *at_us
+ * sample reaching its level, counting only samples from from_us on, a
+ * marker with the label, or an engine start. An engine start is the
+ * engine-speed signal's rising threshold at ECUIO_ENGINE_START_RPM with
+ * a hysteresis of ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM: a
+ * sample below ECUIO_ENGINE_STOPPED_RPM arms it, so a recording that
+ * starts with the engine running finds nothing until a later start. The
+ * engine-speed signal is the number signal whose unit is "rpm", ASCII
+ * case ignored (obd2's and the mock's say "RPM"): of several, the one of
+ * the lowest nonzero plot_rank, else the first in the recording's order;
+ * with none, nothing is found. Its signal, direction, level and
+ * hysteresis are 0. Nothing found is ECUIO_OK with *at_us
  * ECUIO_RECORDING_NONE. ECUIO_ERR_INVALID_ARGUMENT also for an unknown
  * kind or direction, a negative or NaN hysteresis, nonzero flags or
- * reserved, or a threshold on a text signal; ECUIO_ERR_NULL_ARGUMENT for
- * a marker's NULL label.
+ * reserved, a threshold on a text signal, or an engine start with a
+ * nonzero signal, direction, level or hysteresis;
+ * ECUIO_ERR_NULL_ARGUMENT for a marker's NULL label.
  */
 ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                                     const ecuio_recording_find_t* what,
@@ -879,12 +896,11 @@ typedef struct ecuio_health_options {
     uint64_t to_us;
     uint64_t utc_us;            /* the report's time, microseconds since
                                    1970 UTC, the caller's; 0 writes none */
-    uint32_t value_count;       /* entries of values */
+    uint32_t value_count;       /* entries of values; 0 for a folder */
     uint32_t reserved0;         /* zero */
     uint64_t reserved[4];       /* zero; ABI growth space */
     ecuio_session_t* session;   /* the source: a live session, or */
-    const char* folder_utf8;    /* a recording's folder (not built:
-                                   ECUIO_ERR_NOT_IMPLEMENTED) */
+    const char* folder_utf8;    /* a recording's folder */
     const ecuio_health_value_t* values; /* a session's newest values, or
                                            NULL with value_count 0 */
     const char* out_path_utf8;  /* the file to write, refused when it
@@ -946,17 +962,28 @@ _Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
  * (Service 01 PIDs 21, 30, 31, 4D and 4E, whenever given) and its
  * identification items by name and outcome (their text left out), then
  * the key values: the set's ranked signals (plot_rank above 0, numbers
- * and enumerations) among the values given, in rank order. The file is
- * checked for the identification texts and the VIN's shape before it's
- * renamed into place; a match fails it with its class. Deterministic:
- * the time and each value's age are the caller's. report may be NULL.
+ * and enumerations) among the values given, in rank order. From a
+ * recording's folder, each ECU's reports are rebuilt from its replies in
+ * frames.csv that end in the range (an ECU: a reply ID with a positive
+ * diagnostic or identification reply; the last of each kind; one with
+ * none "not recorded"), and the values are the set's (its signals.json,
+ * else its uds-generic DIDs, else its profile) in force at the range's
+ * end, from signals.csv or, with none, decoded from frames.csv, each aged
+ * from that end; a recording with no frames.csv has no ECU and says so.
+ * The file is checked for the identification texts and the VIN's shape
+ * before it's renamed into place; a match fails it with its class.
+ * Deterministic: the time and each value's age are the caller's, or the
+ * recording's. report may be NULL.
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or out path;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format or units, a flag or
  * reserved field this core doesn't know, a session and a folder both or
- * neither, NULL values with a count, a value's flags or reserved
- * nonzero; ECUIO_ERR_NOT_IMPLEMENTED for a folder; ECUIO_ERR_LOAD_FAILED for a
- * file that exists or can't be written, or a failed check (its words
- * in the detail, never a value or a path).
+ * neither, NULL values with a count, values with a folder, a value's
+ * flags or reserved nonzero; ECUIO_ERR_LOAD_FAILED for a folder with
+ * neither frames.csv nor signals.csv, a row the reader refuses
+ * ("frames.csv line N: ..."), a range that starts after the recording
+ * ends, a file that exists or can't be written, or
+ * a failed check (its words in the detail, never a value or a path);
+ * the reader's own codes for a recording that changes while it's read.
  */
 ecuio_status_t ecuio_health_export(const ecuio_health_options_t* options,
                                    ecuio_health_report_t* report);

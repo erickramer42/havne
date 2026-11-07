@@ -673,3 +673,125 @@ model year; an identity text echoed by a value failing the report; the
 text of a quiet car byte for byte; numbers and times without the
 locale; the export over a `mock://` session, its label out, the file
 written once; the argument checks), `test_c_abi`.
+
+**Over a recording (2026-11-07).** `folder_utf8` names a recording's
+folder, and the report is built from what the recording holds, through
+the same model and writers, so it reads as the session's would. Nothing
+in the call changed: a folder takes no values of the caller's
+(`value_count` 0, else `ECUIO_ERR_INVALID_ARGUMENT`), since the
+recording has its own, and `from_us`/`to_us` are host_us as the
+exports' (0 and 0 the whole recording; a `to_us` past the end is the
+end; a `from_us` past the end is refused, `ECUIO_ERR_LOAD_FAILED` "the
+range starts at A s, after the recording ends at B s", as replay
+refuses a stretch with no frames).
+
+- **The ECUs** come from the replies in `frames.csv`
+  (`core/src/health_replies.h`, pure): whole messages on the diagnostic
+  reply IDs (`scrub::reply_id`), a reassembled row as it is and wire
+  frames through `frame_reassembly.h` (the export's rules), each taken
+  when it ends in the range. They go through the request engine's
+  parsers: 41 01 `ecuio_diag_take_readiness`, 41 41 `ecuio_diag_take_cycle`
+  (after readiness, whatever their order), 43/47/4A
+  `ecuio_diag_take_codes`, 7F 03/07/0A that list's refusal, 42 00 00 the
+  freeze frame's PIDs, 42 02 00 its code, 42 PID 00 its values by the
+  obd2 defs (only with a nonzero code), 49 xx (not a PID bitmap) and 62
+  F180-F1FF identification items, their text by
+  `ecuio_identity_format`. The last reply of each kind wins, so a
+  readiness reply after the codes were read is the one shown, and the
+  drive cycle's monitors (41 41) are laid on it. An ECU is a reply ID
+  with at least one positive reply of these kinds: a listener's raw
+  recording hears every module's traffic, and a refusal alone makes no
+  ECU. Any other refusal says nothing of which request it answers, and
+  7F xx 78 (still working) is no answer; both are skipped. Nothing is
+  marked asked or complete, so the inspection never reads READING, and
+  a kind with no reply reads "not recorded" (a recording can't say
+  whether it was asked); each ECU's state is "recorded".
+- **The values** are the recording's set's (`core/src/recording_set.h`,
+  the exports' rule, shared with them: its own `signals.json`, else
+  uds-generic's set from the URI's `did=` list, else the profile by
+  name): each number def with a signal of its name, the value in force at
+  the range's end (`ecuio_recording_text_at`, parsed without the locale)
+  and aged from that end; one whose last sample is before the range's
+  start has none. A recording with `frames.csv` and a set but no
+  `signals.csv` has its values decoded from the frames
+  (`ecuio_recording_open_frames`). The key values and since-cleared
+  values then follow the live rule.
+- **The source:** kind `recording`, the URI from `events.log` through
+  `scrub::uri` (none: `null`, "no URI"), the backend by the URI's scheme
+  (`unknown` without one), the profile from the header, no bit rate
+  (the header has none), the recording's start (`started`, from its
+  `utc` line), the range (`from_s`, `to_s`) and whether it has
+  `frames.csv`. A recording of values alone (no `frames.csv`) has no ECU
+  and says so (`ecus_note` "the recording has no frames"); one whose
+  frames hold no such reply says no ECU answered in the range. A folder
+  with neither file is refused as the folder export refuses it.
+- **The check** also takes every identification reply's values in the
+  whole recording (`scrub::identification_values`), in the range or not,
+  besides the items' texts: a number signal in the range that reads an
+  ECU's serial fails the report even when the serial's reply came
+  before the range. A scrubbed copy (the folder export) holds no
+  identification reply, so its report reads no VIN and lists no item.
+
+`frames.csv` is read a row at a time by `core/src/frame_rows.h`'s
+`frame_rows`, the exports' reader, shared with them.
+
+**Tests (step 2):** `HealthTest`: a hand-written recording of replies,
+reassembled and on the wire, rebuilt into the ECU's report (both formats
+holding the same facts, no VIN, calibration ID or port; another module's
+refusal no ECU; 7F 03 78 and a Service 09 bitmap ignored); a range
+taking the replies that end in it and no value from before it, and one
+starting past the end refused; the
+replay fixture's frames decoded for its values, with no ECU; a recording
+of values alone; a refusal of a folder with neither file and of a row
+out of order; an identity reply before the range still checked; a
+folder export's scrubbed copy; a small recording's text byte for byte.
+`ExportTest`, `CsvExportTest` and `FolderExportTest` cover the shared
+header and rows.
+
+**`havne-cli health` (2026-11-07).** The third step: `havne-cli health
+<uri | recording> <out> --format json|text [--units metric|imperial]`,
+public headers only (`cli/health_lines.h`, `run_health_session`,
+`run_health_recording`). An argument with a scheme's `://` is a live
+session, anything else a recording's folder. The CLI gives the time
+(`utc_us` from the system clock) and the latest model year (this year
+plus one, as the front ends pass it).
+
+- **A recording** takes `--from`/`--to` (view's seconds) and nothing of a
+  session's: its own set, as core reads it.
+- **A live session** takes `--seconds` (the wait's bound, 30 by default,
+  as `clear`'s) and `--signals`/`--plugin` (loaded as `stream` loads
+  them, so a user's ranked signals are key values). A values callback
+  keeps each def's newest value and when it came (`ecuio_clock_us`), one
+  slot per def ID so the worker allocates nothing; each value's age is
+  the report's time less that. The wait is for what's asked: a channel
+  is settled once its diagnostics are complete or were never asked
+  (only obd2 and the mock ask them; a uds-generic or raw session never
+  does) and its identification is complete or has no items. Then it
+  waits until no shown signal (a ranked one or a since-cleared PID) has
+  gained its first value for 2 s: a PID the ECU lacks never comes, so
+  the wait ends on quiet, not on all of them. `--seconds` or Ctrl+C
+  ends it sooner, and the report holds what's in, a report still being
+  read saying so.
+- **Reads only.** On a car the session asks only what core's
+  diagnostics and identification ask (Services 01, 02, 03, 07, 09 and
+  0A, never 04's clear), so it runs parked or driving; the usage says
+  so.
+- **Its lines:** `start`, a session's `session`, then `health` (format,
+  file, source, the report's counts, the identification texts left out,
+  `vin_decoded` as a yes or no, and a session's `settled`); never the
+  VIN or an identification text. A failed check writes `health_failed`
+  with its class before the `error` line. Exits as `export`'s: 0
+  written, 2 usage, 3 a connect, a refused folder, an existing file or a
+  failed check, 1 the CLI's own output failing.
+
+**Tests (step 3):** `CliHealthTest` (test_cli: each argument form and
+refusal, the wait's rule for asked and unasked reports, the shown defs,
+the values' quiet, the lines), `CliUsageTest.Health*`, and
+`CliHealthRunTest` (`tests/cli_health.py`): the mock's report (its label
+out, the file written once), a uds-generic mock with diagnostics off
+ending well before its `--seconds`, the simulated car as an ELM327
+adapter on loopback (its VIN decoded and in neither the file nor the
+lines, its ranked values and five since-cleared PIDs), the same car
+answering late through uds-generic (its identification outlasts the
+values' quiet, and the report waits for it), a recording of values alone
+and a range past its end.

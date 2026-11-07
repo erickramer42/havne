@@ -12,6 +12,8 @@ TestCase {
     readonly property string shaB: "b".repeat(64)
     readonly property string shaC: "c".repeat(64)
     function fileA() { return { sha256: shaA, name: "Transmission", profile: "user.transmission" } }
+    // A recording's folder as the Recordings page names it
+    readonly property string baselineA: "/recordings/20261106-090000 Daily driver"
 
     // Two vehicles, the first picked and recognized, with a signal file
     function book() {
@@ -22,9 +24,9 @@ TestCase {
                 { id: "v1", label: "Daily driver", vinKey: "key-a",
                   uri: "elm327://COM6?profile=obd2", plotted: ["Timing Advance"],
                   unplotted: ["Intake Air Temp"], signals: [fileA()], own: "",
-                  plugin: "plugin.example-sim.base" },
+                  plugin: "plugin.example-sim.base", baseline: baselineA },
                 { id: "v2", label: "Weekend car", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], signals: [], own: "", plugin: "" }
+                  unplotted: [], signals: [], own: "", plugin: "", baseline: "" }
             ]
         }
     }
@@ -61,6 +63,34 @@ TestCase {
         compare(VehicleBook.picked(VehicleBook.setPlugin(d, "")).plugin, "")
         compare(VehicleBook.picked(VehicleBook.duplicate(book(), "Copy")).plugin,
                 "plugin.example-sim.base")
+    }
+
+    // A vehicle's baseline recording (ADR-0049's appendix of 2026-11-06):
+    // none in an entry stored before it; one that isn't text drops the
+    // document, as any bad field does; the picked vehicle's set and
+    // cleared, the others' left; Duplicate doesn't copy it (a recording
+    // of that car)
+    function test_aVehiclesBaseline() {
+        const old = book()
+        delete old.list[0].baseline
+        compare(VehicleBook.parse(JSON.stringify(old)).list[0].baseline, "")
+        for (const wrong of [7, null, ["a"], {}]) {
+            const bad = book()
+            bad.list[1].baseline = wrong
+            compare(VehicleBook.parse(JSON.stringify(bad)), VehicleBook.empty(), JSON.stringify(wrong))
+        }
+
+        const later = "/recordings/20261106-100000 Weekend car"
+        const d = VehicleBook.setBaseline(VehicleBook.pick(book(), "v2"), later)
+        compare(VehicleBook.picked(d).baseline, later)
+        compare(VehicleBook.find(d, "v1").baseline, baselineA, "the others unchanged")
+        compare(VehicleBook.parse(VehicleBook.serialize(d)), d, "stored and read")
+        compare(VehicleBook.picked(VehicleBook.clearBaseline(d)).baseline, "")
+        compare(VehicleBook.find(VehicleBook.clearBaseline(d), "v1").baseline, baselineA)
+        compare(VehicleBook.setBaseline(VehicleBook.pick(book(), ""), later),
+                VehicleBook.pick(book(), ""), "no vehicle picked: nothing changes")
+        compare(VehicleBook.picked(VehicleBook.duplicate(book(), "Copy")).baseline, "")
+        compare(book().list[1].baseline, "", "the given document is unchanged")
     }
 
     // An entry stored before signal files existed has none
@@ -156,7 +186,7 @@ TestCase {
         compare(added.picked, "v3")
         compare(VehicleBook.picked(added),
                 { id: "v3", label: "Track day", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], signals: [], own: "", plugin: "" })
+                  unplotted: [], signals: [], own: "", plugin: "", baseline: "" })
 
         const copied = VehicleBook.duplicate(d, "Daily driver (copy)")
         const c = VehicleBook.picked(copied)
@@ -195,6 +225,7 @@ TestCase {
         const v = VehicleBook.picked(data.apply(d))
         compare(v.signals, [fileA(), { sha256: shaB, name: "Mine", profile: "user.mine" }])
         compare(v.own, shaB)
+        compare(v.baseline, baselineA, "and the baseline")
     }
 
     function test_aClashingProfileIsRefused() {
@@ -334,7 +365,7 @@ TestCase {
         compare(VehicleBook.picked(r.doc),
                 { id: "v3", label: "Vehicle 1", vinKey: "key-c",
                   uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [],
-                  signals: [], own: "", plugin: "" })
+                  signals: [], own: "", plugin: "", baseline: "" })
         compare(VehicleBook.logLine(r), "Vehicle: not Daily driver (its VIN differs); saved as Vehicle 1")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")

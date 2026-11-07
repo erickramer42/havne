@@ -880,7 +880,7 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
                   counts + "\"failed\":false,\"yielded\":true}");
 }
 
-TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)
+TEST(CliViewTest, AlignOnTakesItsFiveFormsAndNothingElse)
 {
     cli::AlignOn a;
     ASSERT_TRUE(cli::parse_align_on("rise:RPM:4000", a));
@@ -895,11 +895,15 @@ TEST(CliViewTest, AlignOnTakesItsFourFormsAndNothingElse)
     ASSERT_TRUE(cli::parse_align_on("marker:lap: 2", a));
     EXPECT_EQ(a.kind, cli::AlignOn::marker);
     EXPECT_EQ(a.label, "lap: 2");
+    ASSERT_TRUE(cli::parse_align_on("engine-start", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::engine_start);
     ASSERT_TRUE(cli::parse_align_on("utc", a));
     EXPECT_EQ(a.kind, cli::AlignOn::utc);
-    for (const char* bad : {"", "UTC", "rise", "rise:RPM", "rise::4000",
-                            "rise:RPM:", "rise:RPM:fast", "rise:RPM:inf",
-                            "rise:RPM:4000x", "marker:", "sideways:RPM:1"}) {
+    for (const char* bad :
+         {"", "UTC", "rise", "rise:RPM", "rise::4000",
+          "rise:RPM:", "rise:RPM:fast", "rise:RPM:inf", "rise:RPM:4000x",
+          "marker:", "sideways:RPM:1", "Engine-Start", "engine-start:RPM",
+          "engine", "engine-start "}) {
         EXPECT_FALSE(cli::parse_align_on(bad, a)) << bad;
     }
     EXPECT_EQ(a.kind, cli::AlignOn::utc) << "a refusal leaves it as it was";

@@ -6,7 +6,7 @@ import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
 // { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted,
-// signals, own, plugin }] }:
+// signals, own, plugin, baseline }] }:
 // plotted and unplotted are the rows ticked past Live's default and
 // unticked from it (ADR-0039 section 8); a stored entry without
 // plotted reads as none.
@@ -20,6 +20,9 @@ import QtQml
 // plugin is the profile of the plugin variant picked for the vehicle
 // (plugin.<id>.<variant>, ADR-0052 section 5), "" for none; the
 // plugins themselves are the app's, not a vehicle's.
+// baseline is the folder of the vehicle's baseline recording (ADR-0049's
+// appendix of 2026-11-06), as the Recordings page names it, "" for none;
+// an entry stored before it has none.
 // every function takes the document and returns a new one, never
 // changing what it was given, so SettingsPage stores what comes back
 // and the rules test without a page.
@@ -62,7 +65,8 @@ QtObject {
                     || (v.signals !== undefined
                         && (!Array.isArray(v.signals) || !v.signals.every(isFile)))
                     || (v.own !== undefined && !isString(v.own))
-                    || (v.plugin !== undefined && !isString(v.plugin)))
+                    || (v.plugin !== undefined && !isString(v.plugin))
+                    || (v.baseline !== undefined && !isString(v.baseline)))
                 return empty()
             ids[v.id] = true
         }
@@ -91,7 +95,8 @@ QtObject {
         return { id: v.id, label: v.label, vinKey: v.vinKey, uri: v.uri,
                  plotted: v.plotted === undefined ? [] : v.plotted.slice(),
                  unplotted: v.unplotted.slice(), signals: files, own: own,
-                 plugin: v.plugin === undefined ? "" : v.plugin }
+                 plugin: v.plugin === undefined ? "" : v.plugin,
+                 baseline: v.baseline === undefined ? "" : v.baseline }
     }
 
     function copy(doc) {
@@ -166,13 +171,15 @@ QtObject {
         const d = copy(doc)
         const id = nextId(d)
         d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
-                      plotted: [], unplotted: [], signals: [], own: "", plugin: "" })
+                      plotted: [], unplotted: [], signals: [], own: "", plugin: "",
+                      baseline: "" })
         d.picked = id
         return d
     }
 
     // The picked vehicle's connection, plotted signals and signal files
-    // (the same files, so the same profiles), not its VIN key
+    // (the same files, so the same profiles), not its VIN key or its
+    // baseline: a recording of that car
     function duplicate(doc, label) {
         const from = picked(doc)
         if (from === null)
@@ -296,6 +303,15 @@ QtObject {
     // The picked vehicle's plugin variant, by its profile ("" for none)
     function setPlugin(doc, profile) {
         return change(doc, v => v.plugin = String(profile))
+    }
+
+    // The picked vehicle's baseline recording, by its folder ("" for none)
+    function setBaseline(doc, folder) {
+        return change(doc, v => v.baseline = String(folder))
+    }
+
+    function clearBaseline(doc) {
+        return setBaseline(doc, "")
     }
 
     // Every vehicle's pick of one of profiles undone: a plugin removed

@@ -18,13 +18,31 @@ pragma ComponentBehavior: Bound
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
 // frames check's findings on it, and the findings listed. A second
 // recording can be overlaid, its traces dashed in the first's colors,
-// lined up as havne-cli view --align-on lines two up.
+// lined up as havne-cli view --align-on lines two up. The vehicle picked
+// in Settings keeps a baseline recording (ADR-0049's appendix of
+// 2026-11-06): an open recording can become it, and the baseline can be
+// overlaid on another, lined up on their engine starts.
 Page {
     id: root
     background: Rectangle { color: Theme.bg }
 
     // Main puts the URI in Settings' field and shows it
     signal replayRequested(string uri)
+
+    // The vehicles, Settings' VehicleBook document: Main binds it, and a
+    // baseline set or cleared here goes back through vehiclesEdited for
+    // Settings to store, so the page never writes the store itself
+    property var vehicles: VehicleBook.empty()
+    signal vehiclesEdited(var doc)
+    readonly property var pickedVehicle: VehicleBook.picked(vehicles)
+    readonly property string baselineFolder: pickedVehicle !== null ? pickedVehicle.baseline : ""
+    // The baseline's row (Bridge.recordingRow), null with none set or its
+    // folder gone; looked at again at each refresh and open, since a
+    // folder can go while the app runs
+    property var baselineRow: null
+    readonly property bool baselineGone: baselineFolder !== "" && baselineRow === null
+    readonly property bool isBaseline: baselineFolder !== "" && recording.folder === baselineFolder
+    onBaselineFolderChanged: checkBaseline()
 
     readonly property int recordingsListed: 20
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
@@ -108,7 +126,8 @@ Page {
     // on the first's axis at compareOffsetMs (its own time plus the
     // offset). alignOn says how the two line up: "start", "utc", "marker"
     // (alignLabel), "rise" or "fall" (alignSignal reaching alignLevel, in
-    // display units, after being alignHysteresis beyond it)
+    // display units, after being alignHysteresis beyond it), or "engine"
+    // (each engine's first start: RPM reaching 500 after being below 100)
     readonly property bool comparing: compare.state !== RecordingView.Closed
     property string compareTitle: ""
     property bool compareAligned: false
@@ -187,9 +206,37 @@ Page {
 
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
+        checkBaseline()
+    }
+
+    function checkBaseline() {
+        // Not a ternary of the map and ({}): qmlcachegen 6.12.0 crashes on it
+        if (baselineFolder === "") {
+            baselineRow = null
+            return
+        }
+        const row = Bridge.recordingRow(baselineFolder)
+        baselineRow = row.folder !== undefined ? row : null
+    }
+    function useAsBaseline() {
+        vehiclesEdited(VehicleBook.setBaseline(vehicles, recording.folder))
+    }
+    function clearBaseline() {
+        vehiclesEdited(VehicleBook.clearBaseline(vehicles))
+    }
+    // The baseline overlaid on the open recording, lined up on their
+    // engine starts
+    function compareWithBaseline() {
+        checkBaseline()
+        if (baselineRow === null)
+            return
+        alignChoice.currentIndex = alignChoice.indexOfValue("engine")
+        setAlignOn("engine")
+        compareWith(baselineRow)
     }
 
     function open(row) {
+        checkBaseline()
         openedTitle = row.title
         openedUri = row.uri !== undefined ? row.uri : ""
         recording.open(row.folder)
@@ -462,10 +509,20 @@ Page {
             const j = compareByName[alignSignal]
             here = recording.findThreshold(s.index, alignLevel, alignHysteresis, alignOn === "rise")
             there = j !== undefined ? compare.findThreshold(j, alignLevel, alignHysteresis, alignOn === "rise") : -1
+        } else if (alignOn === "engine") {
+            what = qsTr("their engine starts")
+            here = recording.findEngineStart()
+            there = compare.findEngineStart()
         }
         if (here < 0 || there < 0) {
             compareStatus = alignOn === "utc"
                 ? qsTr("%1 isn't drawn: an older recording has no UTC start").arg(compareTitle)
+                : alignOn === "engine"
+                ? (here < 0 && there < 0
+                   ? qsTr("%1 isn't drawn: neither has an engine start (RPM reaching 500 after being below 100)")
+                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no engine start (RPM reaching 500 after being below 100)")
+                   : qsTr("%1 isn't drawn: it has no engine start (RPM reaching 500 after being below 100)"))
+                  .arg(compareTitle)
                 : here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has %2").arg(compareTitle).arg(what)
                 : here < 0 ? qsTr("%1 isn't drawn: this recording has no %2").arg(compareTitle).arg(what)
                 : qsTr("%1 isn't drawn: it has no %2").arg(compareTitle).arg(what)
@@ -707,6 +764,31 @@ Page {
                   : qsTr("No recordings yet: turn Record on in Settings, then connect.")
         }
 
+        // A baseline whose folder was moved or deleted says so, on the list
+        // and in the viewer, with the way to clear it
+        RowLayout {
+            objectName: "baselineGoneRow"
+            visible: root.baselineGone && !root.chartMaximized
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+            Label {
+                objectName: "baselineGone"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.warning
+                text: qsTr("%1's baseline recording is gone: its folder was moved or deleted.")
+                          .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
+            }
+            ThemedButton {
+                objectName: "clearBaseline"
+                compact: true
+                text: qsTr("Clear it")
+                Accessible.name: qsTr("Clear %1's baseline").arg(root.pickedVehicle !== null
+                                                                 ? root.pickedVehicle.label : "")
+                onClicked: root.clearBaseline()
+            }
+        }
+
         ListView {
             id: recordingList
             objectName: "recordingList"
@@ -768,6 +850,27 @@ Page {
                             elide: Text.ElideMiddle
                             Layout.fillWidth: true
                         }
+                    }
+                    // The picked vehicle's baseline
+                    Label {
+                        objectName: "baselineBadge"
+                        visible: root.baselineFolder !== ""
+                                 && recordingRow.modelData.folder === root.baselineFolder
+                        text: qsTr("Baseline")
+                        color: Theme.text
+                        font.pointSize: 8
+                        leftPadding: 6
+                        rightPadding: 6
+                        topPadding: 2
+                        bottomPadding: 2
+                        background: Rectangle {
+                            radius: Theme.radius
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.info
+                        }
+                        Accessible.name: qsTr("%1's baseline").arg(root.pickedVehicle !== null
+                                                                  ? root.pickedVehicle.label : "")
                     }
                     ThemedButton {
                         objectName: "replayButton"
@@ -863,6 +966,45 @@ Page {
             onActivated: index => root.decodeWith(valueAt(index))
         }
 
+        // The picked vehicle's baseline: this recording made it, or the
+        // baseline overlaid on it, lined up on their engine starts
+        Flow {
+            id: baselineFlow
+            objectName: "baselineRow"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+                     && root.pickedVehicle !== null
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+            ThemedButton {
+                objectName: "useAsBaseline"
+                visible: !root.isBaseline
+                width: Math.min(implicitWidth, baselineFlow.width)
+                text: qsTr("Use as %1's baseline").arg(root.pickedVehicle !== null
+                                                        ? root.pickedVehicle.label : "")
+                onClicked: root.useAsBaseline()
+            }
+            Label {
+                objectName: "isBaseline"
+                visible: root.isBaseline
+                width: Math.min(implicitWidth, baselineFlow.width)
+                height: Theme.controlHeight
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.WordWrap
+                color: Theme.textDim
+                text: qsTr("%1's baseline").arg(root.pickedVehicle !== null
+                                                 ? root.pickedVehicle.label : "")
+            }
+            ThemedButton {
+                objectName: "compareBaseline"
+                visible: root.baselineRow !== null && !root.isBaseline
+                width: Math.min(implicitWidth, baselineFlow.width)
+                text: qsTr("Compare with the baseline")
+                Accessible.name: qsTr("Compare with %1's baseline, aligned on the engine starts")
+                                     .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
+                onClicked: root.compareWithBaseline()
+            }
+        }
+
         // Another recording to overlay, and how the two line up
         RowLayout {
             visible: recording.state === RecordingView.Open && !root.chartMaximized
@@ -905,7 +1047,8 @@ Page {
                         { text: qsTr("Align UTC starts"), value: "utc" },
                         { text: qsTr("Align a marker"), value: "marker" },
                         { text: qsTr("Align a rise"), value: "rise" },
-                        { text: qsTr("Align a fall"), value: "fall" }]
+                        { text: qsTr("Align a fall"), value: "fall" },
+                        { text: qsTr("Align engine starts"), value: "engine" }]
                 onActivated: root.setAlignOn(currentValue)
             }
             ComboBox {

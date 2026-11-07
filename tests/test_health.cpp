@@ -8,7 +8,11 @@
 // a model year, the key values' rule and the since-cleared PIDs, the
 // check failing a report that would carry an identity text, and
 // ecuio_health_export over a mock:// session and its argument checks.
-// Files go to a folder of their own under TEMP/TMPDIR, removed at the end.
+// Then the report from a recording: a hand-written folder of replies
+// (reassembled and as they crossed the bus) rebuilt into the ECU's
+// reports, a range, the replay fixture's frames decoded for its values, a
+// recording of values alone, and a folder export's scrubbed copy. Files
+// go to a folder of their own under TEMP/TMPDIR, removed at the end.
 
 #include <gtest/gtest.h>
 
@@ -64,6 +68,14 @@ struct Folder {
     std::string utf8(const std::string& name) const
     {
         return (path / name).generic_u8string();
+    }
+    void write(const std::string& name, const std::string& bytes) const
+    {
+        const fs::path p = path / name;
+        std::error_code ec;
+        fs::create_directories(p.parent_path(), ec);
+        std::ofstream f(p, std::ios::binary);
+        f << bytes;
     }
 };
 
@@ -531,6 +543,9 @@ TEST(HealthTest, NumbersAndTimesAreWrittenWithoutTheLocale)
     EXPECT_EQ(ecuio_health::fixed(0.005, 3), "0.005");
     EXPECT_EQ(ecuio_health::utc_text(0), "1970-01-01T00:00:00Z");
     EXPECT_EQ(ecuio_health::utc_text(951782400000000u), "2000-02-29T00:00:00Z");
+    EXPECT_EQ(ecuio_health::utc_text(253402300799999999u),
+              "9999-12-31T23:59:59Z");
+    EXPECT_EQ(ecuio_health::utc_text(UINT64_MAX), "9999-12-31T23:59:59Z");
     EXPECT_EQ(ecuio_health::utc_text(kUtc), "2026-11-06T14:22:33Z");
 }
 
@@ -609,12 +624,435 @@ TEST(HealthTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     a.values = &bad;
     a.value_count = 1;
     EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    /* A recording takes no values of the caller's */
+    const ecuio_health_value_t given{1, 0, 0.0, 0, 0};
     a = o;
     a.session = nullptr;
-    a.folder_utf8 = "rec"; /* a recording: step 2 */
-    EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_NOT_IMPLEMENTED);
+    a.folder_utf8 = "rec";
+    a.values = &given;
+    a.value_count = 1;
+    EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_FALSE(fs::exists("health.txt"));
     ecuio_session_destroy(s);
+}
+
+// ---- The report from a recording ----
+
+/* A frames.csv row */
+std::string row(uint64_t t, uint32_t id, uint32_t flags,
+                const std::vector<uint8_t>& data)
+{
+    char head[96];
+    std::snprintf(head, sizeof head, "%llu,%llu,0x%X,0x%X,",
+                  static_cast<unsigned long long>(t),
+                  static_cast<unsigned long long>(t), id, flags);
+    std::string out = head;
+    for (size_t i = 0; i < data.size(); ++i) {
+        char b[4];
+        std::snprintf(b, sizeof b, i == 0 ? "%02X" : " %02X", data[i]);
+        out += b;
+    }
+    return out + "\n";
+}
+
+std::vector<uint8_t> with_text(std::vector<uint8_t> head, const char* text,
+                               size_t pad = 0)
+{
+    head.insert(head.end(), text, text + std::strlen(text));
+    head.insert(head.end(), pad, 0x00);
+    return head;
+}
+
+constexpr uint32_t kWhole = ECUIO_FRAME_FLAG_REASSEMBLED;
+
+/* An ELM327 session's recording of the engine ECU's replies: the MIL on,
+ * two stored codes (then a 7F 03 78, still working, which answers
+ * nothing), the pending list refused, no permanent code, a freeze frame
+ * stored by P0301 at 3000 rpm, Service 09's PID bitmap (no item), the VIN
+ * across three frames as they crossed the bus (its Flow Control between)
+ * and a calibration ID whole; another module's refusal and an
+ * unattributable one; at 9 s readiness again, the MIL off. The values:
+ * the first ranked signal and the distance since the codes were
+ * cleared. */
+void car_recording(const Folder& f, const std::string& name = "rec")
+{
+    const std::string rank1 = ranked_def(1)->name;
+    const std::string since = pid_def(0x31)->name;
+    f.write(name + "/events.log",
+            "ecuio session recording, format 2 (ADR-0049)\n"
+            "started  2026-11-06 14:00:00.000 (UTC)\n"
+            "utc  2026-11-06T05:30:00.000Z\n"
+            "core  0.5.1\n"
+            "uri  elm327://COM3?profile=obd2&serial=115200\n"
+            "profile  obd2\n"
+            "frame flags  complete\n"
+            "\n");
+    const std::string vin = kVin;
+    f.write(
+        name + "/frames.csv",
+        "host_us,timestamp_us,id,flags,data\n" +
+            row(1000, 0x7E8, kWhole, {0x41, 0x01, 0x82, 0x07, 0xE5, 0x00}) +
+            row(1100, 0x7E8, kWhole, {0x41, 0x41, 0x00, 0x07, 0xE5, 0x04}) +
+            row(1200, 0x7E8, kWhole, {0x43, 0x02, 0x03, 0x01, 0x04, 0x20}) +
+            row(1250, 0x7E8, kWhole, {0x7F, 0x03, 0x78}) +
+            row(1300, 0x7E8, kWhole, {0x7F, 0x07, 0x11}) +
+            row(1400, 0x7E8, kWhole, {0x4A, 0x00}) +
+            row(1500, 0x7E8, kWhole,
+                {0x42, 0x00, 0x00, 0x58, 0x18, 0x00, 0x00}) +
+            row(1600, 0x7E8, kWhole, {0x42, 0x02, 0x00, 0x03, 0x01}) +
+            row(1700, 0x7E8, kWhole, {0x42, 0x0C, 0x00, 0x2E, 0xE0}) +
+            row(1750, 0x7E8, kWhole, {0x49, 0x00, 0x55, 0x40, 0x00, 0x00}) +
+            row(1800, 0x7E8, 0,
+                with_text({0x10, 0x14, 0x49, 0x02, 0x01},
+                          vin.substr(0, 3).c_str())) +
+            row(1805, 0x7E0, 0,
+                {0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) +
+            row(1810, 0x7E8, 0, with_text({0x21}, vin.substr(3, 7).c_str())) +
+            row(1820, 0x7E8, 0, with_text({0x22}, vin.substr(10, 7).c_str())) +
+            row(1900, 0x7E8, kWhole,
+                with_text({0x49, 0x04, 0x01}, "FAKECAL-01", 6)) +
+            row(2000, 0x7E9, kWhole, {0x7F, 0x03, 0x11}) +
+            row(2100, 0x7E8, kWhole, {0x7F, 0x01, 0x12}) +
+            row(9000000, 0x7E8, kWhole, {0x41, 0x01, 0x00, 0x07, 0xE5, 0x00}));
+    f.write(name + "/signals.csv", "host_us,signal,value,unit\n"
+                                   "1000000," +
+                                       rank1 + ",800," + ranked_def(1)->unit +
+                                       "\n"
+                                       "3000000," +
+                                       since + ",1234," + pid_def(0x31)->unit +
+                                       "\n"
+                                       "4000000," +
+                                       rank1 + ",850," + ranked_def(1)->unit +
+                                       "\n"
+                                       "8000000," +
+                                       rank1 + ",900," + ranked_def(1)->unit +
+                                       "\n");
+}
+
+/* ecuio_health_export over a folder, the file read back */
+struct Reported {
+    ecuio_status_t status = ECUIO_OK;
+    ecuio_health_report_t r{};
+    std::string bytes;
+    std::string detail;
+    std::string out;
+
+    Reported(const Folder& f, const std::string& folder, uint32_t format,
+             uint64_t from_us = 0, uint64_t to_us = 0)
+    {
+        static int n = 0;
+        out = f.utf8("report-" + std::to_string(++n) +
+                     (format == ECUIO_HEALTH_TEXT ? ".txt" : ".json"));
+        ecuio_health_options_t o{};
+        o.format = format;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        o.latest_model_year = 2027;
+        o.utc_us = kUtc;
+        o.from_us = from_us;
+        o.to_us = to_us;
+        status = ecuio_health_export(&o, &r);
+        detail = ecuio_last_error_detail();
+        bytes = read_file(fs::u8path(out));
+    }
+};
+
+/* The replies rebuild the ECU's reports as the session kept them: the
+ * last of each kind wins, a refusal of a list is that list's, another
+ * module's refusal makes no ECU; both formats hold the same facts and
+ * neither the VIN nor the calibration ID */
+TEST(HealthTest, ARecordingsRepliesRebuildTheEcusReports)
+{
+    Folder f;
+    car_recording(f);
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    const Reported text(f, f.utf8("rec"), ECUIO_HEALTH_TEXT);
+    ASSERT_EQ(text.status, ECUIO_OK) << text.detail;
+    const ecuio_json::Value v = parsed(json.bytes);
+    std::vector<std::string> facts;
+    strings_of(v, facts);
+    for (const std::string& fact : facts) {
+        EXPECT_NE(text.bytes.find(fact), std::string::npos)
+            << "the text lacks '" << fact << "'\n"
+            << text.bytes;
+    }
+    for (const std::string* out : {&json.bytes, &text.bytes}) {
+        EXPECT_EQ(out->find(kVin), std::string::npos);
+        EXPECT_EQ(out->find("FAKECAL"), std::string::npos);
+        EXPECT_EQ(out->find("COM3"), std::string::npos);
+    }
+    const ecuio_json::Value& src = *v.find("source");
+    EXPECT_EQ(src.find("kind")->text, "recording");
+    EXPECT_EQ(src.find("uri")->text,
+              "elm327://<address>?profile=obd2&serial=115200");
+    EXPECT_EQ(src.find("backend")->text, "elm327");
+    EXPECT_EQ(src.find("started")->text, "2026-11-06T05:30:00Z");
+    EXPECT_EQ(src.find("to_s")->number, 9.0);
+    EXPECT_TRUE(v.find("vehicle")->find("vin_read")->boolean);
+    ASSERT_EQ(v.find("ecus")->items.size(), 1u);
+    const ecuio_json::Value& ecu = v.find("ecus")->items[0];
+    EXPECT_EQ(ecu.find("ecu")->text, "0x7E8");
+    EXPECT_EQ(ecu.find("state")->text, "recorded");
+    /* The later readiness reply: the MIL off; the drive cycle's reply
+     * laid on its monitors, though it came first */
+    EXPECT_FALSE(ecu.find("readiness")->find("mil")->boolean);
+    const std::vector<ecuio_json::Value>& monitors =
+        ecu.find("readiness")->find("monitors")->items;
+    ASSERT_FALSE(monitors.empty());
+    size_t cycle_incomplete = 0;
+    for (const ecuio_json::Value& m : monitors) {
+        EXPECT_TRUE(m.find("cycle_enabled")->boolean) << m.find("name")->text;
+        cycle_incomplete += m.find("cycle_complete")->boolean ? 0 : 1;
+    }
+    EXPECT_EQ(cycle_incomplete, 1u);
+    EXPECT_EQ(ecu.find("stored")->find("codes")->items.size(), 2u);
+    EXPECT_EQ(ecu.find("pending")->find("reply")->text, "7F 07 11");
+    EXPECT_EQ(ecu.find("permanent")->find("outcome")->text, "answered");
+    EXPECT_EQ(ecu.find("freeze")->find("stored_by")->find("code")->text,
+              "P0301");
+    ASSERT_EQ(ecu.find("freeze")->find("values")->items.size(), 1u);
+    EXPECT_EQ(ecu.find("freeze")->find("values")->items[0].find("value")->whole,
+              3000);
+    ASSERT_EQ(ecu.find("identification")->items.size(), 2u);
+    EXPECT_EQ(ecu.find("identification")->items[0].find("name")->text, "VIN");
+    EXPECT_EQ(ecu.find("identification")->items[1].find("name")->text, "CALID");
+    ASSERT_EQ(ecu.find("since_cleared")->items.size(), 1u);
+    EXPECT_EQ(ecu.find("since_cleared")->items[0].find("age_ms")->whole, 6000);
+    ASSERT_EQ(v.find("key_values")->items.size(), 1u);
+    const ecuio_json::Value& key = v.find("key_values")->items[0];
+    EXPECT_EQ(key.find("value")->whole, 900);
+    EXPECT_EQ(key.find("age_ms")->whole, 1000);
+    EXPECT_EQ(v.find("ecus_note"), nullptr);
+    EXPECT_EQ(json.r.ecus, 1u);
+    EXPECT_EQ(json.r.codes, 2u);
+    EXPECT_EQ(json.r.values, 1u);
+    EXPECT_EQ(json.r.since_cleared, 1u);
+    EXPECT_EQ(json.r.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 2u);
+    EXPECT_EQ(json.r.flags, ECUIO_HEALTH_VIN_DECODED);
+}
+
+/* The range: up to 5 s the first readiness reply (the MIL on); from 8.5 s
+ * only the later one, every other kind not recorded, and no value in
+ * force from the range's start */
+TEST(HealthTest, ARangeTakesTheRepliesThatEndInIt)
+{
+    Folder f;
+    car_recording(f);
+    const Reported early(f, f.utf8("rec"), ECUIO_HEALTH_JSON, 0, 5000000);
+    ASSERT_EQ(early.status, ECUIO_OK) << early.detail;
+    const ecuio_json::Value e = parsed(early.bytes);
+    EXPECT_EQ(e.find("source")->find("to_s")->number, 5.0);
+    const ecuio_json::Value& ecu = e.find("ecus")->items.at(0);
+    EXPECT_TRUE(ecu.find("readiness")->find("mil")->boolean);
+    EXPECT_EQ(e.find("inspection")->find("verdict")->text, "mil_on");
+    EXPECT_EQ(e.find("key_values")->items.at(0).find("value")->whole, 850);
+    EXPECT_EQ(e.find("key_values")->items.at(0).find("age_ms")->whole, 1000);
+
+    const Reported late(f, f.utf8("rec"), ECUIO_HEALTH_TEXT, 8500000, 0);
+    ASSERT_EQ(late.status, ECUIO_OK) << late.detail;
+    EXPECT_NE(late.bytes.find("Range: 8.500 s to 9.000 s"), std::string::npos)
+        << late.bytes;
+    EXPECT_NE(late.bytes.find("  Readiness: answered, MIL off, 0 confirmed "
+                              "codes\n"),
+              std::string::npos)
+        << late.bytes;
+    EXPECT_NE(late.bytes.find("  Stored codes: not recorded\n"),
+              std::string::npos);
+    EXPECT_NE(late.bytes.find("  Freeze frame: not recorded\n"),
+              std::string::npos);
+    EXPECT_NE(late.bytes.find("None of the ranked signals has a value."),
+              std::string::npos);
+    EXPECT_NE(late.bytes.find("No VIN was read."), std::string::npos);
+
+    /* A range that starts after the recording ends is refused; one that
+     * starts at its end is its last moment */
+    const Reported past(f, f.utf8("rec"), ECUIO_HEALTH_JSON, 500000000, 0);
+    EXPECT_EQ(past.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(past.detail,
+              "the range starts at 500 s, after the recording ends at 9 s");
+    EXPECT_TRUE(past.bytes.empty());
+    const Reported at_end(f, f.utf8("rec"), ECUIO_HEALTH_JSON, 9000000, 0);
+    EXPECT_EQ(at_end.status, ECUIO_OK) << at_end.detail;
+}
+
+/* The replay fixture: no events.log of its own, so one naming obd2 beside
+ * its frames; its values decoded from the frames, and no ECU, since its
+ * replies are Service 01's values alone */
+TEST(HealthTest, TheReplayFixturesFramesGiveItsValuesAndNoEcu)
+{
+    Folder f;
+    std::error_code ec;
+    fs::create_directories(f.path / "fixture", ec);
+    fs::copy_file(fs::u8path(ECUIO_REPLAY_FIXTURES) /
+                      "2026-10-25-engine-start" / "frames.csv",
+                  f.path / "fixture" / "frames.csv", ec);
+    ASSERT_FALSE(ec) << ec.message();
+    f.write("fixture/events.log",
+            "ecuio session recording, format 2 (ADR-0049)\n"
+            "profile  obd2\n"
+            "\n");
+    const Reported rep(f, f.utf8("fixture"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(rep.status, ECUIO_OK) << rep.detail;
+    const ecuio_json::Value v = parsed(rep.bytes);
+    EXPECT_TRUE(v.find("ecus")->items.empty());
+    EXPECT_EQ(v.find("ecus_note")->text,
+              "no ECU answered a diagnostic or identification request in "
+              "the range");
+    EXPECT_EQ(v.find("source")->find("uri")->type, ecuio_json::Type::null);
+    EXPECT_EQ(v.find("source")->find("backend")->text, "unknown");
+    EXPECT_GT(rep.r.values, 3u);
+    EXPECT_EQ(rep.r.ecus, 0u);
+    EXPECT_EQ(v.find("key_values")->items.at(0).find("name")->text,
+              ranked_def(1)->name);
+}
+
+/* A recording of values alone (no frames.csv): the key values, no ECU,
+ * and why */
+TEST(HealthTest, ARecordingOfValuesAloneSaysItHasNoFrames)
+{
+    Folder f;
+    const Reported json(f, ECUIO_GOLDEN_RECORDING, ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    const ecuio_json::Value v = parsed(json.bytes);
+    EXPECT_FALSE(v.find("source")->find("frames")->boolean);
+    EXPECT_EQ(v.find("source")->find("uri")->text,
+              "replay://<path>?profile=obd2&speed=max");
+    EXPECT_TRUE(v.find("ecus")->items.empty());
+    EXPECT_EQ(v.find("ecus_note")->text, "the recording has no frames");
+    EXPECT_GT(json.r.values, 3u);
+    const Reported text(f, ECUIO_GOLDEN_RECORDING, ECUIO_HEALTH_TEXT);
+    EXPECT_NE(text.bytes.find("\nECUs: the recording has no frames\n"),
+              std::string::npos)
+        << text.bytes;
+
+    /* Neither frames nor values: refused, as the folder export refuses */
+    f.write("empty/events.log", "ecuio session recording, format 2 "
+                                "(ADR-0049)\n\n");
+    const Reported none(f, f.utf8("empty"), ECUIO_HEALTH_JSON);
+    EXPECT_EQ(none.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(none.detail, "the folder has no frames.csv or signals.csv");
+    EXPECT_FALSE(fs::exists(fs::u8path(none.out)));
+    EXPECT_FALSE(fs::exists(fs::u8path(none.out + ".partial")));
+
+    /* A row the reader refuses, by its line */
+    f.write("bad/frames.csv", "host_us,timestamp_us,id,flags,data\n" +
+                                  row(2000, 0x7E8, kWhole, {0x43, 0x00}) +
+                                  row(1000, 0x7E8, kWhole, {0x43, 0x00}));
+    const Reported bad(f, f.utf8("bad"), ECUIO_HEALTH_JSON);
+    EXPECT_EQ(bad.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(bad.detail,
+              "frames.csv line 3: host_us is earlier than the row before");
+    EXPECT_TRUE(bad.bytes.empty());
+}
+
+/* A folder export's scrubbed copy has no identification reply: its report
+ * reads no VIN and lists no item, and keeps the codes */
+TEST(HealthTest, AScrubbedCopysReportHasNoIdentification)
+{
+    Folder f;
+    car_recording(f);
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_FOLDER;
+    const std::string folder = f.utf8("rec");
+    const std::string out = f.utf8("copy");
+    o.folder_utf8 = folder.c_str();
+    o.out_path_utf8 = out.c_str();
+    ecuio_export_report_t er{};
+    ASSERT_EQ(ecuio_export(&o, &er), ECUIO_OK) << ecuio_last_error_detail();
+    const Reported rep(f, out, ECUIO_HEALTH_JSON);
+    ASSERT_EQ(rep.status, ECUIO_OK) << rep.detail;
+    const ecuio_json::Value v = parsed(rep.bytes);
+    EXPECT_FALSE(v.find("vehicle")->find("vin_read")->boolean);
+    const ecuio_json::Value& ecu = v.find("ecus")->items.at(0);
+    EXPECT_TRUE(ecu.find("identification")->items.empty());
+    EXPECT_EQ(ecu.find("stored")->find("codes")->items.size(), 2u);
+    EXPECT_EQ(rep.r.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 0u);
+    EXPECT_EQ(rep.r.flags, 0u);
+}
+
+/* An identification reply before the range still has its value
+ * searched for: a number signal in the range that reads it (an ECU's
+ * serial as a number) fails the report */
+TEST(HealthTest, AnIdentityReplyOutsideTheRangeIsStillChecked)
+{
+    Folder f;
+    const std::string rank1 = ranked_def(1)->name;
+    f.write("rec/events.log", "ecuio session recording, format 2 "
+                              "(ADR-0049)\nprofile  obd2\n\n");
+    f.write(
+        "rec/frames.csv",
+        "host_us,timestamp_us,id,flags,data\n" +
+            row(1000, 0x7E8, kWhole,
+                with_text({0x62, 0xF1, 0x8C}, "12345678")) +
+            row(3000000, 0x7E8, kWhole, {0x41, 0x01, 0x00, 0x07, 0xE5, 0x00}));
+    f.write("rec/signals.csv", "host_us,signal,value,unit\n"
+                               "2500000," +
+                                   rank1 + ",12345678," + ranked_def(1)->unit +
+                                   "\n");
+    const Reported whole(f, f.utf8("rec"), ECUIO_HEALTH_TEXT);
+    EXPECT_EQ(whole.status, ECUIO_ERR_LOAD_FAILED);
+    const Reported later(f, f.utf8("rec"), ECUIO_HEALTH_TEXT, 2000000, 0);
+    EXPECT_EQ(later.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(later.r.failed_class, ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1);
+    EXPECT_EQ(later.detail, "the check found an identification reply's value "
+                            "in the report: nothing was written");
+    EXPECT_TRUE(later.bytes.empty());
+}
+
+/* The text of a small recording, byte for byte */
+TEST(HealthTest, TheTextOfARecordingIsByteForByte)
+{
+    Folder f;
+    f.write("small/events.log", "ecuio session recording, format 2 (ADR-0049)\n"
+                                "uri  mock://Weekend car\n"
+                                "profile  mock\n"
+                                "\n");
+    f.write(
+        "small/frames.csv",
+        "host_us,timestamp_us,id,flags,data\n" +
+            row(500000, 0x7E8, kWhole, {0x41, 0x01, 0x00, 0x01, 0x00, 0x00}) +
+            row(600000, 0x7E8, kWhole, {0x43, 0x00}) +
+            row(2500000, 0x7E8, kWhole, {0x7F, 0x0A, 0x11}));
+    const Reported rep(f, f.utf8("small"), ECUIO_HEALTH_TEXT);
+    ASSERT_EQ(rep.status, ECUIO_OK) << rep.detail;
+    const std::string misfire = ecuio_monitor_name(0, 0);
+    EXPECT_EQ(rep.bytes,
+              std::string("Havne ") + ecuio_version_string() +
+                  ": a scrubbed health report (ADR-0054)\n"
+                  "Source: a recording, mock://<label> (mock), profile "
+                  "mock\n"
+                  "Range: 0.000 s to 2.500 s\n"
+                  "Time: 2026-11-06T14:22:33Z\n"
+                  "Units: metric\n"
+                  "\n"
+                  "Vehicle (from its VIN, which is left out)\n"
+                  "  No VIN was read.\n"
+                  "\n"
+                  "Inspection (40 CFR 85.2222)\n"
+                  "  Verdict: ready, ready: the incomplete monitors are "
+                  "within what the rule allows\n"
+                  "  No model year: one incomplete monitor passes either "
+                  "model year's rule, two pass only 1996-2000's, three or "
+                  "more pass neither\n"
+                  "  Incomplete: none\n"
+                  "  Reports counted: 1\n"
+                  "\n"
+                  "ECU 0x7E8 (recorded)\n"
+                  "  Readiness: answered, MIL off, 0 confirmed codes\n"
+                  "    " +
+                  misfire +
+                  ": complete\n"
+                  "  Stored codes: answered, none\n"
+                  "  Pending codes: not recorded\n"
+                  "  Permanent codes: refused (7F 0A 11)\n"
+                  "  Freeze frame: not recorded\n"
+                  "\n"
+                  "Key values (the profile's ranked signals)\n"
+                  "  The profile ranks no signals.\n"
+                  "\n"
+                  "Left out: 0 identification texts (the VIN, calibration "
+                  "IDs, serials and the like)\n");
 }
 
 } // namespace
