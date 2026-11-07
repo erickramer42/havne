@@ -21,6 +21,7 @@ TestCase {
     function cleanup() {
         Relay.stop()
         Theme.developerMode = false
+        Theme.zoom = 1.0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false
@@ -208,6 +209,82 @@ TestCase {
         compare(Theme.pageMargin, data.dense ? 10 : 16)
         const live = find(main.contentItem, "livePage")
         compare(live.rowHeight, data.dense ? 36 : 44, "Live's rows follow it")
+    }
+
+    // An item's rectangle in the window's own units (the glass's, the
+    // zoom applied)
+    function onGlass(item, main) {
+        return item.mapToItem(main.contentItem, 0, 0, item.width, item.height)
+    }
+
+    // The phone's tab bar upright: every tab a touch's size on the glass
+    // at any zoom that shows the bar (67 % is the least at 384; at 50 %
+    // the layout passes 720 and the sidebar shows), the targets ending a
+    // gap above the window's bottom, and with the system's bars over the
+    // window (Android edge to edge) no tab inside the bottom inset, the
+    // bar's color reaching the window's edge and the header's row below
+    // the top inset
+    function test_theTabBarsTargetsAreATouchsSize_data() {
+        const none = { left: 0, top: 0, right: 0, bottom: 0 }
+        return [{ tag: "100 %", zoom: 1.0, insets: none },
+                { tag: "67 %", zoom: 0.67, insets: none },
+                { tag: "150 %", zoom: 1.5, insets: none },
+                { tag: "the system's bars", zoom: 1.0,
+                  insets: { left: 0, top: 24, right: 0, bottom: 48 } },
+                { tag: "the system's bars at 67 %", zoom: 0.67,
+                  insets: { left: 0, top: 24, right: 0, bottom: 48 } }]
+    }
+
+    function test_theTabBarsTargetsAreATouchsSize(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        Theme.zoom = data.zoom
+        main.testInsets = data.insets
+        verify(waitForPolish(main), "laid out")
+        const bar = find(main.contentItem, "tabBar")
+        tryVerify(() => bar.visible, 2000, "the tab bar shows upright")
+        const glass = main.contentItem.height
+        const floor = glass - data.insets.bottom - 8
+        compare(bar.count, 7, "today's tabs")
+        for (let i = 0; i < bar.count; ++i) {
+            const tab = bar.itemAt(i)
+            const r = onGlass(tab, main)
+            verify(r.height >= 48 - 0.5, tab.text + " is " + r.height + " tall on the glass")
+            verify(r.width >= 48 - 0.5, tab.text + " is " + r.width + " wide on the glass")
+            verify(r.y + r.height <= floor + 0.5,
+                   tab.text + " ends at " + (r.y + r.height) + ", past " + floor)
+        }
+        const back = onGlass(find(bar, "tabBarBackground"), main)
+        verify(back.y + back.height >= glass - 0.5,
+               "the bar's color ends at " + (back.y + back.height) + " of " + glass)
+        const head = onGlass(find(main.contentItem, "headerRow"), main)
+        verify(head.y >= data.insets.top - 0.5,
+               "the header's row starts at " + head.y + ", inside the top inset")
+        const rowHeight = Theme.toolBarHeight * Theme.zoom
+        verify(head.height >= rowHeight - 0.5,
+               "the header's row is " + head.height + " tall, under " + rowHeight)
+        const headBar = onGlass(find(main.contentItem, "headerBar"), main)
+        verify(headBar.y <= 0.5, "the header's color starts at the window's top")
+    }
+
+    // At the sidebar's width (a phone on its side) there's no tab bar, and
+    // the pages still keep off the bottom inset
+    function test_thePagesKeepOffTheBottomInsetBesideTheSidebar() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 832
+        main.height = 384
+        main.testInsets = { left: 0, top: 24, right: 0, bottom: 30 }
+        verify(waitForPolish(main), "laid out")
+        verify(!find(main.contentItem, "tabBar").visible, "the sidebar instead")
+        const home = find(main.contentItem, "homePage")
+        main.gotoPage(Array.from(home.parent.children).indexOf(home))
+        verify(waitForPolish(main), "laid out")
+        const r = onGlass(home.parent, main)
+        verify(r.y + r.height <= main.contentItem.height - 30 + 0.5,
+               "the pages end at " + (r.y + r.height) + " of " + main.contentItem.height)
     }
 
     // The chart maximized: on its side by default, upright on request,
