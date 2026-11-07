@@ -376,8 +376,9 @@ background too ([roadmap](#roadmap)).
     offline by core's reader, the Recordings page and `havne-cli
     view`, through the values as recorded or through the frames by a
     profile (`ecuio_recording_open_frames`, so a raw recording plots),
-    exported by `havne-cli export` as pcapng (its frames) or CSV (its
-    values, one row per sample), scrubbed by construction and checked
+    exported by `havne-cli export` as pcapng (its frames), CSV (its
+    values, one row per sample) or a folder (a copy that reads and
+    replays as the original), scrubbed by construction and checked
     ([ADR-0054](docs/adr/0054-exports-and-imports.md)), and a
     `candump -L` log imported as a recording (`havne-cli import
     candump`); the app exports only the Log page's frames and imports
@@ -574,11 +575,13 @@ append-only.
     ([ADR-0053](docs/adr/0053-python-bindings.md)'s appendices);
   - a recording's values exported as CSV, one row per sample, scrubbed
     and checked, in core and `havne-cli export --format csv`
-    (ADR-0054's appendix "the CSV export as built").
+    (ADR-0054's appendix "the CSV export as built");
+  - a scrubbed copy of a recording's folder, every file rewritten by
+    its classes and checked, in core and `havne-cli export --format
+    folder` (ADR-0054's appendix "the folder export as built").
 - **In progress:** the `havne` Python package and its tests (step 3),
   then the wheel (step 4).
-- **To come:** the other exports (a scrubbed recording folder, the
-  health report) and CSV import, a vehicle's baseline recording,
+- **To come:** the health report's export and CSV import, a vehicle's baseline recording,
   and the Python examples against the simulated ECU.
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
