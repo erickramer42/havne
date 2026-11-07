@@ -4,13 +4,21 @@
 #
 # plugins/example-sim loaded from its folder (core reads each file
 # through the package's callback, on the loading thread), its variants
-# listed, one registered, and a session decoding through it.
+# listed, one registered, a session decoding through it, and its
+# recording holding the variant's file as signals.json. Two threads
+# loading at once each read their own folder; a read that raises is a
+# file core can't read; a file is read no further than core's bound.
 
 import os
+import shutil
+import threading
+import time
 
 import pytest
 
 import havne
+import havne.signals
+from havne._core import lib
 
 from conftest import PLUGINS
 
@@ -23,6 +31,118 @@ def test_the_example_plugin_loads_and_a_session_decodes_through_a_variant():
     with havne.Session("mock://py", plugin=p, variant=p.variants[1]) as s:
         assert "profile=plugin.example-sim." + p.variants[1] in s.uri
         assert s.signals, "the variant's signals"
+
+
+def test_a_plugin_session_s_recording_holds_its_variant_s_file(tmp_path):
+    """Recorded as havne-cli stream --record --plugin records it: the
+    variant's file goes in as signals.json, named in events.log with
+    the plugin, so a replay decodes through it again"""
+    p = havne.Plugin(os.path.join(PLUGINS, "example-sim"))
+    variant = p.variants[1]
+    with havne.Session("mock://py", plugin=p, variant=variant) as s:
+        rec = s.record(tmp_path)
+        s.start()
+        time.sleep(0.3)
+        folder = rec.folder
+    assert os.path.isfile(os.path.join(folder, "signals.json"))
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        header = f.read().split("\n\n")[0].splitlines()
+    assert "profile  plugin.example-sim." + variant in header
+    assert any(line.startswith("signal file  signals.json,") for line in header), header
+    assert any(line.startswith("plugin  ") for line in header), header
+
+
+def copy_of_the_example(folder, plugin_id, oil_name):
+    """The example plugin under another id, its oil temperature named
+    oil_name, so a load that read another folder's files shows"""
+    shutil.copytree(os.path.join(PLUGINS, "example-sim"), folder)
+    for name, old, new in (("manifest.json", '"id": "example-sim"', f'"id": "{plugin_id}"'),
+                           ("data/base.json", '"name": "Oil Temp"', f'"name": "{oil_name}"')):
+        path = os.path.join(folder, name)
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+        assert body.count(old) == 1, name
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(body.replace(old, new))
+    return folder
+
+
+def oil_name(plugin):
+    d = lib.ecuio_plugin_variant_find(plugin._handle, 0, b"oil_temp")
+    return d.contents.name.decode("utf-8")
+
+
+def test_two_threads_load_two_folders_each_its_own(tmp_path):
+    # core calls the read callback on each loading thread: each load
+    # reads its own folder's files, whatever the other thread loads
+    folders = {"copy-a": "Oil Temp A", "copy-b": "Oil Temp B"}
+    paths = {i: copy_of_the_example(str(tmp_path / i), i, n) for i, n in folders.items()}
+    start = threading.Barrier(len(paths))
+    wrong = []
+
+    def load(plugin_id):
+        start.wait()
+        for _ in range(50):
+            p = havne.Plugin(paths[plugin_id])
+            if (p.id, oil_name(p)) != (plugin_id, folders[plugin_id]):
+                wrong.append((plugin_id, p.id, oil_name(p)))
+
+    threads = [threading.Thread(target=load, args=(i,)) for i in paths]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not wrong, wrong[:3]
+
+
+def test_a_read_that_raises_is_a_file_that_cannot_be_read(tmp_path, monkeypatch):
+    # Not an OSError: the callback still answers core, which refuses
+    folder = copy_of_the_example(str(tmp_path / "raises"), "raises", "Oil Temp")
+    real_open = open
+
+    def raising_open(path, *args, **kwargs):
+        if os.path.basename(path) != "manifest.json":
+            raise RuntimeError("not a file system error")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(havne.signals, "open", raising_open, raising=False)
+    with pytest.raises(havne.Error) as e:
+        havne.Plugin(folder)
+    assert e.value.name == "INVALID_ARGUMENT"
+    assert "data/base.json" in e.value.detail, e.value.detail
+
+
+def test_a_data_file_is_read_no_further_than_core_takes(tmp_path, monkeypatch):
+    # A file past core's bound is refused by core either way: the
+    # package reads one byte past it, never the whole file
+    folder = copy_of_the_example(str(tmp_path / "big"), "big", "Oil Temp")
+    with open(os.path.join(folder, "data", "base.json"), "ab") as f:
+        f.write(b" " * (2 * havne.c.ECUIO_SIGNAL_FILE_MAX_BYTES))
+    real_open, asked = open, []
+
+    class Recorded:
+        def __init__(self, f):
+            self.f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.f.close()
+
+        def read(self, size=-1):
+            asked.append(size)
+            return self.f.read(size)
+
+    def recording_open(path, *args, **kwargs):
+        f = real_open(path, *args, **kwargs)
+        return f if os.path.basename(path) == "manifest.json" else Recorded(f)
+
+    monkeypatch.setattr(havne.signals, "open", recording_open, raising=False)
+    with pytest.raises(havne.Error) as e:
+        havne.Plugin(folder)
+    assert e.value.name == "INVALID_ARGUMENT"
+    assert asked == [havne.c.ECUIO_SIGNAL_FILE_MAX_BYTES + 1], asked
 
 
 def test_a_folder_with_no_plugin_is_refused(tmp_path):

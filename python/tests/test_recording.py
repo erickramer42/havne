@@ -4,9 +4,12 @@
 #
 # A mock:// session recorded through Session.record, a note and a marker
 # on the way, read back with Recording: its signals with their samples, the
-# marker, a query, the value at a time, a threshold's crossing; then the
-# same folder decoded again from its frames.
+# marker, a query, the value at a time (signals.csv's last row), a
+# threshold's crossing; then the same folder decoded again from its
+# frames.
 
+import csv
+import os
 import time
 
 import pytest
@@ -26,6 +29,13 @@ def recorded(tmp_path, seconds=1.2):
     return folder
 
 
+def last_row(folder, signal):
+    """(value, host_us) of the signal's last row in signals.csv"""
+    with open(os.path.join(folder, "signals.csv"), encoding="utf-8-sig", newline="") as f:
+        rows = [r for r in csv.DictReader(f) if r["signal"] == signal]
+    return rows[-1]["value"], int(rows[-1]["host_us"])
+
+
 def test_a_recorded_session_reads_back(tmp_path):
     folder = recorded(tmp_path)
     assert folder.startswith(str(tmp_path).replace("\\", "/")) or folder.startswith(str(tmp_path))
@@ -42,7 +52,8 @@ def test_a_recorded_session_reads_back(tmp_path):
         assert len(cols) == 2 and all(len(c) == 4 for c in cols)
         assert sum(c.samples for c in cols[0]) == rpm.samples
         value, at = r.text_at("RPM", rpm.last_us)
-        assert at == rpm.last_us and float(value) == pytest.approx(rpm.lowest, abs=1e9)
+        assert (value, at) == last_row(folder, "RPM")
+        assert at == rpm.last_us
         assert r.text_at("RPM", 0)[1] in (None, 0)
         coolant = r.signal("Coolant Temp")
         assert r.find_threshold("Coolant Temp", coolant.highest + 1000) is None

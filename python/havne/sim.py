@@ -6,6 +6,7 @@
 # Linux virtual CAN bus answering a session as the engine ECU.
 
 import ctypes
+import weakref
 from collections import namedtuple
 
 from . import _ecuio as e
@@ -32,6 +33,9 @@ class Sim:
                 raise ValueError("a sim on a bus needs its interface; Sim.unbound takes none")
             check(lib.ecuio_sim_create(utf8(uri), utf8(interface), ctypes.byref(self._sim)),
                   "ecuio_sim_create")
+        # Left unclosed, destroyed when collected or at the interpreter's
+        # exit, so its worker leaves the bus
+        self._finalizer = weakref.finalize(self, _destroy, self._sim)
 
     @classmethod
     def unbound(cls, uri="mock://sim"):
@@ -67,5 +71,9 @@ class Sim:
 
     def close(self):
         if self._sim is not None:
-            lib.ecuio_sim_destroy(self._sim)
             self._sim = None
+            self._finalizer()
+
+
+def _destroy(sim):
+    lib.ecuio_sim_destroy(sim)

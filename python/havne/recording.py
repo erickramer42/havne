@@ -10,6 +10,7 @@
 
 import ctypes
 import json
+import weakref
 from collections import namedtuple
 
 from . import _ecuio as e
@@ -26,7 +27,7 @@ Imported = namedtuple("Imported", "folder lines frames error_frames interfaces v
 Imported.__doc__ = ("What an import made: its folder and core's counts; utc_start_us None "
                     "when the file gave no UTC time")
 
-NONE = (1 << 64) - 1   # ECUIO_RECORDING_NONE
+NONE = e.ECUIO_RECORDING_NONE
 
 
 class Recording:
@@ -37,20 +38,27 @@ class Recording:
 
     def __init__(self, folder, profile=None, signals=None):
         self._r = ctypes.POINTER(e.ecuio_recording_t)()
-        if signals is not None:
-            profile = signals.profile
-        if profile is None:
+        if signals is not None and profile is not None:
+            raise ValueError("a recording decodes through one set: profile or signals")
+        if signals is None and profile is None:
             rc = lib.ecuio_recording_open(utf8(str(folder)), e.ecuio_open_progress_t(0), None,
                                           ctypes.byref(self._r))
             check(rc, "ecuio_recording_open")
         else:
-            sset = ctypes.POINTER(e.ecuio_signal_set_t)()
-            check(lib.ecuio_profile_lookup(utf8(profile), ctypes.byref(sset)),
-                  "ecuio_profile_lookup")
+            if signals is not None:
+                # The file's own set: the registry's, under its profile's
+                # name, may be a later file of the same name
+                sset = lib.ecuio_signal_file_set(signals._handle)
+            else:
+                sset = ctypes.POINTER(e.ecuio_signal_set_t)()
+                check(lib.ecuio_profile_lookup(utf8(profile), ctypes.byref(sset)),
+                      "ecuio_profile_lookup")
             rc = lib.ecuio_recording_open_frames(utf8(str(folder)), sset,
                                                  e.ecuio_open_progress_t(0), None,
                                                  ctypes.byref(self._r))
             check(rc, "ecuio_recording_open_frames")
+        # Left unclosed, closed when collected or at the interpreter's exit
+        self._finalizer = weakref.finalize(self, _close, self._r)
         self.info = e.ecuio_recording_info_t()
         check(lib.ecuio_recording_get_info(self._r, ctypes.byref(self.info)),
               "ecuio_recording_get_info")
@@ -65,8 +73,8 @@ class Recording:
 
     def close(self):
         if self._r is not None:
-            lib.ecuio_recording_close(self._r)
             self._r = None
+            self._finalizer()
 
     def _signal(self, i):
         s = e.ecuio_recording_signal_t()
@@ -178,3 +186,7 @@ def import_candump(path, folder, interface=None):
     o.out_folder_utf8 = utf8(str(folder))
     o.interface_utf8 = None if interface is None else utf8(interface)
     return _import(o, str(folder))
+
+
+def _close(r):
+    lib.ecuio_recording_close(r)

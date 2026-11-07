@@ -7,10 +7,18 @@
 # no Python runs on core's worker; its report, identity and support; a
 # recording of it (recording.h). Session is a context manager: leaving it
 # closes the session, then its streams and the recorders it opened.
+#
+# A session left unclosed is closed in that order when it's collected, or
+# at the interpreter's exit (weakref.finalize), so a notebook cell run
+# again doesn't leave the last one's worker holding the adapter. The
+# finalizer holds the handles, never an object that holds the session: a
+# stream's queue lives in a _Queue of its own, apart from its Stream, and
+# a Recorder holds no session.
 
 import ctypes
 import logging
 import threading
+import weakref
 from collections import namedtuple
 
 from . import _ecuio as e
@@ -29,6 +37,20 @@ Value.__doc__ = ("A decoded value: its frame's time and ID, its def's id, name a
 TEXT_KINDS = (e.ECUIO_VALUE_TEXT, e.ECUIO_VALUE_HEX)
 
 
+class _Queue:
+    """A pull queue's handle and the lock its reads hold"""
+
+    def __init__(self):
+        self.q = ctypes.POINTER(e.ecuio_queue_t)()
+        self.lock = threading.Lock()
+
+    def close(self):
+        with self.lock:
+            if self.q is not None:
+                lib.ecuio_queue_close(self.q)
+                self.q = None
+
+
 class Stream:
     """A pull queue of a session's frames or values. Iterating reads in
     batches, 100 ms at a time, so Ctrl+C lands within that, and ends when
@@ -45,9 +67,9 @@ class Stream:
         self.dropped = 0
         self.ended = None   # "stream ended" or "session closed" once it has
         self._session = session
-        self._lock = threading.Lock()
-        self._q = ctypes.POINTER(e.ecuio_queue_t)()
-        check(lib.ecuio_queue_open(session._handle(), kind, capacity, ctypes.byref(self._q)),
+        self._queue = _Queue()
+        check(lib.ecuio_queue_open(session._handle(), kind, capacity,
+                                   ctypes.byref(self._queue.q)),
               "ecuio_queue_open")
         entry = e.ecuio_frame_t if kind == e.ECUIO_QUEUE_FRAMES else e.ecuio_queue_value_t
         self._buf = (entry * batch)()
@@ -59,10 +81,11 @@ class Stream:
         """What's waiting, as a list, waiting up to timeout seconds for the
         first entry; [] once the stream has ended"""
         count, dropped = ctypes.c_uint32(), ctypes.c_uint64()
-        with self._lock:
-            if self._q is None or self.ended:
+        with self._queue.lock:
+            if self._queue.q is None or self.ended:
+                self.ended = self.ended or "session closed"
                 return []
-            rc = self._read(self._q, self._buf, self._batch, ctypes.byref(count),
+            rc = self._read(self._queue.q, self._buf, self._batch, ctypes.byref(count),
                             ctypes.byref(dropped), max(0, int(timeout * 1000)))
             if rc == e.ECUIO_ERR_STREAM_ENDED:
                 self.ended = "stream ended"
@@ -83,10 +106,10 @@ class Stream:
             yield from self.read(0.1)
 
     def close(self):
-        with self._lock:
-            if self._q is not None:
-                lib.ecuio_queue_close(self._q)
-                self._q = None
+        self._queue.close()
+        # Ended, so an iteration stops whether it's reading or in its
+        # loop body: read() returns nothing once the queue is gone
+        self.ended = self.ended or "session closed"
 
     def _entry(self, c):
         if self.kind == e.ECUIO_QUEUE_FRAMES:
@@ -110,8 +133,11 @@ class Recorder:
         check(lib.ecuio_recorder_open(ctypes.byref(opts), ctypes.byref(self._r)),
               "ecuio_recorder_open")
         try:
-            if session.signal_file is not None:
-                check(lib.ecuio_recorder_signal_file(self._r, session.signal_file._handle),
+            # The set it decodes with goes in as signals.json, a signal
+            # file's or a plugin variant's, as havne-cli's --record does
+            file = session._decoding_file()
+            if file:
+                check(lib.ecuio_recorder_signal_file(self._r, file),
                       "ecuio_recorder_signal_file")
             check(lib.ecuio_session_record(session._handle(), self._r), "ecuio_session_record")
         except Exception:
@@ -151,15 +177,28 @@ class Session:
         if signals is not None and plugin is not None:
             raise ValueError("a session decodes through one set: signals or plugin")
         self.signal_file = signals
+        self._plugin, self._variant = plugin, None
         if signals is not None:
             uri = with_profile(uri, signals.profile)
         elif plugin is not None:
             uri = with_profile(uri, plugin.register(variant))
+            self._variant = plugin.variant_index(variant)
         self.uri = uri
-        self._streams, self._recorders = [], []
+        self._streams, self._queues, self._recorders = [], [], []
         self._s = ctypes.POINTER(e.ecuio_session_t)()
         check(lib.ecuio_session_create(utf8(uri), ctypes.byref(self._s)), "ecuio_session_create")
+        self._finalizer = weakref.finalize(self, _close_session, self._s, self._queues,
+                                           self._recorders)
         self._names = self._read_names()
+
+    def _decoding_file(self):
+        """The signal file whose set the session decodes with: its own
+        SignalFile's, or its plugin variant's; None for neither"""
+        if self.signal_file is not None:
+            return self.signal_file._handle
+        if self._plugin is not None:
+            return lib.ecuio_plugin_variant_file(self._plugin._handle, self._variant)
+        return None
 
     def _handle(self):
         if self._s is None:
@@ -185,12 +224,14 @@ class Session:
         """A stream of the session's frames, before start()"""
         s = Stream(self, e.ECUIO_QUEUE_FRAMES, capacity, batch)
         self._streams.append(s)
+        self._queues.append(s._queue)
         return s
 
     def values(self, capacity=4096, batch=Stream.BATCH):
         """A stream of the session's decoded values, before start()"""
         s = Stream(self, e.ECUIO_QUEUE_VALUES, capacity, batch)
         self._streams.append(s)
+        self._queues.append(s._queue)
         return s
 
     def record(self, root, label=None):
@@ -268,10 +309,19 @@ class Session:
         recorders it opened; destroys it. A second call does nothing."""
         if self._s is None:
             return
-        s, self._s = self._s, None
-        lib.ecuio_session_close(s)
+        self._s = None
+        self._finalizer()
         for st in self._streams:
-            st.close()
-        lib.ecuio_session_destroy(s)
-        for r in self._recorders:
-            r.close()
+            st.close()   # each says it ended, before any read
+
+
+def _close_session(s, queues, recorders):
+    """Session.close()'s order, from close() or the finalizer: the
+    session closed (its worker joined), its queues, the session
+    destroyed, then its recorders"""
+    lib.ecuio_session_close(s)
+    for q in queues:
+        q.close()
+    lib.ecuio_session_destroy(s)
+    for r in recorders:
+        r.close()

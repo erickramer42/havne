@@ -16,7 +16,9 @@
 # keeps the set it opened with.
 
 import ctypes
+import itertools
 import os
+import threading
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8
@@ -51,19 +53,29 @@ class SignalFile:
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_char_p,
                   ctypes.POINTER(ctypes.c_char_p), ctypes.POINTER(ctypes.c_size_t))
 def _read_file(user, rel, out_bytes, out_length):
-    """ecuio_plugin_read_t: a folder package's file, on the loading thread"""
-    plugin = _loading[-1]
+    """ecuio_plugin_read_t: a folder package's file, on the loading
+    thread. user is the loading Plugin's id in _loading, so loads on two
+    threads each read their own folder. Any exception is a file that
+    can't be read: one escaping a ctypes callback would leave its return
+    value unset."""
     try:
+        with _loading_lock:
+            plugin = _loading[user]
+        # One byte past core's bound, so an oversized file is still
+        # refused by core, in its words, without reading all of it
         with open(os.path.join(plugin._folder, rel.decode("utf-8")), "rb") as f:
-            plugin._last = ctypes.create_string_buffer(f.read())
-    except OSError:
+            plugin._last = ctypes.create_string_buffer(
+                f.read(e.ECUIO_SIGNAL_FILE_MAX_BYTES + 1))
+        out_bytes[0] = ctypes.cast(plugin._last, ctypes.c_char_p)
+        out_length[0] = len(plugin._last) - 1
+    except BaseException:
         return 1
-    out_bytes[0] = ctypes.cast(plugin._last, ctypes.c_char_p)
-    out_length[0] = len(plugin._last) - 1
     return 0
 
 
-_loading = []
+_loading = {}  # id -> the Plugin loading under it
+_loading_lock = threading.Lock()
+_loading_ids = itertools.count(1)  # never 0: ctypes passes it as None
 
 
 class Plugin:
@@ -80,12 +92,16 @@ class Plugin:
             self._folder = path
             with open(os.path.join(path, "manifest.json"), "rb") as f:
                 manifest = f.read()
-            _loading.append(self)
+            with _loading_lock:
+                load_id = next(_loading_ids)
+                _loading[load_id] = self
             try:
-                rc = lib.ecuio_plugin_load(manifest, len(manifest), _read_file, None,
+                rc = lib.ecuio_plugin_load(manifest, len(manifest), _read_file,
+                                           ctypes.c_void_p(load_id),
                                            ctypes.byref(self._handle))
             finally:
-                _loading.pop()
+                with _loading_lock:
+                    del _loading[load_id]
                 self._last = None
         else:
             with open(path, "rb") as f:
@@ -104,10 +120,14 @@ class Plugin:
                   "ecuio_plugin_variant")
             self.variants.append(text(buf.raw))
 
+    def variant_index(self, variant=None):
+        """A variant's index by its id; the first's when None"""
+        return 0 if variant is None else self.variants.index(variant)
+
     def register(self, variant=None):
         """Registers a variant (its id; the first when None) and returns
         its profile's name, "plugin.<id>.<variant>" """
-        index = 0 if variant is None else self.variants.index(variant)
+        index = self.variant_index(variant)
         buf = ctypes.create_string_buffer(128)
         check(lib.ecuio_plugin_register(self._handle, index, buf, len(buf)),
               "ecuio_plugin_register")
