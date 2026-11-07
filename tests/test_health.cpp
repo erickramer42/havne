@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -634,12 +635,16 @@ TEST(HealthTest, TheExportWritesAMockSessionsReport)
 
 TEST(HealthTest, ArgumentsAreCheckedBeforeAnythingIsRead)
 {
+    /* a folder of its own: an argument let through writes nothing a
+     * later run would meet */
+    Folder f;
+    const std::string out = f.utf8("health.txt");
     ecuio_session_t* s = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://args", &s), ECUIO_OK);
     ecuio_health_options_t o{};
     o.format = ECUIO_HEALTH_TEXT;
     o.session = s;
-    o.out_path_utf8 = "health.txt";
+    o.out_path_utf8 = out.c_str();
     ecuio_health_report_t r{};
     r.ecus = 7;
     EXPECT_EQ(ecuio_health_export(nullptr, &r), ECUIO_ERR_NULL_ARGUMENT);
@@ -673,6 +678,13 @@ TEST(HealthTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     a = o;
     a.value_count = 1;
     EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    /* a session's values are its newest: a range is a recording's */
+    a = o;
+    a.from_us = 1;
+    EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a = o;
+    a.to_us = 5;
+    EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
     ecuio_health_value_t bad{1, 1, 0.0, 0, 0};
     a = o;
     a.values = &bad;
@@ -686,7 +698,7 @@ TEST(HealthTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     a.values = &given;
     a.value_count = 1;
     EXPECT_EQ(ecuio_health_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_FALSE(fs::exists("health.txt"));
+    EXPECT_TRUE(fs::is_empty(f.path));
     ecuio_session_destroy(s);
 }
 
@@ -1107,6 +1119,233 @@ TEST(HealthTest, TheTextOfARecordingIsByteForByte)
                   "\n"
                   "Left out: 0 identification texts (the VIN, calibration "
                   "IDs, serials and the like)\n");
+}
+
+/* A since-cleared value on a reply ID no listed ECU takes goes among the
+ * key values, after the ranked ones, in both formats */
+TEST(HealthTest, ASinceClearedValueNoEcuTakesIsAKeyValue)
+{
+    Car car;
+    car.diag.rx_id = 0x7E9; /* the value's 0x7E8 is no listed ECU's */
+    ecuio_health_report_t r{};
+    const ecuio_json::Value v = parsed(car.write(ECUIO_HEALTH_JSON, &r));
+    EXPECT_TRUE(
+        v.find("ecus")->items.at(0).find("since_cleared")->items.empty());
+    const std::vector<ecuio_json::Value>& keys = v.find("key_values")->items;
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_EQ(keys[0].find("name")->text, ranked_def(1)->name);
+    EXPECT_EQ(keys[1].find("name")->text, ranked_def(2)->name);
+    EXPECT_EQ(keys[2].find("name")->text, pid_def(0x31)->name);
+    EXPECT_EQ(keys[2].find("value")->whole, 1234);
+    EXPECT_EQ(keys[2].find("age_ms")->whole, 4000);
+    EXPECT_EQ(r.values, 3u);
+    EXPECT_EQ(r.since_cleared, 1u);
+    const std::string text = car.write(ECUIO_HEALTH_TEXT);
+    const size_t head = text.find("  Since the codes were cleared, on a "
+                                  "reply ID no ECU is listed for:\n");
+    ASSERT_NE(head, std::string::npos) << text;
+    EXPECT_LT(text.find(std::string(ranked_def(2)->name) + ": "), head);
+    EXPECT_GT(text.find(std::string(pid_def(0x31)->name) + ": "), head);
+
+    /* No ranked value: the text says so, and still shows it */
+    car.values.erase(car.values.begin());
+    car.values.erase(car.values.begin() + 1, car.values.end());
+    car.in.values = car.values.data();
+    car.in.value_count = static_cast<uint32_t>(car.values.size());
+    const std::string alone = car.write(ECUIO_HEALTH_TEXT);
+    EXPECT_NE(alone.find("  None of the ranked signals has a value.\n"),
+              std::string::npos)
+        << alone;
+    EXPECT_NE(alone.find(std::string(pid_def(0x31)->name) + ": "),
+              std::string::npos);
+}
+
+/* From a recording with none of an ECU's replies, the since-cleared value
+ * signals.csv holds is still in the report */
+TEST(HealthTest, ARecordingsSinceClearedValueWithNoEcuIsAKeyValue)
+{
+    Folder f;
+    f.write("rec/events.log", "ecuio session recording, format 2 (ADR-0049)\n"
+                              "profile  obd2\n"
+                              "frame flags  complete\n"
+                              "\n");
+    f.write("rec/frames.csv",
+            "host_us,timestamp_us,id,flags,data\n" +
+                row(1000, 0x7E8, kWhole, {0x41, 0x31, 0x04, 0xD2}) +
+                row(2000, 0x7E8, kWhole, {0x41, 0x0C, 0x1A, 0xF8}));
+    f.write("rec/signals.csv", std::string("host_us,signal,value,unit\n") +
+                                   "1000," + pid_def(0x31)->name + ",1234," +
+                                   pid_def(0x31)->unit + "\n");
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    EXPECT_EQ(json.r.ecus, 0u);
+    EXPECT_EQ(json.r.since_cleared, 1u);
+    const ecuio_json::Value v = parsed(json.bytes);
+    ASSERT_EQ(v.find("key_values")->items.size(), 1u);
+    EXPECT_EQ(v.find("key_values")->items[0].find("value")->whole, 1234);
+}
+
+/* A recording older than the REASSEMBLED flag holds whole replies with
+ * flags 0; they're taken whole, as the reader decodes them, but only on a
+ * reply ID: another ID's frame that opens like a reply makes no ECU */
+TEST(HealthTest, AnOlderRecordingsWholeRowsGiveItsEcu)
+{
+    Folder f;
+    f.write("rec/events.log", "ecuio session recording, format 2 (ADR-0049)\n"
+                              "profile  obd2\n"
+                              "\n");
+    f.write(
+        "rec/frames.csv",
+        "host_us,timestamp_us,id,flags,data\n" +
+            row(1000, 0x7E8, 0, {0x41, 0x01, 0x82, 0x07, 0xE5, 0x00}) +
+            row(1100, 0x7E8, 0, {0x43, 0x02, 0x03, 0x01, 0x04, 0x20}) +
+            row(1200, 0x3E8, 0, {0x41, 0x01, 0x82, 0x07, 0xE5, 0x00}) +
+            row(1300, 0x3E8, 0, {0x43, 0x01, 0x01, 0x71}) +
+            row(1400, 0x7E8, ECUIO_FRAME_FLAG_ERROR, {0x43, 0x01, 0x01, 0x71}));
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    EXPECT_EQ(json.r.ecus, 1u);
+    EXPECT_EQ(json.r.codes, 2u);
+    const ecuio_json::Value v = parsed(json.bytes);
+    ASSERT_EQ(v.find("ecus")->items.size(), 1u);
+    const ecuio_json::Value& ecu = v.find("ecus")->items[0];
+    EXPECT_EQ(ecu.find("ecu")->text, "0x7E8");
+    EXPECT_TRUE(ecu.find("readiness")->find("mil")->boolean);
+    EXPECT_EQ(ecu.find("stored")->find("codes")->items.size(), 2u);
+}
+
+/* The JSON is UTF-8 whatever bytes its source held: valid sequences as
+ * they are, a byte no sequence holds as U+FFFD */
+TEST(HealthTest, TheJsonIsUtf8WhateverBytesItsSourceHeld)
+{
+    Car car;
+    std::snprintf(car.info.profile, sizeof car.info.profile, "%s",
+                  "ob\xFF"
+                  "d\xC3\xA9\xE2\x82");
+    const std::string json = car.write(ECUIO_HEALTH_JSON);
+    const ecuio_json::Value v = parsed(json);
+    std::vector<std::string> facts;
+    strings_of(v, facts);
+    EXPECT_NE(std::find(facts.begin(), facts.end(),
+                        "ob\xEF\xBF\xBD"
+                        "d\xC3\xA9\xEF\xBF\xBD\xEF\xBF\xBD"),
+              facts.end())
+        << json;
+}
+
+/* An age past what milliseconds can round to saturates, never wraps */
+TEST(HealthTest, AnAgeNearItsLimitSaturates)
+{
+    Car car;
+    car.values[0].age_us = UINT64_MAX;
+    const ecuio_json::Value v = parsed(car.write(ECUIO_HEALTH_JSON));
+    const ecuio_json::Value& k = v.find("key_values")->items.at(0);
+    EXPECT_EQ(k.find("age_ms")->whole, static_cast<int64_t>(UINT64_MAX / 1000));
+    EXPECT_TRUE(k.find("stale")->boolean);
+}
+
+/* An enumeration's value that isn't a raw value a table holds (negative,
+ * a fraction, past UINT32_MAX) is written as its number, with no label */
+TEST(HealthTest, AnEnumerationValueNoTableHoldsHasNoLabel)
+{
+    Car car;
+    ecuio_enum_entry_t entries[3] = {
+        {0, "Off"}, {1, "Open loop"}, {2, "Closed loop"}};
+    ecuio_signal_def_t d{};
+    d.id = 900;
+    d.message_id = 0x7E8;
+    d.kind = ECUIO_VALUE_ENUM;
+    d.bit_length = 8;
+    d.scale = 1.0;
+    std::snprintf(d.name, sizeof d.name, "Fuel System 1");
+    d.plot_rank = 1;
+    d.table_count = 3;
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 1;
+    set.defs = &d;
+    set.enum_count = 3;
+    set.enums = entries;
+    car.in.set = &set;
+    for (double raw : {-1.0, 2.5, 1e20, 4294967298.0}) {
+        SCOPED_TRACE(raw);
+        const ecuio_health_value_t value{900, 0, raw, 0, 0};
+        car.in.values = &value;
+        car.in.value_count = 1;
+        const ecuio_json::Value v = parsed(car.write(ECUIO_HEALTH_JSON));
+        ASSERT_EQ(v.find("key_values")->items.size(), 1u);
+        EXPECT_EQ(v.find("key_values")->items[0].find("value")->type,
+                  ecuio_json::Type::number);
+    }
+    const ecuio_health_value_t two{900, 0, 2.0, 0, 0};
+    car.in.values = &two;
+    EXPECT_EQ(parsed(car.write(ECUIO_HEALTH_JSON))
+                  .find("key_values")
+                  ->items.at(0)
+                  .find("value")
+                  ->text,
+              "Closed loop");
+}
+
+/* A report that isn't written counts nothing written; a failed check
+ * keeps its class */
+TEST(HealthTest, AReportNotWrittenCountsNothing)
+{
+    Folder f;
+    car_recording(f);
+    const Reported first(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(first.status, ECUIO_OK) << first.detail;
+    ASSERT_EQ(first.r.ecus, 1u);
+    ecuio_health_options_t o{};
+    o.format = ECUIO_HEALTH_JSON;
+    const std::string folder = f.utf8("rec");
+    o.folder_utf8 = folder.c_str();
+    o.out_path_utf8 = first.out.c_str(); /* exists */
+    ecuio_health_report_t r{};
+    EXPECT_EQ(ecuio_health_export(&o, &r), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "the file exists already");
+    EXPECT_EQ(r.ecus, 0u);
+    EXPECT_EQ(r.codes, 0u);
+    EXPECT_EQ(r.values, 0u);
+    EXPECT_EQ(r.since_cleared, 0u);
+    EXPECT_EQ(r.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 0u);
+    EXPECT_EQ(r.flags, 0u);
+
+    /* An ECU serial read as a number signal fails the check */
+    Folder g;
+    car_recording(g);
+    std::string frames = read_file(g.path / "rec" / "frames.csv");
+    frames +=
+        row(9100000, 0x7E8, kWhole, with_text({0x62, 0xF1, 0x8C}, "12345678"));
+    g.write("rec/frames.csv", frames);
+    g.write("rec/signals.csv", std::string("host_us,signal,value,unit\n") +
+                                   "8000000," + ranked_def(1)->name +
+                                   ",12345678," + ranked_def(1)->unit + "\n");
+    const Reported failed(g, g.utf8("rec"), ECUIO_HEALTH_JSON);
+    EXPECT_EQ(failed.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(failed.r.failed_class, ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION + 1)
+        << failed.detail;
+    EXPECT_EQ(failed.r.ecus, 0u);
+    EXPECT_EQ(failed.r.values, 0u);
+    EXPECT_EQ(failed.r.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 0u);
+}
+
+/* A number value longer than any buffer but the row's is read whole, never
+ * cut into another number */
+TEST(HealthTest, ALongNumberIsReadWhole)
+{
+    Folder f;
+    car_recording(f);
+    f.write("rec/signals.csv", std::string("host_us,signal,value,unit\n") +
+                                   "8000000," + ranked_def(1)->name + "," +
+                                   std::string(67, '0') + "850," +
+                                   ranked_def(1)->unit + "\n");
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    const ecuio_json::Value v = parsed(json.bytes);
+    ASSERT_EQ(v.find("key_values")->items.size(), 1u);
+    EXPECT_EQ(v.find("key_values")->items[0].find("value")->whole, 850);
 }
 
 } // namespace

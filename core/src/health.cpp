@@ -18,6 +18,7 @@
 #include "frame_reassembly.h"
 #include "frame_rows.h"
 #include "health_replies.h"
+#include "json.h"        /* utf8_length */
 #include "pid_support.h" /* ecuio_service01_keyed */
 #include "recording_rows.h" /* parse_number */
 #include "recording_set.h"
@@ -245,6 +246,9 @@ struct model {
     std::vector<std::string> incomplete;
     std::vector<ecu> ecus;
     std::vector<shown> key_values;
+    /* the last of key_values that are since-cleared values no listed ECU
+     * takes */
+    size_t key_since_cleared = 0;
     std::string started; /* a recording's start, from_s and to_s */
     std::string from_s;
     std::string to_s;
@@ -287,9 +291,11 @@ bool show(const ecuio_signal_set_t* set, const ecuio_signal_def_t& d, double v,
         return false;
     }
     out->name = d.name;
-    if (d.kind == ECUIO_VALUE_ENUM) {
-        const char* label =
-            ecuio_enum_label(set, &d, static_cast<uint32_t>(v >= 0 ? v : 0));
+    /* a label only for a raw value a table can hold: whole, 0 to
+     * UINT32_MAX (a caller's value past it converts to no uint32_t) */
+    if (d.kind == ECUIO_VALUE_ENUM && v >= 0 && v <= 4294967295.0 &&
+        v == std::floor(v)) {
+        const char* label = ecuio_enum_label(set, &d, static_cast<uint32_t>(v));
         if (label != nullptr) {
             out->value = label;
             out->number = false;
@@ -309,7 +315,8 @@ bool show(const ecuio_signal_set_t* set, const ecuio_signal_def_t& d, double v,
 void with_age(const ecuio_health_value_t& v, shown* s)
 {
     s->has_age = true;
-    s->age_ms = (v.age_us + 500) / 1000;
+    s->age_ms = v.age_us > UINT64_MAX - 500 ? UINT64_MAX / 1000
+                                            : (v.age_us + 500) / 1000;
     s->stale = v.age_us > ECUIO_VALUE_STALE_US;
 }
 
@@ -530,6 +537,31 @@ model build(const inputs& in, scrub::values* identity)
             m.key_values.push_back(s);
         }
     }
+
+    /* A since-cleared value on a reply ID no ECU is listed for (a
+     * recording whose range holds none of that ECU's replies): after the
+     * ranked ones, in PID order, so the report still shows it */
+    const auto listed = [&in](uint32_t id) {
+        for (uint32_t c = 0; c < in.channels; ++c) {
+            if (in.diagnostics[c].rx_id == id) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (uint8_t pid : kSinceCleared) {
+        for (uint32_t i = 0; i < in.value_count; ++i) {
+            const ecuio_signal_def_t* def = def_of(in.set, in.values[i].def_id);
+            shown s;
+            if (def != nullptr && since_cleared_pid(*def) &&
+                (def->mux_key & 0xFFu) == pid && !listed(def->message_id) &&
+                show(in.set, *def, in.values[i].value, in.units, &s)) {
+                with_age(in.values[i], &s);
+                m.key_values.push_back(s);
+                ++m.key_since_cleared;
+            }
+        }
+    }
     return m;
 }
 
@@ -589,10 +621,27 @@ private:
             out += ": ";
         }
     }
+    /* RFC 8259's string: valid UTF-8 as it is, a byte no valid sequence
+     * holds as U+FFFD (json.h's rule, which the reader holds it to) */
     void quote(const std::string& s)
     {
         out += '"';
-        for (unsigned char c : s) {
+        const auto* p = reinterpret_cast<const unsigned char*>(s.data());
+        const unsigned char* const end = p + s.size();
+        while (p < end) {
+            const unsigned char c = *p;
+            if (c >= 0x80) {
+                const size_t n = ecuio_json::utf8_length(p, end);
+                if (n == 0) {
+                    out += "\xEF\xBF\xBD";
+                    ++p;
+                } else {
+                    out.append(reinterpret_cast<const char*>(p), n);
+                    p += n;
+                }
+                continue;
+            }
+            ++p;
             if (c == '"' || c == '\\') {
                 out += '\\';
                 out += static_cast<char>(c);
@@ -980,13 +1029,18 @@ std::string text(const model& m)
     }
 
     t += "\nKey values (the profile's ranked signals)\n";
+    const size_t ranked = m.key_values.size() - m.key_since_cleared;
     if (!m.ranks) {
         t += "  The profile ranks no signals.\n";
-    } else if (m.key_values.empty()) {
+    } else if (ranked == 0) {
         t += "  None of the ranked signals has a value.\n";
     }
-    for (const shown& s : m.key_values) {
-        text_shown(t, "  ", s);
+    for (size_t i = 0; i < m.key_values.size(); ++i) {
+        if (i == ranked) {
+            t += "  Since the codes were cleared, on a reply ID no ECU is "
+                 "listed for:\n";
+        }
+        text_shown(t, "  ", m.key_values[i]);
     }
     t += "\nLeft out: " +
          counted(m.identification_left_out, "identification text",
@@ -1005,6 +1059,7 @@ void count(const model& m, ecuio_health_report_t* r)
         }
         r->since_cleared += static_cast<uint32_t>(e.since_cleared.size());
     }
+    r->since_cleared += static_cast<uint32_t>(m.key_since_cleared);
     r->values = static_cast<uint32_t>(m.key_values.size());
     r->left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION] =
         m.identification_left_out;
@@ -1158,9 +1213,17 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
             const uint64_t host_us = rows.host_us();
             end_us = host_us;
             const bool ext = (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
-            if ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0 &&
-                (f.flags &
-                 (ECUIO_FRAME_FLAG_ERROR | ECUIO_FRAME_FLAG_TRUNCATED)) == 0) {
+            const bool damaged = (f.flags & (ECUIO_FRAME_FLAG_ERROR |
+                                             ECUIO_FRAME_FLAG_TRUNCATED)) != 0;
+            /* A message whole: REASSEMBLED, or in a recording older than
+             * the flag any row not on the wire (the reader decodes such a
+             * row whole too). builder::take lists an ECU only on a reply
+             * ID (scrub::reply_id), so another ID's frame that opens like
+             * a reply never becomes one; its identity values still go to
+             * the check. */
+            if (!damaged && f.data_length > 0 &&
+                ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0 ||
+                 !fr::reassembly::on_the_wire(f))) {
                 take(f.arbitration_id, ext, f.data, f.data_length, host_us);
             } else if (fr::reassembly::on_the_wire(f)) {
                 ends.clear();
@@ -1230,6 +1293,9 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
                     i);
             }
         }
+        /* a whole row's room: a value text_at cut to a buffer would read
+         * as another number */
+        std::vector<char> text(ecuio_recording_rows::kRowMax + 1);
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
             const auto it = by_name.find(
@@ -1237,18 +1303,19 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
             if (!numeric(d) || it == by_name.end()) {
                 continue;
             }
-            char text[64] = {};
+            text[0] = 0;
             uint64_t at = ECUIO_RECORDING_NONE;
             const ecuio_status_t st = ecuio_recording_text_at(
-                rec.get(), it->second, to_us, text, sizeof text, &at);
+                rec.get(), it->second, to_us, text.data(),
+                static_cast<uint32_t>(text.size()), &at);
             if (st != ECUIO_OK) {
                 *status = st;
                 return false;
             }
             double v = 0;
             if (at == ECUIO_RECORDING_NONE || at < o.from_us ||
-                !ecuio_recording_rows::parse_number(text, std::strlen(text),
-                                                    &v)) {
+                !ecuio_recording_rows::parse_number(
+                    text.data(), std::strlen(text.data()), &v)) {
                 continue;
             }
             ecuio_health_value_t hv{};
@@ -1349,7 +1416,8 @@ ecuio_health_export(const ecuio_health_options_t* options,
         ((o.session != nullptr) == (o.folder_utf8 != nullptr)) ||
         (o.values == nullptr && o.value_count != 0) ||
         (o.folder_utf8 != nullptr && o.value_count != 0) ||
-        (o.to_us != 0 && o.to_us < o.from_us)) {
+        (o.to_us != 0 && o.to_us < o.from_us) ||
+        (o.session != nullptr && (o.from_us != 0 || o.to_us != 0))) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     for (uint32_t i = 0; i < o.value_count; ++i) {
@@ -1361,13 +1429,23 @@ ecuio_health_export(const ecuio_health_options_t* options,
     ecuio_health_report_t r{};
     bool ok = false;
     ecuio_status_t failed = ECUIO_ERR_LOAD_FAILED;
+    /* a report not written counts nothing written; a failed check keeps
+     * its class */
+    const auto outcome = [&]() {
+        if (!ok) {
+            const uint32_t failed_class = r.failed_class;
+            r = ecuio_health_report_t{};
+            r.failed_class = failed_class;
+        }
+        if (report != nullptr) {
+            *report = r;
+        }
+        return ok ? ECUIO_OK : failed;
+    };
     try {
         if (o.folder_utf8 != nullptr) {
             ok = ecuio_health::from_folder(o, r, &failed);
-            if (report != nullptr) {
-                *report = r;
-            }
-            return ok ? ECUIO_OK : failed;
+            return outcome();
         }
         ecuio_session_info_t info{};
         if (ecuio_session_get_info(o.session, &info) != ECUIO_OK) {
@@ -1401,8 +1479,5 @@ ecuio_health_export(const ecuio_health_options_t* options,
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    if (report != nullptr) {
-        *report = r;
-    }
-    return ok ? ECUIO_OK : failed;
+    return outcome();
 }

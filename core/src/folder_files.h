@@ -13,6 +13,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -278,8 +279,20 @@ inline void remove_folder(const std::string& utf8)
 #endif
 }
 
+#ifdef _WIN32
+struct find_closer {
+    void operator()(void* find) const { FindClose(find); }
+};
+#else
+struct dir_closer {
+    void operator()(DIR* d) const { closedir(d); }
+};
+#endif
+
 /* The names a folder holds, files and folders alike, "." and ".." left
- * out, in the order the system gives; false when it can't be read */
+ * out, in the order the system gives; false when it can't be read. The
+ * search is closed on every way out, a bad_alloc from a name's copy
+ * among them. */
 inline bool list_folder(const std::string& utf8,
                         std::vector<std::string>* names)
 {
@@ -290,10 +303,11 @@ inline bool list_folder(const std::string& utf8,
         return false;
     }
     WIN32_FIND_DATAW fd{};
-    HANDLE find = FindFirstFileW(w.c_str(), &fd);
-    if (find == INVALID_HANDLE_VALUE) {
+    HANDLE first = FindFirstFileW(w.c_str(), &fd);
+    if (first == INVALID_HANDLE_VALUE) {
         return false;
     }
+    const std::unique_ptr<void, find_closer> find(first);
     do {
         char name[MAX_PATH * 4];
         if (std::wcscmp(fd.cFileName, L".") == 0 ||
@@ -303,21 +317,19 @@ inline bool list_folder(const std::string& utf8,
         names->push_back(ecuio_wide_to_utf8(fd.cFileName, name, sizeof name)
                              ? std::string(name)
                              : std::string("?"));
-    } while (FindNextFileW(find, &fd));
-    FindClose(find);
+    } while (FindNextFileW(find.get(), &fd));
     return true;
 #else
-    DIR* d = opendir(utf8.c_str());
+    const std::unique_ptr<DIR, dir_closer> d(opendir(utf8.c_str()));
     if (d == nullptr) {
         return false;
     }
-    while (const dirent* e = readdir(d)) {
+    while (const dirent* e = readdir(d.get())) {
         if (std::strcmp(e->d_name, ".") != 0 &&
             std::strcmp(e->d_name, "..") != 0) {
             names->push_back(e->d_name);
         }
     }
-    closedir(d);
     return true;
 #endif
 }

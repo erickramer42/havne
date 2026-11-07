@@ -30,6 +30,7 @@
 #include "ecuio/signals.h"
 #include "folder_files.h"
 #include "isotp.h"
+#include "open_handles.h"
 #include "partial_left.h"
 #include "scrub.h"
 #include "temp_name.h"
@@ -2135,6 +2136,7 @@ TEST(ExportTest, OutOfMemoryAnywhereLeavesNoFileBehind)
         fs::remove_all(f.path / "oom", ec);
         ASSERT_GT(news, 10u);
         unsigned long refused = 0;
+        const unsigned long handles = open_handles();
         for (unsigned long n = 1; n <= news; ++n) {
             fail_new_on_this_thread(n);
             const ecuio_status_t rc = ecuio_export(&o, nullptr);
@@ -2150,6 +2152,8 @@ TEST(ExportTest, OutOfMemoryAnywhereLeavesNoFileBehind)
             fs::remove_all(f.path / "oom", ec);
         }
         EXPECT_GT(refused, 0u) << format;
+        EXPECT_EQ(open_handles(), handles)
+            << format << ": a handle left open (a folder's listing)";
     }
 }
 

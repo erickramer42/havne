@@ -909,6 +909,37 @@ diagnostics`' `test_saveReportWritesTheChosenFormat` and `QmlTest.
 recordings`' `test_saveReportWritesTheWholeRecording` (zoomed in, the
 report still the whole recording's).
 
+**Note of 2026-11-07: what a report shows and refuses.**
+
+- A since-cleared value on a reply ID no listed ECU takes (a recording
+  whose range holds none of that ECU's diagnostic or identification
+  replies, one made with `diagnose=0`) is shown among the key values,
+  after the ranked ones, in PID order; the text gives them the line
+  "Since the codes were cleared, on a reply ID no ECU is listed for:".
+  A value an ECU takes stays under that ECU alone. The report counts
+  such a value in both `values` and `since_cleared`.
+- A recording older than the `REASSEMBLED` flag holds whole replies with
+  flags 0. A row that isn't on the wire (not 1-8 bytes with a PCI
+  nibble on ISO 15765-4's IDs) and isn't an error or truncated is taken
+  whole, as the reader decodes it. An ECU is still listed only on a
+  reply ID, so another ID's frame that opens like a reply never becomes
+  one; the identity values of every such row go to the check.
+- A session with a range (`from_us` or `to_us` nonzero) is refused
+  `ECUIO_ERR_INVALID_ARGUMENT`: a session's values are its newest, and a
+  range is a recording's. `havne-cli health` already refused `--from`
+  and `--to` for a live session ("--from and --to take a recording's
+  seconds, not a session's").
+- A report that isn't written counts nothing written: on any failure
+  the report is zero but a failed check's `failed_class`.
+- The JSON is valid UTF-8 whatever bytes its sources held: a byte no
+  valid sequence holds is written as U+FFFD (`json.h`'s `utf8_length`,
+  the rule the reader holds a string to).
+- A value's age saturates where milliseconds can't round it; an
+  enumeration's value that is negative, a fraction or past UINT32_MAX is
+  written as its number, with no label; a recording's number value is
+  read with a row's room, so a long one is never cut into another
+  number.
+
 ## Appendix: the CSV import as built (2026-11-07)
 
 `ECUIO_IMPORT_CSV` makes a recording's folder from another logger's CSV

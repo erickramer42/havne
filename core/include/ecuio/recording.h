@@ -916,7 +916,8 @@ typedef struct ecuio_health_options {
     uint32_t latest_model_year; /* for the VIN's decode: this year + 1,
                                    as the front ends pass it; 0 none */
     uint64_t from_us;           /* a recording's range, host_us as the
-                                   export's; 0 and 0 is all of it */
+                                   export's; 0 and 0 is all of it, and
+                                   a session's must be */
     uint64_t to_us;
     uint64_t utc_us;            /* the report's time, microseconds since
                                    1970 UTC, the caller's; 0 writes none */
@@ -998,12 +999,15 @@ _Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
  * The file is checked for the identification texts and the VIN's shape
  * before it's renamed into place; a match fails it with its class.
  * Deterministic: the time and each value's age are the caller's, or the
- * recording's. report may be NULL.
+ * recording's. report may be NULL; a report not written counts nothing
+ * but a failed check's class.
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or out path;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format or units, a flag or
  * reserved field this core doesn't know, a session and a folder both or
  * neither, NULL values with a count, values with a folder, a value's
- * flags or reserved nonzero; ECUIO_ERR_LOAD_FAILED for a folder with
+ * flags or reserved nonzero, a nonzero to_us before from_us, a range
+ * (from_us or to_us nonzero) with a session, whose values are its
+ * newest; ECUIO_ERR_LOAD_FAILED for a folder with
  * neither frames.csv nor signals.csv, a row the reader refuses
  * ("frames.csv line N: ..."), a range that starts after the recording
  * ends, a file that exists or can't be written, or

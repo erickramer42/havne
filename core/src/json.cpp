@@ -1,5 +1,5 @@
 // File/layer: core/src/json.cpp | internal, C++17, Qt-free; ALL platforms
-// Testing: UNIT: JsonTest (test_core); FUZZ: fuzz_json
+// Testing: UNIT: JsonTest, HealthTest (test_core); FUZZ: fuzz_json
 //
 // The strict JSON reader of json.h: one recursive-descent pass over the
 // bytes, the depth bounded so the recursion is, every value placed where
@@ -21,14 +21,6 @@
 
 namespace ecuio_json {
 
-namespace {
-
-/* Past this many members an object's keys go into a set for the
- * duplicate check, so a large object costs n log n, not n squared */
-constexpr size_t kLinearKeys = 32;
-
-/* The length of the valid UTF-8 sequence at [p, end), or 0 (Unicode 15,
- * table 3-7: no overlong forms, no surrogates, nothing past U+10FFFF) */
 size_t utf8_length(const unsigned char* p, const unsigned char* end)
 {
     const unsigned char b = p[0];
@@ -67,6 +59,12 @@ size_t utf8_length(const unsigned char* p, const unsigned char* end)
     }
     return n;
 }
+
+namespace {
+
+/* Past this many members an object's keys go into a set for the
+ * duplicate check, so a large object costs n log n, not n squared */
+constexpr size_t kLinearKeys = 32;
 
 void append_utf8(std::string& out, uint32_t cp)
 {
@@ -654,7 +652,7 @@ private:
     }
 };
 
-}  // namespace
+} // namespace
 
 const Value* Value::find(std::string_view key) const
 {

@@ -18,6 +18,7 @@
 #include "fake_diagnostics.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
+#include "open_handles.h"
 #include "temp_name.h"
 
 #include <algorithm>
@@ -2516,6 +2517,39 @@ TEST(Elm327LogTest, KeptNamesAndTextHaveTheirShape)
     EXPECT_STREQ(out, "ABC") << "cut to fit, terminated";
     elm327_log_text("A\x01", 2, out, 5);
     EXPECT_STREQ(out, "A") << "an escape is never cut part way";
+}
+
+/* Out of memory at each of a log's opens' allocations in turn: the open
+ * catches it and opens no log, and the listing it prunes by is closed
+ * whatever the throw, no handle left behind. The folder starts empty: an
+ * open that fails after its file is made prunes nothing, so a run's logs
+ * would add to the next run's listing */
+TEST(Elm327LogTest, OutOfMemoryInAnOpenLeavesNoHandleOpen)
+{
+    LogDir dir("out-of-memory");
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(dir.path(), ec)) {
+        fs::remove(e.path(), ec);
+    }
+    for (int i = 0; i < 8; ++i) {
+        std::ofstream(dir.path() / ("ecuio-elm327.20261027-17253" +
+                                    std::to_string(i) + "-123.log"));
+    }
+    elm327_log log;
+    const unsigned long before = new_counter::on_this_thread();
+    elm327_log_open(log);
+    const unsigned long news = new_counter::on_this_thread() - before;
+    ASSERT_TRUE(elm327_log_is_open(log));
+    elm327_log_close(log);
+    ASSERT_GT(news, 8u) << "each listed name is a copy";
+    const unsigned long handles = open_handles();
+    for (unsigned long n = 1; n <= news; ++n) {
+        new_counter::fail_new(n);
+        elm327_log_open(log);
+        new_counter::fail_new(0);
+        elm327_log_close(log);
+    }
+    EXPECT_EQ(open_handles(), handles) << "a listing left open";
 }
 
 /* What a frame costs the worker: no operator new between two frames once
