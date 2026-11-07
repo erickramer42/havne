@@ -69,6 +69,9 @@ public:
     // store's holds: what a recording copies as signals.json (ADR-0051
     // section 4). Valid until close().
     const ecuio_signal_file_t* fileFor(const ecuio_signal_set_t* set) const;
+    // The hash of the file whose set this is, "" for none: whether a
+    // session decodes with a file about to be replaced
+    QString shaFor(const ecuio_signal_set_t* set) const;
 
     // The profile the file with this hash is registered under, "" when
     // none is: a replay whose recording holds these bytes decodes with

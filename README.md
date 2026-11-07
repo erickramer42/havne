@@ -253,7 +253,7 @@ file saved out of the app), is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.6.0-v0.9.0 | Exports, imports and Python; triggered logging and alerts; discovery of every module; the scan tool |
+| v0.6.0-v0.10.0 | Exports, imports and Python; configurable dashboards and a refreshed UI; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known

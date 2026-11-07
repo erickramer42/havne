@@ -80,3 +80,15 @@ section 3) and, from v0.5.0, the plugin formats.
 - 1.0.0 is a promise about the read side: after it, the C ABI,
   `havne-cli`'s schema and the plugin formats break only with a MAJOR
   release.
+
+## Appendix: the dashboard release (2026-11-06)
+
+A release for configurable dashboards and a refreshed UI goes in as
+v0.7.0, ahead of conditions, so alerts land on a finished dashboard and
+the phone's Settings stops gaining controls before its refresh. The
+later releases move up one: conditions are v0.8.0, the whole vehicle
+v0.9.0, and the scan tool, the last feature release, v0.10.0. The
+freeze of decision 5 runs as the 0.10.x releases (and decision 6's
+"0.9.x" reads 0.10.x); the ceiling of 0.99.99 is untouched. ADRs
+written before this date name discovery and the conversation tier
+v0.8.0: that's v0.9.0 now.

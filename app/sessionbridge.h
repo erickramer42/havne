@@ -700,6 +700,26 @@ public:
     // first; the files themselves stay loaded until the bridge closes,
     // since a session may still decode with one
     Q_INVOKABLE int deleteUnusedSignalFiles(const QStringList& keep);
+    // An OBDb set imported (ADR-0051's appendix of 2026-11-06,
+    // ObdbImport): preview reads the file at url as importSignalFile
+    // does and converts it for modelYear (0: none), named name, giving
+    // ObdbImport::report's map; the converted text is held as the one
+    // pending import, nothing kept. keep puts it in the store as
+    // importSignalText does, the same map back; replacing names the
+    // vehicle's earlier import it takes the place of, "" for none, and
+    // is refused, nothing changed and the import still pending, while a
+    // session decodes with that file. drop forgets the pending import.
+    // Each of preview and keep logs one line, never naming the path
+    Q_INVOKABLE QVariantMap previewObdb(const QUrl& url, int modelYear,
+                                        const QString& name);
+    Q_INVOKABLE QVariantMap keepObdb(const QString& replacing);
+    Q_INVOKABLE void dropObdb() { m_obdbPending.clear(); }
+    // A kept copy the OBDb import wrote (ObdbImport::isConversion): only
+    // such a file is replaced by importing the set again
+    Q_INVOKABLE bool isObdbImport(const QString& sha) const;
+    // The model year of the typed VIN, or with "" the session's (which
+    // stays here, ADR-0027 section 3), by ADR-0043's decode; 0 for none
+    Q_INVOKABLE int vinModelYear(const QString& typedVin) const;
     // The app's plugins (ADR-0052, PluginStore): every kept one loaded
     // and its variants registered at the first call, then the list, one
     // entry a plugin { sha256, ok, words, id, name, version, variants,
@@ -1265,6 +1285,7 @@ private:
         m_streamPreparer; // none: nothing to ready
     ReadOnce m_readOnce;
     SignalStore m_signalStore;
+    QByteArray m_obdbPending; // previewObdb's converted file, until kept
     PluginStore m_pluginStore;
     // Recordings' own signal files by their hash, each registered under
     // its rec.<16 hex> profile until the bridge closes, as the store keeps

@@ -3,13 +3,16 @@ add_library(ecuio-core STATIC
     src/core.cpp
     src/frame_decoder.cpp
     src/dtc_titles.cpp
+    src/export.cpp
     src/host_clock.cpp
+    src/import.cpp
     src/json.cpp
     src/obdb_import.cpp
     src/profile_registry.cpp
     src/recorder.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
+    src/scrub.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp

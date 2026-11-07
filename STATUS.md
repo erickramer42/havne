@@ -187,7 +187,11 @@ background too ([roadmap](#roadmap)).
     refuses shows as refused. Verified on the test car through the VX
     and the MX+
     ([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md)),
-    plugins against the simulated car only. JSON Schemas in `schema/`
+    plugins against the simulated car only. Settings imports an OBDb
+    set itself (ADR-0051's appendix "the OBDb import in the app"), the
+    report shown before Keep, a re-import replacing the vehicle's
+    earlier one; bridge- and QML-tested on a synthetic set, not run on
+    the test phone. JSON Schemas in `schema/`
     for editors and other repositories' CI, kept to the loaders' keys by
     a test. Left: naming a scanned DID's refusal and a replay's (the
     backlog), a plugin on a car.
@@ -369,7 +373,10 @@ background too ([roadmap](#roadmap)).
     offline by core's reader, the Recordings page and `havne-cli
     view`, through the values as recorded or through the frames by a
     profile (`ecuio_recording_open_frames`, so a raw recording plots),
-    and a surrogate
+    exported by `havne-cli export` as pcapng, scrubbed by construction
+    and checked twice ([ADR-0054](docs/adr/0054-exports-and-imports.md)),
+    and a `candump -L` log imported as a recording (`havne-cli import
+    candump`); the app has no export or import yet, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -525,7 +532,7 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.5.1 | A patch: a replay through its recording's own signal file, refused signals shown as refused, a signal file saved out of the app; the car run of v0.5.0's own signals; the request pace on Windows' high-resolution timer, the charts on the GPU | Released |
 | v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files | In progress |
-| v0.7.0-v0.9.0 | v0.7.0, conditions: triggered logging and alerts. v0.8.0, the whole vehicle: discovery and extended sessions. v0.9.0, the scan tool, the last feature release | Planned |
+| v0.7.0-v0.10.0 | v0.7.0, the dashboard and the UI: configurable gauges from a library, a refresh for the phone, night themes. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -550,21 +557,22 @@ append-only.
     frames through a profile;
   - JSON Schemas for signal files and plugins, checked in CI;
   - CI's downloads (the Windows Qt kit, Gradle's, linuxdeploy's) from
-    the Actions cache.
-- **In progress:** PCAP export and candump import, scrubbed by
-  construction ([ADR-0054](docs/adr/0054-exports-and-imports.md),
-  proposed).
-- **To come:** the Python bindings and their wheel
-  ([ADR-0053](docs/adr/0053-python-bindings.md), proposed), the other
-  exports (a scrubbed recording folder, CSV, the health report) and
-  CSV import, an OBDb set imported in the app, a vehicle's baseline
-  recording, the Log page's filter and export, and the Python examples
-  against the simulated ECU.
+    the Actions cache;
+  - PCAP export and candump import in core and `havne-cli`, scrubbed
+    by construction ([ADR-0054](docs/adr/0054-exports-and-imports.md));
+  - an OBDb set imported in Settings.
+- **In progress:** the Python bindings and their wheel
+  ([ADR-0053](docs/adr/0053-python-bindings.md)), starting with a
+  shared core; the Log page's filter, per-ID view and scrubbed export.
+- **To come:** the other exports (a scrubbed recording folder, CSV,
+  the health report) and CSV import, a vehicle's baseline recording,
+  and the Python examples against the simulated ECU.
 
 **Done when:** a Python script opens SocketCAN, decodes PIDs and prints
 the values; an export of a recording passes the leak check; a recording
-opens in Wireshark; python-OBD reads the simulated car through the
-ELM327 emulator on Windows (met: `CliElm327RunTest.PythonObdReadsIt`).
+opens in Wireshark (met: `CliTransferRunTest.tshark`, its ISO-TP
+reassembled); python-OBD reads the simulated car through the ELM327
+emulator on Windows (met: `CliElm327RunTest.PythonObdReadsIt`).
 
 ### Waiting on a tester: an iPhone download
 
@@ -577,13 +585,13 @@ notes' Try it points at [docs/ios.md](docs/ios.md).
 
 ### 1.0.0: the finished reader
 
-After v0.9.0 the formats freeze (the C ABI, `havne-cli`'s schema, the
+After v0.10.0 the formats freeze (the C ABI, `havne-cli`'s schema, the
 plugin formats, the recording format) and the releases are fixes
-alone, as 0.9.x: a second car and testers other than the developer,
+alone, as 0.10.x: a second car and testers other than the developer,
 every adapter class on a car, the release on a PC without Visual
 Studio, Linux on real hardware, accessibility and a user guide, and
 hour-long runs on every transport. 1.0.0 follows once those runs are
-filed and the 0.9.x releases have gone a stated stretch with no
+filed and the 0.10.x releases have gone a stated stretch with no
 high-severity issue: full featured on Windows, Linux and Android, as
 much macOS and iOS as is manageable, with a signed Windows executable
 and an installer that checks for updates. Writing to a car (security

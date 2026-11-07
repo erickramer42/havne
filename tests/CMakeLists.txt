@@ -24,7 +24,8 @@ endif()
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
-    test_recording_frames.cpp test_sha256.cpp)
+    test_recording_frames.cpp test_candump_import.cpp test_export.cpp
+    test_sha256.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -218,7 +219,7 @@ endif()
 # too, which is the host's clock). Rewrite one after a deliberate change
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
-    add_executable(test_cli test_cli.cpp)
+    add_executable(test_cli test_cli.cpp test_cli_transfer.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -322,6 +323,27 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> clear mock://golden --yes --engine-running)
         app_cli_golden(ClearRefusesABadUri bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> clear "mock://golden?speed=2" --yes)
+        # export and import (ADR-0054): a candump log in, read through
+        # obd2 and out to pcapng, read back by struct; the refusals; and
+        # tshark's reading where it's installed (skip 77)
+        foreach(_mode roundtrip refusals tshark)
+            add_test(NAME CliTransferRunTest.${_mode}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                        ${_mode} $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliTransferRunTest.${_mode} PROPERTIES
+                TIMEOUT 60 SKIP_RETURN_CODE 77)
+        endforeach()
+        # A candump -L log of the simulated car on vcan0 imported and read
+        # through obd2: its values the direct session's (Linux; skipped
+        # without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED; serial:
+        # the sim answers 0x7E0 for the bus)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliTransferRunTest.candump
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                        candump $<TARGET_FILE:havne-cli>)
+            set_tests_properties(CliTransferRunTest.candump PROPERTIES
+                TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
@@ -729,6 +751,17 @@ if(TARGET havne-cli)
     app_cli_usage(InfoARateDropOfOneIsUsage "info|x|--rate-drop|1")
     app_cli_usage(InfoSettleThatIsntSecondsIsUsage "info|x|--settle|soon")
     app_cli_usage(InfoAnUnknownOptionIsUsage "info|x|--fast")
+    # export and import (ADR-0054): refused before any file is read
+    app_cli_usage(ExportWithoutAFileIsUsage "export|rec")
+    app_cli_usage(ExportWithoutAFormatIsUsage "export|rec|out")
+    app_cli_usage(ExportAnUnknownFormatIsUsage "export|rec|out|--format|blf")
+    app_cli_usage(ExportToBeforeFromIsUsage
+        "export|rec|out|--format|pcapng|--from|5|--to|4")
+    app_cli_usage(ExportANegativeFromIsUsage "export|rec|out|--format|pcapng|--from|-1")
+    app_cli_usage(ExportAnUnknownOptionIsUsage "export|rec|out|--format|pcapng|--scrub")
+    app_cli_usage(ImportWithoutCandumpIsUsage "import|bus.log|rec")
+    app_cli_usage(ImportWithoutAFolderIsUsage "import|candump|bus.log")
+    app_cli_usage(ImportAnUnknownOptionIsUsage "import|candump|bus.log|rec|--map|m.json")
     # A connect held past the CLI's deadline ends it (ADR-0031's appendix
     # of 2026-11-01): the fake DLL holds PassThruOpen longer than the
     # deadline
@@ -808,6 +841,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/recordingview.cpp
         ../app/sessionbridge.cpp
         ../app/framefilter.cpp
+        ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -836,6 +870,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+        ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -867,6 +902,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         bench_bridge.cpp
         ../app/sessionbridge.cpp
         ../app/framefilter.cpp
+        ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
@@ -916,6 +952,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_RECORDING_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+        ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

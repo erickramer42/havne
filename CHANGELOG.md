@@ -48,6 +48,32 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   a file as you write it, and another repository can lint its files in
   CI. A file can't name its schema with `"$schema"`, which the loader
   refuses, so map it in the editor's settings by file name or folder.
+- `havne-cli export <recording> <out> --format pcapng` writes a
+  recording's frames for Wireshark, scrubbed: identification replies
+  (Service 09, the F180-F1FF DIDs) and text signals' messages are left
+  out and counted, then every message and the file itself are searched
+  for the car's identity values and anything shaped like a VIN, and a
+  match writes nothing. A message an adapter delivered whole goes out
+  as the frames its ECU sent, each marked as made up, so Wireshark's
+  ISO-TP dissector reassembles it. `--from`/`--to` take a stretch;
+  `--raw` writes it as recorded, and the file says so
+  ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s appendix of
+  2026-11-06).
+- `havne-cli import candump <log> <folder> [--interface <name>]` reads
+  a `candump -L` log into a recording's folder: `view --frames`, `info`
+  and `replay://` read it like any other. One bus to a recording: a log
+  of several takes the one you name.
+- A CAN FD frame's error state indicator (ESI) is kept: SocketCAN
+  sessions flag it, recordings and replays carry it, and `havne-cli
+  play` puts it back on the bus.
+- Settings imports an OBDb signal set for a vehicle (Import an OBDb
+  set, in the Vehicle section, on every platform, Android's document
+  picker too): the model year comes from a VIN (the one you look up, or
+  the connected car's) or is typed, and the report shows what
+  converted, each field that differs and each signal left out before
+  Keep saves the file as the vehicle's. Importing the set again, for
+  another year say, replaces the vehicle's earlier import, and says so
+  first.
 
 ## [0.5.1] - 2026-11-06
 
