@@ -11,6 +11,44 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- `havne-cli sim <uri> --elm327 tcp:<port>` serves the simulated car as
+  an ELM327 adapter on a TCP port, on Windows, macOS and Linux: Havne's
+  own `elm327://127.0.0.1:<port>`, python-OBD and ELM327 apps that take
+  a WiFi adapter's address read it with no car. It listens on 127.0.0.1
+  unless you name another address, takes one host at a time, and
+  answers from the same simulated ECU as `sim --on`: the mock's drive
+  cycle or canned values, a recording, a second module, a signal file's
+  or a plugin's DIDs, and the faults
+  ([ADR-0055](docs/adr/0055-elm327-emulator.md)).
+- Core's simulated ECU answers with no bus: `ecuio_sim_create_unbound`
+  and `ecuio_sim_ask` (`ecuio/sim.h`) take one request and return each
+  ECU's reply, its fault as the time it starts and a flag, on the
+  caller's clock.
+- `havne-cli clear <uri> --yes` clears each ECU's trouble codes, freeze
+  frame and readiness from a script, through the same gate as the app:
+  each ECU's report is written first as `diagnostics` lines, then each
+  ECU is cleared at that report by its own ID, only with the engine
+  stopped unless `--engine-running` gives your word (and only standing
+  still unless `--moving` does too), then read again. A `clear` line
+  says what each ECU did; the exit is 0 only when every ECU cleared
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)'s appendix of
+  2026-11-06).
+- The viewer and `havne-cli view --frames` can read a recording's
+  values from its frames through a profile: a raw recording (a
+  SocketCAN listener's among them) has values to plot, and a signal
+  file written today decodes an older recording. The viewer offers it
+  beside the values as recorded, and opens a folder that holds frames
+  alone through its frames
+  ([ADR-0049](docs/adr/0049-recordings-in-core.md)'s appendix of
+  2026-11-06).
+- JSON Schemas for signal files, plugin manifests and plugin value
+  fixtures in `schema/`: an editor mapped to them completes and checks
+  a file as you write it, and another repository can lint its files in
+  CI. A file can't name its schema with `"$schema"`, which the loader
+  refuses, so map it in the editor's settings by file name or folder.
+
 ## [0.5.1] - 2026-11-06
 
 ### Added
