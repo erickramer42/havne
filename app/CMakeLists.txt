@@ -48,6 +48,7 @@ qt_add_library(app_ui STATIC
     signalfilter.cpp
     signalfilter.h
     latencystats.h
+    urlwrite.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml

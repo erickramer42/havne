@@ -8,6 +8,7 @@
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
+#include "urlwrite.h"
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
@@ -1430,18 +1431,7 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
     const QByteArray bytes = SignalStore::bytes(sha, &words);
     bool written = false;
     if (!bytes.isEmpty()) {
-        if (url.isLocalFile()) {
-            // Whole or not at all: a failed write leaves what was there
-            QSaveFile out(url.toLocalFile());
-            written = out.open(QIODevice::WriteOnly) &&
-                      out.write(bytes) == bytes.size() && out.commit();
-        } else {
-            // A content:// document the picker just made: QFile writes it
-            // through its provider, where a rename can't
-            QFile out(url.toString());
-            written = out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-                      out.write(bytes) == bytes.size() && out.flush();
-        }
+        written = writeToUrl(url, bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
@@ -1464,15 +1454,7 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
     QString words = csv.words;
     bool written = false;
     if (csv.ok) {
-        if (url.isLocalFile()) {
-            QSaveFile out(url.toLocalFile());
-            written = out.open(QIODevice::WriteOnly) &&
-                      out.write(csv.bytes) == csv.bytes.size() && out.commit();
-        } else {
-            QFile out(url.toString());
-            written = out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-                      out.write(csv.bytes) == csv.bytes.size() && out.flush();
-        }
+        written = writeToUrl(url, csv.bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
