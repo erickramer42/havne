@@ -1563,3 +1563,20 @@ TEST_F(SimBusTest, ASimWithNoProfileTakesNoValue)
     EXPECT_NE(std::string(ecuio_last_error_detail()).find("profile"),
               std::string::npos);
 }
+
+/* A sim on a bus answers on it: ecuio_sim_ask is an unbound sim's
+ * alone (ADR-0055), so the two never race over the ECU */
+TEST_F(SimBusTest, ASimOnABusRefusesAnAsk)
+{
+    Sim sim("mock://sim");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    const uint8_t q[2] = {0x01, 0x00};
+    uint32_t n = 99;
+    EXPECT_EQ(ecuio_sim_ask(sim.get(), 0x7E0, q, 2, ECUIO_SIM_NOW, nullptr, 0,
+                            &n),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(n, 99u);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("bus"),
+              std::string::npos);
+    EXPECT_EQ(sim.stats().requests, 0u);
+}

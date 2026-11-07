@@ -1,0 +1,16 @@
+{
+  "havne_signals": 1,
+  "name": "Schema wrong type",
+  "notes": "Synthetic: its signal's decimals is a string, not a number",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "road_speed",
+      "name": "Road Speed",
+      "read": { "service": "01", "number": "0D" },
+      "field": { "byte": 0, "bits": 8 },
+      "unit": "km/h", "decimals": "1"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 // File/layer: core/src/sim.cpp | C++17, Qt-free; the bus side Linux only
-//             (SocketCAN), a refusal elsewhere
-// Testing: UNIT: SimTest (test_socketcan); SimRecordingTest (test_obd2);
-//          HARNESS: SimBusTest (test_vcan)
+//             (SocketCAN), a refusal elsewhere; the unbound sim everywhere
+// Testing: UNIT: SimTest (test_socketcan); SimRecordingTest, SimAskTest
+//          (test_obd2); HARNESS: SimBusTest (test_vcan)
 //
 // The simulated ECU on a virtual bus (ADR-0046): a CAN_RAW socket on a
 // vcan interface hearing 0x7DF and 0x7E0 (and with modules=2 0x7E1, or
@@ -13,6 +13,11 @@
 // and sends; it allocates nothing. A replay:// recording is read whole at
 // create (ecuio_sim_load_recording, every platform; a stretch of it alone
 // under from= and to=, recording_stretch.h) and only read after.
+//
+// An unbound sim (ecuio_sim_create_unbound, ADR-0055) has the same ECUs
+// and answers with no bus, worker or socket: ecuio_sim_ask ticks its
+// clock to the caller's time and returns each ECU's whole reply, its
+// fate as the time it starts and a flag.
 
 #include "ecuio/sim.h"
 
@@ -25,7 +30,10 @@
 
 #include "ecuio/profile.h"
 
+#include "isotp.h"
+
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -35,11 +43,9 @@
 
 #if ECUIO_HAVE_SOCKETCAN
 
-#include "isotp.h"
 #include "socketcan_netlink.h"
 #include "socketcan_wire.h"
 
-#include <chrono>
 #include <thread>
 
 #include <errno.h>
@@ -50,6 +56,8 @@
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#endif
 
 /* A reply waiting for its time (late, pending), or under way through the
  * sender */
@@ -80,7 +88,8 @@ struct sim_node {
     sim_sending r;
 };
 
-#endif
+static_assert(ECUIO_SIM_MAX_REPLIES >= 2 * (1 + ECUIO_MAX_CHANNELS),
+              "every ECU's reply, each with a 7F xx 78 ahead of it");
 
 struct ecuio_sim {
     /* The registry's set, held from create (profile_hold.h); first, so
@@ -102,17 +111,93 @@ struct ecuio_sim {
      * set from any thread (ecuio_sim_set_value) and read by the worker */
     const ecuio_signal_set_t* set = nullptr;
     std::unique_ptr<std::atomic<double>[]> values;
-#if ECUIO_HAVE_SOCKETCAN
     ecuio_sim_recording recording; /* replay://: the ECU's replies */
     ecuio_sim_ecu ecu;
-    int fd = -1;
-    int stop_fd = -1;
     /* the engine ECU, then modules=2's module or the profile's */
     sim_node nodes[1 + ECUIO_MAX_CHANNELS];
     int node_count = 1;
+    /* ecuio_sim_create_unbound: no bus; ecuio_sim_ask answers, ticking
+     * the clock to the time it's given (its ticks never go back) */
+    bool unbound = false;
+    std::chrono::steady_clock::time_point created =
+        std::chrono::steady_clock::now();
+#if ECUIO_HAVE_SOCKETCAN
+    int fd = -1;
+    int stop_fd = -1;
     std::thread worker;
 #endif
 };
+
+namespace {
+
+/* The reply's send is over: count it */
+void sent(ecuio_sim* s, const sim_sending& r)
+{
+    switch (r.fate) {
+    case ecuio_sim_fate::bad_sequence:
+    case ecuio_sim_fate::stalled:
+        break; /* counted when decided: never whole */
+    default:
+        s->replies.fetch_add(1, std::memory_order_relaxed);
+        if (r.len == 3 && r.data[0] == 0x7F) {
+            s->refused.fetch_add(1, std::memory_order_relaxed);
+        }
+        break;
+    }
+}
+
+/* n's answer to a whole request, into out: the profile's DIDs, the
+ * engine ECU's or modules=2's module's; 0 for none */
+uint32_t answer(ecuio_sim* s, const sim_node& n, const uint8_t* req,
+                uint32_t len, bool functional, uint8_t* out)
+{
+    if (n.from_set && (n.module != 0 || (len > 0 && req[0] == 0x22))) {
+        const ecuio_sim* self = s;
+        return ecuio_sim_did_answer(
+            *s->set, n.reply_id, req, len, functional,
+            [self](uint32_t i) {
+                return self->values[i].load(std::memory_order_relaxed);
+            },
+            out, ECUIO_SIM_REPLY_MAX);
+    }
+    if (n.module == 0) {
+        return ecuio_sim_answer(s->ecu, req, len, functional, out);
+    }
+    return ecuio_sim_module_answer(req, len, functional, out);
+}
+
+/* The fate of n's reply to req, a clear and the fault counted */
+ecuio_sim_fate decide(ecuio_sim* s, const sim_node& n, const uint8_t* req,
+                      uint32_t len, const uint8_t* reply, uint32_t reply_len)
+{
+    if (n.module == 0 && reply[0] == 0x44) {
+        s->clears.fetch_add(1, std::memory_order_relaxed);
+    }
+    const ecuio_sim_fate fate =
+        ecuio_sim_next_fate(s->ecu, req, len, reply_len, n.module);
+    switch (fate) {
+    case ecuio_sim_fate::silent:
+        s->silent.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ecuio_sim_fate::late:
+        s->late.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ecuio_sim_fate::pending:
+        s->pending.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ecuio_sim_fate::bad_sequence:
+        s->bad_sequence.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ecuio_sim_fate::stalled:
+        s->stalled.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ecuio_sim_fate::intact:
+        break;
+    }
+    return fate;
+}
+
+} // namespace
 
 #if ECUIO_HAVE_SOCKETCAN
 
@@ -149,22 +234,6 @@ bool put(int fd, const isotp_can& f)
         std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
     return false;
-}
-
-/* The reply's send is over: count it */
-void sent(ecuio_sim* s, const sim_sending& r)
-{
-    switch (r.fate) {
-    case ecuio_sim_fate::bad_sequence:
-    case ecuio_sim_fate::stalled:
-        break; /* counted when decided: never whole */
-    default:
-        s->replies.fetch_add(1, std::memory_order_relaxed);
-        if (r.len == 3 && r.data[0] == 0x7F) {
-            s->refused.fetch_add(1, std::memory_order_relaxed);
-        }
-        break;
-    }
 }
 
 /* Starts n's reply at now: its Single Frame (the send is over) or its
@@ -259,39 +328,21 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
         return true;
     }
     const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
-    if (n.from_set && (n.module != 0 || (m.len > 0 && m.data[0] == 0x22))) {
-        const ecuio_sim* self = s;
-        r.len = ecuio_sim_did_answer(
-            *s->set, n.reply_id, m.data, m.len, functional,
-            [self](uint32_t i) {
-                return self->values[i].load(std::memory_order_relaxed);
-            },
-            r.data, ECUIO_SIM_REPLY_MAX);
-    } else if (n.module == 0) {
-        r.len = ecuio_sim_answer(s->ecu, m.data, m.len, functional, r.data);
-    } else {
-        r.len = ecuio_sim_module_answer(m.data, m.len, functional, r.data);
-    }
+    r.len = answer(s, n, m.data, m.len, functional, r.data);
     if (r.len == 0) {
         return true;
     }
-    if (n.module == 0 && r.data[0] == 0x44) {
-        s->clears.fetch_add(1, std::memory_order_relaxed);
-    }
-    r.fate = ecuio_sim_next_fate(s->ecu, m.data, m.len, r.len, n.module);
+    r.fate = decide(s, n, m.data, m.len, r.data, r.len);
     switch (r.fate) {
     case ecuio_sim_fate::silent:
-        s->silent.fetch_add(1, std::memory_order_relaxed);
         return true;
     case ecuio_sim_fate::late:
-        s->late.fetch_add(1, std::memory_order_relaxed);
         r.waiting = true;
         r.start_us = now + ECUIO_SIM_LATE_US;
         return true;
     case ecuio_sim_fate::pending: {
         /* 7F <service> 78 now, a Single Frame; the reply itself later,
          * whole */
-        s->pending.fetch_add(1, std::memory_order_relaxed);
         const uint8_t wait[3] = {0x7F, m.data[0], 0x78};
         isotp_can f;
         if (isotp_tx_start(n.tx, n.reply_id, wait, 3, now, &f) &&
@@ -304,11 +355,7 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
         return true;
     }
     case ecuio_sim_fate::bad_sequence:
-        s->bad_sequence.fetch_add(1, std::memory_order_relaxed);
-        break;
     case ecuio_sim_fate::stalled:
-        s->stalled.fetch_add(1, std::memory_order_relaxed);
-        break;
     case ecuio_sim_fate::intact:
         break;
     }
@@ -479,6 +526,145 @@ int open_socket(int32_t ifindex, const sim_node* nodes, int count)
 
 #endif /* ECUIO_HAVE_SOCKETCAN */
 
+namespace {
+
+/* What both creates take from the URI: its config and its profile's
+ * set, held */
+struct sim_plan {
+    ecuio_sim_config config;
+    const ecuio_signal_set_t* set = nullptr;
+    ecuio_profile_hold hold;
+    ecuio_sim_module_plan modules;
+};
+
+/* The URI and its profile, on every platform */
+ecuio_status_t plan_sim(const char* uri, sim_plan* p)
+{
+    char why[256] = {};
+    if (ecuio_sim_parse_uri(uri, &p->config, why, sizeof why) !=
+        ecuio_sim_uri_result::ok) {
+        ecuio_detail_set("%s", why);
+        return ECUIO_ERR_BAD_URI;
+    }
+    if (p->config.profile_len != 0) {
+        const std::string name(p->config.profile, p->config.profile_len);
+        const ecuio_status_t found =
+            ecuio_profile_acquire(name.c_str(), &p->set);
+        p->hold.set = p->set;
+        if (found != ECUIO_OK) {
+            ecuio_detail_set("profile: no profile '%s' is registered",
+                             name.c_str());
+            return ECUIO_ERR_UNKNOWN_PROFILE;
+        }
+        if (p->set != nullptr &&
+            !ecuio_sim_plan_modules(*p->set, &p->modules, why, sizeof why)) {
+            ecuio_detail_set("profile '%s': %s", name.c_str(), why);
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    p->config.profile = nullptr; /* the URI's, gone after create */
+    p->config.profile_len = 0;
+    return ECUIO_OK;
+}
+
+/* The sim p plans, on no bus yet: its values, its recording and its
+ * ECUs */
+ecuio_status_t build_sim(sim_plan& p, std::unique_ptr<ecuio_sim>* out)
+{
+    std::unique_ptr<ecuio_sim> s(new (std::nothrow) ecuio_sim);
+    if (s == nullptr) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    s->profile_hold = std::move(p.hold);
+    const ecuio_signal_set_t* set = p.set;
+    ecuio_sim_config& config = p.config;
+    if (set != nullptr) {
+        s->set = set;
+        s->values.reset(new (std::nothrow) std::atomic<double>[set->count]);
+        if (set->count > 0 && s->values == nullptr) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        /* Until it's given one, each field holds raw 0 */
+        for (uint32_t i = 0; i < set->count; ++i) {
+            s->values[i].store(set->defs[i].offset, std::memory_order_relaxed);
+        }
+    }
+    if (config.source == ecuio_sim_source::replay) {
+        ecuio_status_t loaded = ECUIO_OK;
+        try {
+            loaded = ecuio_sim_load_recording(
+                std::string(config.path, config.path_len), &s->recording,
+                config.stretch);
+        } catch (const std::bad_alloc&) {
+            loaded = ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        if (loaded != ECUIO_OK) {
+            return loaded;
+        }
+        /* A loop with no span would answer one instant forever */
+        if (config.loop && s->recording.span_us == 0) {
+            ecuio_detail_set(config.stretch.given()
+                                 ? "loop=1 needs a stretch that spans time; "
+                                   "its replies all share one time"
+                                 : "loop=1 needs a recording that spans "
+                                   "time; its replies all share one time");
+            return ECUIO_ERR_BAD_URI;
+        }
+        s->recording.loop = config.loop;
+        s->ecu.recording = &s->recording;
+    }
+    config.path = nullptr; /* the URI's, gone after create */
+    config.path_len = 0;
+    s->ecu.config = config;
+    s->nodes[0].rx.timed = true;
+    if (config.second_module) {
+        sim_node& m = s->nodes[1];
+        m.request_id = ECUIO_SIM_MODULE_REQUEST_ID;
+        m.reply_id = ECUIO_SIM_MODULE_REPLY_ID;
+        m.module = 1;
+        m.rx.timed = true;
+        s->node_count = 2;
+    }
+    if (set != nullptr) {
+        s->nodes[0].from_set = p.modules.engine;
+        for (uint32_t i = 0; i < p.modules.count; ++i) {
+            sim_node& m = s->nodes[1 + i];
+            m.request_id = p.modules.tx[i];
+            m.reply_id = p.modules.rx[i];
+            m.module = 1;
+            m.from_set = true;
+            m.rx.timed = true;
+        }
+        s->node_count = 1 + static_cast<int>(p.modules.count);
+    }
+    *out = std::move(s);
+    return ECUIO_OK;
+}
+
+/* A reply into the caller's entries, counted whether or not it fits */
+void put_reply(ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n,
+               uint32_t reply_id, uint32_t flags, int64_t delay_us,
+               const uint8_t* data, uint32_t len)
+{
+    if (*n < capacity) {
+        ecuio_sim_reply_t& r = replies[*n];
+        std::memset(&r, 0, sizeof r);
+        r.reply_id = reply_id;
+        r.flags = flags;
+        r.delay_us = delay_us;
+        r.length = len;
+        std::memcpy(r.data, data, len);
+    }
+    ++*n;
+}
+
+/* An ask's clock catches up at most this much a call, tick by tick; a
+ * longer step moves the ECU's time without stepping the drive cycle
+ * through it */
+constexpr int64_t kCatchUpUs = 3600LL * 1000000;
+
+} // namespace
+
 ecuio_status_t ecuio_sim_load_recording(const std::string& path,
                                         ecuio_sim_recording* out,
                                         const ecuio_stretch::stretch& stretch)
@@ -584,79 +770,21 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
                          options & ~ECUIO_SIM_ALLOW_DESK_BUS);
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    ecuio_sim_config config;
-    char why[256] = {};
-    if (ecuio_sim_parse_uri(uri, &config, why, sizeof why) !=
-        ecuio_sim_uri_result::ok) {
-        ecuio_detail_set("%s", why);
-        return ECUIO_ERR_BAD_URI;
+    sim_plan p;
+    const ecuio_status_t planned = plan_sim(uri, &p);
+    if (planned != ECUIO_OK) {
+        return planned;
     }
-    const ecuio_signal_set_t* set = nullptr;
-    ecuio_profile_hold hold;
-    ecuio_sim_module_plan plan;
-    if (config.profile_len != 0) {
-        const std::string name(config.profile, config.profile_len);
-        const ecuio_status_t found = ecuio_profile_acquire(name.c_str(), &set);
-        hold.set = set;
-        if (found != ECUIO_OK) {
-            ecuio_detail_set("profile: no profile '%s' is registered",
-                             name.c_str());
-            return ECUIO_ERR_UNKNOWN_PROFILE;
-        }
-        if (set != nullptr &&
-            !ecuio_sim_plan_modules(*set, &plan, why, sizeof why)) {
-            ecuio_detail_set("profile '%s': %s", name.c_str(), why);
-            return ECUIO_ERR_INVALID_ARGUMENT;
-        }
-    }
-    config.profile = nullptr; /* the URI's, gone after create */
-    config.profile_len = 0;
 #if !ECUIO_HAVE_SOCKETCAN
     ecuio_detail_set("the simulated ECU needs Linux, whose vcan is a "
                      "virtual CAN bus");
     return ECUIO_ERR_NO_TRANSPORT;
 #else
-    std::unique_ptr<ecuio_sim> s(new (std::nothrow) ecuio_sim);
-    if (s == nullptr) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
+    std::unique_ptr<ecuio_sim> s;
+    const ecuio_status_t built = build_sim(p, &s);
+    if (built != ECUIO_OK) {
+        return built;
     }
-    s->profile_hold = std::move(hold);
-    if (set != nullptr) {
-        s->set = set;
-        s->values.reset(new (std::nothrow) std::atomic<double>[set->count]);
-        if (set->count > 0 && s->values == nullptr) {
-            return ECUIO_ERR_OUT_OF_MEMORY;
-        }
-        /* Until it's given one, each field holds raw 0 */
-        for (uint32_t i = 0; i < set->count; ++i) {
-            s->values[i].store(set->defs[i].offset, std::memory_order_relaxed);
-        }
-    }
-    if (config.source == ecuio_sim_source::replay) {
-        ecuio_status_t loaded = ECUIO_ERR_OUT_OF_MEMORY;
-        try {
-            loaded = ecuio_sim_load_recording(
-                std::string(config.path, config.path_len), &s->recording,
-                config.stretch);
-        } catch (const std::bad_alloc&) {
-        }
-        if (loaded != ECUIO_OK) {
-            return loaded;
-        }
-        /* A loop with no span would answer one instant forever */
-        if (config.loop && s->recording.span_us == 0) {
-            ecuio_detail_set(config.stretch.given()
-                                 ? "loop=1 needs a stretch that spans time; "
-                                   "its replies all share one time"
-                                 : "loop=1 needs a recording that spans "
-                                   "time; its replies all share one time");
-            return ECUIO_ERR_BAD_URI;
-        }
-        s->recording.loop = config.loop;
-        s->ecu.recording = &s->recording;
-    }
-    config.path = nullptr; /* the URI's, gone after create */
-    config.path_len = 0;
     if (!socketcan_name_ok(ifname, std::strlen(ifname))) {
         ecuio_detail_set("'%.20s' isn't an interface name", ifname);
         return ECUIO_ERR_LOAD_FAILED;
@@ -680,28 +808,6 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
         ecuio_detail_set("%s", refusal);
         return ECUIO_ERR_LOAD_FAILED;
     }
-    s->ecu.config = config;
-    s->nodes[0].rx.timed = true;
-    if (config.second_module) {
-        sim_node& m = s->nodes[1];
-        m.request_id = ECUIO_SIM_MODULE_REQUEST_ID;
-        m.reply_id = ECUIO_SIM_MODULE_REPLY_ID;
-        m.module = 1;
-        m.rx.timed = true;
-        s->node_count = 2;
-    }
-    if (set != nullptr) {
-        s->nodes[0].from_set = plan.engine;
-        for (uint32_t i = 0; i < plan.count; ++i) {
-            sim_node& m = s->nodes[1 + i];
-            m.request_id = plan.tx[i];
-            m.reply_id = plan.rx[i];
-            m.module = 1;
-            m.from_set = true;
-            m.rx.timed = true;
-        }
-        s->node_count = 1 + static_cast<int>(plan.count);
-    }
     s->fd = open_socket(link.index, s->nodes, s->node_count);
     s->stop_fd = s->fd >= 0 ? eventfd(0, EFD_CLOEXEC) : -1;
     if (s->fd < 0 || s->stop_fd < 0) {
@@ -722,6 +828,122 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
     *out = s.release();
     return ECUIO_OK;
 #endif
+}
+
+ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
+                                        ecuio_sim_t** out)
+{
+    ecuio_detail_clear();
+    if (uri == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = nullptr;
+    if (options != 0) {
+        ecuio_detail_set("option bits 0x%x aren't an unbound sim's", options);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    sim_plan p;
+    const ecuio_status_t planned = plan_sim(uri, &p);
+    if (planned != ECUIO_OK) {
+        return planned;
+    }
+    std::unique_ptr<ecuio_sim> s;
+    const ecuio_status_t built = build_sim(p, &s);
+    if (built != ECUIO_OK) {
+        return built;
+    }
+    s->unbound = true;
+    s->created = std::chrono::steady_clock::now();
+    *out = s.release();
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_sim_ask(ecuio_sim_t* sim, uint32_t request_id,
+                             const uint8_t* request, uint32_t length,
+                             int64_t time_us, ecuio_sim_reply_t* replies,
+                             uint32_t capacity, uint32_t* count)
+{
+    ecuio_detail_clear();
+    if (sim == nullptr || request == nullptr || count == nullptr ||
+        (replies == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (!sim->unbound) {
+        ecuio_detail_set("this simulated ECU answers on its bus; "
+                         "ecuio_sim_create_unbound makes one to ask");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (length == 0 || length > ECUIO_ISOTP_MAX) {
+        ecuio_detail_set("a request is 1 to %u bytes, not %u",
+                         static_cast<unsigned>(ECUIO_ISOTP_MAX),
+                         static_cast<unsigned>(length));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (time_us < ECUIO_SIM_NOW) {
+        ecuio_detail_set("time_us counts from create, or is ECUIO_SIM_NOW");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    int64_t t = time_us;
+    if (t == ECUIO_SIM_NOW) {
+        t = static_cast<int64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - sim->created)
+                .count());
+    }
+    ecuio_sim_ecu& e = sim->ecu;
+    if (t - e.time_us > kCatchUpUs) {
+        e.time_us += (t - e.time_us - kCatchUpUs) / ECUIO_SIM_TICK_US *
+                     ECUIO_SIM_TICK_US;
+    }
+    while (e.time_us + ECUIO_SIM_TICK_US <= t) {
+        ecuio_sim_tick(e);
+    }
+
+    uint32_t n = 0;
+    const bool functional = request_id == ECUIO_SIM_FUNCTIONAL_ID;
+    for (int i = 0; i < sim->node_count; ++i) {
+        sim_node& node = sim->nodes[i];
+        if (!functional && request_id != node.request_id) {
+            continue;
+        }
+        sim->requests.fetch_add(1, std::memory_order_relaxed);
+        sim_sending& r = node.r;
+        r.len = answer(sim, node, request, length, functional, r.data);
+        if (r.len == 0) {
+            continue;
+        }
+        r.fate = decide(sim, node, request, length, r.data, r.len);
+        uint32_t flags = 0;
+        int64_t delay = 0;
+        switch (r.fate) {
+        case ecuio_sim_fate::silent:
+            continue;
+        case ecuio_sim_fate::pending: {
+            const uint8_t wait[3] = {0x7F, request[0], 0x78};
+            put_reply(replies, capacity, &n, node.reply_id,
+                      ECUIO_SIM_REPLY_PENDING, 0, wait, sizeof wait);
+            delay = ECUIO_SIM_PENDING_US;
+            break;
+        }
+        case ecuio_sim_fate::late:
+            flags = ECUIO_SIM_REPLY_LATE;
+            delay = ECUIO_SIM_LATE_US;
+            break;
+        case ecuio_sim_fate::bad_sequence:
+            flags = ECUIO_SIM_REPLY_BAD_SEQUENCE;
+            break;
+        case ecuio_sim_fate::stalled:
+            flags = ECUIO_SIM_REPLY_STALLED;
+            break;
+        case ecuio_sim_fate::intact:
+            break;
+        }
+        put_reply(replies, capacity, &n, node.reply_id, flags, delay, r.data,
+                  r.len);
+        sent(sim, r);
+    }
+    *count = n;
+    return ECUIO_OK;
 }
 
 ecuio_status_t ecuio_sim_get_stats(const ecuio_sim_t* sim,
@@ -784,13 +1006,15 @@ void ecuio_sim_destroy(ecuio_sim_t* sim)
         return;
     }
 #if ECUIO_HAVE_SOCKETCAN
-    const uint64_t one = 1;
-    (void)!write(sim->stop_fd, &one, sizeof one);
-    if (sim->worker.joinable()) {
-        sim->worker.join();
+    if (!sim->unbound) {
+        const uint64_t one = 1;
+        (void)!write(sim->stop_fd, &one, sizeof one);
+        if (sim->worker.joinable()) {
+            sim->worker.join();
+        }
+        close(sim->fd);
+        close(sim->stop_fd);
     }
-    close(sim->fd);
-    close(sim->stop_fd);
 #endif
     delete sim;
 }

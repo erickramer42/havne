@@ -5,7 +5,8 @@
 # Writes the seed inputs of the harnesses that read a structured format
 # into <out>/<harness>/, one file each, from the files the tree commits:
 # the signal-file and OBDb fixtures, the example plugin and the recording
-# fixtures. Each seed is in the harness's own form (fuzz/README.md): the
+# fixtures; and the ELM327 emulator's, the conversations its hosts open
+# with. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording harness's a
 # folder ('F'), with the pieces cut at 0x1E bytes. Started from
@@ -128,6 +129,26 @@ def main(argv):
               b"profile  obd2\n\n")
     write(out, "fuzz_recording", "wire-frames",
           b"F" + events + SEP + SEP + SEP + wire)
+
+    # The ELM327 emulator: a mode byte (bit 0 a second module, bit 1 the
+    # faults), then what a host sends, CR-ended: python-OBD's opening,
+    # Havne's setup (core/src/elm327_transport.cpp) and a VIN read, each
+    # in every mode
+    hosts = {
+        "python-obd": ["ATZ", "ATE0", "ATH1", "ATL0", "AT RV", "ATSP0", "0100",
+                       "ATDPN", "0120", "0140", "0902", "010C", "03"],
+        "havne": ["ATZ", "ATI", "ATE0", "ATL0", "ATS0", "ATH1", "ATD0", "ATCAF1",
+                  "ATCFC1", "ATSP6", "ATAT1", "ATST19", "ATSH7E0", "ATCRA7E8",
+                  "ATRV", "STI", "01001", "01201", "09022", "010C1", "0101",
+                  "03", "ATSH7E1", "ATCRA7E9", "22D1011", "ATMA", " "],
+        "vin": ["ATZ", "ATE0", "ATH0", "ATS1", "0902", "ATH1", "ATD1", "0902",
+                "", "0902", "ATSP7", "0902", "ATSP8", "0902"],
+    }
+    for name, lines in hosts.items():
+        text = "".join(line + "\r" for line in lines).encode("ascii")
+        for mode in range(4):
+            write(out, "fuzz_elm327_emulator", "%s_mode%d" % (name, mode),
+                  bytes([mode]) + text)
     return 0
 
 

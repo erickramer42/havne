@@ -203,6 +203,11 @@ if(Python3_Interpreter_FOUND)
     # scripts/dtc_titles.py, the trouble-code titles' generator (ADR-0044)
     add_test(NAME DtcTitlesTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/dtc_titles.py --selftest)
+    # schema/'s objects against the loaders' only_keys sets and word lists
+    # (ADR-0051, ADR-0052): a key on one side alone fails
+    add_test(NAME SchemaKeysTest.EachObjectsKeysAreItsLoaders
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_keys.py
+                ${CMAKE_SOURCE_DIR})
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -287,6 +292,27 @@ if(TARGET havne-cli)
         app_cli_golden(SimRefusesARelativeRecording sim-relative-recording.jsonl
             --exit 3
             -- $<TARGET_FILE:havne-cli> sim "replay://recordings/run?loop=1" --on vcan0)
+        # The ELM327 emulator (ADR-0055) parses its URI as the bus's sim
+        # does, before it listens: the same refusal, every platform
+        app_cli_golden(SimElm327RefusesABadUri sim-bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0"
+               --elm327 tcp:0)
+        # The emulator on 127.0.0.1, a port the system picks: a host's
+        # ELM327 exchange, core's own elm327:// session, a second module's
+        # DID, a plugin's DIDs, and python-OBD (skipped without it)
+        function(app_cli_elm327 name mode)
+            add_test(NAME CliElm327RunTest.${name}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_elm327.py
+                        ${mode} $<TARGET_FILE:havne-cli>
+                        ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+            set_tests_properties(CliElm327RunTest.${name} PROPERTIES
+                TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endfunction()
+        app_cli_elm327(AHostSpeaksElm327ToIt adapter)
+        app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
+        app_cli_elm327(ASecondModulesDidAnswers modules)
+        app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(PythonObdReadsIt python-obd)
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
@@ -441,6 +467,16 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream
                "mock://x?profile=plugin.example-sim.base"
                --plugin ${_cli_example} --values --count 6)
+        # schema/ (ADR-0051, ADR-0052) through the jsonschema package:
+        # every committed signal file, manifest, data file and fixture file
+        # validates, tests/fixtures/schema/'s refused ones fail it and
+        # havne-cli's check alike, and edge cases get one verdict from
+        # both; skipped without jsonschema unless ECUIO_SCHEMA_REQUIRED
+        add_test(NAME SchemaFixturesTest.TheSchemasAndTheLoadersAgree
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_fixtures.py
+                    ${CMAKE_SOURCE_DIR} $<TARGET_FILE:havne-cli>)
+        set_tests_properties(SchemaFixturesTest.TheSchemasAndTheLoadersAgree
+            PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
         # Every plugin in the repository with its fixtures answered by the
         # simulated ECU on vcan0 and decoded back (ADR-0052 section 8), and
         # a test plugin giving one signal a value in each of two files;
@@ -617,6 +653,13 @@ if(TARGET havne-cli)
     app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
     app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
     app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
+    app_cli_usage(SimOnAndElm327IsUsage "sim|mock://sim|--on|vcan0|--elm327|tcp:0")
+    app_cli_usage(SimElm327DeskBusIsUsage "sim|mock://sim|--elm327|tcp:0|--desk-bus")
+    app_cli_usage(SimElm327WithoutAnAddressIsUsage "sim|mock://sim|--elm327")
+    app_cli_usage(SimElm327NotTcpIsUsage "sim|mock://sim|--elm327|udp:35000")
+    app_cli_usage(SimElm327APortPastTheRangeIsUsage "sim|mock://sim|--elm327|tcp:65536")
+    app_cli_usage(SimElm327AShortAddressIsUsage "sim|mock://sim|--elm327|tcp:127.0.1:35000")
+    app_cli_usage(SimElm327AHostNameIsUsage "sim|mock://sim|--elm327|tcp:localhost:35000")
     # view's refusals come before any recording opens, but for a name no
     # recording has, which comes after the opens and before any line
     app_cli_usage(ViewWithoutARecordingIsUsage "view")

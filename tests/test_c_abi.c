@@ -125,6 +125,15 @@ typedef char abi_inspection_flags_check[(offsetof(ecuio_inspection_t, diag_flags
 typedef char abi_sim_stats_size_check[(sizeof(ecuio_sim_stats_t) == 96) ? 1 : -1];
 typedef char abi_sim_stats_flags_check[(offsetof(ecuio_sim_stats_t, flags) == 72) ? 1 : -1];
 typedef char abi_sim_stats_pending_check[(offsetof(ecuio_sim_stats_t, pending) == 80) ? 1 : -1];
+typedef char
+    abi_sim_reply_size_check[(sizeof(ecuio_sim_reply_t) == 4136) ? 1 : -1];
+typedef char abi_sim_reply_delay_check
+    [(offsetof(ecuio_sim_reply_t, delay_us) == 8) ? 1 : -1];
+typedef char abi_sim_reply_length_check
+    [(offsetof(ecuio_sim_reply_t, length) == 16) ? 1 : -1];
+typedef char abi_sim_reply_data_check[(offsetof(ecuio_sim_reply_t, data) == 40)
+                                          ? 1
+                                          : -1];
 typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_plugin_info_size_check[(sizeof(ecuio_plugin_info_t) == 136) ? 1 : -1];
@@ -305,6 +314,15 @@ int main(void)
         ecuio_sim_set_value(NULL, 1, 0.0) != ECUIO_ERR_NULL_ARGUMENT ||
         sim != NULL || ECUIO_SIM_FAILED != 1u || ECUIO_SIM_YIELDED != 2u ||
         ECUIO_SIM_ALLOW_DESK_BUS != 1u) {
+        return 1;
+    }
+    /* The unbound sim (ADR-0055) */
+    if (ecuio_sim_create_unbound(NULL, 0, &sim) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_ask(NULL, 0x7E0u, NULL, 0, ECUIO_SIM_NOW, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        sim != NULL || ECUIO_SIM_MAX_REPLIES != 10u ||
+        ECUIO_SIM_REPLY_PENDING != 1u || ECUIO_SIM_REPLY_LATE != 2u ||
+        ECUIO_SIM_REPLY_BAD_SEQUENCE != 4u || ECUIO_SIM_REPLY_STALLED != 8u) {
         return 1;
     }
     ecuio_sim_destroy(NULL);

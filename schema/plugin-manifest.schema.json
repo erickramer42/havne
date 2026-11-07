@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/plugin-manifest.schema.json",
+  "title": "Havne plugin manifest",
+  "description": "A Havne plugin's manifest (format 1, ADR-0052): a folder's manifest.json, or a packed plugin, one file holding the manifest and its data files under \"files\". A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/plugin.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader.",
+  "type": "object",
+  "required": ["havne_plugin", "id", "name", "version", "requires", "source", "tiers", "variants"],
+  "properties": {
+    "havne_plugin": {
+      "title": "Format",
+      "description": "The manifest format's version, and the manifest's first key. This Havne reads format 1.",
+      "const": 1
+    },
+    "id": {
+      "title": "Plugin id",
+      "description": "1 to 31 of a-z, 0-9 and -, a letter or digit at each end. Each variant's profile is plugin.<id>.<variant>.",
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+    },
+    "name": {
+      "title": "Name",
+      "description": "The plugin's name, 1 to 63 bytes with at least one letter or digit. A recording of a variant names its signal file by it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^(?=[^\\u0000]*[A-Za-z0-9])[^\\u0000]*$"
+    },
+    "version": {
+      "title": "Version",
+      "description": "The plugin's own version, X.Y.Z: each 0 to 65535 with no leading zero, 15 characters at most.",
+      "$ref": "#/$defs/version"
+    },
+    "requires": {
+      "title": "Requires",
+      "description": "What the plugin needs to load.",
+      "type": "object",
+      "required": ["core"],
+      "properties": {
+        "core": {
+          "title": "Core version",
+          "description": "The oldest Havne core that reads the plugin, X.Y.Z.",
+          "$ref": "#/$defs/version"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "source": { "$ref": "signal-file.schema.json#/$defs/source" },
+    "tiers": {
+      "title": "Tiers",
+      "description": "What the plugin holds: [\"data\"] (signal files) is the only tier this Havne runs, and a plugin naming another is refused.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "const": "data" }
+    },
+    "match": {
+      "title": "Match",
+      "description": "The cars the plugin proposes itself for by their VIN, at most 32 rules. A match only proposes: the user picks the variant.",
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/match" }
+    },
+    "ecus": {
+      "$ref": "signal-file.schema.json#/$defs/ecus",
+      "description": "The modules the data files' signals read, named by id; a data file declares none of its own. The base set's count toward 4 in all, of one ID width."
+    },
+    "variants": {
+      "title": "Variants",
+      "description": "1 to 32 named lists of data files, each list merged by signal key at load (a later file's signal replaces an earlier one's in its place, and adds the rest).",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/variant" }
+    },
+    "fixtures": {
+      "title": "Fixtures",
+      "description": "A folder's value-fixture files, at most 16, which havne-cli plugins check runs (plugin-fixtures.schema.json). A packed plugin carries none.",
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/path" }
+    },
+    "files": {
+      "title": "Files",
+      "description": "A packed plugin's data files, at most 64, each by the path its variants name. A folder's manifest takes none.",
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/path" },
+      "additionalProperties": { "$ref": "#/$defs/dataFile" }
+    },
+    "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+  },
+  "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+  "additionalProperties": false,
+  "not": {
+    "$comment": "A packed plugin carries no fixtures, and only a packed one has files",
+    "required": ["files", "fixtures"]
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "maxLength": 15,
+      "pattern": "^(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
+    },
+    "path": {
+      "title": "Path",
+      "description": "A path in the package: relative, forward slashes, no empty, \".\" or \"..\" part, 1 to 127 printable ASCII characters but backslash and colon.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 127,
+      "pattern": "^(?!/)(?!.*//)(?!.*/$)(?!(?:.*/)?\\.\\.?(?:/|$))[!-9;-\\[\\]-~]+$"
+    },
+    "years": {
+      "title": "Model years",
+      "description": "The first and the last model year, 1980 to 2039, inclusive.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "title": "First year", "type": "integer", "minimum": 1980, "maximum": 2039 },
+        { "title": "Last year", "type": "integer", "minimum": 1980, "maximum": 2039 }
+      ],
+      "items": false
+    },
+    "match": {
+      "title": "Match rule",
+      "description": "Manufacturer codes, and optionally the model years, a car's VIN must show.",
+      "type": "object",
+      "required": ["wmi"],
+      "properties": {
+        "wmi": {
+          "title": "Manufacturer codes",
+          "description": "1 to 64 world manufacturer identifiers: a VIN's first 3 characters, or 6 (the first 3 and the 12th to 14th) where the third is 9. Upper case, no I, O or Q.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[A-HJ-NPR-Z0-9]{3}|[A-HJ-NPR-Z0-9]{6})$"
+          }
+        },
+        "years": { "$ref": "#/$defs/years" },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "variant": {
+      "title": "Variant",
+      "description": "One variant: its data files in order, merged by signal key, and optionally the model years it's for.",
+      "type": "object",
+      "required": ["id", "files"],
+      "properties": {
+        "id": {
+          "title": "Variant id",
+          "description": "1 to 24 of a-z, 0-9 and -, a letter or digit at each end. Its profile is plugin.<plugin id>.<variant id>.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$"
+        },
+        "years": { "$ref": "#/$defs/years" },
+        "files": {
+          "title": "Files",
+          "description": "The variant's data files, 1 to 64, each once. Only the first may extend a set.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/path" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "dataFile": {
+      "title": "Plugin data file",
+      "description": "A plugin's data file: a signal file whose signals name the manifest's ECUs by id and which declares none of its own. Its name and source are optional, the manifest's being the plugin's.",
+      "type": "object",
+      "required": ["havne_signals", "signals"],
+      "properties": {
+        "havne_signals": {
+          "title": "Format",
+          "description": "The signal-file format's version, and the file's first key. This Havne reads format 1.",
+          "const": 1
+        },
+        "name": {
+          "title": "Name",
+          "description": "The data file's own name, 1 to 63 bytes, for its reader: a variant's signal file takes the plugin's.",
+          "$ref": "signal-file.schema.json#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "source": { "$ref": "signal-file.schema.json#/$defs/source" },
+        "extends": {
+          "$ref": "signal-file.schema.json#/$defs/extends",
+          "description": "A built-in set the variant adds to, only in a variant's first file: \"obd2\" in format 1."
+        },
+        "signals": {
+          "title": "Signals",
+          "description": "The file's signals, each key once. A variant's files' signals merged hold 1 to 1024.",
+          "type": "array",
+          "maxItems": 1024,
+          "items": { "$ref": "signal-file.schema.json#/$defs/signal" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    }
+  }
+}
