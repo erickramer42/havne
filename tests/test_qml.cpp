@@ -109,9 +109,11 @@ public:
     }
 
     // Registers the mock's set with every def renamed ("Renamed RPM", ...)
-    // as a profile, and returns its name ("" if refused): the Dashboard's
-    // gauges must find their signals by ID alone. The registry keeps the
-    // set's pointer, so it lives as long as the process.
+    // as a profile, and returns its name ("" if refused): a set registered
+    // without a signal file, whose rows have no ADR-0057 refs, so no
+    // Dashboard gauge binds them though they carry the mock's IDs. The
+    // registry keeps the set's pointer, so it lives as long as the
+    // process.
     Q_INVOKABLE QString registerRenamedMock()
     {
         static std::vector<ecuio_signal_def_t> defs;

@@ -703,6 +703,44 @@ void FrameIdModel::refresh()
     }
 }
 
+// A value, its unit and its decimals in a unit system (ADR-0022)
+static ecuio_display_value_t displayed(const char* unit, uint8_t decimals,
+                                       double value, uint32_t units)
+{
+    ecuio_display_value_t out;
+    if (ecuio_display_convert(unit, decimals, value, units, &out) !=
+        ECUIO_DISPLAY_OK) {
+        // units is only ever metric or imperial, so this is unreachable;
+        // show the decoded value rather than nothing
+        out = {};
+        out.value = value;
+        qstrncpy(out.unit, unit, sizeof(out.unit));
+        out.decimal_places = decimals;
+    }
+    return out;
+}
+
+// A def's range as displayed in a unit system: NaN for both ends when
+// either is NaN (core gives none), converts past a double (a finite end
+// near DBL_MAX times 1.8 is inf, and inf isn't a range), or the converted
+// ends meet (ends one ulp apart can round to one number, and lo == hi
+// isn't a range, as core's refusal of a == b says)
+static std::pair<double, double> displayedRange(const char* unit,
+                                                uint8_t decimals, double lo,
+                                                double hi, uint32_t units)
+{
+    const double none = std::numeric_limits<double>::quiet_NaN();
+    if (std::isnan(lo) || std::isnan(hi)) {
+        return {none, none};
+    }
+    const double l = displayed(unit, decimals, lo, units).value;
+    const double h = displayed(unit, decimals, hi, units).value;
+    if (!std::isfinite(l) || !std::isfinite(h) || !(l < h)) {
+        return {none, none};
+    }
+    return {l, h};
+}
+
 // ---------------- SignalListModel ----------------
 SignalListModel::SignalListModel(QObject* parent)
     : QAbstractListModel(parent)
@@ -745,6 +783,14 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return e.refused;
         case RefusedCodeRole:
             return e.refusedCode;
+        case RefRole:
+            return e.facts.ref;
+        case RangeLowRole:
+            return shownRange(e).first;
+        case RangeHighRole:
+            return shownRange(e).second;
+        case IsEnumRole:
+            return e.facts.isEnum;
         default: return QVariant();
     }
 }
@@ -768,10 +814,53 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {GroupRole, "group"},
             {LabelRole, "label"},
             {RefusedRole, "refused"},
-            {RefusedCodeRole, "refusedCode"}};
+            {RefusedCodeRole, "refusedCode"},
+            {RefRole, "ref"},
+            {RangeLowRole, "rangeLow"},
+            {RangeHighRole, "rangeHigh"},
+            {IsEnumRole, "isEnum"}};
 }
 
-void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
+bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
+{
+    // The registry's sets, so the rule is the profile's whatever binds it
+    const ecuio_signal_set_t* mock = nullptr;
+    const ecuio_signal_set_t* obd2 = nullptr;
+    (void)ecuio_profile_lookup("mock", &mock);
+    (void)ecuio_profile_lookup("obd2", &obd2);
+    return set != nullptr && (set == mock || set == obd2);
+}
+
+SignalListModel::DefFacts
+SignalListModel::factsOf(const ecuio_signal_file_t* file, bool builtIn,
+                         const ecuio_signal_def_t& def)
+{
+    DefFacts f;
+    f.isEnum = def.kind == ECUIO_VALUE_ENUM;
+    double lo = 0.0;
+    double hi = 0.0;
+    if (ecuio_def_range(&def, &lo, &hi) == ECUIO_DECODE_OK) {
+        f.rangeLow = lo;
+        f.rangeHigh = hi;
+    } else {
+        f.rangeLow = f.rangeHigh = std::numeric_limits<double>::quiet_NaN();
+    }
+    // ADR-0057's refs: a file's own def by its key (a def of its extends
+    // base has none, and keeps the base's ID); a built-in set's by ID
+    const QString byId = QStringLiteral("id:%1").arg(def.id);
+    if (file != nullptr) {
+        const char* key = ecuio_signal_file_key(file, &def);
+        f.ref = (key != nullptr && key[0] != '\0')
+                    ? QStringLiteral("key:") + QString::fromUtf8(key)
+                    : byId;
+    } else if (builtIn) {
+        f.ref = byId;
+    }
+    return f;
+}
+
+void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
+                                   const ecuio_signal_file_t* file)
 {
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
@@ -798,6 +887,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     // Each entry holds its history ring (tens of KB): built in place,
     // never on the stack or moved by a reallocation
     m_entries.reserve(set->count);
+    const bool builtIn = isBuiltIn(set);
 
     for (uint32_t i = 0; i < set->count; ++i) {
         // value-init zeroes the history ring, head, and count
@@ -809,6 +899,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
+        e.facts = factsOf(file, builtIn, set->defs[i]);
         if (set->defs[i].kind == ECUIO_VALUE_ENUM && set->enums != nullptr) {
             const uint32_t first = set->defs[i].table_first;
             const uint32_t end = first + set->defs[i].table_count;
@@ -952,16 +1043,13 @@ QString SignalListModel::labelOf(const Entry& e)
 
 ecuio_display_value_t SignalListModel::shown(const Entry& e, double value) const
 {
-    ecuio_display_value_t out;
-    if (ecuio_display_convert(e.unit, e.decimals, value, m_units, &out) != ECUIO_DISPLAY_OK) {
-        // m_units is only ever metric or imperial, so this is unreachable;
-        // show the decoded value rather than nothing
-        out = {};
-        out.value = value;
-        qstrncpy(out.unit, e.unit, sizeof(out.unit));
-        out.decimal_places = e.decimals;
-    }
-    return out;
+    return displayed(e.unit, e.decimals, value, m_units);
+}
+
+std::pair<double, double> SignalListModel::shownRange(const Entry& e) const
+{
+    return displayedRange(e.unit, e.decimals, e.facts.rangeLow,
+                          e.facts.rangeHigh, m_units);
 }
 
 void SignalListModel::setUnitSystem(uint32_t units)
@@ -970,7 +1058,8 @@ void SignalListModel::setUnitSystem(uint32_t units)
     m_units = units;
     if (m_entries.empty()) return;
     emit dataChanged(index(0), index(static_cast<int>(m_entries.size()) - 1),
-                     {ValueRole, WindowHighRole, WindowLowRole, UnitRole, DecimalsRole});
+                     {ValueRole, WindowHighRole, WindowLowRole, UnitRole,
+                      DecimalsRole, RangeLowRole, RangeHighRole});
     emit valuesUpdated();   // the chart redraws its history in the new units
 }
 
@@ -1833,7 +1922,8 @@ QString SessionBridge::coreVersion() const
 QVariantMap SessionBridge::gaugeSignals() const
 {
     const auto ids = [](int mock, int obd2) {
-        return QVariantList{mock, obd2};
+        return QVariantList{QStringLiteral("id:%1").arg(mock),
+                            QStringLiteral("id:%1").arg(obd2)};
     };
     return {
         {QStringLiteral("rpm"),
@@ -1853,6 +1943,122 @@ QVariantMap SessionBridge::gaugeSignals() const
         {QStringLiteral("load"),
          ids(ECUIO_MOCK_SIG_LOAD_ID, ECUIO_OBD2_SIG_ENGINE_LOAD_ID)},
     };
+}
+
+const ecuio_signal_file_t*
+SessionBridge::fileOfSet(const ecuio_signal_set_t* set) const
+{
+    if (set == nullptr) {
+        return nullptr;
+    }
+    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
+    if (file == nullptr) {
+        file = m_pluginStore.fileFor(set);
+    }
+    for (auto it = m_replayFiles.begin();
+         file == nullptr && it != m_replayFiles.end(); ++it) {
+        if (ecuio_signal_file_set(it->second.file) == set) {
+            file = it->second.file;
+        }
+    }
+    return file;
+}
+
+QString SessionBridge::profileOfUri(const QString& uri)
+{
+    // Core's scheme routing and defaults (core.cpp, ecuio_session_create):
+    // case-sensitive prefixes; j2534:// on Windows alone, socketcan:// on
+    // Linux but not Android (internal.h's ECUIO_HAVE_SOCKETCAN); mock://
+    // decodes through mock, an adapter through obd2, a replay and a bus
+    // through raw. replayUriFor has its own rule for a recorded URI
+    static const struct {
+        const char* scheme;
+        const char* profile;
+    } kSchemes[] = {
+        {"mock://", "mock"},   // the mock's own set
+        {"replay://", "raw"},  // a recording's frames
+        {"elm327://", "obd2"}, // an adapter
+#ifdef _WIN32
+        {"j2534://", "obd2"}, // an adapter
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+        {"socketcan://", "raw"}, // a bus
+#endif
+    };
+    const QByteArray u = uri.toUtf8();
+    QString profile;
+    for (const auto& s : kSchemes) {
+        if (u.startsWith(s.scheme)) {
+            profile = QString::fromLatin1(s.profile);
+            break;
+        }
+    }
+    if (profile.isEmpty()) {
+        return {};
+    }
+    const qsizetype q = u.indexOf('?');
+    if (q < 0) {
+        return profile;
+    }
+    // The query's grammar (core/src/uri_query.h): key=value segments
+    // joined by '&', none empty, each with an '='; every profile= value
+    // 1 to ECUIO_PROFILE_NAME_MAX bytes, the last one winning. Other keys
+    // and the segment count are core's to judge at the connect
+    const QList<QByteArray> segments = u.mid(q + 1).split('&');
+    for (const QByteArray& segment : segments) {
+        const qsizetype eq = segment.indexOf('=');
+        if (eq < 0) {
+            return {};
+        }
+        if (segment.left(eq) == "profile") {
+            const QByteArray value = segment.mid(eq + 1);
+            if (value.isEmpty() || value.size() > ECUIO_PROFILE_NAME_MAX) {
+                return {};
+            }
+            profile = QString::fromUtf8(value);
+        }
+    }
+    return profile;
+}
+
+QVariantList SessionBridge::profileSignals(const QString& uri) const
+{
+    const QString profile = profileOfUri(uri);
+    const ecuio_signal_set_t* set = nullptr;
+    if (profile.isEmpty() ||
+        ecuio_profile_lookup(profile.toUtf8().constData(), &set) != ECUIO_OK ||
+        set == nullptr || set->defs == nullptr) {
+        return {};
+    }
+    const ecuio_signal_file_t* file = fileOfSet(set);
+    const bool builtIn = SignalListModel::isBuiltIn(set);
+    const uint32_t units = m_signalModel->unitSystem();
+    QVariantList rows;
+    rows.reserve(static_cast<qsizetype>(set->count));
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& def = set->defs[i];
+        const SignalListModel::DefFacts f =
+            SignalListModel::factsOf(file, builtIn, def);
+        const ecuio_display_value_t shown =
+            displayed(def.unit, def.decimal_places, 0.0, units);
+        const std::pair<double, double> range = displayedRange(
+            def.unit, def.decimal_places, f.rangeLow, f.rangeHigh, units);
+        rows.append(QVariantMap{
+            {QStringLiteral("id"), static_cast<int>(def.id)},
+            {QStringLiteral("ref"), f.ref},
+            {QStringLiteral("name"), QString::fromUtf8(def.name)},
+            {QStringLiteral("unit"), QString::fromUtf8(shown.unit)},
+            {QStringLiteral("decimals"),
+             static_cast<int>(shown.decimal_places)},
+            {QStringLiteral("isText"),
+             def.kind == ECUIO_VALUE_TEXT || def.kind == ECUIO_VALUE_HEX},
+            {QStringLiteral("isEnum"), f.isEnum},
+            {QStringLiteral("group"), static_cast<int>(def.group)},
+            {QStringLiteral("rangeLow"), range.first},
+            {QStringLiteral("rangeHigh"), range.second},
+        });
+    }
+    return rows;
 }
 
 QString SessionBridge::statusString(int statusCode) const
@@ -1978,7 +2184,9 @@ QString SessionBridge::replayUriFor(const QString& folder,
     }
     if (profile.isEmpty()) {
         // Core's defaults by scheme (ADR-0013); a replay's is raw, which
-        // can't decode a recording wrongly, and so is an unknown source's
+        // can't decode a recording wrongly, and so is an unknown source's.
+        // Not profileOfUri's table: a recording made on another platform
+        // names j2534:// or another case, and its frames still decode
         profile = recordedUri.startsWith(QLatin1String("mock://"),
                                          Qt::CaseInsensitive)
                       ? QStringLiteral("mock")
@@ -2291,7 +2499,8 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_frameLog->clear();
     m_currentFrameCount = 0;
     notifyFrameCounts();
-    m_signalModel->setSignalSet(ecuio_session_signal_set(session));
+    m_signalModel->setSignalSet(ecuio_session_signal_set(session),
+                                fileOfSet(ecuio_session_signal_set(session)));
     m_stagingBuffer.clear();   // previous session's batch must never
     m_stagingTexts.clear();    // bleed into this one's first
     m_linkErrorCode = ECUIO_OK;
@@ -2708,17 +2917,8 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
     // (ADR-0051 section 4): a vehicle's, its hash the store copy's name,
     // or a plugin variant's files merged, with the plugin's line
     // (ADR-0052 section 4), as havne-cli stream --plugin --record does
-    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
-    if (file == nullptr) {
-        file = m_pluginStore.fileFor(set);
-    }
-    for (auto it = m_replayFiles.begin();
-         file == nullptr && set != nullptr && it != m_replayFiles.end(); ++it) {
-        if (ecuio_signal_file_set(it->second.file) == set) {
-            file = it->second.file;
-        }
-    }
+    const ecuio_signal_file_t* file =
+        fileOfSet(ecuio_session_signal_set(session));
     if (file != nullptr) {
         rc = ecuio_recorder_signal_file(recorder, file);
     }

@@ -18,15 +18,15 @@ Page {
 
     SignalHub { id: hub }
 
-    // One gauge input: the first of `ids` (core's def IDs, from
+    // One gauge input: the first of `refs` (ADR-0057's refs, from
     // Bridge.gaugeSignals) the active profile provides, whatever it names
     // the signal. Unit and decimals are
     // core's display strings. `high` and `low` are the last window's,
     // for the gauges' holds. `note` explains an empty gauge instead of
     // showing a fake zero.
     component Tap: QtObject {
-        required property var ids
-        readonly property SignalHub.Entry entry: hub.lookup(ids)
+        required property var refs
+        readonly property SignalHub.Entry entry: hub.lookup(refs)
         readonly property bool live: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
         readonly property real high: entry ? entry.windowHigh : 0
@@ -40,14 +40,14 @@ Page {
                                      : ""
     }
 
-    Tap { id: rpm;      ids: Bridge.gaugeSignals.rpm }
-    Tap { id: speed;    ids: Bridge.gaugeSignals.speed }
-    Tap { id: coolant;  ids: Bridge.gaugeSignals.coolant }
-    Tap { id: oil;      ids: Bridge.gaugeSignals.oil }
-    Tap { id: iat;      ids: Bridge.gaugeSignals.iat }
-    Tap { id: maf;      ids: Bridge.gaugeSignals.maf }
-    Tap { id: throttle; ids: Bridge.gaugeSignals.throttle }
-    Tap { id: load;     ids: Bridge.gaugeSignals.load }
+    Tap { id: rpm;      refs: Bridge.gaugeSignals.rpm }
+    Tap { id: speed;    refs: Bridge.gaugeSignals.speed }
+    Tap { id: coolant;  refs: Bridge.gaugeSignals.coolant }
+    Tap { id: oil;      refs: Bridge.gaugeSignals.oil }
+    Tap { id: iat;      refs: Bridge.gaugeSignals.iat }
+    Tap { id: maf;      refs: Bridge.gaugeSignals.maf }
+    Tap { id: throttle; refs: Bridge.gaugeSignals.throttle }
+    Tap { id: load;     refs: Bridge.gaugeSignals.load }
 
     // Sizes for the gauge arrangements below
     QtObject {

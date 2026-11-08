@@ -2345,6 +2345,12 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::RefusedRole), QByteArray("refused"));
     EXPECT_EQ(roles.value(SignalListModel::RefusedCodeRole),
               QByteArray("refusedCode"));
+    EXPECT_EQ(roles.value(SignalListModel::RefRole), QByteArray("ref"));
+    EXPECT_EQ(roles.value(SignalListModel::RangeLowRole),
+              QByteArray("rangeLow"));
+    EXPECT_EQ(roles.value(SignalListModel::RangeHighRole),
+              QByteArray("rangeHigh"));
+    EXPECT_EQ(roles.value(SignalListModel::IsEnumRole), QByteArray("isEnum"));
 
     // A row answers only its roles, and only rows that exist answer
     ecuio_signal_def_t defs[2];
@@ -7992,6 +7998,510 @@ TEST(BridgeTest, ReplayOfAChangedSignalFileCopyDecodesAsLoaded)
         QStringLiteral("Replay: the recording's signals.json is missing; "
                        "decoding with user.recorded as loaded now")))
         << log.join(QLatin1Char('\n')).toStdString();
+}
+
+// ---- ADR-0057's refs and ranges: the model's rows and profileSignals ----
+
+namespace {
+
+// The rows of the bridge's signal model, each a map of its role names
+QVariantList modelRows(SessionBridge& bridge)
+{
+    SignalListModel* model = bridge.signalModel();
+    const QHash<int, QByteArray> roles = model->roleNames();
+    QVariantList rows;
+    for (int i = 0; i < model->rowCount(); ++i) {
+        QVariantMap row;
+        for (auto it = roles.begin(); it != roles.end(); ++it) {
+            row.insert(QString::fromUtf8(it.value()),
+                       model->data(model->index(i, 0), it.key()));
+        }
+        rows.append(row);
+    }
+    return rows;
+}
+
+// The row named name, an empty map if none
+QVariantMap rowNamed(const QVariantList& rows, const QString& name)
+{
+    for (const QVariant& r : rows) {
+        if (r.toMap().value(QStringLiteral("name")).toString() == name) {
+            return r.toMap();
+        }
+    }
+    return {};
+}
+
+QStringList refsOf(const QVariantList& rows)
+{
+    QStringList refs;
+    for (const QVariant& r : rows) {
+        refs << r.toMap().value(QStringLiteral("ref")).toString();
+    }
+    return refs;
+}
+
+// Imports bytes into the store and uses it alone; its profile
+QString useFile(SessionBridge& bridge, const QString& folder,
+                const QByteArray& bytes)
+{
+    const QVariantMap r =
+        bridge.importSignalFile(writeScratch(folder, "f.json", bytes));
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(bridge.useSignalFiles({sha256Of(bytes)}).size(), 1);
+    return r.value(QStringLiteral("profile")).toString();
+}
+
+// A signal file extending obd2: an 8-bit temperature at -40 and one at
+// -50 (whose low end differs between the unit systems), an enum, a
+// text, and a computed signal over the temperature
+QByteArray rangesFile()
+{
+    return QByteArray(
+        R"({"havne_signals":1,"name":"Ranges","source":{"name":"t"},)"
+        R"("extends":"obd2","ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"temp","name":"Temp","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0,"bits":8},"offset":-40,"unit":"\u00b0C"},)"
+        R"({"key":"gear","name":"Gear","read":{"service":"22","number":"D101"},)"
+        R"("field":{"byte":0,"bits":8},"kind":"enum","values":{"0":"Park"}},)"
+        R"({"key":"part","name":"Part","read":{"service":"22","number":"D102"},)"
+        R"("field":{"byte":0},"kind":"text"},)"
+        R"({"key":"cold","name":"Cold","read":{"service":"22","number":"D103"},)"
+        R"("field":{"byte":0,"bits":8},"offset":-50,"unit":"\u00b0C"},)"
+        R"({"key":"twice","name":"Twice","kind":"computed","expr":"temp * 2"}]})");
+}
+
+} // namespace
+
+/* The mock's and obd2's rows are theirs by core's def ID; a row's ref
+ * is the same in the model and in profileSignals */
+TEST(BridgeTest, ABuiltInSetsRowsAreReferencedByTheirIds)
+{
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    const QVariantList rows = modelRows(bridge);
+    ASSERT_GT(rows.size(), 0);
+    for (const QVariant& r : rows) {
+        const QVariantMap m = r.toMap();
+        EXPECT_EQ(
+            m.value(QStringLiteral("ref")).toString(),
+            QStringLiteral("id:%1").arg(m.value(QStringLiteral("id")).toInt()))
+            << m.value(QStringLiteral("name")).toString().toStdString();
+    }
+    EXPECT_EQ(
+        rowNamed(rows, QStringLiteral("RPM")).value(QStringLiteral("ref")),
+        QStringLiteral("id:1001"));
+    EXPECT_EQ(refsOf(bridge.profileSignals(QStringLiteral("mock://demo"))),
+              refsOf(rows));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QString obd2 =
+        QStringLiteral(
+            "replay://%1/2026-10-25-engine-start?profile=obd2&speed=max")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    ASSERT_TRUE(bridge.connectSession(obd2).isEmpty());
+    const QVariantList obd2Rows = modelRows(bridge);
+    EXPECT_TRUE(refsOf(obd2Rows).contains(QStringLiteral("id:7003")));
+    for (const QString& ref : refsOf(obd2Rows)) {
+        EXPECT_TRUE(ref.startsWith(QStringLiteral("id:"))) << ref.toStdString();
+    }
+    EXPECT_EQ(refsOf(bridge.profileSignals(obd2)), refsOf(obd2Rows));
+    EXPECT_EQ(refsOf(bridge.profileSignals(QStringLiteral("elm327://COM9"))),
+              refsOf(obd2Rows))
+        << "an adapter's default, obd2";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* uds-generic's rows and a set registered with no signal file (the
+ * mock's, copied) have no ref, though they carry IDs */
+TEST(BridgeTest, ASetWithNoFileHasNoRefs)
+{
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://demo?profile=uds-generic&did=1E1C:u16"))
+                    .isEmpty());
+    QVariantList rows = modelRows(bridge);
+    ASSERT_GT(rows.size(), 0);
+    for (const QString& ref : refsOf(rows)) {
+        EXPECT_EQ(ref, QString());
+    }
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    // The registry keeps the set's pointer until it's unregistered
+    static std::vector<ecuio_signal_def_t> defs;
+    static ecuio_signal_set_t copy{};
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    defs.assign(mock->defs, mock->defs + mock->count);
+    copy = *mock;
+    copy.defs = defs.data();
+    ASSERT_EQ(ecuio_profile_register("copied-mock", &copy, nullptr), ECUIO_OK);
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://demo?profile=copied-mock"))
+            .isEmpty());
+    rows = modelRows(bridge);
+    ASSERT_EQ(rows.size(), static_cast<int>(mock->count));
+    EXPECT_EQ(rowNamed(rows, QStringLiteral("RPM"))
+                  .value(QStringLiteral("id"))
+                  .toInt(),
+              1001);
+    for (const QString& ref : refsOf(rows)) {
+        EXPECT_EQ(ref, QString());
+    }
+    const QVariantList copied = bridge.profileSignals(
+        QStringLiteral("mock://demo?profile=copied-mock"));
+    ASSERT_EQ(copied.size(), static_cast<int>(mock->count));
+    for (const QString& ref : refsOf(copied)) {
+        EXPECT_EQ(ref, QString());
+    }
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(ecuio_profile_unregister("copied-mock"), ECUIO_OK);
+}
+
+/* A signal file's own defs are theirs by key, its extends base's by
+ * the base's ID; a file extending nothing has keys alone */
+TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QByteArray extending = signalFile(QStringLiteral("Extending"));
+    extending.replace(R"("source":{"name":"t"},)",
+                      R"("source":{"name":"t"},"extends":"obd2",)");
+    const QString profile = useFile(bridge, from.path(), extending);
+    ASSERT_FALSE(profile.isEmpty());
+    const QString uri = QStringLiteral("mock://demo?profile=") + profile;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QVariantList rows = modelRows(bridge);
+    EXPECT_EQ(rowNamed(rows, QStringLiteral("A")).value(QStringLiteral("ref")),
+              QStringLiteral("key:a"));
+    const QStringList refs = refsOf(rows);
+    EXPECT_TRUE(refs.contains(QStringLiteral("id:7003"))) << "obd2's RPM";
+    EXPECT_EQ(refs.filter(QStringLiteral("key:")).size(), 1);
+    EXPECT_FALSE(refs.contains(QString()));
+    EXPECT_EQ(refsOf(bridge.profileSignals(uri)), refs);
+
+    // A store change under a session leaves its rows' refs; the file's
+    // profile is gone from the registry, so profileSignals gives []
+    bridge.useSignalFiles({});
+    EXPECT_EQ(refsOf(modelRows(bridge)), refs);
+    EXPECT_TRUE(bridge.profileSignals(uri).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QString alone =
+        useFile(bridge, from.path(), signalFile(QStringLiteral("Alone")));
+    ASSERT_FALSE(alone.isEmpty());
+    EXPECT_EQ(refsOf(bridge.profileSignals(
+                  QStringLiteral("mock://demo?profile=") + alone)),
+              QStringList{QStringLiteral("key:a")});
+    bridge.useSignalFiles({});
+}
+
+/* A plugin variant's rows have refs, its file being the plugin
+ * store's, in profileSignals and in a session's model alike */
+TEST(BridgeTest, APluginVariantsRowsHaveRefs)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray bytes = packed_plugin::example();
+    ASSERT_FALSE(bytes.isEmpty());
+    ASSERT_TRUE(bridge
+                    .importPlugin(
+                        writeScratch(from.path(), "p.havne-plugin.json", bytes))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QString uri =
+        QStringLiteral("mock://demo?profile=plugin.example-sim.base");
+    const QVariantList rows = bridge.profileSignals(uri);
+    ASSERT_GT(rows.size(), 0);
+    const QStringList refs = refsOf(rows);
+    EXPECT_FALSE(refs.contains(QString())) << refs.join(' ').toStdString();
+    EXPECT_FALSE(refs.filter(QStringLiteral("key:")).isEmpty());
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_EQ(refsOf(modelRows(bridge)), refs);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A def's range follows the unit system in the model and in
+ * profileSignals; an enum's is scaled as the decoder scales it, and a
+ * text or computed def has none (NaN) */
+TEST(BridgeTest, ARowsRangeIsShownInTheUnitSystem)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QString profile = useFile(bridge, from.path(), rangesFile());
+    ASSERT_FALSE(profile.isEmpty());
+    const QString uri = QStringLiteral("mock://demo?profile=") + profile;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+
+    for (int units : {0, 1}) {
+        bridge.setUnitSystem(units);
+        const bool metric = units == 0;
+        for (const QVariantList& rows :
+             {modelRows(bridge), bridge.profileSignals(uri)}) {
+            const QVariantMap temp = rowNamed(rows, QStringLiteral("Temp"));
+            ASSERT_FALSE(temp.isEmpty());
+            EXPECT_EQ(temp.value(QStringLiteral("unit")).toString(),
+                      metric ? QStringLiteral("°C") : QStringLiteral("°F"));
+            EXPECT_NEAR(temp.value(QStringLiteral("rangeLow")).toDouble(),
+                        -40.0, 1e-9);
+            EXPECT_NEAR(temp.value(QStringLiteral("rangeHigh")).toDouble(),
+                        metric ? 215.0 : 419.0, 1e-9);
+            EXPECT_FALSE(temp.value(QStringLiteral("isEnum")).toBool());
+            const QVariantMap cold = rowNamed(rows, QStringLiteral("Cold"));
+            ASSERT_FALSE(cold.isEmpty());
+            EXPECT_NEAR(cold.value(QStringLiteral("rangeLow")).toDouble(),
+                        metric ? -50.0 : -58.0, 1e-9);
+            EXPECT_NEAR(cold.value(QStringLiteral("rangeHigh")).toDouble(),
+                        metric ? 205.0 : 401.0, 1e-9);
+
+            const QVariantMap gear = rowNamed(rows, QStringLiteral("Gear"));
+            EXPECT_TRUE(gear.value(QStringLiteral("isEnum")).toBool());
+            EXPECT_EQ(gear.value(QStringLiteral("rangeLow")).toDouble(), 0.0);
+            EXPECT_EQ(gear.value(QStringLiteral("rangeHigh")).toDouble(),
+                      255.0);
+
+            for (const char* none : {"Part", "Twice"}) {
+                const QVariantMap row =
+                    rowNamed(rows, QString::fromLatin1(none));
+                ASSERT_FALSE(row.isEmpty()) << none;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeLow")).toDouble()))
+                    << none;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeHigh")).toDouble()))
+                    << none;
+                EXPECT_FALSE(row.value(QStringLiteral("isEnum")).toBool())
+                    << none;
+            }
+            const QVariantMap speed =
+                rowNamed(rows, QStringLiteral("Vehicle Speed"));
+            ASSERT_FALSE(speed.isEmpty()) << "obd2's, the base";
+            EXPECT_EQ(speed.value(QStringLiteral("unit")).toString(),
+                      metric ? QStringLiteral("km/h") : QStringLiteral("mph"));
+            EXPECT_NEAR(speed.value(QStringLiteral("rangeHigh")).toDouble(),
+                        metric ? 255.0 : 255.0 / 1.609344, 1e-3);
+        }
+    }
+    bridge.setUnitSystem(0);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.useSignalFiles({});
+}
+
+/* A range whose end isn't a finite number (a 32-bit field at scale
+ * 1e300), whose ends are one number (a byte at offset 1e300, past the
+ * double's precision), whose end converts past a double (deg C near
+ * DBL_MAX, times 1.8 in deg F), or whose ends meet once converted (a bit
+ * at 1.75 km/h and one ulp more, one number in mph) is no range, NaN, in
+ * the model and in profileSignals */
+TEST(BridgeTest, ARangeOfAnEndPastADoubleIsNoRange)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray bytes(
+        R"({"havne_signals":1,"name":"Huge","source":{"name":"t"},)"
+        R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"huge","name":"Huge","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0,"bits":32},"scale":1e300},)"
+        R"({"key":"flat","name":"Flat","read":{"service":"22","number":"D101"},)"
+        R"("field":{"byte":0,"bits":8},"offset":1e300},)"
+        R"({"key":"edge","name":"Edge","read":{"service":"22","number":"D102"},)"
+        R"("field":{"byte":0,"bits":32},"scale":3.49e298,"unit":"\u00b0C"},)"
+        R"({"key":"meet","name":"Meet","read":{"service":"22","number":"D103"},)"
+        R"("field":{"byte":0,"bits":1,"order":"le"},"offset":1.75,)"
+        R"("scale":2.220446049250313e-16,"unit":"km/h"}]})");
+    const QString profile = useFile(bridge, from.path(), bytes);
+    ASSERT_FALSE(profile.isEmpty());
+    const QString uri = QStringLiteral("mock://demo?profile=") + profile;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    for (int units : {0, 1}) {
+        bridge.setUnitSystem(units);
+        for (const QVariantList& rows :
+             {modelRows(bridge), bridge.profileSignals(uri)}) {
+            for (const char* name : {"Huge", "Flat"}) {
+                const QVariantMap row =
+                    rowNamed(rows, QString::fromLatin1(name));
+                ASSERT_FALSE(row.isEmpty()) << name;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeLow")).toDouble()))
+                    << name;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeHigh")).toDouble()))
+                    << name;
+            }
+            // About 1.499e308 in deg C; deg F's 2.698e308 is inf
+            const QVariantMap edge = rowNamed(rows, QStringLiteral("Edge"));
+            ASSERT_FALSE(edge.isEmpty());
+            const double lo = edge.value(QStringLiteral("rangeLow")).toDouble();
+            const double hi =
+                edge.value(QStringLiteral("rangeHigh")).toDouble();
+            if (units == 0) {
+                EXPECT_EQ(lo, 0.0);
+                EXPECT_GT(hi, 1.4e308);
+                EXPECT_TRUE(std::isfinite(hi));
+            } else {
+                EXPECT_TRUE(std::isnan(lo)) << lo;
+                EXPECT_TRUE(std::isnan(hi)) << hi;
+            }
+            // 1.75 and 1.75 + 2^-52 km/h are both 1.0873995864153345 mph
+            const QVariantMap meet = rowNamed(rows, QStringLiteral("Meet"));
+            ASSERT_FALSE(meet.isEmpty());
+            const double mlo =
+                meet.value(QStringLiteral("rangeLow")).toDouble();
+            const double mhi =
+                meet.value(QStringLiteral("rangeHigh")).toDouble();
+            if (units == 0) {
+                EXPECT_EQ(mlo, 1.75);
+                EXPECT_EQ(mhi, std::nextafter(1.75, 2.0));
+            } else {
+                EXPECT_TRUE(std::isnan(mlo)) << mlo;
+                EXPECT_TRUE(std::isnan(mhi)) << mhi;
+            }
+        }
+    }
+    bridge.setUnitSystem(0);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.useSignalFiles({});
+}
+
+/* profileSignals gives the rows of the profile a URI selects, and []
+ * for one with no rows to bind or none registered */
+TEST(BridgeTest, ProfileSignalsGivesTheProfilesRows)
+{
+    SessionBridge bridge;
+    const QVariantList mock =
+        bridge.profileSignals(QStringLiteral("mock://demo"));
+    ASSERT_EQ(mock.size(), static_cast<int>(ecuio_mock_signal_set()->count));
+    const QVariantMap rpm = rowNamed(mock, QStringLiteral("RPM"));
+    EXPECT_EQ(rpm.value(QStringLiteral("id")).toInt(), 1001);
+    EXPECT_EQ(rpm.value(QStringLiteral("ref")).toString(),
+              QStringLiteral("id:1001"));
+    EXPECT_EQ(rpm.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("RPM"));
+    EXPECT_FALSE(rpm.value(QStringLiteral("isText")).toBool());
+    EXPECT_FALSE(rpm.value(QStringLiteral("isEnum")).toBool());
+    EXPECT_EQ(rpm.value(QStringLiteral("group")).toInt(),
+              static_cast<int>(ECUIO_SIGNAL_GROUP_ENGINE));
+    EXPECT_EQ(rpm.value(QStringLiteral("decimals")).toInt(), 0);
+    EXPECT_NEAR(rpm.value(QStringLiteral("rangeHigh")).toDouble(), 65535 * 0.25,
+                1e-9);
+
+    for (const char* none :
+         {"mock://demo?profile=uds-generic", "mock://demo?profile=no-such",
+          "mock://demo?profile=raw", "replay://somewhere", "bogus://x",
+          "mock://demo?profile="}) {
+        EXPECT_TRUE(bridge.profileSignals(QString::fromLatin1(none)).isEmpty())
+            << none;
+    }
+}
+
+/* A replay's own signals.json is registered when it connects, so its
+ * profile has no rows before and the file's after */
+TEST(BridgeTest, ProfileSignalsOfAReplaysOwnFileFollowTheConnect)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString own = QStringLiteral("rec.") + sha256Of(v1).left(16);
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    const QString uri = QStringLiteral("replay://") +
+                        QDir::fromNativeSeparators(folder) +
+                        QStringLiteral("?profile=") + own;
+    EXPECT_TRUE(bridge.profileSignals(uri).isEmpty()) << "before the connect";
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(own))
+        << bridge.currentUri().toStdString();
+    EXPECT_EQ(refsOf(bridge.profileSignals(uri)),
+              QStringList{QStringLiteral("key:a")});
+    EXPECT_EQ(refsOf(modelRows(bridge)), QStringList{QStringLiteral("key:a")});
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* profileOfUri is core's choice of profile: each URI core takes gives
+ * the profile its session reports, and one core refuses for its scheme
+ * or its query gives "" */
+TEST(BridgeTest, ProfileOfUriIsTheProfileCoreChooses)
+{
+    const QString fixture =
+        QStringLiteral("replay://%1/2026-10-25-engine-start")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    const QStringList taken = {
+        QStringLiteral("mock://demo"),
+        QStringLiteral("mock://demo?profile=obd2"),
+        QStringLiteral("mock://demo?profile=raw&profile=mock"),
+        QStringLiteral("mock://demo?profile=uds-generic&did=1E1C:u16"),
+        fixture,
+        fixture + QStringLiteral("?profile=obd2&speed=max"),
+    };
+    for (const QString& uri : taken) {
+        ecuio_session_t* s = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri.toUtf8().constData(), &s), ECUIO_OK)
+            << uri.toStdString();
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+        EXPECT_EQ(SessionBridge::profileOfUri(uri).toStdString(),
+                  std::string(info.profile))
+            << uri.toStdString();
+        ecuio_session_destroy(s);
+    }
+
+    const QString tooLong =
+        QStringLiteral("mock://demo?profile=") +
+        QString(ECUIO_PROFILE_NAME_MAX + 1, QLatin1Char('x'));
+    const QStringList refused = {
+        QStringLiteral("Mock://demo"),
+        QStringLiteral("bogus://x"),
+        QStringLiteral("mock://demo?profile"),
+        QStringLiteral("mock://demo?profile="),
+        QStringLiteral("mock://demo?&profile=obd2"),
+        tooLong,
+    };
+    for (const QString& uri : refused) {
+        ecuio_session_t* s = nullptr;
+        EXPECT_NE(ecuio_session_create(uri.toUtf8().constData(), &s), ECUIO_OK)
+            << uri.toStdString();
+        ecuio_session_destroy(s);
+        EXPECT_EQ(SessionBridge::profileOfUri(uri), QString())
+            << uri.toStdString();
+    }
+
+    // The longest name core takes, and the transports this test can't open
+    const QString longest(ECUIO_PROFILE_NAME_MAX, QLatin1Char('x'));
+    EXPECT_EQ(SessionBridge::profileOfUri(
+                  QStringLiteral("mock://demo?profile=") + longest),
+              longest);
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("elm327://COM9")),
+              QStringLiteral("obd2"));
+    EXPECT_EQ(SessionBridge::profileOfUri(
+                  QStringLiteral("elm327://COM9?profile=mock")),
+              QStringLiteral("mock"));
+#ifdef _WIN32
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("j2534://dev0")),
+              QStringLiteral("obd2"));
+#else
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("j2534://dev0")),
+              QString());
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("socketcan://vcan0")),
+              QStringLiteral("raw"));
+#else
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("socketcan://vcan0")),
+              QString());
+#endif
 }
 
 // ---- The app's plugins (ADR-0052, PluginStore): the example plugin

@@ -363,32 +363,64 @@ public:
                          * a window's newest value still counts.
                          * Notified with ValueRole. */
         WindowLowRole,
-        RowRole,    /* the row in this model, which toggleSubscribed
+        RowRole,         /* the row in this model, which toggleSubscribed
                          * takes and chartData's `row` names, whatever
                          * row a filtered view shows it at */
-        HiddenRole, /* core reports it unsupported or absent
+        HiddenRole,      /* core reports it unsupported or absent
                          * (applyUnsupported, applyAbsent): Live
                          * leaves the row out */
-        GroupRole,  /* the def's group (ECUIO_SIGNAL_GROUP_*,
+        GroupRole,       /* the def's group (ECUIO_SIGNAL_GROUP_*,
                          * ADR-0050), for Live's filter. Fixed per
                          * signal set. */
-        LabelRole,  /* an enum row's label for its newest raw value
+        LabelRole,       /* an enum row's label for its newest raw value
                          * (ADR-0051), from the set's enums; "" for a
                          * value with none, which shows its number, and
                          * for any other kind. Notified with ValueRole. */
-        RefusedRole, /* the words of its ECU's negative reply to the
+        RefusedRole,     /* the words of its ECU's negative reply to the
                          * request that reads it ("Refused:
                          * requestOutOfRange (7F 22 31)", applyRefused,
                          * ADR-0051 section 3); "" while none refused it */
-        RefusedCodeRole /* that reply's bytes alone ("7F 22 31"), for a
+        RefusedCodeRole, /* that reply's bytes alone ("7F 22 31"), for a
                          * row too narrow for the words; notified with
                          * RefusedRole */
+        RefRole,         /* the def's reference across sets (ADR-0057):
+                         * "id:<n>" for a def of the mock or obd2 set
+                         * or of a file's extends base, "key:<k>" for a
+                         * file's own def, "" for any other set's
+                         * (uds-generic's). Fixed per signal set. */
+        RangeLowRole,    /* the lowest and highest value the def's field
+                         * decodes to (ecuio_def_range), displayed like
+                         * ValueRole. NaN means no range (core gives none:
+                         * a float, text or computed def, a range of no
+                         * width or a non-finite end); QML tests it with
+                         * isNaN. NaN isn't JSON (QJsonValue writes null,
+                         * which reads back as 0), so a layout file never
+                         * stores an end as is. Notified with UnitRole. */
+        RangeHighRole,
+        IsEnumRole /* the def's kind is ENUM. Fixed per signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
-    void setSignalSet(const ecuio_signal_set_t* set);
+    // file: the signal file whose set it is (SessionBridge::fileOfSet),
+    // for the rows' refs; nullptr for a built-in set or none
+    void setSignalSet(const ecuio_signal_set_t* set,
+                      const ecuio_signal_file_t* file = nullptr);
+    // A def's fixed facts beyond the def itself, the same for a row and
+    // for SessionBridge::profileSignals: its ref (RefRole), whether it
+    // is an ENUM, and its decoded range in the def's unit, NaN for none
+    struct DefFacts {
+        QString ref;
+        double rangeLow = 0.0;
+        double rangeHigh = 0.0;
+        bool isEnum = false;
+    };
+    // builtIn: set is the registered mock or obd2 set (isBuiltIn),
+    // found once per set by the caller
+    static DefFacts factsOf(const ecuio_signal_file_t* file, bool builtIn,
+                            const ecuio_signal_def_t& def);
+    static bool isBuiltIn(const ecuio_signal_set_t* set);
     // The bridge's form: each signal's window. The row shows the newest
     // value, and the window's highest and lowest beside it; the history
     // takes the distinct points among the three, in time order, so a
@@ -506,6 +538,7 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
+        DefFacts facts;           // ref, range and enum-ness (factsOf)
         // An ENUM def's labels by raw value, copied from the set when it
         // loads, so a row keeps them whatever happens to the set later
         std::vector<std::pair<uint32_t, QString>> labels;
@@ -550,6 +583,8 @@ private:
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
+    // A row's range as displayed (displayedRange)
+    std::pair<double, double> shownRange(const Entry& e) const;
 
     std::vector<Entry> m_entries;
     // Each signal id's row, so a batch finds its rows without a search.
@@ -609,9 +644,9 @@ class SessionBridge : public QObject
     // A Read once is running (readOnce); no session connects meanwhile
     Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
-    // "speed", ...) to the def IDs core's sets give it (signal_sets.h),
-    // the first one the session's set has wins. By ID, so a def core
-    // names otherwise keeps its gauge
+    // "speed", ...) to the refs (RefRole) of the defs core's sets give
+    // it ("id:<n>", signal_sets.h), the first one the session's set has
+    // winning. By ID, so a def core names otherwise keeps its gauge
     Q_PROPERTY(QVariantMap gaugeSignals READ gaugeSignals CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
@@ -800,6 +835,31 @@ public:
     // each, name the file's or "<plugin> <variant>", "" for a built-in
     Q_INVOKABLE QVariantList decodeProfiles();
     QVariantMap gaugeSignals() const;
+    // The signals a session on uri would show, without connecting: the
+    // profile the URI selects (profileOfUri), its registered set, and
+    // one map per def as the model's rows give it: { id, ref, name,
+    // unit, decimals, isText, isEnum, group, rangeLow, rangeHigh }, unit,
+    // decimals and range in the current unit system, rangeLow and
+    // rangeHigh NaN for no range (RangeLowRole). [] when profileOfUri
+    // gives "" (a scheme or profile= core refuses), for an unknown
+    // profile, and for a profile whose set is a session's own
+    // (uds-generic) or none (raw); a URI core refuses for another
+    // reason (an unknown key, too many segments) still gives its
+    // profile's rows. A replay's own
+    // signals.json is registered only when it connects, so its profile
+    // gives [] before then and its rows after. A snapshot: call it
+    // again on unitSystemChanged, a signal file's change and a connect.
+    Q_INVOKABLE QVariantList profileSignals(const QString& uri) const;
+    // The profile a session on uri decodes through, as core picks it at
+    // ecuio_session_create: the last profile= (1 to
+    // ECUIO_PROFILE_NAME_MAX bytes), else the scheme's default. "" for
+    // a scheme this platform's core doesn't take, a malformed query or
+    // a bad profile= value. Static, so tests need no session.
+    static QString profileOfUri(const QString& uri);
+    // The signal file whose set set is: a vehicle's (the signal store),
+    // a plugin variant's or a replay's own signals.json; nullptr for
+    // any other set
+    const ecuio_signal_file_t* fileOfSet(const ecuio_signal_set_t* set) const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
