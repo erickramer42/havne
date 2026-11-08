@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-08, **Version:** v0.6.0,
+**Updated:** 2026-11-08, **Version:** v0.7.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,8 +14,8 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.7.0, the dashboard and the UI, is built and in its
-release passes** (its section below). The Dashboard is built by hand
+**Current phase: v0.7.0, the dashboard and the UI, is
+out** (its section below). The Dashboard is built by hand
 from eight kinds of gauge and saved per phone and desktop, with Low
 glare and Night themes; Settings is a list of pages; an analysis log
 records the signals picked on Live at their own rate, as a wide CSV; the
@@ -576,7 +576,7 @@ an issue is resolved it is removed, and its number is not reused.
 | Version | Scope | Status |
 |---|---|---|
 | v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files, the health report | Released |
-| v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | In progress |
+| v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | Released |
 | v0.7.1-v0.10.0 | v0.7.1, a more modern look, phone first: the shared controls, Night as its own control. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
