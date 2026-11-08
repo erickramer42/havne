@@ -1278,7 +1278,8 @@ choice and Replay in Settings shown without frames).
 
 ## Appendix: a column map guessed from the header (2026-11-07)
 
-Accepted 2026-11-07, not built.
+Accepted 2026-11-07; step 1 built 2026-11-07, as the note "settled
+while building" at the end of this appendix says.
 
 The CSV import (the appendix "the CSV import as built") takes a column
 map and refuses a file without one. Writing JSON for an ordinary file
@@ -1407,3 +1408,78 @@ would refuse is never handed out.
 
 1. Core's call and its tests, the CLI and Python (one branch).
 2. The preview on the Import panel (after step 1).
+
+### Settled while building (2026-11-07)
+
+Step 1 settled these, and the call as built is `recording.h`'s, not
+section 1's sketch:
+
+- **The text and its room:** the call writes one JSON text,
+  `{"map": {...}, "columns": [{"column", "used", "why"}], "notes":
+  [...]}`, so the notes are in the text and the struct has no notes
+  buffer. `map_out` and `cap` follow `ecuio_serial_ports`' contract (cap
+  0 with a NULL `map_out` asks the size, `*needed` always set, no
+  status of its own): on `ECUIO_OK` `*needed` is the text's length and
+  its NUL, and the text is written only when `cap` holds it; on any
+  failure, the arguments' refusals too, `*needed` is 0, the report zero
+  and a `map_out` with room `""`. `ecuio_csv_guess_t` keeps `flags` and
+  the counts and is 48 bytes on both widths.
+- **The flags:** `TIME_UNIT_KNOWN` (the map's time has a unit),
+  `DECIMAL_COMMA`, `PREAMBLE` (lines above the header left out) and
+  `TIME_NUMBERS`: the time column holds plain numbers, the one time a
+  unit given can fix. A front end names `--time-unit` (`time_unit`) only
+  then; for any other time it names a map with the zone (or the date and
+  offset).
+- **The map's slice:** `map_offset` and `map_length` in the report give
+  the map's byte range in the text this call wrote. That slice alone is
+  complete JSON, with two-space indents, which `ecuio_import` takes as
+  it is: the CLI prints and passes it with no JSON reader of its own.
+  `CsvGuessTest.TheMadeUpLoggersAreGuessedAndImported` pins each made-up
+  logger's slice to its `guessed-map.json`, and
+  `CliTransferRunTest.csv-guess` pins `--print-map` to the same bytes.
+- **The time unit:** an argument, `time_unit`: NULL, `"s"`, `"ms"` or
+  `"us"`, anything else `ECUIO_ERR_INVALID_ARGUMENT`. A time of plain
+  numbers takes it when given, else the unit its header names. ISO 8601
+  times with their offset stay `iso8601`, with a note that the unit
+  given isn't used. A map with no unit is checked with one in its place
+  and handed out without it.
+- **Times without a zone:** ISO 8601 cells with no UTC offset, and
+  times of day, leave the unit unknown with a note that a map with the
+  zone (or the date and offset) is needed. A UTC offset given to the
+  guess waits for a later step.
+- **The bounds:** the header search covers the file's first 1000 lines
+  within 1 MiB; the sample's 64 KiB and 200 rows count from the header.
+  A read past what the guess needs stops at a line feed, and a quoted
+  field that read cuts short ends the sample; a read with no line feed
+  at all is refused as one ("the file's first 1152 KiB hold no line
+  end"). The header's check reads 64 KiB from the candidate: a row that
+  window ends inside ends the check as the file's end would, so wide
+  rows keep their header, and a candidate needs one whole row below it.
+  A preamble line the import refuses (past 64 KiB, a NUL) refuses the
+  guess in the import's words, as a map with that `header_row` would.
+- **The header and the time:** a header has two or more cells, more
+  than half of its non-empty ones not numbers or times, and up to five
+  rows below it of its cell count, each with more than half of its
+  non-empty cells numbers or times (a row of empty cells skipped). Each
+  row on its own, not the rows together, so a preamble line with the
+  data's field count is never taken for the header. A time column that
+  isn't named so must be non-decreasing with at least two distinct
+  values. Majority is more than half of the non-empty cells.
+- **Units in the header:** `sec`, `secs`, `seconds`, `msec` and `usec`
+  inside the brackets too, and both micro signs (U+00B5 and U+03BC)
+  read as data.
+- **Names and notes:** a cut name leaves room for its ` 2`; past 64
+  notes the rest are counted in one `...and N more`; columns past the
+  map's 256 signals are left out and counted in one note.
+- **The front ends:** `havne-cli import csv <file> <folder>` without
+  `--map` writes a `guessed` line (the text's three keys) before the
+  import's own, as compact JSON like the CLI's other lines, and refuses
+  a map with no unit with an `error` line naming `--time-unit` for a time
+  of plain numbers, a map with the zone (or the date and offset) for any
+  other. `havne-cli import csv <file> --print-map
+  [--time-unit ...]` prints the slice alone and a line end, no JSON
+  lines; a map with no unit is printed with a stderr line saying so.
+  Python's `havne.guess_csv_map(path, time_unit=None)` returns a
+  `GuessedMap` (`map` a dict, `notes`, `flags`, `columns` the text's
+  list); `havne.import_csv(path, folder, column_map=None,
+  time_unit=None)` takes the slice when no map is given.

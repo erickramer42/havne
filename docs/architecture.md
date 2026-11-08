@@ -475,7 +475,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   older one (the viewer's decode choice, `havne-cli view --frames`).
   `havne-cli import` makes a recording's folder from another tool's
   log: a `candump -L` log's frames, or a logger's CSV of values through
-  a column map ([ADR-0054](adr/0054-exports-and-imports.md)). A health
+  a column map ([ADR-0054](adr/0054-exports-and-imports.md)), which core
+  guesses from the file's header when none is given
+  (`ecuio_import_csv_guess`, `havne-cli import csv --print-map`,
+  `havne.guess_csv_map`). A health
   report (`ecuio_health_export`, `havne-cli health`, Save report on the
   Diagnostics and Recordings pages) writes a car's readiness, trouble
   codes, freeze frame and key values from a session or a recording as
