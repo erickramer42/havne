@@ -10,7 +10,10 @@
 #include <QTemporaryDir>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
+#include <memory>
+#include <thread>
 
 #include "recordingframes.h"
 
@@ -357,4 +360,45 @@ TEST(ViewerFramesTest, AClearedReadThatEndsAnywayReportsNothing)
     ASSERT_TRUE(finishedAt(r, 1));
     EXPECT_EQ(loadedCount, 1) << "the cleared read's end said nothing";
     EXPECT_FALSE(r.loading());
+}
+
+// The object destroyed while a read is held: the destructor waits for the
+// worker, whose end is then posted to nothing. Without the join the thread
+// outlives its job and std::thread terminates
+TEST(ViewerFramesTest, DestroyingWhileAReadIsHeldWaitsForItAndPostsToNothing)
+{
+    QTemporaryDir root;
+    const QString folder = writeRecording(root, 5);
+    std::atomic<int> calls{0};
+    std::atomic<bool> release{false};
+    std::atomic<bool> returned{false};
+    Releases guard{release};
+    auto r = std::make_unique<RecordingFrames>();
+    r->setReadForTesting([&](const char* f, uint64_t from, uint64_t to,
+                             ecuio_frame_row_callback_t cb, void* user,
+                             ecuio_frames_read_t* summary) {
+        ++calls;
+        while (!release.load()) {
+            std::this_thread::yield();
+        }
+        const ecuio_status_t rc =
+            ecuio_recording_read_frames(f, from, to, cb, user, summary);
+        returned = true;
+        return rc;
+    });
+    r->load(folder, 100, 500);
+    ASSERT_TRUE(waitFor([&] { return calls.load() == 1; }));
+
+    // The read is let go a moment after the destructor starts waiting
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        release = true;
+    });
+    r.reset();
+    releaser.join();
+    EXPECT_TRUE(returned.load()) << "the destructor waited for the read";
+    for (int i = 0; i < 20; ++i) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    }
+    EXPECT_EQ(calls.load(), 1);
 }
