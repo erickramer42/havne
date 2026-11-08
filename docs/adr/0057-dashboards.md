@@ -1,7 +1,7 @@
 # ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
 
-- **Status:** Accepted. Built: section 10's steps 1 to 4 and 6 (each
-  in an appendix); steps 5, 7 and 8 not built.
+- **Status:** Accepted. Built: section 10's steps 1 to 7 (each in an
+  appendix); step 8's run has no session sheet yet.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
   gets final display values); [ADR-0022](0022-display-units.md) (the
@@ -993,3 +993,58 @@ page does not draw one: the cell's note ("not supported by this car",
 user tidying a page sees which gauges the vehicle can't fill without it.
 The mark stays out of the first release; a cell with no value is shown
 by its note alone.
+
+## Appendix: the new kinds and the theme roles as built (2026-11-08)
+
+Steps 5 and 7. Where this contradicts an earlier appendix's account of
+a kind, this is the present state; the earlier text is kept as written.
+
+- **`segments`** (`SegmentGauge`, the Cells tile): `cells` (2 to 64,
+  default 24) Rectangles along a rising curve, each taller than the one
+  before; `rise` (0 to 4, default 1.6) sets the curve's steepness and 0
+  gives one height. Cells are lit up to the value, each in its zone's
+  color, with the danger cells outlined and a notch over the cell the
+  held peak reached.
+- **`seven-segment`** (`SegmentReadout`, the Digits tile): `digits` (1
+  to 8, default 4). Each digit is seven Rectangles whose opacity
+  follows the digit (the decision's "Shape paths" became
+  Rectangles), right aligned, with the decimal point and a
+  negative's middle bar. A value too long for its digits shows dashes in
+  every digit, never a wrong number; no value blanks them. The digits
+  take the zones' colors.
+- **`sparkline`** (`SparkGauge`): one `ShapePath` trace over `window`
+  (10 to 120 s, default 30), the newest value at its end and the
+  window's own low and high as its scale, padded by 4 % of full scale.
+  It samples only while its page is the one shown and the app is active
+  (neither Suspended nor Hidden).
+- **The bar** takes `vertical` (segments stacked from the bottom, the
+  scale beside) and `marks` (the scale's ticks, on by default).
+- **`peak` on every kind that has a scale:** `showPeak` is
+  `GaugeBase`'s, off by default. The dial keeps its tell-tale, the bar
+  a mark across it, the ring a mark on its zone strip and the cells a
+  notch. The digital tile keeps its MIN and MAX footer, and the
+  seven-segment readout and the sparkline have no scale to mark.
+  `DashboardPage.peakKinds` names the four kinds that draw one, and the
+  cell's panel offers Peak hold only there. The once-a-session sweep
+  plays on the dial, the ring, the cells and the shift lights.
+- **Every new kind keeps the danger mark's slot** (opacity, never
+  visibility), so a readout never moves as the mark appears, and is
+  tested at two sizes in each theme (`QmlTest.kinds`).
+- **The panel and Add:** the cell's panel has rows for each kind's own
+  options (Cells and Curve, Digits, Window, Standing up, Scale marks),
+  hidden on the kinds without them. A new gauge's span is
+  `DashboardPage.newSpans`: Cells 2 x 3, Digits 1 x 2, Sparkline 2 x 3.
+  The Add tile of a sparkline draws a made-up trace with its sampling
+  off.
+- **The theme roles** (section 9): `gaugeFace`, `gaugeValue`,
+  `gaugeNeedle`, `gaugeTick`, `gaugeWarn` and `gaugeDanger`, and two
+  more: `gaugeReadout` (the readout's own color, which in Dark stays
+  near-white where `gaugeValue` is the arcs' lilac) and `gaugeShade`
+  (the dial's bezel, face, needle and hub shades). Every gauge takes
+  its colors from them, with no literals left. The themes are Dark, Low
+  glare (amber and orange on near black) and Night (red on near black),
+  chosen under Settings, Display and kept in the `ui` settings; a name
+  that isn't a theme reads as Dark. In Low glare and Night the danger
+  color is the theme's red or orange, so a danger is told by more than
+  hue: a mark beside the readout and a heavier zone stroke, in every
+  theme.

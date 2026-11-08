@@ -505,7 +505,7 @@ havne-cli import candump <log> <folder>                   # another tool's log a
 ```
 
 An adapter only the phone reaches: the app relays it to a computer on
-its USB cable ([ADR-0047](adr/0047-adapter-relay.md); Settings, Adapter,
+its USB cable ([ADR-0047](adr/0047-adapter-relay.md); Settings, Connection,
 the adapter's row, then **Relay**, in developer mode), and havne-cli
 connects as to a WiFi adapter:
 

@@ -164,6 +164,9 @@ Dates are commit dates.
 | 2026-11-06 | The shared core exporting the C API and nothing else, the pull queue for callers that can't take a callback, and the `havne` Python package over them through ctypes ([ADR-0053](adr/0053-python-bindings.md)) | `bb76988`, `31c9fef`, `66f6ff8`, `8015fd6` |
 | 2026-11-07 | A vehicle's baseline recording aligned on its engine start, the health report from a session or a recording in core, `havne-cli health` and the app, the wheel for each platform with the shared core inside, the Python examples, and another logger's CSV imported by a column map | `106e368`, `eeeda26`, `2156fa8`, `fe9357d`, `42f660d`, `c4ba99c`, `ea2292d`, `6c72831`, `39629a4`, `f762678` |
 | 2026-11-07 | v0.6.0's review fixes: the scrub reads identification replies in both addressing layouts and CAN FD's forms on any ID, joins segments on any ID, finds a VIN run into other characters by its check digit, and never renames over a name; the exports leave nothing behind out of memory; `havne-cli` fails when its output can't be written; the health report waits for each supported value; the Python package closes what a script drops. Scrubbed exports of every archived car, bench and phone recording hold none of their identity values | `c0cc077`, `9f0da36`, `1a077e9`, `06500d4`, `8c49351`, `ab762e4`, `63cd98f`, `41b77f2`, `c3e89f5`, `8ae67a8`, `02a5f16` |
+| 2026-11-08 | The analysis log ([ADR-0056](adr/0056-analysis-log.md)): a running session narrowed to picked signals (`69bd149`), a recorder attached to it (`28b1cbd`), the wide CSV and its estimate (`afa8f7f`), `havne-cli log` (`be31b7d`) and the app's Start log and Stop log (`b11049e`); on the test car over ELM327 on native Linux, the MX+ and the VX measured at 1, 4 and 8 signals ([2026-11-08-linux-car](bench-sessions/2026-11-08-linux-car.md)) |
+| 2026-11-08 | Configurable dashboards ([ADR-0057](adr/0057-dashboards.md)): core names a signal file's key and a def's range (`5e57a6e`), the bridge and the hub by reference (`f6f4fbf`), the document's rules (`bd687f5`), the renderer (`0545d98`), edit mode, three more kinds (`4a152e3`), and the Low glare and Night themes with the gauges' roles in `Theme` (`c212e7a`) |
+| 2026-11-08 | Settings as a list of pages (`daa57d9`), the phone's tab bar at touch size (`727f6db`), the CSV map guessed from the header and edited in the Import panel (`923930b`), the Log page's ID mask, length and time filters, and the viewer's Frames view (`98c20cb`) |
 
 ## Lessons learned
 
@@ -1297,3 +1300,11 @@ addressing on ISO 15765-4's IDs, each Single Frame form only at the
 frame lengths ISO 15765-2 allows) brought both counts back to zero with
 every test still passing. A rule that fails closed can still cost the
 user their data; the corpus, not the unit tests, shows how much.
+
+**2026-11-08: a histogram's caller that the first caller never was:** a
+log2 bucket search over a 32-bit count has to stop at bit 31. A session
+kept connected while one request's answers paused for 36 minutes or more
+fed it a value past that, and the worker hung in the search. A histogram
+fed from a new caller meets values its first caller never made, so a
+search over a bounded type stops at the type's end, not at what the
+callers have sent so far.

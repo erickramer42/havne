@@ -289,7 +289,7 @@ each a matrix over the two):
   (`package_check.sh`, the AppImage up 10 s offscreen). The suites run
   on ARM on a Raspberry Pi 3 (docs/linux.md, "What has run where").
 
-## Appendix: the AppImage's runtime pinned (2026-11-08)
+## Appendix: the AppImage's runtime pinned (2026-11-07)
 
 - **What the AppImage started with:** linuxdeploy's AppImage plugin
   packs through appimagetool, which, with no runtime named, downloads

@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-07, **Version:** v0.6.0,
+**Updated:** 2026-11-08, **Version:** v0.6.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,8 +14,13 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: between releases; v0.7.0 is next.** v0.6.0 is out,
-sharing and scripting (its section below): everything reaches
+**Current phase: v0.7.0, the dashboard and the UI, is built and in its
+release passes** (its section below). The Dashboard is built by hand
+from eight kinds of gauge and saved per phone and desktop, with Low
+glare and Night themes; Settings is a list of pages; an analysis log
+records the signals picked on Live at their own rate, as a wide CSV; the
+app imports CSV and candump logs and shows a recording's frames. v0.6.0
+is out, sharing and scripting: everything reaches
 `havne-cli` and Python as well as the app, a recording exports scrubbed
 as pcapng, CSV or a copy of its folder, a car's health goes in one
 file, candump logs and other loggers' CSVs import as recordings, and the
@@ -209,8 +214,14 @@ background too ([roadmap](#roadmap)).
     adapter apart on every connection surface
     ([docs/j2534.md](docs/j2534.md#session-lifecycle)); all four states
     have shown on the VX.
-  - **The UI:** Dashboard gauges with peak hold and stale dimming,
-    Live's table and strip chart, the Log page's activity log, the
+  - **The UI:** the Dashboard, built in the app
+    ([ADR-0057](docs/adr/0057-dashboards.md)): pages of dials, rings,
+    bars, cells, digits, numbers, sparklines and shift lights for any
+    numeric signal of the profile, each with its label, range, zones,
+    decimals, size and place, saved as made, one set for every vehicle,
+    the phone's and the desktop's apart, with peak hold and stale
+    dimming; Dark, Low glare and Night themes; Settings as a list of
+    pages; Live's table and strip chart, the Log page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
     findings, two runs overlaid and aligned, a vehicle's baseline
     recording overlaid on a new run aligned on the engine starts, and a
@@ -225,7 +236,8 @@ background too ([roadmap](#roadmap)).
     a filter (ID, data, direction, flag), a By ID view (count, rate,
     newest payload), selected rows copied to the clipboard as they are,
     and Export CSV, scrubbed by core (ADR-0054's appendix "frames in
-    memory"). Kept between runs: zoom,
+    memory"), by ID or mask, length and time, and the changed bytes
+    marked. Kept between runs: the theme, zoom,
     metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
     connected, the Record sessions switch, the splitters' shares and
@@ -314,9 +326,11 @@ background too ([roadmap](#roadmap)).
     Pi 3 (aarch64), with no warnings; on both, the simulated bus's
     cases and `havne-cli` end to end over `vcan0` (the simulated ECU
     answering through ISO-TP, recorded and checked) (2026-11-05,
-    [docs/linux.md](docs/linux.md#what-has-run-where)); not yet with an
-    ELM327 adapter on Linux, nor a CAN controller on a Linux machine
-    outside WSL.
+    [docs/linux.md](docs/linux.md#what-has-run-where)). A laptop on
+    native Ubuntu 26.04 has run the MX+ over Bluetooth, the VX in ELM
+    mode on USB and WiFi and the USB2CAN listening, on the test car
+    ([2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md));
+    no requesting session has sent through a real CAN controller.
   - **Reply timing** ([ADR-0042](docs/adr/0042-reply-timing.md)): every
     requesting session measures, per request in its rotation, its
     outcomes, its reply latency (host clock) and its refresh interval
@@ -373,6 +387,18 @@ background too ([roadmap](#roadmap)).
     test car through the VX: "ready", one monitor incomplete where its
     model year allows one
     ([2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
+  - **The analysis log** ([ADR-0056](docs/adr/0056-analysis-log.md)):
+    the app's Start log and Stop log, and `havne-cli log`, ask the ECU
+    for the signals picked on Live alone, so they refresh at the bus's
+    own pace, into a recording that exports as one wide CSV, a row a
+    sweep (`ecuio_session_set_focus`, `ecuio_session_record`,
+    `ecuio_export_estimate`). Verified at UNIT, in the bridge, QML and CLI
+    tests, and on the test car over ELM327 on native Linux: the MX+
+    reached 27.45 sweeps a second at one signal and 15.48 at eight, the
+    VX on USB 47.38 and 6.63, every reply after the connect carrying
+    only the picked PIDs
+    ([2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md)).
+    Left: a log through J2534 and SocketCAN, the viewer's Export.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), written by core's
@@ -383,13 +409,14 @@ background too ([roadmap](#roadmap)).
     view`, through the values as recorded or through the frames by a
     profile (`ecuio_recording_open_frames`, so a raw recording plots),
     exported by `havne-cli export` as pcapng (its frames), CSV (its
-    values, one row per sample) or a folder (a copy that reads and
+    values, a row a sweep in the wide layout) or a folder (a copy that reads and
     replays as the original), scrubbed by construction and checked
     ([ADR-0054](docs/adr/0054-exports-and-imports.md)), summed up as
     a scrubbed health report by `havne-cli health`, and a
-    `candump -L` log imported as a recording (`havne-cli import
-    candump`); the app exports only the Log page's frames and imports
-    nothing yet, and a surrogate
+    `candump -L` log or another logger's CSV imported as a recording
+    (`havne-cli import`, and the Recordings page's Import, which guesses
+    a CSV's map from its header); the app exports the Log page's frames
+    and a report, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -409,8 +436,8 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1607 ctest cases on Windows (both trees rebuilt,
-  2026-11-07), all passing but six skips (the cross-arch case and
+- **Tests:** 1814 ctest cases on Windows (both trees rebuilt,
+  2026-11-08), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
@@ -528,7 +555,9 @@ an issue is resolved it is removed, and its number is not reused.
     A listening session needs no flow control, so its setup still
     turns it off (`AT CFC0`). Untried: `STCMM`'s other modes
     (some acknowledge on the bus) and `STM`'s filters. To listen to
-    multi-frame replies, use a SocketCAN controller in listen-only mode.
+    multi-frame replies, use a SocketCAN controller in listen-only mode,
+    or the VX in ELM mode, which hears them (BENCH prep #19,
+    [2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md)).
 - **#42. Through the OBDX Pro VX, a second module's reply can be lost
     while the first module's segmented reply comes in.** On the test
     car, a session asking the engine (0x7E8) and a second module
@@ -547,7 +576,8 @@ an issue is resolved it is removed, and its number is not reused.
 | Version | Scope | Status |
 |---|---|---|
 | v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files, the health report | Released |
-| v0.7.0-v0.10.0 | v0.7.0, the dashboard and the UI: configurable gauges from a library, a refresh for the phone, night themes. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
+| v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | In progress |
+| v0.7.1-v0.10.0 | v0.7.1, a more modern look, phone first: the shared controls, Night as its own control. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -557,92 +587,52 @@ releases are in [CHANGELOG.md](CHANGELOG.md). The planned releases are
 in order and hold about three features each; a release's detail comes
 in here when its work starts.
 
-### v0.6.0: sharing and scripting
+### v0.7.0: the dashboard and the UI
 
-For users who script, pen testers among them: everything reaches
-`havne-cli` and Python as well as the app. A minor release
+For people who watch the car while it runs, and for anyone who wants
+the values of a drive in a spreadsheet. A minor release
 ([ADR-0048](docs/adr/0048-semantic-versioning.md)): the C ABI grows,
-append-only.
+append-only, and the CSV export's default changes (a breaking change
+for scripts, named in CHANGELOG).
 - **Built:**
-  - the ELM327 emulator ([ADR-0055](docs/adr/0055-elm327-emulator.md)):
-    `havne-cli sim --elm327`, and core's simulated ECU answering with
-    no bus;
-  - `havne-cli clear <uri> --yes`, through core's clear gate;
-  - the viewer and `havne-cli view --frames` reading a recording's
-    frames through a profile;
-  - JSON Schemas for signal files and plugins, checked in CI;
-  - CI's downloads (the Windows Qt kit, Gradle's, linuxdeploy's) from
-    the Actions cache;
-  - PCAP export and candump import in core and `havne-cli`, scrubbed
-    by construction ([ADR-0054](docs/adr/0054-exports-and-imports.md));
-  - an OBDb set imported in Settings;
-  - the Log page's filter, per-ID view and Export CSV, scrubbed by core
-    (`ecuio_scrub_frames`);
-  - the shared core (`ecuio`), exporting the C API and nothing else,
-    `ecuio_version`, and the pull queue (`ecuio/queue.h`), steps 1 and
-    2 of the Python bindings
-    ([ADR-0053](docs/adr/0053-python-bindings.md)'s appendices);
-  - a recording's values exported as CSV, one row per sample, scrubbed
-    and checked, in core and `havne-cli export --format csv`
-    (ADR-0054's appendix "the CSV export as built");
-  - a scrubbed copy of a recording's folder, every file rewritten by
-    its classes and checked, in core and `havne-cli export --format
-    folder` (ADR-0054's appendix "the folder export as built");
-  - the `havne` Python package over the shared core, its tests in CI
-    (step 3 of ADR-0053; its appendix "the havne package as built"),
-    and a replay's end told through the pull queue
-    (`ECUIO_ERR_STREAM_ENDED`);
-  - a vehicle's baseline recording, one per vehicle, overlaid on a new
-    run aligned on its engine start (core's
-    `ECUIO_RECORDING_FIND_ENGINE_START`, the Recordings page, `havne-cli
-    view --align-on engine-start`; ADR-0049's appendix "a vehicle's
-    baseline");
-  - the wheel (step 4 of ADR-0053; its appendix "the wheel as
-    built"): one per platform with the shared core inside, each release
-    job installing it into a fresh venv and running
-    `python/examples/read_pids.py` through it, which also reads
-    SocketCAN on `vcan0` and the ELM327 emulator. The v0.6.0 release's
-    four wheels, the macOS 13.0 one among them, pass `gh attestation
-    verify` for their provenance and the SBOM, and the Linux ones
-    install from the downloads and read `mock://` on x86_64 and
-    aarch64 (2026-11-07);
-  - the examples (ADR-0053's appendix "the examples as built"): a DID
-    scan through core's own scan, ISO-TP fuzzing of the simulated ECU
-    on `vcan0`, a notebook predicting fuel cut from a committed
-    synthetic recording; the notebook runs locally, as CI carries no
-    scientific stack;
-  - the health report (ADR-0054's appendix "the health report as
-    built"): one scrubbed file of a car's health in JSON or text, from
-    a live session or a recording (each ECU's reports rebuilt from its
-    replies in frames.csv), in core, `havne-cli health` and the app's
-    Save report on Diagnostics and in the log viewer;
-  - the CSV import (ADR-0054's appendix "the CSV import as built"):
-    another logger's CSV by a column map into a recording's folder of
-    values, in core, `havne-cli import csv` and Python's
-    `havne.import_csv` (with `havne.import_candump`); the app's
-    Recordings page lists a folder of values alone and the viewer opens
-    and plots it, saying it has no frames. Left: the app's Import
-    button, v0.7.0's, for both formats; until then a folder made
-    elsewhere is moved into the recordings folder to be listed.
+  - the Dashboard, built in the app
+    ([ADR-0057](docs/adr/0057-dashboards.md)): eight kinds of gauge,
+    pages, edit mode, one layout for every vehicle and one per form,
+    saved as it is made; core names a signal file's key and a def's
+    range (`ecuio_signal_file_key`, `ecuio_def_range`);
+  - the Low glare and Night themes, with the gauges' color roles in
+    `Theme`;
+  - Settings as a list of pages, and the phone's tab bar and top bar at
+    a finger's size;
+  - the analysis log ([ADR-0056](docs/adr/0056-analysis-log.md)): a
+    running session's requests narrowed to picked signals
+    (`ecuio_session_set_focus`), a recorder attached to a running
+    session, `havne-cli log` and the app's Start log and Stop log, the
+    wide CSV as the export's default (`--rows`, `--signal`,
+    `--units`) with its size estimate (`ecuio_export_estimate`); it has
+    run on the test car through the MX+ and the VX over ELM327 on
+    native Linux, with the rates per signal count in ADR-0056's
+    appendix of 2026-11-08
+    ([2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md));
+    not through J2534, and no request has gone out through SocketCAN;
+  - the app's Import for CSV and candump logs, a CSV's map guessed from
+    its header (`havne-cli import csv` with no map, Python's
+    `havne.guess_csv_map`), and the viewer's Frames switch with
+    `havne-cli frames` and `havne.read_frames`;
+  - the Log page's ID mask, length and time filters, and By ID's
+    changed bytes;
+  - the health report naming the vehicle's baseline recording;
+  - the downloads' notices: Qt's, the AppImage's pinned runtime and
+    its sources, and no Microsoft shader DLLs in the Windows zip.
+- **Left for v0.7.1:** the viewer's Export, undo and drag in edit mode,
+  the minimum sweep interval and the viewer's navigation aids
+  (ADR-0056), and a more modern look.
 
-**Done when:** a Python script opens SocketCAN, decodes PIDs and prints
-the values, and the same script runs on Windows against the ELM327
-emulator and on every platform against `mock://` (met:
-`python/examples/read_pids.py`, through `PythonTest.test_vcan` on
-`vcan0`, `PythonTest.test_read_pids` and each wheel's install check);
-the wheel installs from a release's downloads and passes `gh
-attestation verify` (met: the v0.6.0 release's four wheels,
-2026-11-07); an export of a
-recording passes the leak check (met 2026-11-07: scrubbed pcapng, CSV
-and folder exports of 159 real-car, bench and phone recordings hold none
-of their cars' identity values, whole or in 7-byte pieces, as bytes or
-hex); a recording opens in Wireshark (met:
-`CliTransferRunTest.tshark`, its ISO-TP reassembled); python-OBD reads
-the simulated car through the ELM327 emulator on Windows (met:
-`CliElm327RunTest.PythonObdReadsIt`); a CSV from another logger plots in
-the viewer (met: `QmlTest.recordings`, an import listed, opened and
-plotted; `RecordingViewTest.AnImportedCsvOpensAndPlots`;
-`CliTransferRunTest.csv-import`, two made-up loggers' layouts).
+**Done when:** a user builds a dashboard page from the library on the
+test phone and on the desktop, it survives a restart (tested:
+`QmlTest.dashedit`'s `test_aLayoutBuiltInEditModeSurvivesARestart`; the
+phone's run is not filed as a session sheet), and Settings fits the test
+phone with no section longer than two screens.
 
 ### Waiting on a tester: an iPhone download
 
@@ -687,10 +677,6 @@ less, **M** a few days, **L** a week or more or an ADR first.
   arrow keys stepping the cursor a sample at a time; on Live, a pause
   that scrolls back through the buffer while the session runs. v0.5.0's
   computed signals want panes too.
-- **Low-glare and night themes (M):** Theme roles for the analog gauge
-  first; warning and danger told apart by more than hue.
-- **User-configurable dashboards (L):** pages built from the gauge
-  library; layout persistence is the new ground.
 - **In-vehicle displays, Android Auto and CarPlay (L, research
   first):** a native front end over the C ABI, only if a live-gauge
   app qualifies.
@@ -712,10 +698,22 @@ less, **M** a few days, **L** a week or more or an ADR first.
 
 ### Performance
 
+- **`FrameListModel` inserts a row per frame (S):** one
+  `beginInsertRows` for each frame of a delivery; a batch insert would
+  signal the view once. Measure first
+  ([docs/testing.md](docs/testing.md#performance)).
 - **Full signal sets at full rate (L):** left is the bridge's 4 KB copy
   per frame ([docs/testing.md](docs/testing.md#performance)).
 
 ### Toolchain
+
+- **A Release iOS build may link Qt's `qmltooling` plugins (S):** check
+  whether the `.ipa` carries them and, if so, exclude them with
+  `qt_import_plugins(havne EXCLUDE_BY_TYPE qmltooling)`; needs a CI run
+  and an Apple kit.
+- **The next type2-runtime pin (S):** the steps are in
+  [docs/development.md](docs/development.md) ("A new runtime pin"); the
+  newer runtime would take the release that unpacks into a 0700 folder.
 
 - **C++20 baseline (M, an ADR first):** `std::span` and `std::format`
   against older toolchains dropping out; low priority.

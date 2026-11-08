@@ -1,7 +1,10 @@
 # ADR-0056: The analysis log: picked signals logged at the bus's own pace between an explicit Start and Stop, exported as one wide row per sweep
 
-- **Status:** Accepted. Being built: section 2, the focus, is in (the
-  appendix).
+- **Status:** Accepted. Built: the focus (section 2), the recorder
+  attached to a running session (section 3), the rows and the wide CSV
+  with its estimate (sections 4 and 5), `havne-cli log` and the app's
+  Start log and Stop log (the appendices); the viewer's Export and the
+  steps after it are v0.7.1's.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request
   engine) and [ADR-0039](0039-full-service01-coverage.md) (its two rate classes);
@@ -451,3 +454,28 @@ v0.7.1's, decided 2026-11-07.
 - Not built: markers typed on standard input (stream --record's); a log
   from the command line is left to run, and the app's Mark button marks
   the app's log.
+
+## Appendix: the log on a car, over ELM327 (2026-11-08)
+
+Amended 2026-11-08: the consequences section promised a bench row per
+transport. [2026-11-08-linux-car](../bench-sessions/2026-11-08-linux-car.md)
+gives the rows for ELM327 on native Ubuntu 26.04, on the test car at
+idle: `havne-cli log` for about 70 s per run, a sweep one new value of
+every picked signal, so sweeps per second is the slowest signal's rate.
+
+| Signals | OBDLink MX+ (Bluetooth) | VX, USB | VX, WiFi | VX, USB, `&pack=0` |
+|---|---|---|---|---|
+| 1 | 27.45 | 47.38 | 45.31 | not run |
+| 4 | 24.00 | 9.61 | 8.80 | 11.85 |
+| 8 | 15.48 | 6.63 | 4.66, with stalls | 5.93 |
+
+Every reply after the connect's reports carried only the picked PIDs,
+`log` lines came every 10 s, SIGINT ended each run with `interrupted`
+and the recording whole, and `havne-cli export --format csv --layout
+wide` wrote exactly the picked columns. The VX is the faster adapter
+with one signal and the slower with several packed: its packed requests
+take about 100-113 ms each against about 21 ms for one PID. A pack
+carries a response-count digit, and the VX in ELM mode still prints its
+prompt about one `AT ST 19` timeout after a multi-frame reply, as the sheet's bus and prompt timings show. `&pack=0` helped at 4
+signals and cost at 8. J2534 and SocketCAN sending have no row: they
+have not run.
