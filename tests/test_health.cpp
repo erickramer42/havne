@@ -1281,12 +1281,15 @@ TEST(HealthTest, AnAgeNearItsLimitSaturates)
 }
 
 /* An enumeration's value that isn't a raw value a table holds (negative,
- * a fraction, past UINT32_MAX) is written as its number, with no label */
+ * a fraction, past UINT32_MAX) is written as its number, with no label.
+ * UINT32_MAX itself is the last that is, and 2^32 the first past it */
 TEST(HealthTest, AnEnumerationValueNoTableHoldsHasNoLabel)
 {
     Car car;
-    ecuio_enum_entry_t entries[3] = {
-        {0, "Off"}, {1, "Open loop"}, {2, "Closed loop"}};
+    ecuio_enum_entry_t entries[4] = {{0, "Off"},
+                                     {1, "Open loop"},
+                                     {2, "Closed loop"},
+                                     {UINT32_MAX, "Top of the table"}};
     ecuio_signal_def_t d{};
     d.id = 900;
     d.message_id = 0x7E8;
@@ -1295,15 +1298,15 @@ TEST(HealthTest, AnEnumerationValueNoTableHoldsHasNoLabel)
     d.scale = 1.0;
     std::snprintf(d.name, sizeof d.name, "Fuel System 1");
     d.plot_rank = 1;
-    d.table_count = 3;
+    d.table_count = 4;
     ecuio_signal_set_t set{};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 1;
     set.defs = &d;
-    set.enum_count = 3;
+    set.enum_count = 4;
     set.enums = entries;
     car.in.set = &set;
-    for (double raw : {-1.0, 2.5, 1e20, 4294967298.0}) {
+    for (double raw : {-1.0, 2.5, 1e20, 4294967296.0, 4294967298.0}) {
         SCOPED_TRACE(raw);
         const ecuio_health_value_t value{900, 0, raw, 0, 0};
         car.in.values = &value;
@@ -1321,6 +1324,14 @@ TEST(HealthTest, AnEnumerationValueNoTableHoldsHasNoLabel)
                   .find("value")
                   ->text,
               "Closed loop");
+    const ecuio_health_value_t top{900, 0, 4294967295.0, 0, 0};
+    car.in.values = &top;
+    EXPECT_EQ(parsed(car.write(ECUIO_HEALTH_JSON))
+                  .find("key_values")
+                  ->items.at(0)
+                  .find("value")
+                  ->text,
+              "Top of the table");
 }
 
 /* A report that isn't written counts nothing written; a failed check
