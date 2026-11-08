@@ -15,6 +15,8 @@ ColumnLayout {
     spacing: Theme.spacing * 2
 
     property alias vehicleLabelField: vehicleLabelField
+    // Whether the row of the less common actions shows
+    property bool moreShown: false
 
     // ---- Vehicle (ADR-0027): picked before a connect, its
     // connection filling the field; every change to the list is
@@ -88,39 +90,59 @@ ColumnLayout {
             objectName: "vehicleMore"
             text: qsTr("More")
             enabled: root.host.idle
-            onClicked: moreMenu.popup(this, 0, height)
+            highlighted: root.moreShown
+            onClicked: root.moreShown = !root.moreShown
         }
     }
 
-    // The destructive actions apart from New, each still confirming
-    Menu {
-        id: moreMenu
-        MenuItem {
+    // The destructive actions apart from New, in a row of their own under
+    // the page's zoom (a Popup menu keeps the window's scale and the
+    // Basic style's row height), each still confirming
+    Flow {
+        id: moreRow
+        objectName: "vehicleMoreRow"
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        visible: root.moreShown && root.host.confirming === ""
+
+        ThemedButton {
             objectName: "vehicleRename"
             text: qsTr("Rename")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.typedLabel !== ""
                      && root.host.typedLabel !== root.host.pickedVehicle.label
                      && VehicleBook.labelProblem(root.host.vehicles, root.host.typedLabel,
                                                  root.host.pickedVehicle.id) === ""
-            onClicked: root.host.changeVehicles(VehicleBook.rename(root.host.vehicles, root.host.typedLabel))
+            onClicked: {
+                root.moreShown = false
+                root.host.changeVehicles(VehicleBook.rename(root.host.vehicles, root.host.typedLabel))
+            }
         }
-        MenuItem {
+        ThemedButton {
             objectName: "vehicleForgetVin"
             text: qsTr("Forget the VIN")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
-            onClicked: root.host.changeVehicles(VehicleBook.forgetVin(root.host.vehicles))
+            onClicked: {
+                root.moreShown = false
+                root.host.changeVehicles(VehicleBook.forgetVin(root.host.vehicles))
+            }
         }
-        MenuItem {
+        ThemedButton {
             objectName: "vehicleForget"
             text: qsTr("Forget")
             enabled: root.host.idle && root.host.pickedVehicle !== null
-            onClicked: root.host.confirming = "forget"
+            onClicked: {
+                root.moreShown = false
+                root.host.confirming = "forget"
+            }
         }
-        MenuItem {
+        ThemedButton {
             objectName: "vehicleForgetAll"
             text: qsTr("Forget all vehicles")
             enabled: root.host.idle && root.host.vehicles.list.length > 0
-            onClicked: root.host.confirming = "forgetAll"
+            onClicked: {
+                root.moreShown = false
+                root.host.confirming = "forgetAll"
+            }
         }
     }
 

@@ -1236,6 +1236,31 @@ TestCase {
         compare(page.vehicles, VehicleBook.empty())
     }
 
+    // More opens a row of its own in the page, not a menu in the window's
+    // overlay: the buttons are the page's, so they follow its zoom
+    function test_moreOpensItsActionsInPlace() {
+        const page = createPage()
+        page.open("vehicle")
+        press(page, "vehicleNew")
+        const row = find(page, "vehicleMoreRow")
+        verify(!row.visible, "closed to start")
+        find(page, "vehicleMore").clicked()
+        verify(row.visible, "More opens the row")
+        for (const n of ["vehicleRename", "vehicleForgetVin", "vehicleForget", "vehicleForgetAll"]) {
+            const b = find(page, n)
+            verify(b.visible, n + " shows")
+            verify(b.mapToItem(page, b.width, 0).x <= page.width + 0.5, n + " is inside the page")
+        }
+        find(page, "vehicleMore").clicked()
+        verify(!row.visible, "More again closes it")
+        find(page, "vehicleMore").clicked()
+        press(page, "vehicleForget")
+        verify(!row.visible, "a choice closes the row")
+        compare(page.confirming, "forget", "and asks in place")
+        press(page, "vehicleCancel")
+        verify(!row.visible, "and Cancel leaves it closed")
+    }
+
     // ---- The vehicle's signal files (ADR-0051) ----
 
     // A signal file of one DID on the engine ECU
