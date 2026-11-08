@@ -499,6 +499,34 @@ TestCase {
         compare(uri.text, "elm327://192.168.0.10:35000?profile=raw")
     }
 
+    // The Display page's theme buttons set Theme.theme at once and the
+    // chosen one is highlighted (Main.qml stores it: tst_phone's case)
+    function test_theThemeButtonsSetTheTheme() {
+        const page = createPage()
+        page.open("display")
+        for (const name of ["night", "lowGlare", "dark"]) {
+            const b = find(page, "theme_" + name)
+            verify(b.visible, name + " is offered")
+            b.clicked()
+            compare(Theme.theme, name)
+            verify(b.highlighted, name + " is highlighted")
+            for (const other of Theme.themeNames.filter(n => n !== name))
+                verify(!find(page, "theme_" + other).highlighted, other + " is not")
+        }
+        compare(find(page, "theme_lowGlare").text, "Low glare")
+    }
+
+    // An unknown stored name reads as dark, and the buttons agree
+    function test_anUnknownThemeNameHighlightsDark() {
+        const page = createPage()
+        page.open("display")
+        Theme.theme = "nonsense"
+        verify(find(page, "theme_dark").highlighted, "dark is shown as the theme in use")
+        verify(!find(page, "theme_night").highlighted)
+        verify(!find(page, "theme_lowGlare").highlighted)
+        Theme.theme = "dark"
+    }
+
     // A preset or row of another scheme keeps the query's keys that
     // scheme takes and drops the rest, and the mock profile on an
     // adapter; one of the same scheme keeps the query whole

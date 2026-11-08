@@ -37,6 +37,7 @@ Rectangle {
             // from 6.5. No numerals or readout; at this size they'd crowd it.
             Rectangle {
                 id: logo
+                objectName: "homeLogo"
                 implicitWidth: 96; implicitHeight: 96   // layout-managed: implicit, not width/height
                 radius: Theme.radius
                 color: Theme.surface
@@ -48,8 +49,8 @@ Rectangle {
                 readonly property real cy: height / 2
                 readonly property real r: 38
                 readonly property real tickOuter: r * 0.76
-                readonly property color litColor: rpm >= redline ? Theme.danger
-                                                : rpm >= 4500 ? Theme.warning
+                readonly property color litColor: rpm >= redline ? Theme.gaugeDanger
+                                                : rpm >= 4500 ? Theme.gaugeWarn
                                                 : Theme.success
                 property real rpm: 800
 
@@ -83,7 +84,7 @@ Rectangle {
                     anchors.fill: parent
                     preferredRendererType: Shape.CurveRenderer
                     ShapePath {
-                        strokeColor: Qt.alpha(Theme.text, 0.12)
+                        strokeColor: Qt.alpha(Theme.gaugeTick, 0.12)
                         strokeWidth: 1
                         fillGradient: RadialGradient {
                             centerX: logo.cx; centerY: logo.cy - logo.r * 0.35
@@ -109,13 +110,13 @@ Rectangle {
                         centerX: logo.cx; centerY: logo.cy; radius: logo.tickOuter - 3
                         startAngle: logo.angleOf(logo.redline)
                         sweepAngle: logo.angleOf(logo.maxRpm) - startAngle
-                        strokeColor: Qt.alpha(Theme.danger, logo.rpm >= logo.redline ? 0.6 : 0.22)
+                        strokeColor: Qt.alpha(Theme.gaugeDanger, logo.rpm >= logo.redline ? 0.6 : 0.22)
                         strokeWidth: 6
                     }
                     GaugeArc {
                         centerX: logo.cx; centerY: logo.cy; radius: logo.r * 0.88
                         startAngle: logo.angleOf(0); sweepAngle: 270
-                        strokeColor: Qt.alpha(Theme.text, 0.08)
+                        strokeColor: Qt.alpha(Theme.gaugeTick, 0.08)
                         strokeWidth: 3
                     }
                     GaugeArc {
@@ -145,8 +146,8 @@ Rectangle {
                             height: tick.major ? 6 : 3.5
                             x: logo.cx - width / 2
                             y: logo.cy - logo.tickOuter
-                            color: tick.v >= logo.redline ? Theme.danger
-                                 : tick.major ? Theme.text : Qt.alpha(Theme.text, 0.5)
+                            color: tick.v >= logo.redline ? Theme.gaugeDanger
+                                 : tick.major ? Theme.gaugeTick : Qt.alpha(Theme.gaugeTick, 0.5)
                         }
                     }
                 }
@@ -170,7 +171,7 @@ Rectangle {
                         readonly property real len: logo.r * 0.80
                         readonly property real tail: logo.r * 0.18
                         strokeColor: "transparent"
-                        fillColor: Theme.danger
+                        fillColor: Theme.gaugeDanger
                         startX: logo.cx - needle.tail; startY: logo.cy - 1
                         PathLine { x: logo.cx; y: logo.cy - 1.6 }
                         PathLine { x: logo.cx + needle.len; y: logo.cy - 0.4 }

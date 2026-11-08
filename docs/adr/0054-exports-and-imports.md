@@ -1561,9 +1561,10 @@ Time (ms),RPM (rpm),Speed (km/h),Throttle (%)
   the session never answered is a column of a log; `havne-cli export`
   says so on stderr for each, the exit code unchanged); one that names
   a text or identification signal, or a name twice, is
-  `ECUIO_ERR_INVALID_ARGUMENT` with the reason in the detail. Text and
-  identification signals are never columns and their values are
-  counted left out as the long form counts them.
+  `ECUIO_ERR_INVALID_ARGUMENT` with the reason in the detail (the same
+  pick in the header's focus line is a bad recording,
+  `ECUIO_ERR_LOAD_FAILED`). Text and identification signals are never
+  columns and their values are counted left out as the long form counts them.
 - **The rows** (section 4's rule): a row once every column in the rule
   has a sample newer than the last row, at the completing sample's
   time in whole ms (rounded) from the recording's zero, each cell the

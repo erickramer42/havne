@@ -66,6 +66,22 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
+    // The theme: Dark, or Low glare and Night (amber and red on near black)
+    // for a cabin after dark. Takes effect at once; Main.qml stores it.
+    LabeledFlow {
+        label: qsTr("Theme:")
+        Repeater {
+            model: Theme.themeNames
+            ThemedButton {
+                required property string modelData
+                objectName: "theme_" + modelData
+                text: Theme.themeLabel(modelData)
+                highlighted: Theme.active === modelData
+                onClicked: Theme.theme = modelData
+            }
+        }
+    }
+
     // Units: what the pages show, converted in core (ADR-0022);
     // recordings keep the decoded values. Main.qml stores it.
     // Takes effect at once, connected or not.

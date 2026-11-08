@@ -57,12 +57,18 @@ TestCase {
                 pastTheEdge(child, edge, out)
                 continue
             }
-            // A rotated Shape its parent's size (a gauge's needle, turned
-            // about the dial's center) swings its box's corners past the
-            // dial while its path stays inside: its parent's box is judged
-            if (child.preferredRendererType !== undefined && child.rotation !== 0
-                    && child.width === item.width && child.height === item.height)
+            // Any other rotated item (a gauge's needle, a Shape turned about
+            // the dial's center) is judged by the circle its corners sweep:
+            // one mapped corner would depend on the angle, which follows
+            // the mock's drive cycle, so the same layout passes or fails
+            // with how long the connect took
+            if (child.rotation !== 0) {
+                const mid = child.mapToItem(edge, child.width / 2, child.height / 2).x
+                const right = mid + Math.hypot(child.width, child.height) / 2
+                if (right > edge.width + 0.5)
+                    out.push(label(child) + " at " + Math.round(right))
                 continue
+            }
             const painted = child.elide !== undefined && !child.clip
                             ? Math.max(child.width, child.contentWidth) : child.width
             const right = child.mapToItem(edge, painted, 0).x
