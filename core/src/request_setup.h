@@ -1,9 +1,9 @@
 // File/layer: core/src/request_setup.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: UNIT: RecorderTest (test_core); HARNESS: J2534QueryParamTest,
-//          J2534AdoptionTest (test_j2534_stream); Elm327SessionTest
-//          (test_elm327); J2534HealthTest (test_j2534_health);
-//          SocketCanRequestTest (test_vcan)
+// Testing: UNIT: CoreTest, RecorderTest (test_core); HARNESS:
+//          J2534QueryParamTest, J2534AdoptionTest (test_j2534_stream);
+//          Elm327SessionTest (test_elm327); J2534HealthTest
+//          (test_j2534_health); SocketCanRequestTest (test_vcan)
 //
 // What a requesting transport (J2534, ELM327) derives from its URI and
 // profile before it opens anything: the request keys' values, the
@@ -253,6 +253,47 @@ inline uint32_t ecuio_poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
     return 0;
 }
 
+/* Whether table row r is the request req (len bytes) on channel c: how
+ * a focus finds a picked def's row (ecuio_engine_request_for_def, the
+ * mux key at offset 0 as ecuio_engine_derive enrols it, on the channel
+ * of its message_id) */
+inline bool ecuio_focus_row_is(const ecuio_request& r, uint32_t c,
+                               const uint8_t* req, uint8_t len)
+{
+    return r.channel == c && r.len == len && r.bytes[0] == req[0] &&
+           r.bytes[1] == req[1] && (len < 3 || r.bytes[2] == req[2]);
+}
+
+/* Each def's byte in askable (n of them, in place: no allocation): 1
+ * when its request is a row of e's table that isn't dropped, parked or
+ * not, since a focus can unpark it; 0 for a def asked nowhere (a passive
+ * def, Service 09's, a request the probe dropped, a DID the scan hasn't
+ * found, a PID ?poll= doesn't ask). What ecuio_session_set_focus judges
+ * a focus by (ADR-0056 section 2). */
+inline void ecuio_focus_askable(const ecuio_signal_set_t* set,
+                                const ecuio_request_engine& e,
+                                const uint32_t* rx_ids, uint32_t chan_count,
+                                uint8_t* askable, size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        askable[i] = 0;
+        uint8_t req[3] = {};
+        uint8_t len = 0;
+        if (set == nullptr || set->defs == nullptr || i >= set->count ||
+            !ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
+            continue;
+        }
+        const uint32_t c =
+            ecuio_engine_channel_for(&set->defs[i], rx_ids, chan_count);
+        for (uint32_t k = 0; k < e.count && askable[i] == 0; ++k) {
+            const ecuio_request& r = e.requests[k];
+            if (r.dropped == 0 && ecuio_focus_row_is(r, c, req, len)) {
+                askable[i] = 1;
+            }
+        }
+    }
+}
+
 /* The requests, into e (initialized here for chan_count channels):
  *   ?poll=        -> that one Service 01 request; the set's rotation
  *                    isn't built, so the PID in the URI is the only one
@@ -275,10 +316,11 @@ inline uint32_t ecuio_poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
  * declared channels. BAD_URI with the detail set when they have none,
  * or for ?scan=first outside uds-generic, which alone scans, before any
  * hardware is touched. */
-inline ecuio_status_t ecuio_build_requests(
-    const ecuio_session_t* session, const ecuio_signal_set_t* set,
-    const request_params& params, const uint32_t* rx_ids, uint32_t chan_count,
-    ecuio_request_engine* e, bool* probe, bool* identify)
+inline ecuio_status_t
+ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
+                     const request_params& params, const uint32_t* rx_ids,
+                     uint32_t chan_count, ecuio_request_engine* e, bool* probe,
+                     bool* identify)
 {
     ecuio_engine_init(e, chan_count);
     if (params.scan_first && session->uds == nullptr) {
@@ -340,6 +382,19 @@ inline ecuio_status_t ecuio_build_requests(
                              "channel to receive on");
         }
         return ECUIO_ERR_BAD_URI;
+    }
+    /* What a focus is judged by (ADR-0056 section 2): whether the
+     * session asks anything, and which defs it can ask, sized here so
+     * the worker keeps the map in place (ecuio_take_focus) */
+    try {
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        session->focus_requests = requests;
+        const size_t n = set != nullptr ? set->count : 0;
+        session->focus_askable.assign(n, 0);
+        ecuio_focus_askable(set, *e, rx_ids, chan_count,
+                            session->focus_askable.data(), n);
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     return ECUIO_OK;
 }
@@ -492,6 +547,87 @@ inline void ecuio_take_clear_requests(ecuio_session_t* session,
             (void)ecuio_engine_clear(e, c, session->clear_generation[c].load(),
                                      session->clear_flags[c].load());
         }
+    }
+}
+
+/* What ecuio_take_focus has taken, the worker's own: the count of
+ * focus_generation, and the table's stamp the askable map was worked out
+ * at (ecuio_focus_table_stamp) */
+struct ecuio_focus_seen {
+    uint32_t generation = 0;
+    uint64_t table = 0;
+};
+
+/* A number that moves whenever the table's rows or their drops can have
+ * changed: its size (a scanned DID joins) and every channel's
+ * generation (a drop moves it). Both only grow, so the sum never
+ * repeats. */
+inline uint64_t ecuio_focus_table_stamp(const ecuio_request_engine& e)
+{
+    uint64_t stamp = e.count;
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        stamp += e.chans[c].generation;
+    }
+    return stamp;
+}
+
+/* Takes a focus (ecuio_session_set_focus, ADR-0056 section 2) the
+ * worker hasn't taken, or resolves the stored picks again when a request
+ * joined parked under it (focus_joined: a scanned DID found): under the
+ * session's lock, each picked def's request on the channel of its
+ * message_id (ecuio_focus_row_is) marks a table row kept; then the engine
+ * parks the rest, or ends the focus on a count of 0. First, when the
+ * table changed, the askable map is worked out again in place. A fixed
+ * table, no allocation on the worker. */
+inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
+                             ecuio_focus_seen& seen)
+{
+    const uint64_t table = ecuio_focus_table_stamp(*e);
+    if (table != seen.table) {
+        seen.table = table;
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        ecuio_focus_askable(session->active_signal_set, *e,
+                            session->info.rx_ids, session->info.channel_count,
+                            session->focus_askable.data(),
+                            session->focus_askable.size());
+    }
+    const uint32_t asked = session->focus_generation.load();
+    if (asked == seen.generation && !e->focus_joined) {
+        return;
+    }
+    seen.generation = asked;
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    bool focused = false;
+    {
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        const ecuio_signal_set_t* set = session->active_signal_set;
+        focused = !session->focus_ids.empty();
+        const size_t defs = session->focus_defs.size();
+        for (uint32_t i = 0; focused && set != nullptr &&
+                             set->defs != nullptr && i < set->count && i < defs;
+             ++i) {
+            if (session->focus_defs[i] == 0) {
+                continue;
+            }
+            uint8_t req[3] = {};
+            uint8_t len = 0;
+            if (!ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
+                continue;
+            }
+            const uint32_t c =
+                ecuio_engine_channel_for(&set->defs[i], session->info.rx_ids,
+                                         session->info.channel_count);
+            for (uint32_t k = 0; k < e->count; ++k) {
+                if (ecuio_focus_row_is(e->requests[k], c, req, len)) {
+                    keep[k] = 1;
+                }
+            }
+        }
+    }
+    if (focused) {
+        ecuio_engine_focus(e, keep);
+    } else {
+        ecuio_engine_unfocus(e);
     }
 }
 

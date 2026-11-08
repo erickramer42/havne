@@ -240,6 +240,33 @@ class Session:
         self._recorders.append(r)
         return r
 
+    def set_focus(self, signals):
+        """Asks only the requests that carry these signals, until called
+        again (ADR-0056 section 2): ids or names of the session's set, in
+        any order; an empty list asks the whole set again. The picks run
+        in the fast class, the rest wait, parked. Before or after
+        start(); on mock:// and replay:// it changes nothing. A name the
+        set lacks is a KeyError; an id that isn't an int (a bool isn't) or
+        is outside 0-65535 a ValueError; an id the set lacks, or a focus
+        that leaves a requesting session nothing to ask, core's
+        INVALID_ARGUMENT."""
+        by_name = {name: sid for sid, (name, unit) in self._names.items()}
+        ids = []
+        for s in signals:
+            if isinstance(s, str):
+                if s not in by_name:
+                    raise KeyError(f"no signal named {s!r} in the session's set")
+                ids.append(by_name[s])
+            elif isinstance(s, bool) or not isinstance(s, int):
+                raise ValueError(f"a signal id is an int, not {s!r}")
+            elif not 0 <= s <= 0xFFFF:
+                raise ValueError(f"a signal id is 0-65535, not {s}")
+            else:
+                ids.append(s)
+        picks = (ctypes.c_uint16 * len(ids))(*ids) if ids else None
+        check(lib.ecuio_session_set_focus(self._handle(), picks, len(ids)),
+              "ecuio_session_set_focus")
+
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")
 

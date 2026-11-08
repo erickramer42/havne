@@ -1,6 +1,7 @@
 # ADR-0056: The analysis log: picked signals logged at the bus's own pace between an explicit Start and Stop, exported as one wide row per sweep
 
-- **Status:** Accepted. Not built.
+- **Status:** Accepted. Being built: section 2, the focus, is in (the
+  appendix).
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request
   engine) and [ADR-0039](0039-full-service01-coverage.md) (its two rate classes);
@@ -224,3 +225,65 @@ log quickly, never cutting it.
 - What a log of N signals reaches on each adapter is measured, not
   promised: a bench row per transport (J2534, ELM327 over USB, WiFi and
   Bluetooth, SocketCAN) in the run sheets.
+
+## Appendix: the build (2026-11-07)
+
+Steps 1-6 of the build (the focus, the recorder attached to a running
+session, the wide CSV and its estimate, `havne-cli log`, the app's Start
+log and Stop log, the viewer's Export) are v0.7.0's; the minimum time
+between sweeps (section 4) and the navigation aids (section 6) are
+v0.7.1's, decided 2026-11-07.
+
+**Section 2, the focus, as built:**
+
+- `ecuio_session_set_focus(session, const uint16_t* signal_ids, count)`
+  (`core.h`): the ids are `uint16_t`, as every other id list in the ABI
+  (`ecuio_session_get_unsupported_signals`, the absent signals), not the
+  `uint32_t` section 2 wrote. A NULL session, or NULL ids with a count,
+  `ECUIO_ERR_NULL_ARGUMENT`; an id the session's set lacks
+  `ECUIO_ERR_INVALID_ARGUMENT` with "no signal with id N in profile P" in
+  the detail and nothing changed; after close `ECUIO_ERR_SESSION_CLOSED`.
+  Before or after start alike.
+- The session keeps the picks (the ids in the caller's order, one byte
+  per def) under a mutex with a generation; each requesting worker
+  (J2534, ELM327, SocketCAN) takes a new generation once before its
+  loop and then between passes, beside the clear and Read again
+  requests (`ecuio_take_focus`), maps each picked def to its request
+  (the mux key at offset 0, the channel of its `message_id`) and calls
+  the engine: a request none of the picks reads is `parked`, a state
+  beside `dropped` (out of the rotation, in the table, back on a count
+  of 0); the kept ones run in the fast class and get their class back at
+  the end (`slow_default`). The walk, the DID scan, identification,
+  diagnostics, a clear and a request already out are untouched; a
+  dropped request stays dropped; packing gathers kept requests alone.
+- A request added under a focus (a scanned DID found) starts parked,
+  and the worker resolves the stored picks again at its next pass: a
+  pick that names the DID unparks it, and one that doesn't leaves it
+  parked until the focus's end.
+- The engine moves a channel's generation only when the focus changed
+  its count of requests in the rotation, so a channel the focus leaves
+  as it was isn't republished in its support report.
+- A requesting session refuses a focus that would leave it nothing to
+  ask: none of the picks reads a request the session can make (passive
+  signals, Service 09's, a request the walk dropped, a DID the scan
+  hasn't found, under `?poll=` any but the polled PID's).
+  `ECUIO_ERR_INVALID_ARGUMENT`, "the focus leaves nothing to request" in
+  the detail, and the focus it had stands. A focus with one askable
+  pick among others is taken. The worker keeps what is askable in step
+  with the table (a drop, a DID found), so the call judges by the table
+  as it stands.
+- `mock://`, `replay://` and a listening session ask nothing and accept
+  any focus, changing nothing: their values aren't asked for.
+- The call clears the thread's detail on entry, so a refusal without
+  words of its own leaves none from an earlier call.
+- Python: `Session.set_focus(signals)`, ids or names, before or after
+  `start()`; an id outside 0-65535, or one that isn't an `int` (a
+  `bool` among them), is a `ValueError` before the call.
+- The focus is judged against the session's requests when the call is
+  made. A focus taken and later left with nothing to ask isn't refused
+  after the fact: the first walk after start, the walk of a focus set
+  before start, a re-walk after a recovery, or an NRC can drop every
+  pick, and the session then asks nothing until the focus changes or
+  ends. The front ends see each drop in the support report, as for any
+  dropped request. Between a drop and the worker's next take, the
+  askable map the call judges by can still name a PID no longer asked.

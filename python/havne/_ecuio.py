@@ -1211,6 +1211,7 @@ FUNCTIONS = {
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h
     'ecuio_session_send': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t)]),  # core.h
+    'ecuio_session_set_focus': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32]),  # core.h
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h

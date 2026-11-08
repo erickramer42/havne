@@ -640,6 +640,53 @@ TEST_F(SocketCanRequestTest,
     EXPECT_EQ(flow_controls, first_frames);
 }
 
+/* ADR-0056 section 2 on a kernel socket: a focus set while the session
+ * runs has it ask the picked PIDs alone. The listener opens after the
+ * call, so it hears only requests sent under the focus, but for one: the
+ * worker takes the focus at the end of a turn and sends at the start of
+ * the next, so a call landing between the two lets one request chosen
+ * without it go out after the call. The first request heard is
+ * therefore left unchecked. */
+TEST_F(SocketCanRequestTest, AFocusAsksOnlyThePickedPids)
+{
+    vcan_bus::Ecu ecu;
+    Session s("?profile=obd2&probe=0&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.get());
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), ids.data(), 2), ECUIO_OK);
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    ASSERT_TRUE(listener.ok());
+
+    std::vector<uint8_t> pids; /* each request's PID, in order */
+    const auto end = std::chrono::steady_clock::now() + 3s;
+    while (pids.size() < 12 && std::chrono::steady_clock::now() < end) {
+        can_frame f{};
+        if (vcan_bus::read_for(listener.get(), &f, sizeof f, 100) ==
+                static_cast<long>(sizeof f) &&
+            (f.can_id & CAN_ERR_FLAG) == 0 &&
+            (f.can_id & CAN_SFF_MASK) == vcan_bus::kRequest && f.len >= 3 &&
+            f.data[1] == 0x01) {
+            pids.push_back(f.data[2]);
+        }
+    }
+    ASSERT_EQ(pids.size(), 12u);
+    for (size_t k = 1; k < pids.size(); ++k) {
+        EXPECT_TRUE(pids[k] == 0x0C || pids[k] == 0x0D)
+            << "request " << k << " asks PID " << int(pids[k]);
+    }
+    EXPECT_EQ(ecuio_session_set_focus(s.get(), nullptr, 0), ECUIO_OK);
+}
+
 /* vcan has no rate, so a stated one isn't checked against it */
 TEST_F(SocketCanRequestTest, ARequestingSessionOnVcanNeedsNoRate)
 {

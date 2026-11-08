@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -2555,6 +2556,164 @@ TEST(J2534StreamTest, RequestFailedStatusHasDistinctString)
     ASSERT_NE(s, nullptr);
     EXPECT_STRNE(s, "unknown status");
     EXPECT_STRNE(s, ecuio_status_string(ECUIO_ERR_TRANSPORT_HARD_FAILURE));
+}
+
+/* ADR-0056 section 2: a focus set before start narrows the rotation to
+ * the picked PIDs from the worker's first request, and a count of 0
+ * brings the whole set back. The page keeps 16 writes: the second run's
+ * are read after a reset of the page, where the first few may still be
+ * the picks'. */
+TEST_F(J2534AdoptionTest, AFocusAsksOnlyThePickedPids)
+{
+    char uri[700];
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=obd2&filter=0x7E8&probe=0&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus(session, ids.data(), 2), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 16, 250);
+    uint8_t last = 0;
+    for (unsigned long i = 0; i < 16; ++i) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_GE(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
+        EXPECT_TRUE(wbuf[5] == 0x0C || wbuf[5] == 0x0D)
+            << "write " << i << " asks PID " << int(wbuf[5]);
+        EXPECT_NE(wbuf[5], last) << "write " << i << " repeats a pick";
+        last = wbuf[5];
+    }
+
+    ASSERT_EQ(ecuio_session_set_focus(session, nullptr, 0), ECUIO_OK);
+    fake_control::reset(fake_page());
+    wait_for_writes(get_write_count, 16, 250);
+    std::set<uint8_t> pids;
+    for (unsigned long i = 0; i < 16; ++i) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_GE(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
+        pids.insert(wbuf[5]);
+    }
+    EXPECT_GT(pids.size(), 2u) << "the whole set is asked again";
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* The obd2 set's id for Service 01 PID pid */
+uint16_t obd2_id_of(const ecuio_signal_set_t* set, uint8_t pid)
+{
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            d.mux_key == (0x4100u | pid)) {
+            return d.id;
+        }
+    }
+    ADD_FAILURE() << "no def reads PID " << int(pid);
+    return 0;
+}
+
+/* ?poll=0x0C asks that one request, so a focus on 0x0D alone would
+ * leave the session nothing to ask: it's refused, before start and
+ * while running, and the session goes on asking 0x0C; a focus on 0x0C
+ * is taken. A closed session refuses any focus. */
+TEST_F(J2534AdoptionTest, AFocusUnderPollIsJudgedByThePolledPid)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&poll=0x0C",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    const uint16_t rpm = obd2_id_of(set, 0x0C);
+    const uint16_t speed = obd2_id_of(set, 0x0D);
+    EXPECT_EQ(ecuio_session_set_focus(session, &speed, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ASSERT_EQ(ecuio_session_set_focus(session, &rpm, 1), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(session, &speed, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    wait_for_writes(get_write_count, 5, 200);
+    for (unsigned long i = 0; i < 5; ++i) {
+        expect_write(i, 0x01, 0x0C);
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(session, &rpm, 1),
+              ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(session);
+}
+
+/* A focus outlives the link's loss and return: the probe's walk and the
+ * rescan the recovery runs ask what they must, and once the walk is
+ * done every request out names picks alone (a pack of them too). */
+TEST_F(J2534AdoptionTest, AFocusOutlivesTheLinksRecovery)
+{
+    std::unique_ptr<KnobGuard> quiet =
+        std::make_unique<KnobGuard>("ECUIO_FAKE_READ_STATUS", "9");
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=obd2&filter=0x7E8&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    const uint16_t ids[2] = {obd2_id_of(set, 0x0C), obd2_id_of(set, 0x0D)};
+    ASSERT_EQ(ecuio_session_set_focus(session, ids, 2), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    for (int i = 0; i < 500 && le != ECUIO_ERR_VEHICLE_TIMEOUT; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        (void)ecuio_session_get_error_state(session, &le, &ec);
+    }
+    ASSERT_EQ(le, ECUIO_ERR_VEHICLE_TIMEOUT) << "the bus never read as quiet";
+
+    quiet.reset();
+    ecuio_channel_support_t s = {};
+    ASSERT_TRUE(wait_for_support(
+        session, s,
+        [](const ecuio_channel_support_t& r) {
+            return (r.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        3000))
+        << "the walk didn't resume (flags " << s.flags << ")";
+    fake_control::reset(fake_page());
+    wait_for_writes(get_write_count, 16, 250);
+    for (unsigned long i = 0; i < 16; ++i) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_GE(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
+        for (unsigned long k = 5; k < wlen; ++k) {
+            EXPECT_TRUE(wbuf[k] == 0x0C || wbuf[k] == 0x0D)
+                << "write " << i << " asks PID " << int(wbuf[k]);
+        }
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
 }
 
 } // namespace

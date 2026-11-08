@@ -266,3 +266,28 @@ def test_a_clear_of_the_simulated_car_goes_through_core_s_gate():
         while time.monotonic() < until and not s.diagnostics(0).flags & c.ECUIO_DIAG_COMPLETE:
             time.sleep(0.05)
         assert s.diagnostics(0).lists[c.ECUIO_DIAG_STORED].reported == 0
+
+
+def test_a_focus_takes_ids_or_names_and_refuses_a_stranger():
+    with havne.Session("mock://py") as s:
+        sid, (name, unit) = next(iter(s.signals.items()))
+        s.set_focus([sid])
+        s.set_focus([name])
+        s.set_focus([])
+        with pytest.raises(KeyError):
+            s.set_focus(["no such signal"])
+        with pytest.raises(havne.Error) as e:
+            s.set_focus([65000])
+        assert e.value.name == "INVALID_ARGUMENT"
+        assert "65000" in e.value.detail
+        s.start()
+        s.set_focus([sid])
+
+
+def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
+    with havne.Session("mock://py") as s:
+        sid = next(iter(s.signals))
+        for bad in (-1, 0x10000, 65536 + sid, True, 1.0, None):
+            with pytest.raises(ValueError):
+                s.set_focus([bad])
+        s.set_focus([sid])

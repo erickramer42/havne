@@ -46,6 +46,8 @@ extern "C" {
 #include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
 #include "def_index.h"     /* core/src: the defs a frame can match */
 #include "precise_wait.h"  /* core/src: a requesting worker's waits */
+#include "request_setup.h" /* core/src: the requests and the focus's map */
+#include "session.h"       /* core/src: the session's focus fields */
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "surrogate_log_names.h" /* core/src: the surrogate logs pruning keeps */
 #include "new_counter.h"   /* tests: operator new counted per thread */
@@ -6037,4 +6039,181 @@ TEST(CoreTest, APackedReplyDecodesEachDefOnce)
 
     ecuio_session_destroy(session);
     (void)ecuio_profile_unregister("packed-each-once");
+}
+
+/* ADR-0056 section 2: the focus call's contract on a session that asks
+ * nothing (the mock): taken before and after start, an id the set lacks
+ * refused by name, a count of 0 taken, NULLs and a closed session
+ * refused; a session with no set (raw) takes only a count of 0 */
+TEST(CoreTest, SetFocusTakesTheSetsIdsAndRefusesTheRest)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    ASSERT_GE(set->count, 2u);
+    const uint16_t ids[2] = {set->defs[0].id, set->defs[1].id};
+    EXPECT_EQ(ecuio_session_set_focus(nullptr, ids, 2),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_set_focus(s, nullptr, 1), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_set_focus(s, ids, 2), ECUIO_OK);
+    const uint16_t stranger[2] = {ids[0], 65000};
+    EXPECT_EQ(ecuio_session_set_focus(s, stranger, 2),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "no signal with id 65000 in profile mock");
+    EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, ids, 1), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, ids, 1), ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+
+    ecuio_session_t* raw = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=raw", &raw), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(raw, ids, 1), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_session_set_focus(raw, nullptr, 0), ECUIO_OK);
+    ecuio_session_destroy(raw);
+}
+
+/* The focus call clears the thread's detail on entry, so a refusal that
+ * sets none (a NULL, a closed session) or a success leaves no stale
+ * words from an earlier call */
+TEST(CoreTest, SetFocusClearsAStaleDetail)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    ASSERT_GE(set->count, 1u);
+    const uint16_t id = set->defs[0].id;
+    ecuio_detail_set("stale");
+    EXPECT_EQ(ecuio_session_set_focus(nullptr, &id, 1),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+    ecuio_detail_set("stale");
+    EXPECT_EQ(ecuio_session_set_focus(s, &id, 1), ECUIO_OK);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    ecuio_detail_set("stale");
+    EXPECT_EQ(ecuio_session_set_focus(s, &id, 1), ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+    ecuio_session_destroy(s);
+}
+
+namespace {
+
+/* The id of set's first def whose request is bytes[0..len) */
+uint16_t focus_id_of(const ecuio_signal_set_t* set,
+                     std::initializer_list<uint8_t> bytes)
+{
+    for (uint32_t i = 0; i < set->count; ++i) {
+        uint8_t req[3] = {};
+        uint8_t len = 0;
+        if (ecuio_engine_request_for_def(&set->defs[i], req, &len) &&
+            len == bytes.size() &&
+            std::equal(bytes.begin(), bytes.end(), req)) {
+            return set->defs[i].id;
+        }
+    }
+    ADD_FAILURE() << "no def asks that request";
+    return 0;
+}
+
+} // namespace
+
+/* A requesting session refuses a focus that leaves it nothing to ask,
+ * with the reason in the detail and the focus it had untouched; a focus
+ * with one askable pick among others is taken. Under ?poll=0x0C the one
+ * request is 01 0C, so a focus on 0x0D alone is refused. The requests
+ * are built on a mock session, whose worker never takes the focus. */
+TEST(CoreTest, AFocusThatLeavesNothingToRequestIsRefused)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    const uint16_t rpm = focus_id_of(set, {0x01, 0x0C});
+    const uint16_t speed = focus_id_of(set, {0x01, 0x0D});
+    ASSERT_NE(rpm, speed);
+    request_params params;
+    params.has_poll = true;
+    params.poll_pid = 0x0C;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ASSERT_EQ(e->count, 1u);
+
+    ASSERT_EQ(ecuio_session_set_focus(s, &rpm, 1), ECUIO_OK);
+    const uint32_t generation = s->focus_generation.load();
+    EXPECT_EQ(ecuio_session_set_focus(s, &speed, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the focus leaves nothing to request: none of the picked "
+                 "signals is asked on this session");
+    EXPECT_EQ(s->focus_generation.load(), generation) << "nothing changed";
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, std::vector<uint16_t>{rpm});
+    }
+    const uint16_t both[2] = {speed, rpm};
+    EXPECT_EQ(ecuio_session_set_focus(s, both, 2), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    ecuio_session_destroy(s);
+}
+
+/* uds-generic: a DID the scan finds under a focus joins parked and is
+ * unparked at the worker's next take when the focus names it; one it
+ * doesn't name stays parked. A focus on a DID the scan hasn't found is
+ * refused alone, and taken once it has. Rows are added as the scan's
+ * find adds them (ecuio_engine_scan_poll). */
+TEST(CoreTest, AScannedDidFoundUnderAFocusJoinsItWhenPicked)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create(
+            "mock://focus?profile=uds-generic&did=1E1C:u16,1E18-1E1A", &s),
+        ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    const uint16_t polled = focus_id_of(set, {0x22, 0x1E, 0x1C});
+    const uint16_t picked = focus_id_of(set, {0x22, 0x1E, 0x19});
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ASSERT_EQ(e->count, 1u) << "the polled DID; the scan's are unasked";
+
+    EXPECT_EQ(ecuio_session_set_focus(s, &picked, 1),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "the scan hasn't found it";
+    const uint16_t ids[2] = {polled, picked};
+    ASSERT_EQ(ecuio_session_set_focus(s, ids, 2), ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+    ASSERT_TRUE(e->focused);
+    EXPECT_EQ(e->requests[0].parked, 0u);
+
+    for (const uint8_t lo : {uint8_t{0x19}, uint8_t{0x1A}}) {
+        const uint8_t req[3] = {0x22, 0x1E, lo};
+        ASSERT_EQ(ecuio_engine_add(e.get(), 0, req, 3),
+                  ecuio_engine_add_result::added);
+        ++e->chans[0].generation; /* the scan's settle */
+    }
+    EXPECT_EQ(e->requests[1].parked, 1u) << "it joins parked";
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(e->requests[1].parked, 0u) << "1E19 is picked";
+    EXPECT_EQ(e->requests[2].parked, 1u) << "1E1A isn't";
+    EXPECT_EQ(e->chans[0].requests, 2u);
+    EXPECT_EQ(ecuio_session_set_focus(s, &picked, 1), ECUIO_OK)
+        << "found, it is askable";
+    ecuio_session_destroy(s);
 }

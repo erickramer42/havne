@@ -329,6 +329,7 @@ int main(void)
     if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_set_focus(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_clear_diagnostics_with(NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING |
                                                  ECUIO_CLEAR_ALLOW_MOVING) !=
