@@ -39,12 +39,14 @@ Page {
 
     // The stored text read: the document, or the built-in layout with
     // the reason when there is none or it can't be used
-    readonly property var parsed: DashboardBook.parse(form === "phone" ? store.phone
-                                                                       : store.desktop, form)
+    readonly property var parsed: DashboardBook.parse(storedText, form)
     property var doc: parsed.doc
     readonly property string problem: parsed.problem
     readonly property var pages: doc && Array.isArray(doc.pages) ? doc.pages : []
     property bool problemDismissed: false
+    // A different stored text is a different problem, so its line shows again
+    readonly property string storedText: form === "phone" ? store.phone : store.desktop
+    onStoredTextChanged: problemDismissed = false
 
     // ---- Pages
 
@@ -90,13 +92,21 @@ Page {
     // Ignition-style sweep, once per session, the first time the page
     // is on screen while connected
     property bool sweptThisSession: false
+    // When the sweep was last requested (ms since the epoch) and how long
+    // it plays. A gauge that finishes loading within that time of it
+    // plays its own, so a page loaded between frames sweeps too.
+    property double sweptAt: 0
+    property int sweepMs: 1550
+    function sweepIsOn() { return Date.now() - sweptAt < sweepMs }
     function maybeSweep() {
         if (!Bridge.connected) {
             sweptThisSession = false
+            sweptAt = 0
             return
         }
         if (!visible || sweptThisSession) return
         sweptThisSession = true
+        sweptAt = Date.now()
         sweepRequested()
     }
     function resetPeaks() { peaksResetRequested() }
@@ -140,9 +150,17 @@ Page {
     component Cell: GaugeCard {
         id: card
         required property var cell
-        // On a page not shown, the gauge loads between frames, so a full
-        // document doesn't hold back the first one; shown, it finishes at once
+        // On a page two or more away from the one shown, the gauge loads
+        // between frames, so a full document doesn't hold back the first
+        // one; on the page shown and its neighbors (a swipe drags one in)
+        // it finishes at once
         property bool later: false
+
+        // The sweep plays on the dials and the shift lights only
+        function sweep() {
+            if (gauge.item && kind !== "bar" && kind !== "digital")
+                (gauge.item as GaugeBase).sweep()
+        }
 
         readonly property string kind: cell && typeof cell.kind === "string" ? cell.kind : ""
         readonly property var options: cell && cell.options ? cell.options : ({})
@@ -282,13 +300,11 @@ Page {
                 const g = item
                 for (const name of card.shared.concat(card.own[card.kind] ?? []))
                     g[name] = Qt.binding(() => card[name])
+                if (root.sweepIsOn()) card.sweep()
             }
             Connections {
                 target: root
-                function onSweepRequested() {
-                    if (gauge.item && card.kind !== "bar" && card.kind !== "digital")
-                        (gauge.item as GaugeBase).sweep()
-                }
+                function onSweepRequested() { card.sweep() }
                 function onPeaksResetRequested() {
                     if (gauge.item) (gauge.item as GaugeBase).resetPeaks()
                 }
@@ -477,7 +493,7 @@ Page {
                             readonly property var box: pageView.boxes[index]
                             objectName: "dashCell_" + pageView.index + "_" + index
                             cell: pageView.cells[index]
-                            later: pageView.index !== root.pageIndex
+                            later: Math.abs(pageView.index - root.pageIndex) > 1
                             x: box ? box.x * (pageView.columnWidth + root.gap) : 0
                             y: box ? box.y * pageView.pitch : 0
                             width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0
