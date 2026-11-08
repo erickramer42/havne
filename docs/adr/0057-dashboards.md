@@ -1,0 +1,559 @@
+# ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
+
+- **Status:** Accepted. Not built.
+- **Date:** 2026-11-07.
+- **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
+  gets final display values); [ADR-0022](0022-display-units.md) (the
+  unit system, converted in core at the UI's edge);
+  [ADR-0027](0027-vehicle-profiles.md) section 5 (preferences as one
+  JSON document in QML `Settings`, its rules in a `pragma Singleton`);
+  [ADR-0039](0039-full-service01-coverage.md) section 8 (what the
+  Dashboard reads); [ADR-0048](0048-semantic-versioning.md) (an
+  additive C ABI change is a minor release);
+  [ADR-0050](0050-finding-a-signal.md) (the signal filter);
+  [ADR-0051](0051-signal-files.md) section 2 (a signal file's `key` as
+  the stable name); [ADR-0052](0052-plugin-framework.md) (a plugin
+  variant's signals as a signal file).
+- **Leads to:** v0.7.0's dashboard steps (section 10); the gauge roles
+  the low-glare and night themes set (section 9); a plugin's default
+  layout and alerts on the gauges, each a later decision on this
+  document's format.
+
+## Context
+
+The Dashboard is one fixed page: a shift-light strip, two dials
+(engine speed, vehicle speed), two rings (coolant, oil), two digital
+tiles (IAT, MAF) and two bars (throttle, load), in three hand-written
+arrangements (`DashboardPage.qml`'s `fit`: stacked, narrow, wide). Each
+gauge reads one `Tap`: the first of a list of core's def IDs
+(`Bridge.gaugeSignals`, a mock ID and an `obd2` ID per gauge) that the
+session's set holds, looked up through `SignalHub`, an ID-keyed mirror
+of `Bridge.signalModel`. Scale ends and zones are written in the
+decoded units and shown through `Bridge.displayValue` (ADR-0022). A
+gauge with no signal says why: "no session", "not in profile", "waiting
+for data".
+
+A user's own signals (ADR-0051), a plugin variant's (ADR-0052) and
+Service 01's other PIDs (ADR-0039) reach Live but never a gauge. The
+roadmap's v0.7.0 asks for a gauge library, any signal on any gauge,
+several pages, and the phone's layout apart from the desktop's.
+
+What the code gives this decision:
+
+- **Signals have two kinds of stable name, and some have none.** A
+  built-in set's def IDs are public constants (`signal_sets.h`): the
+  mock's from 1001, `obd2`'s first ten fixed at 7001-7010 and the rest
+  `ECUIO_OBD2_PID_SIG_ID(pid, field)`, append-only. A signal file that
+  `extends` `obd2` loads `obd2`'s defs first, with those IDs. A file's
+  own defs are numbered by their place (`ECUIO_USER_SIG_ID_BASE` plus
+  the index), which a reordered file changes; ADR-0051 section 2 names
+  `key` as the name a Dashboard's tile refers to, 1 to 31 of `a-z`,
+  `0-9` and `_`. A plugin variant's signals are a signal file
+  (`ecuio_plugin_variant_file`), keys included. `uds-generic`'s IDs
+  follow the URI's `did=` order and its defs have no key.
+- **Names aren't stable.** The mock and `obd2` name one quantity
+  differently ("RPM" and "Engine speed"), a set may reword a name, and
+  `test_aRenamedSetStillDrivesEveryGauge` pins that the gauges don't
+  depend on names.
+- **Core finds a def by its key** (`ecuio_signal_file_find`) **but
+  can't name the key of a def**, so the bridge can't tell QML which key
+  a row carries. `obd2`'s own key names (`rpm`, `pid_0c`) exist only
+  inside the signal-file loader, for computed expressions.
+- **A def has no display range.** Its field (kind, bit length, scale,
+  offset) bounds what it can decode, which for engine speed is 0 to
+  16383.75: a span, not a gauge's range.
+- **The model's rows are the set's defs in order** (`setSignalSet`),
+  each with `IdRole`, `NameRole`, `UnitRole` (converted), `DecimalsRole`,
+  `GroupRole`, `IsTextRole`, `LabelRole`, `HiddenRole`, `RefusedCodeRole`,
+  `WindowHighRole`, `WindowLowRole`, `HasValueRole`, `AgeMsRole`.
+- **Preferences** are QML `Settings` over QSettings (the registry on
+  Windows, an ini under `HAVNE_SETTINGS_DIR` for the tests and the
+  run-havne skill), and the rename's carryover copies every key. The
+  vehicles are one JSON string there (category `vehicles`), parsed and
+  changed by pure functions in `VehicleBook.qml`, tested without a page
+  (`tst_vehiclebook.qml`).
+- **The gauges draw without Canvas** (AnalogGauge's header: a Canvas
+  repaint rasters the whole dial on the CPU at animation rate, which a
+  3x phone screen pays for; a Canvas also paints at its own size under
+  the zoom). Each is a `GaugeBase` (range, easing, zones, the sweep,
+  peak and low hold) inside a `GaugeCard`. DigitalGauge's 8 s trace is
+  a `ShapePath` over an array sampled at 10 Hz.
+- **A `Popup` doesn't fit the zoom** (it draws in the unscaled
+  overlay); every in-page question so far is a panel inside the page's
+  `Flickable`.
+- **The density rules** (`.claude/rules/qml.md`): 48 dp targets on a
+  phone (`Theme.touchTarget`), 8 dp between them, at most three buttons
+  in a phone's row, nothing past the edge at 320 dp.
+
+The decisions of 2026-11-06 hold here as given: the layouts are the
+app's, not a vehicle's, one set every vehicle and session uses; several
+pages, swiped on the phone and clicked or keyed through on the desktop;
+the phone's and the desktop's layouts kept apart; a missing signal
+shows "-" and says so; the night and low-glare looks in red and orange,
+suggesting a segmented bar and a seven-segment readout for the library;
+and no dashboard in `havne-cli`, which isn't a gap.
+
+## Decision
+
+### 1. The library: eight kinds on one contract
+
+Each kind is one QML component on `GaugeBase`, named in a layout by the
+first column. Kinds are append-only: a name is never reused for
+another drawing.
+
+| Kind | Component | What it draws | Its own options | Default span (w x h) |
+|---|---|---|---|---|
+| `analog` | AnalogGauge | Dial, needle, zones, tell-tale peak | `majorStep`, `minorStep`, `labelDivisor`, `caption`, `progress` | 2 x 8 |
+| `ring` | RingGauge | A thick arc colored by zone, a centered readout | none | 1 x 4 |
+| `bar` | BarGauge | A straight LED bar with scale marks, horizontal or vertical | `vertical`, `marks` | 2 x 2 (vertical 1 x 4) |
+| `segments` | SegmentGauge (new) | Discrete cells along a rising curve, each cell taller than the one before (a tachometer's curve), lit up to the value | `cells`, `rise` | 2 x 3 |
+| `digital` | DigitalGauge | A number, its unit, an 8 s trace and the session's low and high | none | 1 x 4 |
+| `seven-segment` | SegmentReadout (new) | Digits of seven segments, the unlit ones faint, the unit beside | `digits` | 1 x 2 |
+| `sparkline` | SparkGauge (new) | One trace over a window, the newest value at its end, the window's low and high as a scale | `window` (10 to 120 s) | 2 x 3 |
+| `shift-light` | ShiftLightBar | A row of lights filling to the shift point, flashing past it | `count` | full width x 1 |
+
+**The shared contract** is `GaugeBase`'s today: `value`, `windowHigh`,
+`windowLow`, `hasValue`, `stale`, `from`, `to`, `label`, `unit`, `note`,
+`decimals`, the zones `coldBelow`, `warnFrom`, `dangerFrom`, the hold
+(`peakValue`, `lowValue`, `resetPeaks`) and `sweep()`. Every kind takes
+the common options `from`, `to`, `coldBelow`, `warnFrom`, `dangerFrom`,
+`decimals` and `peak` (the hold on or off); a shift light reads `from`
+as its first light and `to` as its shift point. A kind ignores a common
+option it has no use for (a seven-segment readout has no zones to
+color, so it colors its digits by them instead).
+
+The new kinds keep the gauges' drawing rule: static items (Shapes,
+Rectangles, Text) built once for a size, and per frame only opacities
+and one transform change. A seven-segment digit is seven Shape paths
+whose opacity follows the digit; a segment cell is a Rectangle whose
+opacity follows the value, as BarGauge's are; the sparkline is
+DigitalGauge's `ShapePath` trace with a longer window (at 10 Hz, 1,200
+points at most), never `StripChart`, which is a Canvas. The sparkline
+samples only while its page is on screen, so a page left and returned
+to starts its trace again; the trace is a glance, Live's chart is the
+record.
+
+Why eight and these: the five the roadmap names, the shift light the
+page has, and the two kinds the night-theme references suggest. A
+kind not on this list (a horizontal needle, a numeric with a bar) waits
+for a user to ask: each kind is a component to draw, test at two sizes
+and keep on three themes.
+
+### 2. A gauge binds to a signal by a reference
+
+A reference is a short string:
+
+- **`id:<n>`**: a built-in set's def by its ID (`id:7003` is `obd2`'s
+  engine speed; `id:1001` the mock's). It matches in every set that
+  holds that ID, so a signal file extending `obd2` keeps `obd2`'s
+  gauges.
+- **`key:<key>`**: a signal file's own def, or a plugin variant's, by
+  its `key` (`key:boost`). It matches the session's file whatever the
+  file's name, so one layout reads `boost` from whichever vehicle's
+  file has that key, and from a recording replayed with its own
+  `signals.json`.
+
+A cell holds an ordered list of references, at most 8, and shows the
+first the session's set provides, as `Tap` does today: the built-in
+layout's engine speed is `["id:1001", "id:7003"]`. A reference of any
+other form is kept as it is and matches nothing, so a later form (a
+`did:` for `uds-generic`, should one be decided) reads in an older
+version as a gauge without its signal, not as damage.
+
+A `uds-generic` row has no reference, so Add doesn't offer it: its ID
+is the URI's order and its name is display text. A DID that belongs on
+a gauge goes in a signal file (ADR-0051), which is also where it gets
+its unit and scale. Names are not references: they differ between sets
+for one quantity and a set may reword them. A file's def ID isn't one
+either: a reordered file renumbers.
+
+**Core's part:** two functions, appended to `signals.h`, additive in
+v0.7.0's feature release (ADR-0048), exported by the shared core and
+regenerated into the Python bindings as every public change is:
+
+```c
+/* The "key" of a def of the file's own (never a base set's, extends):
+ * valid until ecuio_signal_file_free; "" for a base set's def, a def
+ * that isn't the set's, or a NULL argument. The inverse of
+ * ecuio_signal_file_find. */
+const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
+                                  const ecuio_signal_def_t* def);
+
+/* The lowest and highest value a def's field decodes to (scale and
+ * offset applied; INT sign-extended; an ENUM its raw range), in the
+ * def's unit. ECUIO_DECODE_OK, or ECUIO_DECODE_ERR_UNSUPPORTED for a
+ * kind with no such span (FLOAT, the text kinds, COMPUTED), or
+ * ECUIO_DECODE_ERR_NULL. *lo and *hi are written only on OK. */
+int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
+```
+
+The key function takes the def, as `ecuio_enum_label` does, rather
+than an index: the caller has the def (a model row is the set's def at
+that row), and an index would need the set's and the file's numbering
+to be one thing. The range lives in core because it is the field model
+(sign extension, the FLOAT and text kinds have no span): the bridge
+computing it would be a second decoder's worth of rules in the app,
+against rule 2's spirit, and `havne-cli` and the Python bindings get it
+for free.
+
+**The bridge's part:** `SignalListModel` gains `RefRole` (`ref`):
+`id:<n>` for a def of a built-in set (the mock, `obd2`, and a file's
+`extends` base), `key:<key>` for a file's or a plugin variant's own def
+(the file found through the stores' `fileFor(set)` and the bridge's
+own replay files, the key through the function above), "" for
+`uds-generic` and every other row; fixed per set. And `RangeLowRole`
+and `RangeHighRole` (`rangeLow`, `rangeHigh`, through
+`ecuio_display_convert` like the value, so they read in the unit system;
+NaN where core gives no range). `SignalHub` keys its entries by
+reference instead of def ID and `lookup()` takes a list of references;
+its `Entry` adds `ref`, `hidden`, `refusedCode`, `label`, `isText`,
+`rangeLow` and `rangeHigh`. `Bridge.gaugeSignals` becomes a map of
+reference lists (`["id:1001", "id:7003"]` per key), what the built-in
+layout and the Add flow's counterparts (section 5) read.
+
+For building a page with no session connected, the bridge offers
+`Bridge.profileSignals(uri)`: the rows (name, unit, decimals, group,
+ref, rangeLow, rangeHigh, isText) of the set the URI's profile names
+(`ecuio_profile_lookup`: the built-ins, the vehicles' signal files and
+the plugins' variants as registered; none for `uds-generic` or an
+unknown profile). The same shape as the model's rows, so Add's list is
+one delegate either way.
+
+### 3. What a gauge shows without its signal
+
+A layout is never changed because the session lacks a signal: a cell
+naming a signal that no profile, signal file or plugin provides stays
+in the layout, is saved with it, and reads again under the next
+session whose set has it. The gauge draws its face at rest, its value
+"-", and its note says which state it is in, the first that applies:
+
+1. "no session";
+2. "not in this profile: <the cell's label>" (no reference matches a
+   row);
+3. "not supported by this car" (the row is hidden: core found it
+   unsupported or absent);
+4. "refused (7F 22 31)" (the row's `RefusedCodeRole`);
+5. "waiting for data".
+
+A stale value dims (`Theme.staleMs`), as today. In edit mode a cell in
+state 2 or 3 carries a mark, so a user tidying a page sees which gauges
+this vehicle can't fill.
+
+Text rows are never offered. An enumeration row is offered to
+`digital` alone, which shows its label (`LabelRole`) and falls back to
+the number; a seven-segment readout has digits only, and the other
+kinds would plot a code as a quantity.
+
+### 4. Pages, the two forms and the grid
+
+The dashboards are the app's: one set that every vehicle and session
+uses. There are two forms, each with its own pages: **phone** (Android
+and iOS, `Theme.mobile`) and **desktop** (everything else). A layout
+made on one is never shown on the other: a gauge sized for a 384 px
+column reads badly in a 1400 px one. The form is the platform's, not
+the window's width, so a desktop window narrowed under 720 px keeps
+the desktop pages (at fewer columns), and a tablet gets the phone form.
+
+A form holds 1 to 10 pages; a page has a name and 0 to 24 cells. Each
+cell has a span, `w` columns (1 to 12) and `h` rows (1 to 16). The
+**row unit is a quarter of the column width**, so a cell with `h` four
+times `w` is square and the compact kinds (a shift light at `h` 1, a
+bar at 2) keep their proportions at every width; a span wider than the
+grid takes the whole row. Cells are stored **in order**, not at
+positions: placement puts each cell, in order, at the first free block
+of its span scanning rows top to bottom and columns left to right
+(`DashboardBook.place`, pure). So a page reflows when the columns
+change and a move is a change of order.
+
+- **Phone:** 2 columns upright, 4 on its side. Pages swipe
+  (`SwipeView`), a `PageIndicator` above the tab bar.
+- **Desktop:** the columns follow the width, about one per 220 px,
+  between 2 and 12. Page buttons in the header; Left and Right (with no
+  text field focused) go to the previous and next page.
+- A page taller than its area scrolls, as the Dashboard does, with the
+  scroll bar shown while it overflows.
+- **Reset peaks** and the once-a-session sweep act on every page; a
+  change of units resets the peaks, as today.
+
+### 5. Edit mode
+
+Edit starts from the header's **Edit** button on both forms, or a long
+press on a gauge on the phone; **Done** ends it and saves. Every
+control it shows meets the density rules (48 dp targets, 8 dp apart,
+at most three buttons on a phone's row), and every panel it opens is
+in the page, inside its scroll area, never a `Popup`.
+
+- **Add:** a "+" cell at the page's end opens the kinds (each with a
+  small still preview), then the signals: the session's numeric rows
+  with references, searched with `SignalFilterBar` (ADR-0050); with no
+  session, `Bridge.profileSignals` of the URI Settings holds, so a page
+  can be built in the garage.
+- **A new gauge's options:** the label is the row's name; `decimals`
+  the row's; `from` and `to` from section 6's rule; no zones. The
+  references are the picked one plus its counterparts in the other
+  built-in set where `Bridge.gaugeSignals` pairs them, so an
+  engine-speed gauge picked under the mock works under `obd2` and the
+  other way.
+- **The cell's panel** (a tap on a cell in edit mode): signal, label,
+  range, zones, decimals, peak hold, the kind's own options, the span
+  as two steppers (`w` and `h`), and **Move earlier**, **Move later**,
+  **To the start**, **To the end**. A move is a change of order on both
+  forms. Drag-to-reorder, on both forms, is v0.7.1's, on top of the
+  same order: v0.7.0's done-when is a page built from the library that
+  survives a restart, and a drag in a flowing grid adds a
+  pointer-handler layer and a test surface for what four buttons
+  already give.
+- **Remove:** the cell's close button, at `Theme.touchTarget`.
+- **Pages:** add, rename, move left or right, remove (never the last).
+- **Reset to the built-in layout:** under the edit bar's menu, with an
+  in-page confirmation; it replaces this form's pages only.
+
+### 6. Ranges and units
+
+Options are written in the unit the signal decodes to (the metric one
+core gives), with that unit stored in the cell (`unit`), and shown in
+the current unit system through `Bridge.displayValue`, as the
+Dashboard's scales are today. When a reference resolves to a row whose
+unit differs from the cell's (another vehicle's `boost` in another
+unit, judged by `Bridge.displayUnit(cell.unit)` against the row's
+unit), the gauge takes the row's range (section 2) for its scale, keeps
+the stored options for the next match, and its note adds the unit it
+expected.
+
+A new gauge's range (`DashboardBook.defaultRange(unit, rangeLow,
+rangeHigh)`, pure) is a table by the decoded unit first, the field's
+range second, 0 to 100 last: engine speed 0 to 8000, km/h 0 to 260,
+deg C 0 to 150, percent 0 to 100, kPa 0 to 300, V 0 to 16, g/s 0 to
+300, L/h 0 to 60. A field's span alone is wider than a useful dial for
+most 16-bit PIDs, and the table covers nearly every gauge a user adds;
+the user narrows the rest.
+
+### 7. Where it's stored, and how it's read
+
+QML `Settings`, category `dashboards`, as the vehicles are (ADR-0027
+section 5): key `phone` and key `desktop`, each one JSON string, and
+`phonePage` and `desktopPage`, the page last shown (an integer, so a
+swipe doesn't rewrite the layout). A form with no stored text shows the
+built-in layout, which isn't stored until the user's first edit, so a
+later version's improved built-in layout reaches everyone who never
+edited theirs.
+
+```json
+{
+  "format": 1,
+  "pages": [
+    {
+      "name": "Engine",
+      "cells": [
+        { "kind": "shift-light", "w": 12, "h": 1, "label": "Shift lights",
+          "refs": ["id:1001", "id:7003"], "unit": "RPM",
+          "options": { "from": 4500, "to": 6500 } },
+        { "kind": "analog", "w": 2, "h": 8, "label": "Engine speed",
+          "refs": ["id:1001", "id:7003"], "unit": "RPM",
+          "options": { "from": 0, "to": 8000, "dangerFrom": 6800,
+                       "majorStep": 1000, "labelDivisor": 1000, "peak": true } },
+        { "kind": "digital", "w": 1, "h": 4, "label": "Boost",
+          "refs": ["key:boost"], "unit": "kPa",
+          "options": { "from": -100, "to": 150 } }
+      ]
+    }
+  ]
+}
+```
+
+The key is `refs`, never `signals`: a QML property of that name meets
+Qt's macro (qml.md's `signalList` rule), and the page binds cells to
+properties.
+
+The rules are pure functions in a `pragma Singleton`,
+`DashboardBook.qml` (`parse`, `serialize`, `builtIn(form)`, `place`,
+`defaultRange`, `addCell`, `moveCell`, `resizeCell`, `removeCell`,
+`setOptions`, the page functions, `reset`), each taking a document and
+returning a new one, never changing its argument, so
+`tst_dashboardbook.qml` runs them without a page, as
+`tst_vehiclebook.qml` runs VehicleBook's.
+
+**Reading** keeps what it can, and never loses what it can't read:
+
+- **Within format 1,** a cell of a kind this version doesn't know, and
+  any key it doesn't know (in a cell, its options or a page), is kept
+  as read and written back. Such a cell draws as an empty card saying
+  "a gauge this version of Havne doesn't have" and can be removed. So a
+  later version adds kinds and options without a new format, and going
+  back a version loses nothing.
+- **A known field of the wrong type or out of its bounds** drops that
+  cell, or that page when it's the page's own field; the rest reads. A
+  dashboard holds no identity, so one bad cell costs one gauge, not
+  every page (the vehicles drop whole because a half-read entry could
+  name the wrong car).
+- **Text that doesn't parse,** a `format` that isn't a whole number,
+  or a `format` above the one this version reads: the built-in layout
+  shows, the page says once which of these it was ("couldn't be read",
+  "made by a newer version of Havne"), and the stored text is left
+  alone. The first edit after that copies it to `phoneUnread` or
+  `desktopUnread` (one slot, the newest) before saving the new layout.
+- **Bounds:** 10 pages, 24 cells a page, 8 references a cell, a label
+  of 40 characters, `w` 1 to 12, `h` 1 to 16, and 64 KiB of text a
+  form; past a bound the document reads as damaged.
+- **A new format** comes only with a change an older reader would
+  misread; adding a kind, an option or a reference form isn't one.
+
+A file per form under the settings folder was weighed (Alternatives);
+an export and import of a form's pages as a file can follow on top of
+this document.
+
+### 8. havne-cli has no dashboard
+
+Gauges are display only, so `havne-cli` has none, and this isn't a gap
+in it: its values are the same values (`stream --values`, the
+recordings), and the two core functions (section 2) reach it and the
+Python bindings like any other C ABI addition.
+
+### 9. Colors and themes
+
+The gauges take every color from `Theme`, and this ADR adds the roles
+they need so the low-glare and night themes can set them: `gaugeFace`,
+`gaugeValue` (the lit segments, the arc, the readout), `gaugeNeedle`
+(AnalogGauge's needle, a literal today), `gaugeTick`, `gaugeWarn` and
+`gaugeDanger`. Warning and danger differ by more than hue: past
+`dangerFrom` a readout gains a mark beside its value and the zone's
+stroke is heavier. The themes themselves (the palettes, the setting,
+Home's logo) are the themes item's.
+
+### 10. Steps
+
+Each step is handed over on its own branch with its tests and mutants;
+the model named is the one sized for it.
+
+1. **Core** (Opus): `ecuio_signal_file_key` and `ecuio_def_range`,
+   their tests, `test_c_abi`, the exports check, the regenerated
+   `_ecuio.py`.
+2. **The bridge and the hub** (Opus): `RefRole`, `RangeLowRole`,
+   `RangeHighRole`, `profileSignals(uri)`; `SignalHub` by reference
+   with its wider `Entry`; `gaugeSignals` as reference lists. The
+   Dashboard reads through it and looks the same.
+3. **The rules** (Opus): `DashboardBook.qml` with the built-in layout
+   per form (today's gauges, in today's order, at spans that keep their
+   proportions) and every function of section 7; `tst_dashboardbook`.
+4. **The renderer** (Sonnet, to this ADR): `DashboardPage.qml` draws a
+   form's pages from a document (no editing yet): the grid, the phone's
+   swipe, the desktop's buttons and keys, section 3's states and notes,
+   the saved last page. `tst_dashboard` keeps its cases over the
+   built-in layout.
+5. **The new kinds and options** (Sonnet): `segments`, `seven-segment`,
+   `sparkline`; `vertical` and `marks` on the bar; `peak` on every kind.
+6. **Edit mode** (Sonnet for the controls, the rules being step 3's):
+   Edit and Done, Add, the cell's panel, remove, the pages' controls,
+   Reset, the save to `Settings` and the restart test.
+7. **The gauge roles in `Theme`** (Sonnet, with the themes item).
+8. **The done-when run** on the test phone and the desktop: a page built
+   from the library survives a restart; the run sheet names the build.
+
+## Tests
+
+- **Core:** `SignalFileTest` (`test_signals`): every own def's key, ""
+  for an `extends` base's defs, a def of another set and NULL; the same
+  through a plugin variant's file (`PluginTest`). `SignalsTest`: the
+  range of an unsigned, a signed and a scaled field, an ENUM, and
+  UNSUPPORTED for FLOAT, the text kinds and a COMPUTED def; the mock's
+  and `obd2`'s defs each give a range that holds every value the fakes
+  answer. `test_c_abi.c` compiles both declarations as strict C.
+- **Bridge** (`test_bridge`): `RefRole` for the mock, `obd2`, a file
+  extending `obd2` (base `id:`, own `key:`), a plugin variant, a replay
+  with its own `signals.json`, and "" for `uds-generic`; the range
+  roles in both unit systems; `profileSignals` for a built-in, a
+  registered file, `uds-generic` (none) and an unknown name.
+- **Rules** (`tst_dashboardbook.qml`, QML tier): parse and serialize
+  round trips; an unknown kind, an unknown reference form and unknown
+  keys kept; a wrong-typed field drops its cell and keeps the rest; a
+  newer format and damaged text give the built-in layout and leave the
+  text; the first edit copies it to the `Unread` key; each bound;
+  placement at 2, 4 and 12 columns, a span wider than the grid, the
+  order kept across a reflow; each move and page function;
+  `defaultRange` by unit, by field, and the fallback.
+- **The page** (`tst_dashboard.qml`): each kind shows "-" and each note
+  of section 3 in its state; a layout naming a signal no profile has
+  keeps that cell after a profile switch and a save, and the gauge
+  reads again when a set that has it returns; an enum label on
+  `digital`; stale dims; Left and Right and the page buttons on the
+  desktop form, a swipe on the phone form; the last page shown comes
+  back; Add, the panel, move, resize, remove and Reset, each saved to
+  `Settings` (the test's ini under `HAVNE_SETTINGS_DIR`) and read back
+  by a new page (the restart).
+- **Sizes:** the phone form at 384 x 832 and 832 x 384: every cell
+  inside the width (`pastTheEdge`'s rule), every edit control at least
+  `Theme.touchTarget` on the glass; the desktop form at 1280 x 800 and
+  500 x 300 (a whole dial still fits a short page).
+- **Mutants** for each new test, as every new test has.
+- **Manual:** the done-when on the test phone and the desktop, filed
+  in the run sheets.
+
+## Alternatives considered
+
+- **Layouts per vehicle** (the roadmap's first wording, and a file per
+  vehicle id in the design note): each new vehicle would start over;
+  with a missing signal shown as "-", one layout serves every car.
+- **A file per form** (`<settings>/dashboards/phone.json`): a layout
+  is small and changes in place, as the vehicles do; `Settings` already
+  holds those, the rename's carryover copies it, and the tests' ini
+  holds it. Signal files and plugins are files because they are
+  imported and kept by content; a layout is neither.
+- **Binding by name:** names differ between sets for one quantity and
+  can be reworded.
+- **Binding a file's signal by its def ID:** a reordered file
+  renumbers.
+- **One key namespace for every set** (`obd2:rpm`, `mock:rpm`,
+  `user:boost`, `did:7E9:1E1C`), with core naming every def's key: it
+  reads better in the stored text and would reach `uds-generic`, but it
+  needs keys for the mock that don't exist, a buffer-filling call for
+  `obd2`'s computed names, and a way for the bridge to know which
+  namespace a session's set is in. A def ID is already the contract
+  the Dashboard relies on and is as stable as a key; the reference
+  grammar leaves room for a `did:` form later.
+- **The app reading a file's keys from its JSON:** a second reader of
+  the format beside core's strict one, and a plugin's variant files
+  aren't the app's to parse.
+- **The range worked out in the bridge from the def's field:** a
+  second copy of the decoder's rules (sign extension, FLOAT, the text
+  kinds) in the app; core's one function serves every front end.
+- **No default range, or the field's span alone:** the user types a
+  range for every gauge, or narrows a 16,383 rpm dial; a table by unit
+  covers nearly every gauge added.
+- **Cells at fixed grid positions:** they don't reflow between 2 and 4
+  columns; an order does, and a move stays one change.
+- **Square cells (the row unit a whole column):** a shift light or a
+  bar at one row is as tall as it is wide; the quarter-column unit
+  keeps the compact kinds' proportions.
+- **One document holding both forms:** an edit on one form would
+  rewrite the other's text, and nothing moves a layout between them.
+- **Dropping the whole document on any damage** (the vehicles' rule):
+  one bad cell would cost every page.
+- **Drag-to-reorder in v0.7.0:** a pointer-handler layer and a test
+  surface over a flowing grid, for what the panel's move buttons give;
+  v0.7.1 adds it on the same order model.
+- **Canvas for the new kinds, or `StripChart` for the sparkline:** the
+  CPU repaint AnalogGauge avoids, and the zoom's scaling trap.
+- **Offering `uds-generic` DIDs by their name** ("0x7E9 DID 1E1C"):
+  binding by display text, which the rest of this decision refuses; a
+  signal file gives the DID a key, a unit and a scale.
+
+## Consequences
+
+- Any signal a session decodes, numeric and with a reference, can go
+  on any of eight gauges, on pages the user arranges, kept across
+  restarts and shared by every vehicle.
+- The Dashboard page becomes a layout's renderer; today's look is the
+  built-in layout, so a user who never edits sees the same gauges in
+  the same order.
+- Core gains two functions (a minor version); the model three roles and
+  one invokable.
+- A `uds-generic` DID reaches a gauge only through a signal file.
+- A def still has no display range of its own: a new gauge starts
+  from a table by unit, then its field's span. A range in the def's
+  reserved room would be a separate decision.
+- A plugin's default layout for its variants is left to a later
+  decision, on top of this document's format.
+- Alerts on the gauges (the roadmap's optional item) would read the
+  zones' thresholds; they aren't part of this decision.
+- Drag-to-reorder (v0.7.1), and an export and import of a form's
+  pages, build on the order and the document as decided here.
