@@ -107,9 +107,10 @@ ecuio_signal_def_t kObd2Defs[] = {
              16, 0.001, 0.0, "V", 2, 0x42, ECUIO_BYTE_ORDER_BE),
     /* SAE J1979 PID 0x10: air flow rate, (256*A + B)/100 g/s. Two-byte
      * big-endian like RPM/0x42; the 0.01 scale needs no decoder
-     * extension (generic raw*scale + offset). Shown to one decimal. */
+     * extension (generic raw*scale + offset). Shown to two decimals, the
+     * step of the PID (ADR-0056 section 5). */
     obd2_def(ECUIO_OBD2_SIG_MAF_ID, "MAF", ECUIO_VALUE_UINT, 16, 0.01, 0.0,
-             "g/s", 1, 0x10, ECUIO_BYTE_ORDER_BE),
+             "g/s", 2, 0x10, ECUIO_BYTE_ORDER_BE),
     /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
      * def shape as coolant and IAT. Transmission fluid temperature isn't
      * a standard Mode-01 PID (it's manufacturer-specific, usually

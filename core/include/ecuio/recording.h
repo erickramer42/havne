@@ -681,6 +681,10 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
                                                    so its count stays 0 */
 #define ECUIO_EXPORT_LEFT_OUT_COUNT          5u
 
+/* ecuio_export_options_t.layout, the CSV's (ADR-0056 section 5) */
+#define ECUIO_CSV_WIDE 0u /* a column a signal, a row a sweep or a grid */
+#define ECUIO_CSV_LONG 1u /* a row a value: time_s,signal,unit,value */
+
 typedef struct ecuio_export_options {
     uint32_t format;           /* ECUIO_EXPORT_* */
     uint32_t flags;            /* ECUIO_EXPORT_RAW, or 0 */
@@ -693,8 +697,39 @@ typedef struct ecuio_export_options {
                                   exists: written under a name of its
                                   own beside it, renamed into place
                                   once checked */
-    uint64_t reserved[4];      /* zero; ABI growth space */
+    /* The CSV's shape (ADR-0056 section 5); 0 or NULL throughout for
+     * the other formats and for ECUIO_CSV_LONG */
+    uint32_t layout;                 /* ECUIO_CSV_WIDE (0, the default) or
+                                  ECUIO_CSV_LONG */
+    uint32_t row_ms;                 /* wide: 0 a row a sweep, else a grid this
+                                  many ms apart from the recording's zero */
+    uint32_t units;                  /* wide: ECUIO_UNITS_* (signals.h) */
+    uint32_t column_count;           /* wide: the columns named below; 0 takes
+                                  the header's focus line, else every
+                                  number signal in the recording's order */
+    const char* const* columns_utf8; /* the columns by name, in order */
+    uint64_t reserved[1];            /* zero; ABI growth space */
 } ecuio_export_options_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_export_options_t, layout) ==
+                  24 + 2 * sizeof(void*),
+              "export options layout offset is ABI");
+static_assert(offsetof(ecuio_export_options_t, columns_utf8) ==
+                  40 + 2 * sizeof(void*),
+              "export options columns offset is ABI");
+static_assert(sizeof(ecuio_export_options_t) == 56 + 2 * sizeof(void*),
+              "ecuio_export_options_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_export_options_t, layout) ==
+                   24 + 2 * sizeof(void*),
+               "export options layout offset is ABI");
+_Static_assert(offsetof(ecuio_export_options_t, columns_utf8) ==
+                   40 + 2 * sizeof(void*),
+               "export options columns offset is ABI");
+_Static_assert(sizeof(ecuio_export_options_t) == 56 + 2 * sizeof(void*),
+               "ecuio_export_options_t size is ABI");
+#endif
 
 typedef struct ecuio_export_report {
     uint64_t frames;   /* written, made-up ones among them; 0 for CSV */
@@ -710,7 +745,9 @@ typedef struct ecuio_export_report {
     uint64_t signal_count; /* CSV, folder: the signals they're of */
     uint32_t files;          /* folder: the files written */
     uint32_t files_left_out; /* folder: the files it doesn't know */
-    uint64_t reserved[1];    /* zero; ABI growth space */
+    uint64_t rows;           /* CSV wide: the rows written (values counts
+                                the filled cells, signal_count the
+                                columns); 0 otherwise */
 } ecuio_export_report_t;
 
 #if defined(__cplusplus)
@@ -748,13 +785,30 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * written bytes, and every message as it was before any segmenting,
  * searched for the recording's own identity values and VIN-shaped
  * tokens; one match fails the export, leaving no file, with the class
- * in report->failed_class. ECUIO_EXPORT_CSV writes signals.csv's values
- * as samples, a comment line of counts first (pandas: skiprows=1),
- * then time_s,signal,unit,value: a text or hex signal's values and a
- * signal keyed as an identification reply are left out unless RAW; a
- * name, unit or raw text value that starts as a spreadsheet formula
- * does (=, +, -, @, a tab, a CR) fails it, while a number written as
- * recorded, such as -12.5, is exempt. Markers aren't written.
+ * in report->failed_class. ECUIO_EXPORT_CSV writes signals.csv's number
+ * values. ECUIO_CSV_WIDE, the default (ADR-0056 sections 4 and 5): a
+ * column a signal, Time (ms) first; a row each time every column in
+ * the rule has a sample newer than the last row, at the completing
+ * sample's time in whole ms from the recording's zero, each cell the
+ * column's newest value, held, never interpolated; a column with no
+ * sample for 1 s, or 3x its usual interval when that is longer, leaves
+ * the rule and its cells stay empty until its next sample; with
+ * row_ms, a grid of that many ms from the zero instead, each row the
+ * newest values at its time, a row with no new cell skipped. The
+ * columns are columns_utf8's names in order (one the recording lacks
+ * is an empty column), else the header's focus line's, else every
+ * number signal in the recording's order that has a sample in range.
+ * Each cell carries its signal's decimal places (the header's; an
+ * older recording's the most its values show) in units
+ * (ecuio_display_convert), the head cell "Name (unit)" in the unit
+ * shown; CRLF, no comment line, RFC 4180 quotes only where needed.
+ * ECUIO_CSV_LONG writes a row a value, a comment line of counts first
+ * (pandas: skiprows=1), then time_s,signal,unit,value. In both, a text
+ * or hex signal's values and a signal keyed as an identification reply
+ * are left out unless RAW (never columns); a name, unit or raw text
+ * value that starts as a spreadsheet formula does (=, +, -, @, a tab,
+ * a CR) fails it, while a number written as recorded, such as -12.5,
+ * is exempt. Markers aren't written.
  * ECUIO_EXPORT_FOLDER makes out_path_utf8 a scrubbed copy of the
  * folder (the caller names it; the source's name, which may hold the
  * vehicle's label, is never carried): frames.csv's kept rows as
@@ -766,9 +820,13 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * doesn't know is left out and counted (files_left_out).
  * Deterministic: the same recording and options give the same bytes.
  * report may be NULL. ECUIO_OK;
- * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
- * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
- * field this core doesn't know, or a to_us other than 0 before from_us;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path, a column_count
+ * with NULL columns_utf8 or a NULL name among them;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, layout or units, a
+ * flag or reserved field this core doesn't know, a to_us other than 0
+ * before from_us, a layout field set for another format or for
+ * ECUIO_CSV_LONG, an empty column name, a column named twice, or a
+ * column that names a text or identification signal;
  * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
  * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
  * 12: ...", never a path; for CSV, a folder with no signals.csv), a
@@ -777,6 +835,40 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  */
 ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
                             ecuio_export_report_t* report);
+
+/* What a wide CSV export would write, per row interval */
+typedef struct ecuio_export_estimate {
+    uint64_t rows;  /* the rows the interval gives */
+    uint64_t bytes; /* the file's size, exact */
+    uint32_t columns;
+    uint32_t flags;       /* zero */
+    uint64_t reserved[2]; /* zero; ABI growth space */
+} ecuio_export_estimate_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_export_estimate_t) == 40,
+              "ecuio_export_estimate_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_export_estimate_t) == 40,
+               "ecuio_export_estimate_t size is ABI");
+#endif
+
+/*
+ * Sizes the wide CSV export options describe (ECUIO_EXPORT_CSV,
+ * ECUIO_CSV_WIDE) for each of the count row intervals in row_ms (0 a
+ * row a sweep), in one pass over the recording: out[i] gets the rows,
+ * the file's exact size (every cell formatted as the export would
+ * write it) and the columns. options->row_ms is ignored and
+ * out_path_utf8 may be NULL; nothing is written and the file check
+ * doesn't run, so an export can still fail it. ECUIO_OK;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL options, folder, row_ms or out;
+ * ECUIO_ERR_INVALID_ARGUMENT as ecuio_export's, for a count of 0, and
+ * for a format or layout other than the wide CSV;
+ * ECUIO_ERR_LOAD_FAILED as ecuio_export's.
+ */
+ecuio_status_t ecuio_export_estimate(const ecuio_export_options_t* options,
+                                     const uint32_t* row_ms, uint32_t count,
+                                     ecuio_export_estimate_t* out);
 
 /* Puts frame index of the caller's frames in *out (zeroed first); nonzero
  * cancels. Called on the caller's thread before ecuio_scrub_frames
