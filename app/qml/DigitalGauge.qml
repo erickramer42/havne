@@ -17,6 +17,9 @@ GaugeBase {
     property string description: ""   // second line under the label
     property int historyLength: 80     // samples at the 10 Hz clock below
     property var history: []
+    // Whether the page holding this tile is on screen: a tile on another
+    // page takes no samples (its trace picks up where it stopped)
+    property bool shown: true
 
     // Clear with the peaks, so a new session draws a fresh trace
     onPeaksReset: history = []
@@ -26,7 +29,8 @@ GaugeBase {
     Timer {
         interval: 100
         repeat: true
-        running: gauge.hasValue && gauge.visible
+        objectName: "sampler"
+        running: gauge.hasValue && gauge.visible && gauge.shown
         onTriggered: {
             const h = gauge.history.slice(1 - gauge.historyLength)
             h.push(gauge.value)

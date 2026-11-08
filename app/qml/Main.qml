@@ -255,6 +255,7 @@ ApplicationWindow {
                     // The name gives way to Mark or the log's controls on a
                     // phone's width
                     Label {
+                        id: headerTitle
                         objectName: "headerTitle"
                         visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
                                  || headerRow.width >= 420
@@ -301,6 +302,7 @@ ApplicationWindow {
                                 color: pill.tone
                                 text: Bridge.connecting ? qsTr("Connecting…")
                                     : Bridge.disconnecting ? qsTr("Disconnecting…")
+                                    : !headerTitle.visible ? Theme.linkShortLabel(Bridge.linkState)
                                     : Bridge.connected
                                       ? qsTr("%1 · %2").arg(Theme.linkLabel(Bridge.linkState))
                                                         .arg(Bridge.uriLabel)

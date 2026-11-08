@@ -247,4 +247,48 @@ TestCase {
         logo.rpm = 7000
         same(logo.litColor, Theme.gaugeDanger, "redline")
     }
+
+    // A scale numeral keeps the decimals its value needs
+    function test_scaleNumeralsKeepTheirDecimals() {
+        const g = createTemporaryObject(analogC, testCase.parent,
+                                        { from: 0, to: 5, majorStep: 0.5, minorStep: 0.25 })
+        const texts = []
+        for (let i = 0; i <= 10; ++i) {
+            const t = g.formatScale(i * 0.5)
+            texts.push(t)
+        }
+        compare(new Set(texts).size, 11, "eleven distinct numerals: " + texts)
+        compare(g.formatScale(1000), "1,000".replace(",", Qt.locale().groupSeparator))
+        compare(g.formatScale(43.5), "43" + Qt.locale().decimalPoint + "5")
+        compare(g.formatScale(95), "95")
+    }
+
+    // A step that does not divide the range draws no tick past its end
+    function test_aStepThatDoesNotDivideTheRangeStopsAtTheEnd() {
+        const g = createTemporaryObject(analogC, testCase.parent,
+                                        { from: 0, to: 7500, majorStep: 1000, minorStep: 500 })
+        compare(g.majorCount, 8, "0 to 7000")
+        compare(g.minorCount, 16, "0 to 7500")
+        g.to = 8000
+        compare(g.majorCount, 9, "an exact multiple keeps its last tick")
+    }
+
+    // The shift lights flash at 3 Hz or under
+    function test_theShiftLightsFlashAtThreeHertzOrUnder() {
+        const g = createTemporaryObject(shiftC, testCase.parent)
+        let flasher = null
+        for (const o of g.data)
+            if (o.hasOwnProperty("interval")) flasher = o
+        verify(flasher, "the flasher timer")
+        verify(2 * flasher.interval >= 1000 / 3, "a cycle is two toggles: " + flasher.interval)
+    }
+
+    // The danger mark is hidden from assistive technology while it is off
+    function test_theDangerMarkIsIgnoredWhileItIsOff() {
+        const g = gaugeOf(kinds[0], 10)
+        const mark = find(g, "dangerMark")
+        compare(mark.Accessible.ignored, true, "value below danger")
+        g.value = 90
+        tryCompare(mark.Accessible, "ignored", false)
+    }
 }

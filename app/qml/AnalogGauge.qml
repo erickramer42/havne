@@ -42,13 +42,13 @@ GaugeBase {
     readonly property real numRadius: r * 0.63
 
     // None while a reused cell rebinds its ends one at a time
-    readonly property int majorCount: Math.max(0, Math.round((to - from) / majorStep) + 1)
-    readonly property int minorCount: Math.max(0, Math.round((to - from) / minorStep) + 1)
+    readonly property int majorCount: Math.max(0, Math.floor((to - from) / majorStep + 1e-9) + 1)
+    readonly property int minorCount: Math.max(0, Math.floor((to - from) / minorStep + 1e-9) + 1)
     // Numerals shrink to fit the arc between them, down to 9 px; past
     // that every other one (or more) is dropped
     readonly property real labelGap: numRadius * sweepAngle * Math.PI / 180
                                      / Math.max(1, majorCount - 1)
-    readonly property real labelEm: 0.62 * String(Math.round(to / labelDivisor)).length + 0.6
+    readonly property real labelEm: 0.62 * formatScale(to / labelDivisor).length + 0.6
     readonly property real numSize: Math.max(9, Math.min(size * 0.07, labelGap / labelEm))
     readonly property int labelEvery: Math.max(1, Math.ceil(numSize * labelEm / labelGap))
 
@@ -204,7 +204,7 @@ GaugeBase {
             readonly property real a: gauge.angleOf(v)
 
             visible: index % gauge.labelEvery === 0
-            text: String(Math.round(v / gauge.labelDivisor))
+            text: gauge.formatScale(v / gauge.labelDivisor)
             x: gauge.px(a, gauge.numRadius) - width / 2
             y: gauge.py(a, gauge.numRadius) - height / 2
             font.pixelSize: gauge.numSize

@@ -46,6 +46,15 @@ TestCase {
         compare(Theme.linkLabel(data.state), data.label)
     }
 
+    // The one word a tight header shows in the pill
+    function test_linkShortLabel() {
+        const words = { ok: "Live", fault: "Fault", requests: "Failing", quiet: "Quiet",
+                        stopped: "Stopped", disconnected: "Offline", degraded: "Degraded",
+                        "a later state": "Degraded" }
+        for (const state of Object.keys(words))
+            compare(Theme.linkShortLabel(state), words[state], state)
+    }
+
     // The stale age is core's, through the bridge
     function test_staleMsIsCores() {
         // ECUIO_VALUE_STALE_US, 3 s: compared with the number, since

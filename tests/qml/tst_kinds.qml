@@ -546,6 +546,7 @@ TestCase {
         tryVerify(() => !isNaN(g.peakValue), 2000, "a peak is held")
         waitForRendering(g)
         verify(mark.visible, "the mark shows")
+        same(mark.color, Theme.gaugeTick, "no zone's color")
         if (data.tag === "bar") {
             const bar = find(g, "bar")
             fuzzyCompare(mark.x + mark.width / 2, bar.x + 0.7 * bar.width, 1, "at 70 % along the bar")
@@ -583,5 +584,33 @@ TestCase {
         waitForRendering(flat)
         const fm = findChild(flat, "peakMark")
         verify(fm.x + fm.width <= findChild(flat, "bar").x + findChild(flat, "bar").width + 0.5, "not past the track's end")
+    }
+
+    // A bar too short for ten segments draws as many as fit, none narrower
+    // than the least width
+    function test_aShortBarDrawsAsManySegmentsAsFit() {
+        const g = make(barC, { vertical: true, width: 100, height: 130 })
+        g.hasValue = true
+        g.value = 50
+        waitForRendering(g)
+        const segments = all(g, "segment")
+        verify(segments.length >= 2 && segments.length < 10, "fewer than ten: " + segments.length)
+        for (const s of segments)
+            verify(s.height >= g.segmentWidth - 0.01, "a segment is " + s.height + " long")
+        const tall = make(barC, { vertical: true, width: 100, height: 260 })
+        tall.hasValue = true
+        waitForRendering(tall)
+        verify(all(tall, "segment").length >= 10, "ten or more when they fit")
+    }
+
+    // The sparkline's trace does not move as its scale labels change width
+    function test_theSparklinesTraceStaysPutWhenALabelGainsADigit() {
+        const g = make(sparkC, { windowS: 10 })
+        const box = find(g, "scaleBox")
+        const empty = box.width
+        g.history = [9, 9.5]
+        compare(box.width, empty, "two short labels")
+        g.history = [9, 100]
+        compare(box.width, empty, "a three-digit label")
     }
 }

@@ -730,6 +730,52 @@ TestCase {
         live.listShare = kept
     }
 
+    // The Dashboard's title row fits a phone's width whatever the font:
+    // a title longer than any font makes "Dashboard" stands in for a wide
+    // one, and gives way, eliding, while the buttons keep their words
+    function test_theDashboardsHeaderFitsWhateverTheFont_data() {
+        return [{ tag: "phone" }, { tag: "desktop" }]
+    }
+    function test_theDashboardsHeaderFitsWhateverTheFont(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = data.tag
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
+        verify(waitForPolish(main), "laid out at 384 px")
+        const header = find(dash, "resetPeaks").parent
+        const title = header.children[0]
+        compare(title.text, qsTr("Dashboard"), "the title")
+        const whole = title.implicitWidth
+        // At a phone's width the buttons are no wider than their words,
+        // so the title has the row's width less theirs in any font. A
+        // layout rounds a fractional width up to a whole pixel
+        for (const n of ["resetPeaks", "dashEdit"]) {
+            const b = find(dash, n)
+            verify(b.width <= Math.ceil(Math.max(40, b.implicitContentWidth + 12)) + 0.5,
+                   n + " is " + b.width + " px for " + b.implicitContentWidth + " px of words")
+        }
+        header.title = qsTr("Dashboard").repeat(4)
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const out = pastTheEdge(header, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        verify(title.truncated, "the long title elides")
+        for (const n of ["resetPeaks", "dashEdit"]) {
+            const words = find(dash, n).contentItem
+            compare(words.lineCount, 1, n + " on " + words.lineCount + " lines")
+        }
+        // Given room, the title is whole again and no wider than its words
+        header.title = qsTr("Dashboard")
+        verify(waitForPolish(main), "laid out again")
+        compare(title.truncated, false, "whole at 384 px")
+        verify(title.width <= Math.ceil(whole) + 0.5, "no wider than its words: " + title.width)
+    }
+
     // The phone's link state: a line of its own under the title row,
     // no taller than its words, which name the state (never the color
     // alone)
@@ -758,6 +804,34 @@ TestCase {
         verify(words.font.pixelSize <= 13, "the small font")
     }
 
+    // A phone on its side has the link state in the title row, so the line
+    // under it, a gauge row's height, is gone
+    function test_aPhoneOnItsSideKeepsTheLinkStateInTheTitleRow() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const line = find(dash, "linkLine")
+        const inRow = find(dash, "linkInRow")
+        tryVerify(() => line.active && !inRow.active, 3000, "upright: a line of its own")
+        main.width = 832
+        main.height = 384
+        tryVerify(() => Theme.shortLayout, 2000, "on its side")
+        tryVerify(() => !line.active && inRow.active, 3000, "on its side: in the row")
+        const header = find(dash, "resetPeaks").parent
+        tryVerify(() => inRow.item && inRow.item.children[1].width > 0, 3000, "laid out")
+        const words = inRow.item.children[1]
+        verify(words.mapToItem(header, 0, 0).y < header.height, "in the title row")
+        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
+        main.width = 384
+        main.height = 832
+        tryVerify(() => line.active && !inRow.active, 3000, "upright again")
+    }
+
     // Edit mode's controls on the phone: each a touch target, the bar at
     // most three buttons
     function test_thePhonesEditControlsAreTouchTargets() {
@@ -769,7 +843,13 @@ TestCase {
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
         dash.form = "phone"
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        verify(find(dash, "dashEdit").height >= Theme.touchTarget - 0.5, "Edit")
+        // Measured once the phone's density holds: before it, a button is
+        // the desktop's height and the touch size the desktop's too
+        tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
+        verify(waitForPolish(main), "laid out")
+        for (const n of ["resetPeaks", "dashEdit"])
+            verify(find(dash, n).height >= Theme.touchTarget - 0.5,
+                   n + " is " + find(dash, n).height + " px tall")
         dash.startEditing()
         const bar = find(dash, "dashEditBar")
         compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").length, 3,
@@ -970,6 +1050,9 @@ TestCase {
         verify(disconnect.visible)
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way to Start log on a phone")
+        const pillText = find(main.contentItem, "linkPillText")
+        tryCompare(pillText, "text", "Live", 5000, "the pill is a word, not 'Ses...'")
+        verify(!pillText.truncated, "and it fits")
         let out = pastTheEdge(row, main.contentItem, [])
         compare(out.length, 0, "before the log, past " + main.contentItem.width + " px: "
                                + out.join(", "))

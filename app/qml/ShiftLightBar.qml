@@ -22,7 +22,7 @@ GaugeBase {
     property bool flashOn: false
     Timer {
         id: flasher
-        interval: 70
+        interval: 167   // a flash of 3 Hz at most
         repeat: true
         running: gauge.shiftNow
         onTriggered: gauge.flashOn = !gauge.flashOn

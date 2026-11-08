@@ -944,11 +944,17 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   it on its own cell. Decimals shows the row's own while the cell sets
   none.
 - **Density on the phone:** every control in the bar, the Pages row,
-  both questions and the three panels is at least
-  `Theme.touchTarget` tall. The header's link state takes a line of
-  its own under the title row, at the header's small size with no
-  extra padding, and keeps its words beside the dot, so the state is
-  never told by color alone. The desktop header is unchanged.
+  both questions, the three panels and the header's **Reset peaks**
+  and **Edit** is at least `Theme.touchTarget` tall. The header's
+  link state takes a line of its own under the title row, at the
+  header's small size with no extra padding, and keeps its words
+  beside the dot, so the state is never told by color alone.
+- **A narrow header** (under 600 px, either form): Reset peaks and
+  Edit are compact, and the row gives way by order, the desktop's
+  link state first (it has no width of its own, only what is left)
+  and the title last, eliding (`PageHeader.titleShrinks`). So the
+  row fits a phone's width whatever the font's widths, with no width
+  tuned to one font.
 - **A tap on a peak-holding dial** in edit mode also clears its peaks:
   `AnalogGauge`'s own `TapHandler` takes the same tap as the cell's.
 - **Tests:** `QmlTest.dashedit` (`tests/qml/tst_dashedit.qml`):
@@ -978,3 +984,12 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   and `test_thePhonesLinkStateTakesACompactLine`.
   `BridgeTest.ARowsRangeIsShownInTheUnitSystem` checks the three
   decoded keys under both unit systems.
+
+## Appendix: the edit-mode mark for unfilled cells (2026-11-08)
+
+Section 3 says a cell in state 2 or 3 carries a mark in edit mode. The
+page does not draw one: the cell's note ("not supported by this car",
+"refused (7F 22 31)") shows whether or not the page is being edited, so a
+user tidying a page sees which gauges the vehicle can't fill without it.
+The mark stays out of the first release; a cell with no value is shown
+by its note alone.

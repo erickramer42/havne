@@ -951,4 +951,24 @@ TestCase {
         tryVerify(() => allLoaded(page), 30000, "every page loads")
         compare(loaders(page).length, DashboardBook.maxPages * DashboardBook.maxCells)
     }
+
+    // The lit parts take Theme's gaugeValue in every theme, not a color
+    // derived from the primary
+    function test_gaugesTakeTheirValueColorFromTheTheme() {
+        for (const name of Theme.themeNames) {
+            Theme.theme = name
+            const page = createTemporaryObject(pageComponent, testCase)
+            const tach = gauges(page)["Engine speed"]
+            verify(Qt.colorEqual(tach.accent, Theme.gaugeValue),
+                   name + ": " + tach.accent + ", expected " + Theme.gaugeValue)
+        }
+        Theme.theme = "dark"
+    }
+
+    // A ref that names an inherited object key is no signal
+    function test_hubIgnoresInheritedKeys() {
+        const hub = createTemporaryObject(hubComponent, testCase)
+        compare(hub.lookup(["constructor"]), null)
+        compare(hub.lookup(["toString", "__proto__"]), null)
+    }
 }
