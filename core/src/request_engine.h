@@ -225,6 +225,10 @@ struct ecuio_request {
     uint8_t slow;       /* 1: the slow class, else fast (ADR-0039 section 3) */
     uint8_t reply_len;  /* a pack's reply, its records' lengths added; 0
                            for every other request */
+    uint8_t parked;     /* 1: out of the rotation while a focus leaves it
+                           out (ADR-0056 section 2); back on a count of 0 */
+    uint8_t slow_default; /* the class classify or judge_duplicates gave
+                             it, which a focus's end restores */
 };
 
 struct ecuio_scan_entry {
@@ -324,6 +328,14 @@ struct ecuio_request_engine {
     const uint8_t* duplicates = nullptr;
     uint32_t duplicate_count = 0;
     bool pack = false;          /* several PIDs per request (the driver's) */
+    /* ADR-0056 section 2: a focus is on. Every request it parked stays
+     * parked, the kept ones run fast, and a request added later starts
+     * parked, until ecuio_engine_unfocus. */
+    bool focused = false;
+    /* A request joined parked under the focus (ecuio_engine_add): the
+     * driver resolves the picks again, and a pick that names it unparks
+     * it (ecuio_take_focus). Cleared by the focus and its end. */
+    bool focus_joined = false;
     /* Reply timing (ADR-0042): the driver's, NULL for none. Before each
      * frame it hands over, a driver whose frames carry stamps of their
      * own sets stamp_us (session time on the frames' clock) and
@@ -334,6 +346,13 @@ struct ecuio_request_engine {
     int64_t stamp_us = 0;
     uint32_t stamp_breaks = 0;
 };
+
+/* Whether request r is asked in the rotation: not dropped by the probe
+ * and not parked by a focus (ADR-0056 section 2) */
+inline bool ecuio_engine_in_rotation(const ecuio_request& r)
+{
+    return r.dropped == 0 && r.parked == 0;
+}
 
 /* A rotation request's answer or refusal, for reply timing */
 inline void ecuio_engine_time_reply(ecuio_request_engine* e, uint32_t c,
@@ -500,7 +519,16 @@ inline ecuio_engine_add_result ecuio_engine_add(ecuio_request_engine* e,
     }
     r.len = len;
     r.channel = static_cast<uint8_t>(channel);
-    ++e->chans[channel].requests;
+    /* Under a focus a request added later (a scanned DID found) wasn't
+     * there when the focus resolved its picks: it joins parked, and
+     * focus_joined has the driver resolve them again, which unparks it
+     * when a pick names it */
+    r.parked = e->focused ? 1 : 0;
+    if (r.parked == 0) {
+        ++e->chans[channel].requests;
+    } else {
+        e->focus_joined = true;
+    }
     return ecuio_engine_add_result::added;
 }
 
@@ -560,8 +588,9 @@ inline void ecuio_engine_classify(ecuio_request_engine* e,
 {
     for (uint32_t i = 0; i < e->count; ++i) {
         ecuio_request& r = e->requests[i];
-        r.slow =
+        r.slow_default =
             (r.len == 2 && r.bytes[0] == 0x01 && !fast(r.bytes[1])) ? 1 : 0;
+        r.slow = r.slow_default;
     }
 }
 
@@ -585,7 +614,8 @@ inline int32_t ecuio_engine_next_of(ecuio_request_engine* e, uint32_t c,
     for (uint32_t k = 0; k < e->count; ++k) {
         const uint32_t i = (cursor + k) % e->count;
         const ecuio_request& r = e->requests[i];
-        if (r.channel == c && r.dropped == 0 && (r.slow != 0) == slow) {
+        if (r.channel == c && ecuio_engine_in_rotation(r) &&
+            (r.slow != 0) == slow) {
             cursor = (i + 1) % e->count;
             return static_cast<int32_t>(i);
         }
@@ -612,7 +642,7 @@ inline bool ecuio_engine_packable(const ecuio_request_engine* e, uint32_t c,
     const ecuio_engine_channel& ch = e->chans[c];
     const ecuio_request& r = e->requests[i];
     if (!e->pack || ch.unpacked || ch.walking || r.channel != c ||
-        r.dropped != 0 || r.len != 2 || r.bytes[0] != 0x01) {
+        !ecuio_engine_in_rotation(r) || r.len != 2 || r.bytes[0] != 0x01) {
         return false;
     }
     const uint8_t pid = r.bytes[1];
@@ -642,7 +672,8 @@ inline int32_t ecuio_engine_gather(ecuio_request_engine* e, uint32_t c,
          ++k) {
         const uint32_t j = (cursor + k) % e->count;
         const ecuio_request& r = e->requests[j];
-        if (r.channel != c || r.dropped != 0 || (r.slow != 0) != slow) {
+        if (r.channel != c || !ecuio_engine_in_rotation(r) ||
+            (r.slow != 0) != slow) {
             continue;
         }
         if (j == static_cast<uint32_t>(i) || !ecuio_engine_packable(e, c, j)) {
@@ -939,8 +970,68 @@ inline void ecuio_engine_drop(ecuio_request_engine* e, uint32_t i,
     r.dropped = reason;
     r.nrc = nrc;
     ecuio_engine_channel& ch = e->chans[r.channel];
-    --ch.requests;
+    if (r.parked == 0) {
+        --ch.requests; /* a parked one was counted out already */
+    }
     ++ch.generation;
+}
+
+/* Each channel's count of requests in the rotation, after a focus
+ * changed which are in it. A channel whose count changed moves its
+ * generation on, so its support report is published again; one whose
+ * count stayed keeps its generation: its report reads the same. */
+inline void ecuio_engine_recount(ecuio_request_engine* e)
+{
+    uint32_t counts[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t i = 0; i < e->count; ++i) {
+        const ecuio_request& r = e->requests[i];
+        if (ecuio_engine_in_rotation(r) && r.channel < e->chan_count) {
+            ++counts[r.channel];
+        }
+    }
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].requests != counts[c]) {
+            e->chans[c].requests = counts[c];
+            ++e->chans[c].generation;
+        }
+    }
+}
+
+/* ADR-0056 section 2: parks every request keep (one byte per table row,
+ * nonzero kept) leaves out and runs the kept ones in the fast class, so
+ * the rotation is as short as the picks allow. The walk, the scan,
+ * identification, diagnostics, a clear and a request already out are
+ * untouched: a parked request's reply still correlates by the table. A
+ * dropped request stays dropped. */
+inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep)
+{
+    for (uint32_t i = 0; i < e->count; ++i) {
+        ecuio_request& r = e->requests[i];
+        r.parked = keep[i] != 0 ? 0 : 1;
+        if (r.parked == 0) {
+            r.slow = 0;
+        }
+    }
+    e->focused = true;
+    e->focus_joined = false;
+    ecuio_engine_recount(e);
+}
+
+/* The focus's end: every parked request back in the rotation, each in
+ * the class it was given. Nothing moves when no focus is on. */
+inline void ecuio_engine_unfocus(ecuio_request_engine* e)
+{
+    if (!e->focused) {
+        return;
+    }
+    for (uint32_t i = 0; i < e->count; ++i) {
+        ecuio_request& r = e->requests[i];
+        r.parked = 0;
+        r.slow = r.slow_default;
+    }
+    e->focused = false;
+    e->focus_joined = false;
+    ecuio_engine_recount(e);
 }
 
 inline bool ecuio_engine_pid_bit(const uint8_t* bits, uint8_t pid)
@@ -1336,7 +1427,10 @@ inline void ecuio_engine_judge_duplicates(ecuio_request_engine* e, uint32_t c)
             ecuio_request& r = e->requests[i];
             if (r.channel == c && r.len == 2 && r.bytes[0] == 0x01 &&
                 r.bytes[1] == demote) {
-                r.slow = both ? 1 : 0;
+                r.slow_default = both ? 1 : 0;
+                if (!e->focused) {
+                    r.slow = r.slow_default;
+                }
             }
         }
     }

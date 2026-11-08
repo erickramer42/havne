@@ -275,6 +275,7 @@ void request_worker(ecuio_socketcan_transport* t)
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
     uint32_t next_chan = 0;
     int64_t timing_at = 0;
     sent_request pending;
@@ -285,6 +286,8 @@ void request_worker(ecuio_socketcan_transport* t)
     if (t->probe) {
         ecuio_engine_probe(&e, now_us(t));
     }
+    /* A focus set before start applies from the first request */
+    ecuio_take_focus(s, &e, focus_seen);
 
     /* What became of the request awaiting its echo */
     const auto settle = [&](socketcan_sent what) {
@@ -551,6 +554,7 @@ void request_worker(ecuio_socketcan_transport* t)
         }
         ecuio_take_diag_request(s, &e, diag_seen);
         ecuio_take_clear_requests(s, &e, clear_seen);
+        ecuio_take_focus(s, &e, focus_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(s, e, c, t->rx_ids[c], published[c]);
             ecuio_publish_identity(s, e, c, t->rx_ids[c],

@@ -1002,6 +1002,41 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
     uint32_t flags
 );
 
+/*
+ * The analysis log's focus (ADR-0056 section 2): asks only the requests
+ * that carry these signals, until called again; count 0 asks the whole
+ * set again. The picked requests run in the fast class, so the rotation
+ * is as short as the picks allow; the rest are parked: kept in the
+ * table, not refused, asked again on a count of 0. The probe, the DID
+ * scan, identification and diagnostics are untouched, and a request the
+ * probe dropped stays dropped. A DID the scan finds while a focus is on
+ * is asked when the focus picks it, parked otherwise. A session that asks
+ * requests refuses a focus none of whose signals it can ask (passive
+ * signals, broadcast frames a listener hears; Service 09's; a request
+ * the probe dropped; a DID the scan hasn't found; under ?poll=, any but
+ * the polled PID's). The focus is judged against the session's requests
+ * when the call is made: a pick dropped later (by the probe's walk, an
+ * NRC, or the first walk after a focus set before start) can leave a
+ * requesting session asking nothing until the focus changes or ends.
+ * Takes effect on the worker between two requests, never inside an
+ * exchange; before start it applies from the first pass. mock://,
+ * replay:// and a listening session ask nothing, so they accept any
+ * focus and change nothing. Returns at once. The session's one caller
+ * may call it from any thread, while the worker runs (the picks reach it
+ * under a lock), but not at the same time as another call on the
+ * session, ecuio_session_close among them.
+ * The detail (ecuio_last_error_detail) is cleared on entry.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
+ * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
+ * detail, for an id the session's set lacks or a focus that leaves
+ * nothing to request; ECUIO_ERR_SESSION_CLOSED after close.
+ */
+ecuio_status_t ecuio_session_set_focus(
+    ecuio_session_t* session,
+    const uint16_t* signal_ids,
+    uint32_t count
+);
+
 #ifdef __cplusplus
 }
 #endif

@@ -450,6 +450,72 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(ecuio_session_t* session,
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_set_focus(ecuio_session_t* session,
+                                       const uint16_t* signal_ids,
+                                       uint32_t count)
+{
+    ecuio_detail_clear();
+    if (session == nullptr || (signal_ids == nullptr && count > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    const uint32_t defs =
+        (set != nullptr && set->defs != nullptr) ? set->count : 0;
+    std::vector<uint16_t> ids;
+    std::vector<uint8_t> picked;
+    try {
+        if (count > 0) {
+            ids.assign(signal_ids, signal_ids + count);
+        }
+        picked.assign(defs, 0);
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    for (uint32_t k = 0; k < count; ++k) {
+        bool found = false;
+        for (uint32_t i = 0; i < defs; ++i) {
+            if (set->defs[i].id == signal_ids[k]) {
+                picked[i] = 1;
+                found = true;
+            }
+        }
+        if (!found) {
+            ecuio_detail_set("no signal with id %u in profile %s",
+                             static_cast<unsigned>(signal_ids[k]),
+                             session->info.profile);
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        /* A session that asks requests refuses a focus that would leave
+         * it nothing to ask: none of the picks is a request it can make
+         * (askable, kept by its worker). One that asks nothing (the mock,
+         * a replay, listening) takes any focus. */
+        if (count > 0 && session->focus_requests) {
+            bool asks = false;
+            for (uint32_t i = 0;
+                 i < defs && i < session->focus_askable.size() && !asks; ++i) {
+                asks = picked[i] != 0 && session->focus_askable[i] != 0;
+            }
+            if (!asks) {
+                ecuio_detail_set("the focus leaves nothing to request: none "
+                                 "of the picked signals is asked on this "
+                                 "session");
+                return ECUIO_ERR_INVALID_ARGUMENT;
+            }
+        }
+        session->focus_ids.swap(ids);
+        session->focus_defs.swap(picked);
+    }
+    /* The picks first: a worker that sees the count moved reads them */
+    session->focus_generation.fetch_add(1);
+    return ECUIO_OK;
+}
+
 const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
 {
     if (request == nullptr) {

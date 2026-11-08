@@ -6323,3 +6323,285 @@ TEST(SimAskTest, ARecordingAnswersAtTheCallersTime)
     ASSERT_EQ(r.size(), 1u);
     EXPECT_NE(reply_bytes(r[0]), first) << "its last replies hold";
 }
+
+namespace {
+
+/* Starts channel 0's clock over, for a helper that counts time from 0
+ * (rotation_of, packing_turns) run again on an engine that has run:
+ * nothing is out, so only the floor stands in the way */
+void clock_over(ecuio_request_engine* e)
+{
+    ASSERT_EQ(e->chans[0].outstanding, ECUIO_ENGINE_NONE);
+    e->chans[0].next_send_us = 0;
+    e->chans[0].deadline_us = 0;
+}
+
+} // namespace
+
+/* ADR-0056 section 2: a focus parks every request outside it and runs
+ * the picks in the fast class, so a slow PID picked is asked each turn,
+ * the two picks taking turns in table order; a count of 0 unparks them
+ * all and gives each its class back */
+TEST(RequestEngineTest, AFocusParksTheRestAndRunsThePicksFast)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ASSERT_TRUE(
+        ecuio_engine_derive(&e, ecuio_obd2_signal_set(), &rx, 1, nullptr));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    uint32_t slow_row = UINT32_MAX;
+    uint32_t fast_row = UINT32_MAX;
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const uint8_t pid = e.requests[i].bytes[1];
+        if (pid == 0x0C || pid == 0x05) {
+            keep[i] = 1;
+        }
+        if (pid == 0x05) {
+            slow_row = i;
+        }
+        if (pid == 0x0C) {
+            fast_row = i;
+        }
+    }
+    ASSERT_NE(slow_row, UINT32_MAX);
+    ASSERT_NE(fast_row, UINT32_MAX);
+    ASSERT_EQ(e.requests[slow_row].slow, 1u) << "05 is slow by class";
+    const uint32_t before = e.chans[0].requests;
+    const uint32_t generation = e.chans[0].generation;
+
+    ecuio_engine_focus(&e, keep);
+    EXPECT_TRUE(e.focused);
+    EXPECT_EQ(e.chans[0].requests, 2u);
+    EXPECT_GT(e.chans[0].generation, generation);
+    EXPECT_EQ(e.requests[slow_row].slow, 0u) << "a pick runs fast";
+    EXPECT_EQ(e.requests[slow_row].slow_default, 1u);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        EXPECT_EQ(e.requests[i].parked != 0, keep[i] == 0) << "row " << i;
+    }
+    const uint8_t first = slow_row < fast_row ? 0x05 : 0x0C;
+    const uint8_t second = first == 0x05 ? 0x0C : 0x05;
+    EXPECT_EQ(
+        rotation_of(&e, 6),
+        (std::vector<uint8_t>{first, second, first, second, first, second}));
+
+    ecuio_engine_unfocus(&e);
+    ASSERT_NO_FATAL_FAILURE(clock_over(&e));
+    EXPECT_FALSE(e.focused);
+    EXPECT_EQ(e.chans[0].requests, before);
+    EXPECT_EQ(e.requests[slow_row].slow, 1u) << "its class is back";
+    for (uint32_t i = 0; i < e.count; ++i) {
+        EXPECT_EQ(e.requests[i].parked, 0u) << "row " << i;
+        EXPECT_EQ(e.requests[i].slow, e.requests[i].slow_default);
+    }
+    /* Two fast to one slow again: three slow turns in nine, whatever the
+     * phase the focused turns left the counter in */
+    const std::vector<uint8_t> sent = rotation_of(&e, 9);
+    ASSERT_EQ(sent.size(), 9u);
+    size_t slow_turns = 0;
+    for (uint8_t pid : sent) {
+        slow_turns += ecuio_obd2_pid_fast(pid) ? 0 : 1;
+    }
+    EXPECT_EQ(slow_turns, 3u);
+}
+
+/* A focus that leaves a channel nothing to ask: the rotation sends
+ * nothing and the engine has no next event, and the focus's end brings
+ * the rotation back */
+TEST(RequestEngineTest, AFocusWithNoPickOnAChannelLeavesItNothingToAsk)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+    const uint8_t none[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    ecuio_engine_focus(&e, none);
+    EXPECT_EQ(e.chans[0].requests, 0u);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 0), INT64_MAX);
+    ecuio_engine_unfocus(&e);
+    EXPECT_EQ(e.chans[0].requests, 2u);
+    EXPECT_EQ(send_next(&e, 0, 0), 0x0Bu);
+    EXPECT_LT(ecuio_engine_next_event_us(&e, 0), INT64_MAX);
+}
+
+/* The probe's walk runs on under a focus and what it drops stays
+ * dropped after the focus ends; a request both parked and dropped is
+ * counted out of the rotation once, and a rescan unparks nothing.
+ * Bitmap 00's bits: PID p is bit 32 - p, so 0x00180000 lists 0x0C and
+ * 0x0D, leaves 0x0B clear, and ends the chain. */
+TEST(RequestEngineTest, TheWalkDropsUnderAFocusAndADropOutlivesIt)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C, 0x0D}));
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    keep[1] = 1; /* 0x0C */
+    ecuio_engine_focus(&e, keep);
+    ecuio_engine_probe(&e, 0);
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
+    ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0x00180000u, 4 * kMs),
+              ecuio_reply::positive);
+    EXPECT_FALSE(e.chans[0].walking);
+    EXPECT_NE(e.requests[0].dropped, 0u) << "0x0B is unsupported";
+    EXPECT_EQ(e.requests[0].parked, 1u);
+    EXPECT_EQ(e.chans[0].requests, 1u) << "0x0C alone; 0x0B counted out once";
+    EXPECT_EQ(send_next(&e, 0, 4 * kMs + ECUIO_ENGINE_GAP_US), 0x0Cu);
+    ecuio_engine_rescan(&e);
+    EXPECT_EQ(e.requests[0].parked, 1u) << "a rescan unparks nothing";
+    EXPECT_EQ(e.requests[2].parked, 1u);
+    ecuio_engine_unfocus(&e);
+    EXPECT_NE(e.requests[0].dropped, 0u) << "the drop outlives the focus";
+    EXPECT_EQ(e.requests[0].parked, 0u);
+    EXPECT_EQ(e.chans[0].requests, 2u) << "0x0C and 0x0D";
+}
+
+/* A pack gathers kept requests alone: under a focus on three fast PIDs
+ * every request out names picks alone, and the three pack together,
+ * the parked rows between them passed over (0x11, a fast row between
+ * 0x0D and 0x10 in the table, is parked) */
+TEST(RequestEngineTest, APackGathersKeptRequestsAlone)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    (void)packing_turns(&e, 200, packed_from(fake_reply));
+    const std::vector<uint8_t> picks = {0x0C, 0x0D, 0x10};
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    for (uint32_t i = 0; i < e.count; ++i) {
+        if (std::find(picks.begin(), picks.end(), e.requests[i].bytes[1]) !=
+            picks.end()) {
+            keep[i] = 1;
+        }
+    }
+    ecuio_engine_focus(&e, keep);
+    ASSERT_NO_FATAL_FAILURE(clock_over(&e));
+    const std::vector<Bytes> sent =
+        packing_turns(&e, 40, packed_from(fake_reply));
+    ASSERT_FALSE(sent.empty());
+    bool all_three = false;
+    for (const Bytes& req : sent) {
+        ASSERT_GE(req.size(), 2u);
+        EXPECT_EQ(req[0], 0x01u);
+        for (size_t k = 1; k < req.size(); ++k) {
+            EXPECT_NE(std::find(picks.begin(), picks.end(), req[k]),
+                      picks.end())
+                << "PID " << int(req[k]) << " isn't a pick";
+        }
+        all_three = all_three || req.size() == 1 + picks.size();
+    }
+    EXPECT_TRUE(all_three) << "the three picks pack as one request";
+}
+
+/* A request out when a focus parks it is still answered: its reply
+ * correlates by the table, and the next request is a pick */
+TEST(RequestEngineTest, ARequestOutWhenParkedIsStillAnswered)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+    EXPECT_EQ(send_next(&e, 0, 0), 0x0Bu);
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    keep[1] = 1; /* 0x0C */
+    ecuio_engine_focus(&e, keep);
+    EXPECT_EQ(e.chans[0].outstanding, 0) << "0x0B stays out";
+    const uint8_t reply[3] = {0x41, 0x0B, 0x64};
+    EXPECT_EQ(
+        ecuio_engine_on_frame(&e, 0, reply, sizeof(reply), 4 * kMs, nullptr),
+        ecuio_reply::positive);
+    EXPECT_EQ(e.chans[0].outstanding, ECUIO_ENGINE_NONE);
+    EXPECT_EQ(send_next(&e, 0, 4 * kMs + ECUIO_ENGINE_GAP_US), 0x0Cu);
+}
+
+/* A duplicate pair judged while a focus is on (a re-walk after a
+ * recovery): the demoted PID's class is remembered, not applied, so a
+ * pick keeps running fast until the focus ends. PID p's bit in the
+ * answered bitmaps is 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8. */
+TEST(RequestEngineTest, ADuplicateJudgedUnderAFocusStaysFastUntilItEnds)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar, false));
+    uint32_t demoted = UINT32_MAX;
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const uint8_t pid = e.requests[i].bytes[1];
+        if (pid == 0x23 || pid == 0x59) {
+            keep[i] = 1;
+        }
+        if (pid == 0x59) {
+            demoted = i;
+        }
+    }
+    ASSERT_NE(demoted, UINT32_MAX);
+    ecuio_engine_focus(&e, keep);
+    for (const uint8_t pid : {uint8_t{0x23}, uint8_t{0x59}}) {
+        e.chans[0].supported[(pid - 1u) / 8u] |= 0x80u >> ((pid - 1u) % 8u);
+    }
+    ecuio_engine_judge_duplicates(&e, 0);
+    EXPECT_EQ(e.requests[demoted].slow_default, 1u) << "judged slow";
+    EXPECT_EQ(e.requests[demoted].slow, 0u) << "but a pick runs fast";
+    ecuio_engine_unfocus(&e);
+    EXPECT_EQ(e.requests[demoted].slow, 1u) << "its class once the focus ends";
+}
+
+/* A request added under a focus (a scanned DID found) starts parked and
+ * marks the focus for resolving again (focus_joined), which the next
+ * focus call clears; it joins the rotation when the focus ends */
+TEST(RequestEngineTest, ARequestAddedUnderAFocusStartsParked)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B}));
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    keep[0] = 1;
+    ecuio_engine_focus(&e, keep);
+    EXPECT_FALSE(e.focus_joined);
+    const uint8_t req[3] = {0x22, 0x1E, 0x1C};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, req, 3), ecuio_engine_add_result::added);
+    EXPECT_EQ(e.requests[1].parked, 1u);
+    EXPECT_EQ(e.chans[0].requests, 1u);
+    EXPECT_TRUE(e.focus_joined);
+    ecuio_engine_focus(&e, keep);
+    EXPECT_FALSE(e.focus_joined) << "the focus resolved again";
+    EXPECT_EQ(e.requests[1].parked, 1u) << "no pick names it";
+    ecuio_engine_unfocus(&e);
+    EXPECT_EQ(e.requests[1].parked, 0u);
+    EXPECT_EQ(e.chans[0].requests, 2u);
+}
+
+/* A focus moves only the generations of the channels whose count it
+ * changed: a channel that keeps every request keeps its generation, so
+ * its support report isn't published again, and a swap of picks inside
+ * a channel that keeps its count moves nothing */
+TEST(RequestEngineTest, AFocusMovesOnlyTheChangedChannelsGenerations)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 2);
+    for (const uint8_t pid : {uint8_t{0x0B}, uint8_t{0x0C}}) {
+        const uint8_t req[2] = {0x01, pid};
+        ASSERT_EQ(ecuio_engine_add(&e, 0, req, 2),
+                  ecuio_engine_add_result::added);
+    }
+    const uint8_t other[2] = {0x01, 0x0D};
+    ASSERT_EQ(ecuio_engine_add(&e, 1, other, 2),
+              ecuio_engine_add_result::added);
+    const uint32_t g0 = e.chans[0].generation;
+    const uint32_t g1 = e.chans[1].generation;
+
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    keep[0] = 1; /* channel 0's 0x0B */
+    keep[2] = 1; /* channel 1's 0x0D */
+    ecuio_engine_focus(&e, keep);
+    EXPECT_EQ(e.chans[0].requests, 1u);
+    EXPECT_GT(e.chans[0].generation, g0) << "channel 0 lost a request";
+    EXPECT_EQ(e.chans[1].generation, g1) << "channel 1 kept its one";
+
+    const uint32_t g0_focused = e.chans[0].generation;
+    keep[0] = 0;
+    keep[1] = 1; /* 0x0C in 0x0B's place */
+    ecuio_engine_focus(&e, keep);
+    EXPECT_EQ(e.requests[0].parked, 1u);
+    EXPECT_EQ(e.requests[1].parked, 0u);
+    EXPECT_EQ(e.chans[0].generation, g0_focused) << "the count stood";
+    EXPECT_EQ(e.chans[1].generation, g1);
+
+    ecuio_engine_unfocus(&e);
+    EXPECT_EQ(e.chans[0].requests, 2u);
+    EXPECT_GT(e.chans[0].generation, g0_focused);
+    EXPECT_EQ(e.chans[1].generation, g1);
+}

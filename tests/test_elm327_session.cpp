@@ -730,6 +730,113 @@ TEST_F(Elm327SessionTest, TheSignalsOfAWithheldPidAreUnsupported)
     EXPECT_EQ(ids, expected);
 }
 
+/* ADR-0056 section 2: a focus set before start has the adapter asked for
+ * the picked PIDs alone from its first request, and a count of 0 has it
+ * ask the rest again */
+TEST_F(Elm327SessionTest, AFocusAsksOnlyThePickedPids)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0&probe=0")), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus(s.s, ids.data(), 2), ECUIO_OK);
+    s.start();
+    /* The Service 01 requests sent, each as its first four characters */
+    const auto requests = [] {
+        std::vector<std::string> out;
+        for (const std::string& cmd : fake_commands()) {
+            if (cmd.size() >= 4 && cmd.compare(0, 2, "01") == 0) {
+                out.push_back(cmd.substr(0, 4));
+            }
+        }
+        return out;
+    };
+    ASSERT_TRUE(wait_for([&] { return requests().size() >= 8; }, 5000));
+    const std::vector<std::string> first = requests();
+    for (size_t k = 0; k < first.size(); ++k) {
+        EXPECT_TRUE(first[k] == "010C" || first[k] == "010D") << first[k];
+    }
+    ASSERT_EQ(ecuio_session_set_focus(s.s, nullptr, 0), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            const std::vector<std::string> sent = requests();
+            for (size_t k = first.size(); k < sent.size(); ++k) {
+                if (sent[k] != "010C" && sent[k] != "010D") {
+                    return true;
+                }
+            }
+            return false;
+        },
+        5000))
+        << "the whole set is asked again";
+}
+
+/* A focus is judged by what the session can still ask: once the walk
+ * has dropped a PID the ECU withholds, a focus on it alone is refused
+ * with the reason in the detail, and one that adds an askable pick is
+ * taken, the session then asking that pick alone */
+TEST_F(Elm327SessionTest, AFocusOnADroppedPidAloneIsRefused)
+{
+    Withheld w({0x0D});
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    uint16_t rpm = 0;
+    uint16_t speed = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Cu) {
+            rpm = d.id;
+        }
+        if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Du) {
+            speed = d.id;
+        }
+    }
+    ASSERT_NE(rpm, speed);
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000));
+    EXPECT_EQ(ecuio_session_set_focus(s.s, &speed, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the focus leaves nothing to request: none of the picked "
+                 "signals is asked on this session");
+    const uint16_t both[2] = {rpm, speed};
+    ASSERT_EQ(ecuio_session_set_focus(s.s, both, 2), ECUIO_OK);
+    const auto requests = [] {
+        std::vector<std::string> out;
+        for (const std::string& cmd : fake_commands()) {
+            if (cmd.size() >= 4 && cmd.compare(0, 2, "01") == 0) {
+                out.push_back(cmd);
+            }
+        }
+        return out;
+    };
+    /* One request may be out when the call lands; the rest are the pick */
+    const size_t from = requests().size() + 1;
+    ASSERT_TRUE(wait_for([&] { return requests().size() >= from + 6; }, 5000));
+    const std::vector<std::string> sent = requests();
+    for (size_t k = from; k < sent.size(); ++k) {
+        EXPECT_EQ(sent[k].substr(0, 4), "010C") << sent[k];
+    }
+}
+
 /* Reply timing (ADR-0042) through an ELM327: a row per request in the
  * rotation, each answered one at least the fake's reply delay after its
  * request, the intervals on the host's clock (an ELM327's lines are
