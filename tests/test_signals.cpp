@@ -1287,3 +1287,190 @@ TEST(SignalsTest, ApplyGateIsTruePredicate)
     f.data[1] = 0xAB;
     EXPECT_EQ(ecuio_def_applies_to_frame(&d, &f), 0);
 }
+
+namespace {
+
+/* A field of `bits` at byte 1 (bit `bit_offset` for LE), so a range
+ * test sees the field's start move nothing */
+ecuio_signal_def_t field_def(int kind, uint8_t bits, double scale = 1.0,
+                             double offset = 0.0,
+                             int order = ECUIO_BYTE_ORDER_LE,
+                             uint8_t bit_offset = 0)
+{
+    ecuio_signal_def_t d = {};
+    d.id = 1;
+    d.kind = static_cast<uint8_t>(kind);
+    d.byte_order = static_cast<uint8_t>(order);
+    d.start_byte = 1;
+    d.bit_offset = bit_offset;
+    d.bit_length = bits;
+    d.scale = scale;
+    d.offset = offset;
+    return d;
+}
+
+struct Span {
+    int rc;
+    double lo;
+    double hi;
+};
+
+Span range_of(const ecuio_signal_def_t& d)
+{
+    Span s{-1, -7.0, -7.0};
+    s.rc = ecuio_def_range(&d, &s.lo, &s.hi);
+    return s;
+}
+
+/* Puts raw into the def's field in payload, as the decoder reads it
+ * back, and the def's mux key at its place */
+void put_raw(const ecuio_signal_def_t& d, uint32_t raw, uint8_t* payload)
+{
+    if (d.byte_order == ECUIO_BYTE_ORDER_BE) {
+        const int n = d.bit_length / 8;
+        for (int i = 0; i < n; ++i) {
+            payload[d.start_byte + i] =
+                static_cast<uint8_t>(raw >> (8 * (n - 1 - i)));
+        }
+    } else {
+        for (int i = 0; i < d.bit_length; ++i) {
+            const uint32_t at = d.start_byte * 8u + d.bit_offset + i;
+            const uint8_t bit = static_cast<uint8_t>(1u << (at & 7u));
+            if ((raw >> i) & 1u) {
+                payload[at >> 3] |= bit;
+            } else {
+                payload[at >> 3] &= static_cast<uint8_t>(~bit);
+            }
+        }
+    }
+    for (int i = 0; i < d.mux_length; ++i) {
+        payload[d.mux_offset + i] =
+            static_cast<uint8_t>(d.mux_key >> (8 * (d.mux_length - 1 - i)));
+    }
+}
+
+} // namespace
+
+// A field's span is every raw value its bits hold, scaled: the lowest
+// and highest a decode can give, whatever the scale's sign
+TEST(SignalsTest, ADefsRangeIsItsFieldsSpanScaled)
+{
+    const auto expect = [](const ecuio_signal_def_t& d, double lo, double hi,
+                           const char* what) {
+        const Span s = range_of(d);
+        EXPECT_EQ(s.rc, ECUIO_DECODE_OK) << what;
+        EXPECT_EQ(s.lo, lo) << what;
+        EXPECT_EQ(s.hi, hi) << what;
+    };
+    expect(field_def(ECUIO_VALUE_UINT, 8), 0.0, 255.0, "a byte");
+    expect(field_def(ECUIO_VALUE_UINT, 1, 1.0, 0.0, ECUIO_BYTE_ORDER_LE, 7),
+           0.0, 1.0, "one bit at bit 7");
+    expect(field_def(ECUIO_VALUE_UINT, 16, 0.25, 0.0, ECUIO_BYTE_ORDER_BE), 0.0,
+           16383.75, "the engine speed field");
+    expect(field_def(ECUIO_VALUE_UINT, 32), 0.0, 4294967295.0, "32 bits");
+    expect(field_def(ECUIO_VALUE_UINT, 8, 1.0, -40.0), -40.0, 215.0,
+           "an offset");
+    expect(field_def(ECUIO_VALUE_INT, 8), -128.0, 127.0, "a signed byte");
+    expect(field_def(ECUIO_VALUE_INT, 12, 0.5, 10.0), -1014.0, 1033.5,
+           "signed, scaled, offset");
+    expect(field_def(ECUIO_VALUE_INT, 32), -2147483648.0, 2147483647.0,
+           "signed 32 bits");
+    expect(field_def(ECUIO_VALUE_UINT, 8, -0.5, 100.0), -27.5, 100.0,
+           "a negative scale swaps the ends");
+    expect(field_def(ECUIO_VALUE_ENUM, 3, 2.0, 5.0), 0.0, 7.0,
+           "an enum's raw range, never scaled");
+}
+
+// What has no span, and a field the decoder refuses, in the decoder's
+// order: the kind and byte order before the bits; *lo and *hi untouched
+TEST(SignalsTest, ADefsRangeRefusesWhatHasNoSpan)
+{
+    ecuio_signal_def_t d = field_def(ECUIO_VALUE_UINT, 8);
+    double lo = -7.0;
+    double hi = -7.0;
+    EXPECT_EQ(ecuio_def_range(nullptr, &lo, &hi), ECUIO_DECODE_ERR_NULL);
+    EXPECT_EQ(ecuio_def_range(&d, nullptr, &hi), ECUIO_DECODE_ERR_NULL);
+    EXPECT_EQ(ecuio_def_range(&d, &lo, nullptr), ECUIO_DECODE_ERR_NULL);
+    EXPECT_EQ(lo, -7.0);
+    EXPECT_EQ(hi, -7.0);
+
+    const auto refused = [](const ecuio_signal_def_t& def, int rc,
+                            const char* what) {
+        const Span s = range_of(def);
+        EXPECT_EQ(s.rc, rc) << what;
+        EXPECT_EQ(s.lo, -7.0) << what;
+        EXPECT_EQ(s.hi, -7.0) << what;
+    };
+    const int unsupported = ECUIO_DECODE_ERR_UNSUPPORTED;
+    const int bad = ECUIO_DECODE_ERR_BAD_PARAMS;
+    refused(four_byte_def(ECUIO_VALUE_FLOAT), unsupported, "a FLOAT");
+    refused(field_def(ECUIO_VALUE_TEXT, 0), unsupported, "TEXT");
+    refused(field_def(ECUIO_VALUE_HEX, 0), unsupported, "HEX");
+    refused(field_def(9, 8), unsupported, "a kind with no decoder");
+    refused(field_def(ECUIO_VALUE_UINT, 8, 1.0, 0.0, 2), unsupported,
+            "a byte order with none");
+    ecuio_signal_def_t computed = field_def(ECUIO_VALUE_UINT, 0);
+    computed.flags = ECUIO_DEF_FLAG_COMPUTED;
+    refused(computed, unsupported, "a COMPUTED def, before its zero bits");
+    computed.bit_length = 8;
+    refused(computed, unsupported, "a COMPUTED def with bits");
+
+    refused(field_def(ECUIO_VALUE_UINT, 0), bad, "no bits");
+    refused(field_def(ECUIO_VALUE_UINT, 33), bad, "33 bits");
+    refused(field_def(ECUIO_VALUE_INT, 8, 1.0, 0.0, ECUIO_BYTE_ORDER_LE, 8),
+            bad, "bit 8");
+    refused(field_def(ECUIO_VALUE_UINT, 12, 1.0, 0.0, ECUIO_BYTE_ORDER_BE), bad,
+            "big-endian, not whole bytes");
+    refused(field_def(ECUIO_VALUE_ENUM, 0), bad, "an enum with no bits");
+
+    /* The order: a kind with no span before its bits, as the decoder */
+    refused(field_def(ECUIO_VALUE_FLOAT, 0), unsupported, "FLOAT, no bits");
+    refused(field_def(ECUIO_VALUE_UINT, 0, 1.0, 0.0, 2), unsupported,
+            "an unknown order, no bits");
+}
+
+// Every def of the built-in sets with a range: its ends are what the
+// decoder gives for the field's lowest and highest raw values, so the
+// range is the decoder's, not a second copy of its rules
+TEST(SignalsTest, EachBuiltInDefsRangeIsTheDecodersExtremes)
+{
+    for (const ecuio_signal_set_t* set :
+         {ecuio_mock_signal_set(), ecuio_obd2_signal_set()}) {
+        ASSERT_NE(set, nullptr);
+        uint32_t ranged = 0;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            const Span s = range_of(d);
+            const bool spanless = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0 ||
+                                  d.kind == ECUIO_VALUE_FLOAT ||
+                                  d.kind == ECUIO_VALUE_TEXT ||
+                                  d.kind == ECUIO_VALUE_HEX;
+            if (spanless) {
+                EXPECT_EQ(s.rc, ECUIO_DECODE_ERR_UNSUPPORTED) << d.name;
+                continue;
+            }
+            ASSERT_EQ(s.rc, ECUIO_DECODE_OK) << d.name;
+            ++ranged;
+            const bool is_int = d.kind == ECUIO_VALUE_INT;
+            const uint32_t all =
+                d.bit_length == 32 ? 0xFFFFFFFFu : (1u << d.bit_length) - 1u;
+            const uint32_t raw_min = is_int ? 1u << (d.bit_length - 1) : 0u;
+            const uint32_t raw_max = is_int ? all >> 1 : all;
+            uint8_t payload[ECUIO_FRAME_DATA_MAX] = {};
+            const uint16_t len = ECUIO_FRAME_DATA_MAX;
+            double a = 0.0;
+            double b = 0.0;
+            put_raw(d, raw_min, payload);
+            ASSERT_EQ(ecuio_decode_signal(&d, payload, len, &a),
+                      ECUIO_DECODE_OK)
+                << d.name;
+            put_raw(d, raw_max, payload);
+            ASSERT_EQ(ecuio_decode_signal(&d, payload, len, &b),
+                      ECUIO_DECODE_OK)
+                << d.name;
+            EXPECT_EQ(s.lo, std::fmin(a, b)) << d.name;
+            EXPECT_EQ(s.hi, std::fmax(a, b)) << d.name;
+        }
+        EXPECT_GT(ranged, 0u);
+    }
+}

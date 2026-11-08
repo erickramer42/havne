@@ -1,5 +1,5 @@
 // File/layer: core/src/signal_file.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest (test_signals); FUZZ: fuzz_signal_file
+// Testing: UNIT: SignalFileTest, PluginTest (test_signals); FUZZ: fuzz_signal_file
 //
 // The signal-file loader (ADR-0051): a file's JSON (json.h) into a
 // signal set the validator passes, everything a file can get wrong
@@ -1217,6 +1217,22 @@ const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file
         }
     }
     return nullptr;
+}
+
+const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
+                                  const ecuio_signal_def_t* def)
+{
+    if (file == nullptr || def == nullptr) {
+        return "";
+    }
+    /* By address: a def of another set, or a copy, with the same ID is
+     * not this file's */
+    for (const auto& k : file->keys) {
+        if (&file->defs[k.second] == def) {
+            return k.first.c_str();
+        }
+    }
+    return "";
 }
 
 void ecuio_signal_file_free(ecuio_signal_file_t* file)

@@ -283,6 +283,23 @@ int main(void)
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
         return 1;
     }
+    {
+        /* ADR-0057's two: a field's span, and a def's key */
+        ecuio_signal_def_t byte_def;
+        double lo = 0.0;
+        double hi = 0.0;
+        memset(&byte_def, 0, sizeof byte_def);
+        byte_def.kind = ECUIO_VALUE_UINT;
+        byte_def.bit_length = 8;
+        byte_def.scale = 1.0;
+        byte_def.offset = -40.0;
+        if (ecuio_def_range(&byte_def, &lo, &hi) != ECUIO_DECODE_OK ||
+            lo != -40.0 || hi != 215.0 ||
+            ecuio_def_range(NULL, &lo, &hi) != ECUIO_DECODE_ERR_NULL ||
+            strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0) {
+            return 1;
+        }
+    }
     if (strcmp(ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_DIAGNOSTICS),
                "Diagnostics") != 0) {
         return 1;

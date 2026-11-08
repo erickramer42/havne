@@ -325,6 +325,20 @@ const char* ecuio_enum_label(const ecuio_signal_set_t* set,
                              const ecuio_signal_def_t* signal,
                              uint32_t raw);
 
+/* The lowest and highest value a def's field decodes to, in the def's
+ * unit: every raw value the field's bits hold (UINT 0 to 2^n - 1, INT
+ * sign-extended from bit_length) with scale and offset applied, lo <=
+ * hi whatever the scale's sign; an ENUM's raw range, as its value is
+ * the raw number. A span, not a gauge's range: a UI narrows it. The
+ * decoder's checks, in its order: ECUIO_DECODE_ERR_NULL for a NULL
+ * argument; ECUIO_DECODE_ERR_UNSUPPORTED for a kind or byte order with
+ * no decoder, a FLOAT, a text kind or a COMPUTED def, none of which
+ * has such a span; then ECUIO_DECODE_ERR_BAD_PARAMS for bit parameters
+ * the decoder refuses (bit_length 0 or over 32, bit_offset over 7, a
+ * big-endian field not whole bytes). *lo and *hi are written only on
+ * ECUIO_DECODE_OK. */
+int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
+
 /* ecuio_validate_signal and ecuio_validate_signal_set return codes.
  * Values are append-only. Per-def codes are positive; the set-level
  * codes are negative, so a set's result says which kind failed. */
@@ -578,6 +592,14 @@ const char* ecuio_signal_file_extends(const ecuio_signal_file_t* file);
  * (extends) have no key here. */
 const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file,
                                                  const char* key);
+
+/* The "key" of a def of the file's own: the inverse of
+ * ecuio_signal_file_find, by the def's address in the file's set. ""
+ * for a base set's def (extends), a def that isn't the file's (another
+ * set's, or a copy), or a NULL argument. Valid until
+ * ecuio_signal_file_free. */
+const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
+                                  const ecuio_signal_def_t* def);
 
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */

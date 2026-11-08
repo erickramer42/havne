@@ -290,6 +290,43 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
     return ECUIO_DECODE_OK;
 }
 
+int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi)
+{
+    if (!def || !lo || !hi) {
+        return ECUIO_DECODE_ERR_NULL;
+    }
+    /* The decoder's order: the kind and byte order, then the bits. A
+     * FLOAT's field holds any binary32, and the text kinds and a
+     * computed def have no field to bound. */
+    if (!is_decodable_kind(def->kind) || def->kind == ECUIO_VALUE_FLOAT ||
+        !is_known_byte_order(def->byte_order) || is_computed(def)) {
+        return ECUIO_DECODE_ERR_UNSUPPORTED;
+    }
+    if (def->bit_length == 0 || def->bit_length > 32 || def->bit_offset > 7 ||
+        (def->byte_order == ECUIO_BYTE_ORDER_BE && !is_whole_bytes(def))) {
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
+    }
+
+    const int n = def->bit_length;
+    double raw_lo = 0.0;
+    double raw_hi = ldexp(1.0, n) - 1.0;
+    if (def->kind == ECUIO_VALUE_INT) {
+        raw_lo = -ldexp(1.0, n - 1);
+        raw_hi = ldexp(1.0, n - 1) - 1.0;
+    }
+    if (def->kind == ECUIO_VALUE_ENUM) {
+        /* Its raw number is the value a label names */
+        *lo = raw_lo;
+        *hi = raw_hi;
+        return ECUIO_DECODE_OK;
+    }
+    const double a = raw_lo * def->scale + def->offset;
+    const double b = raw_hi * def->scale + def->offset;
+    *lo = a <= b ? a : b;
+    *hi = a <= b ? b : a;
+    return ECUIO_DECODE_OK;
+}
+
 const char* ecuio_enum_label(const ecuio_signal_set_t* set,
                              const ecuio_signal_def_t* signal, uint32_t raw)
 {

@@ -1122,6 +1122,7 @@ FUNCTIONS = {
     'ecuio_decode_signal': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, POINTER(c_double)]),  # signals.h
     'ecuio_decode_text': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, c_char_p, c_uint32]),  # signals.h
     'ecuio_def_applies_to_frame': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_frame_t)]),  # signals.h
+    'ecuio_def_range': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_double), POINTER(c_double)]),  # signals.h
     'ecuio_diag_inspect': (c_int, [POINTER(ecuio_channel_diagnostics_t), c_uint32, c_uint32, POINTER(ecuio_inspection_t)]),  # core.h
     'ecuio_display_convert': (c_int, [c_char_p, c_uint8, c_double, c_uint32, POINTER(ecuio_display_value_t)]),  # signals.h
     'ecuio_dtc_format': (c_int, [c_uint16, c_char_p, c_uint32]),  # core.h
@@ -1216,6 +1217,7 @@ FUNCTIONS = {
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h
     'ecuio_signal_file_free': (None, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
