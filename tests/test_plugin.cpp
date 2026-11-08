@@ -861,3 +861,40 @@ TEST(PluginTest, AFreeWaitsForASessionOnASetRegisteredByHand)
     const ecuio_signal_set_t* set = nullptr;
     EXPECT_EQ(ecuio_profile_lookup("by-hand", &set), ECUIO_ERR_UNKNOWN_PROFILE);
 }
+
+// A variant's file names its own defs' keys, a replaced one included,
+// and none for the obd2 base it extends
+TEST(PluginTest, AVariantsFileNamesEachOfItsOwnDefsKeys)
+{
+    Folder f = example_folder();
+    Plugin p = load_folder(f);
+    ASSERT_TRUE(p) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    for (uint32_t v = 0; v < 2; ++v) {
+        const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p.get(), v);
+        ASSERT_NE(file, nullptr);
+        const ecuio_signal_set_t* set = ecuio_signal_file_set(file);
+        uint32_t keyed = 0;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const char* key = ecuio_signal_file_key(file, &set->defs[i]);
+            if (i < obd2->count) {
+                EXPECT_STREQ(key, "") << set->defs[i].name;
+                continue;
+            }
+            ASSERT_NE(std::string(key), "") << set->defs[i].name;
+            EXPECT_EQ(ecuio_plugin_variant_find(p.get(), v, key), &set->defs[i])
+                << key;
+            ++keyed;
+        }
+        EXPECT_EQ(keyed, set->count - obd2->count);
+    }
+    const ecuio_signal_file_t* late = ecuio_plugin_variant_file(p.get(), 1);
+    EXPECT_STREQ(ecuio_signal_file_key(
+                     late, ecuio_plugin_variant_find(p.get(), 1, "trans_temp")),
+                 "trans_temp")
+        << "the later file's def in the earlier's place";
+    EXPECT_STREQ(ecuio_signal_file_key(
+                     late, ecuio_plugin_variant_find(p.get(), 0, "trans_temp")),
+                 "")
+        << "the other variant's def";
+}

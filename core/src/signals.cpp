@@ -6,6 +6,7 @@
 #include <ecuio/signal_sets.h>
 #include <string.h>
 #include <math.h>
+#include <cmath>
 
 /* Internal helper: extract bitfield from byte array (little-endian)
  * Intel (little-endian) bit numbering: the field's LSB sits at bit
@@ -287,6 +288,46 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
         }
     }
     out[pos] = '\0';
+    return ECUIO_DECODE_OK;
+}
+
+int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi)
+{
+    if (!def || !lo || !hi) {
+        return ECUIO_DECODE_ERR_NULL;
+    }
+    /* The decoder's order: the kind and byte order, then the bits, then
+     * the FLOAT check. The text kinds and a computed def have no field
+     * to bound, and a FLOAT's field holds any binary32. */
+    if (!is_decodable_kind(def->kind) ||
+        !is_known_byte_order(def->byte_order) || is_computed(def)) {
+        return ECUIO_DECODE_ERR_UNSUPPORTED;
+    }
+    if (def->bit_length == 0 || def->bit_length > 32 || def->bit_offset > 7 ||
+        (def->byte_order == ECUIO_BYTE_ORDER_BE && !is_whole_bytes(def))) {
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
+    }
+    if (def->kind == ECUIO_VALUE_FLOAT) {
+        return ECUIO_DECODE_ERR_UNSUPPORTED;
+    }
+
+    /* UINT and ENUM scale the raw number as the decoder does */
+    const int n = def->bit_length;
+    double raw_lo = 0.0;
+    double raw_hi = ldexp(1.0, n) - 1.0;
+    if (def->kind == ECUIO_VALUE_INT) {
+        raw_lo = -ldexp(1.0, n - 1);
+        raw_hi = ldexp(1.0, n - 1) - 1.0;
+    }
+    const double a = raw_lo * def->scale + def->offset;
+    const double b = raw_hi * def->scale + def->offset;
+    /* A scale of 0, inf or NaN, an offset NaN or an end past the double
+     * range leaves no span a UI can scale to */
+    if (!std::isfinite(a) || !std::isfinite(b) || a == b) {
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
+    }
+    *lo = a <= b ? a : b;
+    *hi = a <= b ? b : a;
     return ECUIO_DECODE_OK;
 }
 

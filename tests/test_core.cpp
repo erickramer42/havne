@@ -1651,6 +1651,14 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
         /* Half an LSB of each signal's scale, plus float slack */
         const double tol = 0.5 * std::fabs(def.scale) + 0.01;
         EXPECT_LE(worst_err[i], tol) << def.name << " lost precision or clamped";
+        /* Every value the cycle sends inside the def's range, which a
+         * gauge's default scale starts from (ADR-0057) */
+        double range_lo = 0.0;
+        double range_hi = 0.0;
+        ASSERT_EQ(ecuio_def_range(&def, &range_lo, &range_hi), ECUIO_DECODE_OK)
+            << def.name;
+        EXPECT_GE(lo[i], range_lo) << def.name;
+        EXPECT_LE(hi[i], range_hi) << def.name;
 
         switch (def.id) {
         case ECUIO_MOCK_SIG_RPM_ID:

@@ -6323,3 +6323,46 @@ TEST(SimAskTest, ARecordingAnswersAtTheCallersTime)
     ASSERT_EQ(r.size(), 1u);
     EXPECT_NE(reply_bytes(r[0]), first) << "its last replies hold";
 }
+
+// Every value the fakes answer for a Service 01 PID decodes inside its
+// def's range (ecuio_def_range): what a gauge's default scale starts from
+TEST(Obd2SetTest, EveryValueTheFakesAnswerIsInsideItsDefsRange)
+{
+    fake_ecu::reset_diagnostics();
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    auto frame = std::make_unique<ecuio_frame_t>();
+    uint32_t checked = 0;
+    for (unsigned pid = 0; pid <= 0xFF; ++pid) {
+        const unsigned char req[2] = {0x01, static_cast<unsigned char>(pid)};
+        unsigned char out[fake_ecu::kReplyMax];
+        size_t n = 0;
+        if (!fake_ecu::answer(req, 2, -1, out, &n) || out[0] != 0x41) {
+            continue;
+        }
+        *frame = {};
+        frame->arbitration_id = 0x7E8u;
+        frame->data_length = static_cast<uint16_t>(n);
+        std::memcpy(frame->data, out, n);
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (!ecuio_def_applies_to_frame(&d, frame.get())) {
+                continue;
+            }
+            double lo = 0.0;
+            double hi = 0.0;
+            if (ecuio_def_range(&d, &lo, &hi) != ECUIO_DECODE_OK) {
+                continue;
+            }
+            double v = 0.0;
+            ASSERT_EQ(
+                ecuio_decode_signal(&d, frame->data, frame->data_length, &v),
+                ECUIO_DECODE_OK)
+                << d.name;
+            EXPECT_GE(v, lo) << d.name;
+            EXPECT_LE(v, hi) << d.name;
+            ++checked;
+        }
+    }
+    EXPECT_GT(checked, 100u) << "most of the set's numbers were answered";
+    fake_ecu::reset_diagnostics();
+}
