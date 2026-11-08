@@ -376,6 +376,8 @@ jobs:
           key: linuxdeploy-${{ runner.arch }}-${{ hashFiles('packaging/linux/make-appimage.sh') }}
 
       - name: Build and pack the AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
