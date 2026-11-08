@@ -12,6 +12,10 @@
 # notices (core/THIRD_PARTY_NOTICES.txt from its first section on) word
 # for word, since every app links core.
 
+# A script run with -P takes no policies from the project, so it names its
+# version itself: under CMake 3.x, if(IN_LIST) needs CMP0057 NEW.
+cmake_minimum_required(VERSION 3.21)
+
 if(MODE STREQUAL "apk")
     set(_assets "${ROOT}/app/android/assets/havne")
     set(_pairs
