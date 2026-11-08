@@ -56,6 +56,8 @@ qt_add_library(app_ui STATIC
     signalfilter.h
     latencystats.h
     urlwrite.h
+    windowtheme.cpp
+    windowtheme.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
@@ -148,6 +150,10 @@ if(ANDROID)
     # (ADR-0029 section 2; its Java half is in android/src)
     target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
 endif()
+# The title bar's color (windowtheme.cpp, DwmSetWindowAttribute)
+if(WIN32)
+    target_link_libraries(app_ui PUBLIC dwmapi)
+endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
 # the generated QML registration code instantiates them; none of it is
 # this project's code.
@@ -170,8 +176,6 @@ app_add_version_resource(havne havne "Havne ECU reader and logger"
 
 if(WIN32)
     set_target_properties(havne PROPERTIES WIN32_EXECUTABLE TRUE)
-    # The title bar's color (main.cpp, DwmSetWindowAttribute)
-    target_link_libraries(havne PRIVATE dwmapi)
 endif()
 # The name people see is capitalized: Apple's bundle, which Finder and
 # the home screen show (iOS's display name is Xcode's PRODUCT_NAME, the
