@@ -776,6 +776,37 @@ TestCase {
         verify(title.width <= Math.ceil(whole) + 0.5, "no wider than its words: " + title.width)
     }
 
+    // A font whose advances aren't whole pixels (CoreText, DirectWrite at
+    // a scaled display) gives the title a fractional width. Letter spacing
+    // makes one on any platform; the title stays whole wherever it has room
+    function test_aFractionalTitleIsNotElided_data() {
+        return [
+            { tag: "phone at 384", form: "phone", w: 384 },
+            { tag: "desktop at 384", form: "desktop", w: 384 },
+            { tag: "desktop at 1280", form: "desktop", w: 1280 }
+        ]
+    }
+    function test_aFractionalTitleIsNotElided(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = data.form
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        verify(waitForPolish(main), "laid out")
+        const title = find(dash, "resetPeaks").parent.children[0]
+        title.font.letterSpacing = 0.13
+        verify(title.implicitWidth !== Math.round(title.implicitWidth),
+               "a fractional width: " + title.implicitWidth)
+        verify(waitForPolish(main), "laid out with the spacing")
+        waitForRendering(main.contentItem)
+        compare(title.truncated, false,
+                "whole: " + title.width + " px for " + title.implicitWidth + " px of words")
+        Bridge.disconnectSession()
+    }
+
     // The phone's link state: a line of its own under the title row,
     // no taller than its words, which name the state (never the color
     // alone)

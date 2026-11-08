@@ -1071,8 +1071,13 @@ Page {
                         ColumnLayout {
                             id: kindTile
                             required property string modelData
-                            readonly property bool wide: ["bar", "shift-light", "segments", "sparkline"]
-                                                         .indexOf(modelData) >= 0
+                            // Comparisons, not an indexOf on an array literal: the QML
+                            // compiler's C++ for that narrows qsizetype to int, which
+                            // Xcode's -Wshorten-64-to-32 rejects
+                            readonly property bool wide: modelData === "bar"
+                                                         || modelData === "shift-light"
+                                                         || modelData === "segments"
+                                                         || modelData === "sparkline"
                             spacing: 4
                             Loader {
                                 objectName: "preview_" + kindTile.modelData
