@@ -16,6 +16,7 @@
 #include "frames_lines.h"
 #include "health_lines.h"
 #include "info_lines.h"
+#include "log_lines.h"
 #include "timing_line.h"
 #include "transfer_lines.h"
 #include "view_frames.h"
@@ -145,24 +146,39 @@ size_t ring_bytes()
 // shortens it.
 constexpr unsigned long kConnectMs = 60 * 1000;
 
-unsigned long connect_ms()
+// A test knob in milliseconds: the environment's value when it is 100
+// or more, else the fallback
+unsigned long env_ms(const char* name, unsigned long fallback)
 {
     char env[32] = {};
 #ifdef _WIN32
-    const DWORD n =
-        GetEnvironmentVariableA("HAVNE_CLI_CONNECT_MS", env, sizeof env);
+    const DWORD n = GetEnvironmentVariableA(name, env, sizeof env);
     if (n == 0 || n >= sizeof env) {
-        return kConnectMs;
+        return fallback;
     }
 #else
-    const char* value = std::getenv("HAVNE_CLI_CONNECT_MS");
+    const char* value = std::getenv(name);
     if (!value || std::strlen(value) >= sizeof env) {
-        return kConnectMs;
+        return fallback;
     }
     std::memcpy(env, value, std::strlen(value));
 #endif
     const unsigned long v = std::strtoul(env, nullptr, 10);
-    return v >= 100 ? v : kConnectMs;
+    return v >= 100 ? v : fallback;
+}
+
+unsigned long connect_ms()
+{
+    return env_ms("HAVNE_CLI_CONNECT_MS", kConnectMs);
+}
+
+// The log line's period (cli::kLogEveryUs); HAVNE_CLI_LOG_EVERY_MS (tests
+// only) shortens it
+uint64_t log_every_us()
+{
+    return env_ms("HAVNE_CLI_LOG_EVERY_MS",
+                  static_cast<unsigned long>(cli::kLogEveryUs / 1000)) *
+           1000ULL;
 }
 
 std::atomic<bool> g_interrupted{false};
@@ -375,10 +391,12 @@ void write_error(Output& out, ecuio_status_t status,
 
 // ecuio_session_create within connect_ms(): on a thread of its own, the
 // detail carried back from it (it's per thread). Past the deadline, the
-// error line and exit 3 at once; the process's end ends the surrogate
-// with it (its job object), wherever the connect was held.
+// error line (after the start line, when the caller hasn't written it
+// yet: start_first) and exit 3 at once; the process's end ends the
+// surrogate with it (its job object), wherever the connect was held.
 ecuio_status_t create_within(Output& out, const char* uri,
-                             ecuio_session_t** session, std::string* detail)
+                             ecuio_session_t** session, std::string* detail,
+                             bool start_first = false)
 {
     struct Connect {
         std::mutex mutex;
@@ -409,6 +427,9 @@ ecuio_status_t create_within(Output& out, const char* uri,
         char why[96];
         std::snprintf(why, sizeof why, "the connect didn't finish within %lu s",
                       (ms + 999) / 1000);
+        if (start_first) {
+            write_start(out);
+        }
         write_error(out, ECUIO_ERR_TRANSPORT_HARD_FAILURE, why);
         out.flush();
         std::fflush(stderr);
@@ -1884,6 +1905,10 @@ void usage(FILE* to)
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
+        "       havne-cli log <uri> <folder> [--signal <name>]... "
+        "[--label <name>]\n"
+        "                      [--seconds S] [--signals <file> | --plugin "
+        "<pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -1950,6 +1975,15 @@ void usage(FILE* to)
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
         "         profile= names the one to read.\n"
+        "log      records the session <uri> names to a folder of its own in\n"
+        "         <folder>, as stream --record does, asking only the signals\n"
+        "         --signal names (every one with none) so each is read as\n"
+        "         often as the bus allows; export then takes those columns\n"
+        "         by itself. Writes a log line every 10 s with the\n"
+        "         recording's size, no frames or values. Runs until Ctrl+C,\n"
+        "         S seconds, a failed recording or a replay's last frame; a\n"
+        "         lost link is logged and waited out. --signals and --plugin\n"
+        "         as stream's.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -2085,6 +2119,37 @@ bool parse_count(const char* text, uint64_t& out)
     return true;
 }
 
+// stream's and log's profile source: a plugin's variants registered, a
+// signal file's profile put in the URI, or a replay's own signals.json
+// (opened holds the URI then; *uri points into it). An exit code (0 or
+// more) when the command ends here, -1 to go on.
+int take_profile_source(const char* signals, const char* plugin,
+                        const char** uri, std::string* opened)
+{
+    if (plugin != nullptr) {
+        const int rc = use_plugin(plugin, *uri);
+        if (rc >= 0) {
+            return rc;
+        }
+    }
+    if (signals != nullptr) {
+        const int rc = use_signal_file(signals, *uri, opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        *uri = opened->c_str();
+    } else if (plugin == nullptr) {
+        const int rc = use_recording_signals(*uri, opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        if (!opened->empty()) {
+            *uri = opened->c_str();
+        }
+    }
+    return -1;
+}
+
 struct StreamArgs {
     const char* uri = nullptr;
     bool values = false;
@@ -2178,18 +2243,19 @@ void write_recording(Output& out, const char* state, const char* key,
     write_line(out, l);
 }
 
-// --record: a recorder opened and attached before the session starts;
-// false (and the recording line says why) when it can't be
-bool open_recording(Output& out, ecuio_session_t* session,
-                    const StreamArgs& args, ecuio_recorder_t** recorder)
+// stream --record and log: a recorder opened under root (with the label)
+// and attached before the session starts; false (and the recording line
+// says why) when it can't be
+bool open_recording(Output& out, ecuio_session_t* session, const char* root,
+                    const char* label, ecuio_recorder_t** recorder)
 {
     const std::string caller =
         std::string("havne-cli ") + ecuio_version_string();
     const char* lines[] = {caller.c_str()};
     ecuio_record_options_t o;
     std::memset(&o, 0, sizeof o);
-    o.root_utf8 = args.record;
-    o.label_utf8 = args.label;
+    o.root_utf8 = root;
+    o.label_utf8 = label;
     o.header_lines = lines;
     o.header_line_count = 1;
     ecuio_status_t st = ecuio_recorder_open(&o, recorder);
@@ -2281,6 +2347,33 @@ void close_recording(Output& out, ecuio_recorder_t** recorder, const char* why,
     write_line(out, l);
 }
 
+// A health line on each change of the session's error state (the code or
+// its episode count); the state read is left in last_error and episodes
+void poll_health(Output& out, ecuio_session_t* session, int32_t* last_error,
+                 uint32_t* episodes)
+{
+    int32_t now_error = ECUIO_OK;
+    uint32_t now_episodes = 0;
+    ecuio_session_get_error_state(session, &now_error, &now_episodes);
+    if (now_error == *last_error && now_episodes == *episodes) {
+        return;
+    }
+    *last_error = now_error;
+    *episodes = now_episodes;
+    char buf[256];
+    cli::Line l(buf, sizeof buf);
+    l.raw("{\"type\":\"health\"");
+    l.key("code");
+    l.u64(static_cast<uint32_t>(now_error));
+    l.key("message");
+    l.string(ecuio_status_string(static_cast<ecuio_status_t>(now_error)),
+             SIZE_MAX);
+    l.key("episodes");
+    l.u64(now_episodes);
+    l.ch('}');
+    write_line(out, l);
+}
+
 // A replay that doesn't loop has ended when every row is read and every
 // row its faults didn't take (ADR-0041) has been written: frames lost to
 // ?faults= never arrive, so the rows alone would wait forever
@@ -2356,7 +2449,7 @@ int run_stream(const StreamArgs& args)
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
     if (args.record != nullptr &&
-        !open_recording(out, session, args, &recorder)) {
+        !open_recording(out, session, args.record, args.label, &recorder)) {
         out.flush();
         ecuio_session_destroy(session);
         return kExitFailed;
@@ -2469,33 +2562,19 @@ int run_stream(const StreamArgs& args)
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
 
-        int32_t now_error = ECUIO_OK;
-        uint32_t now_episodes = 0;
-        ecuio_session_get_error_state(session, &now_error, &now_episodes);
-        if (now_error != last_error || now_episodes != episodes) {
-            last_error = now_error;
-            episodes = now_episodes;
-            char buf[256];
-            cli::Line l(buf, sizeof buf);
-            l.raw("{\"type\":\"health\"");
-            l.key("code");
-            l.u64(static_cast<uint32_t>(now_error));
-            l.key("message");
-            l.string(
-                ecuio_status_string(static_cast<ecuio_status_t>(now_error)),
-                SIZE_MAX);
-            l.key("episodes");
-            l.u64(now_episodes);
-            l.ch('}');
-            write_line(out, l);
-        }
+        poll_health(out, session, &last_error, &episodes);
         // A replay whose file changed has stopped, short of its last
         // frame: the health line above says so, then the stream ends
-        if (!reason && replay && now_error == ECUIO_ERR_RECORDING_CHANGED) {
+        if (!reason && replay && last_error == ECUIO_ERR_RECORDING_CHANGED) {
             reason = "recording-changed";
         }
     }
 
+    // The loop left on a failed output (a closed pipe, a full stdout):
+    // nothing more is written, but the recording's close needs its why
+    if (reason == nullptr) {
+        reason = "output-failed";
+    }
     // Close joins the worker, whose last callbacks may still be pushing
     // (a replay waiting for room): keep draining until it returns. With
     // the output gone, nothing drains, so the waits end instead.
@@ -2615,6 +2694,255 @@ std::vector<ecuio_can_interface_t> can_interfaces()
         list.resize(count < list.size() ? count : list.size());
     }
     return list;
+}
+
+// The recording's size so far: the recorder's files' bytes summed (its
+// writer thread adds to them meanwhile; a file not yet made counts 0)
+uint64_t folder_bytes(const std::string& folder)
+{
+    static const char* const kFiles[] = {"frames.csv",  "signals.csv",
+                                         "events.log",  "markers.csv",
+                                         "latency.csv", "signals.json"};
+    uint64_t total = 0;
+    for (const char* name : kFiles) {
+        const std::string path = folder + "/" + name;
+#ifdef _WIN32
+        WIN32_FILE_ATTRIBUTE_DATA a;
+        if (GetFileAttributesExW(wide(path.c_str()).c_str(),
+                                 GetFileExInfoStandard, &a)) {
+            total +=
+                (static_cast<uint64_t>(a.nFileSizeHigh) << 32) | a.nFileSizeLow;
+        }
+#else
+        struct stat st{};
+        if (stat(path.c_str(), &st) == 0 && st.st_size > 0) {
+            total += static_cast<uint64_t>(st.st_size);
+        }
+#endif
+    }
+    return total;
+}
+
+// log's frame callback: the frames seen, for a replay's end (stream
+// counts them as it writes them; log writes none)
+struct LogFrames {
+    std::atomic<uint64_t> covered{0};
+};
+
+void on_log_frame(const ecuio_frame_t*, void* user)
+{
+    static_cast<LogFrames*>(user)->covered.fetch_add(1,
+                                                     std::memory_order_release);
+}
+
+// What the log and end lines say: session time since start in whole
+// seconds, the folder's bytes, the rows signals.csv holds
+cli::LogReadout log_readout(uint64_t started, const std::string& folder,
+                            ecuio_recorder_t* recorder)
+{
+    cli::LogReadout r;
+    r.seconds = (ecuio_clock_us() - started) / 1000000u;
+    r.bytes = folder_bytes(folder);
+    ecuio_recorder_state_t st;
+    if (recorder != nullptr &&
+        ecuio_recorder_get_state(recorder, &st) == ECUIO_OK) {
+        r.values = st.value_rows;
+    }
+    return r;
+}
+
+// The analysis log from the command line (ADR-0056 section 7): the
+// session, the focus on the signals named (core asks those alone, as
+// often as the bus allows), a recorder attached before start so the
+// folder's header carries the focus, and a log line each period of
+// session time with the recording's size; no frame or values lines, the
+// folder is the output. The names are checked against the session's set
+// before any line is written, so a typo is usage: exit 2, nothing on
+// stdout. Ends at Ctrl+C, --seconds, a failed recording (exit 1) or a
+// replay's last frame; a lost link is logged in health lines and waited
+// out. Exit codes as stream's.
+int run_log(const cli::LogArgs& args)
+{
+    Output out;
+    ecuio_session_t* session = nullptr;
+    std::string detail;
+    ecuio_status_t st =
+        create_within(out, args.uri, &session, &detail, /*start_first=*/true);
+    if (st != ECUIO_OK) {
+        write_start(out);
+        write_error(out, st, detail.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    std::vector<uint16_t> ids;
+    std::string why;
+    if (!cli::resolve_focus(set, args.names, ids, &why)) {
+        ecuio_session_destroy(session);
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        return kExitUsage;
+    }
+    write_start(out);
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    ecuio_session_get_info(session, &info);
+    const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
+                             !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
+    write_session(out, info);
+    // The focus before the recorder attaches: the header's focus line is
+    // the focus at the attach
+    st = ecuio_session_set_focus(session, ids.empty() ? nullptr : ids.data(),
+                                 static_cast<uint32_t>(ids.size()));
+    if (st != ECUIO_OK) {
+        write_error(out, st, ecuio_last_error_detail());
+        out.flush();
+        ecuio_session_destroy(session);
+        return kExitConnect;
+    }
+    {
+        BigLine b(cli::focus_line_bytes(ids.size()));
+        cli::focus_line(b.line, set, ids);
+        write_line(out, b.line);
+    }
+    ecuio_recorder_t* recorder = nullptr;
+    bool recording_failed = false;
+    if (!open_recording(out, session, args.folder, args.label, &recorder)) {
+        out.flush();
+        ecuio_session_destroy(session);
+        return kExitFailed;
+    }
+    // The folder, which the log and end lines name: a path core can't give
+    // whole is an error, never an empty or cut folder in the lines
+    std::string folder;
+    {
+        char buf[4096];
+        uint32_t len = 0;
+        st = ecuio_recorder_get_folder(recorder, buf, sizeof buf, &len);
+        if (st != ECUIO_OK || len >= sizeof buf) {
+            write_error(out, st != ECUIO_OK ? st : ECUIO_ERR_INVALID_ARGUMENT,
+                        st != ECUIO_OK
+                            ? "the recording's folder couldn't be read"
+                            : "the recording's folder path is longer than "
+                              "4095 bytes");
+            out.flush();
+            ecuio_session_destroy(session);
+            close_recording(out, &recorder,
+                            "havne-cli: the folder couldn't be read",
+                            &recording_failed);
+            out.flush();
+            return kExitFailed;
+        }
+        folder.assign(buf, len);
+    }
+    out.flush();
+
+    LogFrames frames;
+    ecuio_register_frame_callback(session, on_log_frame, &frames);
+    install_handlers();
+    st = ecuio_session_start(session);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        ecuio_session_close(session);
+        ecuio_session_destroy(session);
+        close_recording(out, &recorder, "the session didn't start",
+                        &recording_failed);
+        out.flush();
+        return kExitConnect;
+    }
+
+    // Session time's clock (ADR-0033): --seconds and the log line's
+    // period count a sleep too
+    const uint64_t started = ecuio_clock_us();
+    cli::SleepWatch sleep_watch(ecuio_clock_slept_us());
+    cli::LogTicker ticker(started, log_every_us());
+    int32_t last_error = ECUIO_OK;
+    uint32_t episodes = 0;
+    const char* reason = nullptr;
+    while (!reason) {
+        std::this_thread::sleep_for(kPoll);
+        const uint64_t now = ecuio_clock_us();
+        if (const uint64_t slept = sleep_watch.poll(ecuio_clock_slept_us())) {
+            char buf[64];
+            cli::Line l(buf, sizeof buf);
+            l.raw("{\"type\":\"slept\"");
+            l.key("us");
+            l.u64(slept);
+            l.ch('}');
+            write_line(out, l);
+        }
+        poll_recording(out, recorder, nullptr, &recording_failed);
+        poll_health(out, session, &last_error, &episodes);
+        reason = cli::log_end_reason(
+            g_interrupted.load(), recording_failed,
+            replay_ends &&
+                replay_done(session, info,
+                            frames.covered.load(std::memory_order_acquire)),
+            args.seconds != 0 && now - started >= args.seconds * 1000000u);
+        if (ticker.due(now)) {
+            char buf[256];
+            cli::Line l(buf, sizeof buf);
+            cli::log_line(l, log_readout(started, folder, recorder));
+            write_line(out, l);
+        }
+        out.flush();
+        if (out.failed) {
+            break;
+        }
+    }
+    // The loop left on a failed output (a closed pipe, a full stdout):
+    // nothing more is written, but the recording's close needs its why
+    if (reason == nullptr) {
+        reason = "output-failed";
+    }
+
+    // The close on a thread of its own, as stream's: interrupted and the
+    // close still waiting (an adapter's teardown), the recording ends
+    // whole now, the session going on unrecorded
+    std::atomic<bool> closed{false};
+    std::thread closer([&] {
+        ecuio_session_close(session);
+        closed.store(true);
+    });
+    const auto closing = std::chrono::steady_clock::now();
+    while (!closed.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (recorder != nullptr && g_interrupted.load() &&
+            std::chrono::steady_clock::now() - closing >= kRecordingCloseWait) {
+            close_recording(out, &recorder,
+                            "interrupted: the session's close didn't finish",
+                            &recording_failed);
+        }
+    }
+    closer.join();
+
+    int code = kExitOk;
+    poll_recording(out, recorder, nullptr, &recording_failed);
+    const cli::LogReadout last = log_readout(started, folder, recorder);
+    BigLine end(cli::log_end_line_bytes(folder.c_str()));
+    if (!out.failed) {
+        cli::log_end_line(end.line, reason, folder.c_str(), last);
+    }
+    // The recording's last note is the end line; it closes after its
+    // session, as the app's does
+    if (recorder != nullptr && end.line.size() > 0) {
+        const std::string text(end.line.data(), end.line.size());
+        ecuio_recorder_note(recorder, text.c_str());
+    }
+    ecuio_session_destroy(session);
+    const std::string why_closed = std::string("havne-cli: ") + reason;
+    close_recording(out, &recorder, why_closed.c_str(), &recording_failed);
+    if (!out.failed) {
+        write_line(out, end.line);
+        out.flush();
+    }
+    if (!out.ok() || recording_failed) {
+        code = kExitFailed;
+    }
+#ifdef _WIN32
+    g_done.store(true);
+#endif
+    return code;
 }
 
 struct SimArgs {
@@ -4585,6 +4913,22 @@ int run(int argc, char** argv)
         usage(stderr);
         return kExitUsage;
     }
+    if (command == "log") {
+        cli::LogArgs la;
+        std::string why;
+        if (!cli::parse_log(argc, argv, la, &why)) {
+            std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+            usage(stderr);
+            return kExitUsage;
+        }
+        std::string opened;
+        const int rc =
+            take_profile_source(la.signals, la.plugin, &la.uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        return run_log(la);
+    }
     if (command != "stream") {
         usage(stderr);
         return kExitUsage;
@@ -4646,27 +4990,11 @@ int run(int argc, char** argv)
         usage(stderr);
         return kExitUsage;
     }
-    if (args.plugin != nullptr) {
-        const int rc = use_plugin(args.plugin, args.uri);
-        if (rc >= 0) {
-            return rc;
-        }
-    }
     std::string opened;
-    if (args.signals != nullptr) {
-        const int rc = use_signal_file(args.signals, args.uri, &opened);
-        if (rc >= 0) {
-            return rc;
-        }
-        args.uri = opened.c_str();
-    } else if (args.plugin == nullptr) {
-        const int rc = use_recording_signals(args.uri, &opened);
-        if (rc >= 0) {
-            return rc;
-        }
-        if (!opened.empty()) {
-            args.uri = opened.c_str();
-        }
+    const int rc =
+        take_profile_source(args.signals, args.plugin, &args.uri, &opened);
+    if (rc >= 0) {
+        return rc;
     }
     return run_stream(args);
 }

@@ -444,8 +444,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   frames the Log page drops are recorded too. The bridge opens the
   recorder, attaches it before the session starts, notes its activity
   lines and closes it after the teardown; `havne-cli stream --record`
-  does the same. Reading one back is core's too: `ecuio_recording_open`
-  reads the folder once into each signal's per-second summaries and
+  does the same, and `havne-cli log` records a session narrowed to the
+  signals named, the analysis log from the command line
+  ([ADR-0056](adr/0056-analysis-log.md)). Reading one back is core's
+  too: `ecuio_recording_open` reads the folder once into each signal's
+  per-second summaries and
   an index of where each second starts, so its memory follows the
   recording's seconds, not its size, and a query answers each column's
   lowest and highest from the summaries, or from the raw rows when
