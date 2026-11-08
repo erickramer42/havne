@@ -1484,7 +1484,7 @@ section 1's sketch:
   list); `havne.import_csv(path, folder, column_map=None,
   time_unit=None)` takes the slice when no map is given.
 
-### The preview as built (2026-11-08)
+### The preview as built (2026-11-07)
 
 Step 2 settled these:
 
@@ -1503,12 +1503,15 @@ Step 2 settled these:
   never decides anything from them.
 - **Editing:** a checkbox, name, unit and a number/text toggle a column.
   A column the guess left out can be put back as text named by its
-  header (the name cut to 31 bytes); a column with an empty header can't
-  be named in a map and stays out. Decimals and the other keys are the
+  header (the name cut to 31 bytes on a character); a column with an
+  empty header, or a header the file has twice, can't be named in a map
+  and stays out. The time column is the map's time and never also a
+  signal, whatever the edits say. Decimals and the other keys are the
   guess's. A time of plain numbers takes its unit from a choice of s, ms
   and us; any other time without a unit needs a map with its zone, and
   **Column map...** picks one.
 - **Saved maps:** **Save as map** writes `<settings folder>/maps/<name>.json`
   (the name made of ASCII letters, digits, `-` and `_`, never over a name
-  taken); a **Saved maps** list offers them, and choosing one, like
+  taken) once Import would be enabled, so a map with no time unit is
+  never saved; a **Saved maps** list offers them, and choosing one, like
   **Column map...**, skips the guess until **Use the guess**.
