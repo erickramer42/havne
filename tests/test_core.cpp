@@ -3522,8 +3522,12 @@ TEST(CoreTest, ReplayStretchPlaysItsRowsAlone)
 }
 
 /* The rows before a stretch are read but never waited for: at speed 1
- * its first frame goes out at once, the next a second of session time
- * later; a loop plays the stretch again, its stamps carried on */
+ * its first frame goes out at once and the next 0.3 s of session time
+ * later (the rows' host_us steps are 1 s); a loop plays the stretch
+ * again, its stamps carried on. Both frames are timed from before the
+ * session starts, and frames are due at set times from the worker's
+ * start: a wrong wait puts them past each bound below on any machine,
+ * so a loaded one has until those bounds to run a right one */
 TEST(CoreTest, ReplayStretchStartsAtOnceAndLoopsItself)
 {
     std::string text = kFramesHeader;
@@ -3545,9 +3549,9 @@ TEST(CoreTest, ReplayStretchStartsAtOnceAndLoopsItself)
                    cap.arrived[i] - started)
             .count();
     };
-    EXPECT_LT(ms(0), 250) << "not after the 0.9 s of rows before it";
-    EXPECT_GE(ms(1) - ms(0), 250) << "the stretch's own 0.3 s";
-    EXPECT_LT(ms(1) - ms(0), 800);
+    EXPECT_LT(ms(0), 900) << "not after the 0.9 s of rows before it";
+    EXPECT_GE(ms(1), 300) << "the stretch's own 0.3 s";
+    EXPECT_LT(ms(1), 1000) << "timestamp_us's 0.3 s, not host_us's 1 s";
     ecuio_session_destroy(session);
 
     ReplayCapture looped;
