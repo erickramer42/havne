@@ -2,7 +2,13 @@
 // Testing: Manual smoke; BENCH (the phone run sheet); CI android-build
 //          (compiles it)
 
+#include <QColor>
 #include <QGuiApplication>
+#include <QMetaMethod>
+#include <QMetaProperty>
+#ifdef Q_OS_ANDROID
+#include <QJniEnvironment>
+#endif
 #include <QQmlApplicationEngine>
 #include <QQmlExtensionPlugin>
 #include <QQuickStyle>
@@ -44,19 +50,19 @@ Q_IMPORT_QML_PLUGIN(AppPlugin)
 // (QtActivity's DayNight): light on a light phone. After a rotation, the
 // screen Qt's window didn't reach showed white, and three-button
 // navigation sat on a light scrim (docs/bench-sessions/2026-10-28-android-3.md).
-// Dark like the app instead, no scrim, the navigation buttons drawn light.
-static void darkenAndroidWindow()
+// Dark like the app instead (the theme's bg), no scrim, the navigation
+// buttons drawn light.
+static void darkenAndroidWindow(const QColor& bg)
 {
     using QNativeInterface::QAndroidApplication;
-    QAndroidApplication::runOnAndroidMainThread([]() {
+    QAndroidApplication::runOnAndroidMainThread([bg]() {
         const QJniObject activity = QAndroidApplication::context();
         const QJniObject window =
             activity.callObjectMethod("getWindow", "()Landroid/view/Window;");
         if (!window.isValid())
             return;
         const QJniObject background("android/graphics/drawable/ColorDrawable",
-                                    "(I)V",
-                                    static_cast<jint>(0xFF14141Cu)); // Theme.bg
+                                    "(I)V", static_cast<jint>(bg.rgba()));
         window.callMethod<void>("setBackgroundDrawable",
                                 "(Landroid/graphics/drawable/Drawable;)V",
                                 background.object());
@@ -75,6 +81,9 @@ static void darkenAndroidWindow()
                                         static_cast<jint>(0x10));
             }
         }
+        // A refused call leaves a pending Java exception; the next JNI call
+        // would abort on it
+        QJniEnvironment().checkAndClearExceptions();
     });
 }
 #endif
@@ -110,16 +119,65 @@ protected:
 // The title bar in the header's color (Theme.surface) with the app's text
 // color, so the two read as one bar. Windows 11 takes both; Windows 10
 // refuses them and keeps the dark title bar the color scheme gives it
-static void colorTitleBar(QWindow *window)
+static void colorTitleBar(QWindow *window, const QColor &surface,
+                          const QColor &textColor)
 {
     // WId is the window's HWND held as an integer: the cast is Qt's own
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const auto hwnd = reinterpret_cast<HWND>(window->winId());
-    const COLORREF caption = RGB(0x1e, 0x1e, 0x2e); // Theme.surface
-    const COLORREF text = RGB(0xe8, 0xe8, 0xf0);    // Theme.text
+    const COLORREF caption = RGB(surface.red(), surface.green(), surface.blue());
+    const COLORREF text = RGB(textColor.red(), textColor.green(), textColor.blue());
     (void)DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption, sizeof caption);
     (void)DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text, sizeof text);
 }
+#endif
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
+// Colors the platform's own window from Theme's bg, surface and text, now
+// and again whenever the theme changes them, so a night theme never sits
+// under a bright title bar or a white strip. Owned by the window.
+class WindowTheme : public QObject
+{
+    Q_OBJECT
+public:
+    WindowTheme(QObject *theme, QWindow *window)
+        : QObject(window), m_theme(theme)
+#ifdef Q_OS_WIN
+        , m_window(window)
+#endif
+    {
+        const QMetaObject *themeMeta = theme->metaObject();
+        const QMetaMethod apply =
+            metaObject()->method(metaObject()->indexOfSlot("apply()"));
+        for (const char *name : {"bg", "surface", "text"}) {
+            const QMetaProperty property =
+                themeMeta->property(themeMeta->indexOfProperty(name));
+            if (property.hasNotifySignal())
+                connect(theme, property.notifySignal(), this, apply);
+        }
+        apply_();
+    }
+
+public slots:
+    void apply() { apply_(); }
+
+private:
+    void apply_()
+    {
+#ifdef Q_OS_ANDROID
+        darkenAndroidWindow(m_theme->property("bg").value<QColor>());
+#endif
+#ifdef Q_OS_WIN
+        colorTitleBar(m_window, m_theme->property("surface").value<QColor>(),
+                      m_theme->property("text").value<QColor>());
+#endif
+    }
+
+    QObject *m_theme;
+#ifdef Q_OS_WIN
+    QWindow *m_window;
+#endif
+};
 #endif
 
 int main(int argc, char *argv[])
@@ -196,18 +254,20 @@ int main(int argc, char *argv[])
                 .arg(earlierProductName())
                 .arg(carriedOver));
     }
-#ifdef Q_OS_ANDROID
-    darkenAndroidWindow();
-    if (auto* window =
-            qobject_cast<QWindow*>(engine.rootObjects().constFirst()))
-        window->installEventFilter(new NoDrawWhileInactive(window));
-#endif
-#ifdef Q_OS_WIN
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
     if (auto *window =
             qobject_cast<QWindow *>(engine.rootObjects().constFirst())) {
-        colorTitleBar(window);
+        if (auto *theme = engine.singletonInstance<QObject *>("App", "Theme"))
+            new WindowTheme(theme, window);
+#ifdef Q_OS_ANDROID
+        window->installEventFilter(new NoDrawWhileInactive(window));
+#endif
     }
 #endif
 
     return app.exec();
 }
+
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
+#include "main.moc"
+#endif

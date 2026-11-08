@@ -52,6 +52,28 @@ TestCase {
         LiveViewPage {}
     }
 
+    // The chart paints again when the theme changes, so its traces and
+    // chrome take the new palette with no session moving it
+    function test_theChartPaintsAgainOnANewTheme() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const chart = findChild(page, "chart")
+        verify(chart, "the chart is there")
+        tryVerify(() => chart.available, 2000, "the canvas is ready")
+        const spy = createTemporaryObject(spyComponent, testCase, { target: chart })
+        Theme.theme = "night"
+        spy.wait(2000)
+        verify(spy.count >= 1, "painted again for the night theme")
+        const before = spy.count
+        Theme.theme = "lowGlare"
+        tryVerify(() => spy.count > before, 2000, "and again for low glare")
+        Theme.theme = "dark"
+    }
+
+    Component {
+        id: spyComponent
+        SignalSpy { signalName: "painted" }
+    }
+
     // F on a desktop's keyboard maximizes the chart and gives the list
     // back; typed into Find a signal it's a letter of the filter and
     // leaves the chart as it was. In the test's window, which the keys go to

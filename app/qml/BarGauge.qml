@@ -45,13 +45,24 @@ GaugeBase {
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
             id: valueLabel
+            objectName: "readout"
             text: gauge.valueText
             font.pixelSize: 22
             font.weight: Font.DemiBold
             font.features: ({ "tnum": 1 })
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.text) : Theme.textDim
+            color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+        }
+        // Past dangerFrom, beside the value
+        DangerMark {
+            // The slot stays once a gauge has a danger zone, so the readout
+            // never moves as the mark appears
+            visible: !isNaN(gauge.dangerFrom)
+            opacity: gauge.inDanger ? 1 : 0
+            size: 18
+            anchors.verticalCenter: valueLabel.verticalCenter
         }
         Text {
+            objectName: "unit"
             visible: gauge.hasValue
             anchors.baseline: valueLabel.baseline
             text: gauge.unit
@@ -70,6 +81,7 @@ GaugeBase {
             model: gauge.segments
             delegate: Rectangle {
                 id: seg
+                objectName: "segment"
                 required property int index
                 // Zone color at the segment's midpoint; fill fraction
                 // 0..1 so the leading segment fades rather than snaps
@@ -79,10 +91,18 @@ GaugeBase {
                 readonly property real fill: Math.max(0, Math.min(1,
                     gauge.fraction * gauge.segments - index))
 
+                // The danger zone's segments carry an outline: heavier than
+                // the others, so the zone reads apart by more than its hue
+                readonly property bool inDangerZone: !isNaN(gauge.dangerFrom)
+                    && gauge.from + (index + 0.5) / gauge.segments * (gauge.to - gauge.from)
+                       >= gauge.dangerFrom
+
                 width: (bar.width - (gauge.segments - 1) * gauge.segmentGap) / gauge.segments
                 height: bar.height
                 radius: 2
                 color: Qt.alpha(seg.lit, 0.09)
+                border.width: seg.inDangerZone ? 2 : 0
+                border.color: Qt.alpha(Theme.gaugeDanger, 0.55)
 
                 Rectangle {
                     anchors.fill: parent

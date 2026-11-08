@@ -28,7 +28,7 @@ GaugeBase {
     property string peakLabel: qsTr("PEAK")
     property bool showProgress: false   // lit arc from `from` to the needle
     property bool showPeak: false       // tell-tale marker and readout line
-    property color needleColor: "#ff5a5f"
+    property color needleColor: Theme.gaugeNeedle
 
     // Geometry, all from the square the dial fits in
     readonly property real size: Math.min(width, height)
@@ -72,9 +72,9 @@ GaugeBase {
         anchors.centerIn: parent
         width: gauge.size; height: width; radius: width / 2
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#3a3a52" }
-            GradientStop { position: 0.45; color: "#1b1b28" }
-            GradientStop { position: 1.0; color: "#2c2c42" }
+            GradientStop { position: 0.0; color: Theme.gaugeShade.bezelHi }
+            GradientStop { position: 0.45; color: Theme.gaugeFace }
+            GradientStop { position: 1.0; color: Theme.gaugeShade.bezelLo }
         }
     }
     Shape {
@@ -86,8 +86,8 @@ GaugeBase {
                 centerX: gauge.cx; centerY: gauge.cy - gauge.r * 0.35
                 centerRadius: gauge.r * 1.25
                 focalX: gauge.cx; focalY: gauge.cy - gauge.r * 0.35
-                GradientStop { position: 0.0; color: "#25253a" }
-                GradientStop { position: 1.0; color: "#0e0e15" }
+                GradientStop { position: 0.0; color: Theme.gaugeShade.faceHi }
+                GradientStop { position: 1.0; color: Theme.gaugeShade.faceLo }
             }
             PathAngleArc {
                 centerX: gauge.cx; centerY: gauge.cy
@@ -104,7 +104,7 @@ GaugeBase {
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.tickOuter
             startAngle: gauge.startAngle; sweepAngle: gauge.sweepAngle
-            strokeColor: Qt.alpha(Theme.text, 0.16)
+            strokeColor: Qt.alpha(Theme.gaugeTick, 0.16)
             strokeWidth: Math.max(1, gauge.size * 0.004)
         }
         GaugeArc {
@@ -112,7 +112,7 @@ GaugeBase {
             radius: gauge.tickOuter - gauge.majorLen / 2
             startAngle: gauge.angleOf(gauge.warnStart)
             sweepAngle: gauge.angleOf(gauge.dangerStart) - startAngle
-            strokeColor: Qt.alpha(Theme.warning, 0.14)
+            strokeColor: Qt.alpha(Theme.gaugeWarn, 0.14)
             strokeWidth: gauge.majorLen
         }
         GaugeArc {
@@ -120,22 +120,23 @@ GaugeBase {
             radius: gauge.tickOuter - gauge.majorLen / 2
             startAngle: gauge.angleOf(gauge.dangerStart)
             sweepAngle: gauge.angleOf(gauge.to) - startAngle
-            strokeColor: Qt.alpha(Theme.danger, 0.18)
+            strokeColor: Qt.alpha(Theme.gaugeDanger, 0.30)
             strokeWidth: gauge.majorLen
         }
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.tickOuter
             startAngle: gauge.angleOf(gauge.warnStart)
             sweepAngle: gauge.angleOf(gauge.dangerStart) - startAngle
-            strokeColor: Theme.warning
+            strokeColor: Theme.gaugeWarn
             strokeWidth: Math.max(2, gauge.size * 0.009)
         }
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.tickOuter
             startAngle: gauge.angleOf(gauge.dangerStart)
             sweepAngle: gauge.angleOf(gauge.to) - startAngle
-            strokeColor: Theme.danger
-            strokeWidth: Math.max(2, gauge.size * 0.009)
+            strokeColor: Theme.gaugeDanger
+            // Heavier than the warning stroke: danger is more than a hue
+            strokeWidth: Math.max(4, gauge.size * 0.02)
         }
     }
 
@@ -147,7 +148,7 @@ GaugeBase {
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.ringRadius
             startAngle: gauge.startAngle; sweepAngle: gauge.sweepAngle
-            strokeColor: Qt.alpha(Theme.text, 0.06)
+            strokeColor: Qt.alpha(Theme.gaugeTick, 0.06)
             strokeWidth: gauge.ringWidth
         }
         GaugeArc {
@@ -190,8 +191,8 @@ GaugeBase {
                 height: tick.major ? gauge.majorLen : gauge.minorLen
                 x: gauge.cx - width / 2
                 y: gauge.cy - gauge.tickOuter
-                color: gauge.zoneColor(tick.v, tick.major ? Theme.text
-                                                          : Qt.alpha(Theme.text, 0.5))
+                color: gauge.zoneColor(tick.v, tick.major ? Theme.gaugeTick
+                                                          : Qt.alpha(Theme.gaugeTick, 0.5))
             }
         }
     }
@@ -210,7 +211,7 @@ GaugeBase {
             font.pixelSize: gauge.numSize
             font.weight: Font.DemiBold
             font.features: ({ "tnum": 1 })
-            color: gauge.zoneColor(v, Theme.text)
+            color: gauge.zoneColor(v, Theme.gaugeTick)
         }
     }
 
@@ -227,7 +228,7 @@ GaugeBase {
                 readonly property real m: gauge.size * 0.02
                 readonly property real tip: gauge.cx + gauge.ringRadius - gauge.ringWidth
                 strokeColor: "transparent"
-                fillColor: Theme.warning
+                fillColor: Theme.gaugeWarn
                 startX: wedge.tip; startY: gauge.cy
                 PathLine { x: wedge.tip + wedge.m * 1.6; y: gauge.cy - wedge.m }
                 PathLine { x: wedge.tip + wedge.m * 1.6; y: gauge.cy + wedge.m }
@@ -250,14 +251,29 @@ GaugeBase {
         y: gauge.cy + gauge.r * 0.2
         opacity: gauge.stale ? 0.45 : 1.0
 
-        Text {
+        Item {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: gauge.valueText
-            // Sized to clear the end numerals beside it at full scale
-            font.pixelSize: Math.max(16, gauge.size * 0.1)
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.text) : Theme.textDim
+            width: valueLabel.width
+            height: valueLabel.height
+            Text {
+                id: valueLabel
+                objectName: "readout"
+                text: gauge.valueText
+                // Sized to clear the end numerals beside it at full scale
+                font.pixelSize: Math.max(16, gauge.size * 0.1)
+                font.weight: Font.DemiBold
+                font.features: ({ "tnum": 1 })
+                color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+            }
+            // Past dangerFrom, beside the value
+            DangerMark {
+                // The slot stays once a gauge has a danger zone, so the readout
+                // never moves as the mark appears
+                visible: !isNaN(gauge.dangerFrom)
+                opacity: gauge.inDanger ? 1 : 0
+                size: valueLabel.font.pixelSize * 0.8
+                anchors { left: valueLabel.right; leftMargin: 4; verticalCenter: valueLabel.verticalCenter }
+            }
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -276,7 +292,7 @@ GaugeBase {
             font.pixelSize: Math.max(9, gauge.size * 0.032)
             font.letterSpacing: 1
             font.features: ({ "tnum": 1 })
-            color: gauge.hasValue ? Theme.warning : Theme.textDim
+            color: gauge.hasValue ? Theme.gaugeWarn : Theme.textDim
         }
     }
 
@@ -314,8 +330,8 @@ GaugeBase {
             id: grad
             x1: gauge.cx - gauge.r * 0.18; y1: 0
             x2: gauge.cx + gauge.r * 0.80; y2: 0
-            GradientStop { position: 0.0; color: "#2a2a38" }
-            GradientStop { position: 0.17; color: "#2a2a38" }
+            GradientStop { position: 0.0; color: Theme.gaugeShade.needleBase }
+            GradientStop { position: 0.17; color: Theme.gaugeShade.needleBase }
             GradientStop { position: 0.19; color: Qt.darker(needle.tint, 1.25) }
             GradientStop { position: 1.0; color: Qt.lighter(needle.tint, 1.2) }
         }
@@ -330,11 +346,11 @@ GaugeBase {
     Rectangle {
         anchors.centerIn: parent
         width: gauge.size * 0.11; height: width; radius: width / 2
-        border.color: Qt.alpha(Theme.text, 0.10)
+        border.color: Qt.alpha(Theme.gaugeTick, 0.10)
         border.width: 1
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#4b4b63" }
-            GradientStop { position: 1.0; color: "#14141c" }
+            GradientStop { position: 0.0; color: Theme.gaugeShade.hubHi }
+            GradientStop { position: 1.0; color: Theme.bg }
         }
         Rectangle {
             anchors.centerIn: parent

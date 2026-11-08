@@ -248,6 +248,12 @@ Canvas {
         ctx.setLineDash([])
     }
 
+    // The traces and the chrome are read from Theme as they are painted:
+    // a new theme paints them again
+    Connections {
+        target: Theme
+        function onThemeChanged() { chart.requestPaint() }
+    }
     onWidthChanged: requestPaint()
     onHeightChanged: requestPaint()
     Component.onCompleted: requestPaint()
