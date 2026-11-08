@@ -1,6 +1,7 @@
 # ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
 
-- **Status:** Accepted. Not built.
+- **Status:** Accepted. Built: section 10's step 1 (the appendix of
+  2026-11-08); steps 2 to 8 not built.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
   gets final display values); [ADR-0022](0022-display-units.md) (the
@@ -557,3 +558,50 @@ the model named is the one sized for it.
   zones' thresholds; they aren't part of this decision.
 - Drag-to-reorder (v0.7.1), and an export and import of a form's
   pages, build on the order and the document as decided here.
+
+## Appendix: core's two functions as built (2026-11-08)
+
+Section 10's step 1.
+
+- **`ecuio_def_range(def, lo, hi)`** (`signals.h`, beside the decoder
+  in `core/src/signals.cpp`) makes the decoder's checks in the
+  decoder's order, so a hand-built def gets the decoder's word:
+  `ECUIO_DECODE_ERR_NULL` for a NULL argument;
+  `ECUIO_DECODE_ERR_UNSUPPORTED` for a kind or byte order with no
+  decoder, a FLOAT, a text kind or a COMPUTED def (whose kind reads
+  UINT, so the flag is checked with the kind); then
+  `ECUIO_DECODE_ERR_BAD_PARAMS` for bit parameters the decoder refuses
+  (a `bit_length` of 0 or over 32, a `bit_offset` over 7, a big-endian
+  field not whole bytes). That is a fourth code beside section 2's
+  three. The mux key doesn't move the span and isn't checked. UINT
+  spans 0 to 2^n - 1 and INT -2^(n-1) to 2^(n-1) - 1, both through
+  scale and offset, with `lo` <= `hi` for a negative scale; an ENUM
+  gives its raw range unscaled, its value being the raw number.
+- **`ecuio_signal_file_key(file, def)`** (`core/src/signal_file.cpp`)
+  gives the key whose def has that address in the file's set. Another
+  set's def with the same ID, and a copy, give "", as a base set's defs
+  do (they are in the set with no key). A plugin variant's file is the
+  same structure, so it needs nothing more.
+- Both are exported by the shared core and bound in
+  `python/havne/_ecuio.py`.
+- **Tests:** `SignalsTest.ADefsRangeIsItsFieldsSpanScaled`,
+  `.ADefsRangeRefusesWhatHasNoSpan` and
+  `.EachBuiltInDefsRangeIsTheDecodersExtremes` (each def of the mock
+  and `obd2`: its ends are the decoder's values at the field's lowest
+  and highest raw); `Obd2SetTest.EveryValueTheFakesAnswerIsInsideItsDefsRange`
+  (`test_obd2`, where the fakes are); the mock's round trip over three
+  loops (`CoreTest.MockDriveCycleEveryTickRoundTripsThroughTheMockSet`)
+  keeps each signal inside its range; `SignalFileTest.EachOwnDefNamesItsKeyAndNoOtherDefDoes`;
+  `PluginTest.AVariantsFileNamesEachOfItsOwnDefsKeys`; `c_abi`.
+
+## Appendix: an analog dial's ticks under another unit system (2026-11-08)
+
+Settled before steps 3 and 4, for section 6. `majorStep`, `minorStep`
+and `labelDivisor` are spacings in the unit shown, never converted. A
+`from` or `to` converted into the other unit system snaps to the
+nearest multiple of `majorStep`, where the kind has one: the built-in
+speed dial's 260 km/h reads 160 mph with a tick every 20, as the
+Dashboard's speed dial reads. A kind with no `majorStep` keeps the
+converted end as it is. A value past an end pins the needle, arc or
+bar at that end while the readout shows the value, as `GaugeBase`'s
+clamp does.
