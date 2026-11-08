@@ -8288,6 +8288,28 @@ TEST(BridgeTest, ARowsRangeIsShownInTheUnitSystem)
             EXPECT_NEAR(speed.value(QStringLiteral("rangeHigh")).toDouble(),
                         metric ? 255.0 : 255.0 / 1.609344, 1e-3);
         }
+
+        // profileSignals also gives the def's own unit and range, the
+        // same in every unit system
+        const QVariantList rows = bridge.profileSignals(uri);
+        const QVariantMap temp = rowNamed(rows, QStringLiteral("Temp"));
+        EXPECT_EQ(temp.value(QStringLiteral("decodedUnit")).toString(),
+                  QStringLiteral("°C"));
+        EXPECT_NEAR(temp.value(QStringLiteral("decodedLow")).toDouble(), -40.0,
+                    1e-9);
+        EXPECT_NEAR(temp.value(QStringLiteral("decodedHigh")).toDouble(), 215.0,
+                    1e-9);
+        const QVariantMap speed =
+            rowNamed(rows, QStringLiteral("Vehicle Speed"));
+        EXPECT_EQ(speed.value(QStringLiteral("decodedUnit")).toString(),
+                  QStringLiteral("km/h"));
+        EXPECT_NEAR(speed.value(QStringLiteral("decodedHigh")).toDouble(),
+                    255.0, 1e-9);
+        const QVariantMap part = rowNamed(rows, QStringLiteral("Part"));
+        EXPECT_TRUE(
+            std::isnan(part.value(QStringLiteral("decodedLow")).toDouble()));
+        EXPECT_TRUE(
+            std::isnan(part.value(QStringLiteral("decodedHigh")).toDouble()));
     }
     bridge.setUnitSystem(0);
     ASSERT_TRUE(disconnectAndWait(bridge));

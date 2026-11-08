@@ -840,7 +840,10 @@ public:
     // one map per def as the model's rows give it: { id, ref, name,
     // unit, decimals, isText, isEnum, group, rangeLow, rangeHigh }, unit,
     // decimals and range in the current unit system, rangeLow and
-    // rangeHigh NaN for no range (RangeLowRole). [] when profileOfUri
+    // rangeHigh NaN for no range (RangeLowRole); and decodedUnit,
+    // decodedLow, decodedHigh, the def's own unit and range as core
+    // decodes them in any unit system (what a dashboard cell stores,
+    // ADR-0057 section 6), NaN for no range. [] when profileOfUri
     // gives "" (a scheme or profile= core refuses), for an unknown
     // profile, and for a profile whose set is a session's own
     // (uds-generic) or none (raw); a URI core refuses for another

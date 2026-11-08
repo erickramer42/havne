@@ -2056,6 +2056,9 @@ QVariantList SessionBridge::profileSignals(const QString& uri) const
             {QStringLiteral("group"), static_cast<int>(def.group)},
             {QStringLiteral("rangeLow"), range.first},
             {QStringLiteral("rangeHigh"), range.second},
+            {QStringLiteral("decodedUnit"), QString::fromUtf8(def.unit)},
+            {QStringLiteral("decodedLow"), f.rangeLow},
+            {QStringLiteral("decodedHigh"), f.rangeHigh},
         });
     }
     return rows;
