@@ -1250,6 +1250,38 @@ Page {
             sourceComponent: linkState
         }
 
+        // What the log did without being asked: Start log's refusal, or
+        // an end the user didn't ask for (a failed write, the session's
+        // end), in words beside a warning dot, until Dismiss or the next
+        // log. Start log sits in Main's header, so the bridge holds the
+        // words (Bridge.logNotice) and this page shows them
+        RowLayout {
+            objectName: "dashLogNotice"
+            Layout.fillWidth: true
+            visible: Bridge.logNotice !== ""
+            spacing: 10
+            Rectangle {
+                implicitWidth: 8; implicitHeight: 8   // layout-managed
+                radius: 4
+                color: Theme.warning
+            }
+            Label {
+                objectName: "dashLogNoticeText"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: 13
+                text: Bridge.logNotice
+            }
+            ThemedButton {
+                objectName: "dashLogNoticeDismiss"
+                compact: true
+                text: qsTr("Dismiss")
+                Accessible.name: qsTr("Dismiss the log's notice")
+                onClicked: Bridge.clearLogNotice()
+            }
+        }
+
         // Edit mode's bar: three buttons, compact on the phone, so its
         // row holds them
         RowLayout {

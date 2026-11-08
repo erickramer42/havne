@@ -705,6 +705,13 @@ class SessionBridge : public QObject
     // a second; the last log's once it ends
     Q_PROPERTY(qint64 logElapsedMs READ logElapsedMs NOTIFY logProgressChanged)
     Q_PROPERTY(qint64 logBytes READ logBytes NOTIFY logProgressChanged)
+    // What the Dashboard's header says about the log: "Log not started:
+    // <why>" after a refusal, "Log ended: <why>" after an end the user
+    // didn't ask for (a failed write, the session's end), "" otherwise. A
+    // log that starts clears it, as does clearLogNotice (Dismiss). A
+    // property, not a signal: Start log sits in Main's header, on every
+    // page, so the Dashboard may not exist when the refusal lands
+    Q_PROPERTY(QString logNotice READ logNotice NOTIFY logNoticeChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
@@ -1019,6 +1026,8 @@ public:
     bool logActive() const { return m_logActive; }
     qint64 logElapsedMs() const;
     qint64 logBytes() const { return m_logBytes; }
+    QString logNotice() const { return m_logNotice; }
+    Q_INVOKABLE void clearLogNotice() { setLogNotice(QString()); }
     // Start log: the plotted rows' ids (SignalListModel::plottedIds) as
     // the session's focus, then a recorder opened as Record sessions'
     // (the same root, label and caller lines) and attached to the running
@@ -1209,6 +1218,7 @@ signals:
     void markCountChanged();
     void logStateChanged();
     void logProgressChanged();
+    void logNoticeChanged();
     // A log ended: byUser for Stop log, false for the session's end or a
     // failed write (reported as a Record sessions recording's end is).
     // The folder is absolute, as recordingRow takes it
@@ -1249,10 +1259,13 @@ private:
     void startRecording(ecuio_session_t* session, const QString& uri);
     // A recorder opened on recordingsRoot() with the app's caller lines
     // and the session's signal file, and attached to it; nullptr, with
-    // the reason logged after `failed` ("Recording failed"), when it
-    // can't be
+    // the reason logged after `failed` ("Recording failed"), and given
+    // to `reason` when the caller wants it, when it can't be
     ecuio_recorder_t* openRecorder(ecuio_session_t* session, const QString& uri,
-                                   const QString& failed);
+                                   const QString& failed,
+                                   QString* reason = nullptr);
+    // logNotice, with its change signal when it changes
+    void setLogNotice(const QString& text);
     // m_recorder from here, its folder shown and its marks from 0
     void adoptRecorder(ecuio_recorder_t* recorder);
     // Its last notes, then closed with why; "" with nothing open. A log
@@ -1460,6 +1473,7 @@ private:
     HostElapsedTimer m_logClock;       // from Start log, sleeps counted
     qint64 m_logElapsedMs = 0;         // the last log's, once it ends
     qint64 m_logBytes = 0;             // countLogBytes' last sum
+    QString m_logNotice;               // the header's line about the log
     QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder

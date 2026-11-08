@@ -2922,12 +2922,19 @@ bool holdsFrames(const QString& folder)
 
 ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
                                               const QString& uri,
-                                              const QString& failed)
+                                              const QString& failed,
+                                              QString* reason)
 {
+    const auto fail = [this, &failed, reason](const QString& why) {
+        if (reason != nullptr) {
+            *reason = why;
+        }
+        emit logMessage(QStringLiteral("%1: %2").arg(failed, why));
+        return nullptr;
+    };
     const QString root = recordingsRoot();
     if (root.isEmpty()) {
-        emit logMessage(QStringLiteral("%1: no Documents folder").arg(failed));
-        return nullptr;
+        return fail(QStringLiteral("no Documents folder"));
     }
 
     // The picked vehicle names an adapter's session only (ADR-0027 section 1):
@@ -2967,9 +2974,7 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
     ecuio_recorder_t* recorder = nullptr;
     ecuio_status_t rc = ecuio_recorder_open(&o, &recorder);
     if (rc != ECUIO_OK) {
-        emit logMessage(QStringLiteral("%1: %2").arg(
-            failed, QString::fromUtf8(ecuio_last_error_detail())));
-        return nullptr;
+        return fail(QString::fromUtf8(ecuio_last_error_detail()));
     }
     // The signal file decoding the session goes in as signals.json
     // (ADR-0051 section 4): a vehicle's, its hash the store copy's name,
@@ -2992,9 +2997,7 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
         if (!holdsFrames(folder)) {
             (void)QDir(folder).removeRecursively();
         }
-        emit logMessage(QStringLiteral("%1: %2").arg(
-            failed, QString::fromUtf8(ecuio_status_string(rc))));
-        return nullptr;
+        return fail(QString::fromUtf8(ecuio_status_string(rc)));
     }
     return recorder;
 }
@@ -3012,8 +3015,11 @@ void SessionBridge::adoptRecorder(ecuio_recorder_t* recorder)
 
 bool SessionBridge::startLog()
 {
+    // The activity log's line, and the Dashboard header's notice
     const auto refuse = [this](const QString& why) {
-        emit logMessage(QStringLiteral("Log not started: %1").arg(why));
+        const QString line = QStringLiteral("Log not started: %1").arg(why);
+        setLogNotice(line);
+        emit logMessage(line);
         return false;
     };
     if (m_logActive) {
@@ -3042,12 +3048,16 @@ bool SessionBridge::startLog()
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
         return refuse(detail.isEmpty() ? failureText(rc) : detail);
     }
+    QString why;
     ecuio_recorder_t* recorder = openRecorder(
-        m_session, m_currentUri, QStringLiteral("Log not started"));
+        m_session, m_currentUri, QStringLiteral("Log not started"), &why);
     if (recorder == nullptr) {
         (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        // openRecorder wrote the activity log's line
+        setLogNotice(QStringLiteral("Log not started: %1").arg(why));
         return false;
     }
+    setLogNotice(QString());
     m_logActive = true;
     m_logClock.restart();
     m_logElapsedMs = 0;
@@ -3125,9 +3135,23 @@ void SessionBridge::stopRecording(const QString& why, bool byUser)
     m_logElapsedMs = m_logClock.elapsed();
     m_logActive = false;
     countLogBytes(); // closed: the folder's final size
+    // An end the user didn't ask for is told on the Dashboard; Stop
+    // log's isn't, the viewer opens on it
+    if (!byUser) {
+        setLogNotice(QStringLiteral("Log ended: %1").arg(why));
+    }
     emit logStateChanged();
     emit logProgressChanged();
     emit logStopped(m_recordingFolder, byUser);
+}
+
+void SessionBridge::setLogNotice(const QString& text)
+{
+    if (m_logNotice == text) {
+        return;
+    }
+    m_logNotice = text;
+    emit logNoticeChanged();
 }
 
 bool SessionBridge::mark(const QString& label)
@@ -3158,8 +3182,14 @@ void SessionBridge::pollRecording()
         return;
     }
     const QString reason = QString::fromUtf8(st.reason);
+    const bool log = m_logActive;
     stopRecording(QStringLiteral("a write failed"));
     emit logMessage(QStringLiteral("Recording stopped: %1").arg(reason));
+    // The Dashboard's notice gets the recorder's own words (the disk is
+    // full), not the recording's end note
+    if (log) {
+        setLogNotice(QStringLiteral("Log ended: %1").arg(reason));
+    }
 }
 
 void SessionBridge::logUnnoted(const QString& line)
