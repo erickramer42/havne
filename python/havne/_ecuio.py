@@ -83,6 +83,8 @@ ECUIO_CSV_GUESS_DECIMAL_COMMA = 2
 ECUIO_CSV_GUESS_PREAMBLE = 4
 ECUIO_CSV_GUESS_TIME_NUMBERS = 8
 ECUIO_CSV_GUESS_TIME_UNIT_KNOWN = 1
+ECUIO_CSV_LONG = 1
+ECUIO_CSV_WIDE = 0
 ECUIO_DECODE_ERR_BAD_PARAMS = 3
 ECUIO_DECODE_ERR_MUX_MISMATCH = 5
 ECUIO_DECODE_ERR_NULL = 1
@@ -388,6 +390,9 @@ class ecuio_dtc_list_t(Structure):
     pass
 
 class ecuio_enum_entry_t(Structure):
+    pass
+
+class ecuio_export_estimate_t(Structure):
     pass
 
 class ecuio_export_options_t(Structure):
@@ -705,6 +710,13 @@ ecuio_enum_entry_t._fields_ = [
     ('raw', c_uint32),
     ('label', (c_char * 28)),
 ]
+ecuio_export_estimate_t._fields_ = [
+    ('rows', c_uint64),
+    ('bytes', c_uint64),
+    ('columns', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', (c_uint64 * 2)),
+]
 ecuio_export_options_t._fields_ = [
     ('format', c_uint32),
     ('flags', c_uint32),
@@ -712,7 +724,12 @@ ecuio_export_options_t._fields_ = [
     ('to_us', c_uint64),
     ('folder_utf8', c_char_p),
     ('out_path_utf8', c_char_p),
-    ('reserved', (c_uint64 * 4)),
+    ('layout', c_uint32),
+    ('row_ms', c_uint32),
+    ('units', c_uint32),
+    ('column_count', c_uint32),
+    ('columns_utf8', POINTER(c_char_p)),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_export_report_t._fields_ = [
     ('frames', c_uint64),
@@ -724,7 +741,7 @@ ecuio_export_report_t._fields_ = [
     ('signal_count', c_uint64),
     ('files', c_uint32),
     ('files_left_out', c_uint32),
-    ('reserved', (c_uint64 * 1)),
+    ('rows', c_uint64),
 ]
 ecuio_frame_t._fields_ = [
     ('timestamp_us', c_uint64),
@@ -1131,6 +1148,7 @@ FUNCTIONS = {
     'ecuio_dtc_title_source': (c_char_p, []),  # core.h
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h
+    'ecuio_export_estimate': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, POINTER(ecuio_export_estimate_t)]),  # recording.h
     'ecuio_health_export': (c_int, [POINTER(ecuio_health_options_t), POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h
     'ecuio_identity_vin': (c_int, [POINTER(ecuio_channel_identity_t), c_char_p, c_uint32]),  # core.h

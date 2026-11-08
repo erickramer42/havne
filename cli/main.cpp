@@ -1902,6 +1902,8 @@ void usage(FILE* to)
         "       havne-cli frames <recording> [--from S] [--to S]\n"
         "       havne-cli export <recording> <out> --format folder|csv|pcapng\n"
         "                      [--from S] [--to S] [--raw]\n"
+        "                      [--layout wide|long] [--rows sweep|<ms>]\n"
+        "                      [--units metric|imperial] [--signal <name>]...\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
         "       havne-cli import csv <file> <folder> [--map <map.json> |\n"
         "                      --time-unit s|ms|us]\n"

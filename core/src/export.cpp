@@ -40,6 +40,7 @@
 #include "recording_check.h" /* iso15765_id */
 #include "recording_rows.h"
 #include "recording_set.h"
+#include "request_timing.h" /* timing_hist: a column's usual interval */
 #include "scrub.h"
 
 #include "ecuio/core.h"
@@ -55,6 +56,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -71,6 +73,52 @@ constexpr size_t kWriteChunk = 1u << 16;
 constexpr uint32_t kIdentification = ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION;
 constexpr uint32_t kUnattributable = ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE;
 constexpr uint32_t kTextValues = ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES;
+/* The wide CSV's silence (ADR-0056 section 4): a column with no sample
+ * for this long, or 3x its usual interval if longer, leaves the rule */
+constexpr uint64_t kSilenceUs = 1000000;
+constexpr uint64_t kSilenceTimes = 3;
+
+/* A number to d decimal places (0 to 3) with a '.', whatever the
+ * locale: the scaled value rounded half away from zero, then its
+ * digits; no "-0.0". Past what a long long holds, or not finite, "" */
+std::string fixed_text(double v, int d)
+{
+    static const double kPow10[] = {1.0, 10.0, 100.0, 1000.0};
+    if (!std::isfinite(v) || d < 0 || d > 3) {
+        return std::string();
+    }
+    const double scaled = std::round(v * kPow10[d]);
+    if (std::fabs(scaled) >= 9.0e15) {
+        return std::string();
+    }
+    const long long n = static_cast<long long>(scaled);
+    const unsigned long long a = n < 0
+                                     ? 0ull - static_cast<unsigned long long>(n)
+                                     : static_cast<unsigned long long>(n);
+    std::string digits = std::to_string(a);
+    if (d > 0) {
+        while (digits.size() < static_cast<size_t>(d) + 1) {
+            digits.insert(digits.begin(), '0');
+        }
+        digits.insert(digits.size() - static_cast<size_t>(d), 1, '.');
+    }
+    return n < 0 ? "-" + digits : digits;
+}
+
+/* The digits after a recorded value's point, capped at 3; an exponent
+ * form counts as 3 */
+uint8_t decimals_of(const std::string& value)
+{
+    if (value.find_first_of("eE") != std::string::npos) {
+        return 3;
+    }
+    const size_t dot = value.find('.');
+    if (dot == std::string::npos) {
+        return 0;
+    }
+    const size_t after = value.size() - dot - 1;
+    return static_cast<uint8_t>(after > 3 ? 3 : after);
+}
 
 const char* const kMadeUp =
     "made up by Havne: the adapter delivered this frame's message whole";
@@ -170,9 +218,15 @@ class recording_export
 public:
     recording_export(const ecuio_export_options_t& o, ecuio_export_report_t& r)
         : o_(o), r_(r), raw_((o.flags & ECUIO_EXPORT_RAW) != 0),
-          folder_(o.format == ECUIO_EXPORT_FOLDER), made_(new ecuio_frame_t{}),
-          probe_(new ecuio_frame_t{}), tx_(new isotp_tx)
+          folder_(o.format == ECUIO_EXPORT_FOLDER),
+          wide_(o.format == ECUIO_EXPORT_CSV && o.layout == ECUIO_CSV_WIDE),
+          made_(new ecuio_frame_t{}), probe_(new ecuio_frame_t{}),
+          tx_(new isotp_tx)
     {}
+
+    /* The status a failed run or estimate ends in: LOAD_FAILED, or
+     * INVALID_ARGUMENT for a column the recording can't give */
+    ecuio_status_t status() const { return status_; }
 
     /* *partial names the file made under a name of its own (pcapng, CSV)
      * while it isn't in place, so the caller removes it on any failure */
@@ -192,7 +246,7 @@ public:
             /* The plan's frame counts are the pcapng's; the CSV counts
              * values */
             r_ = ecuio_export_report_t{};
-            if (!values(folder, false)) {
+            if (wide_ ? !wide_survey(folder) : !values(folder, false)) {
                 return false;
             }
         }
@@ -206,7 +260,8 @@ public:
             partial->clear();
             return fail("the export can't be written: %s", why);
         }
-        if (!(csv_out ? write_csv(folder) : write(folder))) {
+        if (!(csv_out ? (wide_ ? write_wide(folder) : write_csv(folder))
+                      : write(folder))) {
             return false;
         }
         if (std::fclose(file_.release()) != 0) {
@@ -220,10 +275,44 @@ public:
         return true;
     }
 
+    /* The wide CSV's size for each interval, nothing written: the
+     * header, the classes, the survey, then one pass feeding every
+     * interval's rows (ecuio_export_estimate) */
+    bool estimate(const std::string& folder, const uint32_t* row_ms,
+                  uint32_t count, ecuio_export_estimate_t* out)
+    {
+        if (!read_header(folder) || (!raw_ && !text_defs(folder)) ||
+            !wide_survey(folder)) {
+            return false;
+        }
+        std::vector<wide_rows> engines(count);
+        for (uint32_t i = 0; i < count; ++i) {
+            engines[i].row_ms = row_ms[i];
+        }
+        if (!wide_walk(folder, false, &engines)) {
+            return false;
+        }
+        const size_t head = wide_head().size();
+        for (uint32_t i = 0; i < count; ++i) {
+            out[i] = ecuio_export_estimate_t{};
+            out[i].rows = engines[i].rows;
+            out[i].bytes = head + engines[i].bytes;
+            out[i].columns = static_cast<uint32_t>(columns_.size());
+        }
+        return true;
+    }
+
 private:
     bool in_range(uint64_t host_us) const
     {
         return host_us >= o_.from_us && (o_.to_us == 0 || host_us <= o_.to_us);
+    }
+
+    /* A refusal that is the caller's, not the recording's */
+    bool refuse(const char* fmt, const std::string& a = std::string())
+    {
+        status_ = ECUIO_ERR_INVALID_ARGUMENT;
+        return fail(fmt, a);
     }
 
     /* events.log's header: the utc line, the recording's start (none
@@ -917,6 +1006,396 @@ private:
         return true;
     }
 
+    // ---- The wide CSV (ADR-0056 sections 4 and 5) ----
+
+    struct wide_column {
+        std::string name;
+        std::string unit;     /* the header's, else the first row's */
+        std::string head;     /* "Name (unit)" in the export's units, a field */
+        uint8_t decimals = 0; /* the header's; else the most its values show */
+        bool in_header = false;
+        uint64_t samples = 0;
+        uint64_t last_us = 0;
+        timing_hist deltas; /* between its samples */
+        uint64_t silence_us = kSilenceUs;
+    };
+
+    /* One row interval's rows over the columns, fed the samples in time
+     * order: the sweep rule (row_ms 0) or a grid; sink takes each row's
+     * text when set, bytes counts it either way */
+    struct wide_rows {
+        uint32_t row_ms = 0;
+        uint64_t next_grid_us = 0;
+        std::vector<std::string> cell; /* the newest value; "" none */
+        std::vector<uint8_t> fresh;    /* a sample since the last row */
+        std::vector<uint8_t> in_rule;
+        std::vector<uint64_t> last_us;
+        uint64_t rows = 0;
+        uint64_t cells = 0;
+        uint64_t bytes = 0;
+        std::string* sink = nullptr;
+        std::string line;
+
+        void start(size_t n, uint64_t t0)
+        {
+            cell.assign(n, std::string());
+            fresh.assign(n, 0);
+            in_rule.assign(n, 1);
+            last_us.assign(n, t0);
+            if (row_ms > 0) {
+                const uint64_t step = uint64_t{row_ms} * 1000;
+                next_grid_us = (t0 / step) * step;
+            }
+        }
+
+        /* At time t: a column quiet past its silence leaves the rule,
+         * and emit writes no cell for it until its next sample */
+        void silence(uint64_t t, const std::vector<wide_column>& cols)
+        {
+            for (size_t k = 0; k < cols.size(); ++k) {
+                if (in_rule[k] != 0 && t > last_us[k] &&
+                    t - last_us[k] > cols[k].silence_us) {
+                    in_rule[k] = 0;
+                    fresh[k] = 0;
+                }
+            }
+        }
+
+        void emit(uint64_t ms)
+        {
+            line = std::to_string(ms);
+            for (size_t k = 0; k < cell.size(); ++k) {
+                line += ',';
+                if (in_rule[k] != 0 && !cell[k].empty()) {
+                    line += cell[k];
+                    ++cells;
+                }
+                fresh[k] = 0;
+            }
+            line += "\r\n";
+            bytes += line.size();
+            ++rows;
+            if (sink != nullptr) {
+                *sink += line;
+            }
+        }
+
+        /* The grid rows due before t (or at it, when inclusive): each
+         * with the newest values at its time, skipped with no new cell */
+        void grid_to(uint64_t t, bool inclusive,
+                     const std::vector<wide_column>& cols)
+        {
+            const uint64_t step = uint64_t{row_ms} * 1000;
+            while (inclusive ? next_grid_us <= t : next_grid_us < t) {
+                silence(next_grid_us, cols);
+                bool any = false;
+                for (uint8_t f : fresh) {
+                    any = any || f != 0;
+                }
+                if (any) {
+                    emit(next_grid_us / 1000);
+                }
+                next_grid_us += step;
+            }
+        }
+
+        void sample(size_t k, uint64_t t, const std::string& text,
+                    const std::vector<wide_column>& cols)
+        {
+            if (row_ms > 0) {
+                grid_to(t, false, cols);
+            }
+            silence(t, cols);
+            cell[k] = text;
+            fresh[k] = 1;
+            in_rule[k] = 1;
+            last_us[k] = t;
+            if (row_ms > 0) {
+                return;
+            }
+            /* A row once every column in the rule has a sample newer
+             * than the last row, at the completing sample's time */
+            for (size_t j = 0; j < cols.size(); ++j) {
+                if (in_rule[j] != 0 && fresh[j] == 0) {
+                    return;
+                }
+            }
+            emit((t + 500) / 1000);
+        }
+
+        /* The grid's last row: the step at or after the last sample, so
+         * the newest values are in */
+        void finish(uint64_t last_t, const std::vector<wide_column>& cols)
+        {
+            if (row_ms > 0) {
+                const uint64_t step = uint64_t{row_ms} * 1000;
+                grid_to(((last_t + step - 1) / step) * step, true, cols);
+            }
+        }
+    };
+
+    /* A column by name, in order of arrival; its header line's unit
+     * and decimals when the header has it */
+    size_t add_column(const std::string& name)
+    {
+        wide_column c;
+        c.name = name;
+        for (const rows::header_signal& hs : header_.signals) {
+            if (hs.name == name) {
+                c.in_header = true;
+                c.unit = hs.unit;
+                c.decimals = hs.decimal_places;
+                break;
+            }
+        }
+        columns_.push_back(c);
+        index_[name] = columns_.size() - 1;
+        return columns_.size() - 1;
+    }
+
+    /* A column's name and unit, as check_formula judges a row's */
+    bool check_column(const wide_column& c)
+    {
+        rows::signal_row row;
+        row.name = c.name;
+        row.unit = c.unit;
+        row.value = "0";
+        return check_formula(row, true);
+    }
+
+    static std::string csv_field(const std::string& s)
+    {
+        if (s.find_first_of(",\"\r\n") == std::string::npos) {
+            return s;
+        }
+        std::string out = "\"";
+        for (char ch : s) {
+            out += ch;
+            if (ch == '"') {
+                out += '"';
+            }
+        }
+        out += '"';
+        return out;
+    }
+
+    /* The first pass: the columns (named, the header's focus, or every
+     * number signal met), each one's samples, usual interval, unit and
+     * decimals; the values left out counted */
+    bool wide_survey(const std::string& folder)
+    {
+        std::vector<std::string> picked;
+        picked.reserve(o_.column_count);
+        for (uint32_t i = 0; i < o_.column_count; ++i) {
+            picked.emplace_back(o_.columns_utf8[i]);
+        }
+        if (picked.empty()) {
+            picked = header_.focus;
+        }
+        fixed_columns_ = !picked.empty();
+        for (const std::string& name : picked) {
+            if (index_.count(name) != 0) {
+                return refuse("the column %s is named twice",
+                              ecuio_json::quoted(name));
+            }
+            if (!raw_ && text_names_.count(name) != 0) {
+                return refuse("the signal %s is a text signal, never a column",
+                              ecuio_json::quoted(name));
+            }
+            if (!raw_ && ident_names_.count(name) != 0) {
+                return refuse("the signal %s is an identification signal, "
+                              "never a column",
+                              ecuio_json::quoted(name));
+            }
+            add_column(name);
+        }
+        if (!fixed_columns_) {
+            /* The header's number signals first, in its order */
+            for (const rows::header_signal& hs : header_.signals) {
+                if (!hs.text && index_.count(hs.name) == 0 &&
+                    (raw_ || (text_names_.count(hs.name) == 0 &&
+                              ident_names_.count(hs.name) == 0))) {
+                    add_column(hs.name);
+                }
+            }
+        }
+        if (!wide_walk(folder, true, nullptr)) {
+            return false;
+        }
+        if (!fixed_columns_) {
+            /* A header signal with no sample in range isn't a column */
+            std::vector<wide_column> kept;
+            index_.clear();
+            for (const wide_column& c : columns_) {
+                if (c.samples > 0) {
+                    index_[c.name] = kept.size();
+                    kept.push_back(c);
+                }
+            }
+            columns_.swap(kept);
+        }
+        for (wide_column& c : columns_) {
+            if (!check_column(c)) {
+                return false;
+            }
+            const uint64_t usual =
+                c.deltas.count > 0 ? c.deltas.quantile(0.5) : 0;
+            c.silence_us = (std::max)(kSilenceUs, kSilenceTimes * usual);
+            std::string unit = c.unit;
+            ecuio_display_value_t dv{};
+            if (ecuio_display_convert(c.unit.c_str(), c.decimals, 0.0, o_.units,
+                                      &dv) == ECUIO_DISPLAY_OK) {
+                unit = dv.unit;
+            }
+            c.head =
+                csv_field(unit.empty() ? c.name : c.name + " (" + unit + ")");
+        }
+        r_.signal_count = columns_.size();
+        return true;
+    }
+
+    std::string wide_head() const
+    {
+        std::string h = "Time (ms)";
+        for (const wide_column& c : columns_) {
+            h += ',';
+            h += c.head;
+        }
+        h += "\r\n";
+        return h;
+    }
+
+    /* A cell: the value in the export's units, to the places shown */
+    std::string cell_text(const wide_column& c, double v) const
+    {
+        ecuio_display_value_t dv{};
+        if (ecuio_display_convert(c.unit.c_str(), c.decimals, v, o_.units,
+                                  &dv) != ECUIO_DISPLAY_OK) {
+            return fixed_text(v, c.decimals);
+        }
+        return fixed_text(dv.value, dv.decimal_places);
+    }
+
+    /* signals.csv's number rows in range, by column: the survey counts
+     * and classifies, the second pass feeds each interval's rows */
+    bool wide_walk(const std::string& folder, bool survey,
+                   std::vector<wide_rows>* engines)
+    {
+        std::string why;
+        file_ptr f(files::open_file(folder + "/signals.csv", false, &why));
+        if (!f) {
+            return fail("the folder has no signals.csv");
+        }
+        if (!survey) {
+            for (wide_rows& e : *engines) {
+                e.start(columns_.size(), first_us_);
+            }
+        }
+        std::vector<char> buf(rows::kRowMax + 2);
+        bool too_long = false;
+        bool torn = false;
+        uint64_t line = 0;
+        rows::signal_row row;
+        std::string text;
+        while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            ++line;
+            if (line == 1) {
+                continue;
+            }
+            const char* bad = nullptr;
+            if (too_long ||
+                !rows::parse_signal_row(buf.data(), std::strlen(buf.data()),
+                                        row, &bad)) {
+                ecuio_detail_set("signals.csv line %llu: %s",
+                                 static_cast<unsigned long long>(line),
+                                 too_long ? "the row is too long" : bad);
+                return false;
+            }
+            if (!in_range(row.host_us)) {
+                continue;
+            }
+            if (!raw_ && ident_names_.count(row.name) != 0) {
+                r_.left_out[kIdentification] += survey ? 1u : 0u;
+                continue;
+            }
+            double v = 0.0;
+            const bool number =
+                rows::parse_number(row.value.data(), row.value.size(), &v);
+            if (!number || (!raw_ && text_names_.count(row.name) != 0)) {
+                r_.left_out[kTextValues] += survey ? 1u : 0u;
+                continue;
+            }
+            auto it = index_.find(row.name);
+            if (it == index_.end()) {
+                if (fixed_columns_ || !survey) {
+                    continue;
+                }
+                add_column(row.name);
+                it = index_.find(row.name);
+            }
+            wide_column& c = columns_[it->second];
+            if (survey) {
+                if (c.samples == 0 && c.unit.empty()) {
+                    c.unit = row.unit;
+                }
+                if (c.samples > 0 && row.host_us >= c.last_us) {
+                    c.deltas.add(static_cast<int64_t>(row.host_us - c.last_us));
+                }
+                if (!c.in_header) {
+                    c.decimals = (std::max)(c.decimals, decimals_of(row.value));
+                }
+                c.last_us = row.host_us;
+                ++c.samples;
+                first_us_ = surveyed_ == 0 ? row.host_us : first_us_;
+                last_us_ = row.host_us;
+                ++surveyed_;
+                continue;
+            }
+            ++seen_;
+            text = cell_text(c, v);
+            for (wide_rows& e : *engines) {
+                e.sample(it->second, row.host_us, text, columns_);
+                if (e.sink != nullptr && !flush(false)) {
+                    return false;
+                }
+            }
+        }
+        if (!survey) {
+            for (wide_rows& e : *engines) {
+                e.finish(last_us_, columns_);
+            }
+        }
+        return true;
+    }
+
+    /* The wide CSV's second pass, written and checked as the long's */
+    bool write_wide(const std::string& folder)
+    {
+        file_check_.reset(new scrub::check(values_));
+        buf_ = wide_head();
+        std::vector<wide_rows> engines(1);
+        engines[0].row_ms = o_.row_ms;
+        engines[0].sink = &buf_;
+        if (!wide_walk(folder, false, &engines) || !flush(true)) {
+            return false;
+        }
+        if (seen_ != surveyed_) {
+            return fail("the recording changed while it was exported");
+        }
+        r_.values = engines[0].cells;
+        r_.rows = engines[0].rows;
+        if (!raw_) {
+            const uint32_t found = file_check_->finish();
+            if (found != 0) {
+                r_.failed_class = found;
+                return fail("the check found %s in the export's file: nothing "
+                            "was written",
+                            scrub::failed_words(found));
+            }
+        }
+        return true;
+    }
+
     // ---- The folder export ----
 
     /* A caller line's text a scrubbed copy keeps, rewritten; false to
@@ -1408,6 +1887,7 @@ private:
     ecuio_export_report_t& r_;
     const bool raw_;
     const bool folder_;
+    const bool wide_;
     scrub::values values_;
     std::vector<uint64_t> dropped_;
     file_ptr file_;
@@ -1425,6 +1905,13 @@ private:
     std::unordered_set<std::string> ident_names_;
     uint64_t first_us_ = 0;
     uint64_t last_us_ = 0;
+    /* The wide CSV's */
+    std::vector<wide_column> columns_;
+    std::unordered_map<std::string, size_t> index_;
+    bool fixed_columns_ = false;
+    uint64_t surveyed_ = 0;
+    uint64_t seen_ = 0;
+    ecuio_status_t status_ = ECUIO_ERR_LOAD_FAILED;
     /* The folder export's */
     std::string partial_;
     std::vector<std::string> written_paths_;
@@ -1447,14 +1934,15 @@ private:
 
 } // namespace
 
-extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
-                                       ecuio_export_report_t* report)
+namespace {
+
+/* The options every call checks before anything is read; an estimate
+ * needs no file to write and only the wide CSV */
+ecuio_status_t check_options(const ecuio_export_options_t* options,
+                             bool estimate)
 {
-    if (report != nullptr) {
-        *report = ecuio_export_report_t{};
-    }
     if (options == nullptr || options->folder_utf8 == nullptr ||
-        options->out_path_utf8 == nullptr) {
+        (!estimate && options->out_path_utf8 == nullptr)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     for (uint64_t v : options->reserved) {
@@ -1474,23 +1962,76 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
     default:
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
+    const bool wide = options->format == ECUIO_EXPORT_CSV &&
+                      options->layout == ECUIO_CSV_WIDE;
+    if (options->layout > ECUIO_CSV_LONG ||
+        (options->format != ECUIO_EXPORT_CSV && options->layout != 0)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (!wide) {
+        /* The shape fields are the wide CSV's alone */
+        if (options->row_ms != 0 || options->units != 0 ||
+            options->column_count != 0 || options->columns_utf8 != nullptr ||
+            estimate) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        return ECUIO_OK;
+    }
+    if (options->units > ECUIO_UNITS_IMPERIAL) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (options->column_count > 0 && options->columns_utf8 == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < options->column_count; ++i) {
+        if (options->columns_utf8[i] == nullptr) {
+            return ECUIO_ERR_NULL_ARGUMENT;
+        }
+        if (options->columns_utf8[i][0] == '\0') {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    return ECUIO_OK;
+}
+
+/* The folder's path with no trailing separators */
+std::string folder_of(const char* utf8)
+{
+    std::string folder = utf8;
+    while (folder.size() > 1 &&
+           (folder.back() == '/' || folder.back() == '\\')) {
+        folder.pop_back();
+    }
+    return folder;
+}
+
+} // namespace
+
+extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
+                                       ecuio_export_report_t* report)
+{
+    if (report != nullptr) {
+        *report = ecuio_export_report_t{};
+    }
+    const ecuio_status_t checked = check_options(options, false);
+    if (checked != ECUIO_OK) {
+        return checked;
+    }
     ecuio_detail_clear();
     ecuio_export_report_t r{};
     std::string out;     /* these two allocate nothing until the try */
     std::string partial; /* the pcapng's or CSV's, while not in place */
     bool ok = false;
+    ecuio_status_t failed = ECUIO_ERR_LOAD_FAILED;
     try {
-        std::string folder = options->folder_utf8;
-        while (folder.size() > 1 &&
-               (folder.back() == '/' || folder.back() == '\\')) {
-            folder.pop_back();
-        }
+        const std::string folder = folder_of(options->folder_utf8);
         out = options->out_path_utf8;
         {
             /* closed before its partial is removed: Windows removes no
              * file still open */
             recording_export e(*options, r);
             ok = e.run(folder, out, &partial);
+            failed = e.status();
         }
         if (!partial.empty()) {
             files::remove_file(partial);
@@ -1508,5 +2049,36 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
     if (report != nullptr) {
         *report = r;
     }
-    return ok ? ECUIO_OK : ECUIO_ERR_LOAD_FAILED;
+    return ok ? ECUIO_OK : failed;
+}
+
+extern "C" ecuio_status_t
+ecuio_export_estimate(const ecuio_export_options_t* options,
+                      const uint32_t* row_ms, uint32_t count,
+                      ecuio_export_estimate_t* out)
+{
+    if (row_ms == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const ecuio_status_t checked = check_options(options, true);
+    if (checked != ECUIO_OK) {
+        return checked;
+    }
+    if (count == 0) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        out[i] = ecuio_export_estimate_t{};
+    }
+    ecuio_detail_clear();
+    ecuio_export_report_t r{};
+    try {
+        recording_export e(*options, r);
+        if (!e.estimate(folder_of(options->folder_utf8), row_ms, count, out)) {
+            return e.status();
+        }
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    return ECUIO_OK;
 }

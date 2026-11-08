@@ -1490,3 +1490,99 @@ section 1's sketch:
   `GuessedMap` (`map` a dict, `notes`, `flags`, `columns` the text's
   list); `havne.import_csv(path, folder, column_map=None,
   time_unit=None)` takes the slice when no map is given.
+
+## Appendix: the wide CSV as built (2026-11-07)
+
+[ADR-0056](0056-analysis-log.md) sections 4 and 5 make the wide layout
+the CSV export's default; the long form of the appendix "the CSV export
+as built" stays behind `ECUIO_CSV_LONG` (`havne-cli export --layout
+long`), byte for byte.
+
+**The options grow within `reserved`** (the C API appendix's
+`reserved[4]` is now `layout`, `row_ms`, `units`, `column_count`,
+`columns_utf8` and `reserved[1]`): `layout` at 24 plus two pointers (40
+on 64-bit, 32 on 32-bit), `columns_utf8` at 40 plus two pointers, the
+size 56 plus two pointers, each pinned in `test_c_abi`. A caller that
+zeroed `reserved` gets the wide CSV. The report's `reserved[1]` is
+`rows` (at 112). The fields are the wide CSV's alone: set for another
+format or for the long layout, `ECUIO_ERR_INVALID_ARGUMENT`.
+
+**The file:**
+
+```
+Time (ms),RPM (rpm),Speed (km/h),Throttle (%)
+160,812,0,10.5
+260,815,0,10.0
+```
+
+- `Time (ms)` first, then each column as `Name (unit)` (the name alone
+  with no unit), RFC 4180 quotes only where a cell needs them, CRLF, no
+  comment line: the analyst's tools want the header first.
+- **The columns:** `columns_utf8`'s names in order (`--signal <name>`
+  repeated); with none, the header's `focus` line's names in its order
+  (a log begun with a focus exports its picks by itself); with neither,
+  every number signal that has a sample in range, the header's signal
+  lines first in their order, then any the header lacks as first met.
+  A named column the recording lacks is an empty column; one that
+  names a text or identification signal, or a name twice, is
+  `ECUIO_ERR_INVALID_ARGUMENT` with the reason in the detail. Text and
+  identification signals are never columns and their values are
+  counted left out as the long form counts them.
+- **The rows** (section 4's rule): a row once every column in the rule
+  has a sample newer than the last row, at the completing sample's
+  time in whole ms (rounded) from the recording's zero, each cell the
+  column's newest value, held. Every column starts in the rule at the
+  first sample in range; one with no sample for 1 s, or 3x its usual
+  interval when that is longer (the median of the gaps between its
+  samples, from a log-linear histogram as reply timing keeps), leaves
+  the rule when the next sample of any column finds it quiet, and its
+  cells stay empty until its next sample, which puts it back. A
+  column that never answers in range holds the rows up for its first
+  second and then drops out.
+- **A grid** (`row_ms`, `--rows <ms>`): rows at the multiples of the
+  interval from the recording's zero (so two exports of one log align,
+  `--from` or not), each the newest values at its time under the same
+  silence rule, a step with no new cell since the last written row
+  skipped, and a last row at the step at or after the last sample so
+  the newest values are in.
+- **Cells:** each in its signal's decimal places from the header's
+  signal line (an older recording's: the most its values show, at most
+  3), converted to `units` (`ECUIO_UNITS_*`, `--units metric|imperial`)
+  through `ecuio_display_convert`, which adds a place where the
+  conversion needs it (kPa to psi); the head cell carries the unit
+  shown. Formatted by core's own digits, a `.` whatever the locale, no
+  `-0.0`.
+- **The report:** `rows`, `values` the filled cells, `signal_count` the
+  columns; the file goes through the same check as the long form and
+  the same formula refusal for a name or unit.
+
+**The estimate** (`ecuio_export_estimate(options, row_ms, count, out)`):
+one pass over the recording answers each interval in `row_ms` with its
+rows, the file's exact bytes (every cell formatted, nothing written,
+the check not run) and the columns, for the app's choices beside each
+other and for scripts; the wide CSV's alone, `out_path_utf8` may be
+NULL.
+
+**`havne-cli export`:** `--layout wide|long` (wide the default),
+`--rows sweep|<ms>` (1 to 86400000), `--units metric|imperial`,
+`--signal <name>` repeated; the four go with `--format csv`, the last
+three with the wide layout, else usage. The `exported` line adds
+`layout`, `rows` and `row_ms` for CSV (schema 1 growth).
+
+**Tests:** `CsvExportTest.Wide*` (test_core: a row a sweep over every
+number signal, a range and an empty one; a column that stops leaving
+the rule at 1 s and rejoining; a slow column's 3x; a 100 ms grid
+holding values, skipping an empty step and ending on the step after
+the last sample, aligned to the zero under `--from`; decimals and
+units from the header, metric and imperial; named columns in order
+with an empty one, a text, an identification and a repeated name
+refused; the focus line's columns; text and identification signals
+never columns; a quoted head and a formula refused),
+`ExportTest.TheEstimateMatchesTheFileForEachInterval` and
+`.ArgumentsAreCheckedBeforeAnythingIsRead` (the shape fields and the
+estimate's refusals), `FolderExportTest.EachFileIsCopiedThroughItsClasses`
+(a copy exported wide through its focus line), `test_c_abi` (the
+offsets), `CliTransferTest` (the flags, their bad forms, the line),
+`CliTransferRunTest.csv` (the replay fixture's recording exported long
+as before and wide: the header, every cell a number or empty, the
+times whole ms ascending, a 1 s grid, named columns in order).

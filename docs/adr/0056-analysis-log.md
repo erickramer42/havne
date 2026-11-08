@@ -325,3 +325,29 @@ v0.7.1's, decided 2026-11-07.
 - `ecuio_session_record` runs on the thread that starts and closes the
   session, as `recording.h` says; `started` stays a plain bool.
 - `RecorderTest`'s cases are listed in that appendix.
+
+**Sections 4 and 5, the rows and the wide CSV, as built:**
+
+- The rule as section 4 says, with two things it left open: every
+  column starts in the rule at the first sample in range (a column
+  that never answers holds the rows up for its first second, then
+  drops out), and a column's usual interval is the median gap between
+  its samples. A row's time is the completing sample's host_us to the
+  nearest ms.
+- `ecuio_export_options_t` grows within its reserved words (`layout`,
+  `row_ms`, `units`, `column_count`, `columns_utf8`), the report's
+  reserved word is `rows`, and the estimate is `ecuio_export_estimate`
+  over several intervals in one pass; [ADR-0054](0054-exports-and-imports.md)'s
+  appendix "the wide CSV as built" has the file, the columns' order
+  and the CLI's flags. Columns are picked by name: the file is keyed
+  by name and so are the app's plot choices.
+- With no columns named, the recording's `focus` header line (section
+  3) picks them, so a log's export needs no list; with no focus line
+  either, every number signal in range.
+- The grid's last row sits on the step at or after the last sample, so
+  the newest values reach the file.
+- The MAF's two decimals (section 5) are the mock's and obd2's defs
+  together, the sets' shared names and units pinned by
+  `SignalsTest.MockAndObd2ShareDisplayNamesAndUnits`.
+- `havne-cli export` writes the wide layout by default; the long form
+  is `--layout long`. The app's Export (step 6) takes the same options.

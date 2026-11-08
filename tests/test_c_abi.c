@@ -212,6 +212,8 @@ int main(void)
     ecuio_check_summary_t check_summary;
     ecuio_export_options_t export_options;
     ecuio_export_report_t export_report;
+    ecuio_export_estimate_t estimate;
+    uint32_t estimate_ms = 0;
     ecuio_import_options_t import_options;
     ecuio_import_report_t import_report;
     ecuio_csv_guess_t csv_guess;
@@ -455,6 +457,7 @@ int main(void)
     memset(&export_options, 0, sizeof export_options);
     memset(&import_options, 0, sizeof import_options);
     export_options.format = ECUIO_EXPORT_PCAPNG;
+    export_options.folder_utf8 = "."; /* the estimate judges the format */
     import_options.format = ECUIO_IMPORT_CANDUMP;
     if (sizeof(ecuio_export_report_t) != 120 ||
         offsetof(ecuio_export_report_t, failed_class) != 80 ||
@@ -462,7 +465,13 @@ int main(void)
         offsetof(ecuio_export_report_t, files) != 104 ||
         offsetof(ecuio_export_report_t, files_left_out) != 108 ||
         offsetof(ecuio_export_options_t, folder_utf8) != 24 ||
-        sizeof(ecuio_import_report_t) != 80 ||
+        offsetof(ecuio_export_options_t, layout) != 24 + 2 * sizeof(void*) ||
+        offsetof(ecuio_export_options_t, columns_utf8) !=
+            40 + 2 * sizeof(void*) ||
+        sizeof(ecuio_export_options_t) != 56 + 2 * sizeof(void*) ||
+        offsetof(ecuio_export_report_t, rows) != 112 ||
+        sizeof(ecuio_export_estimate_t) != 40 || ECUIO_CSV_WIDE != 0u ||
+        ECUIO_CSV_LONG != 1u || sizeof(ecuio_import_report_t) != 80 ||
         offsetof(ecuio_import_report_t, duration_us) != 40 ||
         offsetof(ecuio_import_report_t, values) != 48 ||
         offsetof(ecuio_import_report_t, columns_ignored) != 56 ||
@@ -473,6 +482,10 @@ int main(void)
         ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
         ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_estimate(NULL, &estimate_ms, 1, &estimate) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_estimate(&export_options, &estimate_ms, 1, &estimate) !=
+            ECUIO_ERR_INVALID_ARGUMENT ||
         ecuio_scrub_frames(0, NULL, NULL, NULL, 0, NULL, &export_report) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
