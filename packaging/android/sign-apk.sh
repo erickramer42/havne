@@ -101,6 +101,26 @@ enabler=$(unzip -p "$in" "$lib" | grep -a -c QQmlDebuggingEnabler || true)
 [ "$enabler" -eq 0 ] || die "$in's $lib was built with QT_QML_DEBUG (app/CMakeLists.txt: Debug builds only)"
 echo "ok    $in: no QML debugging"
 
+# The notices the source tree ships (app/android/assets/havne) are entries
+# of the APK as assets/havne/...: a packaging change that drops them would
+# ship the licenses' texts nowhere. The list is read into variables and
+# counted (a grep -q on a pipe can pass on an empty read under pipefail),
+# and an empty source list or entry list is itself a failure.
+notice_src=app/android/assets/havne
+[ -d "$notice_src" ] || die "$notice_src isn't here: run from the repository root"
+notices=$(cd "$notice_src" && find . -type f | sed 's|^\./||' | sort)     || die "can't list $notice_src"
+[ -n "$notices" ] || die "$notice_src holds no notice files"
+[ -n "$entries" ] || die "unzip listed no entries of $in"
+missing=0
+while IFS= read -r notice; do
+    if ! grep -qxF "assets/havne/$notice" <<< "$entries"; then
+        echo "sign-apk: $in has no assets/havne/$notice" >&2
+        missing=$((missing + 1))
+    fi
+done <<< "$notices"
+[ "$missing" -eq 0 ] || die "$in lacks $missing of the notices in $notice_src"
+echo "ok    $in: $(grep -c . <<< "$notices") notice files"
+
 # Aligned, signed, verified
 mkdir -p "$outdir"
 out="$outdir/havne-$version-android-$ABI.apk"
