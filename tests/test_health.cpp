@@ -36,6 +36,7 @@
 #include "ecuio/vin.h"
 #include "health.h"
 #include "json.h"
+#include "partial_left.h"
 #include "recording_rows.h" /* kRowMax */
 #include "scrub.h"
 #include "temp_name.h"
@@ -461,7 +462,7 @@ TEST(HealthTest, AnIdentityTextInTheReportFailsIt)
               "the check found an identification reply's value in the "
               "report: nothing was written");
     EXPECT_FALSE(fs::exists(f.path / "health.txt"));
-    EXPECT_FALSE(fs::exists(f.path / "health.txt.partial"));
+    EXPECT_FALSE(partial_left(f.path, "health.txt"));
 
     /* Without the echo it's written, and a second time refused */
     Car plain;
@@ -474,6 +475,32 @@ TEST(HealthTest, AnIdentityTextInTheReportFailsIt)
     EXPECT_FALSE(ecuio_health::put(f.utf8("health.txt"), good, ids, ok));
     EXPECT_EQ(std::string(ecuio_last_error_detail()),
               "the file exists already");
+}
+
+/* A name taken after the exists check (another process wrote it) is
+ * never replaced, and the report's own file is removed, not left beside
+ * it */
+TEST(HealthTest, ANameTakenBeforeTheRenameLeavesTheOthersFileAndNoPartial)
+{
+    static fs::path taken;
+    Folder f;
+    taken = f.path / "health.txt";
+    Car car;
+    ecuio_health_report_t r{};
+    ecuio_scrub::values ids;
+    const std::string bytes = car.write(ECUIO_HEALTH_TEXT, &r, &ids);
+    ecuio_health::put_test_before_rename = [](const std::string&) {
+        std::ofstream(taken, std::ios::binary) << "another's";
+    };
+    const bool put = ecuio_health::put(f.utf8("health.txt"), bytes, ids, r);
+    ecuio_health::put_test_before_rename = nullptr;
+    EXPECT_FALSE(put);
+    EXPECT_NE(std::string(ecuio_last_error_detail())
+                  .find("the report can't be put in place"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(read_file(taken), "another's");
+    EXPECT_FALSE(partial_left(f.path, "health.txt"));
 }
 
 /* The text, byte for byte, for an ECU with nothing stored */
@@ -630,7 +657,7 @@ TEST(HealthTest, TheExportWritesAMockSessionsReport)
     EXPECT_EQ(json.find("Daily"), std::string::npos);
     EXPECT_EQ(r.ecus, 1u);
     EXPECT_GT(r.codes, 0u);
-    EXPECT_FALSE(fs::exists(f.path / "health.json.partial"));
+    EXPECT_FALSE(partial_left(f.path, "health.json"));
     EXPECT_EQ(ecuio_health_export(&o, &r), ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(std::string(ecuio_last_error_detail()),
               "the file exists already");
@@ -1007,7 +1034,8 @@ TEST(HealthTest, ARecordingOfValuesAloneSaysItHasNoFrames)
     EXPECT_EQ(none.status, ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(none.detail, "the folder has no frames.csv or signals.csv");
     EXPECT_FALSE(fs::exists(fs::u8path(none.out)));
-    EXPECT_FALSE(fs::exists(fs::u8path(none.out + ".partial")));
+    EXPECT_FALSE(
+        partial_left(f.path, fs::u8path(none.out).filename().u8string()));
 
     /* A row the reader refuses, by its line */
     f.write("bad/frames.csv", "host_us,timestamp_us,id,flags,data\n" +

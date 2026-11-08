@@ -75,6 +75,12 @@ constexpr uint32_t kUnattributable = ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE;
 constexpr uint32_t kTextValues = ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES;
 /* The wide CSV's silence (ADR-0056 section 4): a column with no sample
  * for this long, or 3x its usual interval if longer, leaves the rule */
+/* The most columns a wide CSV has: past it no spreadsheet opens the
+ * file, and every sample costs a step per column */
+constexpr size_t kWideColumnsMax = 16384;
+/* The most row intervals one ecuio_export_estimate call sizes: each one
+ * keeps its own rows engine */
+constexpr uint32_t kEstimateCountMax = 64;
 constexpr uint64_t kSilenceUs = 1000000;
 constexpr uint64_t kSilenceTimes = 3;
 
@@ -1155,6 +1161,16 @@ private:
         }
     };
 
+    /* The refusal for a wide CSV with more columns than kWideColumnsMax,
+     * given as soon as one past it is met */
+    static bool too_many_columns()
+    {
+        ecuio_detail_set("the wide CSV is limited to %u columns: pick the "
+                         "columns to keep",
+                         static_cast<unsigned>(kWideColumnsMax));
+        return false;
+    }
+
     /* A column by name, in order of arrival; its header line's unit
      * and decimals when the header has it */
     size_t add_column(const std::string& name)
@@ -1205,6 +1221,9 @@ private:
      * decimals; the values left out counted */
     bool wide_survey(const std::string& folder)
     {
+        if (o_.column_count > kWideColumnsMax) {
+            return too_many_columns();
+        }
         std::vector<std::string> picked;
         picked.reserve(o_.column_count);
         for (uint32_t i = 0; i < o_.column_count; ++i) {
@@ -1243,6 +1262,9 @@ private:
                 if (!hs.text && index_.count(hs.name) == 0 &&
                     (raw_ || (text_names_.count(hs.name) == 0 &&
                               ident_names_.count(hs.name) == 0))) {
+                    if (columns_.size() >= kWideColumnsMax) {
+                        return too_many_columns();
+                    }
                     add_column(hs.name);
                 }
             }
@@ -1357,6 +1379,9 @@ private:
             if (it == index_.end()) {
                 if (fixed_columns_ || !survey) {
                     continue;
+                }
+                if (columns_.size() >= kWideColumnsMax) {
+                    return too_many_columns();
                 }
                 add_column(row.name);
                 it = index_.find(row.name);
@@ -2092,7 +2117,7 @@ ecuio_export_estimate(const ecuio_export_options_t* options,
     if (checked != ECUIO_OK) {
         return checked;
     }
-    if (count == 0) {
+    if (count == 0 || count > kEstimateCountMax) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     for (uint32_t i = 0; i < count; ++i) {

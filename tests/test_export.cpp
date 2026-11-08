@@ -1645,6 +1645,107 @@ TEST(ExportTest, TheEstimateMatchesTheFileForEachInterval)
     }
 }
 
+/* The wide CSV has 16384 columns at most, found or named: the refusal
+ * names the limit, comes from the survey (a few seconds for 16384
+ * columns, not minutes) and leaves no file */
+TEST(ExportTest, TheWideCsvRefusesMoreThanTheColumnLimit)
+{
+    const auto names = [](size_t n) {
+        std::string rows;
+        for (size_t i = 0; i < n; ++i) {
+            rows += std::to_string(1000 * (i + 1)) + ",S" + std::to_string(i) +
+                    ",1,\n";
+        }
+        return rows;
+    };
+    Folder at;
+    recording(at, "", names(16384));
+    WideExported ok(at);
+    ASSERT_EQ(ok.rc, ECUIO_OK) << ok.detail;
+    EXPECT_EQ(ok.report.signal_count, 16384u);
+    Folder over;
+    recording(over, "", names(16385));
+    WideExported found(over);
+    EXPECT_EQ(found.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(found.detail,
+              "the wide CSV is limited to 16384 columns: pick the columns to "
+              "keep");
+    EXPECT_FALSE(fs::exists(over.path / "wide.csv"));
+    EXPECT_FALSE(partial_left(over.path, "wide.csv"));
+
+    /* The estimate refuses it the same way */
+    {
+        const std::string folder = over.utf8("rec");
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_CSV;
+        o.folder_utf8 = folder.c_str();
+        const uint32_t ms = 0;
+        ecuio_export_estimate_t est;
+        EXPECT_EQ(ecuio_export_estimate(&o, &ms, 1, &est),
+                  ECUIO_ERR_LOAD_FAILED);
+    }
+
+    /* Declared in events.log's header: the same limit */
+    {
+        std::string header = "profile  obd2\n";
+        for (size_t i = 0; i < 16385; ++i) {
+            header += "signal  H" + std::to_string(i) + ",number,,0,0,0\n";
+        }
+        Folder declared;
+        recording(declared, "", "1000,H0,1,\n", header);
+        WideExported d(declared);
+        EXPECT_EQ(d.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_NE(d.detail.find("limited to 16384 columns"), std::string::npos)
+            << d.detail;
+    }
+
+    /* Named: the limit holds for the picks, which the survey reads first */
+    std::vector<std::string> store;
+    for (size_t i = 0; i < 16385; ++i) {
+        store.push_back("S" + std::to_string(i));
+    }
+    std::vector<const char*> picks;
+    for (size_t i = 0; i < 16384; ++i) {
+        picks.push_back(store[i].c_str());
+    }
+    Folder few;
+    recording(few, "", names(3));
+    WideExported named(few, picks, 0, ECUIO_UNITS_METRIC, 0, 0, 0, "n.csv");
+    ASSERT_EQ(named.rc, ECUIO_OK) << named.detail;
+    picks.push_back(store[16384].c_str());
+    WideExported named_over(few, picks, 0, ECUIO_UNITS_METRIC, 0, 0, 0,
+                            "o.csv");
+    EXPECT_EQ(named_over.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(named_over.detail.find("limited to 16384 columns"),
+              std::string::npos)
+        << named_over.detail;
+    EXPECT_FALSE(fs::exists(few.path / "o.csv"));
+}
+
+/* The estimate takes 64 intervals in a call, no more, and refuses the
+ * 65th before it allocates or reads anything */
+TEST(ExportTest, TheEstimateRefusesMoreThanSixtyFourIntervals)
+{
+    Folder f;
+    recording(f, "", polled_rows(5));
+    const std::string folder = f.utf8("rec");
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_CSV;
+    o.folder_utf8 = folder.c_str();
+    std::vector<uint32_t> ms(65, 100);
+    std::vector<ecuio_export_estimate_t> est(65);
+    EXPECT_EQ(ecuio_export_estimate(&o, ms.data(), 64, est.data()), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_GT(est[63].rows, 0u);
+    est[0].rows = 7;
+    EXPECT_EQ(ecuio_export_estimate(&o, ms.data(), 65, est.data()),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(est[0].rows, 7u) << "refused before out was touched";
+    /* A count no array could back: refused before any allocation */
+    EXPECT_EQ(ecuio_export_estimate(&o, ms.data(), 0xFFFFFFFFu, est.data()),
+              ECUIO_ERR_INVALID_ARGUMENT);
+}
+
 struct FolderExported {
     ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
     ecuio_export_report_t report{};

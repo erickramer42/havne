@@ -797,7 +797,9 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * newest values at its time, a row with no new cell skipped. The
  * columns are columns_utf8's names in order (one the recording lacks
  * is an empty column), else the header's focus line's, else every
- * number signal in the recording's order that has a sample in range.
+ * number signal in the recording's order that has a sample in range;
+ * more than 16384 columns, named or found, fail the export (the
+ * survey refuses at the first one past, before any row is costed).
  * Each cell carries its signal's decimal places (the header's; an
  * older recording's the most its values show) in units
  * (ecuio_display_convert), the head cell "Name (unit)" in the unit
@@ -830,8 +832,10 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
  * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
  * 12: ...", never a path; for CSV, a folder with no signals.csv), a
- * file that exists or can't be written, a formula's start, and a failed
- * check (the class's words, never the value).
+ * file that exists or can't be written, a formula's start, more than
+ * 16384 wide columns ("the wide CSV is limited to 16384 columns: pick
+ * the columns to keep"), and a failed check (the class's words, never
+ * the value).
  */
 ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
                             ecuio_export_report_t* report);
@@ -862,8 +866,9 @@ _Static_assert(sizeof(ecuio_export_estimate_t) == 40,
  * out_path_utf8 may be NULL; nothing is written and the file check
  * doesn't run, so an export can still fail it. ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL options, folder, row_ms or out;
- * ECUIO_ERR_INVALID_ARGUMENT as ecuio_export's, for a count of 0, and
- * for a format or layout other than the wide CSV;
+ * ECUIO_ERR_INVALID_ARGUMENT as ecuio_export's, for a count of 0 or
+ * above 64 (refused before anything is allocated), and for a format or
+ * layout other than the wide CSV;
  * ECUIO_ERR_LOAD_FAILED as ecuio_export's.
  */
 ecuio_status_t ecuio_export_estimate(const ecuio_export_options_t* options,

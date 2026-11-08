@@ -1063,7 +1063,7 @@ struct ecuio_recorder {
 
     uint64_t host_us_of(uint64_t clock_us) const
     {
-        return clock_us > link->zero_us ? clock_us - link->zero_us : 0;
+        return clock_us > zero_us ? clock_us - zero_us : 0;
     }
 
     void run()
@@ -1680,7 +1680,7 @@ ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
     }
     const uint64_t now = ecuio_clock_us();
     const uint64_t host_us =
-        now > recorder->link->zero_us ? now - recorder->link->zero_us : 0;
+        now > recorder->zero_us ? now - recorder->zero_us : 0;
     try {
         std::string line = one_line(utf8_line);
         std::lock_guard<std::mutex> g(recorder->note_m);
@@ -1710,7 +1710,7 @@ ecuio_status_t ecuio_recorder_mark(ecuio_recorder_t* recorder,
     }
     const uint64_t now = ecuio_clock_us();
     const uint64_t host_us =
-        now > recorder->link->zero_us ? now - recorder->link->zero_us : 0;
+        now > recorder->zero_us ? now - recorder->zero_us : 0;
     try {
         std::string label = one_line(utf8_label);
         std::lock_guard<std::mutex> g(recorder->note_m);
