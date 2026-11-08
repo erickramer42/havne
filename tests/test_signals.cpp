@@ -1377,12 +1377,17 @@ TEST(SignalsTest, ADefsRangeIsItsFieldsSpanScaled)
            "signed 32 bits");
     expect(field_def(ECUIO_VALUE_UINT, 8, -0.5, 100.0), -27.5, 100.0,
            "a negative scale swaps the ends");
-    expect(field_def(ECUIO_VALUE_ENUM, 3, 2.0, 5.0), 0.0, 7.0,
-           "an enum's raw range, never scaled");
+    expect(field_def(ECUIO_VALUE_ENUM, 3), 0.0, 7.0,
+           "an enum as validated, its raw range");
+    expect(field_def(ECUIO_VALUE_ENUM, 3, 2.0, 5.0), 5.0, 19.0,
+           "an enum scaled as the decoder scales it");
+    expect(field_def(ECUIO_VALUE_UINT, 32, 4e298), 0.0, 4294967295.0 * 4e298,
+           "a large span, still finite");
 }
 
 // What has no span, and a field the decoder refuses, in the decoder's
-// order: the kind and byte order before the bits; *lo and *hi untouched
+// order: the kind and byte order, the bits, then a FLOAT; then an end
+// that isn't finite or a span of zero width. *lo and *hi untouched
 TEST(SignalsTest, ADefsRangeRefusesWhatHasNoSpan)
 {
     ecuio_signal_def_t d = field_def(ECUIO_VALUE_UINT, 8);
@@ -1423,10 +1428,18 @@ TEST(SignalsTest, ADefsRangeRefusesWhatHasNoSpan)
             "big-endian, not whole bytes");
     refused(field_def(ECUIO_VALUE_ENUM, 0), bad, "an enum with no bits");
 
-    /* The order: a kind with no span before its bits, as the decoder */
-    refused(field_def(ECUIO_VALUE_FLOAT, 0), unsupported, "FLOAT, no bits");
+    /* The decoder's order: a byte order with no decoder before the bits,
+     * the bits before the FLOAT check */
     refused(field_def(ECUIO_VALUE_UINT, 0, 1.0, 0.0, 2), unsupported,
             "an unknown order, no bits");
+    refused(field_def(ECUIO_VALUE_FLOAT, 0), bad, "FLOAT, no bits");
+
+    refused(field_def(ECUIO_VALUE_UINT, 8, INFINITY), bad, "scale inf");
+    refused(field_def(ECUIO_VALUE_UINT, 8, NAN), bad, "scale NaN");
+    refused(field_def(ECUIO_VALUE_UINT, 8, 1.0, NAN), bad, "offset NaN");
+    refused(field_def(ECUIO_VALUE_UINT, 32, 1e300), bad,
+            "an end past the double range");
+    refused(field_def(ECUIO_VALUE_UINT, 8, 0.0), bad, "scale 0, zero width");
 }
 
 // Every def of the built-in sets with a range: its ends are what the
@@ -1473,4 +1486,73 @@ TEST(SignalsTest, EachBuiltInDefsRangeIsTheDecodersExtremes)
         }
         EXPECT_GT(ranged, 0u);
     }
+}
+
+// The range against the decoder over field shapes: each kind, byte
+// order, width, scale's sign and bit offset, and a muxed def. Its ends
+// are the decoder's values at the lowest and highest raw, and a shape
+// the decoder refuses the range refuses with the same code
+TEST(SignalsTest, ADefsRangeIsTheDecodersExtremesForEveryFieldShape)
+{
+    const auto against_the_decoder = [](const ecuio_signal_def_t& d) {
+        const Span s = range_of(d);
+        const bool is_int = d.kind == ECUIO_VALUE_INT;
+        const uint32_t all =
+            d.bit_length == 32 ? 0xFFFFFFFFu : (1u << d.bit_length) - 1u;
+        const uint32_t raw_min = is_int ? 1u << (d.bit_length - 1) : 0u;
+        const uint32_t raw_max = is_int ? all >> 1 : all;
+        uint8_t payload[ECUIO_FRAME_DATA_MAX] = {};
+        const uint16_t len = ECUIO_FRAME_DATA_MAX;
+        double a = 0.0;
+        double b = 0.0;
+        put_raw(d, raw_min, payload);
+        const int rc = ecuio_decode_signal(&d, payload, len, &a);
+        if (rc != ECUIO_DECODE_OK) {
+            EXPECT_EQ(s.rc, rc);
+            EXPECT_EQ(s.lo, -7.0);
+            EXPECT_EQ(s.hi, -7.0);
+            return;
+        }
+        put_raw(d, raw_max, payload);
+        ASSERT_EQ(ecuio_decode_signal(&d, payload, len, &b), ECUIO_DECODE_OK);
+        EXPECT_EQ(s.rc, ECUIO_DECODE_OK);
+        EXPECT_EQ(s.lo, std::fmin(a, b));
+        EXPECT_EQ(s.hi, std::fmax(a, b));
+    };
+
+    /* Binary-exact scales and offsets, so a fused multiply-add gives
+     * the same double as the decoder's */
+    const double scaling[][2] = {{0.25, -40.0}, {-0.5, 12.5}};
+    int refused = 0;
+    for (const int kind : {ECUIO_VALUE_UINT, ECUIO_VALUE_INT}) {
+        for (const int order : {ECUIO_BYTE_ORDER_LE, ECUIO_BYTE_ORDER_BE}) {
+            for (const int bits : {1, 8, 13, 32}) {
+                for (const auto& so : scaling) {
+                    for (const int at : {0, 3}) {
+                        const ecuio_signal_def_t d =
+                            field_def(kind, static_cast<uint8_t>(bits), so[0],
+                                      so[1], order, static_cast<uint8_t>(at));
+                        SCOPED_TRACE(testing::Message()
+                                     << "kind " << kind << ", order " << order
+                                     << ", " << bits << " bits at bit " << at
+                                     << ", scale " << so[0]);
+                        against_the_decoder(d);
+                        refused += range_of(d).rc != ECUIO_DECODE_OK;
+                    }
+                }
+            }
+        }
+    }
+    /* Big-endian at bit 3, and big-endian 1 and 13 bits */
+    EXPECT_GT(refused, 0);
+
+    ecuio_signal_def_t muxed =
+        field_def(ECUIO_VALUE_UINT, 16, 0.25, 0.0, ECUIO_BYTE_ORDER_BE);
+    muxed.start_byte = 2;
+    muxed.mux_offset = 0;
+    muxed.mux_length = 2;
+    muxed.mux_key = 0x410C;
+    SCOPED_TRACE("a muxed def");
+    against_the_decoder(muxed);
+    EXPECT_EQ(range_of(muxed).rc, ECUIO_DECODE_OK);
 }

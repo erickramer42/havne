@@ -327,15 +327,20 @@ const char* ecuio_enum_label(const ecuio_signal_set_t* set,
 
 /* The lowest and highest value a def's field decodes to, in the def's
  * unit: every raw value the field's bits hold (UINT 0 to 2^n - 1, INT
- * sign-extended from bit_length) with scale and offset applied, lo <=
- * hi whatever the scale's sign; an ENUM's raw range, as its value is
- * the raw number. A span, not a gauge's range: a UI narrows it. The
+ * sign-extended from bit_length) with scale and offset applied, both
+ * finite and lo < hi whatever the scale's sign. An ENUM scales as the
+ * decoder scales it, so an ENUM as validated (scale 1, offset 0) gives
+ * its raw range. A span, not a gauge's range: a UI narrows it. The mux
+ * doesn't move the span and isn't checked (mux_length included). The
  * decoder's checks, in its order: ECUIO_DECODE_ERR_NULL for a NULL
  * argument; ECUIO_DECODE_ERR_UNSUPPORTED for a kind or byte order with
- * no decoder, a FLOAT, a text kind or a COMPUTED def, none of which
- * has such a span; then ECUIO_DECODE_ERR_BAD_PARAMS for bit parameters
- * the decoder refuses (bit_length 0 or over 32, bit_offset over 7, a
- * big-endian field not whole bytes). *lo and *hi are written only on
+ * no decoder, a text kind or a COMPUTED def; ECUIO_DECODE_ERR_BAD_PARAMS
+ * for bit parameters the decoder refuses (bit_length 0 or over 32,
+ * bit_offset over 7, a big-endian field not whole bytes); then
+ * ECUIO_DECODE_ERR_UNSUPPORTED for a FLOAT, whose field holds any
+ * binary32. Last, ECUIO_DECODE_ERR_BAD_PARAMS for an end that isn't
+ * finite or a span of zero width (a scale of 0, inf or NaN, an offset
+ * NaN, an end past the double range). *lo and *hi are written only on
  * ECUIO_DECODE_OK. */
 int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
 
