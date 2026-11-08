@@ -62,6 +62,7 @@ Instantiator {
     // First of `refs` the active signal set provides, else null
     function lookup(refs) {
         for (const ref of refs ?? []) {
+            if (!Object.prototype.hasOwnProperty.call(byRef, ref)) continue
             const e = byRef[ref]
             if (e) return e
         }

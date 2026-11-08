@@ -804,6 +804,34 @@ TestCase {
         verify(words.font.pixelSize <= 13, "the small font")
     }
 
+    // A phone on its side has the link state in the title row, so the line
+    // under it, a gauge row's height, is gone
+    function test_aPhoneOnItsSideKeepsTheLinkStateInTheTitleRow() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const line = find(dash, "linkLine")
+        const inRow = find(dash, "linkInRow")
+        tryVerify(() => line.active && !inRow.active, 3000, "upright: a line of its own")
+        main.width = 832
+        main.height = 384
+        tryVerify(() => Theme.shortLayout, 2000, "on its side")
+        tryVerify(() => !line.active && inRow.active, 3000, "on its side: in the row")
+        const header = find(dash, "resetPeaks").parent
+        tryVerify(() => inRow.item && inRow.item.children[1].width > 0, 3000, "laid out")
+        const words = inRow.item.children[1]
+        verify(words.mapToItem(header, 0, 0).y < header.height, "in the title row")
+        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
+        main.width = 384
+        main.height = 832
+        tryVerify(() => line.active && !inRow.active, 3000, "upright again")
+    }
+
     // Edit mode's controls on the phone: each a touch target, the bar at
     // most three buttons
     function test_thePhonesEditControlsAreTouchTargets() {
@@ -1022,6 +1050,9 @@ TestCase {
         verify(disconnect.visible)
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way to Start log on a phone")
+        const pillText = find(main.contentItem, "linkPillText")
+        tryCompare(pillText, "text", "Live", 5000, "the pill is a word, not 'Ses...'")
+        verify(!pillText.truncated, "and it fits")
         let out = pastTheEdge(row, main.contentItem, [])
         compare(out.length, 0, "before the log, past " + main.contentItem.width + " px: "
                                + out.join(", "))

@@ -145,8 +145,12 @@ GaugeBase {
     // The scale: the window's high at the top, its low at the bottom
     Column {
         id: scaleBox
+        objectName: "scaleBox"
         anchors { left: parent.left; top: trace.top; bottom: trace.bottom }
-        width: Math.max(highText.implicitWidth, lowText.implicitWidth)
+        // Sized from the scale's ends and a digit more, so the trace
+        // doesn't move when a label gains a digit
+        width: Math.max(highText.implicitWidth, lowText.implicitWidth,
+                        sampleLow.implicitWidth, sampleHigh.implicitWidth)
         Text {
             id: highText
             objectName: "scaleHigh"
@@ -164,6 +168,21 @@ GaugeBase {
             font.features: ({ "tnum": 1 })
             color: Qt.alpha(Theme.textDim, 0.8)
         }
+    }
+
+    Text {
+        id: sampleLow
+        visible: false
+        text: gauge.format(gauge.from) + "0"
+        font.pixelSize: 10
+        font.features: ({ "tnum": 1 })
+    }
+    Text {
+        id: sampleHigh
+        visible: false
+        text: gauge.format(gauge.to) + "0"
+        font.pixelSize: 10
+        font.features: ({ "tnum": 1 })
     }
 
     Shape {

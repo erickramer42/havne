@@ -123,6 +123,7 @@ Page {
         editing = true
     }
     function stopEditing() {
+        commitTyping()
         editing = false
         selected = -1
         panel = ""
@@ -143,7 +144,9 @@ Page {
         const f = Window.activeFocusItem
         if (f !== null && (f instanceof TextInput || f instanceof TextEdit))
             f.focus = false
+        // qmllint disable missing-property
         Qt.inputMethod.hide()
+        // qmllint enable missing-property
     }
 
     // Stores next as this form's document, unless it's the same (a
@@ -281,6 +284,7 @@ Page {
             selected = t
     }
     function removeCell(i) {
+        commitTyping()
         if (!edit(DashboardBook.removeCell(doc, pageIndex, i)))
             return
         if (selected === i) {
@@ -544,7 +548,7 @@ Page {
         readonly property color accent: {
             const a = opt("accent", "accent")
             return a === "info" ? Theme.info : a === "success" ? Theme.success
-                                             : Qt.lighter(Theme.primary, 1.3)
+                                             : Theme.gaugeValue
         }
 
         // Each kind's own
@@ -585,9 +589,13 @@ Page {
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
             "sparkline": ["windowS", "shown"],
-            "digital": ["description", "valueLabel"],
+            "digital": ["description", "valueLabel", "shown"],
             "shift-light": ["count", "ledSpacing"]
         })
+
+        // A held peak, low and trace belong to the signal that made them:
+        // a cell that shows another signal starts them again
+        onEntryChanged: if (gauge.item) (gauge.item as GaugeBase).resetPeaks()
 
         Loader {
             id: gauge
@@ -741,7 +749,10 @@ Page {
                     ThemedButton {
                         objectName: "panelClose"
                         text: qsTr("Close")
-                        onClicked: root.panel = ""
+                        onClicked: {
+                            root.commitTyping()
+                            root.panel = ""
+                        }
                     }
                 }
 
@@ -798,6 +809,7 @@ Page {
                     Caption { text: qsTr("Decimals") }
                     SpinBox {
                         objectName: "panelDecimals"
+                        Accessible.name: qsTr("Decimals")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 0
                         to: 6
@@ -811,6 +823,7 @@ Page {
                     Caption { text: qsTr("Width") }
                     SpinBox {
                         objectName: "panelW"
+                        Accessible.name: qsTr("Width")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 1
                         to: DashboardBook.maxColumns
@@ -820,6 +833,7 @@ Page {
                     Caption { text: qsTr("Height") }
                     SpinBox {
                         objectName: "panelH"
+                        Accessible.name: qsTr("Height")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 1
                         to: DashboardBook.maxRows
@@ -833,6 +847,7 @@ Page {
                     }
                     Switch {
                         objectName: "panelPeak"
+                        Accessible.name: qsTr("Peak hold")
                         visible: root.peakKinds.indexOf(panelCard.kind) >= 0
                         implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
                                                  Theme.touchTarget)
@@ -884,6 +899,7 @@ Page {
                     Caption { visible: panelCard.kind === "segments"; text: qsTr("Cells") }
                     SpinBox {
                         objectName: "panelCells"
+                        Accessible.name: qsTr("Cells")
                         visible: panelCard.kind === "segments"
                         Layout.preferredHeight: Theme.touchTarget
                         from: 2
@@ -896,6 +912,7 @@ Page {
                     Caption { visible: panelCard.kind === "segments"; text: qsTr("Curve") }
                     OptionField {
                         objectName: "panelRise"
+                        Accessible.name: qsTr("Curve")
                         visible: panelCard.kind === "segments"
                         option: "rise"
                         converted: false
@@ -904,6 +921,7 @@ Page {
                     Caption { visible: panelCard.kind === "seven-segment"; text: qsTr("Digits") }
                     SpinBox {
                         objectName: "panelDigits"
+                        Accessible.name: qsTr("Digits")
                         visible: panelCard.kind === "seven-segment"
                         Layout.preferredHeight: Theme.touchTarget
                         from: 1
@@ -916,6 +934,7 @@ Page {
                     Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
                     SpinBox {
                         objectName: "panelWindow"
+                        Accessible.name: qsTr("Window (s)")
                         visible: panelCard.kind === "sparkline"
                         Layout.preferredHeight: Theme.touchTarget
                         from: 10
@@ -929,16 +948,30 @@ Page {
                     Caption { visible: panelCard.kind === "bar"; text: qsTr("Standing up") }
                     Switch {
                         objectName: "panelVertical"
+                        Accessible.name: qsTr("Standing up")
                         visible: panelCard.kind === "bar"
                         implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
                                                  Theme.touchTarget)
                         checked: panelCard.cell && panelCard.cell.options
                                  ? panelCard.cell.options.vertical === true : false
-                        onToggled: root.setOptions({ vertical: checked })
+                        onToggled: {
+                            // Standing up is a tall, narrow bar: the default
+                            // span follows the toggle, and a size the user
+                            // chose stays
+                            // (the resize rebinds this switch, so its state is read first)
+                            const on = checked
+                            const c = panelCard.cell
+                            if (c && on && c.w === 2 && c.h === 2)
+                                root.resize(1, 4)
+                            else if (c && !on && c.w === 1 && c.h === 4)
+                                root.resize(2, 2)
+                            root.setOptions({ vertical: on })
+                        }
                     }
                     Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
                     Switch {
                         objectName: "panelMarks"
+                        Accessible.name: qsTr("Scale marks")
                         visible: panelCard.kind === "bar"
                         implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
                                                  Theme.touchTarget)
@@ -949,6 +982,7 @@ Page {
                     Caption { visible: panelCard.kind === "shift-light"; text: qsTr("Lights") }
                     SpinBox {
                         objectName: "panelCount"
+                        Accessible.name: qsTr("Lights")
                         visible: panelCard.kind === "shift-light"
                         Layout.preferredHeight: Theme.touchTarget
                         from: 1
@@ -1023,7 +1057,10 @@ Page {
                     ThemedButton {
                         objectName: "addClose"
                         text: qsTr("Close")
-                        onClicked: root.panel = ""
+                        onClicked: {
+                            root.commitTyping()
+                            root.panel = ""
+                        }
                     }
                 }
                 Flow {
@@ -1057,9 +1094,11 @@ Page {
                                     // A sparkline's still is a made-up trace, and it
                                     // takes no samples of its own
                                     if (kindTile.modelData === "sparkline") {
-                                        g.shown = false
-                                        g.history = Array.from({ length: 120 },
-                                                               (_, i) => 55 + 25 * Math.sin(i / 10))
+                                        const spark = item as SparkGauge
+                                        spark.shown = false
+                                        spark.windowS = 12   // 120 points at 10 Hz fill the box
+                                        spark.history = Array.from({ length: 120 },
+                                                                   (_, i) => 55 + 25 * Math.sin(i / 10))
                                     }
                                 }
                             }
@@ -1215,18 +1254,21 @@ Page {
 
             // The desktop's link state follows the title; the phone's
             // row has no room for it beside Reset peaks and Edit, so it
-            // takes a line of its own below. No width of its own: it
-            // takes what the title and buttons leave
+            // takes a line of its own below, except on its side, where
+            // the row has the width and the line's height is the
+            // gauges'. No width of its own: it takes what the title and
+            // buttons leave
             Loader {
+                objectName: "linkInRow"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
-                active: root.form !== "phone"
+                active: root.form !== "phone" || Theme.shortLayout
                 visible: active
                 sourceComponent: linkState
             }
             Item {
                 Layout.fillWidth: true
-                visible: root.form === "phone"
+                visible: root.form === "phone" && !Theme.shortLayout
             }
             ThemedButton {
                 objectName: "resetPeaks"
@@ -1244,8 +1286,9 @@ Page {
         }
 
         Loader {
+            objectName: "linkLine"
             Layout.fillWidth: true
-            active: root.form === "phone"
+            active: root.form === "phone" && !Theme.shortLayout
             visible: active
             sourceComponent: linkState
         }
@@ -1586,9 +1629,12 @@ Page {
                             cell: pageView.cells[index]
                             pageNo: pageView.index
                             cellIndex: index
-                            later: Math.abs(pageView.index - root.pageIndex) > 1
-                            shown: pageView.index === root.pageIndex
-                                   && Qt.application.state === Qt.ApplicationActive
+                            later: pageView !== null && Math.abs(pageView.index - root.pageIndex) > 1
+                            // qmllint disable missing-property
+                            shown: pageView !== null && pageView.index === root.pageIndex
+                                   && Qt.application.state !== Qt.ApplicationSuspended
+                                   && Qt.application.state !== Qt.ApplicationHidden
+                            // qmllint enable missing-property
                             x: box ? box.x * (pageView.columnWidth + root.gap) : 0
                             y: box ? box.y * pageView.pitch : 0
                             width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0

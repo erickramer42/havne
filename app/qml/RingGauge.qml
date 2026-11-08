@@ -1,6 +1,5 @@
 // File/layer: app/qml/RingGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo; coolant
-//          crosses cold -> normal during warm-up; legible at 140 px
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
 
 import QtQuick
 import QtQuick.Shapes
@@ -113,7 +112,7 @@ GaugeBase {
         width: gauge.zoneWidth * 2.6; height: width; radius: width / 2
         x: gauge.px(a, gauge.zoneRadius) - width / 2
         y: gauge.py(a, gauge.zoneRadius) - height / 2
-        color: Theme.gaugeWarn
+        color: Theme.gaugeTick   // no zone's color: it sits on the strip
     }
 
     // Tip knob

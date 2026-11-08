@@ -984,3 +984,12 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   and `test_thePhonesLinkStateTakesACompactLine`.
   `BridgeTest.ARowsRangeIsShownInTheUnitSystem` checks the three
   decoded keys under both unit systems.
+
+## Appendix: the edit-mode mark for unfilled cells (2026-11-08)
+
+Section 3 says a cell in state 2 or 3 carries a mark in edit mode. The
+page does not draw one: the cell's note ("not supported by this car",
+"refused (7F 22 31)") shows whether or not the page is being edited, so a
+user tidying a page sees which gauges the vehicle can't fill without it.
+The mark stays out of the first release; a cell with no value is shown
+by its note alone.

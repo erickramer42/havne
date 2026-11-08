@@ -245,6 +245,18 @@ QtObject {
     // states fall to "Link degraded", mirroring linkColor. LiveView's
     // banner keeps its own longer messages, which carry the episode count
     // and error code.
+    // The same states in one short word, for a header with no room
+    function linkShortLabel(state: string): string {
+        switch (state) {
+        case "ok":              return qsTr("Live")
+        case "fault":           return qsTr("Fault")
+        case "requests":        return qsTr("Failing")
+        case "quiet":           return qsTr("Quiet")
+        case "stopped":         return qsTr("Stopped")
+        case "disconnected":    return qsTr("Offline")
+        default:                return qsTr("Degraded")
+        }
+    }
     function linkLabel(state: string): string {
         switch (state) {
         case "ok":              return qsTr("Session active")

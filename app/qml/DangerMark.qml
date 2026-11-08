@@ -21,6 +21,7 @@ Item {
 
     Accessible.role: Accessible.Indicator
     Accessible.name: qsTr("Danger")
+    Accessible.ignored: opacity === 0
 
     Shape {
         anchors.fill: parent

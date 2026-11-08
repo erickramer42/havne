@@ -411,6 +411,9 @@ TestCase {
         const hidden = names => { for (const n of names) verify(!find(page, n).visible, n + " is hidden") }
 
         press(find(page, "dashCell_0_0"))
+        compare(find(page, "panelCells").Accessible.name, "Cells")
+        compare(find(page, "panelRise").Accessible.name, "Curve")
+        compare(find(page, "panelDecimals").Accessible.name, "Decimals")
         spin(find(page, "panelCells"), 12)
         compare(at(0).options.cells, 12)
         type(find(page, "panelRise"), "2.5")
@@ -425,6 +428,7 @@ TestCase {
         hidden(["panelCells", "panelWindow", "panelVertical"])
 
         press(find(page, "dashCell_0_2"))
+        compare(find(page, "panelWindow").Accessible.name, "Window (s)")
         spin(find(page, "panelWindow"), 60)
         compare(at(2).options.window, 60)
         verify(!find(page, "panelPeak").visible, "the sparkline has no peak")
@@ -471,6 +475,7 @@ TestCase {
             verify(spark.history.length > 10, "a still trace to look at")
             wait(300)
             compare(spark.history.length, 120, "and it takes no samples of its own")
+            verify(spark.tracePoints(200, 50)[0].x < 2, "the trace spans the preview")
         }
     }
 
@@ -911,5 +916,99 @@ TestCase {
         mouseRelease(cell)
         compare(page.selected, 1)
         compare(page.panel, "cell")
+    }
+
+    // A held peak, low and trace belong to the signal that made them:
+    // when two cells of a kind swap signals, each starts again
+    function test_aMovedCellDoesNotKeepTheOthersHolds_data() {
+        return [
+            { tag: "analog", kind: "analog" },
+            { tag: "segments", kind: "segments" },
+            { tag: "sparkline", kind: "sparkline" },
+            { tag: "digital", kind: "digital" }
+        ]
+    }
+    function test_aMovedCellDoesNotKeepTheOthersHolds(data) {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const a = cellOf("A", data.kind)
+        a.refs = [Bridge.gaugeSignals["coolant"][0]]
+        const b = cellOf("B", data.kind)
+        b.refs = [Bridge.gaugeSignals["speed"][0]]
+        a.options.peak = true
+        b.options.peak = true
+        const page = pageOf({}, docOf([a, b]))
+        page.startEditing()
+        const gaugeAt = i => find(find(page, "dashCell_0_" + i), "gauge")
+        tryVerify(() => gaugeAt(0).item !== null && gaugeAt(1).item !== null, 3000, "both load")
+        const first = gaugeAt(0).item
+        first.peakValue = 1e9
+        first.lowValue = -1e9
+        if (data.kind === "sparkline" || data.kind === "digital")
+            first.history = [1e9]
+        press(find(page, "dashCell_0_0"))
+        compare(page.selected, 0)
+        page.moveTo(1)
+        compare(labels(page), ["B", "A"])
+        const now = gaugeAt(0).item
+        verify(now.peakValue !== 1e9, "no peak of A's")
+        verify(now.lowValue !== -1e9, "no low of A's")
+        if (now.history !== undefined)
+            verify(now.history.indexOf(1e9) < 0, "no trace of A's")
+    }
+
+    // The Close buttons and Done commit a field still holding the focus
+    function test_doneCommitsATypedLabel() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const label = find(page, "panelLabel")
+        label.forceActiveFocus()
+        label.selectAll()
+        keyClick("t")
+        keyClick("a")
+        keyClick("c")
+        keyClick("h")
+        page.stopEditing()
+        compare(labels(page), ["tach"])
+    }
+
+    // Standing up moves the bar's default span to the ADR's 1 x 4 and back;
+    // a span the user chose stays
+    function test_standingUpTakesTheTallSpanAndBack() {
+        const bar = cellOf("Level", "bar")
+        bar.w = 2
+        bar.h = 2
+        const odd = cellOf("Odd", "bar")
+        odd.w = 3
+        odd.h = 2
+        const page = pageOf({}, docOf([bar, odd]))
+        page.startEditing()
+        const at = i => page.doc.pages[0].cells[i]
+        press(find(page, "dashCell_0_0"))
+        const vertical = find(page, "panelVertical")
+        vertical.toggle()
+        vertical.toggled()
+        compare([at(0).w, at(0).h], [1, 4], "tall")
+        compare(at(0).options.vertical, true)
+        vertical.toggle()
+        vertical.toggled()
+        compare([at(0).w, at(0).h], [2, 2], "and back")
+        press(find(page, "dashCell_0_1"))
+        vertical.toggle()
+        vertical.toggled()
+        compare([at(1).w, at(1).h], [3, 2], "a chosen span stays")
+    }
+
+    // A digital tile samples only while its page is the one shown
+    function test_aDigitalTileOnAnotherPageTakesNoSamples() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const d = docOf([cellOf("A", "digital")])
+        d.pages.push({ name: "P2", cells: [cellOf("B", "digital")] })
+        const page = pageOf({}, d)
+        const sampler = p => find(find(find(page, "dashCell_" + p + "_0"), "gauge").item, "sampler")
+        tryVerify(() => sampler(0).running, 3000, "the page shown samples")
+        verify(!sampler(1).running, "the other page's tile does not")
+        page.goTo(1)
+        tryVerify(() => sampler(1).running && !sampler(0).running, 3000, "and it follows the page")
     }
 }

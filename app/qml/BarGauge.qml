@@ -1,7 +1,5 @@
 // File/layer: app/qml/BarGauge.qml | Qt6 Quick, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo; segment
-//          count follows width (phone ~30, desktop ~50); the leading
-//          segment fades in, so motion reads smooth at any count
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
 
 import QtQuick
 
@@ -23,8 +21,10 @@ GaugeBase {
     // The bar's length along its own direction, and its thickness across
     readonly property real barLength: vertical ? bar.height : bar.width
     readonly property real barThickness: vertical ? bar.width : bar.height
-    readonly property int segments: Math.max(10, Math.floor((barLength + segmentGap)
-                                                            / (segmentWidth + segmentGap)))
+    // At least ten when ten fit; a short bar gets as many as fit (two at
+    // least), never segments narrower than they are wide across
+    readonly property int segments: Math.max(2, Math.floor((barLength + segmentGap)
+                                                           / (segmentWidth + segmentGap)))
 
     implicitHeight: vertical ? 180 : 72
 
@@ -136,7 +136,7 @@ GaugeBase {
         objectName: "peakMark"
         visible: gauge.showPeak && !isNaN(gauge.peakValue)
         readonly property real at: gauge.fractionOf(isNaN(gauge.peakValue) ? gauge.from : gauge.peakValue)
-        color: Theme.gaugeWarn
+        color: Theme.gaugeTick   // no zone's color: it sits over lit segments
         radius: 1
         // Inside the track at either end
         x: gauge.vertical ? bar.x - 3 : bar.x + Math.max(0, Math.min(bar.width - width, at * bar.width - width / 2))
