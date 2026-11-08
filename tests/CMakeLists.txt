@@ -411,7 +411,8 @@ if(TARGET havne-cli)
                     $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
-                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         set_tests_properties(CliExitTest.AFailedWriteIsExit1 PROPERTIES TIMEOUT 120)
         # A candump -L log of the simulated car on vcan0 imported and read
         # through obd2: its values the direct session's (Linux; skipped
@@ -823,6 +824,13 @@ if(TARGET havne-cli)
     app_cli_usage(LogASignalTwiceIsUsage "log|mock://x|f|--signal|RPM|--signal|RPM")
     app_cli_usage(LogAnExportOptionIsUsage "log|mock://x|f|--layout|wide")
     app_cli_usage(LogSecondsOfZeroIsUsage "log|mock://x|f|--seconds|0")
+    # The cap is 366 days of seconds: one more is usage, for every command
+    # that counts --seconds out
+    app_cli_usage(LogSecondsPastTheCapIsUsage "log|mock://x|f|--seconds|31622401")
+    app_cli_usage(StreamSecondsPastTheCapIsUsage "stream|mock://x|--seconds|31622401")
+    app_cli_usage(StreamSecondsThatWrapAreUsage "stream|mock://x|--seconds|18446744073710")
+    app_cli_usage(SimSecondsPastTheCapIsUsage "sim|mock://x|--elm327|tcp:0|--seconds|31622401")
+    app_cli_usage(PlaySecondsPastTheCapIsUsage "play|mock://x|--to|vcan0|--seconds|31622401")
     app_cli_usage(LogSignalsAndAPluginIsUsage "log|mock://x|f|--signals|a.json|--plugin|p")
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
@@ -1218,7 +1226,7 @@ endif()
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT HAVNE_BUILD_CORE_ONLY)
 
-    find_package(Qt6 6.12 COMPONENTS Core Network REQUIRED)   # app/CMakeLists.txt's minimum
+    find_package(Qt6 6.12 COMPONENTS Core Gui Network REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
@@ -1240,7 +1248,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/btconnect.cpp
         ../app/carryover.cpp
         ../app/adapterrelay.cpp
+        ../app/windowtheme.cpp
         fake_bt_socket.h
+        fake_theme.h
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
@@ -1268,9 +1278,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_link_libraries(test_bridge PRIVATE
         ecuio-core
         Qt6::Core
+        Qt6::Gui
         Qt6::Network
         GTest::gtest
     )
+    # windowtheme.cpp colors the title bar through dwmapi
+    if(WIN32)
+        target_link_libraries(test_bridge PRIVATE dwmapi)
+    endif()
 
     # Copy Qt DLLs at build time
     if(WIN32)

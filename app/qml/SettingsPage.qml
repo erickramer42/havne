@@ -5,9 +5,7 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
-import QtQuick.Shapes
 
 pragma ComponentBehavior: Bound
 
@@ -461,7 +459,13 @@ Pane {
         chooseProfile(profile)
     }
 
-    // The picked vehicle's variant as What to read offers it: null for
+    // The Signals row's summary: a count of files, one or many (no
+    // translation is loaded to pick a plural form)
+    function filesSummary(n) {
+        return n === 1 ? qsTr("1 file") : qsTr("%1 files").arg(n)
+    }
+
+    // The picked vehicle's variant as the Profile buttons offer it: null for
     // none, or one no plugin loaded registers
     function pluginChoice() {
         if (pickedVehicle === null || pickedVehicle.plugin === "")
@@ -824,7 +828,7 @@ Pane {
                    + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
         { key: "signals", title: qsTr("Signals"),
           summary: pickedVehicle === null ? qsTr("pick a vehicle")
-                   : qsTr("%1 files").arg(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)) },
+                   : filesSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)) },
         { key: "recording", title: qsTr("Recording"),
           summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off") },
         { key: "display", title: qsTr("Display"),
@@ -867,6 +871,7 @@ Pane {
             Bluetooth.refresh(false)
         }
     }
+    // qmllint disable missing-property
     Connections {
         target: Qt.application
         function onStateChanged() {
@@ -874,6 +879,7 @@ Pane {
                 page.recheckBluetoothIfSeen()
         }
     }
+    // qmllint enable missing-property
     onShownKeyChanged: askBluetoothIfSeen()
     onVisibleChanged: askBluetoothIfSeen()
 

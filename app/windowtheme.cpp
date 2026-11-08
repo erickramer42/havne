@@ -1,12 +1,13 @@
 // File/layer: app/windowtheme.cpp | Qt6 Gui, app layer, C++17
-// Testing: Manual smoke; BENCH (the phone run sheet); CI android-build
-//          (compiles it)
+// Testing: BRIDGE: BridgeTest.WindowTheme* (test_bridge, the wiring and the
+//          count of applies); manual smoke and BENCH for the platform step
 
 #include "windowtheme.h"
 
 #include <QColor>
 #include <QMetaMethod>
 #include <QMetaProperty>
+#include <QtLogging>
 #include <QWindow>
 
 #ifdef Q_OS_ANDROID
@@ -95,8 +96,12 @@ WindowTheme::WindowTheme(QObject* theme, QWindow* window)
     for (const char* name : {"bg", "surface", "text"}) {
         const QMetaProperty property =
             themeMeta->property(themeMeta->indexOfProperty(name));
-        if (property.hasNotifySignal()) {
+        if (property.isValid() && property.hasNotifySignal()) {
             connect(theme, property.notifySignal(), this, slot);
+        } else {
+            qWarning("WindowTheme: the theme has no notifying property '%s': "
+                     "the window will not follow it",
+                     name);
         }
     }
     apply();
@@ -108,11 +113,14 @@ void WindowTheme::apply()
     darkenAndroidWindow(m_theme->property("bg").value<QColor>());
 #endif
 #ifdef Q_OS_WIN
-    colorTitleBar(m_window, m_theme->property("surface").value<QColor>(),
-                  m_theme->property("text").value<QColor>());
+    if (m_window != nullptr) {
+        colorTitleBar(m_window, m_theme->property("surface").value<QColor>(),
+                      m_theme->property("text").value<QColor>());
+    }
 #endif
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_WIN)
     (void)m_theme;
     (void)m_window;
 #endif
+    emit applied();
 }

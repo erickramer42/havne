@@ -1,7 +1,7 @@
 # File/layer: tests/cli_write_fail.py | test-only, Python 3.8+, no packages
 # Testing: HARNESS (ctest CliExitTest.AFailedWriteIsExit1)
 #
-#   python tests/cli_write_fail.py <havne-cli> <pull-early> <findings> <replay-obd2>
+#   python tests/cli_write_fail.py <havne-cli> <pull-early> <findings> <replay-obd2> <replay-frames>
 #
 # A command whose output can't be written exits 1 with a stderr line
 # (cli.md's exit codes), even when every write fails only at the flush:
@@ -24,10 +24,10 @@ def run(cli, args, out):
 
 
 def main():
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 6:
         print(__doc__)
         return 2
-    cli, pull, findings, values = sys.argv[1:]
+    cli, pull, findings, values, replay = sys.argv[1:]
     why = []
     with tempfile.TemporaryDirectory(prefix="havne-cli-write-") as tmp:
         log = os.path.join(tmp, "bus.log")
@@ -43,6 +43,9 @@ def main():
             "export": lambda n: ["export", values, os.path.join(tmp, n + ".csv"),
                                  "--format", "csv"],
             "import": lambda n: ["import", "candump", log, os.path.join(tmp, n)],
+            "frames": lambda n: ["frames", replay, "--from", "100", "--to", "101"],
+            "log": lambda n: ["log", "mock://write-fail", os.path.join(tmp, n),
+                              "--seconds", "1"],
         }
         for name, args in commands.items():
             good = os.path.join(tmp, name + "-good.jsonl")

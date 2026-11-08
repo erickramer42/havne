@@ -2104,6 +2104,14 @@ void usage(FILE* to)
         "        signal file or OBDb set was refused.\n");
 }
 
+bool parse_count(const char* text, uint64_t& out);
+
+// --seconds of stream, play and sim: a whole number up to the shared cap
+bool parse_run_seconds(const char* text, uint64_t& out)
+{
+    return parse_count(text, out) && out <= cli::kMaxRunSeconds;
+}
+
 bool parse_count(const char* text, uint64_t& out)
 {
     if (!text || !*text) {
@@ -2923,10 +2931,14 @@ int run_log(const cli::LogArgs& args)
     if (!out.failed) {
         cli::log_end_line(end.line, reason, folder.c_str(), last);
     }
-    // The recording's last note is the end line; it closes after its
-    // session, as the app's does
+    // The recording's last note is the end line, without the folder (its
+    // path holds the account name, and a recording gets shared); it closes
+    // after its session, as the app's does
     if (recorder != nullptr && end.line.size() > 0) {
-        const std::string text(end.line.data(), end.line.size());
+        char noted_buf[256];
+        cli::Line noted(noted_buf, sizeof noted_buf);
+        cli::log_end_line(noted, reason, nullptr, last);
+        const std::string text(noted.data(), noted.size());
         ecuio_recorder_note(recorder, text.c_str());
     }
     ecuio_session_destroy(session);
@@ -4684,11 +4696,13 @@ int run(int argc, char** argv)
             if (a == "--to" && i + 1 < argc) {
                 play.to = argv[++i];
             } else if ((a == "--count" || a == "--seconds") && i + 1 < argc) {
-                if (!parse_count(argv[++i], a == "--count" ? play.count
-                                                           : play.seconds)) {
-                    std::fprintf(stderr,
-                                 "havne-cli: %s takes a whole number above 0\n",
-                                 a.c_str());
+                const bool is_count = a == "--count";
+                if (!(is_count ? parse_count(argv[++i], play.count)
+                               : parse_run_seconds(argv[++i], play.seconds))) {
+                    std::fprintf(stderr, "havne-cli: %s\n",
+                                 is_count
+                                     ? "--count takes a whole number above 0"
+                                     : cli::run_seconds_why());
                     return kExitUsage;
                 }
             } else if (a.rfind("--", 0) == 0 || play.uri) {
@@ -4774,10 +4788,9 @@ int run(int argc, char** argv)
             } else if (a == "--plugin" && i + 1 < argc) {
                 sim.plugin = argv[++i];
             } else if (a == "--seconds" && i + 1 < argc) {
-                if (!parse_count(argv[++i], sim.seconds)) {
-                    std::fprintf(
-                        stderr,
-                        "havne-cli: --seconds takes a whole number above 0\n");
+                if (!parse_run_seconds(argv[++i], sim.seconds)) {
+                    std::fprintf(stderr, "havne-cli: %s\n",
+                                 cli::run_seconds_why());
                     return kExitUsage;
                 }
             } else if (a.rfind("--", 0) == 0 || sim.uri) {
@@ -4948,10 +4961,8 @@ int run(int argc, char** argv)
                 return kExitUsage;
             }
         } else if (a == "--seconds" && i + 1 < argc) {
-            if (!parse_count(argv[++i], args.seconds)) {
-                std::fprintf(
-                    stderr,
-                    "havne-cli: --seconds takes a whole number above 0\n");
+            if (!parse_run_seconds(argv[++i], args.seconds)) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::run_seconds_why());
                 return kExitUsage;
             }
         } else if (a == "--record" && i + 1 < argc) {

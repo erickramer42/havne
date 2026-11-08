@@ -571,6 +571,9 @@ TEST(CsvGuessTest, APreambleLineOfTheDatasShapeIsNoHeader)
     Guessed blank("time,rpm\n,\n0,800\n1,900\n");
     ASSERT_TRUE(blank.ok) << blank.why;
     EXPECT_EQ(blank.number("header_row"), 1);
+    /* A line of which exactly half the cells are numbers isn't a header
+     * (more than half must not be) */
+    EXPECT_FALSE(refused("2024,Notes\n0,800\n1,900\n").empty());
 }
 
 TEST(CsvGuessTest, AQuoteTheReadsEndCutShortEndsTheSample)

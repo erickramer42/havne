@@ -1,5 +1,5 @@
 // File/layer: app/qml/FrameTable.qml | Qt Quick, UI layer
-// Testing: QML: QmlTest.log (test_qml)
+// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone (test_qml)
 
 pragma ComponentBehavior: Bound
 

@@ -96,7 +96,7 @@ TestCase {
         "gaugeFace", "gaugeValue", "gaugeReadout", "gaugeNeedle",
         "gaugeTick", "gaugeWarn", "gaugeDanger"]
 
-    // Dark's dial shades are the dial's old literals (the other themes'
+    // Dark's dial shades are fixed colors (the other themes'
     // derive from their face)
     function test_darkKeepsTheDialsShades() {
         const s = Theme.gaugeShade
@@ -130,7 +130,7 @@ TestCase {
         sameColor(Theme.primary, "#6d4aff", "primary")
         sameColor(Theme.warning, "#ffd166", "warning")
         sameColor(Theme.danger, "#f87171", "danger")
-        sameColor(Theme.gaugeNeedle, "#ff5a5f", "the analog needle's old literal")
+        sameColor(Theme.gaugeNeedle, "#ff5a5f", "the analog needle")
     }
 
     function test_everyThemeDefinesEveryRole_data() {

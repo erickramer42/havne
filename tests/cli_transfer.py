@@ -61,6 +61,12 @@ LOG = (
 UTC = 1700000000250000
 
 
+def partial_left(path):
+    """Whether core's own file or folder, <path>.partial-..., is left beside path"""
+    folder, name = os.path.split(path)
+    return any(e.startswith(name + ".partial-") for e in os.listdir(folder))
+
+
 def run(cli, args, want=0):
     # No standard input: stream --record reads it as marks, and a test
     # run's own input (a script fed to a shell) would become markers
@@ -202,7 +208,7 @@ def refusals(cli):
         if one(lines, "export_failed")["class"] != "identification":
             raise SystemExit(f"FAIL  export said {lines}")
         if "ZZZFAKE" in json.dumps(lines) or os.path.exists(out) or \
-                os.path.exists(out + ".partial"):
+                partial_left(out):
             raise SystemExit("FAIL  the failed export left the VIN or a file")
         raw = one(run(cli, ["export", echo, out, "--format", "pcapng", "--raw"]),
                   "exported")
@@ -447,7 +453,7 @@ def folder_copy(cli, source, out, want_files, raw=False):
     if (exported["format"], exported["scrubbed"], exported["files"],
             exported["files_left_out"]) != ("folder", not raw, want_files, 0):
         raise SystemExit(f"FAIL  exported {exported}")
-    if os.path.exists(out + ".partial"):
+    if partial_left(out):
         raise SystemExit("FAIL  the partial folder is left")
     return exported
 
@@ -558,7 +564,7 @@ def csv_import(cli, fixtures):
                     "error")
         if "'shade'" not in error["detail"]:
             raise SystemExit(f"FAIL  an unknown key said {error}")
-        if os.path.exists(rec) or os.path.exists(rec + ".partial"):
+        if os.path.exists(rec) or partial_left(rec):
             raise SystemExit("FAIL  a refused import left a folder")
         there = os.path.join(d, "logger-a")
         error = one(run(cli, ["import", "csv", log, there, "--map",

@@ -81,6 +81,10 @@ std::string write(const inputs& in, uint32_t format,
 bool put(const std::string& out, const std::string& bytes,
          const ecuio_scrub::values& identity, ecuio_health_report_t& r);
 
+/* Test seam: called by put with <out> once its own file is written and
+ * before the rename, so a test can take the name then (nullptr in use) */
+inline void (*put_test_before_rename)(const std::string& out) = nullptr;
+
 /* microseconds since 1970 UTC as "YYYY-MM-DDTHH:MM:SSZ" */
 std::string utc_text(uint64_t utc_us);
 

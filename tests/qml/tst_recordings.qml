@@ -193,6 +193,15 @@ TestCase {
         verify(!panel.visible)
         verify(page.recordings.some(r => r.title.endsWith(" · candump import")))
 
+        // The next log needs no interface: the one typed for the last is gone
+        const one = Harness.writeScratchFile("import-one.log", "(1.000000) can0 7E8#01\n")
+        page.chooseImportFile(one)
+        compare(find(page, "importInterface").text, "")
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "Imported 1 frames over 0.0 s")
+
         page.chooseImportFile(log)
         find(page, "importKind_csv").clicked()
         compare(page.importKind, RecordingImport.Csv)
@@ -523,7 +532,7 @@ TestCase {
         verify(!find(page, "signalRows").visible, "the values give way")
         verify(!find(page, "recordingFilter").visible)
         const words = find(page, "framesWords")
-        tryVerify(() => /^\d+ frame\(s\) in view$/.test(words.text), 10000,
+        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000,
                   "the part in view is read: " + words.text)
         const total = parseInt(words.text)
         verify(total > 0, words.text)
@@ -569,6 +578,35 @@ TestCase {
         compare(find(page, "framesFilterToggle").text, "Filter")
     }
 
+    // The viewer's By ID list: one row per ID in view, and a tap on one
+    // puts its ID in the filter and returns to the table
+    function test_theViewersByIdListTakesATapAsAFilter() {
+        const page = openFindings()
+        mouseClick(find(page, "detailView_frames"))
+        const words = find(page, "framesWords")
+        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000, words.text)
+        verify(!find(page, "viewerFrameIds").visible, "the table first")
+
+        mouseClick(find(page, "framesTable_byId"))
+        verify(page.framesById)
+        const idsView = find(page, "viewerFrameIds")
+        verify(idsView.visible)
+        verify(!find(find(page, "viewerFrameTable"), "frameList").visible)
+        const ids = find(idsView, "idList")
+        tryVerify(() => ids.count >= 1 && ids.itemAtIndex(0) !== null && ids.height > 0
+                  && ids.itemAtIndex(0).width > 0, 10000, "the IDs show, laid out")
+        verify(idsView.refreshing, "read again while it shows")
+
+        const row = ids.itemAtIndex(0)
+        const id = row.model.arbId
+        mouseClick(find(row, "idRowArea"))
+        verify(!page.framesById, "back to the table")
+        verify(page.framesFilterOpen, "the filter opens")
+        compare(find(page, "filterIds").text, id.toString(16).toUpperCase())
+        compare(find(page, "framesFilterToggle").text, "Filter (2)", "the ID and its width")
+        verify(!idsView.refreshing, "not read while hidden")
+    }
+
     function test_aRecordingWithNoFramesHasNoFramesSwitch() {
         const page = createPage()
         const folder = Harness.importCsvFixture("logger-a", "viewer-frames-import")
@@ -599,12 +637,12 @@ TestCase {
                   longWait, words.text)
         compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
         page.setView(0, 2000)
-        tryVerify(() => words.text === "2000 frame(s) in view", longWait, words.text)
+        tryVerify(() => words.text === "2000 frames in view", longWait, words.text)
 
         // A view that does not start at the recording's start: the rows
         // are those from its left edge
         page.setView(5000, 6000)
-        tryVerify(() => words.text === "1001 frame(s) in view", longWait, words.text)
+        tryVerify(() => words.text === "1001 frames in view", longWait, words.text)
         const list = find(find(page, "viewerFrameTable"), "frameList")
         tryVerify(() => list.itemAtIndex(0) !== null, longWait)
         compare(list.itemAtIndex(0).model.timestampUs, 5000000)

@@ -6,7 +6,9 @@
 // line is the column map's JSON, the rest the CSV, read from memory. A
 // first line of "guess", or "guess" and a unit (s, ms, us), guesses the map
 // from the CSV instead (its appendix "a column map guessed from the
-// header", core/src/csv_guess.h) and imports with each map it gives.
+// header", core/src/csv_guess.h) and imports with each map it gives;
+// "guess cut" (then optionally a unit) says the bytes are the start of a
+// longer file, cut at a line feed.
 
 #include "csv_guess.h"
 #include "csv_import.h"
@@ -137,14 +139,15 @@ void import(const csv::column_map& m, const unsigned char* body, size_t body_n)
 
 /* The guess, twice: the two agree, the text is JSON, its map's slice is
  * one the import takes (once a time unit is in), and that map imports */
-void guessed(const unsigned char* body, size_t body_n, const char* unit)
+void guessed(const unsigned char* body, size_t body_n, bool cut,
+             const char* unit)
 {
     guess::result r1;
     std::string why1;
-    const bool ok = guess::guess(body, body_n, false, unit, r1, &why1);
+    const bool ok = guess::guess(body, body_n, cut, unit, r1, &why1);
     guess::result r2;
     std::string why2;
-    if (guess::guess(body, body_n, false, unit, r2, &why2) != ok ||
+    if (guess::guess(body, body_n, cut, unit, r2, &why2) != ok ||
         why1 != why2 || r1.text != r2.text || r1.map_offset != r2.map_offset ||
         r1.map_length != r2.map_length || r1.flags != r2.flags ||
         r1.columns != r2.columns || r1.left_out != r2.left_out ||
@@ -207,11 +210,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 
     const std::string first(p, map_n);
     if (first.compare(0, 5, "guess") == 0) {
-        const std::string rest = first.substr(5);
+        std::string rest = first.substr(5);
+        const bool cut = rest.compare(0, 4, " cut") == 0;
+        if (cut) {
+            rest.erase(0, 4);
+        }
         if (rest.empty()) {
-            guessed(body, body_n, nullptr);
+            guessed(body, body_n, cut, nullptr);
         } else if (rest == " s" || rest == " ms" || rest == " us") {
-            guessed(body, body_n, rest.c_str() + 1);
+            guessed(body, body_n, cut, rest.c_str() + 1);
         }
         return 0;
     }

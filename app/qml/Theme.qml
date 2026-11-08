@@ -27,8 +27,10 @@ QtObject {
         category: "ui"
         property string theme: "dark"
     }
+    // qmllint disable missing-property
     Component.onCompleted: theme = clampTheme(store.theme)
     onThemeChanged: store.theme = theme
+    // qmllint enable missing-property
     readonly property var themeNames: ["dark", "lowGlare", "night"]
     function clampTheme(name) { return themeNames.indexOf(name) >= 0 ? name : "dark" }
     function themeLabel(name) {
@@ -123,7 +125,7 @@ QtObject {
     readonly property color gaugeWarn:      colors.gaugeWarn
     readonly property color gaugeDanger:    colors.gaugeDanger
     // The analog dial's own shades (bezelHi, bezelLo, faceHi, faceLo,
-    // needleBase, hubHi): Dark's are the dial's old literals
+    // needleBase, hubHi): Dark's are fixed colors
     readonly property var gaugeShade:       colors.shades
 
     // A phone's density: Main.qml sets dense when the layout (after the

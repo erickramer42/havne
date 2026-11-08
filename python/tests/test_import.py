@@ -45,6 +45,11 @@ def test_an_obdb_import_through_the_declarations_is_freed_by_core():
     havne.SignalFile(converted)
 
 
+def partials(folder, name):
+    """Entries of folder named <name>.partial-...: core's own file or folder left behind"""
+    return [e for e in os.listdir(folder) if e.startswith(name + ".partial-")]
+
+
 def column_map(name):
     with open(os.path.join(CSV, name, "map.json"), encoding="utf-8") as f:
         return json.load(f)
@@ -82,7 +87,8 @@ def test_a_refused_map_raises_cores_words_and_makes_nothing(tmp_path):
         havne.import_csv(os.path.join(CSV, "logger-a", "log.csv"), folder, bad)
     assert e.value.status == havne.c.ECUIO_ERR_LOAD_FAILED
     assert "'shade'" in e.value.detail
-    assert not os.path.exists(folder) and not os.path.exists(str(folder) + ".partial")
+    assert not os.path.exists(folder)
+    assert not partials(tmp_path, "refused")
     with pytest.raises(TypeError):
         havne.import_csv(os.path.join(CSV, "logger-a", "log.csv"), folder, 3)
 

@@ -23,7 +23,8 @@ if(MODE STREQUAL "apk")
         "THIRD_PARTY_NOTICES.txt=packaging/notices/THIRD_PARTY_NOTICES.txt"
         "licenses/LGPL-3.0.txt=packaging/windows/licenses/LGPL-3.0.txt"
         "licenses/GPL-3.0.txt=packaging/windows/licenses/GPL-3.0.txt"
-        "licenses/Apache-2.0.txt=packaging/notices/licenses/Apache-2.0.txt")
+        "licenses/Apache-2.0.txt=packaging/notices/licenses/Apache-2.0.txt"
+        "licenses/Qt-third-party.txt=packaging/windows/licenses/Qt-third-party.txt")
     set(_known "")
     set(_wrong "")
     foreach(_pair IN LISTS _pairs)

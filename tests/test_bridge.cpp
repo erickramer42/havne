@@ -47,11 +47,13 @@
 #include "carryover.h"
 #include "healthreport.h"
 #include "fake_bt_socket.h"
+#include "fake_theme.h"
 #include "obdbimport.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
+#include "windowtheme.h"
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 #include <ecuio/version.h>
@@ -1170,6 +1172,80 @@ TEST(BridgeTest, AFailedWriteEndsALogNotAsTheUsers)
     EXPECT_TRUE(bridge.connected());
     ASSERT_TRUE(disconnectAndWait(bridge));
     EXPECT_EQ(byUser, QList<bool>{false}) << "once";
+}
+
+/* The Dashboard header's notice: a refusal's "Log not started: <why>"
+ * (startLog's own reasons and the recorder's), an end the user didn't
+ * ask for as "Log ended: <why>", nothing for Stop log's, a log that
+ * starts clearing it, Dismiss clearing it, and a change signal for
+ * each change alone. */
+TEST(BridgeTest, TheLogNoticeTellsRefusalsAndUnaskedEnds)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    int changes = 0;
+    QObject::connect(&bridge, &SessionBridge::logNoticeChanged,
+                     [&changes]() { ++changes; });
+
+    EXPECT_EQ(bridge.logNotice(), QString());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_EQ(bridge.logNotice(),
+              QStringLiteral("Log not started: not connected"));
+    EXPECT_EQ(changes, 1);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_EQ(changes, 1) << "the same text again is no change";
+    bridge.clearLogNotice();
+    EXPECT_EQ(bridge.logNotice(), QString());
+    EXPECT_EQ(changes, 2);
+    bridge.clearLogNotice();
+    EXPECT_EQ(changes, 2) << "clearing nothing is no change";
+
+    // The recorder's refusal, the root a file: openRecorder's reason
+    const QString file = root.path() + QStringLiteral("/not-a-folder");
+    {
+        QFile f(file);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    bridge.setRecordingsRootForTesting(file);
+    ASSERT_TRUE(bridge.connectSession("mock://failing").isEmpty());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(bridge.logNotice().startsWith(
+        QStringLiteral("Log not started: can't create ")))
+        << bridge.logNotice().toStdString();
+    EXPECT_TRUE(log.contains(bridge.logNotice()))
+        << "the activity log's own line: " << log.join('\n').toStdString();
+    EXPECT_EQ(
+        log.filter(QStringLiteral("Log not started: can't create ")).size(), 1)
+        << "once, not twice";
+    bridge.setRecordingsRootForTesting(root.path());
+
+    // A log that starts clears it; a failed write ends it, told
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.logNotice(), QString());
+    ASSERT_NE(bridge.recorderForTesting(), nullptr);
+    ecuio_recorder_test_fail_writes(bridge.recorderForTesting());
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    EXPECT_EQ(bridge.logNotice(), QStringLiteral("Log ended: the disk is full"))
+        << "the recorder's own words, not the end note's";
+
+    // Stop log's end says nothing: the viewer opens on it
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.logNotice(), QString());
+    const int before = changes;
+    bridge.stopLog();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_EQ(bridge.logNotice(), QString());
+    EXPECT_EQ(changes, before);
+
+    // The session's end closes a running log, told as "disconnected"
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(bridge.logNotice(), QStringLiteral("Log ended: disconnected"));
 }
 
 /* A connect started from disconnectingChanged's end (as a QML handler
@@ -11053,4 +11129,61 @@ TEST(BridgeTest, HealthReportCarriesLivesValuesInTheAppsUnits)
                                                  "F")))
         << units.join(' ').toStdString();
     EXPECT_FALSE(units.contains(QStringLiteral("km/h")));
+}
+
+namespace {
+
+QStringList g_themeWarnings;
+
+void collectWarnings(QtMsgType type, const QMessageLogContext&,
+                     const QString& message)
+{
+    if (type == QtWarningMsg) {
+        g_themeWarnings << message;
+    }
+}
+
+} // namespace
+
+// Each of bg, surface and text, changed, applies the theme once, with no
+// window to color
+TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
+{
+    FakeTheme theme;
+    WindowTheme follower(&theme, nullptr);
+    int applied = 0;
+    QObject::connect(&follower, &WindowTheme::applied, &follower,
+                     [&] { ++applied; });
+    theme.setBg(Qt::red);
+    EXPECT_EQ(applied, 1);
+    theme.setSurface(Qt::green);
+    EXPECT_EQ(applied, 2);
+    theme.setText(Qt::blue);
+    EXPECT_EQ(applied, 3);
+}
+
+// A property the theme lacks, or does not notify, is a warning: a rename
+// would otherwise leave the window not following the theme
+TEST(BridgeTest, WindowThemeWarnsOfAColorItCannotFollow)
+{
+    g_themeWarnings.clear();
+    const QtMessageHandler previous = qInstallMessageHandler(collectWarnings);
+    {
+        FakeTheme whole;
+        WindowTheme follower(&whole, nullptr);
+    }
+    EXPECT_TRUE(g_themeWarnings.isEmpty()) << "a whole theme says nothing";
+    {
+        FakeThemeWithoutSurface partial;
+        WindowTheme follower(&partial, nullptr);
+        int applied = 0;
+        QObject::connect(&follower, &WindowTheme::applied, &follower,
+                         [&] { ++applied; });
+        partial.setBg(Qt::red);
+        EXPECT_EQ(applied, 1) << "the colors it has still follow";
+    }
+    qInstallMessageHandler(previous);
+    ASSERT_EQ(g_themeWarnings.size(), 1);
+    EXPECT_TRUE(g_themeWarnings[0].contains(QStringLiteral("'surface'")))
+        << g_themeWarnings[0].toStdString();
 }

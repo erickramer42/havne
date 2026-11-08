@@ -1535,6 +1535,9 @@ bool put(const std::string& out, const std::string& bytes,
         return refused("the report can't be written: %s",
                        files::errno_words(err != 0 ? err : EIO));
     }
+    if (put_test_before_rename != nullptr) {
+        put_test_before_rename(out);
+    }
     if (!files::rename_to(partial, out, false, &why)) {
         files::remove_file(partial);
         return refused("the report can't be put in place: %s", why);

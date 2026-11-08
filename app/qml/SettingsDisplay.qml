@@ -67,7 +67,7 @@ ColumnLayout {
     }
 
     // The theme: Dark, or Low glare and Night (amber and red on near black)
-    // for a cabin after dark. Takes effect at once; Main.qml stores it.
+    // for a cabin after dark. Takes effect at once; Theme.qml stores it.
     LabeledFlow {
         label: qsTr("Theme:")
         Repeater {

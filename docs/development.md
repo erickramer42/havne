@@ -901,8 +901,10 @@ downloads type2-runtime's newest `continuous` build at every pack.
 Before a second
 linuxdeploy run packs the AppDir, the script puts the notices in
 `usr/share/doc/havne/`: `LICENSE`, `packaging/notices/`'s
-`THIRD_PARTY_NOTICES.txt` and the LGPL-3.0, GPL-3.0 and ICU texts
-(LGPL-3.0 section 4 wants Qt's notice and both texts with each copy),
+`THIRD_PARTY_NOTICES.txt`, the LGPL-3.0, GPL-3.0 and ICU texts
+(LGPL-3.0 section 4 wants Qt's notice and both texts with each copy)
+and `Qt-third-party.txt` (the credits and license texts of the code
+Qt's own libraries contain, from Qt's SBOM for the modules shipped),
 the runtime's MIT text and those of what it links statically
 (libfuse's LGPL-2.1, squashfuse, musl, mimalloc, zstd, zlib),
 and under `common-licenses/` the `/usr/share/common-licenses` texts
