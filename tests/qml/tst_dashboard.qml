@@ -27,8 +27,8 @@ TestCase {
         "Engine load": ["load", "Engine Load"]
     })
 
-    // The IDs the gauge labeled `label` looks up
-    function idsOf(label) {
+    // The refs the gauge labeled `label` looks up
+    function refsOf(label) {
         return Bridge.gaugeSignals[gaugeSignals[label][0]]
     }
 
@@ -41,6 +41,8 @@ TestCase {
         Bridge.unitSystem = 0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.useSignalFiles([])
+        Bridge.deleteUnusedSignalFiles([])
     }
 
     function connect(uri) {
@@ -65,29 +67,51 @@ TestCase {
         return found
     }
 
-    function test_hubFindsSignalsById() {
+    function test_hubFindsSignalsByRef() {
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo")
         verify(hub.count > 0)
-        compare(Object.keys(hub.byId).length, hub.count, "one entry per def")
+        compare(Object.keys(hub.byRef).length, hub.count, "one entry per def")
         for (const label in gaugeSignals) {
-            const entry = hub.lookup(idsOf(label))
+            const entry = hub.lookup(refsOf(label))
             verify(entry, label + "'s signal is in the mock set")
-            compare(entry.id, idsOf(label)[0], label + ": the mock's ID")
+            compare(entry.ref, refsOf(label)[0], label + ": the mock's ref")
+            compare("id:" + entry.id, entry.ref, label + ": by the mock's ID")
             compare(entry.name, gaugeSignals[label][1])
         }
-        // The first ID the set has wins; none of them, null
-        const rpm = idsOf("Engine speed")
-        verify(hub.lookup([65535, rpm[0]]) === hub.lookup(rpm))
-        compare(hub.lookup([65535]), null)
+        // The first ref the set has wins; none of them, null
+        const rpm = refsOf("Engine speed")
+        verify(hub.lookup(["id:65535", rpm[0]]) === hub.lookup(rpm))
+        compare(hub.lookup(["id:65535"]), null)
+        compare(hub.lookup(["1001", 1001]), null, "only a ref matches")
         compare(hub.lookup([]), null)
         compare(hub.lookup(undefined), null)
+    }
+
+    // An entry carries the row's facts: the def's range (as displayed,
+    // following the unit system), its kind, and Live's state
+    function test_hubEntryCarriesTheRowsFacts() {
+        const hub = createTemporaryObject(hubComponent, testCase)
+        connect("mock://demo")
+        const speed = hub.lookup(refsOf("Vehicle speed"))
+        verify(isFinite(speed.rangeLow) && isFinite(speed.rangeHigh))
+        verify(speed.rangeLow < speed.rangeHigh)
+        compare(speed.isText, false)
+        compare(speed.isEnum, false)
+        compare(speed.hidden, false)
+        compare(speed.refusedCode, "")
+        compare(speed.label, "", "no enum, no value label")
+        compare(speed.unit, "km/h")
+        const kmh = speed.rangeHigh
+        Bridge.unitSystem = 1
+        compare(speed.unit, "mph")
+        fuzzyCompare(speed.rangeHigh, kmh / 1.609344, 1e-3, "the range follows")
     }
 
     function test_hubEntryFollowsTheModel() {
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo")
-        const rpm = hub.lookup(idsOf("Engine speed"))
+        const rpm = hub.lookup(refsOf("Engine speed"))
         compare(rpm.hasValue, false, "no value before the first batch")
         compare(rpm.ageMs, -1)
         tryVerify(() => rpm.hasValue, 3000, "a value arrives")
@@ -95,18 +119,45 @@ TestCase {
         verify(rpm.ageMs >= 0)
     }
 
+    // A def with no range reaches the hub as NaN at both ends, beside a
+    // scaled def's finite range (a signal file's text and number)
+    function test_aTextEntryHasNoRange() {
+        const r = Bridge.importSignalText(JSON.stringify({
+            havne_signals: 1, name: "Text and number", source: { name: "t" },
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [
+                { key: "part", name: "Part", kind: "text",
+                  read: { service: "22", number: "D100" }, field: { byte: 0 } },
+                { key: "temp", name: "Temp", offset: -40, unit: "°C",
+                  read: { service: "22", number: "D101" }, field: { byte: 0, bits: 8 } }
+            ]
+        }))
+        verify(r.ok, r.words)
+        Bridge.useSignalFiles([r.sha256])
+        const hub = createTemporaryObject(hubComponent, testCase)
+        connect("mock://demo?profile=" + r.profile)
+        const part = hub.byRef["key:part"]
+        verify(part, "the text def has its key")
+        compare(part.isText, true)
+        verify(isNaN(part.rangeLow) && isNaN(part.rangeHigh), "no range")
+        const temp = hub.byRef["key:temp"]
+        verify(temp, "the number def has its key")
+        fuzzyCompare(temp.rangeLow, -40, 1e-9)
+        fuzzyCompare(temp.rangeHigh, 215, 1e-9)
+    }
+
     // A profile switch resets the model; the hub drops the old entries
     // and picks up the new set's
     function test_hubFollowsAProfileSwitch() {
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo")
-        const rpm = idsOf("Engine speed")
+        const rpm = refsOf("Engine speed")
         verify(hub.lookup(rpm))
 
         cleanup()
         connect("mock://demo?profile=raw")
         compare(hub.count, 0, "raw decodes nothing")
-        compare(Object.keys(hub.byId).length, 0)
+        compare(Object.keys(hub.byRef).length, 0)
         compare(hub.lookup(rpm), null)
 
         cleanup()
@@ -141,7 +192,7 @@ TestCase {
                   3000, "every gauge gets a value")
         for (const label in gaugeSignals) {
             const g = all[label]
-            const entry = hub.lookup(idsOf(label))
+            const entry = hub.lookup(refsOf(label))
             compare(g.note, "", label)
             compare(g.decimals, entry.decimals, label + " decimals")
             if (entry.unit !== "")
@@ -152,22 +203,60 @@ TestCase {
         }
     }
 
-    // A set that names every def otherwise (the mock's, renamed): each
-    // gauge still reads its signal, found by core's def ID
-    function test_aRenamedSetStillDrivesEveryGauge() {
+    // A set registered with no signal file (the mock's, copied and
+    // renamed) has no refs (ADR-0057): its rows show in Live, but no
+    // gauge binds them, though they carry the mock's IDs
+    function test_aSetWithNoFileHasNoRefs() {
         const profile = Harness.registerRenamedMock()
         verify(profile !== "", "the renamed set registers")
         const page = createTemporaryObject(pageComponent, testCase)
         const hub = createTemporaryObject(hubComponent, testCase)
         const all = gauges(page)
         connect("mock://demo?profile=" + profile)
-        tryVerify(() => Object.keys(gaugeSignals).every(label => all[label].hasValue),
-                  3000, "every gauge gets a value")
+        verify(hub.count > 0, "the set's rows are there")
+        compare(Object.keys(hub.byRef).length, 0, "none has a ref")
+        tryVerify(() => {
+            for (let i = 0; i < hub.count; ++i) {
+                if (hub.objectAt(i).hasValue) return true
+            }
+            return false
+        }, 3000, "the set's rows get values")
         for (const label in gaugeSignals) {
-            compare(all[label].note, "", label)
-            const entry = hub.lookup(idsOf(label))
-            verify(entry.name !== gaugeSignals[label][1], label + ": named otherwise")
+            compare(all[label].note, "not in profile", label)
+            compare(all[label].hasValue, false, label)
         }
+    }
+
+    // A gauge binds by ref, never by name: under a signal file extending
+    // obd2 whose own defs take the tach's label ("Engine speed") and the
+    // name obd2 and the mock give its def ("RPM"), the tach reads obd2's
+    // def by its ID, and the file's defs are theirs by key
+    function test_aGaugeBindsByRefNotByName() {
+        const r = Bridge.importSignalText(JSON.stringify({
+            havne_signals: 1, name: "Named alike", source: { name: "t" },
+            extends: "obd2",
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [
+                { key: "rpm_too", name: "Engine speed",
+                  read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } },
+                { key: "rpm_mock", name: "RPM",
+                  read: { service: "22", number: "D101" }, field: { byte: 0, bits: 8 } }
+            ]
+        }))
+        verify(r.ok, r.words)
+        Bridge.useSignalFiles([r.sha256])
+        const page = createTemporaryObject(pageComponent, testCase)
+        const hub = createTemporaryObject(hubComponent, testCase)
+        const tach = gauges(page)["Engine speed"]
+        connect("replay://" + Harness.replayFixtures
+                + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=100")
+        compare(hub.byRef["key:rpm_too"].name, "Engine speed")
+        compare(hub.byRef["key:rpm_mock"].name, "RPM")
+        const rpm = hub.lookup(refsOf("Engine speed"))
+        compare(rpm.ref, "id:7003", "obd2's def, by its ID")
+        tryVerify(() => tach.hasValue, 5000, "the tach reads it")
+        compare(tach.valueText,
+                Number(rpm.value).toLocaleString(Qt.locale(), 'f', rpm.decimals))
     }
 
     // Imperial: the gauges read mph and degrees F, their scales and zones
