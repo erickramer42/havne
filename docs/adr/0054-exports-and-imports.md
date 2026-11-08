@@ -1483,3 +1483,32 @@ section 1's sketch:
   `GuessedMap` (`map` a dict, `notes`, `flags`, `columns` the text's
   list); `havne.import_csv(path, folder, column_map=None,
   time_unit=None)` takes the slice when no map is given.
+
+### The preview as built (2026-11-08)
+
+Step 2 settled these:
+
+- **The call:** the app's `RecordingImport` runs `ecuio_import_csv_guess`
+  on its worker (a file that isn't local is copied to 1280 KiB first,
+  past core's read, so core cuts it as it cuts the file) and hands the
+  panel the map's slice, each header column's use and why, and the notes.
+  The edits are composed in the app from the slice (`composeMap`) and
+  imported from their text, with no map file written; core's strict
+  `parse_map` still judges them, so a name past 31 bytes or one a
+  spreadsheet would run as a formula is refused in core's words and the
+  panel keeps the edits.
+- **The first rows** are not in core's text, which never carries a cell's
+  value: the app splits the file's first 64 KiB itself for display (at
+  most five rows below the header row, a cell cut at 32 characters) and
+  never decides anything from them.
+- **Editing:** a checkbox, name, unit and a number/text toggle a column.
+  A column the guess left out can be put back as text named by its
+  header (the name cut to 31 bytes); a column with an empty header can't
+  be named in a map and stays out. Decimals and the other keys are the
+  guess's. A time of plain numbers takes its unit from a choice of s, ms
+  and us; any other time without a unit needs a map with its zone, and
+  **Column map...** picks one.
+- **Saved maps:** **Save as map** writes `<settings folder>/maps/<name>.json`
+  (the name made of ASCII letters, digits, `-` and `_`, never over a name
+  taken); a **Saved maps** list offers them, and choosing one, like
+  **Column map...**, skips the guess until **Use the guess**.
