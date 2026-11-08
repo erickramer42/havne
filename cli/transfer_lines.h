@@ -40,7 +40,32 @@ struct ExportArgs {
     std::vector<const char*> signals; /* --signal, in order; options'
                                          columns point into it */
     ecuio_export_options_t options{};
+
+    /* options.columns_utf8 points into signals: a copy would point into
+     * the original's, so there is none */
+    ExportArgs() = default;
+    ExportArgs(const ExportArgs&) = delete;
+    ExportArgs& operator=(const ExportArgs&) = delete;
 };
+
+// The named columns the recording has no values for, in their order: a
+// typo stays an empty column (core's call), so havne-cli says so
+inline std::vector<const char*>
+missing_names(const std::vector<const char*>& named,
+              const std::vector<std::string>& recorded)
+{
+    std::vector<const char*> missing;
+    for (const char* name : named) {
+        bool found = false;
+        for (const std::string& r : recorded) {
+            found = found || r == name;
+        }
+        if (!found) {
+            missing.push_back(name);
+        }
+    }
+    return missing;
+}
 
 // --rows' milliseconds: digits alone, 1 to a day
 inline bool parse_row_ms(const char* word, uint32_t* ms)
@@ -344,10 +369,11 @@ inline void guessed_line(Line& l, const std::string& text)
 // {"type":"exported","format":...,"file":...,"scrubbed":...,"frames":N,
 //  "made_up":N,"left_out":{"identification":N,...}}; csv and folder add
 //  "values":N and "signals":N after made_up, csv then "layout":"wide"|"long",
-//  "rows":N and "row_ms":N (schema 1 growth), folder "files":N and
+//  "rows":N, "row_ms":N and "missing":N (the named columns the recording
+//  has no values for; schema 1 growth), folder "files":N and
 //  "files_left_out":N
 inline void exported_line(Line& l, const ExportArgs& a,
-                          const ecuio_export_report_t& r)
+                          const ecuio_export_report_t& r, uint64_t missing = 0)
 {
     l.raw("{\"type\":\"exported\"");
     l.key("format");
@@ -375,6 +401,8 @@ inline void exported_line(Line& l, const ExportArgs& a,
         l.u64(r.rows);
         l.key("row_ms");
         l.u64(a.options.row_ms);
+        l.key("missing");
+        l.u64(missing);
     }
     if (a.options.format == ECUIO_EXPORT_FOLDER) {
         l.key("files");

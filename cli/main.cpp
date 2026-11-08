@@ -2576,6 +2576,32 @@ int run_stream(const StreamArgs& args)
     return code;
 }
 
+// The named columns the recording has no values for, by the reader's
+// signal list (ecuio_recording_open lists the signals with a sample; a
+// pick the recording never answered isn't among them)
+std::vector<const char*> missing_columns(const cli::ExportArgs& ex)
+{
+    ecuio_recording_t* r = nullptr;
+    if (ecuio_recording_open(ex.folder, nullptr, nullptr, &r) != ECUIO_OK ||
+        r == nullptr) {
+        return {};
+    }
+    std::vector<std::string> recorded;
+    ecuio_recording_info_t info;
+    std::memset(&info, 0, sizeof info);
+    if (ecuio_recording_get_info(r, &info) == ECUIO_OK) {
+        for (uint32_t i = 0; i < info.signal_count; ++i) {
+            ecuio_recording_signal_t s;
+            std::memset(&s, 0, sizeof s);
+            if (ecuio_recording_get_signal(r, i, &s) == ECUIO_OK) {
+                recorded.emplace_back(s.name, strnlen(s.name, sizeof s.name));
+            }
+        }
+    }
+    ecuio_recording_close(r);
+    return cli::missing_names(ex.signals, recorded);
+}
+
 // The machine's CAN interfaces (ecuio/socketcan.h); none off Linux
 std::vector<ecuio_can_interface_t> can_interfaces()
 {
@@ -4238,7 +4264,21 @@ int run(int argc, char** argv)
             write_error(out, rc);
             return ended(out, kExitConnect);
         }
-        cli::exported_line(l, ex, report);
+        // A named column the recording has no values for stays empty
+        // (a focus pick that never answered is a column of a log): each is
+        // said on stderr, so a typo isn't silent, and counted
+        std::vector<const char*> missing;
+        if (ex.options.format == ECUIO_EXPORT_CSV &&
+            ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty()) {
+            missing = missing_columns(ex);
+            for (const char* name : missing) {
+                std::fprintf(stderr,
+                             "havne-cli: the recording has no values for "
+                             "'%s': its column is empty\n",
+                             name);
+            }
+        }
+        cli::exported_line(l, ex, report, missing.size());
         write_line(out, l);
         return ended(out, kExitOk);
     }

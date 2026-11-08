@@ -328,12 +328,12 @@ v0.7.1's, decided 2026-11-07.
 
 **Sections 4 and 5, the rows and the wide CSV, as built:**
 
-- The rule as section 4 says, with two things it left open: every
-  column starts in the rule at the first sample in range (a column
-  that never answers holds the rows up for its first second, then
-  drops out), and a column's usual interval is the median gap between
-  its samples. A row's time is the completing sample's host_us to the
-  nearest ms.
+- The rule as section 4 says, with two things it left open: a column
+  with samples in range starts in the rule at its first sample, one
+  with none (a named pick the session never answered) starts outside
+  it and holds no row up, and a column's usual interval is the median
+  gap between its samples. A row's time is the completing sample's
+  host_us to the nearest ms.
 - `ecuio_export_options_t` grows within its reserved words (`layout`,
   `row_ms`, `units`, `column_count`, `columns_utf8`), the report's
   reserved word is `rows`, and the estimate is `ecuio_export_estimate`
@@ -350,4 +350,8 @@ v0.7.1's, decided 2026-11-07.
   together, the sets' shared names and units pinned by
   `SignalsTest.MockAndObd2ShareDisplayNamesAndUnits`.
 - `havne-cli export` writes the wide layout by default; the long form
-  is `--layout long`. The app's Export (step 6) takes the same options.
+  is `--layout long`. A named column the recording has no values for
+  is said on stderr and counted in the `exported` line's `missing`, so
+  a typo isn't silent. The app's Export (step 6) takes the same options.
+- The export's report has no reserved word left (`rows` took the last):
+  a later figure needs a struct of its own.

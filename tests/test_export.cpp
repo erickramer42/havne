@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1374,6 +1375,66 @@ TEST(CsvExportTest, WideAGridHoldsTheNewestValuesAndSkipsAnEmptyStep)
 /* Each cell in its signal's decimal places from the header's signal
  * line, converted to the units asked for (one more place where the
  * conversion needs it), the head cell in the unit shown */
+TEST(CsvExportTest, WideASweepRowsTimeIsTheCompletingSamplesToTheNearestMs)
+{
+    Folder f;
+    recording(f, "",
+              "100600,RPM,800,rpm\n100700,Speed,3,km/h\n"
+              "200000,RPM,801,rpm\n200500,Speed,4,km/h\n");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+                       "101,800,3\r\n"
+                       "201,801,4\r\n");
+}
+
+TEST(CsvExportTest, WideAGridAppliesTheSilenceAtTheStepItWrites)
+{
+    /* Speed answers once; RPM's sample at 1050 ms finds it 990 ms quiet
+     * (in the rule), the grid's step at 1100 ms finds it past 1 s: the
+     * step writes RPM alone */
+    Folder f;
+    recording(f, "",
+              "50000,RPM,800,rpm\n60000,Speed,3,km/h\n"
+              "1050000,RPM,810,rpm\n1250000,RPM,820,rpm\n");
+    WideExported e(f, {}, 100);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+                       "100,800,3\r\n"
+                       "1100,810,\r\n"
+                       "1300,820,\r\n");
+    EXPECT_EQ(e.report.values, 4u);
+}
+
+TEST(CsvExportTest, WideAGridJumpsAGapWithNothingNew)
+{
+    /* Two samples 1e9 s apart at --rows 1: a step at a time would be
+     * 1e12 steps; the file is two rows and the export is quick */
+    Folder f;
+    recording(f, "", "0,RPM,800,rpm\n1000000000000000,RPM,801,rpm\n");
+    const auto begun = std::chrono::steady_clock::now();
+    WideExported e(f, {}, 1);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm)\r\n"
+                       "0,800\r\n"
+                       "1000000000000,801\r\n");
+    EXPECT_EQ(e.report.rows, 2u);
+    EXPECT_LT(std::chrono::steady_clock::now() - begun,
+              std::chrono::seconds(5));
+}
+
+TEST(CsvExportTest, WideAValuePastTheFixedDigitsIsWrittenAsRecorded)
+{
+    Folder f;
+    recording(f, "", "100000,RPM,1e17,rpm\n200000,RPM,-2.5e16,rpm\n");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm)\r\n"
+                       "100,1e+17\r\n"
+                       "200,-2.5e+16\r\n");
+    EXPECT_EQ(e.report.values, 2u);
+}
+
 TEST(CsvExportTest, WideCellsFollowTheHeadersDecimalsAndTheUnits)
 {
     const std::string header = "profile  obd2\n"
@@ -1404,8 +1465,9 @@ TEST(CsvExportTest, WideNamedColumnsComeInTheirOrder)
     const std::vector<std::string> got = wide_lines(e.bytes);
     ASSERT_GE(got.size(), 2u) << e.bytes;
     EXPECT_EQ(got[0], "Time (ms),Speed (km/h),RPM (rpm),Nothing");
-    EXPECT_EQ(got[1], "1130,5,810,")
-        << "the first row once Nothing's silence passes 1 s";
+    EXPECT_EQ(got[1], "130,0,800,")
+        << "the first sweep: Nothing has no sample, so it holds no row up";
+    EXPECT_EQ(got.size(), 13u) << "a row a sweep";
     EXPECT_EQ(e.report.signal_count, 3u);
 
     const std::string header =
@@ -1520,6 +1582,39 @@ TEST(ExportTest, TheEstimateMatchesTheFileForEachInterval)
         EXPECT_GT(est[i].rows, 0u);
     }
     EXPECT_GT(est[1].rows, est[2].rows) << "a 250 ms grid thins the sweeps";
+
+    /* Named columns (one quoted, one the recording lacks), a range and
+     * imperial units: the estimate is still the file's */
+    Folder g;
+    recording(g, "",
+              polled_rows(10) + "2000000,\"Boost, abs\",101,kPa\n"
+                                "2100000,\"Boost, abs\",102.5,kPa\n");
+    const std::string gfolder = g.utf8("rec");
+    const char* columns[3] = {"Throttle", "Boost, abs", "Nothing"};
+    ecuio_export_options_t n{};
+    n.format = ECUIO_EXPORT_CSV;
+    n.folder_utf8 = gfolder.c_str();
+    n.from_us = 500000;
+    n.to_us = 2050000;
+    n.units = ECUIO_UNITS_IMPERIAL;
+    n.column_count = 3;
+    n.columns_utf8 = columns;
+    ecuio_export_estimate_t named[3];
+    ASSERT_EQ(ecuio_export_estimate(&n, intervals, 3, named), ECUIO_OK)
+        << ecuio_last_error_detail();
+    for (int i = 0; i < 3; ++i) {
+        SCOPED_TRACE(intervals[i]);
+        const std::string name = "named" + std::to_string(i) + ".csv";
+        WideExported e(g, {"Throttle", "Boost, abs", "Nothing"}, intervals[i],
+                       ECUIO_UNITS_IMPERIAL, 0, 500000, 2050000, name);
+        ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+        EXPECT_EQ(named[i].rows, e.report.rows);
+        EXPECT_EQ(named[i].bytes, e.bytes.size());
+        EXPECT_EQ(named[i].columns, 3u);
+        EXPECT_GT(named[i].rows, 0u);
+        EXPECT_EQ(wide_lines(e.bytes)[0],
+                  "Time (ms),Throttle (%),\"Boost, abs (psi)\",Nothing");
+    }
 }
 
 struct FolderExported {

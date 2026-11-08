@@ -77,45 +77,35 @@ static ecuio_signal_def_t computed_def(uint16_t id, const char* name,
 #define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
 #define LAMBDA "\xCE\xBB"      /* UTF-8 Greek small lambda */
 
+// clang-format off
 static const ecuio_signal_def_t kMockDefs[] = {
-    mk(ECUIO_MOCK_SIG_RPM_ID, "RPM", ECUIO_VALUE_UINT, 0, 0, 16, 0.25, 0.0,
-       "RPM", 0, ECUIO_SIGNAL_GROUP_ENGINE),
+    mk(ECUIO_MOCK_SIG_RPM_ID,       "RPM",               ECUIO_VALUE_UINT, 0, 0, 16, 0.25,  0.0,  "RPM",    0, ECUIO_SIGNAL_GROUP_ENGINE),
     /* Coolant and IAT are 8-bit UINT with a -40 offset (J1979: A - 40,
      * so -40..215 degC). As INT, anything from 88 degC up would read
      * as about -160 degC. */
-    mk(ECUIO_MOCK_SIG_COOLANT_ID, "Coolant Temp", ECUIO_VALUE_UINT, 2, 0, 8,
-       1.0, -40.0, DEG_C, 0, ECUIO_SIGNAL_GROUP_ENGINE),
-    mk(ECUIO_MOCK_SIG_SPEED_ID, "Vehicle Speed", ECUIO_VALUE_UINT, 3, 0, 8, 1.0,
-       0.0, "km/h", 0, ECUIO_SIGNAL_GROUP_VEHICLE),
-    mk(ECUIO_MOCK_SIG_THROTTLE_ID, "Throttle Position", ECUIO_VALUE_UINT, 4, 0,
-       8, 100.0 / 255.0, 0.0, "%", 1, ECUIO_SIGNAL_GROUP_AIR),
-    mk(ECUIO_MOCK_SIG_IAT_ID, "Intake Air Temp", ECUIO_VALUE_UINT, 5, 0, 8, 1.0,
-       -40.0, DEG_C, 0, ECUIO_SIGNAL_GROUP_AIR),
-    mk(ECUIO_MOCK_SIG_LOAD_ID, "Engine Load", ECUIO_VALUE_UINT, 6, 0, 8,
-       100.0 / 255.0, 0.0, "%", 1, ECUIO_SIGNAL_GROUP_ENGINE),
+    mk(ECUIO_MOCK_SIG_COOLANT_ID,   "Coolant Temp",      ECUIO_VALUE_UINT, 2, 0, 8,   1.0, -40.0, DEG_C,    0, ECUIO_SIGNAL_GROUP_ENGINE),
+    mk(ECUIO_MOCK_SIG_SPEED_ID,     "Vehicle Speed",     ECUIO_VALUE_UINT, 3, 0, 8,   1.0,   0.0, "km/h",   0, ECUIO_SIGNAL_GROUP_VEHICLE),
+    mk(ECUIO_MOCK_SIG_THROTTLE_ID, "Throttle Position", ECUIO_VALUE_UINT,  4, 0, 8,   100.0/255.0, 0.0, "%", 1, ECUIO_SIGNAL_GROUP_AIR),
+    mk(ECUIO_MOCK_SIG_IAT_ID,       "Intake Air Temp",   ECUIO_VALUE_UINT, 5, 0, 8,   1.0, -40.0, DEG_C,    0, ECUIO_SIGNAL_GROUP_AIR),
+    mk(ECUIO_MOCK_SIG_LOAD_ID,      "Engine Load",       ECUIO_VALUE_UINT, 6, 0, 8,   100.0/255.0, 0.0, "%", 1, ECUIO_SIGNAL_GROUP_ENGINE),
     /* Layout mirrors encode_payload's tail: MAF at bytes 7-8 (LE,
      * like RPM), oil temp at byte 9. Centi-grams/s scale is the
      * same J1979 0x10 formula the obd2 set uses; oil is A - 40. The
      * 0.01 g/s resolution is shown to two decimals, the step of the PID
      * (ADR-0056 section 5). */
-    mk(ECUIO_MOCK_SIG_MAF_ID, "MAF", ECUIO_VALUE_UINT, 7, 0, 16, 0.01, 0.0,
-       "g/s", 2, ECUIO_SIGNAL_GROUP_AIR),
-    mk(ECUIO_MOCK_SIG_OIL_ID, "Engine Oil Temp", ECUIO_VALUE_UINT, 9, 0, 8, 1.0,
-       -40.0, DEG_C, 0, ECUIO_SIGNAL_GROUP_ENGINE),
+    mk(ECUIO_MOCK_SIG_MAF_ID,       "MAF",               ECUIO_VALUE_UINT, 7, 0, 16, 0.01,  0.0, "g/s",  2, ECUIO_SIGNAL_GROUP_AIR),
+    mk(ECUIO_MOCK_SIG_OIL_ID,       "Engine Oil Temp",   ECUIO_VALUE_UINT, 9, 0, 8,   1.0, -40.0, DEG_C, 0, ECUIO_SIGNAL_GROUP_ENGINE),
     /* Wideband lambda at bytes 10-11, LE, scaled like J1979's
      * equivalence ratio (2/65536, so 0 to just under 2). Only the mock
      * carries it; the obd2 set doesn't poll an O2 sensor. */
-    mk(ECUIO_MOCK_SIG_LAMBDA_ID, "Lambda", ECUIO_VALUE_UINT, 10, 0, 16,
-       1.0 / 32768.0, 0.0, LAMBDA, 2, ECUIO_SIGNAL_GROUP_OXYGEN),
+    mk(ECUIO_MOCK_SIG_LAMBDA_ID,    "Lambda",            ECUIO_VALUE_UINT, 10, 0, 16, 1.0/32768.0, 0.0, LAMBDA, 2, ECUIO_SIGNAL_GROUP_OXYGEN),
     /* MAP and baro at bytes 12 and 13, a byte of kPa each, as J1979's
      * 0x0B and 0x33 */
-    mk(ECUIO_MOCK_SIG_MAP_ID, "Intake Manifold Pressure", ECUIO_VALUE_UINT, 12,
-       0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
-    mk(ECUIO_MOCK_SIG_BARO_ID, "Barometric Pressure", ECUIO_VALUE_UINT, 13, 0,
-       8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
-    computed_def(ECUIO_MOCK_SIG_BOOST_ID, "Boost", "kPa", 0,
-                 ECUIO_SIGNAL_GROUP_AIR, 0),
+    mk(ECUIO_MOCK_SIG_MAP_ID,       "Intake Manifold Pressure", ECUIO_VALUE_UINT, 12, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    mk(ECUIO_MOCK_SIG_BARO_ID,      "Barometric Pressure", ECUIO_VALUE_UINT, 13, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    computed_def(ECUIO_MOCK_SIG_BOOST_ID, "Boost", "kPa", 0, ECUIO_SIGNAL_GROUP_AIR, 0),
 };
+// clang-format on
 
 #undef DEG_C
 #undef LAMBDA

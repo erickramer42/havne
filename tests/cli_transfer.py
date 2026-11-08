@@ -386,8 +386,28 @@ def csv_export(cli, recording):
                               "--signal", head[2].split(" (")[0],
                               "--signal", head[1].split(" (")[0]]), "exported")
         phead, _ = wide_rows(picked)
-        if phead != [head[0], head[2], head[1]] or named["signals"] != 2:
+        if phead != [head[0], head[2], head[1]] or named["signals"] != 2 or \
+                named["missing"] != 0:
             raise SystemExit(f"FAIL  the named columns read {phead}")
+        # A named column the recording lacks: an empty column, a stderr
+        # line naming it, the exported line counting it, exit 0
+        typo = os.path.join(d, "typo.csv")
+        done = subprocess.run([cli, "export", recording, typo, "--format",
+                               "csv", "--signal", head[1].split(" (")[0],
+                               "--signal", "Nothing here"],
+                              capture_output=True, stdin=subprocess.DEVNULL)
+        err = done.stderr.decode("utf-8", "replace")
+        if done.returncode != 0 or "'Nothing here'" not in err or \
+                "empty" not in err:
+            raise SystemExit(f"FAIL  the typo's run: exit {done.returncode}, "
+                             f"stderr {err!r}")
+        typo_line = one([json.loads(l) for l in
+                         done.stdout.decode("utf-8").splitlines()], "exported")
+        thead, trows = wide_rows(typo)
+        if thead != [head[0], head[1], "Nothing here"] or \
+                typo_line["missing"] != 1 or typo_line["signals"] != 2 or \
+                any(r[2] != "" for r in trows):
+            raise SystemExit(f"FAIL  the typo's column: {thead}, {typo_line}")
     print(f"ok    {len(want)} values of {len(names)} signals exported as CSV "
           f"long and read back; wide {len(rows)} rows, grid {len(grows)}")
     return 0

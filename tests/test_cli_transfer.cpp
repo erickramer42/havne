@@ -205,6 +205,20 @@ std::string text(const cli::Line& l)
     return std::string(l.data(), l.size());
 }
 
+TEST(CliTransferTest, TheNamedColumnsTheRecordingLacksAreListedInOrder)
+{
+    const std::vector<std::string> recorded = {"RPM", "Speed", "Boost, abs"};
+    const std::vector<const char*> named = {"Nothing", "Speed", "rpm",
+                                            "Boost, abs", "RPM"};
+    const std::vector<const char*> missing =
+        cli::missing_names(named, recorded);
+    ASSERT_EQ(missing.size(), 2u);
+    EXPECT_STREQ(missing[0], "Nothing");
+    EXPECT_STREQ(missing[1], "rpm") << "names are matched whole";
+    EXPECT_TRUE(cli::missing_names({}, recorded).empty());
+    EXPECT_EQ(cli::missing_names({"RPM"}, {}).size(), 1u);
+}
+
 TEST(CliTransferTest, TheLinesSayWhatCoreReports)
 {
     Args a({"havne-cli", "export", "rec", "out.pcapng", "--format", "pcapng"});
@@ -239,8 +253,12 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "{\"type\":\"exported\",\"format\":\"csv\",\"file\":"
               "\"out.csv\",\"scrubbed\":true,\"frames\":0,\"made_up\":0,"
               "\"values\":40,\"signals\":3,\"layout\":\"wide\",\"rows\":14,"
-              "\"row_ms\":0,\"left_out\":{\"identification\":0,"
+              "\"row_ms\":0,\"missing\":0,\"left_out\":{\"identification\":0,"
               "\"unattributable\":0,\"text_values\":2,\"activity\":0}}");
+    cli::Line ml(buf, sizeof buf);
+    cli::exported_line(ml, csv, v, 2);
+    EXPECT_NE(text(ml).find("\"row_ms\":0,\"missing\":2,"), std::string::npos)
+        << text(ml);
     Args g({"havne-cli", "export", "rec", "grid.csv", "--format", "csv",
             "--rows", "100"});
     cli::ExportArgs grid;

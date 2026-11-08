@@ -80,7 +80,9 @@ constexpr uint64_t kSilenceTimes = 3;
 
 /* A number to d decimal places (0 to 3) with a '.', whatever the
  * locale: the scaled value rounded half away from zero, then its
- * digits; no "-0.0". Past what a long long holds, or not finite, "" */
+ * digits; no "-0.0". Not finite, "" (no cell). Past what the fixed digits
+ * hold (the scaled value at 9e15 or more), the value as signals.csv
+ * writes it (%.12g), so a cell is never empty for being large */
 std::string fixed_text(double v, int d)
 {
     static const double kPow10[] = {1.0, 10.0, 100.0, 1000.0};
@@ -89,7 +91,9 @@ std::string fixed_text(double v, int d)
     }
     const double scaled = std::round(v * kPow10[d]);
     if (std::fabs(scaled) >= 9.0e15) {
-        return std::string();
+        std::string as_recorded;
+        rows::append_value(as_recorded, v);
+        return as_recorded;
     }
     const long long n = static_cast<long long>(scaled);
     const unsigned long long a = n < 0
@@ -1036,11 +1040,19 @@ private:
         std::string* sink = nullptr;
         std::string line;
 
-        void start(size_t n, uint64_t t0)
+        /* A column with samples in range starts in the rule (its first
+         * sample is due with the first sweep's); one with none, a named
+         * pick the recording never answered, starts outside it and holds
+         * no row up */
+        void start(const std::vector<wide_column>& cols, uint64_t t0)
         {
+            const size_t n = cols.size();
             cell.assign(n, std::string());
             fresh.assign(n, 0);
-            in_rule.assign(n, 1);
+            in_rule.assign(n, 0);
+            for (size_t k = 0; k < n; ++k) {
+                in_rule[k] = cols[k].samples > 0 ? 1 : 0;
+            }
             last_us.assign(n, t0);
             if (row_ms > 0) {
                 const uint64_t step = uint64_t{row_ms} * 1000;
@@ -1081,7 +1093,12 @@ private:
         }
 
         /* The grid rows due before t (or at it, when inclusive): each
-         * with the newest values at its time, skipped with no new cell */
+         * with the newest values at its time, skipped with no new cell.
+         * Once a step finds nothing new, nothing is new until the next
+         * sample, so the steps up to the last one before t are skipped
+         * in one move (a gap of hours at --rows 1 costs no loop); the
+         * silence is judged at the step that writes, which is at or
+         * after every step skipped */
         void grid_to(uint64_t t, bool inclusive,
                      const std::vector<wide_column>& cols)
         {
@@ -1094,8 +1111,12 @@ private:
                 }
                 if (any) {
                     emit(next_grid_us / 1000);
+                    next_grid_us += step;
+                    continue;
                 }
-                next_grid_us += step;
+                const uint64_t last =
+                    inclusive ? (t / step) * step : ((t - 1) / step) * step;
+                next_grid_us = last > next_grid_us ? last : next_grid_us + step;
             }
         }
 
@@ -1288,7 +1309,7 @@ private:
         }
         if (!survey) {
             for (wide_rows& e : *engines) {
-                e.start(columns_.size(), first_us_);
+                e.start(columns_, first_us_);
             }
         }
         std::vector<char> buf(rows::kRowMax + 2);

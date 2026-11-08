@@ -4436,6 +4436,21 @@ TEST(RequestTimingTest, AQuantileReadsAtMostAnEighthHigh)
     EXPECT_EQ(past.max_us, 20u * 1000 * 1000);
 }
 
+/* A sample with its top bit set (36 minutes and more), or past 32 bits
+ * (a wide CSV survey's gap between two samples hours apart), goes in the
+ * last bucket at once: the log2 search stops at bit 31 */
+TEST(RequestTimingTest, ASamplePastThirtyOneBitsLandsInTheLastBucket)
+{
+    timing_hist h;
+    h.add(INT64_C(0x80000000));
+    h.add(INT64_C(0xFFFFFFFF));
+    h.add(INT64_C(1000000000000000));
+    EXPECT_EQ(h.count, 3u);
+    EXPECT_EQ(h.buckets[timing_hist::kBuckets - 1], 3u);
+    EXPECT_EQ(h.max_us, 0xFFFFFFFFu);
+    EXPECT_EQ(h.quantile(0.5), 0xFFFFFFFFu);
+}
+
 /* Over 1 to 1000 us, each quantile is within its bucket above the true
  * one, capped at the largest sample */
 TEST(RequestTimingTest, QuantilesOfADistribution)
