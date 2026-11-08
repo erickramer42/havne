@@ -1151,8 +1151,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(test_bridge
         test_bridge.cpp
         test_recording_view.cpp
+        test_viewer_frames.cpp
         test_recording_import.cpp
         ../app/recordingview.cpp
+        ../app/recordingframes.cpp
         ../app/sessionbridge.cpp
         ../app/recordingimport.cpp
         ../app/healthreport.cpp

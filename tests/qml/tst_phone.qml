@@ -159,6 +159,44 @@ TestCase {
     // of it: the chart a readable height, the frames check's line inside
     // the page once scrolled to its end, and the filter's options inside
     // the window
+    // The viewer's Frames view on a phone's width: the switch, the table
+    // narrowed to the page (no DLC column), its rows inside the window, and
+    // the filter's fields inside it too
+    function test_theViewersFramesViewFitsAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const frames = find(page, "detailView_frames")
+        verify(frames.visible, "the switch is there")
+        const right = frames.mapToItem(main.contentItem, frames.width, 0).x
+        verify(right <= main.contentItem.width + 0.5,
+               "the switch ends at " + right + " of " + main.contentItem.width)
+        tap(frames, frames.width / 2, frames.height / 2)
+        tryVerify(() => page.framesShown, 2000, "the Frames view")
+        const table = find(page, "viewerFrameTable")
+        tryVerify(() => table.visible && find(table, "frameList").count > 0, 10000, "the rows")
+        verify(waitForPolish(main), "laid out")
+        verify(table.narrowTable, "a phone's table is the narrow one")
+        const scroll = find(page, "recordingsScroll")
+        const edge = table.mapToItem(scroll, table.width, 0).x
+        verify(edge <= scroll.width + 0.5, "the table ends at " + edge + " of " + scroll.width)
+        const toggle = find(page, "framesFilterToggle")
+        tap(toggle, toggle.width / 2, toggle.height / 2)
+        tryVerify(() => find(page, "filterPanel").visible, 2000, "the filter opens")
+        verify(waitForPolish(main), "laid out")
+        const panel = find(page, "filterPanel")
+        const panelRight = panel.mapToItem(scroll, panel.width, 0).x
+        verify(panelRight <= scroll.width + 0.5,
+               "the filter ends at " + panelRight + " of " + scroll.width)
+    }
+
     function test_theViewerReachesAllOfItselfOnAPhone_data() {
         return [{ tag: "upright", w: 384, h: 800 }, { tag: "on its side", w: 800, h: 384 }]
     }
