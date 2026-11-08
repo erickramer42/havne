@@ -1210,21 +1210,28 @@ private:
         for (uint32_t i = 0; i < o_.column_count; ++i) {
             picked.emplace_back(o_.columns_utf8[i]);
         }
-        if (picked.empty()) {
+        /* The header's focus line is the recording's, so a pick it can't
+         * give is a bad recording (LOAD_FAILED), not the caller's */
+        const bool from_header = picked.empty();
+        if (from_header) {
             picked = header_.focus;
         }
+        const auto reject = [this, from_header](const char* fmt,
+                                                const std::string& a) {
+            return from_header ? fail(fmt, a) : refuse(fmt, a);
+        };
         fixed_columns_ = !picked.empty();
         for (const std::string& name : picked) {
             if (index_.count(name) != 0) {
-                return refuse("the column %s is named twice",
+                return reject("the column %s is named twice",
                               ecuio_json::quoted(name));
             }
             if (!raw_ && text_names_.count(name) != 0) {
-                return refuse("the signal %s is a text signal, never a column",
+                return reject("the signal %s is a text signal, never a column",
                               ecuio_json::quoted(name));
             }
             if (!raw_ && ident_names_.count(name) != 0) {
-                return refuse("the signal %s is an identification signal, "
+                return reject("the signal %s is an identification signal, "
                               "never a column",
                               ecuio_json::quoted(name));
             }
