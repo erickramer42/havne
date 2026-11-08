@@ -1,7 +1,7 @@
 # ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
 
-- **Status:** Accepted. Built: section 10's step 1 (the appendix of
-  2026-11-07); steps 2 to 8 not built.
+- **Status:** Accepted. Built: section 10's steps 1 to 3 (steps 1 and
+  3 in the appendices of 2026-11-07); steps 4 to 8 not built.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
   gets final display values); [ADR-0022](0022-display-units.md) (the
@@ -603,6 +603,123 @@ Section 10's step 1.
   loops (`CoreTest.MockDriveCycleEveryTickRoundTripsThroughTheMockSet`)
   keeps each signal inside its range; `SignalFileTest.EachOwnDefNamesItsKeyAndNoOtherDefDoes`;
   `PluginTest.AVariantsFileNamesEachOfItsOwnDefsKeys`; `c_abi`.
+
+## Appendix: the rules as built (2026-11-07)
+
+Section 10's step 3: `app/qml/DashboardBook.qml`, a `pragma Singleton`
+(`QT_QML_SINGLETON_TYPE` in `app/CMakeLists.txt`).
+
+- **Whose field it is decides what a bad one costs.** Section 7's two
+  bullets divide this way. The document's own fields and bounds make
+  the whole text damaged, and the built-in layout shows: a `format`
+  that is missing, not a whole number or below 1 (above 1 is "newer"),
+  `pages` not an array, more than 10 pages, more than 24 cells on a
+  page, or more than 64 KiB (65,536 bytes of UTF-8). A page or cell
+  that is dropped still counts toward those bounds. So does a document
+  with no page left once the bad ones are dropped (`pages: []` among
+  them), and one that is past 64 KiB once written back (`1e5` is
+  written `100000`), since a read document is what the next write
+  stores. A page's own fields drop that page: its name (text of 1 to 40
+  code points once trimmed, kept as stored) and `cells` (an array). A
+  cell's own fields drop that cell; the rest reads.
+- **A cell's fields:** `kind` a non-empty string; `w` a whole number 1
+  to 12 and `h` 1 to 16; `refs` an array of at most 8 strings (an
+  empty one reads); `label` and `unit` strings where present, a label
+  of at most 40 code points (a character outside the BMP counts once);
+  `options` an object where present, with `from` below `to` when both
+  are there. `label`, `unit` and `options` may be left out and read as
+  "", "" and {} (`labelOf`, `unitOf`, `optionsOf`). Each option this
+  version knows has one rule for every kind:
+
+  | Options | Rule |
+  |---|---|
+  | `from`, `to`, `coldBelow`, `warnFrom`, `dangerFrom`, `rise` | a finite number |
+  | `majorStep`, `minorStep`, `labelDivisor` | a finite number above 0 |
+  | `decimals` | a whole number, 0 to 6 |
+  | `count` | a whole number, 1 to 32 |
+  | `cells` | a whole number, 2 to 64 |
+  | `digits` | a whole number, 1 to 8 |
+  | `window` | a whole number, 10 to 120 |
+  | `peak`, `progress`, `vertical`, `marks` | a boolean (`marks`: the ticks on or off) |
+  | `caption` | text of 0 to 40 code points |
+  | `description` | text of 0 to 80 code points |
+  | `peakLabel` | text of 0 to 8 code points |
+  | `accent` | a string |
+
+  The zones (`coldBelow`, `warnFrom`, `dangerFrom`) aren't checked
+  against the range: one outside it doesn't draw.
+- **Kept as read:** a kind outside section 1's eight (`knownKind`
+  false, for section 3's empty card), a reference form, a key this
+  version doesn't know in the document, a page, a cell or its options,
+  and an `accent` other than `accent`, `info` and `success`
+  (`knownAccent` false), which draws as the default accent. An `accent`
+  that isn't a string is a wrong type and drops its cell.
+- **Writes.** Each one copies the document, applies its change and
+  checks the result with `documentProblem`, the reading rules made
+  strict (every page and cell must pass, not only the survivors). A
+  change that doesn't apply, a result that fails, or an input that
+  fails returns a copy equal to the input, which is never changed. The
+  result is the change as stored text reads it back: a key holding
+  `undefined` is left out (of a change, and of a cell or options
+  added), and nothing in it is shared with the write's arguments. A
+  value stored text doesn't hold as it is (a function, NaN or an
+  infinity, a list holding `undefined`, an object of a class such as a
+  `Date`) refuses the write. So `parse(serialize(doc))` gives `doc` back
+  after every write.
+  `resizeCell` rounds the span and clamps it to 1 to 12 and 1 to 16
+  (a span that isn't a finite number is refused). `setCell` changes
+  only `label`, `refs` and `unit`, `null` removing `label` or `unit`;
+  any other field refuses the write, so a cell of another kind is a new
+  cell. `setOptions` merges its changes into the cell's options, `null`
+  removing a key. `addPage` and `renamePage` store the name trimmed.
+  `removePage` refuses the last page. `canAddPage`, `canRemovePage`,
+  `canAddCell`, `cellProblem` and `pageNameProblem` give the controls
+  their state and words. `saveTexts(problem, stored, doc)` gives the
+  text to save and the one for `<form>Unread`: the stored text after a
+  damaged or newer read, else "".
+- **The built-in layout** (`builtIn(form)`, also `reset(form)`): one
+  page, "Engine", with the Dashboard's gauges in its order, each bound
+  to the refs the bridge's `gaugeSignals` gives it, in the units core's
+  sets decode to:
+
+  | Cell | Kind | Phone w x h | Desktop w x h | Options |
+  |---|---|---|---|---|
+  | Shift lights | `shift-light` | 12 x 1 | 12 x 1 | 4500 to 6500, `count` 11 (phone) or 15 (desktop) |
+  | Engine speed | `analog` | 1 x 4 | 2 x 8 | 0 to 8000, steps 1000 and 250, `labelDivisor` 1000, `dangerFrom` 6800, the caption, `peak`, `progress` |
+  | Vehicle speed | `analog` | 1 x 4 | 2 x 8 | 0 to 260, steps 20 and 10, `peak` labeled "TOP" |
+  | Coolant | `ring` | 1 x 4 | 1 x 4 | 0 to 130, zones 60, 105, 115 |
+  | Oil temp | `ring` | 1 x 4 | 1 x 4 | 0 to 160, zones 70, 125, 140 |
+  | IAT | `digital` | 1 x 4 | 1 x 4 | 0 to 120, zones 55 and 70, a description |
+  | MAF | `digital` | 1 x 4 | 1 x 4 | 0 to 300, a description, accent `info` |
+  | Throttle | `bar` | 1 x 2 | 2 x 2 | 0 to 100, accent `success` |
+  | Engine load | `bar` | 1 x 2 | 2 x 2 | 0 to 100 |
+
+  The phone's two columns put the dials side by side under the shift
+  lights, the rings and tiles in pairs below them and the bars last.
+  The desktop's 12 put the dials, rings, tiles and bars in one band.
+- **Placement** (`place(cells, columns)`): in the cells' order, each at
+  the first free block of its span, rows top to bottom and columns left
+  to right, so a later small cell fills a gap an earlier wide one left.
+  A span wider than the grid takes the whole row, and fewer than one
+  column, or a count that isn't a finite number (a page not yet laid
+  out), reads as one.
+- **A new gauge's range** (`defaultRange(unit, lo, hi)`): section 6's
+  table by unit (RPM 0 to 8000, km/h 0 to 260, deg C 0 to 150, % 0 to
+  100, kPa 0 to 300, V 0 to 16, g/s 0 to 300, L/h 0 to 60), then the
+  field's range when both ends are finite and `lo` is below `hi`, then
+  0 to 100. Its unit and ends are the decoded unit's, as the stored
+  options are.
+- **Tests:** `QmlTest.dashboardbook` (`tests/qml/tst_dashboardbook.qml`,
+  test_qml): each form's built-in layout against the table and
+  `Bridge.gaugeSignals`; what a later version writes kept and written
+  back; each wrong field dropping only its cell or page, table-driven,
+  and each bound read at its edge and refused past it (pages, cells,
+  refs, a label in astral code points, the spans, the bytes in
+  multibyte text, the written-back size); the four problems and
+  `saveTexts`; placement at 2, 4, 6 and 12 columns, the first free
+  block, and no overlap and the order kept at every width; every write,
+  every refusal returning an equal copy with the input unchanged, and
+  every kind of write reading back equal.
 
 ## Appendix: an analog dial's ticks under another unit system (2026-11-07)
 
