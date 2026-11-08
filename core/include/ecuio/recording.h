@@ -803,6 +803,61 @@ ecuio_status_t ecuio_scrub_frames(size_t count,
                                   const ecuio_signal_set_t* set, uint32_t flags,
                                   uint8_t* keep, ecuio_export_report_t* report);
 
+/* One frames.csv row as ecuio_recording_read_frames hands it on: the
+ * frame (timestamp_us the row's session time, bytes past data_length
+ * zero) and the row's host_us. Nonzero stops the read. Called on the
+ * caller's thread before ecuio_recording_read_frames returns, never
+ * later, so a binding can pass a plain foreign function. */
+typedef int (*ecuio_frame_row_callback_t)(void* user_data,
+                                          const ecuio_frame_t* frame,
+                                          uint64_t host_us);
+
+typedef struct ecuio_frames_read {
+    uint64_t rows;      /* handed to the callback */
+    uint32_t torn_rows; /* 0 or 1: a last row with no line end, reached
+                           and left out (ADR-0049 section 7) */
+    uint32_t reserved0; /* zero; ABI growth space */
+    uint64_t reserved[2];
+} ecuio_frames_read_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_frames_read_t) == 32,
+              "ecuio_frames_read_t size is ABI");
+static_assert(offsetof(ecuio_frames_read_t, torn_rows) == 8,
+              "ecuio_frames_read_t layout is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_frames_read_t) == 32,
+               "ecuio_frames_read_t size is ABI");
+_Static_assert(offsetof(ecuio_frames_read_t, torn_rows) == 8,
+               "ecuio_frames_read_t layout is ABI");
+#endif
+
+/*
+ * A recording's frames as it recorded them (ADR-0049's appendix "frames
+ * read back"): each frames.csv row whose host_us is from_us to to_us,
+ * both included (to_us 0: to the end), handed to callback in the file's
+ * order, a whole message's row (ECUIO_FRAME_FLAG_REASSEMBLED) as one
+ * frame. Nothing is decoded or scrubbed: identification replies come as
+ * they were recorded. The range's first row is found by a search on the
+ * file's offsets (host_us never goes back in a frames.csv), so a
+ * stretch costs its own rows, not the file's. folder_utf8 is the
+ * recording's folder, or its frames.csv. summary may be NULL; it counts
+ * the rows handed on, whatever the outcome.
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL folder or callback;
+ * ECUIO_ERR_INVALID_ARGUMENT for a to_us other than 0 before from_us;
+ * ECUIO_ERR_CANCELED when the callback returned nonzero;
+ * ECUIO_ERR_LOAD_FAILED for a folder with no frames.csv ("the folder
+ * has no frames.csv"), one that isn't a Havne frames.csv, or a row it
+ * refuses, an earlier host_us than the row before among them
+ * ("frames.csv, the row at byte N: ...", never a path);
+ * ECUIO_ERR_OUT_OF_MEMORY.
+ */
+ecuio_status_t ecuio_recording_read_frames(const char* folder_utf8,
+                                           uint64_t from_us, uint64_t to_us,
+                                           ecuio_frame_row_callback_t callback,
+                                           void* user_data,
+                                           ecuio_frames_read_t* summary);
+
 /* ecuio_import_options_t.format; append-only */
 #define ECUIO_IMPORT_CANDUMP 1u /* can-utils' log (section 4) */
 #define ECUIO_IMPORT_CSV     2u /* another logger's signals (section 5),

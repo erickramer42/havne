@@ -1469,3 +1469,72 @@ Save report passes the picked vehicle's, `havne-cli health` takes
 start, length, profile and backend, and never writes the folder's name
 ([ADR-0054](0054-exports-and-imports.md)'s appendix "the health report
 as built", its note of 2026-11-07).
+
+## Appendix: frames read back (2026-11-07)
+
+The reader answers with values; replay plays frames at the recording's
+pace with new session times; the exports write files. None of them
+hands a caller a recording's frames as recorded, a stretch at a time.
+The viewer needs that for its frames (the Log page's filter over a
+recording), and so does a program that looks at the bytes itself.
+
+**The call.** `ecuio_recording_read_frames(folder, from_us, to_us,
+callback, user, &summary)`, appended to `recording.h`, hands the
+callback each `frames.csv` row whose `host_us` is `from_us` to `to_us`,
+both included (`to_us` 0 is the end, as the exports take it), in the
+file's order, on the caller's thread before the call returns: the row
+as a frame (its session time in `timestamp_us`, the bytes past its
+length zero) and its `host_us`, the time the reader's queries and the
+exports' ranges count on. A whole message's row (`REASSEMBLED`) is one
+frame. Nothing is decoded and nothing is scrubbed: the call reads the
+caller's own recording on the caller's machine, as replay does, and the
+scrub is for what leaves it (ADR-0054). A nonzero return stops the read
+with `ECUIO_ERR_CANCELED`. `ecuio_frames_read_t` (32 bytes, room to
+grow) counts the rows handed on, whatever the outcome, and a last row
+cut short (section 7), which is left out. `folder` names the recording's
+folder or its `frames.csv`, as replay's URI does. The ABI only grows.
+
+**The search.** `host_us` never goes back in a `frames.csv`: the
+recorder stamps it on one worker, the candump import gives an early row
+the previous row's time, and every reader refuses a backward row. So the
+stretch's first row is found by a binary search on the file's offsets:
+a probe seeks to the middle, skips the rest of the row it lands in and
+reads the next, until the first row at or after `from_us` lies within
+64 KiB, which a forward scan then reads. The search is exact, with no
+margin: every row at `from_us` comes, however many share that time, and
+so does every row at `to_us`. A stretch costs its own rows, the probes
+(one for each halving of the file down to 64 KiB) and that last 64 KiB,
+not the rows before it. A backward row the read meets is refused, in
+`frame_rows`' words; one among the rows the search skips is never read.
+
+**Its words.** A refused row is `frames.csv, the row at byte N: <why>`,
+the why the other readers' (`host_us is earlier than the row before`,
+`the row is longer than a frame's`, `id isn't 0x-prefixed hex`): the
+byte, not the line, since the search counts no lines. Never a path. No
+`frames.csv` is "the folder has no frames.csv", as the reader says.
+
+**Not `view --frames`.** `havne-cli view --frames` decodes a
+recording's frames through a profile into the values' columns, as the
+reader's open does; this hands the rows on undecoded, with no profile
+and no columns. So it is a command of its own, `havne-cli frames
+<recording> [--from S] [--to S]` (seconds as view's and export's, both
+edges included, so `--to` may equal `--from`): `start`, a `frame` line
+for each row {`host_us`, `t_us`, `id`, `flags`, `data`}, the stream's
+frame line with `host_us` added and without `ch` (`frames.csv` keeps no
+channel), then `end` {`reason` read or interrupted, `rows`,
+`torn_rows`}. Ctrl+C stops the read; a refused row is an `error` line,
+exit 3, after the rows before it. Python's `havne.read_frames(folder,
+from_us, to_us, limit)` gives the rows as `RecordedFrame`s.
+
+**Later.** The viewer's frames read the stretch in view through it on
+a worker, at most 10,000 rows at a time, and read again when the
+view settles.
+
+Tests: `FramesReadTest` (test_core: the fixture's stretches against a
+plain scan of the file, both edges with every duplicate, a backward row
+at each edge refused with its byte, a large file whose rows before the
+stretch hold a backward pair the search never reads, an empty stretch,
+a torn last row, a stop, the refusals' words), `test_c_abi`, the
+`fuzz_recording` folder's frames read whole and in a stretch, compared,
+`CliFramesTest`, `CliUsageTest.Frames*`, goldens `frames-stretch.jsonl`
+and `frames-missing-folder.jsonl`, `PythonTest.test_frames_read`.

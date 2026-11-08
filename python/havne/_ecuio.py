@@ -392,6 +392,9 @@ class ecuio_export_report_t(Structure):
 class ecuio_frame_t(Structure):
     pass
 
+class ecuio_frames_read_t(Structure):
+    pass
+
 class ecuio_freeze_value_t(Structure):
     pass
 
@@ -533,6 +536,7 @@ class ecuio_vin_info_t(Structure):
 # --- callbacks ---------------------------------------------------------
 ecuio_check_finding_callback_t = CFUNCTYPE(c_int, POINTER(ecuio_check_finding_t), c_void_p)
 ecuio_frame_callback_t = CFUNCTYPE(None, POINTER(ecuio_frame_t), c_void_p)
+ecuio_frame_row_callback_t = CFUNCTYPE(c_int, c_void_p, POINTER(ecuio_frame_t), c_uint64)
 ecuio_obdb_note_fn = CFUNCTYPE(c_int, POINTER(ecuio_obdb_note_t), c_void_p)
 ecuio_open_progress_t = CFUNCTYPE(c_int, c_uint64, c_uint64, c_void_p)
 ecuio_plugin_read_t = CFUNCTYPE(c_int, c_void_p, c_char_p, POINTER(c_char_p), POINTER(c_size_t))
@@ -714,6 +718,12 @@ ecuio_frame_t._fields_ = [
     ('data', (c_uint8 * 4096)),
     ('flags', c_uint32),
     ('reserved', c_uint32),
+]
+ecuio_frames_read_t._fields_ = [
+    ('rows', c_uint64),
+    ('torn_rows', c_uint32),
+    ('reserved0', c_uint32),
+    ('reserved', (c_uint64 * 2)),
 ]
 class ecuio_health_options_t_u0(Union):
     _fields_ = [
@@ -1158,6 +1168,7 @@ FUNCTIONS = {
     'ecuio_recording_open': (c_int, [c_char_p, ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_open_frames': (c_int, [c_char_p, POINTER(ecuio_signal_set_t), ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_query': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_column_t), c_uint32]),  # recording.h
+    'ecuio_recording_read_frames': (c_int, [c_char_p, c_uint64, c_uint64, ecuio_frame_row_callback_t, c_void_p, POINTER(ecuio_frames_read_t)]),  # recording.h
     'ecuio_recording_text_at': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_char_p, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_register_frame_callback': (c_int, [POINTER(ecuio_session_t), ecuio_frame_callback_t, c_void_p]),  # core.h
     'ecuio_register_values_callback': (c_int, [POINTER(ecuio_session_t), ecuio_values_callback_t, c_void_p]),  # profile.h
