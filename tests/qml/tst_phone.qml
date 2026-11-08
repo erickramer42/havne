@@ -416,6 +416,102 @@ TestCase {
                "the pages end at " + (r.y + r.height) + " of " + main.contentItem.height)
     }
 
+    // The bars' heights are fixed dp numbers, the same upright and on its
+    // side: a header of the toolbar's height under the status bar, and a tab
+    // row of a touch's size and a gap over the navigation bar. A phone keeps
+    // its tab bar on its side (ADR-0057: the form follows the platform, not
+    // the width a turn crosses). The window's real safe-area offset can't
+    // be faked in a test (the content item's place), so the phone run
+    // checks that the bars reach the window's edge
+    function test_theBarsKeepTheirHeightsUprightAndOnItsSide_data() {
+        return [{ tag: "upright", w: 384, h: 832,
+                  insets: { left: 0, top: 34, right: 0, bottom: 48 } },
+                { tag: "on its side", w: 832, h: 384,
+                  insets: { left: 34, top: 30, right: 48, bottom: 0 } }]
+    }
+
+    function test_theBarsKeepTheirHeightsUprightAndOnItsSide(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.zoom = 1.0
+        main.testMobile = true
+        main.testInsets = data.insets
+        main.width = data.w
+        main.height = data.h
+        verify(waitForPolish(main), "laid out")
+        const bar = find(main.contentItem, "tabBar")
+        tryVerify(() => bar.visible, 2000, "a phone's tab bar shows")
+        const head = find(main.contentItem, "headerBar")
+        compare(head.height - data.insets.top, 40, "the header's own height")
+        compare(bar.height - data.insets.bottom, Theme.touchTarget + Theme.barGap,
+                "the tab row and its gap")
+        compare(Theme.touchTarget + Theme.barGap, 56)
+    }
+
+    // zoomRoot reaches back out over the system's top and bottom bars
+    // (the window's content item lies inside them), so its place is minus
+    // the top margin and its drawn height the content item's and both
+    // margins, at any zoom. testWindowSafe stands in for the window's
+    // margins, which a test window has none of
+    function test_zoomRootReachesOverTheBars_data() {
+        return [{ tag: "67 %", zoom: 0.67 }, { tag: "100 %", zoom: 1.0 },
+                { tag: "150 %", zoom: 1.5 }]
+    }
+
+    function test_zoomRootReachesOverTheBars(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.zoom = data.zoom
+        main.testMobile = true
+        main.testWindowSafe = { left: 20, top: 24, right: 10, bottom: 48 }
+        main.width = 384
+        main.height = 832
+        verify(waitForPolish(main), "laid out")
+        const root = find(main.contentItem, "zoomRoot")
+        compare(root.y, -24, "starts over the top bar")
+        fuzzyCompare(root.height * Theme.zoom, main.contentItem.height + 24 + 48, 0.01,
+                     "ends under the bottom bar")
+        compare(root.x, 0, "no side inset of its own")
+        fuzzyCompare(root.width * Theme.zoom, main.contentItem.width, 0.01, "nor a side margin's width")
+    }
+
+    // A phone is a window with a short side under 600 dp, whatever the
+    // zoom (a phone zoomed out is still one); at 600 a tablet's width rules
+    function test_thePhoneFormsEdgeIs600Dp_data() {
+        return [{ tag: "599", h: 599, zoom: 1.0, tabs: true },
+                { tag: "600", h: 600, zoom: 1.0, tabs: false },
+                { tag: "a phone at 50 %", h: 384, zoom: 0.5, tabs: true },
+                { tag: "a phone at 67 %", h: 384, zoom: 0.67, tabs: true }]
+    }
+
+    function test_thePhoneFormsEdgeIs600Dp(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.zoom = data.zoom
+        main.testMobile = true
+        main.width = 832
+        main.height = data.h
+        verify(waitForPolish(main), "laid out")
+        tryCompare(find(main.contentItem, "tabBar"), "visible", data.tabs)
+    }
+
+    // A tablet's short side (600 dp) and a computer go by the width
+    function test_onlyAPhoneKeepsTheTabBarWhenWide() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.zoom = 1.0
+        main.testMobile = true
+        main.width = 1280
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        verify(!find(main.contentItem, "tabBar").visible, "a tablet's width gets the sidebar")
+        main.width = 832
+        main.height = 384
+        tryVerify(() => find(main.contentItem, "tabBar").visible, 2000, "a phone on its side")
+        main.testMobile = false
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "a computer's window")
+    }
+
     // The chart maximized: on its side by default, upright on request,
     // each shape keeping its own choice; Live keeps its window row and
     // its link banner, and its list gives way
