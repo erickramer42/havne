@@ -67,6 +67,13 @@ TestCase {
         return out
     }
 
+    // A CSV whose guess has a time with no unit, a long header, a column
+    // the guess leaves out, and notes
+    readonly property string guessFile:
+        "Time since the logger started,Engine speed measured at the crankshaft position sensor [rpm],"
+        + "Intake air temperature after the intercooler (deg C),Always empty\n"
+        + "0,800.5,31.5,\n1,900.25,31.75,\n2,950,32,\n"
+
     // The test phone upright, in device-independent pixels (1440 px
     // at 600 dpi)
     function test_everyPageFitsAPhonesWidth_data() {
@@ -74,7 +81,8 @@ TestCase {
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
                 { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
-                { tag: "recordingsImportCandump" }, { tag: "settingsPage" }]
+                { tag: "recordingsImportCandump" }, { tag: "recordingsImportGuess" },
+                { tag: "settingsPage" }]
     }
 
     function test_everyPageFitsAPhonesWidth(data) {
@@ -107,7 +115,17 @@ TestCase {
         if (name === "recordingsPage")
             page.recordings = [row]
         // Import's panel with every row it can show, long names and words
-        if (importing) {
+        if (data.tag === "recordingsImportGuess") {
+            // The guessed map's preview: long header names, a unit to
+            // choose, a left-out column, and the notes open
+            page.chooseImportFile(Harness.writeScratchFile(
+                "a-logger-export-with-a-long-file-name-2026-11-07.csv", guessFile))
+            tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
+                      "the guess ends")
+            const preview = find(page, "guessPreview")
+            verify(preview.visible, "the preview shows")
+            preview.notesOpen = true
+        } else if (importing) {
             const candump = data.tag === "recordingsImportCandump"
             page.chooseImportFile(Harness.writeScratchFile(
                 "a-logger-export-with-a-long-file-name-2026-11-07.csv",
@@ -247,6 +265,43 @@ TestCase {
         verify(right <= main.contentItem.width + 0.5,
                "the filter's options end at " + right + " of " + main.contentItem.width)
         bar.options.close()
+    }
+
+    // The Import panel's preview on a phone: every control in it is a
+    // touch's size (48 on the glass at any zoom, in the layout's units
+    // Theme.touchTarget), and none is past the window's edge
+    function test_theImportPreviewsTargetsAreATouchsSize() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        tryCompare(Theme, "compact", true)
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.chooseImportFile(Harness.writeScratchFile("targets.csv", guessFile))
+        tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
+                  "the guess ends")
+        const preview = find(page, "guessPreview")
+        verify(preview.visible)
+        verify(waitForPolish(main), "laid out")
+        const seen = []
+        const small = []
+        const walk = item => {
+            for (const child of item.children) {
+                if (child.visible && child.width > 0
+                        && (child.pressed !== undefined || child.placeholderText !== undefined)) {
+                    const top = child.mapToItem(main.contentItem, 0, 0).y
+                    const bottom = child.mapToItem(main.contentItem, 0, child.height).y
+                    seen.push(child.objectName || String(child))
+                    if (bottom - top < Theme.touchTarget - 0.5)
+                        small.push((child.objectName || String(child)) + " " + Math.round(bottom - top))
+                }
+                walk(child)
+            }
+        }
+        walk(preview)
+        verify(seen.length >= 10, "controls found: " + seen.join(", "))
+        compare(small.length, 0, "under " + Theme.touchTarget + ": " + small.join(", "))
     }
 
     // A phone's density: upright (narrower than 720) and on its side
