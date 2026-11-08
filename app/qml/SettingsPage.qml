@@ -856,6 +856,24 @@ Pane {
             Bluetooth.refresh(true)
         }
     }
+    // Back from Android's settings (or any other app) with Connection
+    // shown: the permission may have changed there, so the message and the
+    // Open settings button follow it with no tap. Reads the answer only:
+    // never an ask, never a scan. bluetoothRechecks counts them
+    property int bluetoothRechecks: 0
+    function recheckBluetoothIfSeen() {
+        if (visible && shownKey === "connection") {
+            ++bluetoothRechecks
+            Bluetooth.refresh(false)
+        }
+    }
+    Connections {
+        target: Qt.application
+        function onStateChanged() {
+            if (Qt.application.state === Qt.ApplicationActive)
+                page.recheckBluetoothIfSeen()
+        }
+    }
     onShownKeyChanged: askBluetoothIfSeen()
     onVisibleChanged: askBluetoothIfSeen()
 

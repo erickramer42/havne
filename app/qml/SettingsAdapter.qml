@@ -10,6 +10,7 @@ pragma ComponentBehavior: Bound
 
 ColumnLayout {
     id: root
+    objectName: "adapterSection"
     required property SettingsPage host
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
@@ -42,7 +43,7 @@ ColumnLayout {
             text: qsTr("Refresh")
             onClicked: {
                 root.host.refreshDevices()
-                Bluetooth.refresh(true)
+                Bluetooth.userRefresh()
             }
         }
     }
@@ -70,6 +71,13 @@ ColumnLayout {
             enabled: root.host.idle && !Bluetooth.scanning
             onClicked: Bluetooth.scan()
         }
+    }
+    // Android won't show its dialog: Havne's own page in its settings
+    ThemedButton {
+        objectName: "bluetoothSettingsButton"
+        text: qsTr("Open settings")
+        visible: Bluetooth.available && Bluetooth.needsSettings
+        onClicked: Bluetooth.openSettings()
     }
 
     // Sized to its rows up to deviceRowsShown, then it scrolls
@@ -209,39 +217,82 @@ ColumnLayout {
         }
     }
 
-    // ---- Presets: the URI's base, for what the list doesn't show ----
+    // ---- Presets: the URI's base, for what the list doesn't show. Closed
+    // until the row is tapped: five buttons would fill a phone's page ----
+    property bool presetsOpen: false
+    // A J2534 interface is a Windows driver
+    property bool j2534Offered: Qt.platform.os === "windows"
     LabeledFlow {
-        label: qsTr("Not listed:")
+        ThemedButton {
+            objectName: "presetsToggle"
+            // Expanded or not, for a screen reader
+            Accessible.role: Accessible.Button
+            Accessible.checkable: true
+            Accessible.checked: root.presetsOpen
+            text: root.presetsOpen ? qsTr("Not listed: hide") : qsTr("Not listed: show")
+            onClicked: root.presetsOpen = !root.presetsOpen
+        }
         Repeater {
             model: [
-                { name: "mock", uri: "mock://demo", label: "mock://demo" },
+                { name: "mock", uri: "mock://demo", label: "mock://demo", hint: "" },
                 // A bare j2534:// opens the first discovered device
-                { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)") },
+                { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)"), hint: "" },
                 // elm327:// takes no first port: the user picks one
                 // from the list above or types a WiFi adapter's
                 // address (core's refusal says so)
-                { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port above, or an address)") },
+                { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (type an address)"), hint: "" },
                 // WiFi adapters aren't listed (ADR-0026's appendix
                 // "WiFi over TCP"): the two common addresses, so a
                 // phone needn't type one
                 { name: "wifi_obdx", uri: "elm327://192.168.4.1:23",
-                  label: qsTr("WiFi: OBDX (192.168.4.1:23)") },
+                  label: qsTr("WiFi: OBDX"), hint: "192.168.4.1:23" },
                 { name: "wifi_elm", uri: "elm327://192.168.0.10:35000",
-                  label: qsTr("WiFi: most others (192.168.0.10:35000)") }
+                  label: qsTr("WiFi: other adapters"), hint: "192.168.0.10:35000" }
             ]
             ThemedButton {
+                id: preset
                 required property var modelData
                 objectName: "preset_" + modelData.name
                 text: modelData.label
+                Accessible.name: modelData.hint !== "" ? modelData.label + " " + modelData.hint
+                                                       : modelData.label
                 // Wraps rather than run past a narrow page's edge
                 // (Linux's font at 320 px did)
                 width: Math.min(implicitWidth, parent.width)
                 // The mock is a developer's tool, not a device
-                visible: modelData.name !== "mock" || Theme.developerMode
+                visible: root.presetsOpen
+                         && (modelData.name !== "mock" || Theme.developerMode)
+                         && (modelData.name !== "j2534" || root.j2534Offered)
                 enabled: root.host.idle
                 onClicked: {
                     root.host.fillUri(modelData.uri)
                     root.host.showUriField()
+                }
+                // The name, and the address smaller under it. The width is
+                // stated, so the children's (the item's) don't feed back
+                contentItem: Item {
+                    implicitWidth: Math.max(nameText.implicitWidth, hintText.implicitWidth)
+                    implicitHeight: nameText.height + (hintText.visible ? hintText.height : 0)
+                    Text {
+                        id: nameText
+                        width: parent.width
+                        text: preset.text
+                        font.pixelSize: 14
+                        color: Theme.text
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    Text {
+                        id: hintText
+                        y: nameText.height
+                        width: parent.width
+                        visible: preset.modelData.hint !== ""
+                        text: preset.modelData.hint
+                        font.pixelSize: 11
+                        color: Theme.textDim
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                    }
                 }
             }
         }

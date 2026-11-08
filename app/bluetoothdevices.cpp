@@ -172,9 +172,10 @@ QString BluetoothDevices::streamName(const QString& uri)
 
 void BluetoothDevices::setStatus(const QString& status, bool warns)
 {
-    if (m_status != status || m_statusWarns != warns) {
+    if (m_status != status || m_statusWarns != warns || m_needsSettings) {
         m_status = status;
         m_statusWarns = warns;
+        m_needsSettings = false;
         emit statusChanged();
     }
 }
@@ -190,6 +191,8 @@ void BluetoothDevices::setScanning(bool scanning)
 #ifndef APP_BLUETOOTH
 
 void BluetoothDevices::refresh(bool) {}
+void BluetoothDevices::userRefresh() {}
+void BluetoothDevices::openSettings() {}
 void BluetoothDevices::scan() {}
 
 QString BluetoothDevices::prepare(const QString& uri)
@@ -205,10 +208,25 @@ QString BluetoothDevices::prepare(const QString& uri)
 
 #else
 
+// The refusal's message, and the button to Havne's page in Android's
+// settings (needsSettings)
+void BluetoothDevices::deniedStatus()
+{
+    setStatus(tr("Allow Nearby devices for Havne: Android settings > Apps > "
+                 "Havne > Permissions"),
+              true);
+    m_needsSettings = true;
+    emit statusChanged();
+}
+
 // Android's answer on the Nearby devices permission (BLUETOOTH_CONNECT and
 // BLUETOOTH_SCAN, declared never for location: app/CMakeLists.txt). With
 // ask, an undecided one is asked, and the list or the scan runs on a yes.
-bool BluetoothDevices::permitted(bool ask, bool forScan)
+// After a "Don't allow" Android still shows its dialog the next time, until
+// the user has refused twice or chosen not to be asked again: a tap (user)
+// asks again, and only an answer of Denied sends the user to Havne's page
+// in Android's settings. Seen only (no tap), a refusal just says so.
+bool BluetoothDevices::permitted(bool ask, bool forScan, bool user)
 {
     QBluetoothPermission permission;
     permission.setCommunicationModes(QBluetoothPermission::Access);
@@ -216,10 +234,11 @@ bool BluetoothDevices::permitted(bool ask, bool forScan)
     case Qt::PermissionStatus::Granted:
         return true;
     case Qt::PermissionStatus::Denied:
-        setStatus(tr("Allow Nearby devices for Havne in Android's settings to "
-                     "reach Bluetooth adapters"),
-                  true);
-        return false;
+        if (!(ask && user)) {
+            deniedStatus();
+            return false;
+        }
+        break;
     case Qt::PermissionStatus::Undetermined:
         break;
     }
@@ -235,13 +254,25 @@ bool BluetoothDevices::permitted(bool ask, bool forScan)
                     listPaired();
                 }
             } else {
-                setStatus(
-                    tr("Allow Nearby devices for Havne in Android's settings "
-                       "to reach Bluetooth adapters"),
-                    true);
+                deniedStatus();
             }
         });
     return false;
+}
+
+void BluetoothDevices::userRefresh()
+{
+    if (permitted(true, false, true)) {
+        listPaired();
+    }
+}
+
+void BluetoothDevices::openSettings()
+{
+    const QJniObject context = QNativeInterface::QAndroidApplication::context();
+    QJniObject::callStaticMethod<void>(
+        "io/github/erickramer42/havne/SessionService", "openAppSettings",
+        "(Landroid/content/Context;)V", context.object());
 }
 
 void BluetoothDevices::refresh(bool ask)
@@ -275,7 +306,7 @@ void BluetoothDevices::listPaired()
 
 void BluetoothDevices::scan()
 {
-    if (!m_scanning && permitted(true, true)) {
+    if (!m_scanning && permitted(true, true, true)) {
         scanNow();
     }
 }
