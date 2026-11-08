@@ -81,6 +81,19 @@ qt_add_qml_module(app_ui
         qml/FrameIdList.qml
         qml/RecordingsPage.qml
         qml/SettingsPage.qml
+        qml/Captioned.qml
+        qml/Heading.qml
+        qml/LabeledFlow.qml
+        qml/SettingsAdapter.qml
+        qml/SettingsConnect.qml
+        qml/SettingsDisplay.qml
+        qml/SettingsOwnSignals.qml
+        qml/SettingsPlugins.qml
+        qml/SettingsProfile.qml
+        qml/SettingsRecording.qml
+        qml/SettingsSignalFiles.qml
+        qml/SettingsVehiclePicker.qml
+        qml/SettingsVinLookup.qml
         qml/NavButton.qml
         qml/Theme.qml
         qml/LiveViewPage.qml

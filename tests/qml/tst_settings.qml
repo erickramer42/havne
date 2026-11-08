@@ -846,6 +846,18 @@ TestCase {
         verify(!result.visible)
     }
 
+    // The signal files and the own signals belong to the picked vehicle. With
+    // none picked their parts hold nothing, and a part that stays visible
+    // adds a gap of its own to the Vehicle section's column
+    function test_thePartsOfAPickedVehicleAreAbsentWithNone() {
+        const page = createPage()
+        verify(!find(page, "settingsSignalFilesPart").visible, "no files with no vehicle")
+        verify(!find(page, "settingsOwnSignalsPart").visible, "no own signals with no vehicle")
+        press(page, "vehicleNew")
+        verify(find(page, "settingsSignalFilesPart").visible, "files with a vehicle")
+        verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
+    }
+
     // ADR-0027 section 1: every change to the list is made in the section, a
     // label typed or left to its default
     function test_theVehicleSectionMakesNamesAndForgetsVehicles() {
