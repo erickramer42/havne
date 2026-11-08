@@ -5,7 +5,8 @@
 #     clean (contributors without a win32 tree). Check CI invariant: this
 #     file is app-side only, core stays Qt-free/untouched. Release builds
 #     carry no QML debugging: stage.ps1 fails a package whose exe imports
-#     QQmlDebuggingEnabler or that holds qmltooling.
+#     QQmlDebuggingEnabler or that holds qmltooling, and sign-apk.sh an APK
+#     whose libhavne names it or that holds qmltooling.
 
 # 6.12 is the version CI and local builds use (macOS needs it), and
 # REQUIRES sets every Qt policy up to it to NEW, QTP0004 among them.
@@ -230,6 +231,13 @@ endif()
 # (packaging/windows/stage.ps1 checks the exe's imports).
 if(QT_FEATURE_qml_debug)
     target_compile_definitions(havne PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
+endif()
+# Outside Debug, the APK carries no qmltooling plugins (the debug
+# server's half): androiddeployqt deploys the plugin list Qt's CMake
+# writes, which honors this exclusion. packaging/android/sign-apk.sh
+# checks the release APK
+if(ANDROID AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    qt_import_plugins(havne EXCLUDE_BY_TYPE qmltooling)
 endif()
 
 # --- Deploy Qt runtime DLLs next to the exe (Windows only) ---

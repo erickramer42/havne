@@ -53,6 +53,38 @@ texts those files point to in /usr/share/common-licenses are in
 common-licenses/ beside this file.
 
 
+The AppImage runtime, in the AppImage
+-------------------------------------
+
+The AppImage begins with the AppImage type 2 runtime, which mounts or
+unpacks the rest when it starts:
+type2-runtime release 20251108 (commit dd6cebe)
+from https://github.com/AppImage/type2-runtime, copyright probonopd and
+contributors, under the MIT license in licenses/AppImage-runtime.txt.
+The runtime is one static program that also contains:
+
+    libfuse 3.15.0, with the runtime's patch to lib/mount.c, under the
+      GNU Lesser General Public License, version 2.1
+      (licenses/LGPL-2.1.txt)
+    squashfuse 0.5.2, under its BSD license (licenses/squashfuse.txt)
+    musl libc 1.2.5, under the MIT license (licenses/musl.txt)
+    mimalloc 2.1.7, under the MIT license (licenses/mimalloc.txt)
+    zstd 1.5.6, under the BSD license of its two (licenses/zstd.txt)
+    zlib 1.3.1, under the zlib license (licenses/zlib.txt)
+
+libfuse and squashfuse are built from those releases by the runtime's
+build scripts; musl, mimalloc, zstd and zlib come from Alpine Linux
+3.21's packages. As LGPL-2.1 section 6 asks, the source of libfuse and
+of the runtime it is linked into is attached to each Havne release
+that carries an AppImage, beside the AppImage itself:
+fuse-3.15.0.tar.xz (libfuse's own release) and
+type2-runtime-20251108.tar.gz (the runtime at that commit, with its
+libfuse patch and build scripts). With them you can rebuild the runtime
+against your own libfuse and put it in place of the AppImage's first
+part. They are also at https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0
+and https://github.com/AppImage/type2-runtime/releases/tag/20251108.
+
+
 Android libraries, in the APK
 -----------------------------
 

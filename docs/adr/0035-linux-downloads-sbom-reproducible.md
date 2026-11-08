@@ -288,3 +288,30 @@ each a matrix over the two):
   there; the aarch64 jobs build, pack and check the files
   (`package_check.sh`, the AppImage up 10 s offscreen). The suites run
   on ARM on a Raspberry Pi 3 (docs/linux.md, "What has run where").
+
+## Appendix: the AppImage's runtime pinned (2026-11-08)
+
+- **What the AppImage started with:** linuxdeploy's AppImage plugin
+  packs through appimagetool, which, with no runtime named, downloads
+  type2-runtime's `continuous` build at every pack: a moving release,
+  unpinned and unchecked. v0.6.0's x86_64 AppImage reports commit
+  `fedfad5`. Two packs of one commit matched only while upstream didn't
+  rebuild in between.
+- **Pinned now:** `make-appimage.sh` fetches type2-runtime's release
+  20251108 (commit `dd6cebe`) for its architecture, checks it against
+  GitHub's SHA-256 as it does linuxdeploy, hands it to linuxdeploy as
+  `LDAI_RUNTIME_FILE`, and fails a pack whose runtime reports another
+  commit. That release lacks commit `8f39b89` (the
+  `--appimage-extract-and-run` folder created 0700): the AppImage's
+  files are public, so nothing is disclosed.
+- **The SBOM:** the AppImage's listing names the runtime's release,
+  purl `pkg:github/AppImage/type2-runtime@20251108`, and what it links
+  statically: libfuse 3.15.0 and squashfuse 0.5.2 (pinned by its build
+  scripts), musl 1.2.5, mimalloc 2.1.7, zstd 1.5.6 and zlib 1.3.1
+  (Alpine 3.21's packages as of the release's build).
+- **The release carries two more files:** libfuse is LGPL-2.1, so each
+  release attaches `fuse-3.15.0.tar.xz` and
+  `type2-runtime-20251108.tar.gz` (`packaging/linux/runtime-sources.sh`,
+  each pinned by SHA-256), in `SHA256SUMS.txt` and the provenance
+  attestation, and the notice's runtime section names them. The release
+  lists twenty-two files.
