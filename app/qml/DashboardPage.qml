@@ -70,9 +70,18 @@ Page {
     property bool moreShown: false
     property bool confirmReset: false
 
-    // The kinds this page draws, in the order Add offers them; the Cell's
-    // Loader makes each
+    // The kinds this page draws, in the order Add offers them, and the
+    // component that makes each (a cell's and Add's preview); null for
+    // a kind this version doesn't draw
     readonly property var drawnKinds: ["analog", "ring", "bar", "digital", "shift-light"]
+    function kindComponent(kind) {
+        return kind === "analog" ? analogKind
+             : kind === "ring" ? ringKind
+             : kind === "bar" ? barKind
+             : kind === "digital" ? digitalKind
+             : kind === "shift-light" ? shiftKind
+             : null
+    }
     readonly property var kindNames: ({
         "analog": qsTr("Dial"), "ring": qsTr("Ring"), "bar": qsTr("Bar"),
         "digital": qsTr("Number"), "shift-light": qsTr("Shift lights")
@@ -517,12 +526,7 @@ Page {
             objectName: "gauge"
             anchors.fill: parent
             asynchronous: card.later
-            sourceComponent: card.kind === "analog" ? analogKind
-                           : card.kind === "ring" ? ringKind
-                           : card.kind === "bar" ? barKind
-                           : card.kind === "digital" ? digitalKind
-                           : card.kind === "shift-light" ? shiftKind
-                           : null
+            sourceComponent: root.kindComponent(card.kind)
             onLoaded: {
                 const g = item
                 for (const name of card.shared.concat(card.own[card.kind] ?? []))
@@ -892,11 +896,7 @@ Page {
                                 Layout.preferredWidth: kindTile.wide ? 200 : 120
                                 Layout.preferredHeight: kindTile.modelData === "shift-light" ? 40
                                                       : kindTile.wide ? 70 : 120
-                                sourceComponent: kindTile.modelData === "analog" ? analogKind
-                                               : kindTile.modelData === "ring" ? ringKind
-                                               : kindTile.modelData === "bar" ? barKind
-                                               : kindTile.modelData === "digital" ? digitalKind
-                                               : shiftKind
+                                sourceComponent: root.kindComponent(kindTile.modelData)
                                 // Still: 60 percent of a 0 to 100 range, never live
                                 onLoaded: {
                                     const g = item as GaugeBase
