@@ -328,6 +328,24 @@ TestCase {
         return item.mapToItem(main.contentItem, 0, 0, item.width, item.height)
     }
 
+    // The Bluetooth permission is not asked for at launch: the app opens on
+    // another page, so the ask waits until Settings is seen, and at 1400
+    // wide it is then one ask, with Connection beside the list
+    function test_theBluetoothAskWaitsForSettingsToBeSeen() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        const page = find(main.contentItem, "settingsPage")
+        verify(main.currentPage !== main.settingsPage, "the app opens elsewhere")
+        verify(!page.visible, "Settings is hidden")
+        compare(page.bluetoothAsks, 0, "no ask at launch")
+        main.gotoPage(main.settingsPage)
+        tryCompare(page, "shownKey", "connection")   // wide: Connection beside the list
+        compare(page.bluetoothAsks, 1, "seen: one ask")
+    }
+
     // The phone's tab bar upright: every tab a touch's size on the glass
     // at any zoom that shows the bar (67 % is the least at 384; at 50 %
     // the layout passes 720 and the sidebar shows), the targets ending a
@@ -742,7 +760,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "settingsPage")
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
-        find(page, "adapterSection").open = true   // the relay's box is in it
+        page.open("connection")   // the relay's box is in it
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
         const traffic = find(page, "relayTraffic")
         const button = find(page, "relayButton")

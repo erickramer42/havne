@@ -1,7 +1,6 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
-// Testing: UNIT: SignalsTest (test_signals); BRIDGE: BridgeTest
-//          (test_bridge); QML: QmlTest.settings, QmlTest.linkhealth,
-//          QmlTest.log, QmlTest.phone (test_qml); Manual smoke
+// Testing: QML: QmlTest.settings, QmlTest.linkhealth, QmlTest.log,
+//          QmlTest.phone (test_qml)
 
 import QtCore
 import QtQuick
@@ -16,6 +15,28 @@ Pane {
     id: page
     padding: 0
     background: Rectangle { color: Theme.bg }
+
+    property alias uriField: settingsConnect.uriField
+    property alias errorLabel: settingsConnect.errorLabel
+    property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
+    property alias obdbYearField: settingsSignalFiles.obdbYearField
+    property alias saveDialog: settingsSignalFiles.saveDialog
+    property alias formName: settingsOwnForm.formName
+    property alias formRx: settingsOwnForm.formRx
+    property alias formTx: settingsOwnForm.formTx
+    property alias formNumber: settingsOwnForm.formNumber
+    property alias formByte: settingsOwnForm.formByte
+    property alias formBits: settingsOwnForm.formBits
+    property alias formBit: settingsOwnForm.formBit
+    property alias formBytes: settingsOwnForm.formBytes
+    property alias formSigned: settingsOwnForm.formSigned
+    property alias formScale: settingsOwnForm.formScale
+    property alias formOffset: settingsOwnForm.formOffset
+    property alias formUnit: settingsOwnForm.formUnit
+    property alias formDecimals: settingsOwnForm.formDecimals
+    property alias formValues: settingsOwnForm.formValues
+    property alias vinLookupField: settingsVinLookup.vinLookupField
+    property alias didField: settingsProfile.didField
 
     readonly property int deviceRowHeight: 56
     readonly property int deviceRowsShown: 4   // the list scrolls past this
@@ -527,7 +548,7 @@ Pane {
     // The vehicle a Read once was asked for: its reply shows only there
     property string readOnceFor: ""
 
-    // The form and the section's notes are the picked vehicle's: a pick,
+    // The form and the page's notes are the picked vehicle's: a pick,
     // New, Duplicate, Forget or a car recognized starts them afresh, and a
     // question asked about the last one goes with it
     readonly property string pickedId: pickedVehicle !== null ? pickedVehicle.id : ""
@@ -742,7 +763,7 @@ Pane {
             uriField.text = pickedVehicle.uri
     }
 
-    // A change of the list from the section's buttons: the field empties
+    // A change of the list from the page's buttons: the field empties
     // for the next label
     function changeVehicles(doc) {
         confirming = ""
@@ -786,113 +807,72 @@ Pane {
     // rewrite the grayed field under the connect in flight.
     readonly property bool idle: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
 
-    component Heading: Label {
-        color: Theme.text
-        font.pixelSize: 16
-        font.weight: Font.DemiBold
-        Layout.topMargin: Theme.spacing
-    }
+    // ---- Navigation: the list of pages, and the page shown. A phone shows
+    // one at a time (the list is the root, a page pushes over it); 900 and
+    // wider shows the list at the left and a page beside it. The pages are
+    // all made once and shown or hidden, so the state in them (a typed
+    // URI, a half-filled form) survives a visit elsewhere ----
+    property string pageKey: ""    // "" is the list, on a phone
+    readonly property bool twoPane: width >= 900
+    readonly property string shownKey: twoPane && pageKey === "" ? "connection" : pageKey
+    readonly property var pageList: [
+        { key: "connection", title: qsTr("Connection"),
+          summary: (devices.length === 0 ? qsTr("none found") : qsTr("%1 found").arg(devices.length))
+                   + " · " + profileLabel() },
+        { key: "vehicle", title: qsTr("Vehicle"),
+          summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
+                   + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
+        { key: "signals", title: qsTr("Signals"),
+          summary: pickedVehicle === null ? qsTr("pick a vehicle")
+                   : qsTr("%1 files").arg(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)) },
+        { key: "recording", title: qsTr("Recording"),
+          summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off") },
+        { key: "display", title: qsTr("Display"),
+          summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
+                   + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric")) },
+        { key: "advanced", title: qsTr("Advanced"),
+          summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
+    ]
 
-    // A form's box with its name above it: a placeholder alone goes once
-    // something is typed, and the box no longer says what it holds
-    component Captioned: Column {
-        property alias caption: captionText.text
-        spacing: 2
-        Label {
-            id: captionText
-            color: Theme.textDim
+    function open(key) {
+        pageKey = key
+    }
+    // Back from a page: the form returns to Signals, the rest to the list
+    function back() {
+        pageKey = pageKey === "ownform" ? "signals" : ""
+    }
+    // The form for a new signal (Add a signal), as a page of its own
+    function openOwnForm() {
+        open("ownform")
+    }
+    // The phone's Bluetooth permission is asked for when what to connect to
+    // is seen: Connection is the page shown and Settings is on screen. Not
+    // at launch, and not when the width crosses 900 while Settings is
+    // hidden. bluetoothAsks counts the asks
+    property int bluetoothAsks: 0
+    function askBluetoothIfSeen() {
+        if (visible && shownKey === "connection") {
+            ++bluetoothAsks
+            Bluetooth.refresh(true)
         }
     }
+    onShownKeyChanged: askBluetoothIfSeen()
+    onVisibleChanged: askBluetoothIfSeen()
 
-    // A caption, then buttons that wrap: a row of them would hold the
-    // page at its natural width, past a phone's. The caption is the
-    // flow's first item, so a wrapped button has the whole width
-    component LabeledFlow: Flow {
-        property alias label: caption.text
-        Layout.fillWidth: true
-        spacing: Theme.spacing
-
-        Label {
-            id: caption
-            visible: text !== ""
-            color: Theme.textDim
-            topPadding: 8
-        }
-    }
-
-    // The page is the connect bar, then five sections, each folded
-    // until its heading is pressed: what to connect to, the vehicle, what
-    // to read, recording and the display. Unfolded, the page ran to
-    // several screens on a phone and an adapter sat at its bottom. Each
-    // heading says what its section holds now, so the page reads folded
-    // (docs/bench-sessions/2026-10-28-android-5.md)
-    component Section: ColumnLayout {
-        id: section
-        property string title
-        property string summary
-        property bool open: false
-        default property alias content: body.data
-        Layout.fillWidth: true
-        spacing: Theme.spacing * 2
-
-        ThemedButton {
-            objectName: section.objectName + "Heading"
-            Layout.fillWidth: true
-            Accessible.name: section.title
-            onClicked: section.open = !section.open
-            contentItem: RowLayout {
-                spacing: 10
-                // Drawn, not a glyph: Android's fonts have no ▸ or ▾,
-                // which showed as a box
-                Shape {
-                    objectName: "sectionChevron"
-                    Layout.preferredWidth: 10
-                    Layout.preferredHeight: 10
-                    rotation: section.open ? 90 : 0
-                    preferredRendererType: Shape.CurveRenderer
-                    ShapePath {
-                        strokeColor: Theme.text
-                        strokeWidth: 1.5
-                        fillColor: "transparent"
-                        capStyle: ShapePath.RoundCap
-                        joinStyle: ShapePath.RoundJoin
-                        startX: 3.5; startY: 1
-                        PathLine { x: 7.5; y: 5 }
-                        PathLine { x: 3.5; y: 9 }
-                    }
-                }
-                Label {
-                    text: section.title
-                    color: Theme.text
-                    font.pixelSize: 16
-                    font.weight: Font.DemiBold
-                }
-                Label {
-                    objectName: "sectionSummary"
-                    text: section.summary
-                    color: Theme.textDim
-                    elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignRight
-                    Layout.fillWidth: true
-                }
-            }
-        }
-
-        ColumnLayout {
-            id: body
-            visible: section.open
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spacing
-            Layout.bottomMargin: Theme.spacing
-            spacing: Theme.spacing * 2
+    // A best-effort back key: where Qt delivers it, it repeats the back
+    // arrow. Nothing relies on it
+    focus: true
+    Keys.onBackPressed: event => {
+        if (!twoPane && pageKey !== "") {
+            back()
+            event.accepted = true
         }
     }
 
     // Connect... on Home, Live or the header lands here: what to connect to
-    // is open, folded or not before
     function showAdapters() {
-        adapterSection.open = true
-        flick.contentY = 0
+        open("connection")
+        connectionPage.contentY = 0
     }
 
     function profileLabel() {
@@ -918,6 +898,8 @@ Pane {
     // needs nothing typed. Set like typed text, so the profile row and the
     // DID field read it
     function pickRecording(uri) {
+        // The field is on Connection, which a phone may not be showing
+        open("connection")
         uriField.text = uri
         showUriField()
     }
@@ -932,9 +914,10 @@ Pane {
     // Connect and the error line under them when they're above the view,
     // as on a phone, where the pick otherwise seems to do nothing
     function showUriField() {
-        const top = uriField.mapToItem(column, 0, 0).y + column.y - Theme.spacing
-        if (top < flick.contentY)
-            flick.contentY = Math.max(0, top)
+        const body = connectionPage.body
+        const top = uriField.mapToItem(body, 0, 0).y + body.y - Theme.spacing
+        if (top < connectionPage.contentY)
+            connectionPage.contentY = Math.max(0, top)
     }
 
     // The URI is composed from three choices, so none of it needs typing:
@@ -1201,7 +1184,7 @@ Pane {
         useSignalFiles()
         loadPlugins()
         refreshDevices()
-        Bluetooth.refresh(false)   // asked for when Adapter first opens
+        Bluetooth.refresh(false)   // asked for when Connection first opens
         // Set like typed text, so the profile row and the DID field read
         // it back
         if (uriField.text === "")
@@ -1217,8 +1200,8 @@ Pane {
                 page.readResult = result
         }
         function onConnectResult(uri, error) {
-            errorLabel.text = error
-            errorLabel.visible = (error !== "")
+            page.errorLabel.text = error
+            page.errorLabel.visible = (error !== "")
             if (error === "") {
                 sessionSettings.uri = uri
                 page.rememberVersions(uri, Bridge.adapterVersions)
@@ -1265,1416 +1248,163 @@ Pane {
         }
     }
 
-    // Scrolls when the content doesn't fit (a short laptop screen);
-    // otherwise the activity log takes the height that's left
-    Flickable {
-        id: flick
-        objectName: "settingsFlick"
+    RowLayout {
         anchors.fill: parent
-        contentWidth: width
-        contentHeight: column.height + 2 * Theme.pageMargin
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {
-            policy: flick.contentHeight > flick.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+        spacing: 0
+
+        SettingsList {
+            objectName: "settingsSideList"
+            visible: page.twoPane
+            Layout.preferredWidth: 200
+            Layout.fillHeight: true
+            Layout.alignment: Qt.AlignTop
+            Layout.margins: Theme.pageMargin
+            pages: page.pageList
+            current: page.shownKey
+            onChosen: key => page.open(key)
         }
 
-        ColumnLayout {
-            id: column
-            objectName: "settingsColumn"
-            x: Theme.pageMargin
-            y: Theme.pageMargin
-            width: flick.width - 2 * Theme.pageMargin
-            // Its content's height: stretched to the page, a layout spreads
-            // the spare height between the folded headings
-            height: implicitHeight
-            spacing: Theme.spacing * 2
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
 
-            PageHeader { title: qsTr("Settings") }
+            // The list, a phone's root
+            SettingsSubpage {
+                objectName: "settingsListPage"
+                anchors.fill: parent
+                visible: !page.twoPane && page.pageKey === ""
+                title: qsTr("Settings")
 
-            // ---- Connection ----
-            Heading { text: qsTr("Connection") }
-
-            Label {
-                objectName: "sessionStatus"
-                text: Bridge.connected
-                      ? qsTr("Connected: %1").arg(Bridge.currentUri)
-                      : Bridge.connecting ? qsTr("Connecting…")
-                      : Bridge.disconnecting ? qsTr("Disconnecting…")
-                      : qsTr("Not connected")
-                color: Theme.linkColor(Bridge.linkState)
-                // A long URI breaks anywhere: unwrapped, it widened the
-                // page past a phone's edge once connected
-                wrapMode: Text.WrapAnywhere
-                Layout.fillWidth: true
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing
-
-                TextField {
-                    id: uriField
-                    objectName: "uriField"
+                SettingsList {
+                    objectName: "settingsList"
                     Layout.fillWidth: true
-                    // ?poll= replaces the profile's PID rotation. Raw on an
-                    // adapter listens to the engine ECU, so ?poll= alone
-                    // asks it; under the obd2 default it also decodes.
-                    // A WiFi adapter is typed: nothing lists it (ADR-0026's
-                    // appendix "WiFi over TCP")
-                    placeholderText: qsTr("URI, e.g. mock://demo, elm327://COM5, "
-                                          + "elm327://192.168.0.10:35000 or "
-                                          + "j2534://Vendor?profile=raw&poll=0x0C")
-                    enabled: page.idle
-                    color: Theme.text
-                    // A URI, not prose: a phone's keyboard capitalized
-                    // "Replay://" into a scheme core doesn't know
-                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                    // Any text the page didn't compose is read back
-                    onTextChanged: {
-                        if (!page.composing)
-                            page.readChoices()
-                    }
-                    onAccepted: page.requestConnect(text)
-                }
-
-                ThemedButton {
-                    objectName: "connectButton"
-                    text: Bridge.connected ? qsTr("Disconnect")
-                        : Bridge.connecting ? qsTr("Connecting…")
-                        : Bridge.disconnecting ? qsTr("Disconnecting…")
-                        : qsTr("Connect")
-                    highlighted: !Bridge.connected
-                    // Disconnect is always offered; Connect only while idle
-                    // with a URI to connect
-                    // and no relay holds the adapter (ADR-0047)
-                    enabled: Bridge.connected
-                             || (page.idle && uriField.text !== "" && !Relay.running)
-                    onClicked: {
-                        if (Bridge.connected) {
-                            Bridge.disconnectSession()
-                            errorLabel.visible = false
-                        } else {
-                            page.requestConnect(uriField.text)
-                        }
-                    }
+                    pages: page.pageList
+                    onChosen: key => page.open(key)
                 }
             }
 
-            Label {
-                id: errorLabel
-                objectName: "errorLabel"
-                visible: false
-                color: Theme.danger
-                wrapMode: Text.WrapAnywhere
-                Layout.fillWidth: true
-                text: ""
-            }
+            SettingsSubpage {
+                id: connectionPage
+                objectName: "settingsConnectionPage"
+                anchors.fill: parent
+                visible: page.shownKey === "connection"
+                title: qsTr("Connection")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
-            // ---- Adapter: what to connect to, found or typed ----
-            Section {
-                id: adapterSection
-                objectName: "adapterSection"
-                title: qsTr("Adapter")
-                summary: page.devices.length === 0 ? qsTr("none found")
-                                                   : qsTr("%1 found").arg(page.devices.length)
-                // The phone's Bluetooth permission is asked for here, when
-                // the list is first wanted, not at launch
-                onOpenChanged: if (open) Bluetooth.refresh(true)
-
-                // ---- Adapters: J2534 interfaces and serial ports ----
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    Label {
-                        objectName: "deviceCount"
-                        text: page.devices.length === 0
-                              ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
-                                     + "or pair an ELM327 adapter, or pick one below")
-                              : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
-                                     + "put its URI in the field above, then Connect")
-                                    .arg(page.j2534Devices.length).arg(page.serialPorts.length)
-                                    .arg((page.canInterfaces.length > 0
-                                          ? qsTr(", CAN interfaces: %1").arg(page.canInterfaces.length)
-                                          : "")
-                                         + (Bluetooth.available || page.bluetoothAdapters.length > 0
-                                            ? qsTr(", Bluetooth: %1").arg(page.bluetoothAdapters.length)
-                                            : ""))
-                        color: page.devices.length === 0 ? Theme.textDim : Theme.text
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    ThemedButton {
-                        text: qsTr("Refresh")
-                        onClicked: {
-                            page.refreshDevices()
-                            Bluetooth.refresh(true)
-                        }
-                    }
+                SettingsConnect {
+                    id: settingsConnect
+                    host: page
                 }
 
-                // ---- Bluetooth (Android): why the list is short, and a
-                // scan for BLE adapters, which aren't paired ----
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    visible: Bluetooth.available
-
-                    Label {
-                        objectName: "bluetoothStatus"
-                        text: Bluetooth.status !== ""
-                              ? Bluetooth.status
-                              : qsTr("Paired adapters are listed; pair one in Android's "
-                                     + "Bluetooth settings")
-                        color: Bluetooth.statusWarns ? Theme.warning : Theme.textDim
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    ThemedButton {
-                        objectName: "bleScanButton"
-                        text: Bluetooth.scanning ? qsTr("Scanning…") : qsTr("Scan for BLE")
-                        enabled: page.idle && !Bluetooth.scanning
-                        onClicked: Bluetooth.scan()
-                    }
+                SettingsAdapter {
+                    id: settingsAdapter
+                    host: page
                 }
 
-                // Sized to its rows up to deviceRowsShown, then it scrolls
-                ListView {
-                    id: deviceList
-                    objectName: "deviceList"
-                    // No current row: ListView gives a current one a default
-                    // highlight, which animates to its size and, after the
-                    // section opened at a phone's width, lay past the edge
-                    currentIndex: -1
-                    highlightFollowsCurrentItem: false
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: contentHeight
-                    Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
-                    visible: count > 0
-                    clip: true
-                    spacing: 2
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: page.devices
-
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
-                    delegate: Rectangle {
-                        id: row
-                        required property var modelData
-                        width: deviceList.width
-                        height: page.deviceRowHeight
-                        radius: Theme.radius
-                        color: mouse.containsMouse ? Theme.elevatedLight : Theme.elevated
-                        border.width: page.isChosen(row.modelData.base) ? 2 : 0
-                        border.color: Theme.primary
-
-                        MouseArea {
-                            id: mouse
-                            objectName: "deviceRowArea"
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: page.idle
-                            onClicked: {
-                                page.fillUri(row.modelData.base)
-                                page.showUriField()
-                            }
-                        }
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: Theme.spacing
-                            spacing: 2
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Theme.spacing
-
-                                Label {
-                                    objectName: "deviceTitle"
-                                    text: row.modelData.title
-                                    color: page.idle ? Theme.text : Theme.textDim
-                                }
-                                Label {
-                                    objectName: "deviceVersions"
-                                    visible: text !== ""
-                                    text: row.modelData.versions === ""
-                                          ? "" : qsTr("last seen: %1").arg(row.modelData.versions)
-                                    color: Theme.textDim
-                                    font.pointSize: 8
-                                    elide: Text.ElideRight
-                                    horizontalAlignment: Text.AlignRight
-                                    rightPadding: Theme.spacing   // clear of the list's scroll bar
-                                    Layout.fillWidth: true
-                                }
-                            }
-                            Label {
-                                objectName: "deviceDetail"
-                                text: row.modelData.detail
-                                color: Theme.textDim
-                                font.pointSize: 8
-                                elide: Text.ElideMiddle
-                                Layout.fillWidth: true
-                            }
-                        }
-                    }
-                }
-
-                // ---- Relay (the phone, developer mode; ADR-0047): the
-                // selected Bluetooth adapter relayed to a computer over USB,
-                // for havne-cli there ----
-                ColumnLayout {
-                    objectName: "relayBox"
-                    visible: Relay.available && Theme.developerMode
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    Label {
-                        objectName: "relayStatus"
-                        text: Relay.running
-                              ? Relay.status
-                              : qsTr("Relay to a computer over USB: select a paired adapter above, "
-                                     + "Relay, then on the computer adb forward tcp:%1 tcp:%1 "
-                                     + "and havne-cli on elm327://127.0.0.1:%1")
-                                    .arg(Relay.defaultPort)
-                        color: Relay.running ? Theme.text : Theme.textDim
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-
-                        Label {
-                            objectName: "relayTraffic"
-                            visible: Relay.running
-                            text: qsTr("%1 from the adapter, %2 to it")
-                                  .arg(page.byteText(Relay.bytesIn))
-                                  .arg(page.byteText(Relay.bytesOut))
-                            color: Theme.textDim
-                            // Beside the button on a phone's width
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                        ThemedButton {
-                            objectName: "relayButton"
-                            text: Relay.running ? qsTr("Stop relaying") : qsTr("Relay")
-                            // Not beside a session: the adapter takes one link
-                            enabled: Relay.running
-                                     || (page.idle && /^elm327:\/\/bt:/i.test(uriField.text))
-                            onClicked: {
-                                if (Relay.running) {
-                                    Relay.stop()
-                                    return
-                                }
-                                const why = Relay.start(uriField.text)
-                                errorLabel.text = why
-                                errorLabel.visible = why !== ""
-                            }
-                        }
-                    }
-                }
-
-                // ---- Presets: the URI's base, for what the list doesn't show ----
-                LabeledFlow {
-                    label: qsTr("Not listed:")
-                    Repeater {
-                        model: [
-                            { name: "mock", uri: "mock://demo", label: "mock://demo" },
-                            // A bare j2534:// opens the first discovered device
-                            { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)") },
-                            // elm327:// takes no first port: the user picks one
-                            // from the list above or types a WiFi adapter's
-                            // address (core's refusal says so)
-                            { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port above, or an address)") },
-                            // WiFi adapters aren't listed (ADR-0026's appendix
-                            // "WiFi over TCP"): the two common addresses, so a
-                            // phone needn't type one
-                            { name: "wifi_obdx", uri: "elm327://192.168.4.1:23",
-                              label: qsTr("WiFi: OBDX (192.168.4.1:23)") },
-                            { name: "wifi_elm", uri: "elm327://192.168.0.10:35000",
-                              label: qsTr("WiFi: most others (192.168.0.10:35000)") }
-                        ]
-                        ThemedButton {
-                            required property var modelData
-                            objectName: "preset_" + modelData.name
-                            text: modelData.label
-                            // Wraps rather than run past a narrow page's edge
-                            // (Linux's font at 320 px did)
-                            width: Math.min(implicitWidth, parent.width)
-                            // The mock is a developer's tool, not a device
-                            visible: modelData.name !== "mock" || Theme.developerMode
-                            enabled: page.idle
-                            onClicked: {
-                                page.fillUri(modelData.uri)
-                                page.showUriField()
-                            }
-                        }
-                    }
+                SettingsProfile {
+                    id: settingsProfile
+                    host: page
                 }
             }
 
-            // ---- Vehicle ----
-            Section {
-                id: vehicleSection
-                objectName: "vehicleSection"
+            SettingsSubpage {
+                objectName: "settingsVehiclePage"
+                anchors.fill: parent
+                visible: page.shownKey === "vehicle"
                 title: qsTr("Vehicle")
-                summary: (page.pickedVehicle !== null ? page.pickedVehicle.label : qsTr("None"))
-                         + (page.vehicles.list.length > 0
-                            ? qsTr(" · %1 saved").arg(page.vehicles.list.length) : "")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
-                // ---- Vehicle (ADR-0027): picked before a connect, its
-                // connection filling the field; every change to the list is
-                // made here. Locked while a session is up or in flight ----
-                LabeledFlow {
-                    label: qsTr("Vehicle:")
-
-                    ThemedButton {
-                        objectName: "vehicle_none"
-                        text: qsTr("None")
-                        highlighted: page.pickedVehicle === null
-                        enabled: page.idle
-                        onClicked: page.pickVehicle("")
-                    }
-                    // Keyed by the count, not the list: each change makes a
-                    // new list, and a list model would rebuild every
-                    // button (losing focus) for a pick or a rename
-                    Repeater {
-                        model: page.vehicles.list.length
-                        ThemedButton {
-                            required property int index
-                            // Undefined for a moment when the list shrinks,
-                            // before the button goes
-                            readonly property var vehicle: page.vehicles.list[index]
-                            objectName: "vehicle_" + (vehicle?.id ?? "")
-                            text: vehicle?.label ?? ""
-                            // A long label wraps rather than run past a phone's edge
-                            width: Math.min(implicitWidth, parent.width)
-                            highlighted: vehicle !== undefined && page.vehicles.picked === vehicle.id
-                            enabled: page.idle
-                            onClicked: page.pickVehicle(vehicle.id)
-                        }
-                    }
+                SettingsVehiclePicker {
+                    id: settingsVehiclePicker
+                    host: page
                 }
 
-                Label {
-                    objectName: "vehicleVinPickNote"
-                    visible: page.vinPickNote !== ""
-                    text: page.vinPickNote
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    visible: page.confirming === ""
-
-                    TextField {
-                        id: vehicleLabelField
-                        objectName: "vehicleLabelField"
-                        width: Math.min(300, parent.width)
-                        enabled: page.idle
-                        placeholderText: qsTr("Label")
-                    }
-                    ThemedButton {
-                        objectName: "vehicleNew"
-                        text: qsTr("New")
-                        enabled: page.idle && VehicleBook.labelProblem(page.vehicles, page.newLabel, "") === ""
-                        onClicked: page.changeVehicles(VehicleBook.add(page.vehicles, page.newLabel))
-                    }
-                    ThemedButton {
-                        objectName: "vehicleDuplicate"
-                        text: qsTr("Duplicate")
-                        enabled: page.idle && page.pickedVehicle !== null
-                                 && VehicleBook.labelProblem(page.vehicles, page.copyLabel, "") === ""
-                        onClicked: page.duplicateVehicle()
-                    }
-                    ThemedButton {
-                        objectName: "vehicleRename"
-                        text: qsTr("Rename")
-                        enabled: page.idle && page.pickedVehicle !== null && page.typedLabel !== ""
-                                 && page.typedLabel !== page.pickedVehicle.label
-                                 && VehicleBook.labelProblem(page.vehicles, page.typedLabel,
-                                                             page.pickedVehicle.id) === ""
-                        onClicked: page.changeVehicles(VehicleBook.rename(page.vehicles, page.typedLabel))
-                    }
-                    ThemedButton {
-                        objectName: "vehicleForgetVin"
-                        text: qsTr("Forget the VIN")
-                        enabled: page.idle && page.pickedVehicle !== null && page.pickedVehicle.vinKey !== ""
-                        onClicked: page.changeVehicles(VehicleBook.forgetVin(page.vehicles))
-                    }
-                    ThemedButton {
-                        objectName: "vehicleForget"
-                        text: qsTr("Forget")
-                        enabled: page.idle && page.pickedVehicle !== null
-                        onClicked: page.confirming = "forget"
-                    }
-                    ThemedButton {
-                        objectName: "vehicleForgetAll"
-                        text: qsTr("Forget all vehicles")
-                        enabled: page.idle && page.vehicles.list.length > 0
-                        onClicked: page.confirming = "forgetAll"
-                    }
-                }
-
-                // With the field empty, the defaults New and Duplicate take
-                Label {
-                    objectName: "vehicleLabelHint"
-                    visible: page.typedLabel === "" && page.confirming === ""
-                    text: page.pickedVehicle === null
-                        ? qsTr("Left empty, New makes “%1”").arg(VehicleBook.defaultNewLabel(page.vehicles))
-                        : qsTr("Left empty, New makes “%1” and Duplicate “%2”")
-                              .arg(VehicleBook.defaultNewLabel(page.vehicles),
-                                   VehicleBook.defaultCopyLabel(page.vehicles, page.pickedVehicle.label))
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                // Why a typed label can't be used
-                Label {
-                    objectName: "vehicleLabelProblem"
-                    visible: text !== "" && page.confirming === ""
-                    text: page.typedLabel === "" ? ""
-                        : VehicleBook.labelProblem(page.vehicles, page.typedLabel,
-                                                   page.pickedVehicle !== null ? page.pickedVehicle.id : "")
-                    color: Theme.warning
-                }
-
-                // A removal asks once, in place
-                Flow {
-                    visible: page.confirming !== ""
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    Label {
-                        objectName: "vehicleConfirmText"
-                        text: page.confirming === "forgetAll" ? qsTr("Forget all vehicles?")
-                            : page.confirmingFile() !== null
-                              ? qsTr("Remove %1? It was written here, and no other copy exists")
-                                    .arg(page.confirmingFile().name)
-                            : page.pickedVehicle !== null ? qsTr("Forget %1?").arg(page.pickedVehicle.label)
-                            : ""
-                        color: Theme.text
-                        wrapMode: Text.Wrap
-                        width: Math.min(implicitWidth, parent.width)
-                    }
-                    ThemedButton {
-                        objectName: "vehicleConfirm"
-                        text: page.confirmingFile() !== null ? qsTr("Remove") : qsTr("Forget")
-                        highlighted: true
-                        enabled: page.idle
-                        onClicked: {
-                            const file = page.confirmingFile()
-                            if (file !== null)
-                                page.dropSignalFile(file.sha256)
-                            else
-                                page.forgetVehicles(page.confirming === "forgetAll")
-                        }
-                    }
-                    ThemedButton {
-                        objectName: "vehicleCancel"
-                        text: qsTr("Cancel")
-                        onClicked: page.confirming = ""
-                    }
-                }
-
-                // ---- The picked vehicle's signal files (ADR-0051) ----
-                Label {
-                    objectName: "signalFilesTitle"
-                    visible: page.pickedVehicle !== null
-                    text: qsTr("Signal files")
-                    color: Theme.text
-                    font.bold: true
-                }
-
-                Repeater {
-                    model: page.pickedVehicle !== null ? page.pickedVehicle.signals : []
-                    // The file's line at the page's width, its buttons under
-                    // it, so a phone's narrow page never squeezes the line
-                    ColumnLayout {
-                        id: fileRow
-                        required property var modelData
-                        required property int index
-                        objectName: "signalFile_" + index
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing / 2
-
-                        Label {
-                            objectName: "signalFileText"
-                            text: page.signalFileText(fileRow.modelData)
-                            color: page.signalOk(fileRow.modelData.sha256) ? Theme.text
-                                                                           : Theme.warning
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: Theme.spacing
-                            ThemedButton {
-                                objectName: "signalSave_" + fileRow.index
-                                width: Math.min(implicitWidth, parent.width)
-                                text: qsTr("Save a copy")
-                                // Reads the copy alone, so a session may run
-                                enabled: page.confirming === ""
-                                onClicked: page.saveSignalFileAs(fileRow.modelData)
-                            }
-                            ThemedButton {
-                                objectName: "signalRemove_" + fileRow.index
-                                width: Math.min(implicitWidth, parent.width)
-                                text: qsTr("Remove")
-                                enabled: page.idle && page.confirming === ""
-                                onClicked: page.removeSignalFile(fileRow.modelData.sha256)
-                            }
-                        }
-                    }
-                }
-
-                Label {
-                    objectName: "signalFilesNone"
-                    visible: page.pickedVehicle !== null && page.pickedVehicle.signals.length === 0
-                    text: qsTr("None yet. Import adds a file of your own signals, each "
-                               + "then a profile under What to read")
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                Flow {
-                    visible: page.pickedVehicle !== null
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    ThemedButton {
-                        objectName: "signalImport"
-                        text: qsTr("Import a signal file")
-                        enabled: page.idle && page.confirming === ""
-                        onClicked: importDialog.open()
-                    }
-                    // An OBDb set (ADR-0051's appendix of 2026-11-06):
-                    // its report shows before the file is kept
-                    ThemedButton {
-                        objectName: "obdbImport"
-                        text: qsTr("Import an OBDb set")
-                        enabled: page.idle && page.confirming === ""
-                        onClicked: {
-                            if (obdbYearField.text.trim() === "") {
-                                const y = page.obdbVinYear()
-                                obdbYearField.text = y > 0 ? String(y) : ""
-                            }
-                            obdbDialog.open()
-                        }
-                    }
-                }
-
-                LabeledFlow {
-                    visible: page.pickedVehicle !== null
-                    label: qsTr("OBDb model year:")
-                    TextField {
-                        id: obdbYearField
-                        objectName: "obdbYearField"
-                        width: Math.min(120, parent.width)
-                        maximumLength: 4
-                        placeholderText: qsTr("from the VIN")
-                        inputMethodHints: Qt.ImhDigitsOnly
-                    }
-                }
-
-                Label {
-                    objectName: "signalProblem"
-                    visible: text !== ""
-                    text: page.signalProblem
-                    color: Theme.warning
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Label {
-                    objectName: "signalNote"
-                    visible: text !== ""
-                    text: page.signalNote
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                // The OBDb import's report, before the file is kept: what
-                // converted, each field that differs, each signal left out
-                ColumnLayout {
-                    objectName: "obdbReport"
-                    visible: page.obdbShown
-                    spacing: Theme.spacing / 2
-                    Layout.fillWidth: true
-
-                    Label {
-                        objectName: "obdbSummary"
-                        text: page.obdbSummary(page.obdbReport)
-                        color: Theme.text
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        visible: page.obdbReport !== null && page.obdbReport.changed.length > 0
-                        text: qsTr("Differs from OBDb:")
-                        color: Theme.text
-                        font.bold: true
-                    }
-                    Repeater {
-                        objectName: "obdbChanged"
-                        model: page.obdbReport !== null
-                               ? page.obdbReport.changed.slice(0, page.obdbRowsShown) : []
-                        Label {
-                            required property var modelData
-                            text: qsTr("%1, %2: %3")
-                                      .arg(modelData.key !== "" ? modelData.key : modelData.signal)
-                                      .arg(modelData.field).arg(modelData.text)
-                            color: Theme.textDim
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                    }
-                    Label {
-                        objectName: "obdbChangedMore"
-                        readonly property int more: page.obdbReport === null ? 0
-                            : page.obdbReport.changed.length - page.obdbRowsShown
-                        visible: more > 0
-                        text: qsTr("and %1 more").arg(more)
-                        color: Theme.textDim
-                    }
-                    Label {
-                        visible: page.obdbReport !== null && page.obdbReport.skipped.length > 0
-                        text: qsTr("Left out:")
-                        color: Theme.text
-                        font.bold: true
-                    }
-                    Repeater {
-                        objectName: "obdbSkipped"
-                        model: page.obdbReport !== null
-                               ? page.obdbReport.skipped.slice(0, page.obdbRowsShown) : []
-                        Label {
-                            required property var modelData
-                            text: qsTr("%1 (line %2): %3")
-                                      .arg(modelData.signal !== "" ? modelData.signal : qsTr("the set"))
-                                      .arg(modelData.line).arg(modelData.text)
-                            color: Theme.textDim
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                    }
-                    Label {
-                        objectName: "obdbSkippedMore"
-                        readonly property int more: page.obdbReport === null ? 0
-                            : page.obdbReport.skipped.length - page.obdbRowsShown
-                        visible: more > 0
-                        text: qsTr("and %1 more").arg(more)
-                        color: Theme.textDim
-                    }
-                    Repeater {
-                        objectName: "obdbFileNotes"
-                        model: page.obdbReport !== null ? page.obdbReport.file : []
-                        Label {
-                            required property var modelData
-                            text: modelData.field !== ""
-                                  ? qsTr("The set's %1: %2").arg(modelData.field).arg(modelData.text)
-                                  : qsTr("The set: %1").arg(modelData.text)
-                            color: Theme.textDim
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                    }
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        ThemedButton {
-                            objectName: "obdbKeep"
-                            text: page.obdbReplaces !== "" ? qsTr("Keep, replacing the earlier")
-                                                           : qsTr("Keep")
-                            highlighted: true
-                            enabled: page.idle && page.confirming === ""
-                            onClicked: page.keepObdb()
-                        }
-                        ThemedButton {
-                            objectName: "obdbDiscard"
-                            text: qsTr("Discard")
-                            onClicked: page.discardObdb()
-                        }
-                    }
-                }
-
-                FileDialog {
-                    id: importDialog
-                    title: qsTr("Import a signal file")
-                    nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
-                    onAccepted: page.importSignalFile(importDialog.selectedFile)
-                }
-                FileDialog {
-                    id: obdbDialog
-                    title: qsTr("Import an OBDb set")
-                    nameFilters: [qsTr("OBDb signal sets (*.json)"), qsTr("All files (*)")]
-                    onAccepted: page.previewObdb(obdbDialog.selectedFile)
-                }
-                FileDialog {
-                    id: saveDialog
-                    title: qsTr("Save a copy of the signal file")
-                    fileMode: FileDialog.SaveFile
-                    defaultSuffix: "json"
-                    nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
-                    currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-                    onAccepted: page.saveSignalFileTo(page.savingSha, saveDialog.selectedFile)
-                }
-
-                // ---- The app's plugins (ADR-0052): every vehicle's, the
-                // picked one's variant proposed by its VIN ----
-                Label {
-                    objectName: "pluginsTitle"
-                    text: qsTr("Plugins")
-                    color: Theme.text
-                    font.bold: true
-                }
-
-                Repeater {
-                    model: page.pluginList
-                    RowLayout {
-                        id: pluginRow
-                        required property var modelData
-                        required property int index
-                        objectName: "plugin_" + index
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-
-                        Label {
-                            objectName: "pluginText"
-                            text: page.pluginText(pluginRow.modelData)
-                            color: pluginRow.modelData.ok ? Theme.text : Theme.warning
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                        ThemedButton {
-                            objectName: "pluginRemove_" + pluginRow.index
-                            text: qsTr("Remove")
-                            enabled: page.idle && page.confirming === ""
-                            onClicked: page.removePlugin(pluginRow.modelData.sha256)
-                        }
-                    }
-                }
-
-                Label {
-                    objectName: "pluginsNone"
-                    visible: page.pluginList.length === 0
-                    text: qsTr("None yet. A plugin (a .havne-plugin.json file) holds signals "
-                               + "for the cars its manufacturer codes and model years name")
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    ThemedButton {
-                        objectName: "pluginImport"
-                        text: qsTr("Import a plugin")
-                        enabled: page.idle && page.confirming === ""
-                        onClicked: pluginDialog.open()
-                    }
-                }
-
-                Label {
-                    objectName: "pluginProblem"
-                    visible: text !== ""
-                    text: page.pluginProblem
-                    color: Theme.warning
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Label {
-                    objectName: "pluginNote"
-                    visible: text !== ""
-                    text: page.pluginNote
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                // The variants the VIN proposes for the picked vehicle; the
-                // user picks one (ADR-0052 section 5)
-                Label {
-                    objectName: "pluginMatchesText"
-                    visible: page.pickedVehicle !== null && page.pluginList.length > 0
-                    text: page.pluginMatches.length > 0
-                        ? qsTr("For this car, by its VIN:")
-                        : qsTr("No match yet: plugins are proposed once the car's VIN is "
-                               + "read, or one is typed in the VIN lookup")
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Flow {
-                    visible: page.pickedVehicle !== null
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    Repeater {
-                        model: page.pickedVehicle !== null ? page.pluginMatches : []
-                        ThemedButton {
-                            required property var modelData
-                            required property int index
-                            objectName: "pluginMatch_" + index
-                            width: Math.min(implicitWidth, parent.width)
-                            text: qsTr("%1: %2").arg(modelData.name, modelData.variant)
-                            highlighted: page.pickedVehicle !== null
-                                         && page.pickedVehicle.plugin === modelData.profile
-                            enabled: page.idle
-                            onClicked: page.pickPluginVariant(modelData.profile)
-                        }
-                    }
-                }
-
-                FileDialog {
-                    id: pluginDialog
-                    title: qsTr("Import a plugin")
-                    nameFilters: [qsTr("Plugins (*.havne-plugin.json)"), qsTr("All files (*)")]
-                    onAccepted: page.importPlugin(pluginDialog.selectedFile)
-                }
-
-                // ---- The vehicle's own signals (ADR-0051's form) ----
-                Label {
-                    objectName: "ownSignalsTitle"
-                    visible: page.pickedVehicle !== null
-                    text: qsTr("Your own signals")
-                    color: Theme.text
-                    font.bold: true
-                }
-
-                Repeater {
-                    model: page.ownSignals
-                    RowLayout {
-                        id: ownRow
-                        required property var modelData
-                        required property int index
-                        objectName: "ownSignal_" + index
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-
-                        Label {
-                            objectName: "ownSignalText"
-                            text: qsTr("%1: %2").arg(ownRow.modelData.name,
-                                                     SignalForm.describe(page.ownFile, ownRow.modelData))
-                            color: Theme.text
-                            wrapMode: Text.Wrap
-                            Layout.fillWidth: true
-                        }
-                        ThemedButton {
-                            objectName: "ownEdit_" + ownRow.index
-                            text: qsTr("Edit")
-                            enabled: page.confirming === ""
-                            onClicked: page.editOwnSignal(ownRow.modelData.key)
-                        }
-                        ThemedButton {
-                            objectName: "ownRemove_" + ownRow.index
-                            text: qsTr("Remove")
-                            enabled: page.idle && page.confirming === ""
-                            onClicked: page.removeOwnSignal(ownRow.modelData.key)
-                        }
-                    }
-                }
-
-                ColumnLayout {
-                    objectName: "signalForm"
-                    visible: page.pickedVehicle !== null
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    Flow {
-                        id: formNameRow
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        Captioned {
-                            caption: qsTr("Name")
-                            TextField {
-                                id: formName
-                                objectName: "formName"
-                                placeholderText: qsTr("Name")
-                                width: Math.min(formNameRow.width, Theme.controlHeight * 8)
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Reply ID")
-                            TextField {
-                                id: formRx
-                                objectName: "formRx"
-                                text: "7E8"
-                                placeholderText: qsTr("Reply ID")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Request ID")
-                            TextField {
-                                id: formTx
-                                objectName: "formTx"
-                                placeholderText: qsTr("Request ID")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                    }
-
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        Repeater {
-                            model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
-                            ThemedButton {
-                                required property var modelData
-                                objectName: "formService_" + modelData.name
-                                text: modelData.label
-                                highlighted: page.formService === modelData.name
-                                onClicked: page.formService = modelData.name
-                            }
-                        }
-                        Captioned {
-                            caption: page.formService === "22" ? qsTr("DID") : qsTr("PID")
-                            TextField {
-                                id: formNumber
-                                objectName: "formNumber"
-                                placeholderText: page.formService === "22" ? qsTr("DID, 4 hex digits")
-                                                                           : qsTr("PID, 2 hex digits")
-                                width: Theme.controlHeight * 5
-                            }
-                        }
-                    }
-
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        Repeater {
-                            model: SignalForm.kinds
-                            ThemedButton {
-                                required property string modelData
-                                objectName: "formKind_" + modelData
-                                text: modelData
-                                highlighted: page.formKind === modelData
-                                onClicked: page.formKind = modelData
-                            }
-                        }
-                    }
-
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        Captioned {
-                            caption: qsTr("Byte")
-                            TextField {
-                                id: formByte
-                                objectName: "formByte"
-                                text: "0"
-                                placeholderText: qsTr("Byte")
-                                width: Theme.controlHeight * 2.5
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Bits")
-                            visible: page.formKind === "number" || page.formKind === "enum"
-                            TextField {
-                                id: formBits
-                                objectName: "formBits"
-                                text: "8"
-                                placeholderText: qsTr("Bits")
-                                width: Theme.controlHeight * 2.5
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Start bit")
-                            visible: page.formKind === "number" || page.formKind === "enum"
-                            TextField {
-                                id: formBit
-                                objectName: "formBit"
-                                placeholderText: qsTr("Bit")
-                                width: Theme.controlHeight * 2.5
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Bytes")
-                            visible: !(page.formKind === "number" || page.formKind === "enum")
-                            TextField {
-                                id: formBytes
-                                objectName: "formBytes"
-                                placeholderText: qsTr("Bytes (all)")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                        Repeater {
-                            model: page.formKind === "number" || page.formKind === "enum" ? ["be", "le"] : []
-                            ThemedButton {
-                                required property string modelData
-                                objectName: "formOrder_" + modelData
-                                text: modelData
-                                highlighted: page.formOrder === modelData
-                                onClicked: page.formOrder = modelData
-                            }
-                        }
-                        CheckBox {
-                            id: formSigned
-                            objectName: "formSigned"
-                            visible: page.formKind === "number"
-                            text: qsTr("Signed")
-                        }
-                    }
-
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        visible: page.formKind === "number"
-                        Captioned {
-                            caption: qsTr("Scale")
-                            TextField {
-                                id: formScale
-                                objectName: "formScale"
-                                placeholderText: qsTr("Scale (1)")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Offset")
-                            TextField {
-                                id: formOffset
-                                objectName: "formOffset"
-                                placeholderText: qsTr("Offset (0)")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Unit")
-                            TextField {
-                                id: formUnit
-                                objectName: "formUnit"
-                                placeholderText: qsTr("Unit")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                        Captioned {
-                            caption: qsTr("Decimals")
-                            TextField {
-                                id: formDecimals
-                                objectName: "formDecimals"
-                                placeholderText: qsTr("Decimals")
-                                width: Theme.controlHeight * 3
-                            }
-                        }
-                    }
-
-                    TextField {
-                        id: formValues
-                        objectName: "formValues"
-                        visible: page.formKind === "enum"
-                        placeholderText: qsTr("Values: 0=Park, 1=Reverse, 2=Neutral")
-                        Layout.fillWidth: true
-                    }
-
-                    LabeledFlow {
-                        label: qsTr("Group:")
-                        Repeater {
-                            model: SignalForm.groups
-                            ThemedButton {
-                                required property string modelData
-                                objectName: "formGroup_" + (modelData === "" ? "other" : modelData)
-                                text: modelData === "" ? qsTr("other") : modelData
-                                highlighted: page.formGroup === modelData
-                                onClicked: page.formGroup = modelData
-                            }
-                        }
-                    }
-
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-                        ThemedButton {
-                            objectName: "formReadOnce"
-                            text: Bridge.readingOnce ? qsTr("Reading...") : qsTr("Read once")
-                            enabled: page.idle && !Bridge.readingOnce && page.confirming === ""
-                            onClicked: page.readOnceDraft()
-                        }
-                        ThemedButton {
-                            objectName: "formSave"
-                            text: qsTr("Save")
-                            enabled: page.idle && page.confirming === ""
-                            onClicked: page.saveDraft()
-                        }
-                        ThemedButton {
-                            objectName: "formClear"
-                            text: qsTr("Clear")
-                            onClicked: page.clearForm()
-                        }
-                    }
-
-                    Label {
-                        objectName: "formReadResult"
-                        visible: text !== ""
-                        text: page.readResultText(page.readResult)
-                        color: page.readResult !== null && page.readResult.ok ? Theme.text : Theme.warning
-                        wrapMode: Text.WrapAnywhere
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        objectName: "formProblem"
-                        visible: text !== ""
-                        text: page.formProblem
-                        color: Theme.warning
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        objectName: "formNote"
-                        visible: text !== ""
-                        text: page.formNote
-                        color: Theme.textDim
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                    }
-                }
-
-                // ---- A VIN looked up (ADR-0043): decoded here, never kept ----
-                LabeledFlow {
-                    label: qsTr("Look up a VIN:")
-
-                    TextField {
-                        id: vinLookupField
-                        objectName: "vinLookupField"
-                        width: Math.min(300, parent.width)
-                        maximumLength: 32
-                        placeholderText: qsTr("17 characters")
-                        inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
-                        // A typed VIN proposes plugins too (ADR-0052 section 5)
-                        onTextChanged: page.refreshMatches()
-                    }
-                }
-
-                Label {
-                    readonly property string summary: Bridge.describeVin(vinLookupField.text)
-                    objectName: "vinLookupResult"
-                    visible: summary !== ""
-                    text: summary.charAt(0).toUpperCase() + summary.slice(1)
-                    color: Theme.text
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-
-                Label {
-                    objectName: "vinLookupHint"
-                    text: qsTr("By 49 CFR 565 and NHTSA's vPIC list (%1), on this device; the VIN isn't saved. The connected car's goes in the activity log.")
-                              .arg(Bridge.vinSource())
-                    color: Theme.textDim
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                SettingsVinLookup {
+                    id: settingsVinLookup
+                    host: page
                 }
             }
 
-            // ---- What to read: the profile ----
-            Section {
-                id: profileSection
-                objectName: "profileSection"
-                title: qsTr("What to read")
-                summary: page.profileLabel()
+            SettingsSubpage {
+                objectName: "settingsSignalsPage"
+                anchors.fill: parent
+                visible: page.shownKey === "signals"
+                title: qsTr("Signals")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
-                // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
-                // The chosen button is drawn as the primary color
-                LabeledFlow {
-                    label: qsTr("Profile:")
-                    Repeater {
-                        model: page.profiles
-                        ThemedButton {
-                            required property var modelData
-                            objectName: "profile_" + modelData.name
-                            text: modelData.label
-                            highlighted: page.profileChoice === modelData.name
-                            enabled: page.idle
-                            onClicked: page.chooseProfile(modelData.name)
-                        }
-                    }
+                SettingsSignalFiles {
+                    id: settingsSignalFiles
+                    host: page
                 }
 
-                Label {
-                    objectName: "profileHint"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: page.profileHint()
+                SettingsPlugins {
+                    id: settingsPlugins
+                    host: page
                 }
 
-                RowLayout {
-                    objectName: "didRow"
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    visible: page.profileChoice === "uds-generic"
-                    Label { text: qsTr("DIDs:"); color: Theme.textDim }
-                    TextField {
-                        id: didField
-                        objectName: "didField"
-                        Layout.fillWidth: true
-                        // The ?did= grammar as core reads it (ADR-0020); the
-                        // text goes into the URI as typed, so core's words
-                        // name any mistake. The validator admits only the
-                        // grammar's characters, so a query metacharacter (&,
-                        // =, ?, #) can't split the URI into other keys.
-                        placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF; "
-                                              + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
-                        validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z:,\-\s]*/ }
-                        inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                        enabled: page.idle
-                        color: Theme.text
-                        onTextChanged: {
-                            if (!page.syncing && page.profileChoice === "uds-generic")
-                                page.recompose()
-                        }
-                        onAccepted: page.requestConnect(uriField.text)
-                    }
+                SettingsOwnSignals {
+                    id: settingsOwnSignals
+                    host: page
                 }
             }
 
-            // ---- Recording ----
-            Section {
-                id: recordingSection
-                objectName: "recordingSection"
+            SettingsSubpage {
+                objectName: "settingsOwnFormPage"
+                anchors.fill: parent
+                visible: page.shownKey === "ownform"
+                title: qsTr("Add a signal")
+                backName: qsTr("Back to Signals")
+                backShown: true
+                onBackRequested: page.back()
+
+                SettingsOwnForm {
+                    id: settingsOwnForm
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsRecordingPage"
+                anchors.fill: parent
+                visible: page.shownKey === "recording"
                 title: qsTr("Recording")
-                summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
-                // ---- Recording (ADR-0017) ----
-                // Off until switched on, and kept between runs. It takes effect
-                // at the next connect, so it's fixed while a session is up and
-                // each recording covers a whole session.
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    CheckBox {
-                        id: recordBox
-                        objectName: "recordBox"
-                        text: qsTr("Record sessions")
-                        checked: Bridge.recording
-                        enabled: page.idle
-                        // The bridge decides; the binding comes back either way
-                        onToggled: {
-                            Bridge.recording = checked
-                            checked = Qt.binding(() => Bridge.recording)
-                        }
-                        contentItem: Label {
-                            text: recordBox.text
-                            color: recordBox.enabled ? Theme.text : Theme.textDim
-                            leftPadding: recordBox.indicator.width + recordBox.spacing
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    Label {
-                        objectName: "recordStatus"
-                        Layout.fillWidth: true
-                        elide: Text.ElideMiddle
-                        color: Bridge.recordingActive ? Theme.success : Theme.textDim
-                        text: Bridge.recordingActive
-                              ? qsTr("Recording to %1").arg(Bridge.recordingFolder)
-                              : Bridge.recording && page.replayInField
-                                ? qsTr("Replays aren't recorded")
-                              : Bridge.recordingFolder !== ""
-                                ? qsTr("Last: %1").arg(Bridge.recordingFolder)
-                              : Bridge.recording
-                                ? qsTr("Frames, values and events, from the next connect")
-                              : ""
-                    }
-                    // A phone has no app that opens the app's own folders
-                    ThemedButton {
-                        text: qsTr("Open folder")
-                        visible: Bridge.recordingFolder !== "" && !Theme.mobile
-                        onClicked: Qt.openUrlExternally(Bridge.recordingFolderUrl)
-                    }
+                SettingsRecording {
+                    id: settingsRecording
+                    host: page
                 }
             }
 
-            // ---- Display ----
-            Section {
-                id: displaySection
-                objectName: "displaySection"
+            SettingsSubpage {
+                objectName: "settingsDisplayPage"
+                anchors.fill: parent
+                visible: page.shownKey === "display"
                 title: qsTr("Display")
-                summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
-                         + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric"))
-                         + (Theme.developerMode ? qsTr(" · developer mode") : "")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
-                // The whole UI's zoom; Main.qml applies and stores it
-                LabeledFlow {
-                    label: qsTr("Display size:")
-                    ThemedButton {
-                        id: smaller
-                        text: "−"
-                        Accessible.name: qsTr("Smaller")
-                        enabled: Theme.zoom > Theme.zoomSteps[0] + 0.001
-                        onClicked: Theme.stepZoom(-1)
-                    }
-                    Label {
-                        width: Math.max(52, implicitWidth)
-                        height: smaller.height
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        text: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
-                        color: Theme.text
-                    }
-                    ThemedButton {
-                        text: "+"
-                        Accessible.name: qsTr("Larger")
-                        enabled: Theme.zoom < Theme.zoomSteps[Theme.zoomSteps.length - 1] - 0.001
-                        onClicked: Theme.stepZoom(1)
-                    }
-                    ThemedButton {
-                        text: qsTr("Reset")
-                        enabled: Math.abs(Theme.zoom - 1) > 0.001
-                        onClicked: Theme.zoom = 1
-                    }
+                SettingsDisplay {
+                    id: settingsDisplay
+                    host: page
                 }
-                // A phone has no keyboard to zoom with
-                Label {
-                    visible: !Theme.mobile
-                    text: qsTr("or Ctrl + / Ctrl − / Ctrl 0")
-                    color: Theme.textDim
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
+            }
 
-                // Units: what the pages show, converted in core (ADR-0022);
-                // recordings keep the decoded values. Main.qml stores it.
-                // Takes effect at once, connected or not.
-                LabeledFlow {
-                    label: qsTr("Units:")
-                    Repeater {
-                        model: [
-                            { system: 0, name: "metric", label: qsTr("Metric (km/h, °C)") },
-                            { system: 1, name: "imperial", label: qsTr("Imperial (mph, °F)") }
-                        ]
-                        ThemedButton {
-                            required property var modelData
-                            objectName: "units_" + modelData.name
-                            text: modelData.label
-                            highlighted: Bridge.unitSystem === modelData.system
-                            onClicked: Bridge.unitSystem = modelData.system
-                        }
-                    }
-                }
+            SettingsSubpage {
+                objectName: "settingsAdvancedPage"
+                anchors.fill: parent
+                visible: page.shownKey === "advanced"
+                title: qsTr("Advanced")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
-                // Developer mode (Theme.developerMode); Main.qml stores it
-                CheckBox {
-                    id: developerBox
-                    objectName: "developerBox"
-                    text: qsTr("Developer mode: the mock:// preset, and the raw frames on the Log page")
-                    checked: Theme.developerMode
-                    Layout.fillWidth: true
-                    onToggled: {
-                        Theme.developerMode = checked
-                        checked = Qt.binding(() => Theme.developerMode)
-                    }
-                    contentItem: Label {
-                        text: developerBox.text
-                        color: Theme.text
-                        leftPadding: developerBox.indicator.width + developerBox.spacing
-                        verticalAlignment: Text.AlignVCenter
-                        wrapMode: Text.WordWrap
-                    }
+                SettingsAdvanced {
+                    id: settingsAdvanced
+                    host: page
                 }
             }
         }

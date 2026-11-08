@@ -47,6 +47,8 @@ TestCase {
     // land before the disconnect, or the next case meets a connected
     // bridge and fails for the wrong reason
     function cleanup() {
+        Theme.compact = false
+        Theme.dense = false
         Bridge.unitSystem = 0
         Bridge.recording = false
         tryVerify(() => !Bridge.connecting, 10000, "a connect in flight ends")
@@ -65,22 +67,26 @@ TestCase {
         return item
     }
 
-    readonly property var sections: ["adapterSection", "vehicleSection", "profileSection",
-                                     "recordingSection", "displaySection"]
-
     // The page goes under the window's root, not the TestCase: TestCase is
     // an invisible item, and visible reads the effective visibility, so a
-    // child of it would read invisible whatever the page did. Its sections
-    // start folded; a case reading or clicking what's in them opens them
-    // all, unless it asks for the page as it opens
+    // child of it would read invisible whatever the page did. It is
+    // 1000 wide, so Connection shows beside the list; a case reading what
+    // another page shows opens that page first
     function createPage(asItOpens) {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         verify(page, "Settings loads")
-        if (!asItOpens) {
-            for (const name of sections)
-                find(page, name).open = true
-        }
+        if (!asItOpens)
+            page.open("connection")
         return page
+    }
+
+    // A tap on an item that takes it with a MouseArea or a Button: the
+    // handler runs, as a click would run it. The page is 1000 wide in a
+    // 200 px window and a mouse event outside the window's bounds goes
+    // nowhere, which the list beside the pages now puts every row past
+    function tap(item) {
+        verify(item.enabled, "the item takes taps")
+        item.clicked(item instanceof MouseArea ? null : undefined)
     }
 
     // A button's click, through its own handler
@@ -117,7 +123,7 @@ TestCase {
         // The longest vehicle label, wider than the column on any font (a
         // wider one, Linux's, put two presets past the edge)
         page.vehicles = VehicleBook.add(VehicleBook.empty(), "W".repeat(40))
-        const column = find(page, "settingsColumn")
+        const column = find(page, "settingsConnectionPageColumn")
         tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
         waitForPolish(column)
         compare(pastTheEdge(column, column, []).join("; "), "",
@@ -154,60 +160,232 @@ TestCase {
         }
     }
 
-    // The page opens on the connect bar and five folded sections, each
-    // heading naming what its section holds now; a heading opens and
-    // folds its section
-    function test_sectionsStartFoldedAndOpenFromTheirHeadings_data() {
+    // A phone (384 wide) opens on the list of pages, each row naming what
+    // its page holds now; a row opens its page, whose back arrow returns
+    function test_thePagesOpenFromTheListAndGoBack_data() {
         return [
-            { tag: "adapter", section: "adapterSection", title: "Adapter", summary: "1 found",
-              parts: ["deviceCount", "deviceList", "preset_wifi_obdx", "preset_j2534"] },
-            { tag: "vehicle", section: "vehicleSection", title: "Vehicle", summary: "None",
-              parts: ["vehicle_none", "vehicleLabelField", "vehicleNew"] },
-            { tag: "profile", section: "profileSection", title: "What to read", summary: "Default",
-              parts: ["profile_raw", "profileHint"] },
-            { tag: "recording", section: "recordingSection", title: "Recording",
-              summary: "off", parts: ["recordBox", "recordStatus"] },
-            { tag: "display", section: "displaySection", title: "Display",
-              summary: "100 % · metric", parts: ["units_metric", "developerBox"] },
+            { tag: "connection", title: "Connection", summary: "1 found · Default",
+              parts: ["deviceCount", "deviceList", "preset_wifi_obdx", "profile_raw", "uriField"] },
+            { tag: "vehicle", title: "Vehicle", summary: "None",
+              parts: ["vehicle_none", "vehicleLabelField", "vehicleNew", "vehicleMore"] },
+            { tag: "signals", title: "Signals", summary: "pick a vehicle",
+              parts: ["pluginsNone"] },
+            { tag: "recording", title: "Recording", summary: "off",
+              parts: ["recordBox", "recordStatus"] },
+            { tag: "display", title: "Display", summary: "100 % · metric",
+              parts: ["units_metric"] },
+            { tag: "advanced", title: "Advanced", summary: "off", parts: ["developerBox"] },
         ]
     }
-    function test_sectionsStartFoldedAndOpenFromTheirHeadings(data) {
+    function test_thePagesOpenFromTheListAndGoBack(data) {
         const page = createPage(true)
+        page.width = 384
         page.j2534Devices = []
         page.serialPorts = [{ name: "COM5", device: "" }]
         page.canInterfaces = []
-        for (const name of sections)
-            verify(!find(page, name).open, name + " starts folded")
-        verify(find(page, "uriField").visible, "the connect bar shows")
-        verify(find(page, "connectButton").visible)
-
-        const section = find(page, data.section)
-        const heading = find(page, data.section + "Heading")
-        const chevron = find(heading, "sectionChevron")
-        compare(heading.Accessible.name, data.title)
-        compare(find(heading, "sectionSummary").text, data.summary)
-        compare(chevron.rotation, 0, "pointing right while folded")
+        verify(find(page, "settingsList").visible, "the list is the root")
+        verify(!find(page, "settingsSideList").visible, "no side list on a phone")
+        const row = find(page, "settingsRow_" + data.tag)
+        compare(row.Accessible.name, data.title)
+        compare(find(row, "settingsRowSummary").text, data.summary)
         for (const name of data.parts)
-            verify(!find(page, name).visible, name + " folded")
-        heading.clicked()
-        verify(section.open)
-        compare(chevron.rotation, 90, "pointing down while open")
+            verify(!find(page, name).visible, name + " not shown on the list")
+        row.clicked()
+        verify(!find(page, "settingsList").visible, "the page pushes over the list")
         for (const name of data.parts)
             verify(find(page, name).visible, name + " shown")
-        heading.clicked()
+        find(find(page, "settings" + data.title.charAt(0).toUpperCase() + data.tag.slice(1) + "Page"),
+             "settingsBack").clicked()
+        verify(find(page, "settingsList").visible, "back to the list")
         for (const name of data.parts)
-            verify(!find(page, name).visible, name + " folded again")
+            verify(!find(page, name).visible, name + " gone again")
+    }
+
+    // The visible buttons under item, by their size. Only what has down
+    // and checkable is measured (a Button, CheckBox or Switch): a MouseArea
+    // row or a TapHandler is not
+    function buttonsUnder(item, out) {
+        for (let i = 0; i < item.children.length; ++i) {
+            const child = item.children[i]
+            if (!child.visible)
+                continue
+            if (child.down !== undefined && child.checkable !== undefined)
+                out.push(child)
+            buttonsUnder(child, out)
+        }
+        return out
+    }
+
+    // Density on a phone (qml.md): every page of Settings at 384 x 832,
+    // 100 %, has buttons a touch's size and nothing past 320 px
+    function test_everyPageMeetsAPhonesDensity_data() {
+        return [
+            { tag: "list", key: "", obj: "settingsListPage" },
+            { tag: "connection", key: "connection", obj: "settingsConnectionPage" },
+            { tag: "vehicle", key: "vehicle", obj: "settingsVehiclePage" },
+            { tag: "signals", key: "signals", obj: "settingsSignalsPage" },
+            { tag: "ownform", key: "ownform", obj: "settingsOwnFormPage" },
+            { tag: "recording", key: "recording", obj: "settingsRecordingPage" },
+            { tag: "display", key: "display", obj: "settingsDisplayPage" },
+            { tag: "advanced", key: "advanced", obj: "settingsAdvancedPage" },
+        ]
+    }
+    function test_everyPageMeetsAPhonesDensity(data) {
+        Theme.compact = true
+        Theme.dense = true
+        const page = createPage(true)
+        page.width = 384
+        page.height = 832
+        page.vehicles = VehicleBook.add(VehicleBook.empty(), "Daily driver")
+        page.j2534Devices = []
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        page.open(data.key)
+        const shown = find(page, data.obj)
+        verify(shown.visible, data.tag + " shows")
+        waitForPolish(find(page, data.obj + "Column"))
+        const buttons = buttonsUnder(shown, [])
+        verify(buttons.length > 0, "buttons to measure")
+        for (const b of buttons) {
+            const o = b.mapToItem(null, 0, 0)
+            const e = b.mapToItem(null, b.width, b.height)
+            const name = b.objectName !== "" ? b.objectName : b.text
+            verify(e.y - o.y >= 48 - 0.5, name + " is " + (e.y - o.y) + " tall")
+            verify(e.x - o.x >= 48 - 0.5, name + " is " + (e.x - o.x) + " wide")
+        }
+        page.width = 320
+        const column = find(page, data.obj + "Column")
+        tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
+        waitForPolish(column)
+        tryVerify(() => pastTheEdge(column, column, []).length === 0, 2000)
+        compare(pastTheEdge(column, column, []).join("; "), "", "nothing past the column at 320")
+    }
+
+    // 900 wide and more: the list at the left and Connection open beside it
+    function test_aWidePageShowsTheListBesideConnection() {
+        const page = createPage(true)
+        verify(find(page, "settingsSideList").visible)
+        verify(!find(page, "settingsList").visible, "the phone's root list is hidden")
+        verify(find(page, "uriField").visible, "Connection opens first")
+        find(page, "settingsRow_display").clicked()
+        verify(find(page, "units_metric").visible)
+        verify(!find(page, "uriField").visible)
+        verify(find(page, "settingsSideList").visible, "the list stays")
+    }
+
+    // The back key repeats the arrow where Qt delivers it; the form's back
+    // lands on Signals, not the list
+    function test_theBackKeyPopsAPage() {
+        const page = createPage(true)
+        page.width = 384
+        page.open("display")
+        keyClick(Qt.Key_Back)
+        compare(page.pageKey, "")
+        page.vehicles = VehicleBook.add(VehicleBook.empty(), "A")
+        page.open("ownform")
+        page.back()
+        compare(page.pageKey, "signals")
+    }
+
+    // Save lands on Signals with its note and an empty form; Edit opens the
+    // form filled; Add starts from an empty one, so a signal edited and
+    // backed out of is not replaced by the next Save
+    function test_theFormPageSavesEditsAndStartsAfresh() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        page.open("ownform")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.pageKey, "signals", "Save returns to Signals")
+        compare(find(page, "formName").text, "", "the form empties")
+        verify(find(page, "ownSignalsNote").text.indexOf("Trans Temp saved") === 0,
+               "Signals says it saved")
+
+        press(page, "ownEdit_0")
+        compare(page.pageKey, "ownform", "Edit opens the form")
+        compare(find(page, "formName").text, "Trans Temp")
+        compare(page.editingKey, "trans_temp")
+        page.back()
+        compare(page.pageKey, "signals", "back from the form lands on Signals")
+
+        press(page, "ownAdd")
+        compare(page.pageKey, "ownform", "Add opens the form")
+        compare(find(page, "formName").text, "", "Add starts empty")
+        compare(page.editingKey, "")
+        typeSignal(page, "Gear", "D101")
+        press(page, "formSave")
+        compare(page.ownSignals.map(s => s.key).sort(), ["gear", "trans_temp"], "added, not replaced")
+    }
+
+    // A recording's Replay puts its URI in the field, which is on
+    // Connection: a phone lands there, not on the list or another page
+    function test_aReplayOnAPhoneLandsOnConnection() {
+        const page = createPage(true)
+        page.width = 384
+        page.open("display")
+        page.pickRecording("replay://x?profile=raw")
+        compare(page.pageKey, "connection")
+        compare(find(page, "uriField").text, "replay://x?profile=raw")
+        verify(find(page, "uriField").visible)
+    }
+
+    // The Bluetooth permission is asked for when Connection is seen: not
+    // while Settings is hidden, wide or not, and not at launch
+    function test_theBluetoothAskWaitsUntilConnectionIsSeen() {
+        const page = createPage(true)
+        page.visible = false
+        const before = page.bluetoothAsks
+        page.width = 384
+        page.width = 1000      // crosses 900 hidden: shownKey changes
+        page.open("display")
+        page.open("connection")
+        compare(page.bluetoothAsks, before, "hidden, no ask")
+        page.visible = true
+        compare(page.bluetoothAsks, before + 1, "shown on Connection: one ask")
+        page.open("display")
+        compare(page.bluetoothAsks, before + 1, "another page: none")
+        page.open("connection")
+        compare(page.bluetoothAsks, before + 2, "Connection again: one ask")
+    }
+
+    // The back key does nothing beside the list: nothing is pushed there
+    function test_theBackKeyDoesNothingInTwoPanes() {
+        const page = createPage(true)
+        page.open("display")
+        keyClick(Qt.Key_Back)
+        compare(page.pageKey, "display")
+        compare(page.shownKey, "display")
+    }
+
+    // A page open at a phone's width stays when the window widens past 900
+    // (the arrow goes: the list is beside it) and when it narrows again
+    function test_aResizeKeepsThePageShown() {
+        const page = createPage(true)
+        page.width = 384
+        page.open("display")
+        verify(find(find(page, "settingsDisplayPage"), "settingsBack").visible)
+        page.width = 1000
+        compare(page.shownKey, "display")
+        verify(find(page, "units_metric").visible)
+        verify(find(page, "settingsSideList").visible)
+        verify(!find(find(page, "settingsDisplayPage"), "settingsBack").visible, "no arrow beside the list")
+        page.width = 384
+        compare(page.shownKey, "display")
+        verify(find(page, "units_metric").visible)
+        verify(!find(page, "settingsSideList").visible)
+        verify(find(find(page, "settingsDisplayPage"), "settingsBack").visible)
     }
 
     // Connect... elsewhere opens what to connect to, at the page's top
     function test_showAdaptersOpensWhatToConnectTo() {
         const page = createPage(true)
+        page.width = 384
         page.j2534Devices = []
         page.serialPorts = [{ name: "COM5", device: "" }]
         page.showAdapters()
-        verify(find(page, "adapterSection").open)
+        compare(page.pageKey, "connection")
         verify(find(page, "deviceList").visible)
-        verify(!find(page, "vehicleSection").open, "the rest stay folded")
+        verify(!find(page, "vehicleNew").visible, "the other pages stay away")
     }
 
     // The bridge doesn't record a replay; the switch keeps its setting
@@ -356,11 +534,11 @@ TestCase {
         compare(uri.text, "elm327://", "the port is the user's pick")
         press(page, "profile_raw")
         compare(uri.text, "elm327://?profile=raw")
-        mouseClick(find(list.itemAtIndex(1), "deviceRowArea"))
+        tap(find(list.itemAtIndex(1), "deviceRowArea"))
         compare(uri.text, "elm327://COM5?profile=raw", "the row's base, the query kept")
-        mouseClick(find(list.itemAtIndex(2), "deviceRowArea"))
+        tap(find(list.itemAtIndex(2), "deviceRowArea"))
         compare(uri.text, "elm327:///dev/ttyUSB0?profile=raw")
-        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "j2534://Fake?profile=raw")
     }
 
@@ -391,9 +569,9 @@ TestCase {
                 "Bluetooth LE · AA:BB:CC:DD:EE:FF")
 
         press(page, "profile_raw")
-        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "elm327://bt:00:11:22:33:44:55?profile=raw")
-        mouseClick(find(list.itemAtIndex(1), "deviceRowArea"))
+        tap(find(list.itemAtIndex(1), "deviceRowArea"))
         compare(uri.text, "elm327://ble:AA:BB:CC:DD:EE:FF?profile=raw")
 
         // The row in the field is outlined, whatever the query
@@ -463,15 +641,15 @@ TestCase {
         // Default, raw there, which only listens, the request keys go
         uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
         compare(page.profileChoice, "uds-generic")
-        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
         compare(page.profileChoice, "uds-generic")
         uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")
-        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "socketcan://vcan0?baud=500000")
         press(page, "profile_raw")
-        mouseClick(find(list.itemAtIndex(2), "deviceRowArea"))
+        tap(find(list.itemAtIndex(2), "deviceRowArea"))
         compare(uri.text, "socketcan://can1?baud=500000&profile=raw", "the row's base, the query kept")
     }
 
@@ -486,16 +664,16 @@ TestCase {
         page.serialPorts = []
         page.canInterfaces = []
         page.bluetoothAdapters = [{ name: "OBDLink MX+", address: "00:11:22:33:44:55", kind: "bt" }]
-        const flick = find(page, "settingsFlick")
+        const flick = find(page, "settingsConnectionPage")
         const list = find(page, "deviceList")
         const uri = find(page, "uriField")
         tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        waitForPolish(find(page, "settingsColumn"))
+        waitForPolish(find(page, "settingsConnectionPageColumn"))
 
         // The list at the top of the view, the field above it
         flick.contentY = list.mapToItem(flick.contentItem, 0, 0).y
         verify(uri.mapToItem(flick, 0, 0).y < 0, "the field is out of view")
-        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "elm327://bt:00:11:22:33:44:55")
         const top = uri.mapToItem(flick, 0, 0).y
         verify(top >= 0 && top + uri.height <= flick.height, "the field is in view, at " + top)
@@ -836,6 +1014,7 @@ TestCase {
                "the hint names the vPIC release")
 
         field.text = "1fa fake10m0000001"
+        page.open("vehicle")
         verify(result.visible)
         compare(result.text, "Model year 2021; Ford (manufacturer code 1FA); check digit matches")
         compare(JSON.stringify(page.vehicles).indexOf("FAKE10"), -1, "not in the vehicles")
@@ -846,10 +1025,24 @@ TestCase {
         verify(!result.visible)
     }
 
+    // The signal files and the own signals belong to the picked vehicle. With
+    // none picked their parts hold nothing, and a part that stays visible
+    // adds a gap of its own to the Vehicle section's column
+    function test_thePartsOfAPickedVehicleAreAbsentWithNone() {
+        const page = createPage()
+        page.open("signals")
+        verify(!find(page, "settingsSignalFilesPart").visible, "no files with no vehicle")
+        verify(!find(page, "settingsOwnSignalsPart").visible, "no own signals with no vehicle")
+        page.changeVehicles(VehicleBook.add(page.vehicles, "A"))
+        verify(find(page, "settingsSignalFilesPart").visible, "files with a vehicle")
+        verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
+    }
+
     // ADR-0027 section 1: every change to the list is made in the section, a
     // label typed or left to its default
     function test_theVehicleSectionMakesNamesAndForgetsVehicles() {
         let page = createPage()
+        page.open("vehicle")
         const field = find(page, "vehicleLabelField")
         verify(find(page, "vehicle_none").highlighted, "no vehicle to start")
         verify(!find(page, "vehicleDuplicate").enabled, "nothing to copy")
@@ -874,6 +1067,7 @@ TestCase {
         field.text = " daily DRIVER "
         verify(!find(page, "vehicleNew").enabled, "a label in use")
         verify(!find(page, "vehicleRename").enabled)
+        page.open("vehicle")
         verify(find(page, "vehicleLabelProblem").visible)
         field.text = "x".repeat(41)
         verify(!find(page, "vehicleNew").enabled, "over 40 characters")
@@ -888,7 +1082,7 @@ TestCase {
         // next polish
         const v1 = find(page, "vehicle_v1")
         tryVerify(() => v1.x > 0, 2000, "the button is placed")
-        mouseClick(v1)
+        tap(v1)
         compare(page.confirming, "", "picking another backs out")
         compare(labels(page).length, 2)
         press(page, "vehicleForget")
@@ -930,6 +1124,7 @@ TestCase {
         let page = createPage()
         verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")
         press(page, "vehicleNew")
+        page.open("signals")
         verify(find(page, "signalFilesNone").visible)
         verify(importFile(page, "extras.json", "Extras"))
         compare(page.pickedVehicle.signals.length, 1)
@@ -1012,6 +1207,7 @@ TestCase {
         verify(find(page, "obdbImport").enabled)
         verify(!find(page, "obdbReport").visible)
         verify(obdbPreview(page, "2021"))
+        page.open("signals")
         verify(find(page, "obdbReport").visible)
         compare(find(page, "obdbSummary").text,
                 "Daily driver OBDb from OBDb: 7 signals converted, 6 fields differ, "
@@ -1073,7 +1269,7 @@ TestCase {
         // The report at a phone's width, as test_everyItemFitsAPhonesWidth
         const width = page.width
         page.width = 320
-        const column = find(page, "settingsColumn")
+        const column = find(page, "settingsConnectionPageColumn")
         tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
         waitForPolish(column)
         compare(pastTheEdge(column, column, []).join("; "), "",
@@ -1162,6 +1358,7 @@ TestCase {
         compare(page.obdbReport.skipped.length, 120)
         compare(find(page, "obdbSkipped").count, page.obdbRowsShown)
         compare(find(page, "obdbSkippedMore").text, "and " + (120 - page.obdbRowsShown) + " more")
+        page.open("signals")
         verify(find(page, "obdbSkippedMore").visible)
         verify(!find(page, "obdbChangedMore").visible)
     }
@@ -1292,6 +1489,7 @@ TestCase {
     // import of its id replaces it, and a package core refuses says so
     function test_aPluginIsImportedMatchedByTheVinAndConnected() {
         const page = createPage()
+        page.open("signals")
         verify(find(page, "pluginsNone").visible)
         verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
         compare(find(page, "pluginNote").text,
@@ -1634,6 +1832,7 @@ TestCase {
         for (const box in named) {
             find(page, box).text = "1"
             compare(caption(box).text, named[box], box)
+            page.open("ownform")
             verify(caption(box).visible, box)
         }
         press(page, "formService_01")
@@ -1648,6 +1847,7 @@ TestCase {
     function test_theFormSavesTheVehiclesOwnSignals() {
         const page = createPage()
         press(page, "vehicleNew")
+        page.open("ownform")
         verify(find(page, "signalForm").visible)
         typeSignal(page, "Trans Temp", "1E1C", "16")
         press(page, "formSave")
@@ -1751,7 +1951,7 @@ TestCase {
                                                   "elm327://COM6?profile=uds-generic&did=F190"))
         press(page, "vehicle_none")
         find(page, "uriField").text = "mock://demo"
-        mouseClick(find(page, "vehicle_v1"))
+        tap(find(page, "vehicle_v1"))
         compare(find(page, "uriField").text, "elm327://COM6?profile=uds-generic&did=F190")
         verify(find(page, "profile_uds-generic").highlighted, "read back into the row")
         compare(find(page, "didField").text, "F190")
@@ -1839,6 +2039,7 @@ TestCase {
         find(page, "uriField").text = uri
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
+        page.open("vehicle")
         verify(note.visible)
         compare(note.text, "The connected car's VIN picked Daily driver (Weekend car was picked)")
         Bridge.disconnectSession()
