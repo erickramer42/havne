@@ -1,12 +1,14 @@
 # File/layer: python/havne/recording.py | Python 3.11+, the havne package
-# Testing: PythonTest.test_recording, PythonTest.test_import
+# Testing: PythonTest.test_recording, PythonTest.test_import,
+#          PythonTest.test_frames_read
 #
 # A recording read offline (ADR-0049 section 5, recording.h): its
 # signals with their ranges, its markers, range queries, the value in
 # force at a time, and finding a threshold's crossing or a marker. Times
 # are the recording's host_us, microseconds from its start. import_csv and
 # import_candump make a recording's folder from a logger's file
-# (ADR-0054, ecuio_import).
+# (ADR-0054, ecuio_import). read_frames reads its frames.csv back as
+# recorded (ADR-0049's appendix "frames read back").
 
 import ctypes
 import json
@@ -26,6 +28,10 @@ Imported = namedtuple("Imported", "folder lines frames error_frames interfaces v
                                   "columns_ignored utc_start_us duration_us")
 Imported.__doc__ = ("What an import made: its folder and core's counts; utc_start_us None "
                     "when the file gave no UTC time")
+RecordedFrame = namedtuple("RecordedFrame", "host_us timestamp_us id flags data")
+RecordedFrame.__doc__ = ("A frames.csv row as recorded: its host_us (the time Recording's "
+                         "queries take), its session time in us, its CAN ID, "
+                         "ECUIO_FRAME_FLAG_* and its payload as bytes")
 
 NONE = e.ECUIO_RECORDING_NONE
 
@@ -186,6 +192,41 @@ def import_candump(path, folder, interface=None):
     o.out_folder_utf8 = utf8(str(folder))
     o.interface_utf8 = None if interface is None else utf8(interface)
     return _import(o, str(folder))
+
+
+def read_frames(folder, from_us=0, to_us=0, limit=None):
+    """The recording's frames.csv rows whose host_us is from_us to to_us,
+    both included (to_us 0: to the end), as recorded: a list of
+    RecordedFrame in the file's order, at most limit of them. Nothing is
+    decoded or scrubbed; a last row cut short is left out. folder is the
+    recording's folder or its frames.csv. A refused file or row raises
+    Error with core's words (ecuio_recording_read_frames)."""
+    if limit is not None and limit < 1:
+        raise ValueError("limit is 1 or more, or None")
+    rows = []
+    failed = []
+
+    def take(_user, frame, host_us):
+        # An exception escaping a ctypes callback would leave its return
+        # value unset: it stops the read and is raised after it
+        try:
+            f = frame.contents
+            rows.append(RecordedFrame(host_us, f.timestamp_us, f.arbitration_id, f.flags,
+                                      ctypes.string_at(f.data, f.data_length)))
+            return 1 if limit is not None and len(rows) >= limit else 0
+        except BaseException as exc:  # noqa: BLE001 (raised again below)
+            failed.append(exc)
+            return 1
+
+    callback = e.ecuio_frame_row_callback_t(take)
+    summary = e.ecuio_frames_read_t()
+    rc = lib.ecuio_recording_read_frames(utf8(str(folder)), from_us, to_us, callback, None,
+                                         ctypes.byref(summary))
+    if failed:
+        raise failed[0]
+    if rc != e.ECUIO_ERR_CANCELED:
+        check(rc, "ecuio_recording_read_frames")
+    return rows
 
 
 def _close(r):

@@ -25,7 +25,8 @@ endif()
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
-    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp)
+    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
+    test_frames_read.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -234,7 +235,7 @@ endif()
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
-        test_cli_health.cpp test_cli_partial.cpp)
+        test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -724,6 +725,15 @@ if(TARGET havne-cli)
                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         app_cli_golden(InfoRefusesAFolderWithNoFrames info-no-frames.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/pull-early)
+        # A stretch of the replay fixture's frames as recorded (ADR-0049's
+        # appendix "frames read back"), and a folder that isn't there
+        app_cli_golden(FramesReadsAStretchAsRecorded frames-stretch.jsonl
+            -- $<TARGET_FILE:havne-cli> frames
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
+               --from 100 --to 101)
+        app_cli_golden(FramesRefusesAMissingFolder frames-missing-folder.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> frames
+               ${CMAKE_CURRENT_BINARY_DIR}/never-there)
         # Ctrl+Break while the fake DLL's disconnect hangs: the recording
         # ends whole without waiting for it (skipped where there's no
         # console, as CliSignalTest is)
@@ -849,6 +859,13 @@ if(TARGET havne-cli)
     app_cli_usage(InfoARateDropOfOneIsUsage "info|x|--rate-drop|1")
     app_cli_usage(InfoSettleThatIsntSecondsIsUsage "info|x|--settle|soon")
     app_cli_usage(InfoAnUnknownOptionIsUsage "info|x|--fast")
+    app_cli_usage(FramesWithoutARecordingIsUsage "frames")
+    app_cli_usage(FramesTwoRecordingsIsUsage "frames|x|y")
+    app_cli_usage(FramesToBeforeFromIsUsage "frames|x|--from|2|--to|1")
+    app_cli_usage(FramesToZeroIsUsage "frames|x|--to|0")
+    app_cli_usage(FramesFromThatIsntSecondsIsUsage "frames|x|--from|soon")
+    app_cli_usage(FramesANegativeFromIsUsage "frames|x|--from|-1")
+    app_cli_usage(FramesAnUnknownOptionIsUsage "frames|x|--raw")
     # export and import (ADR-0054): refused before any file is read
     app_cli_usage(ExportWithoutAFileIsUsage "export|rec")
     app_cli_usage(ExportWithoutAFormatIsUsage "export|rec|out")

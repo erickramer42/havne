@@ -13,6 +13,7 @@
 #include "clear_run.h"
 #include "diagnostics_line.h"
 #include "elm327_listener.h"
+#include "frames_lines.h"
 #include "health_lines.h"
 #include "info_lines.h"
 #include "timing_line.h"
@@ -1840,6 +1841,7 @@ void usage(FILE* to)
         "                      [--signals <file> | --plugin <pkg>]]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
+        "       havne-cli frames <recording> [--from S] [--to S]\n"
         "       havne-cli export <recording> <out> --format folder|csv|pcapng\n"
         "                      [--from S] [--to S] [--raw]\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
@@ -1940,6 +1942,9 @@ void usage(FILE* to)
         "         interval passed --rate-drop times its median (10), ID first\n"
         "         seen over --settle seconds in (2), overflow, broken ISO-TP\n"
         "         sequence, link change and sleep, then a summary.\n"
+        "frames   writes a recording's frames from --from to --to seconds\n"
+        "         (both included) as it recorded them, a frame line each\n"
+        "         with its host_us, nothing decoded, then an end line.\n"
         "export   writes a recording from --from to --to seconds to <out>\n"
         "         for another tool: pcapng, its frames for Wireshark, a\n"
         "         message an adapter delivered whole as the frames its ECU\n"
@@ -3821,6 +3826,49 @@ int run_play(const PlayArgs& args)
 }
 #endif
 
+// A recording's frames read back as it recorded them (ADR-0049's
+// appendix "frames read back"): a frame line each, written from core's
+// callback on this thread, then the end line. Ctrl+C or a failed write
+// stops the read; a refused row is an error line, exit 3, the rows
+// before it already out.
+struct FramesOut {
+    Output* out = nullptr;
+    char buf[kLineBytes];
+};
+
+int on_frame_row(void* user, const ecuio_frame_t* f, uint64_t host_us)
+{
+    auto* w = static_cast<FramesOut*>(user);
+    cli::Line l(w->buf, sizeof w->buf);
+    cli::frame_row_line(l, *f, host_us);
+    write_line(*w->out, l);
+    return w->out->failed || g_interrupted.load() ? 1 : 0;
+}
+
+int run_frames(const cli::FramesArgs& args)
+{
+    Output out;
+    write_start(out);
+    install_handlers();
+    auto w = std::make_unique<FramesOut>();
+    w->out = &out;
+    ecuio_frames_read_t summary{};
+    const ecuio_status_t rc = ecuio_recording_read_frames(
+        args.folder, args.from_us, args.to_us, on_frame_row, w.get(), &summary);
+    if (out.failed) {
+        return ended(out, kExitOk); /* a closed pipe stays quiet */
+    }
+    if (rc != ECUIO_OK && rc != ECUIO_ERR_CANCELED) {
+        write_error(out, rc);
+        return ended(out, kExitConnect);
+    }
+    char buf[256];
+    cli::Line l(buf, sizeof buf);
+    cli::frames_end_line(l, rc == ECUIO_OK ? "read" : "interrupted", summary);
+    write_line(out, l);
+    return ended(out, kExitOk);
+}
+
 // A recording checked offline (ADR-0049 section 6): the frames check runs
 // whatever the reader makes of the folder (one with frames.csv alone
 // still has its frames checked), then the lines: what the reader found,
@@ -4092,6 +4140,16 @@ int run(int argc, char** argv)
             }
         }
         return run_health_session(h, uri);
+    }
+    if (command == "frames") {
+        cli::FramesArgs fr;
+        std::string why;
+        if (!cli::parse_frames(argc, argv, fr, &why)) {
+            std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+            usage(stderr);
+            return kExitUsage;
+        }
+        return run_frames(fr);
     }
     if (command == "export") {
         cli::ExportArgs ex;

@@ -1,0 +1,29 @@
+{"schema": 1, "type": "start"}
+{"data": "41 42 34 12", "flags": 0, "host_us": 100011858, "id": "0x7E8", "t_us": 100026108, "type": "frame"}
+{"data": "41 10 01 88", "flags": 0, "host_us": 100027565, "id": "0x7E8", "t_us": 100056639, "type": "frame"}
+{"data": "41 04 39", "flags": 0, "host_us": 100067508, "id": "0x7E8", "t_us": 100095710, "type": "frame"}
+{"data": "41 05 6F", "flags": 0, "host_us": 100101986, "id": "0x7E8", "t_us": 100125978, "type": "frame"}
+{"data": "41 0C 0D 1F", "flags": 0, "host_us": 100213969, "id": "0x7E8", "t_us": 100182140, "type": "frame"}
+{"data": "41 0D 00", "flags": 0, "host_us": 100230875, "id": "0x7E8", "t_us": 100260761, "type": "frame"}
+{"data": "41 0F 5E", "flags": 0, "host_us": 100269983, "id": "0x7E8", "t_us": 100296361, "type": "frame"}
+{"data": "41 11 22", "flags": 0, "host_us": 100311189, "id": "0x7E8", "t_us": 100342448, "type": "frame"}
+{"data": "41 2F 8A", "flags": 0, "host_us": 100350317, "id": "0x7E8", "t_us": 100381496, "type": "frame"}
+{"data": "41 42 34 0C", "flags": 0, "host_us": 100384376, "id": "0x7E8", "t_us": 100410297, "type": "frame"}
+{"data": "41 10 01 8E", "flags": 0, "host_us": 100415958, "id": "0x7E8", "t_us": 100446174, "type": "frame"}
+{"data": "41 04 38", "flags": 0, "host_us": 100463205, "id": "0x7E8", "t_us": 100476168, "type": "frame"}
+{"data": "41 05 70", "flags": 0, "host_us": 100497456, "id": "0x7E8", "t_us": 100506570, "type": "frame"}
+{"data": "41 0C 0D 11", "flags": 0, "host_us": 100534797, "id": "0x7E8", "t_us": 100561120, "type": "frame"}
+{"data": "41 0D 00", "flags": 0, "host_us": 100550457, "id": "0x7E8", "t_us": 100581448, "type": "frame"}
+{"data": "41 0F 5E", "flags": 0, "host_us": 100594340, "id": "0x7E8", "t_us": 100620857, "type": "frame"}
+{"data": "41 11 22", "flags": 0, "host_us": 100635214, "id": "0x7E8", "t_us": 100660911, "type": "frame"}
+{"data": "41 2F 8A", "flags": 0, "host_us": 100675515, "id": "0x7E8", "t_us": 100706017, "type": "frame"}
+{"data": "41 42 34 1A", "flags": 0, "host_us": 100716280, "id": "0x7E8", "t_us": 100745901, "type": "frame"}
+{"data": "41 10 01 87", "flags": 0, "host_us": 100755406, "id": "0x7E8", "t_us": 100781377, "type": "frame"}
+{"data": "41 04 39", "flags": 0, "host_us": 100785785, "id": "0x7E8", "t_us": 100805895, "type": "frame"}
+{"data": "41 05 70", "flags": 0, "host_us": 100823682, "id": "0x7E8", "t_us": 100846163, "type": "frame"}
+{"data": "41 0C 0D 09", "flags": 0, "host_us": 100848480, "id": "0x7E8", "t_us": 100866594, "type": "frame"}
+{"data": "41 0D 00", "flags": 0, "host_us": 100864149, "id": "0x7E8", "t_us": 100892377, "type": "frame"}
+{"data": "41 0F 5E", "flags": 0, "host_us": 100907303, "id": "0x7E8", "t_us": 100921774, "type": "frame"}
+{"data": "41 11 22", "flags": 0, "host_us": 100922878, "id": "0x7E8", "t_us": 100950988, "type": "frame"}
+{"data": "41 2F 87", "flags": 0, "host_us": 100978901, "id": "0x7E8", "t_us": 100995981, "type": "frame"}
+{"reason": "read", "rows": 27, "torn_rows": 0, "type": "end"}

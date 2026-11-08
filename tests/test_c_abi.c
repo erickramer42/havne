@@ -216,6 +216,7 @@ int main(void)
     ecuio_import_report_t import_report;
     ecuio_health_options_t health_options;
     ecuio_health_report_t health_report;
+    ecuio_frames_read_t frames_read;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     uint32_t version_major = 0, version_minor = 0, version_patch = 0;
@@ -473,6 +474,19 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    /* Frames read back (ADR-0049's appendix): the summary's layout, zeroed
+     * by a refused call */
+    memset(&frames_read, 0xFF, sizeof frames_read);
+    if (sizeof(ecuio_frames_read_t) != 32 ||
+        offsetof(ecuio_frames_read_t, torn_rows) != 8 ||
+        offsetof(ecuio_frames_read_t, reserved0) != 12 ||
+        offsetof(ecuio_frames_read_t, reserved) != 16 ||
+        ecuio_recording_read_frames(NULL, 0, 0, NULL, NULL, &frames_read) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        frames_read.rows != 0 || frames_read.torn_rows != 0 ||
+        frames_read.reserved[1] != 0) {
         return 1;
     }
     /* The health report (ADR-0054's appendix): its layouts and refusals */

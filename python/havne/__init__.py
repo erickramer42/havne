@@ -19,7 +19,8 @@ from ._version import __version__
 from ._lib import path as library_path, version as core_version
 from .errors import Error, LibraryNotFound, LibraryVersionError, status_name
 from .session import Frame, Recorder, Session, Stream, Value
-from .recording import Column, Imported, Marker, Recording, Signal, import_candump, import_csv
+from .recording import (Column, Imported, Marker, RecordedFrame, Recording, Signal,
+                        import_candump, import_csv, read_frames)
 from .sim import Reply, Sim
 from .signals import Plugin, SignalFile
 from . import _ecuio as c
@@ -29,6 +30,6 @@ __all__ = [
     "Error", "LibraryNotFound", "LibraryVersionError", "status_name",
     "Session", "Stream", "Frame", "Value", "Recorder",
     "Recording", "Signal", "Marker", "Column",
-    "import_csv", "import_candump", "Imported",
+    "import_csv", "import_candump", "Imported", "read_frames", "RecordedFrame",
     "Sim", "Reply", "SignalFile", "Plugin",
 ]

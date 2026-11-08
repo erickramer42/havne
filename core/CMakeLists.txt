@@ -6,6 +6,7 @@ add_library(ecuio-core STATIC
     src/export.cpp
     src/health.cpp
     src/host_clock.cpp
+    src/frames_read.cpp
     src/import.cpp
     src/json.cpp
     src/obdb_import.cpp
