@@ -166,6 +166,21 @@ TestCase {
         compare(page.panel, "")
     }
 
+    // Only the page shown is edited: another page's cells show no Remove
+    // and no outline at the selected index
+    function test_onlyTheShownPageIsEdited() {
+        const two = docOf([cellOf("A")])
+        two.pages.push({ name: "More", cells: [cellOf("B")] })
+        const page = pageOf({}, two)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(page.selected, 0)
+        const other = find(page, "dashCell_1_0")
+        verify(find(find(page, "dashCell_0_0"), "cellRemove").visible)
+        verify(!find(other, "cellRemove").visible, "no Remove off the page shown")
+        verify(!find(other, "cellSelected").visible, "no outline off the page shown")
+    }
+
     // Add: a kind with its still preview, then a signal of the session's;
     // the cell stores the signal's decoded unit and its default range
     // (DashboardBook.defaultRange) in any unit system, with its
@@ -240,6 +255,13 @@ TestCase {
         verify(analog.every(r => r.ref !== "" && !r.isText && !r.isEnum))
         verify(digital.every(r => r.ref !== "" && !r.isText))
         compare(digital.length, rows.filter(r => r.ref !== "" && !r.isText).length)
+        // The demo has no enumeration: one made up, beside a number and a
+        // text
+        page.profileRows = [{ ref: "key:mode", isText: false, isEnum: true },
+                            { ref: "key:rpm", isText: false, isEnum: false },
+                            { ref: "key:vin", isText: true, isEnum: false }]
+        compare(page.pickable("bar").map(r => r.ref), ["key:rpm"])
+        compare(page.pickable("digital").map(r => r.ref), ["key:mode", "key:rpm"])
     }
 
     // No session: the rows of the last URI that connected; none, a line
@@ -261,6 +283,56 @@ TestCase {
         compare(page.doc.pages[0].cells[1].kind, "ring")
         compare(page.doc.pages[0].cells[1].unit, "km/h")
         compare(page.doc.pages[0].cells[1].options.to, 260)
+    }
+
+    // Change signal: the bar narrows the rows; the cell takes the row's
+    // name, decoded unit, default range and counterpart's ref, its kind,
+    // size and decimals stay, and its zones go with the old signal
+    function test_anotherSignalDropsTheZones() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const zoned = cellOf("A")
+        zoned.options.coldBelow = 500
+        zoned.options.warnFrom = 6000
+        zoned.options.dangerFrom = 7000
+        zoned.options.decimals = 1
+        const page = pageOf({}, docOf([zoned]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelSignal")
+        compare(page.panel, "signal")
+        const coolant = Bridge.gaugeSignals["coolant"]
+        const speed = Bridge.gaugeSignals["speed"][0]
+        // The bar narrows the rows; a find with no match says so
+        const panel = find(page, "dashSignalPanel")
+        const findField = find(panel, "filterText")
+        verify(find(panel, "pickSignal_" + speed).visible)
+        findField.text = "coolant"
+        findField.textEdited()
+        tryVerify(() => !findChild(panel, "pickSignal_" + speed), 3000, "speed filtered out")
+        verify(find(panel, "pickSignal_" + coolant[0]).visible)
+        verify(!find(panel, "signalNone").visible)
+        findField.text = "no such signal"
+        findField.textEdited()
+        tryVerify(() => find(panel, "signalNone").visible, 3000, "nothing matches")
+        compare(find(panel, "signalNone").text, "No signal matches.")
+        findField.text = "coolant"
+        findField.textEdited()
+        click(page, "pickSignal_" + coolant[0])
+        const c = page.doc.pages[0].cells[0]
+        compare(c.kind, "analog")
+        compare(c.w, 2)
+        compare(c.label, "Coolant Temp")
+        compare(c.unit, "°C")
+        compare(JSON.stringify(c.refs), JSON.stringify(coolant))
+        compare(c.options.from, 0)
+        compare(c.options.to, 150)
+        compare(c.options.decimals, 1)
+        verify(c.options.coldBelow === undefined, "no cold zone")
+        verify(c.options.warnFrom === undefined, "no warning zone")
+        verify(c.options.dangerFrom === undefined, "no danger zone")
+        compare(page.panel, "cell")
+        compare(page.selected, 0)
+        compare(storedText(page), DashboardBook.serialize(page.doc))
     }
 
     // The cell's panel: each field writes its option, an emptied zone
