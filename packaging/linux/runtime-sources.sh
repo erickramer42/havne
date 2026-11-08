@@ -33,9 +33,24 @@ fuse_version=3.15.0
 fuse_sum=70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0
 
 mkdir -p "$out"
+# Downloads $2 to $1: curl with retries, then, for a GitHub release asset
+# URL, the API through gh (the asset URLs redirect to a host that answers
+# 504 for long stretches while the API path keeps working). The caller
+# checks the SHA-256 either way.
+download() {
+    local dest=$1 url=$2 owner repo tag name
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors -o "$dest" "$url" && return 0
+    if command -v gh >/dev/null 2>&1 \
+        && [[ $url =~ ^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)$ ]]; then
+        owner=${BASH_REMATCH[1]} repo=${BASH_REMATCH[2]} tag=${BASH_REMATCH[3]} name=${BASH_REMATCH[4]}
+        echo "$0: curl failed for $url; trying gh release download" >&2
+        gh release download "$tag" -R "$owner/$repo" -p "$name" -O "$dest" --clobber && return 0
+    fi
+    die "couldn't download $url"
+}
 fetch() {
     local name=$1 url=$2 sum=$3
-    curl -fsSL -o "$out/$name.part" "$url" || die "couldn't download $url"
+    download "$out/$name.part" "$url"
     echo "$sum  $out/$name.part" | sha256sum -c --status \
         || { rm -f "$out/$name.part"; die "$name's SHA-256 isn't the pinned one"; }
     mv "$out/$name.part" "$out/$name"

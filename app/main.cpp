@@ -4,29 +4,12 @@
 
 #include <QColor>
 #include <QGuiApplication>
-#include <QMetaMethod>
-#include <QMetaProperty>
-#ifdef Q_OS_ANDROID
-#include <QJniEnvironment>
-#endif
 #include <QQmlApplicationEngine>
 #include <QQmlExtensionPlugin>
 #include <QQuickStyle>
 #include <QSettings>
 #include <QStyleHints>
 #include <QWindow>
-
-#ifdef Q_OS_ANDROID
-#include <QJniObject>
-#include <QtCore/qcoreapplication_platform.h>
-#endif
-#ifdef Q_OS_WIN
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <dwmapi.h>
-#endif
 
 #ifdef Q_OS_ANDROID
 #include "androidsession.h"
@@ -39,54 +22,14 @@
 #include "bridgesingleton.h"
 #include "carryover.h"
 #include "sessionbridge.h"
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
+#include "windowtheme.h"
+#endif
 #include "ecuio/version.h"
 
 // The App module is a static library (app/CMakeLists.txt); this pulls
 // in its plugin, which registers the module's types
 Q_IMPORT_QML_PLUGIN(AppPlugin)
-
-#ifdef Q_OS_ANDROID
-// Android's own window, behind Qt's, follows the phone's day/night theme
-// (QtActivity's DayNight): light on a light phone. After a rotation, the
-// screen Qt's window didn't reach showed white, and three-button
-// navigation sat on a light scrim (docs/bench-sessions/2026-10-28-android-3.md).
-// Dark like the app instead (the theme's bg), no scrim, the navigation
-// buttons drawn light.
-static void darkenAndroidWindow(const QColor& bg)
-{
-    using QNativeInterface::QAndroidApplication;
-    QAndroidApplication::runOnAndroidMainThread([bg]() {
-        const QJniObject activity = QAndroidApplication::context();
-        const QJniObject window =
-            activity.callObjectMethod("getWindow", "()Landroid/view/Window;");
-        if (!window.isValid())
-            return;
-        const QJniObject background("android/graphics/drawable/ColorDrawable",
-                                    "(I)V", static_cast<jint>(bg.rgba()));
-        window.callMethod<void>("setBackgroundDrawable",
-                                "(Landroid/graphics/drawable/Drawable;)V",
-                                background.object());
-        if (QAndroidApplication::sdkVersion() >= 29) {
-            window.callMethod<void>("setNavigationBarContrastEnforced", "(Z)V",
-                                    static_cast<jboolean>(false));
-        }
-        if (QAndroidApplication::sdkVersion() >= 30) {
-            const QJniObject insets = window.callObjectMethod(
-                "getInsetsController",
-                "()Landroid/view/WindowInsetsController;");
-            if (insets.isValid()) {
-                // APPEARANCE_LIGHT_NAVIGATION_BARS (0x10) off: light buttons
-                insets.callMethod<void>("setSystemBarsAppearance", "(II)V",
-                                        static_cast<jint>(0),
-                                        static_cast<jint>(0x10));
-            }
-        }
-        // A refused call leaves a pending Java exception; the next JNI call
-        // would abort on it
-        QJniEnvironment().checkAndClearExceptions();
-    });
-}
-#endif
 
 #ifdef Q_OS_ANDROID
 // No drawing while the app isn't active. With the event loops kept running
@@ -108,75 +51,11 @@ protected:
     {
         if ((event->type() == QEvent::Expose ||
              event->type() == QEvent::UpdateRequest) &&
-            QGuiApplication::applicationState() != Qt::ApplicationActive)
+            QGuiApplication::applicationState() != Qt::ApplicationActive) {
             return true;
+        }
         return QObject::eventFilter(watched, event);
     }
-};
-#endif
-
-#ifdef Q_OS_WIN
-// The title bar in the header's color (Theme.surface) with the app's text
-// color, so the two read as one bar. Windows 11 takes both; Windows 10
-// refuses them and keeps the dark title bar the color scheme gives it
-static void colorTitleBar(QWindow *window, const QColor &surface,
-                          const QColor &textColor)
-{
-    // WId is the window's HWND held as an integer: the cast is Qt's own
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    const auto hwnd = reinterpret_cast<HWND>(window->winId());
-    const COLORREF caption = RGB(surface.red(), surface.green(), surface.blue());
-    const COLORREF text = RGB(textColor.red(), textColor.green(), textColor.blue());
-    (void)DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption, sizeof caption);
-    (void)DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text, sizeof text);
-}
-#endif
-
-#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
-// Colors the platform's own window from Theme's bg, surface and text, now
-// and again whenever the theme changes them, so a night theme never sits
-// under a bright title bar or a white strip. Owned by the window.
-class WindowTheme : public QObject
-{
-    Q_OBJECT
-public:
-    WindowTheme(QObject *theme, QWindow *window)
-        : QObject(window), m_theme(theme)
-#ifdef Q_OS_WIN
-        , m_window(window)
-#endif
-    {
-        const QMetaObject *themeMeta = theme->metaObject();
-        const QMetaMethod apply =
-            metaObject()->method(metaObject()->indexOfSlot("apply()"));
-        for (const char *name : {"bg", "surface", "text"}) {
-            const QMetaProperty property =
-                themeMeta->property(themeMeta->indexOfProperty(name));
-            if (property.hasNotifySignal())
-                connect(theme, property.notifySignal(), this, apply);
-        }
-        apply_();
-    }
-
-public slots:
-    void apply() { apply_(); }
-
-private:
-    void apply_()
-    {
-#ifdef Q_OS_ANDROID
-        darkenAndroidWindow(m_theme->property("bg").value<QColor>());
-#endif
-#ifdef Q_OS_WIN
-        colorTitleBar(m_window, m_theme->property("surface").value<QColor>(),
-                      m_theme->property("text").value<QColor>());
-#endif
-    }
-
-    QObject *m_theme;
-#ifdef Q_OS_WIN
-    QWindow *m_window;
-#endif
 };
 #endif
 
@@ -187,8 +66,9 @@ int main(int argc, char *argv[])
     // by an event NoDrawWhileInactive sees. The threaded loop's render
     // thread starts frames of its own, and one that started as the screen
     // went off waited there, the GUI thread waiting on it
-    if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP"))
+    if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP")) {
         qputenv("QSG_RENDER_LOOP", "basic");
+    }
 #endif
     QGuiApplication app(argc, argv);
     app.setOrganizationName("Havne");
@@ -257,8 +137,9 @@ int main(int argc, char *argv[])
 #if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
     if (auto *window =
             qobject_cast<QWindow *>(engine.rootObjects().constFirst())) {
-        if (auto *theme = engine.singletonInstance<QObject *>("App", "Theme"))
+        if (auto* theme = engine.singletonInstance<QObject*>("App", "Theme")) {
             new WindowTheme(theme, window);
+        }
 #ifdef Q_OS_ANDROID
         window->installEventFilter(new NoDrawWhileInactive(window));
 #endif
@@ -267,7 +148,3 @@ int main(int argc, char *argv[])
 
     return app.exec();
 }
-
-#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
-#include "main.moc"
-#endif
