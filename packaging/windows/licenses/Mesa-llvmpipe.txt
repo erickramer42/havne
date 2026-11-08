@@ -8,8 +8,12 @@ Windows kit, unmodified, signed by The Qt Company.
 What is established:
 
 - Qt's documentation lists this file as Mesa llvmpipe, under the MIT
-  License and the Boost Software License 1.0, and gives the first three
-  notices below: https://doc.qt.io/qt-6/qt-attribution-llvmpipe.html
+  License and the Boost Software License 1.0, and gives the Khronos and
+  C11 threads notices below:
+  https://doc.qt.io/qt-6/qt-attribution-llvmpipe.html
+- The Mesa notice below is Mesa's own, from docs/license.html at its tag
+  mesa-11.2.2. Qt's page gives the same notice but names Brian Paul in
+  the disclaimer, where Mesa's reads "the authors or copyright holders".
 - The file's own text strings name Mesa 11.2.2 and LLVM 3.6.2.
 
 What is not established:
@@ -42,9 +46,10 @@ in all copies or substantial portions of the Software.
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
-BRIAN PAUL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
-AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ==== The Khronos Group ====
 
