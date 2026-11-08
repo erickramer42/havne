@@ -832,6 +832,93 @@ TestCase {
         verify(title.visible)
     }
 
+    // A log from the header (ADR-0056 section 1): Start log while
+    // connected, then Stop log and the readout in Mark's and Disconnect's
+    // place, fitting a phone; Stop log opens the folder in the viewer
+    function test_theHeadersLogStartsStopsAndOpensItsFolder() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const start = find(main.contentItem, "startLogButton")
+        const stop = find(main.contentItem, "stopLogButton")
+        const readout = find(main.contentItem, "logReadout")
+        const mark = find(main.contentItem, "markButton")
+        const disconnect = find(main.contentItem, "disconnectButton")
+        const title = find(main.contentItem, "headerTitle")
+        const row = find(main.contentItem, "headerRow")
+        verify(!start.visible, "nothing to log before a connect")
+        compare(Bridge.connectSession("mock://logged"), "", "mock://logged connects")
+        tryVerify(() => start.visible && start.enabled, 5000, "Start log once connected")
+        verify(disconnect.visible)
+        waitForRendering(main.contentItem)
+        verify(!title.visible, "the name gives way to Start log on a phone")
+        let out = pastTheEdge(row, main.contentItem, [])
+        compare(out.length, 0, "before the log, past " + main.contentItem.width + " px: "
+                               + out.join(", "))
+        start.clicked()
+        verify(Bridge.logActive, "the log runs")
+        verify(stop.visible && readout.visible, "Stop log and the readout")
+        verify(!start.visible && !mark.visible && !disconnect.visible,
+               "Start log, Mark and Disconnect step aside")
+        tryVerify(() => Bridge.logBytes > 0 && Bridge.logElapsedMs >= 1000, 10000,
+                  "the readout's second")
+        tryVerify(() => /^\d+:\d\d\n\d+\.\d MB$/.test(readout.text), 2000, readout.text)
+        waitForRendering(main.contentItem)
+        verify(!title.visible, "the name gives way on a phone")
+        out = pastTheEdge(row, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+
+        // A ten-hour log's readout: the name stays away at 420 px of
+        // window and comes back at 420 px of header row, and both fit
+        const gutter = main.width - row.width
+        readout.text = "10:05:07\n123.4 MB"
+        for (const [width, named] of [[420, false], [420 + gutter, true]]) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            compare(title.visible, named, "the name at " + width + " px")
+            out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        }
+        main.width = 384
+
+        const folder = Bridge.recordingFolder
+        stop.clicked()
+        verify(!Bridge.logActive, "the log stopped")
+        verify(!stop.visible && !readout.visible)
+        verify(start.visible && disconnect.visible, "Start log and Disconnect again")
+        const recordings = find(main.contentItem, "recordingsPage")
+        compare(main.currentPage, main.recordingsPage, "on Recordings")
+        tryVerify(() => recordings.viewing, 5000, "the log's folder opens")
+        compare(recordings.openedTitle, Bridge.recordingRow(folder).title)
+
+        // A log the session's end closes leaves the driver where they are
+        const livePage = 2
+        main.gotoPage(livePage)
+        start.clicked()
+        verify(Bridge.logActive, "a second log runs")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.logActive, 5000,
+                  "the disconnect ends the log")
+        compare(main.currentPage, livePage, "still on Live")
+    }
+
+    // The readout's time: m:ss, then h:mm:ss past an hour
+    function test_theLogsTimeReadsMinutesThenHours() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        compare(main.logTimeText(0), "0:00")
+        compare(main.logTimeText(750 * 1000 + 999), "12:30")
+        compare(main.logTimeText(3599 * 1000), "59:59")
+        compare(main.logTimeText(3600 * 1000), "1:00:00")
+        compare(main.logTimeText((10 * 3600 + 5 * 60 + 7) * 1000), "10:05:07")
+        compare(main.logTimeText(-5000), "0:00", "a clock stepped back")
+        compare(main.logTimeText(NaN), "0:00")
+        compare(main.logTimeText(Infinity), "0:00")
+        compare(main.logTimeText(undefined), "0:00")
+    }
+
     // Diagnostics and Recordings take Settings' vehicles, so each report
     // names the picked vehicle's baseline
     function test_theReportsPagesTakeSettingsVehicles() {

@@ -93,6 +93,7 @@ ApplicationWindow {
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
+    readonly property int recordingsPage: 5
     readonly property int settingsPage: 6
 
     function gotoPage(index) { stack.currentIndex = index }
@@ -105,6 +106,26 @@ ApplicationWindow {
     function replayRecording(uri) {
         settingsView.pickRecording(uri)
         gotoPage(settingsPage)
+    }
+    // A log's time as m:ss, or h:mm:ss past an hour; 0:00 for a value
+    // that isn't a time
+    function logTimeText(ms) {
+        const s = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0
+        const two = n => (n < 10 ? "0" : "") + n
+        return s >= 3600 ? Math.floor(s / 3600) + ":" + two(Math.floor(s / 60) % 60) + ":" + two(s % 60)
+                         : Math.floor(s / 60) + ":" + two(s % 60)
+    }
+    // After Stop log the log opens in the viewer (ADR-0056 section 1); a
+    // log the session's end or a failed write closed leaves the page as
+    // it is, since the driver may be reading Live
+    Connections {
+        target: Bridge
+        function onLogStopped(folder, byUser) {
+            if (!byUser)
+                return
+            root.gotoPage(root.recordingsPage)
+            recordingsView.openFolder(folder)
+        }
     }
 
     // ---- Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
@@ -231,10 +252,12 @@ ApplicationWindow {
                     anchors.rightMargin: 16
                     spacing: 12
 
-                    // The name gives way to Mark on a phone's width
+                    // The name gives way to Mark or the log's controls on a
+                    // phone's width
                     Label {
                         objectName: "headerTitle"
-                        visible: !markButton.visible || headerRow.width >= 420
+                        visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
+                                 || headerRow.width >= 420
                         text: qsTr("Havne")
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
@@ -294,18 +317,55 @@ ApplicationWindow {
                     ThemedButton {
                         id: markButton
                         objectName: "markButton"
-                        visible: Bridge.recordingActive
+                        visible: Bridge.recordingActive && !Bridge.logActive
                         text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
                                                    : qsTr("Mark")
                         Accessible.name: qsTr("Mark the recording")
                         onClicked: Bridge.mark()
                     }
 
+                    // The analysis log (ADR-0056 section 1): Live's ticked rows,
+                    // recorded from now on and asked alone until Stop log. A
+                    // replay plays a recording already; Record sessions' own
+                    // recorder is the session's one
+                    ThemedButton {
+                        id: startLogButton
+                        objectName: "startLogButton"
+                        visible: Bridge.connected && !Bridge.recordingActive
+                                 && !Bridge.currentUri.toLowerCase().startsWith("replay://")
+                        enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                        text: qsTr("Start log")
+                        Accessible.name: qsTr("Start a log of the ticked signals")
+                        onClicked: Bridge.startLog()
+                    }
+                    // While a log runs: its time over its folder's size, two
+                    // short lines, so a ten-hour log's readout fits beside
+                    // the name at 420 px
+                    Label {
+                        objectName: "logReadout"
+                        visible: Bridge.logActive
+                        text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
+                                                .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                        horizontalAlignment: Text.AlignRight
+                        font.pixelSize: 12
+                        color: Theme.text
+                    }
+                    ThemedButton {
+                        objectName: "stopLogButton"
+                        visible: Bridge.logActive
+                        enabled: !Bridge.disconnecting
+                        text: qsTr("Stop log")
+                        onClicked: Bridge.stopLog()
+                    }
+
                     // Settings owns connecting: this button opens it, or ends the
                     // session from any page. On Settings itself, its Connect
                     // button is the one to use.
+                    // A log's Stop log takes its place while the log runs
                     ThemedButton {
-                        visible: Bridge.connected || root.currentPage !== root.settingsPage
+                        objectName: "disconnectButton"
+                        visible: !Bridge.logActive
+                                 && (Bridge.connected || root.currentPage !== root.settingsPage)
                         // A teardown can take seconds with a wedged adapter; no
                         // connect starts until it ends
                         enabled: !Bridge.connecting && !Bridge.disconnecting
@@ -387,6 +447,7 @@ ApplicationWindow {
                     }
                     LogPage { objectName: "logPage" }
                     RecordingsPage {
+                        id: recordingsView
                         objectName: "recordingsPage"
                         // A vehicle's baseline: Settings keeps the vehicles
                         vehicles: settingsView.vehicles

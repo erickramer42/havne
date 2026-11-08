@@ -979,6 +979,331 @@ TEST(BridgeTest, AMarkGoesIntoTheRecording)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+namespace {
+
+/* Live's plot: the rows with these ids ticked and every other numeric
+ * row unticked, as a vehicle's choices set them */
+void plotOnly(SignalListModel* model, const std::vector<uint16_t>& ids)
+{
+    QStringList plotted;
+    QStringList unplotted;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r);
+        if (model->data(i, SignalListModel::IsTextRole).toBool()) {
+            continue;
+        }
+        const auto id = static_cast<uint16_t>(
+            model->data(i, SignalListModel::IdRole).toUInt());
+        const QString name =
+            model->data(i, SignalListModel::NameRole).toString();
+        (std::find(ids.begin(), ids.end(), id) != ids.end() ? plotted
+                                                            : unplotted)
+            << name;
+    }
+    model->setPlotChoices(plotted, unplotted);
+}
+
+/* The names of the model's rows with these ids, in the model's order */
+QStringList namesOf(SignalListModel* model, const std::vector<uint16_t>& ids)
+{
+    QStringList names;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r);
+        const auto id = static_cast<uint16_t>(
+            model->data(i, SignalListModel::IdRole).toUInt());
+        if (std::find(ids.begin(), ids.end(), id) != ids.end()) {
+            names << model->data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    return names;
+}
+
+/* A folder's files' sizes summed */
+qint64 folderBytes(const QString& folder)
+{
+    qint64 bytes = 0;
+    for (const QFileInfo& f :
+         QDir(folder).entryInfoList(QDir::Files | QDir::Hidden)) {
+        bytes += f.size();
+    }
+    return bytes;
+}
+
+} // namespace
+
+/* Start log is refused, with its reason in the activity log and no
+ * folder made: while not connected, while Record sessions' recorder is
+ * live (one recorder a session), with no row plotted, and on a replay,
+ * which plays a recording already. */
+TEST(BridgeTest, StartLogIsRefusedWithItsReason)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(QStringLiteral("Log not started: not connected")))
+        << log.join('\n').toStdString();
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://recorded").isEmpty());
+    ASSERT_TRUE(bridge.recordingActive());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: Recording this session already")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.setRecording(false);
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1)
+        << "Record sessions' alone";
+
+    ASSERT_TRUE(bridge.connectSession("mock://unticked").isEmpty());
+    plotOnly(bridge.signalModel(), {});
+    ASSERT_EQ(bridge.signalModel()->subscribedCount(), 0);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: no signal is ticked on Live")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1);
+
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("replay://%1/2026-10-25-engine-start"
+                                           "?profile=obd2&speed=100")
+                                .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES)))
+            .isEmpty());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: a replay plays a recording already")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1);
+}
+
+/* A start the session refuses after its focus took (a recorder of the
+ * test's own holds the session's one slot): the whole set is asked
+ * again, and the folder the start made, holding no frame, is gone. */
+TEST(BridgeTest, AStartLogTheSessionRefusesLeavesNoFolderAndNoFocus)
+{
+    QTemporaryDir root;
+    QTemporaryDir own;
+    ASSERT_TRUE(root.isValid() && own.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession("mock://refused").isEmpty());
+    ASSERT_GT(bridge.signalModel()->subscribedCount(), 0);
+
+    const QByteArray own8 = own.path().toUtf8();
+    const auto attach = [&bridge, &own8]() {
+        ecuio_record_options_t o{};
+        o.root_utf8 = own8.constData();
+        ecuio_recorder_t* r = nullptr;
+        EXPECT_EQ(ecuio_recorder_open(&o, &r), ECUIO_OK);
+        EXPECT_EQ(ecuio_session_record(bridge.sessionForTesting(), r),
+                  ECUIO_OK);
+        return r;
+    };
+    ecuio_recorder_t* holder = attach();
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(QStringLiteral("Log not started: %1")
+                                 .arg(QString::fromUtf8(ecuio_status_string(
+                                     ECUIO_ERR_INVALID_ARGUMENT)))))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty())
+        << recordingFolders(root.path()).join(',').toStdString();
+    (void)ecuio_recorder_close(holder, "the test's");
+
+    // A recorder attached now writes the focus it finds: none
+    ecuio_recorder_t* probe = attach();
+    char folder[4096];
+    uint32_t length = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(probe, folder, sizeof folder, &length),
+              ECUIO_OK);
+    (void)ecuio_recorder_close(probe, "the test's");
+    const QByteArray events =
+        readFile(QString::fromUtf8(folder) + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.contains("\nuri  mock://refused"))
+        << events.toStdString();
+    EXPECT_FALSE(events.contains("\nfocus  ")) << events.toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A write that fails during a log ends it as it ends a Record sessions
+ * recording: "Recording stopped: ..." in the activity log, logStopped
+ * not the user's, the session running on. */
+TEST(BridgeTest, AFailedWriteEndsALogNotAsTheUsers)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    QList<bool> byUser;
+    QObject::connect(&bridge, &SessionBridge::logStopped,
+                     [&byUser](const QString&, bool user) { byUser << user; });
+    ASSERT_TRUE(bridge.connectSession("mock://failing").isEmpty());
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    ASSERT_NE(bridge.recorderForTesting(), nullptr);
+    ecuio_recorder_test_fail_writes(bridge.recorderForTesting());
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    EXPECT_EQ(byUser, QList<bool>{false});
+    EXPECT_TRUE(
+        log.contains(QStringLiteral("Recording stopped: the disk is full")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(bridge.connected());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(byUser, QList<bool>{false}) << "once";
+}
+
+/* A connect started from disconnectingChanged's end (as a QML handler
+ * may) finds the last session's recording closed: that one ends with
+ * the teardown, and the new session's runs on. */
+TEST(BridgeTest, AConnectAtTheTeardownsEndFindsTheRecordingClosed)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://first").isEmpty());
+    const QString first = bridge.recordingFolderUrl().toLocalFile();
+    ASSERT_FALSE(first.isEmpty());
+    bool again = false;
+    QObject::connect(
+        &bridge, &SessionBridge::disconnectingChanged, &bridge,
+        [&bridge, &again]() {
+            if (!bridge.disconnecting() && !again) {
+                again = true;
+                EXPECT_TRUE(bridge.connectSession("mock://second").isEmpty());
+            }
+        });
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(again);
+    EXPECT_TRUE(bridge.connected());
+    EXPECT_TRUE(bridge.recordingActive());
+    const QString second = bridge.recordingFolderUrl().toLocalFile();
+    EXPECT_NE(second, first);
+    EXPECT_TRUE(readFile(first + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
+    EXPECT_FALSE(
+        readFile(second + QStringLiteral("/events.log")).contains("  end  "));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(readFile(second + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
+}
+
+/* A log on a running session (ADR-0056 section 1): its own folder, the
+ * plotted rows its focus line, a readout that counts the folder's bytes
+ * and its time, Stop log's folder in logStopped as the user's; a second
+ * log in the same session, which the session's end closes and reports
+ * with its folder, not as the user's. */
+TEST(BridgeTest, ALogRecordsTheRunningSessionUntilStopped)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    QStringList stopped;
+    QList<bool> byUser;
+    QObject::connect(&bridge, &SessionBridge::logStopped,
+                     [&stopped, &byUser](const QString& folder, bool user) {
+                         stopped << folder;
+                         byUser << user;
+                     });
+
+    ASSERT_TRUE(bridge.connectSession("mock://logged").isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    SignalListModel* model = bridge.signalModel();
+    std::vector<uint16_t> picks;
+    for (int r = 0; r < model->rowCount() && picks.size() < 2; ++r) {
+        const QModelIndex i = model->index(r);
+        if (!model->data(i, SignalListModel::IsTextRole).toBool()) {
+            picks.push_back(static_cast<uint16_t>(
+                model->data(i, SignalListModel::IdRole).toUInt()));
+        }
+    }
+    ASSERT_EQ(picks.size(), 2u);
+    plotOnly(model, picks);
+    ASSERT_EQ(model->subscribedCount(), 2);
+
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_TRUE(bridge.logActive());
+    EXPECT_TRUE(bridge.recordingActive());
+    const QString first = bridge.recordingFolderUrl().toLocalFile();
+    EXPECT_TRUE(log.contains(QStringLiteral("Log started: %1 (2 signals)")
+                                 .arg(bridge.recordingFolder())))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: a log is running already")));
+
+    // The readout's second: the folder's bytes and the time so far
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() {
+            return bridge.logBytes() > 0 && bridge.logElapsedMs() >= 1000;
+        },
+        10000))
+        << bridge.logBytes() << " bytes at " << bridge.logElapsedMs();
+    EXPECT_LE(bridge.logBytes(), folderBytes(first));
+
+    bridge.stopLog();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    ASSERT_EQ(stopped, QStringList{first});
+    EXPECT_EQ(byUser, QList<bool>{true}) << "Stop log's own";
+    EXPECT_EQ(bridge.logBytes(), folderBytes(first))
+        << "the closed folder's size";
+    const qint64 elapsed = bridge.logElapsedMs();
+    EXPECT_GE(elapsed, 1000);
+    spinLoop(50);
+    EXPECT_EQ(bridge.logElapsedMs(), elapsed) << "the last log's, held";
+    const QByteArray events =
+        readFile(first + QStringLiteral("/events.log")).replace("\r\n", "\n");
+    for (const QString& expected :
+         {QStringLiteral("\nfocus  ") + namesOf(model, picks).join(',') +
+              QStringLiteral("\n"),
+          QStringLiteral("  note  Log stopped: "),
+          QStringLiteral("  end  Stop log: ")}) {
+        EXPECT_TRUE(events.contains(expected.toUtf8()))
+            << expected.toStdString() << "\n"
+            << events.toStdString();
+    }
+
+    // The slot is free again, and the session's end closes the next
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    const QString second = bridge.recordingFolderUrl().toLocalFile();
+    EXPECT_NE(second, first);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_FALSE(bridge.logActive());
+    ASSERT_EQ(stopped, (QStringList{first, second}));
+    EXPECT_EQ(byUser, (QList<bool>{true, false}))
+        << "the session's end isn't the user's";
+    EXPECT_TRUE(readFile(second + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 2);
+}
+
 /* An app closed while connected: the bridge's destructor destroys the
  * session itself and ends the recording, with no disconnect first. */
 TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
@@ -3492,6 +3817,166 @@ TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
                                    QStringLiteral("Fuel Pressure")}));
     EXPECT_EQ(bridge.liveSignalModel()->rowCount(), model->rowCount() - 2);
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+/* The obd2 set's id for Service 01 PID pid */
+uint16_t obd2IdOf(uint8_t pid)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            d.mux_key == (0x4100u | pid)) {
+            return d.id;
+        }
+    }
+    ADD_FAILURE() << "no def reads PID " << int(pid);
+    return 0;
+}
+
+/* The next 16 writes after a reset of the fake's page, as the Service 01
+ * PIDs they ask; empty when they don't come or one isn't a Service 01
+ * request */
+std::vector<uint8_t> nextPids()
+{
+    fake_control::reset(fakePage());
+    if (!spinUntil([]() { return fake_control::writes(fakePage()) >= 16; },
+                   5000, 10)) {
+        return {};
+    }
+    std::vector<uint8_t> pids;
+    for (uint32_t i = 0; i < 16; ++i) {
+        fake_control::Write w{};
+        if (!fake_control::recorded_write(fakePage(), i, &w) || w.size < 6 ||
+            w.data[4] != 0x01) {
+            return {};
+        }
+        pids.push_back(w.data[5]);
+    }
+    return pids;
+}
+
+bool onlyThese(const std::vector<uint8_t>& pids,
+               std::initializer_list<uint8_t> picks)
+{
+    return !pids.empty() &&
+           std::all_of(pids.begin(), pids.end(), [&picks](uint8_t pid) {
+               return std::find(picks.begin(), picks.end(), pid) != picks.end();
+           });
+}
+
+} // namespace
+
+/* Start log over the fake ECU (ADR-0056 sections 2 and 3): the session
+ * asks the plotted PIDs alone, ticks on Live meanwhile leave that so,
+ * the recording's time starts at Start (not at the connect), and Stop
+ * asks the whole set again. */
+TEST(BridgeTest, ALogAsksThePlottedPidsAlone)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList stopped;
+    QObject::connect(
+        &bridge, &SessionBridge::logStopped,
+        [&stopped](const QString& folder, bool) { stopped << folder; });
+    const QString uri =
+        QStringLiteral("j2534://%1?profile=obd2&filter=0x7E8&probe=0&"
+                       "identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    QElapsedTimer age;
+    age.start();
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    const std::vector<uint16_t> picks = {obd2IdOf(0x0C), obd2IdOf(0x0D)};
+    plotOnly(model, picks);
+    ASSERT_EQ(model->subscribedCount(), 2);
+    // A session old enough that a recording timed from its start shows it
+    ASSERT_TRUE(spinUntil([&]() { return age.elapsed() >= 2000; }, 10000));
+    const std::vector<uint8_t> before = nextPids();
+    ASSERT_FALSE(before.empty());
+    ASSERT_FALSE(onlyThese(before, {0x0C, 0x0D}))
+        << "the whole set is asked before the log";
+
+    const qint64 ageAtStartMs = age.elapsed();
+    ASSERT_TRUE(bridge.startLog());
+    const QString folder = bridge.recordingFolderUrl().toLocalFile();
+    ASSERT_TRUE(spinUntil([]() { return onlyThese(nextPids(), {0x0C, 0x0D}); },
+                          15000, 10))
+        << "the rotation never narrowed to 0C and 0D";
+
+    // A tick meanwhile plots the row and leaves the focus as it was
+    plotOnly(model, {picks[0], picks[1], obd2IdOf(0x05)});
+    ASSERT_EQ(model->subscribedCount(), 3);
+    for (int round = 0; round < 2; ++round) {
+        const std::vector<uint8_t> pids = nextPids();
+        EXPECT_TRUE(onlyThese(pids, {0x0C, 0x0D})) << "round " << round;
+    }
+
+    bridge.stopLog();
+    ASSERT_EQ(stopped, QStringList{folder});
+    ASSERT_TRUE(spinUntil(
+        []() {
+            const std::vector<uint8_t> pids = nextPids();
+            return !pids.empty() && !onlyThese(pids, {0x0C, 0x0D, 0x05});
+        },
+        15000, 10))
+        << "the whole set never came back";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QList<QByteArray> rows =
+        fileLines(folder + QStringLiteral("/frames.csv"));
+    ASSERT_GE(rows.size(), 2) << "no frame in the log";
+    const qint64 firstHostUs = rows[1].split(',')[0].toLongLong();
+    EXPECT_LT(firstHostUs, ageAtStartMs * 1000 / 2)
+        << "timed from the connect, " << ageAtStartMs << " ms before Start";
+    const QByteArray events = readFile(folder + QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains(
+        (QStringLiteral("focus  ") + namesOf(model, picks).join(',')).toUtf8()))
+        << events.toStdString();
+}
+
+/* A focus core refuses (under ?poll=0x0C, 0D alone leaves nothing to
+ * ask) refuses Start log with core's words and opens no folder; the
+ * polled PID's is taken. */
+TEST(BridgeTest, AFocusCoreRefusesStartsNoLog)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral(
+            "j2534://%1?profile=obd2&poll=0x0C&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+
+    plotOnly(bridge.signalModel(), {obd2IdOf(0x0D)});
+    ASSERT_EQ(bridge.signalModel()->subscribedCount(), 1);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "Log not started: the focus leaves nothing to request: none of the "
+        "picked signals is asked on this session")))
+        << log.join('\n').toStdString();
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty());
+
+    plotOnly(bridge.signalModel(), {obd2IdOf(0x0C)});
+    EXPECT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    bridge.stopLog();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1);
 }
 
 /* ADR-0051 section 3: a DID the fake ECU holds no reply for (it answers

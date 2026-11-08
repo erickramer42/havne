@@ -1212,6 +1212,17 @@ QStringList SignalListModel::plottedNames() const
     return names;
 }
 
+std::vector<uint16_t> SignalListModel::plottedIds() const
+{
+    std::vector<uint16_t> ids;
+    for (const Entry& e : m_entries) {
+        if (e.subscribed && !e.hidden) {
+            ids.push_back(e.id);
+        }
+    }
+    return ids;
+}
+
 QStringList SignalListModel::unplottedNames() const
 {
     QStringList names;
@@ -1461,6 +1472,14 @@ SessionBridge::SessionBridge(QObject* parent)
         notifyDropped();
         flushValues();
         pollRecording();
+    });
+
+    // The log's readout: its time and its folder's size, once a second
+    m_logTimer = new QTimer(this);
+    m_logTimer->setInterval(1000);
+    connect(m_logTimer, &QTimer::timeout, this, [this]() {
+        countLogBytes();
+        emit logProgressChanged();
     });
 
     // The activity lines go into the recording's events.log as notes,
@@ -2726,14 +2745,13 @@ void SessionBridge::disconnectSession()
         QMetaObject::invokeMethod(
             this,
             [this, uri, timing, rows]() {
-                // JOIN FIRST, then clear the flag, then emit, as the
-                // connect completion does: a QML handler inside
-                // disconnectingChanged may start the next connect.
+                // JOIN FIRST, then close the recording, then clear the
+                // flag and emit, as the connect completion does: a QML
+                // handler inside disconnectingChanged may start the next
+                // connect, which must find this session's recorder gone.
                 if (m_disconnectThread.joinable()) {
                     m_disconnectThread.join();
                 }
-                m_disconnecting = false;
-                emit disconnectingChanged();
                 const QString timingLine = timingText(timing, rows);
                 if (!timingLine.isEmpty()) {
                     emit logMessage(timingLine);
@@ -2741,6 +2759,8 @@ void SessionBridge::disconnectSession()
                 emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
                 // Kept open until here, so it brackets the whole teardown
                 stopRecording(QStringLiteral("disconnected"));
+                m_disconnecting = false;
+                emit disconnectingChanged();
             },
             Qt::QueuedConnection);
     });
@@ -2864,12 +2884,47 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
             "Not recording: a replay plays a recording already"));
         return;
     }
+    ecuio_recorder_t* recorder =
+        openRecorder(session, uri, QStringLiteral("Recording failed"));
+    if (recorder == nullptr) {
+        return;
+    }
+    adoptRecorder(recorder);
+    emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
+}
 
+namespace {
+
+// A recorder's folder, absolute
+QString folderOf(ecuio_recorder_t* recorder)
+{
+    char folder[4096];
+    uint32_t length = 0;
+    (void)ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length);
+    return QString::fromUtf8(folder);
+}
+
+// Whether frames.csv holds a row past its header
+bool holdsFrames(const QString& folder)
+{
+    QFile frames(QDir(folder).filePath(QStringLiteral("frames.csv")));
+    if (!frames.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    (void)frames.readLine();
+    return !frames.readLine().trimmed().isEmpty();
+}
+
+} // namespace
+
+ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
+                                              const QString& uri,
+                                              const QString& failed)
+{
     const QString root = recordingsRoot();
     if (root.isEmpty()) {
-        emit logMessage(
-            QStringLiteral("Recording failed: no Documents folder"));
-        return;
+        emit logMessage(QStringLiteral("%1: no Documents folder").arg(failed));
+        return nullptr;
     }
 
     // The picked vehicle names an adapter's session only (ADR-0027 section 1):
@@ -2909,9 +2964,9 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
     ecuio_recorder_t* recorder = nullptr;
     ecuio_status_t rc = ecuio_recorder_open(&o, &recorder);
     if (rc != ECUIO_OK) {
-        emit logMessage(QStringLiteral("Recording failed: %1")
-                            .arg(QString::fromUtf8(ecuio_last_error_detail())));
-        return;
+        emit logMessage(QStringLiteral("%1: %2").arg(
+            failed, QString::fromUtf8(ecuio_last_error_detail())));
+        return nullptr;
     }
     // The signal file decoding the session goes in as signals.json
     // (ADR-0051 section 4): a vehicle's, its hash the store copy's name,
@@ -2926,26 +2981,116 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
         rc = ecuio_session_record(session, recorder);
     }
     if (rc != ECUIO_OK) {
+        // The folder is this call's own, made by the open above; a
+        // session never attached wrote it no frame, so nothing is lost
+        const QString folder = folderOf(recorder);
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");
-        emit logMessage(QStringLiteral("Recording failed: %1")
-                            .arg(QString::fromUtf8(ecuio_status_string(rc))));
-        return;
+        if (!holdsFrames(folder)) {
+            (void)QDir(folder).removeRecursively();
+        }
+        emit logMessage(QStringLiteral("%1: %2").arg(
+            failed, QString::fromUtf8(ecuio_status_string(rc))));
+        return nullptr;
     }
-    char folder[4096];
-    uint32_t length = 0;
-    (void)ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length);
+    return recorder;
+}
+
+void SessionBridge::adoptRecorder(ecuio_recorder_t* recorder)
+{
     m_recorder = recorder;
-    m_recordingFolder = QString::fromUtf8(folder);
+    m_recordingFolder = folderOf(recorder);
     if (m_markCount != 0) {
         m_markCount = 0;
         emit markCountChanged();
     }
     emit recordingStateChanged();
-    emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
 }
 
-void SessionBridge::stopRecording(const QString& why)
+bool SessionBridge::startLog()
+{
+    const auto refuse = [this](const QString& why) {
+        emit logMessage(QStringLiteral("Log not started: %1").arg(why));
+        return false;
+    };
+    if (m_logActive) {
+        return refuse(QStringLiteral("a log is running already"));
+    }
+    if (m_session == nullptr || !m_connected.load(std::memory_order_acquire)) {
+        return refuse(QStringLiteral("not connected"));
+    }
+    // One recorder a session: Record sessions' is attached from the start
+    if (m_recorder != nullptr) {
+        return refuse(QStringLiteral("Recording this session already"));
+    }
+    if (!m_recordReplays && m_currentUri.startsWith(QLatin1String("replay://"),
+                                                    Qt::CaseInsensitive)) {
+        return refuse(QStringLiteral("a replay plays a recording already"));
+    }
+    const std::vector<uint16_t> ids = m_signalModel->plottedIds();
+    if (ids.empty()) {
+        return refuse(QStringLiteral("no signal is ticked on Live"));
+    }
+    // The focus first, so one core refuses (it would leave nothing to
+    // ask) opens no folder
+    const ecuio_status_t rc = ecuio_session_set_focus(
+        m_session, ids.data(), static_cast<uint32_t>(ids.size()));
+    if (rc != ECUIO_OK) {
+        const QString detail = QString::fromUtf8(ecuio_last_error_detail());
+        return refuse(detail.isEmpty() ? failureText(rc) : detail);
+    }
+    ecuio_recorder_t* recorder = openRecorder(
+        m_session, m_currentUri, QStringLiteral("Log not started"));
+    if (recorder == nullptr) {
+        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        return false;
+    }
+    m_logActive = true;
+    m_logClock.restart();
+    m_logElapsedMs = 0;
+    m_logBytes = 0;
+    adoptRecorder(recorder);
+    m_logTimer->start();
+    emit logStateChanged();
+    emit logProgressChanged();
+    emit logMessage(QStringLiteral("Log started: %1 (%2)")
+                        .arg(recordingFolder(),
+                             signalCountText(static_cast<int>(ids.size()))));
+    return true;
+}
+
+void SessionBridge::stopLog()
+{
+    // A teardown under way ends the log itself, once the session is gone
+    if (!m_logActive || m_disconnecting) {
+        return;
+    }
+    emit logMessage(QStringLiteral("Log stopped: %1").arg(recordingFolder()));
+    stopRecording(QStringLiteral("Stop log"), true);
+}
+
+qint64 SessionBridge::logElapsedMs() const
+{
+    return m_logActive ? m_logClock.elapsed() : m_logElapsedMs;
+}
+
+void SessionBridge::countLogBytes()
+{
+    // QDir("") would list the working directory
+    if (m_recordingFolder.isEmpty()) {
+        m_logBytes = 0;
+        return;
+    }
+    qint64 bytes = 0;
+    const QFileInfoList files =
+        QDir(m_recordingFolder).entryInfoList(QDir::Files | QDir::Hidden);
+    for (const QFileInfo& f : files) {
+        bytes += f.size();
+    }
+    m_logBytes = bytes;
+}
+
+void SessionBridge::stopRecording(const QString& why, bool byUser)
 {
     if (m_recorder == nullptr) {
         return;
@@ -2965,6 +3110,21 @@ void SessionBridge::stopRecording(const QString& why)
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+    if (!m_logActive) {
+        return;
+    }
+    // A session still running asks its whole set again; one torn down
+    // took its focus with it
+    if (m_session != nullptr) {
+        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+    }
+    m_logTimer->stop();
+    m_logElapsedMs = m_logClock.elapsed();
+    m_logActive = false;
+    countLogBytes(); // closed: the folder's final size
+    emit logStateChanged();
+    emit logProgressChanged();
+    emit logStopped(m_recordingFolder, byUser);
 }
 
 bool SessionBridge::mark(const QString& label)

@@ -439,6 +439,9 @@ public:
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int hiddenCount() const { return m_hiddenCount; }
+    // The ids of the rows the chart plots and Live shows, in the model's
+    // order: subscribedCount of them, the focus Start log asks
+    std::vector<uint16_t> plottedIds() const;
     // Each number's and enumeration's newest value as core decoded it
     // (the def's unit, an enumeration's raw number; never the display's
     // conversion), aged by the model's clock from the window that brought
@@ -692,6 +695,16 @@ class SessionBridge : public QObject
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
     // The marks put in the recording under way, or the last one
     Q_PROPERTY(int markCount READ markCount NOTIFY markCountChanged)
+    // The analysis log (ADR-0056 section 1): Start log records the running
+    // session from that moment, its requests narrowed to the rows Live
+    // plots then (the focus), and Stop log closes it. It takes the
+    // recorder slot Record sessions uses (recordingActive holds while it
+    // runs): one recorder a session.
+    Q_PROPERTY(bool logActive READ logActive NOTIFY logStateChanged)
+    // The log's time so far and its folder's size in bytes, counted once
+    // a second; the last log's once it ends
+    Q_PROPERTY(qint64 logElapsedMs READ logElapsedMs NOTIFY logProgressChanged)
+    Q_PROPERTY(qint64 logBytes READ logBytes NOTIFY logProgressChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
@@ -1000,6 +1013,21 @@ public:
     // "Mark N" for an empty one, N counting this recording's marks. False
     // with no recording, or one core refused it (a write failed).
     Q_INVOKABLE bool mark(const QString& label = QString());
+    bool logActive() const { return m_logActive; }
+    qint64 logElapsedMs() const;
+    qint64 logBytes() const { return m_logBytes; }
+    // Start log: the plotted rows' ids (SignalListModel::plottedIds) as
+    // the session's focus, then a recorder opened as Record sessions'
+    // (the same root, label and caller lines) and attached to the running
+    // session. False, with the reason in the activity log and nothing
+    // opened, while not connected, on a replay, while a recorder is live,
+    // with no row plotted, or when core refuses the focus. Ticks on Live
+    // while it runs change the chart, never the focus.
+    Q_INVOKABLE bool startLog();
+    // Stop log: the recording closed, the whole set asked again, then
+    // logStopped; nothing with no log running, or while disconnecting
+    // (the teardown's end closes it)
+    Q_INVOKABLE void stopLog();
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
     // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
@@ -1126,6 +1154,9 @@ public:
     // Test seam: the session's recorder, for core's internal.h seams
     // (a failed write); nullptr with none
     ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
+    // Test seam: the running session, for a recorder of the test's own
+    // (an attach the session refuses); nullptr with none
+    ecuio_session_t* sessionForTesting() const { return m_session; }
     // Test seam: how long Read once waits for its reply once the
     // session starts (3 s)
     void setReadOnceWaitForTesting(int ms) { m_readOnceWaitMs = ms; }
@@ -1173,6 +1204,12 @@ signals:
     void recordingChanged();
     void recordingStateChanged();
     void markCountChanged();
+    void logStateChanged();
+    void logProgressChanged();
+    // A log ended: byUser for Stop log, false for the session's end or a
+    // failed write (reported as a Record sessions recording's end is).
+    // The folder is absolute, as recordingRow takes it
+    void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
@@ -1207,8 +1244,21 @@ private:
     // Before the session starts: the recorder opened on recordingsRoot()
     // and attached, when the switch is on and the URI isn't a replay's
     void startRecording(ecuio_session_t* session, const QString& uri);
-    // Its last notes, then closed with why; "" with nothing open
-    void stopRecording(const QString& why);
+    // A recorder opened on recordingsRoot() with the app's caller lines
+    // and the session's signal file, and attached to it; nullptr, with
+    // the reason logged after `failed` ("Recording failed"), when it
+    // can't be
+    ecuio_recorder_t* openRecorder(ecuio_session_t* session, const QString& uri,
+                                   const QString& failed);
+    // m_recorder from here, its folder shown and its marks from 0
+    void adoptRecorder(ecuio_recorder_t* recorder);
+    // Its last notes, then closed with why; "" with nothing open. A log
+    // ends with it: the whole set asked again while the session runs,
+    // its readout's last count, logStopped (byUser: Stop log's)
+    void stopRecording(const QString& why, bool byUser = false);
+    // The log's folder size, its files' sum (a handful, stat'd once a
+    // second on the GUI thread)
+    void countLogBytes();
     // The tick: a write that failed stops the recording, once
     void pollRecording();
     // An activity line core's recording writes in its own form (a link
@@ -1403,6 +1453,11 @@ private:
     QString m_recordingFolder;         // the current or last one, absolute
     bool m_noting = true;              // logUnnoted clears it for its line
     int m_markCount = 0;               // the recording's marks, from 0
+    bool m_logActive = false;          // m_recorder is Start log's
+    HostElapsedTimer m_logClock;       // from Start log, sleeps counted
+    qint64 m_logElapsedMs = 0;         // the last log's, once it ends
+    qint64 m_logBytes = 0;             // countLogBytes' last sum
+    QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only
