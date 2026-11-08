@@ -2254,27 +2254,50 @@ Waited wait_n(ecuio_precise_wait& w, std::chrono::microseconds d, int n)
 
 } // namespace
 
-/* On Windows the waits run on a high-resolution timer (10 1803 and
- * later), which ends a 2 ms wait about on time where a plain sleep ends
- * it at the 15.6 ms step; elsewhere a plain sleep, on time on Linux.
- * Never shorter than asked either way. The median's bound is a quarter
- * of the step, a timer that rounds to it fails it. Not on macOS: CI's
- * runners end a 2 ms sleep 10 to 18 ms late, a plain sleep core can't
- * shorten, so there only the lower bound is judged. */
+/* Core's promise is that a wait never ends early, and on Windows (10
+ * 1803 and later) that the high-resolution timer ends a 2 ms wait about
+ * on time where a plain sleep ends it at the scheduler's 15.6 ms step.
+ * Twenty precise waits and twenty plain ones are timed in the same
+ * round, and the precise waits' median must be under 4 ms (a quarter of
+ * the step, which an idle machine meets) or under half the plain
+ * sleeps' (which a loaded machine meets, since load delays both alike);
+ * a machine whose scheduler already steps at about 1 ms meets the first
+ * with a plain median the second can't halve. Up to three rounds, the
+ * best kept, since one preempted round proves nothing. Where there is
+ * no such timer (Linux, macOS: a plain sleep, which CI's macOS runners
+ * end 10 to 18 ms late and core can't shorten) the two are one path and
+ * only the floor is judged. Mutation-checked 2026-11-08: the timer
+ * ignored in sleep_for (both medians the step's) fails both bounds. */
 TEST(CoreTest, APreciseWaitEndsOnTime)
 {
     ecuio_precise_wait w;
+    ecuio_precise_wait plain(false);
 #ifdef _WIN32
     ASSERT_TRUE(w.high_resolution())
         << "CreateWaitableTimerExW refused the flag";
 #endif
-    const Waited got = wait_n(w, std::chrono::milliseconds(2), 20);
-    EXPECT_GE(got.shortest_us, 2000) << "a wait ended early";
-#ifndef __APPLE__
-    EXPECT_LT(got.median_us, 4000) << "the waits ended on a timer's step";
-#endif
+    Waited got;
+    Waited got_plain;
+    const auto on_time = [](const Waited& precise, const Waited& plain_sleep) {
+        return precise.median_us < 4000 ||
+               precise.median_us * 2 < plain_sleep.median_us;
+    };
+    for (int round = 0; round < 3; ++round) {
+        got = wait_n(w, std::chrono::milliseconds(2), 20);
+        got_plain = wait_n(plain, std::chrono::milliseconds(2), 20);
+        ASSERT_GE(got.shortest_us, 2000) << "a wait ended early";
+        if (!w.high_resolution() || on_time(got, got_plain)) {
+            break;
+        }
+    }
+    if (w.high_resolution()) {
+        EXPECT_TRUE(on_time(got, got_plain))
+            << "the precise waits ended on the plain sleep's step: "
+            << got.median_us << " us against " << got_plain.median_us;
+    }
     RecordProperty("mean_us", static_cast<int>(got.mean_us));
     RecordProperty("median_us", static_cast<int>(got.median_us));
+    RecordProperty("plain_median_us", static_cast<int>(got_plain.median_us));
 }
 
 /* A wait until a time ends at a stop within a piece: a second's wait

@@ -1382,10 +1382,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
         string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
+        # A file's bound is a hang guard, not a measurement: each case
+        # waits for what it checks with tryVerify, and tst_recordings
+        # alone opens a 10,200-frame recording, which a machine building
+        # beside the suite took past 60 s in all
         add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
         set_tests_properties(QmlTest.${_qml_name} PROPERTIES
             ENVIRONMENT "${_qml_test_env}"
-            TIMEOUT 60
+            TIMEOUT 180
         )
     endforeach()
 endif()
