@@ -287,3 +287,41 @@ v0.7.1's, decided 2026-11-07.
   ends. The front ends see each drop in the support report, as for any
   dropped request. Between a drop and the worker's next take, the
   askable map the call judges by can still name a PID no longer asked.
+
+**Section 3, the recorder attached to a running session, as built:**
+
+- `ecuio_session_record` takes a started session. The recording starts
+  at the call, whose moment is its zero, not at a frame boundary on
+  the worker: the worker reads the recorder and its zero together, so
+  every frame dispatched after the attach is in, with its `host_us`
+  from that zero. A second attach while one is live is refused, as the
+  section says; a recorder that has closed frees the session for
+  another, which counts from its own attach. The session's link exists
+  from create, so a worker started before the attach finds it.
+- The header's `focus` line is the focus as it stands at the attach,
+  the names in the order they were picked, written when one is set;
+  the `link` line is the link's state and episode count at the attach
+  (`ecuio_session_get_error_state`'s pair, in the link lines' words),
+  written for a started session only. Both go between `frame flags` and
+  the `signal` lines; [ADR-0049](0049-recordings-in-core.md)'s appendix
+  of 2026-11-07 has the format.
+- `latency.csv`'s `t_s` moves to the recording's clock with it (that
+  appendix), so a log begun mid-session plots its reply timing against
+  its frames.
+- Python: `Session.record(root)` after `start()` as before it; one
+  recorder at a time.
+- The header's `link` line says `healthy (state 0, 0 episodes)` for a
+  link that is OK with no episode; `link_text`'s "recovered" stays for
+  the event lines, where OK after a vehicle timeout (which counts no
+  episode) is a recovery.
+- Reply timing's counts in `latency.csv` are the session's, cumulative
+  since it started, as in any recording: a log begun mid-session finds
+  them already counted up, and the rows still say which requests
+  changed since the last snapshot. The attach resets nothing.
+- A refused attach (another recorder is live) leaves the recorder as it
+  was: everything the attach makes goes into locals and the recorder
+  takes them only once the link is taken, under its mutex, so the same
+  recorder attaches whole on a later try.
+- `ecuio_session_record` runs on the thread that starts and closes the
+  session, as `recording.h` says; `started` stays a plain bool.
+- `RecorderTest`'s cases are listed in that appendix.

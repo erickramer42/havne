@@ -404,6 +404,11 @@ last line for a request is its total. The `end` line carries `isotp`
 reassembles. A session with no rotation writes neither, so the golden
 runs (mock, replay) are unchanged. `CliTimingTest`.
 
+Amended 2026-11-07: a recording's `latency.csv` writes `t_s` on the
+recording's clock ([ADR-0017](0017-session-recording.md)'s appendix of
+2026-11-07); the `timing` lines' `t_s` stays the snapshot's session
+time, the clock every time in the CLI's lines runs on.
+
 ## Appendix: 2026-11-01, a DID scan's progress and end
 
 Schema 1 grows by one type and one end reason

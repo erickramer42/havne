@@ -268,6 +268,39 @@ def test_a_clear_of_the_simulated_car_goes_through_core_s_gate():
         assert s.diagnostics(0).lists[c.ECUIO_DIAG_STORED].reported == 0
 
 
+def test_a_recorder_opened_after_start_counts_from_then(tmp_path):
+    # The analysis log (ADR-0056 section 3): a recorder on a running
+    # session holds the frames from its open, its host_us from then,
+    # while the mock's timestamp_us counts from the start
+    with havne.Session("mock://py") as s:
+        values = s.values()
+        s.start()
+        assert take(values, 1), "the mock's values"
+        time.sleep(0.3)
+        rec = s.record(tmp_path)
+        with pytest.raises(havne.Error) as e:
+            s.record(tmp_path)
+        assert e.value.name == "INVALID_ARGUMENT", "one recorder at a time"
+        folder = rec.folder
+        # What was queued before the attach drains first; a value stamped
+        # well past the newest of those came from a frame dispatched
+        # after it, which the recording holds
+        at_attach = max([v.timestamp_us for v in values.read(0)] + [0])
+        newest, until = at_attach, time.monotonic() + 5
+        while newest <= at_attach + 200_000 and time.monotonic() < until:
+            for v in values.read(0.1):
+                newest = max(newest, v.timestamp_us)
+        assert newest > at_attach + 200_000, "values from after the attach"
+    assert ended(folder)
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        assert "\nlink  healthy (state 0, 0 episodes)\n" in f.read()
+    with open(os.path.join(folder, "frames.csv"), encoding="utf-8") as f:
+        rows = f.read().splitlines()[1:]
+    assert len(rows) >= 2
+    host_us, timestamp_us = (int(x) for x in rows[0].split(",")[:2])
+    assert timestamp_us - host_us >= 200_000, "the session was older than the recording"
+
+
 def test_a_focus_takes_ids_or_names_and_refuses_a_stranger():
     with havne.Session("mock://py") as s:
         sid, (name, unit) = next(iter(s.signals.items()))

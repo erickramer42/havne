@@ -224,3 +224,15 @@ stand.
 - The appendices of 2026-10-29 and 2026-10-31 hold, with core writing
   both: the sleep is an `asleep` line, and `latency.csv` keeps its
   snapshots.
+
+## Appendix: `t_s` on the recording's clock (2026-11-07)
+
+The appendix of 2026-10-31 wrote each `latency.csv` row under its
+snapshot's `t_s`, the session time. With a recorder that attaches to a
+started session ([ADR-0056](0056-analysis-log.md) section 3,
+[ADR-0049](0049-recordings-in-core.md)'s appendix of 2026-11-07), `t_s`
+is the recording's time of the call that published the snapshot,
+`host_us` to the ms as every other file's time, so a recording's files
+share one axis. For a recorder attached before start the two differ by
+the delay between the attach and start alone. The columns and the
+format are unchanged, and a recording made before this reads as it did.

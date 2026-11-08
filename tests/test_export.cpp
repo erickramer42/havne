@@ -1160,7 +1160,8 @@ const std::vector<uint8_t> kWholeReply = {0x41, 0x0C, 0x1A, 0xF8, 0x0D,
 const std::vector<uint8_t> kTwelve = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
 
 /* A recording with every file the export knows and one it doesn't: an
- * ELM327 session through the app, a VIN reply in its frames and its
+ * ELM327 session through the app begun after start (a focus and the
+ * link's state on the header), a VIN reply in its frames and its
  * values, a marker, reply timing and a file of the user's */
 void whole_recording(const Folder& f)
 {
@@ -1173,6 +1174,8 @@ void whole_recording(const Folder& f)
                         "filter=7E8&label=Daily\n"
                         "profile  obd2\n"
                         "frame flags  complete\n"
+                        "focus  RPM\n"
+                        "link  recovered (state 0, 1 episode)\n"
                         "signal  RPM,number,rpm,0,1\n"
                         "signal  VIN,text,,0,0\n"
                         "caller  Havne 0.5.1\n"
@@ -1239,6 +1242,8 @@ const char* const kHead =
     "uri  elm327://<address>?profile=obd2&serial=115200&filter=7E8\n"
     "profile  obd2\n"
     "frame flags  complete\n"
+    "focus  RPM\n"
+    "link  recovered (state 0, 1 episode)\n"
     "signal  RPM,number,rpm,0,1\n"
     "signal  VIN,text,,0,0\n"
     "caller  Havne 0.5.1\n"

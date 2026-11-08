@@ -296,3 +296,14 @@ message: packed requests read a median 24.6 ms against the bus's
 fake as the VX holds a call asked to wait under 10 ms for 10 ms. Timed
 on the car the same day (that sheet's A2): packed 16.4 ms, unpacked
 4.6, each call held a median under 1 ms.
+
+## Appendix: `t_s` in a recording (2026-11-07)
+
+Section 3's `t_s` is the snapshot's session time in the CLI's `timing`
+lines, as written. In a recording's `latency.csv` it is the recording's
+time of the call that published the snapshot, to the ms, since a
+recorder can attach to a started session ([ADR-0056](0056-analysis-log.md)
+section 3): the session's time would put a mid-session log's reply
+timing ahead of its frames. The snapshot's cadence and the columns are
+unchanged; [ADR-0017](0017-session-recording.md)'s appendix of
+2026-11-07 has what an older recording holds.

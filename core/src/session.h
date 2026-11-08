@@ -114,9 +114,10 @@ struct ecuio_session {
     /* A replay's: its source's frame flags line (ADR-0049 section 2),
      * set by attach, read by a recording's attach */
     std::string source_frame_flags;
-    /* The recorder's link (ADR-0049, recorder.h), set by
-     * ecuio_session_record before start and kept until the session is
-     * freed, so the worker reads it without a lock */
+    /* The recorder's link (ADR-0049, recorder.h), made by
+     * ecuio_session_create and kept until the session is freed, so the
+     * worker reads it without a lock; ecuio_session_record puts its
+     * recorder in it, before or after start (ADR-0056 section 3) */
     std::shared_ptr<ecuio_record_link> record_link;
     /* The pull queues' links (ecuio/queue.h, pull_queue.h), set by
      * ecuio_queue_open before start and kept until the session is freed,

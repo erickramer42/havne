@@ -1573,3 +1573,57 @@ frames, a refill during a read, a stopped read that ends last, clear),
 `QmlTest.recordings` (the switch, the rows following the view, a tap's
 cursor, a recording with no frames, the note), `QmlTest.phone` (the
 Frames view at a phone's width).
+
+## Appendix: a recorder attached after start (2026-11-07)
+
+[ADR-0056](0056-analysis-log.md) section 3 amends the attach rule
+above: `ecuio_session_record` takes a session before or after
+`ecuio_session_start`. Before start is Record sessions, the recording
+holding the session's every frame; after start is the analysis log, the
+recording holding the frames from the attach on. What changes with it:
+
+- The session makes its `ecuio_record_link` at create and keeps it; the
+  attach puts the recorder in it under the link's mutex, the zero
+  stored before the recorder, so a worker that sees the recorder sees
+  its zero. One recorder at a time: a second while one is attached is
+  `ECUIO_ERR_INVALID_ARGUMENT`; once that one has closed, another
+  attaches and counts from its own attach. A recorder's close lets go
+  of the link only while the link holds that recorder, so a close that
+  comes after a successor's attach leaves the successor taking frames.
+- The header of a recording begun after start gains two lines between
+  `frame flags` and the `signal` lines: `focus  <name>,...`, the
+  session's focus at the attach in the order it was picked (none: no
+  line, and a session that hasn't started can have one too), and
+  `link  <words> (state N, M episodes)`, the link's state and episode
+  count at the attach in the words of the link lines, except that OK
+  with no episode reads `healthy` where an event line would say
+  `recovered` (a session that hasn't started writes none). The readers
+  pass header keys they don't know by, and the folder export keeps both
+  lines.
+- `host_us` counts from the attach in every file, `latency.csv`'s `t_s`
+  included: a snapshot's row carries the recording's time of the call
+  that published it, to the ms, not the snapshot's session time, so
+  `latency.csv` plots against the other files on one axis. The
+  snapshot's cadence (every 10 s of session time) is unchanged. A
+  recording made before this writes `t_s` as session time, which
+  differs from the recording's time by the delay between the attach
+  and start alone: nothing in the format says which, no version
+  changes, and the one reader that takes `t_s` (the folder export's
+  range) reads it as the recording's time, as it did.
+- `ecuio_recording_check`'s late-ID rule judges from the recording's
+  first frame, which for an analysis log is the attach: an ECU first
+  seen late in such a recording may have been speaking since the
+  session's start.
+
+Tests: `RecorderTest.ARecorderAttachedAfterStartCountsFromItsAttach`,
+`.TheHeaderHoldsTheFocusAndTheLinkAtTheAttach`,
+`.ASecondRecorderAttachesOnceTheFirstHasClosed`,
+`.AClosedRecorderNeverDetachesItsSuccessor`,
+`.ARecordingBegunMidSessionOpensInTheReader`,
+`.ReplyTimingGoesToLatencyCsvEveryTenSeconds` (each `t_s` between the
+test's own clock reads around its call, never a fixed bound),
+`.TheFinalTimingWaitsASecondForRoom` (the time of the call, not of the
+room that came), `.OpenAndAttachRefuseWhatTheyMust`,
+`.RecordersComeAndGoWhileTheSessionStreams` (attach and close in a loop
+under the mock's frames, for the sanitizers);
+`PythonTest.test_session`'s recorder opened after `start()`.
