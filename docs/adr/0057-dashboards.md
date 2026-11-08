@@ -1,7 +1,7 @@
 # ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
 
 - **Status:** Accepted. Built: section 10's step 1 (the appendix of
-  2026-11-08); steps 2 to 8 not built.
+  2026-11-07); steps 2 to 8 not built.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
   gets final display values); [ADR-0022](0022-display-units.md) (the
@@ -181,10 +181,11 @@ const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
                                   const ecuio_signal_def_t* def);
 
 /* The lowest and highest value a def's field decodes to (scale and
- * offset applied; INT sign-extended; an ENUM its raw range), in the
- * def's unit. ECUIO_DECODE_OK, or ECUIO_DECODE_ERR_UNSUPPORTED for a
- * kind with no such span (FLOAT, the text kinds, COMPUTED), or
- * ECUIO_DECODE_ERR_NULL. *lo and *hi are written only on OK. */
+ * offset applied; INT sign-extended; an ENUM as validated its raw
+ * range), in the def's unit. ECUIO_DECODE_OK, or
+ * ECUIO_DECODE_ERR_UNSUPPORTED for a kind with no such span (FLOAT,
+ * the text kinds, COMPUTED), or ECUIO_DECODE_ERR_NULL. *lo and *hi are
+ * written only on OK. */
 int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
 ```
 
@@ -559,7 +560,7 @@ the model named is the one sized for it.
 - Drag-to-reorder (v0.7.1), and an export and import of a form's
   pages, build on the order and the document as decided here.
 
-## Appendix: core's two functions as built (2026-11-08)
+## Appendix: core's two functions as built (2026-11-07)
 
 Section 10's step 1.
 
@@ -568,15 +569,21 @@ Section 10's step 1.
   decoder's order, so a hand-built def gets the decoder's word:
   `ECUIO_DECODE_ERR_NULL` for a NULL argument;
   `ECUIO_DECODE_ERR_UNSUPPORTED` for a kind or byte order with no
-  decoder, a FLOAT, a text kind or a COMPUTED def (whose kind reads
-  UINT, so the flag is checked with the kind); then
-  `ECUIO_DECODE_ERR_BAD_PARAMS` for bit parameters the decoder refuses
-  (a `bit_length` of 0 or over 32, a `bit_offset` over 7, a big-endian
-  field not whole bytes). That is a fourth code beside section 2's
-  three. The mux key doesn't move the span and isn't checked. UINT
-  spans 0 to 2^n - 1 and INT -2^(n-1) to 2^(n-1) - 1, both through
-  scale and offset, with `lo` <= `hi` for a negative scale; an ENUM
-  gives its raw range unscaled, its value being the raw number.
+  decoder, a text kind or a COMPUTED def (whose kind reads UINT, so
+  the flag is checked with the kind); `ECUIO_DECODE_ERR_BAD_PARAMS` for
+  bit parameters the decoder refuses (a `bit_length` of 0 or over 32,
+  a `bit_offset` over 7, a big-endian field not whole bytes); then
+  `ECUIO_DECODE_ERR_UNSUPPORTED` for a FLOAT, where the decoder's FLOAT
+  check comes, since a FLOAT's field holds any binary32. Last,
+  `ECUIO_DECODE_ERR_BAD_PARAMS` for an end that isn't finite or a span
+  of zero width (a scale of 0, inf or NaN, an offset NaN, an end past
+  the double range), which no UI can scale a gauge to. `BAD_PARAMS` is
+  a fourth code beside section 2's three. The mux key doesn't move the
+  span and isn't checked (`mux_length` included). UINT spans 0 to
+  2^n - 1 and INT -2^(n-1) to 2^(n-1) - 1, both through scale and
+  offset, with `lo` < `hi` for a negative scale. An ENUM scales as
+  the decoder scales it, so an ENUM as validated (scale 1, offset 0)
+  gives its raw range.
 - **`ecuio_signal_file_key(file, def)`** (`core/src/signal_file.cpp`)
   gives the key whose def has that address in the file's set. Another
   set's def with the same ID, and a copy, give "", as a base set's defs
@@ -585,16 +592,19 @@ Section 10's step 1.
 - Both are exported by the shared core and bound in
   `python/havne/_ecuio.py`.
 - **Tests:** `SignalsTest.ADefsRangeIsItsFieldsSpanScaled`,
-  `.ADefsRangeRefusesWhatHasNoSpan` and
+  `.ADefsRangeRefusesWhatHasNoSpan`,
   `.EachBuiltInDefsRangeIsTheDecodersExtremes` (each def of the mock
   and `obd2`: its ends are the decoder's values at the field's lowest
-  and highest raw); `Obd2SetTest.EveryValueTheFakesAnswerIsInsideItsDefsRange`
+  and highest raw) and `.ADefsRangeIsTheDecodersExtremesForEveryFieldShape`
+  (UINT and INT, each byte order, 1, 8, 13 and 32 bits, a positive and
+  a negative scale, bit 0 and 3, and a muxed def, against the decoder;
+  a shape it refuses gets the same code); `Obd2SetTest.EveryValueTheFakesAnswerIsInsideItsDefsRange`
   (`test_obd2`, where the fakes are); the mock's round trip over three
   loops (`CoreTest.MockDriveCycleEveryTickRoundTripsThroughTheMockSet`)
   keeps each signal inside its range; `SignalFileTest.EachOwnDefNamesItsKeyAndNoOtherDefDoes`;
   `PluginTest.AVariantsFileNamesEachOfItsOwnDefsKeys`; `c_abi`.
 
-## Appendix: an analog dial's ticks under another unit system (2026-11-08)
+## Appendix: an analog dial's ticks under another unit system (2026-11-07)
 
 Settled before steps 3 and 4, for section 6. `majorStep`, `minorStep`
 and `labelDivisor` are spacings in the unit shown, never converted. A
