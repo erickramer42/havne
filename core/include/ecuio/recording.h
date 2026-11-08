@@ -109,14 +109,23 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
 ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
                                           const ecuio_signal_file_t* file);
 /*
- * Attaches recorder to session, after create and before start: copies
- * the session's defs (name, unit, kind, decimal places, plot rank),
- * writes events.log's header and sets the recording's zero.
+ * Attaches recorder to session, before or after start (ADR-0056 section
+ * 3), on the thread that starts and closes the session: copies the
+ * session's defs (name, unit, kind, decimal places, plot rank), writes
+ * events.log's header and sets the recording's zero, the moment of the
+ * call. The recording holds the frames from then on; a started
+ * session's header says what the link's state was ("link": "healthy"
+ * for one that is OK with no episode) and which signals its focus held
+ * ("focus", when one is set). Reply timing's counts in latency.csv are
+ * the session's, cumulative since it started, so a recording begun
+ * mid-session finds them already counted up. A session takes one
+ * recorder at a time: once that one is closed, another can attach, and
+ * a refused recorder is left as it was for a later try.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session or recorder;
  * ECUIO_ERR_SESSION_CLOSED for a closed session;
- * ECUIO_ERR_INVALID_ARGUMENT for a started session, a recorder that has
- * had a session, or a session that has a recorder;
- * ECUIO_ERR_OUT_OF_MEMORY when the defs' copy can't be made.
+ * ECUIO_ERR_INVALID_ARGUMENT for a recorder that has had a session, or a
+ * session that has a recorder; ECUIO_ERR_OUT_OF_MEMORY when the defs'
+ * copy can't be made.
  */
 ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                                     ecuio_recorder_t* recorder);

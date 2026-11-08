@@ -726,6 +726,13 @@ scrub leaves out; `tests/golden/recording/replay-obd2`'s copy viewed as
 the source; a mock's recording made with a label, its copy's URI
 `mock://<label>`, its `info` and replay the source's).
 
+Amended 2026-11-07: `latency.csv`'s `t_s` is the recording's time to the
+ms ([ADR-0017](0017-session-recording.md)'s appendix of 2026-11-07), so
+the range reads it as it reads `host_us`; a recording from before that
+wrote the session time there, and its rows land by that. The export
+keeps the header's `focus` and `link` lines ([ADR-0049](0049-recordings-in-core.md)'s
+appendix of 2026-11-07).
+
 ## Appendix: the health report as built (2026-11-06)
 
 Section 2's health report: a car's health as one scrubbed file, in core
