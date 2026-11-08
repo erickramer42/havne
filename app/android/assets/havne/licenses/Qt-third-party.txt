@@ -53,6 +53,9 @@ BSD 2-clause:
     Copyright (C) 2015 Cisco Systems, Inc. All rights reserved.
     Copyright (c) 2002-2009 Vivek Thampi
 
+  pcre2-sljit 10.48
+    Copyright Zoltan Herczeg
+
   sha3_endian 1.0.0
     Copyright (c) 1998-2013, Brian Gladman, Worcester, UK. All rights reserved.
 
@@ -212,6 +215,10 @@ MIT:
     Copyright (C) 2016 Intel Corporation
     Copyright (C) 2015 Klarälvdalens Datakonsult AB, a KDAB Group company, info@kdab.com
 
+  freetype-bdf [APK, Windows]
+    Copyright (c) 2000 Computing Research Labs, New Mexico State University
+    Copyright (c) 2001-2014 Francesco Zappa Nardelli
+
   HarfBuzz 14.5.0
     Copyright © 2010-2022  Google, Inc.
     Copyright © 2015-2020  Ebrahim Byagowi
@@ -265,6 +272,13 @@ MIT:
     Copyright (c) Facebook, Inc. and its affiliates.
     Copyright (c) Meta Platforms, Inc. and affiliates.
 
+MIT and MIT (Open Group variant):
+
+  freetype-pcf [APK, Windows]
+    Copyright (c) 2001, 2012 David Turner, Robert Wilhelm, and Werner Lemberg
+    Copyright (c) 2000-2014 Francesco Zappa Nardelli
+    Copyright (c) 1990, 1994, 1998 The Open Group
+
 Mozilla Public License 2.0:
 
   psl-data 2026-05-14_0
@@ -292,6 +306,9 @@ X11 and Historical Permission Notice and Disclaimer:
     Copyright 1987, 1988 by Digital Equipment Corporation, Maynard, Massachusetts.
 
 zlib:
+
+  freetype-zlib [APK, Windows]
+    Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler
 
   zlib 1.3.2 [Windows]
     (C) 1995-2026 Jean-loup Gailly and Mark Adler
@@ -337,13 +354,27 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ==== MIT (Open Group variant) ====
 
-Copyright <yyyy, yyyy> The Open Group
+Copyright 1990, 1994, 1998  The Open Group
 
-Permission to use, copy, modify, distribute, and sell this software and its documentation for any purpose is hereby granted without fee, provided that the above copyright notice appear in all copies and that both that copyright notice and this permission notice appear in supporting documentation.
+Permission to use, copy, modify, distribute, and sell this software and its
+documentation for any purpose is hereby granted without fee, provided that
+the above copyright notice appear in all copies and that both that
+copyright notice and this permission notice appear in supporting
+documentation.
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+OPEN GROUP BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN
+AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of The Open Group shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from The Open Group.
 
 ==== FreeType License ====
 
