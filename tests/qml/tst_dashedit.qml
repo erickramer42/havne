@@ -101,14 +101,17 @@ TestCase {
     function storedText(page) {
         return find(page, "dashStore")[page.form === "phone" ? "phone" : "desktop"]
     }
-    // A press where the item is, once it has stopped moving (a page
-    // change slides the view)
+    // A press where the item is, once the window is laid out and the item
+    // has stopped moving (a page change slides the view). The layout comes
+    // first: a row that opens keeps the place it last had, and until the
+    // layout pass moves the page below it, the page covers it
     function click(page, name) {
         const item = find(page, name)
         verify(item.visible && item.enabled, name + " can be pressed")
         press(item)
     }
     function press(item) {
+        verify(waitForPolish(item.Window.window), item.objectName + " is laid out")
         let last = null
         tryVerify(() => {
             const at = item.mapToItem(null, 0, 0)
@@ -730,6 +733,20 @@ TestCase {
         const store = find(page, "dashStore")
         compare(store.desktopUnread, "{", "kept")
         compare(store.desktop, "", "nothing stored")
+    }
+
+    // The kinds drawn as a strip take the picker's wide tile
+    function test_thePickersStripKindsTakeTheWideTile() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        click(page, "dashEdit")
+        click(page, "dashAdd")
+        const kinds = find(page, "dashAddPanel")
+        const strips = ["bar", "shift-light", "segments", "sparkline"]
+        for (const kind of strips)
+            verify(page.drawnKinds.includes(kind), kind + " is offered")
+        for (const kind of page.drawnKinds)
+            tryCompare(find(kinds, "preview_" + kind), "width",
+                       strips.includes(kind) ? 200 : 120, 3000, kind)
     }
 
     // Done closes the pages' row and each question, so Edit opens the
