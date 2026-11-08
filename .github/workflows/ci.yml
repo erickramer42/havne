@@ -426,13 +426,23 @@ jobs:
 
       # From its GitHub release, checked against its SHA-256 (winget's
       # manifest for 0.9.9.0 gives the same), rather than Chocolatey's
-      # community feed, whose outages fail the job. An Inno Setup
-      # installer, into Program Files, where coverage.sh looks for it.
+      # community feed, whose outages fail the job. The asset URL's host
+      # can answer 504 for long stretches, so a failed download falls
+      # back to the API through gh. An Inno Setup installer, into
+      # Program Files, where coverage.sh looks for it.
       - name: Install OpenCppCoverage
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $exe = "$env:RUNNER_TEMP\OpenCppCoverageSetup-x64-0.9.9.0.exe"
-          Invoke-WebRequest -Uri 'https://github.com/OpenCppCoverage/OpenCppCoverage/releases/download/release-0.9.9.0/OpenCppCoverageSetup-x64-0.9.9.0.exe' `
-            -OutFile $exe -MaximumRetryCount 3 -RetryIntervalSec 10
+          try {
+            Invoke-WebRequest -Uri 'https://github.com/OpenCppCoverage/OpenCppCoverage/releases/download/release-0.9.9.0/OpenCppCoverageSetup-x64-0.9.9.0.exe' `
+              -OutFile $exe -MaximumRetryCount 3 -RetryIntervalSec 10
+          } catch {
+            Write-Warning "Invoke-WebRequest failed ($_); trying gh release download"
+            gh release download release-0.9.9.0 -R OpenCppCoverage/OpenCppCoverage -p OpenCppCoverageSetup-x64-0.9.9.0.exe -O $exe --clobber
+            if ($LASTEXITCODE -ne 0) { Write-Error 'could not download OpenCppCoverage'; exit 1 }
+          }
           $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash
           if ($sha -ne '2295a733da39412c61e4f478677519dd0bb1893d88313ce56b468c9e50517888') {
             Write-Error "unexpected SHA-256 $sha"; exit 1
