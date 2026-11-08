@@ -1414,6 +1414,55 @@ TEST(RecorderTest, RecordersComeAndGoWhileTheSessionStreams)
     ecuio_session_destroy(s);
 }
 
+/* A recorder's marks and notes count from its own zero, not from a later
+ * recorder's, whose attach moves the link's */
+TEST(RecorderTest, AMarkCountsFromItsOwnRecordersZeroAfterASuccessorAttaches)
+{
+    Root root;
+    Recording first(root, "mock://zero");
+    ASSERT_NE(first.recorder, nullptr);
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    ecuio_record_detach(*first.session->record_link);
+
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* second = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &second), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(first.session, second), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_recorder_mark(first.recorder, "after the successor"),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_recorder_note(first.recorder, "a note after it"), ECUIO_OK);
+    ecuio_recorder_test_add_slept(first.recorder, 2000000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    ecuio_session_destroy(first.session);
+    first.session = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(second, "the second"), ECUIO_OK);
+    const std::string folder = first.folder;
+    EXPECT_EQ(ecuio_recorder_close(first.recorder, "the first"), ECUIO_OK);
+    first.recorder = nullptr;
+
+    const std::vector<std::string> marks =
+        lines_of(read_text(fs::u8path(folder) / "markers.csv"));
+    ASSERT_EQ(marks.size(), 2u);
+    EXPECT_GE(std::stoull(marks[1]), 350000u) << marks[1];
+    const std::vector<EventLine> notes =
+        events_of(read_text(fs::u8path(folder) / "events.log"), "note");
+    bool found = false;
+    for (const EventLine& n : notes) {
+        if (n.text.find("a note after it") != std::string::npos) {
+            found = true;
+            EXPECT_GE(n.ms, 350u) << n.text;
+        }
+    }
+    EXPECT_TRUE(found);
+    const std::vector<EventLine> sleeps =
+        events_of(read_text(fs::u8path(folder) / "events.log"), "asleep");
+    ASSERT_EQ(sleeps.size(), 1u);
+    EXPECT_GE(sleeps[0].ms, 350u) << "the asleep line, from the first's zero";
+}
+
 /* A recorder's close lets go of the link only while the link is its
  * own: one detached earlier (the session's side) and closed after a
  * successor attached leaves the successor taking frames */

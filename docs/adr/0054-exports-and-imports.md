@@ -1639,3 +1639,15 @@ writing step, a gap jumped in one move and a value past the fixed
 digits have a case each (`CsvExportTest.WideA*`), and
 `RequestTimingTest.ASamplePastThirtyOneBitsLandsInTheLastBucket` pins
 the histogram's bound, which the survey's gaps reach.
+
+**The column limit (2026-11-08):** a wide CSV has at most 16384 columns,
+the width a spreadsheet opens. The survey counts the columns as it adds
+them, named or found (the header's number signals and every new name in
+signals.csv), and the first one past the limit ends the export with
+`ECUIO_ERR_LOAD_FAILED` and "the wide CSV is limited to 16384 columns:
+pick the columns to keep", before any row is costed (each sample touches
+every column, so a recording naming tens of thousands of signals would
+otherwise run for minutes and write a file nothing opens). The long
+layout has no such limit. `ecuio_export_estimate` takes at most 64 row
+intervals in a call, each one keeping a rows engine, and refuses more
+with `ECUIO_ERR_INVALID_ARGUMENT` before it allocates.
