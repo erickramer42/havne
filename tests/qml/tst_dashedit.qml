@@ -399,6 +399,81 @@ TestCase {
         compare(storedText(page), DashboardBook.serialize(page.doc))
     }
 
+    // Step 5's kinds offer their own options in the panel, the bar its two
+    // switches, and the peak switch shows for the kinds that draw a peak
+    function test_theNewKindsOwnOptionsAreEditable() {
+        const narrow = (label, kind) => Object.assign(cellOf(label, kind), { w: 1 })
+        const page = pageOf({}, docOf([narrow("Cells", "segments"), narrow("Digits", "seven-segment"),
+                                       narrow("Trace", "sparkline"), narrow("Level", "bar"),
+                                       narrow("Temp", "ring"), narrow("Gear", "digital")]))
+        page.startEditing()
+        const at = i => page.doc.pages[0].cells[i]
+        const hidden = names => { for (const n of names) verify(!find(page, n).visible, n + " is hidden") }
+
+        press(find(page, "dashCell_0_0"))
+        spin(find(page, "panelCells"), 12)
+        compare(at(0).options.cells, 12)
+        type(find(page, "panelRise"), "2.5")
+        compare(at(0).options.rise, 2.5)
+        verify(find(page, "panelPeak").visible, "the cells draw a peak")
+        hidden(["panelDigits", "panelWindow", "panelVertical", "panelMarks", "panelMajorStep"])
+
+        press(find(page, "dashCell_0_1"))
+        spin(find(page, "panelDigits"), 6)
+        compare(at(1).options.digits, 6)
+        verify(!find(page, "panelPeak").visible, "the seven-segment readout has no peak")
+        hidden(["panelCells", "panelWindow", "panelVertical"])
+
+        press(find(page, "dashCell_0_2"))
+        spin(find(page, "panelWindow"), 60)
+        compare(at(2).options.window, 60)
+        verify(!find(page, "panelPeak").visible, "the sparkline has no peak")
+        hidden(["panelCells", "panelDigits", "panelVertical"])
+
+        press(find(page, "dashCell_0_3"))
+        compare(page.selected, 3, "the bar is selected")
+        compare(at(3).kind, "bar")
+        const vertical = find(page, "panelVertical")
+        vertical.toggle()
+        vertical.toggled()
+        compare(at(3).options.vertical, true)
+        const marks = find(page, "panelMarks")
+        compare(marks.checked, true, "the ticks are on until turned off")
+        marks.toggle()
+        marks.toggled()
+        compare(at(3).options.marks, false)
+        verify(find(page, "panelPeak").visible, "the bar draws a peak")
+
+        press(find(page, "dashCell_0_4"))
+        verify(find(page, "panelPeak").visible, "the ring draws a peak")
+        hidden(["panelVertical", "panelCells"])
+        press(find(page, "dashCell_0_5"))
+        verify(!find(page, "panelPeak").visible, "the number shows its own MIN and MAX instead")
+        compare(storedText(page), DashboardBook.serialize(page.doc))
+    }
+
+    // Add offers the new kinds, each with a preview and its default span
+    function test_addOffersTheNewKinds_data() {
+        return [{ tag: "segments", kind: "segments", span: [2, 3] },
+                { tag: "seven-segment", kind: "seven-segment", span: [1, 2] },
+                { tag: "sparkline", kind: "sparkline", span: [2, 3] }]
+    }
+    function test_addOffersTheNewKinds(data) {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        page.startAdd()
+        verify(find(page, "addKind_" + data.kind), "a tile for it")
+        verify(find(page, "preview_" + data.kind).item, "its preview loads")
+        compare(page.newSpans[data.kind].join("x"), data.span.join("x"))
+        compare(page.drawnKinds.indexOf(data.kind) >= 0, true)
+        if (data.kind === "sparkline") {
+            const spark = find(page, "preview_sparkline").item
+            verify(spark.history.length > 10, "a still trace to look at")
+            wait(300)
+            compare(spark.history.length, 120, "and it takes no samples of its own")
+        }
+    }
+
     // The span and the order; the selection follows the cell, and
     // Remove takes a cell out with the selection kept on its own
     function test_resizeMoveAndRemove() {
@@ -680,16 +755,22 @@ TestCase {
         compare(page.doc.pages.length, 2)
     }
 
-    // Peak hold shows only for a kind that draws it
-    function test_peakHoldOnlyWhereItDraws() {
-        const page = pageOf({}, docOf([cellOf("A"), cellOf("R", "ring"), cellOf("D", "digital")]))
+    // Peak hold shows only for a kind that draws it: the dial, the ring, the
+    // bar and the cells do; a number (it shows its MIN and MAX), the shift
+    // lights, the seven-segment readout and the sparkline don't
+    function test_peakHoldOnlyWhereItDraws_data() {
+        return [{ tag: "the kinds that draw one", kinds: ["analog", "ring", "bar", "segments"], draws: true },
+                { tag: "the kinds that don't", kinds: ["digital", "shift-light", "seven-segment", "sparkline"],
+                  draws: false }]
+    }
+    function test_peakHoldOnlyWhereItDraws(data) {
+        const page = pageOf({}, docOf(data.kinds.map(k => Object.assign(cellOf(k, k), { w: 1 }))))
         page.startEditing()
-        press(find(page, "dashCell_0_0"))
-        verify(find(page, "panelPeak").visible, "a dial's")
-        press(find(page, "dashCell_0_1"))
-        verify(!find(page, "panelPeak").visible, "not a ring's")
-        press(find(page, "dashCell_0_2"))
-        verify(!find(page, "panelPeak").visible, "not a digital tile's")
+        for (let i = 0; i < data.kinds.length; ++i) {
+            press(find(page, "dashCell_0_" + i))
+            compare(page.selected, i, "cell " + i + " is the one selected")
+            compare(find(page, "panelPeak").visible, data.draws, data.kinds[i])
+        }
     }
 
     // The Decimals stepper starts at the row's when the cell sets none

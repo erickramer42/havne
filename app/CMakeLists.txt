@@ -114,6 +114,9 @@ qt_add_qml_module(app_ui
         qml/SignalHub.qml
         qml/GaugeBase.qml
         qml/DangerMark.qml
+        qml/SegmentGauge.qml
+        qml/SegmentReadout.qml
+        qml/SparkGauge.qml
         qml/GaugeArc.qml
         qml/GaugeCard.qml
         qml/AnalogGauge.qml

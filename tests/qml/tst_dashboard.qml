@@ -692,13 +692,13 @@ TestCase {
     }
 
     // A kind this version doesn't draw is an empty card saying so,
-    // under the cell's label; the five it draws load their gauge
+    // under the cell's label; the eight it draws load their gauge
     function test_aKindThisVersionDoesntDrawIsAnEmptyCard_data() {
         return [
             { tag: "unknown", kind: "gizmo", drawn: false },
-            { tag: "segments", kind: "segments", drawn: false },
-            { tag: "seven-segment", kind: "seven-segment", drawn: false },
-            { tag: "sparkline", kind: "sparkline", drawn: false },
+            { tag: "segments", kind: "segments", drawn: true },
+            { tag: "seven-segment", kind: "seven-segment", drawn: true },
+            { tag: "sparkline", kind: "sparkline", drawn: true },
             { tag: "analog", kind: "analog", drawn: true },
             { tag: "ring", kind: "ring", drawn: true },
             { tag: "bar", kind: "bar", drawn: true },
@@ -718,6 +718,56 @@ TestCase {
             compare(empty.text, "a gauge this version of Havne doesn't have")
         else
             compare(gaugeOf(cell).label, "Odd")
+    }
+
+    // Step 5's kinds and options reach their gauges: the cells' count and
+    // curve, the digits, the sparkline's window, the bar standing up and
+    // without its ticks, and the held peak on every kind
+    function test_theNewKindsTakeTheirOptions_data() {
+        return [
+            { tag: "segments", kind: "segments", options: { cells: 12, rise: 2, peak: true },
+              check: g => g.count === 12 && g.rise === 2 && g.showPeak },
+            { tag: "seven-segment", kind: "seven-segment", options: { digits: 3 },
+              check: g => g.count === 3 && !g.showPeak },
+            { tag: "sparkline", kind: "sparkline", options: { window: 60 },
+              check: g => g.span === 60 && g.historyLength === 600 },
+            { tag: "a vertical bar", kind: "bar", options: { vertical: true, marks: false, peak: true },
+              check: g => g.vertical && !g.marks && g.showPeak },
+            { tag: "a bar's defaults", kind: "bar", options: {},
+              check: g => !g.vertical && g.marks && !g.showPeak },
+            { tag: "a ring's peak", kind: "ring", options: { peak: true }, check: g => g.showPeak },
+            { tag: "a dial's peak", kind: "analog", options: { peak: true }, check: g => g.showPeak }
+        ]
+    }
+    function test_theNewKindsTakeTheirOptions(data) {
+        const page = pageOf({}, docOf([{ kind: data.kind, w: 2, h: 4, label: "Odd", refs: ["id:1001"],
+                          unit: "RPM", options: data.options }]), true)
+        const cell = findChild(page, "dashCell_0_0")
+        verify(cell, "the cell is there")
+        const g = gaugeOf(cell)
+        verify(g !== null, "the gauge loads")
+        verify(data.check(g), "the options reach the gauge")
+    }
+
+    // A sparkline samples only while its page is the one shown: the other
+    // page's takes none (a SwipeView keeps it visible), the page left starts
+    // its trace again, and the one reached starts sampling
+    function test_aSparklineOnAnotherPageTakesNoSamples() {
+        const cell = label => ({ kind: "sparkline", w: 2, h: 3, label: label,
+                                 refs: refsOf("Engine speed"), unit: "RPM", options: { window: 10 } })
+        const d = docOf([cell("First")])
+        d.pages.push({ name: "Second", cells: [cell("Second")] })
+        const page = pageOf({}, d, true)
+        connect("mock://demo")
+        const a = gaugeOf(findChild(page, "dashCell_0_0"))
+        const b = gaugeOf(findChild(page, "dashCell_1_0"))
+        verify(a && b, "both load (the neighbor loads at once)")
+        tryVerify(() => a.history.length > 3, 5000, "the shown page samples")
+        wait(300)
+        compare(b.history.length, 0, "the other page takes none")
+        page.goTo(1)
+        tryVerify(() => b.history.length > 3, 5000, "the page reached samples")
+        tryVerify(() => a.history.length === 0 || a.history.length <= 1, 2000, "the page left starts again")
     }
 
     // Section 6: a cell over a row of another unit takes the row's

@@ -27,7 +27,6 @@ GaugeBase {
     property string caption: ""         // above the hub, e.g. "×1000 r/min"
     property string peakLabel: qsTr("PEAK")
     property bool showProgress: false   // lit arc from `from` to the needle
-    property bool showPeak: false       // tell-tale marker and readout line
     property color needleColor: Theme.gaugeNeedle
 
     // Geometry, all from the square the dial fits in

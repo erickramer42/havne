@@ -86,25 +86,30 @@ Page {
     // The kinds this page draws, in the order Add offers them, and the
     // component that makes each (a cell's and Add's preview); null for
     // a kind this version doesn't draw
-    readonly property var drawnKinds: ["analog", "ring", "bar", "digital", "shift-light"]
+    readonly property var drawnKinds: ["analog", "ring", "bar", "segments", "digital",
+                                       "seven-segment", "sparkline", "shift-light"]
     function kindComponent(kind) {
         return kind === "analog" ? analogKind
              : kind === "ring" ? ringKind
              : kind === "bar" ? barKind
              : kind === "digital" ? digitalKind
              : kind === "shift-light" ? shiftKind
+             : kind === "segments" ? segmentsKind
+             : kind === "seven-segment" ? readoutKind
+             : kind === "sparkline" ? sparkKind
              : null
     }
     // The kinds that draw a peak, so the panel offers Peak hold only there
-    readonly property var peakKinds: ["analog"]
+    readonly property var peakKinds: ["analog", "ring", "bar", "segments"]
     readonly property var kindNames: ({
         "analog": qsTr("Dial"), "ring": qsTr("Ring"), "bar": qsTr("Bar"),
-        "digital": qsTr("Number"), "shift-light": qsTr("Shift lights")
+        "digital": qsTr("Number"), "shift-light": qsTr("Shift lights"),
+        "segments": qsTr("Cells"), "seven-segment": qsTr("Digits"), "sparkline": qsTr("Sparkline")
     })
     // A new gauge's span: columns, and rows of a quarter column
     readonly property var newSpans: ({
         "analog": [1, 4], "ring": [1, 4], "bar": [2, 2], "digital": [1, 4],
-        "shift-light": [12, 1]
+        "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3]
     })
 
     readonly property string formKey: form === "phone" ? "phone" : "desktop"
@@ -434,13 +439,18 @@ Page {
         // one; on the page shown and its neighbors (a swipe drags one in)
         // it finishes at once
         property bool later: false
+        // Whether this card's page is the one on screen and the app is
+        // active: the sparkline samples only then (a SwipeView keeps its
+        // neighbors visible)
+        property bool shown: true
         property int pageNo: -1
         property int cellIndex: -1
         readonly property bool editable: root.editing && pageNo === root.pageIndex
 
-        // The sweep plays on the dials and the shift lights only
+        // The sweep plays on the dials, the cells and the shift lights only
         function sweep() {
-            if (gauge.item && kind !== "bar" && kind !== "digital")
+            if (gauge.item && kind !== "bar" && kind !== "digital"
+                    && kind !== "seven-segment" && kind !== "sparkline")
                 (gauge.item as GaugeBase).sweep()
         }
 
@@ -542,6 +552,15 @@ Page {
         readonly property string caption: opt("caption", unit)
         readonly property string peakLabel: opt("peakLabel", qsTr("PEAK"))
         readonly property bool showPeak: opt("peak", false)
+        // The new kinds' own options (ADR-0057 section 1): the cells' count
+        // and curve, the digits, the sparkline's window, the bar standing up
+        // and its ticks
+        readonly property int cells: opt("cells", 24)
+        readonly property real rise: opt("rise", 1.6)
+        readonly property int digits: opt("digits", 4)
+        readonly property int windowS: opt("window", 30)
+        readonly property bool vertical: opt("vertical", false)
+        readonly property bool marks: opt("marks", true)
         readonly property bool showProgress: opt("progress", false)
         readonly property string description: opt("description", "")
         readonly property var scaleMarks: {
@@ -558,11 +577,14 @@ Page {
 
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "accent"]
+                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "showPeak"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
-                       "showPeak", "showProgress"],
-            "bar": ["scaleMarks"],
+                       "showProgress"],
+            "bar": ["scaleMarks", "vertical", "marks"],
+            "segments": ["cells", "rise"],
+            "seven-segment": ["digits"],
+            "sparkline": ["windowS", "shown"],
             "digital": ["description", "valueLabel"],
             "shift-light": ["count", "ledSpacing"]
         })
@@ -859,6 +881,71 @@ Page {
                             text = Qt.binding(() => current)
                         }
                     }
+                    Caption { visible: panelCard.kind === "segments"; text: qsTr("Cells") }
+                    SpinBox {
+                        objectName: "panelCells"
+                        visible: panelCard.kind === "segments"
+                        Layout.preferredHeight: Theme.touchTarget
+                        from: 2
+                        to: 64
+                        value: panelCard.cell && panelCard.cell.options
+                               && panelCard.cell.options.cells !== undefined
+                               ? panelCard.cell.options.cells : 24
+                        onValueModified: root.setOptions({ cells: value })
+                    }
+                    Caption { visible: panelCard.kind === "segments"; text: qsTr("Curve") }
+                    OptionField {
+                        objectName: "panelRise"
+                        visible: panelCard.kind === "segments"
+                        option: "rise"
+                        converted: false
+                        fallback: 1.6
+                    }
+                    Caption { visible: panelCard.kind === "seven-segment"; text: qsTr("Digits") }
+                    SpinBox {
+                        objectName: "panelDigits"
+                        visible: panelCard.kind === "seven-segment"
+                        Layout.preferredHeight: Theme.touchTarget
+                        from: 1
+                        to: 8
+                        value: panelCard.cell && panelCard.cell.options
+                               && panelCard.cell.options.digits !== undefined
+                               ? panelCard.cell.options.digits : 4
+                        onValueModified: root.setOptions({ digits: value })
+                    }
+                    Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
+                    SpinBox {
+                        objectName: "panelWindow"
+                        visible: panelCard.kind === "sparkline"
+                        Layout.preferredHeight: Theme.touchTarget
+                        from: 10
+                        to: 120
+                        stepSize: 10
+                        value: panelCard.cell && panelCard.cell.options
+                               && panelCard.cell.options.window !== undefined
+                               ? panelCard.cell.options.window : 30
+                        onValueModified: root.setOptions({ window: value })
+                    }
+                    Caption { visible: panelCard.kind === "bar"; text: qsTr("Standing up") }
+                    Switch {
+                        objectName: "panelVertical"
+                        visible: panelCard.kind === "bar"
+                        implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
+                                                 Theme.touchTarget)
+                        checked: panelCard.cell && panelCard.cell.options
+                                 ? panelCard.cell.options.vertical === true : false
+                        onToggled: root.setOptions({ vertical: checked })
+                    }
+                    Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
+                    Switch {
+                        objectName: "panelMarks"
+                        visible: panelCard.kind === "bar"
+                        implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
+                                                 Theme.touchTarget)
+                        checked: panelCard.cell && panelCard.cell.options
+                                 ? panelCard.cell.options.marks !== false : true
+                        onToggled: root.setOptions({ marks: checked })
+                    }
                     Caption { visible: panelCard.kind === "shift-light"; text: qsTr("Lights") }
                     SpinBox {
                         objectName: "panelCount"
@@ -947,13 +1034,17 @@ Page {
                         ColumnLayout {
                             id: kindTile
                             required property string modelData
-                            readonly property bool wide: modelData === "bar" || modelData === "shift-light"
+                            readonly property bool wide: ["bar", "shift-light", "segments", "sparkline"]
+                                                         .indexOf(modelData) >= 0
                             spacing: 4
                             Loader {
                                 objectName: "preview_" + kindTile.modelData
                                 Layout.preferredWidth: kindTile.wide ? 200 : 120
                                 Layout.preferredHeight: kindTile.modelData === "shift-light" ? 40
-                                                      : kindTile.wide ? 70 : 120
+                                                      : kindTile.modelData === "segments"
+                                                        || kindTile.modelData === "sparkline" ? 100
+                                                      : kindTile.wide || kindTile.modelData === "seven-segment" ? 70
+                                                      : 120
                                 sourceComponent: root.kindComponent(kindTile.modelData)
                                 // Still: 60 percent of a 0 to 100 range, never live
                                 onLoaded: {
@@ -963,6 +1054,13 @@ Page {
                                     g.hasValue = true
                                     g.value = 60
                                     g.label = root.kindNames[kindTile.modelData]
+                                    // A sparkline's still is a made-up trace, and it
+                                    // takes no samples of its own
+                                    if (kindTile.modelData === "sparkline") {
+                                        g.shown = false
+                                        g.history = Array.from({ length: 120 },
+                                                               (_, i) => 55 + 25 * Math.sin(i / 10))
+                                    }
                                 }
                             }
                             ThemedButton {
@@ -1063,6 +1161,9 @@ Page {
     Component { id: barKind; BarGauge {} }
     Component { id: digitalKind; DigitalGauge {} }
     Component { id: shiftKind; ShiftLightBar {} }
+    Component { id: segmentsKind; SegmentGauge {} }
+    Component { id: readoutKind; SegmentReadout {} }
+    Component { id: sparkKind; SparkGauge {} }
 
     // The link's dot and words
     Component {
@@ -1444,6 +1545,8 @@ Page {
                             pageNo: pageView.index
                             cellIndex: index
                             later: Math.abs(pageView.index - root.pageIndex) > 1
+                            shown: pageView.index === root.pageIndex
+                                   && Qt.application.state === Qt.ApplicationActive
                             x: box ? box.x * (pageView.columnWidth + root.gap) : 0
                             y: box ? box.y * pageView.pitch : 0
                             width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0
