@@ -45,6 +45,9 @@ class BluetoothDevices : public QObject
     // The status asks the user to act (Bluetooth off, the permission
     // refused, a failed scan), not just reports
     Q_PROPERTY(bool statusWarns READ statusWarns NOTIFY statusChanged)
+    // The permission is refused and Android won't ask: the page shows the
+    // way to Havne's page in Android's settings and a button to it
+    Q_PROPERTY(bool needsSettings READ needsSettings NOTIFY statusChanged)
 
 public:
     explicit BluetoothDevices(QObject* parent = nullptr);
@@ -64,10 +67,16 @@ public:
     bool scanning() const { return m_scanning; }
     QString status() const { return m_status; }
     bool statusWarns() const { return m_statusWarns; }
+    bool needsSettings() const { return m_needsSettings; }
 
     // Lists the paired adapters. With ask, asks for the permission when
     // Android hasn't been asked yet; without, lists only once it's given
     Q_INVOKABLE void refresh(bool ask);
+    // Refresh on the user's tap: also asks again after a "Don't allow",
+    // which Android answers at once once it stops showing the dialog
+    Q_INVOKABLE void userRefresh();
+    // Opens Havne's page in Android's settings (Android only)
+    Q_INVOKABLE void openSettings();
     // Looks for BLE adapters for a few seconds; they join the list
     Q_INVOKABLE void scan();
 
@@ -92,9 +101,12 @@ private:
     bool m_scanning = false;
     QString m_status;
     bool m_statusWarns = false;
+    bool m_needsSettings = false;
 #ifdef APP_BLUETOOTH
-    // Whether Android has been asked and what it said
-    bool permitted(bool ask, bool forScan);
+    // Whether Android has been asked and what it said. user: a tap, which
+    // asks again after a refusal
+    bool permitted(bool ask, bool forScan, bool user = false);
+    void deniedStatus();
     void listPaired();
     void scanNow();
     std::map<QString, BtLink*> m_links; // by stream name, owned (children)

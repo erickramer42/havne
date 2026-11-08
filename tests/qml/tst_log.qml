@@ -186,7 +186,9 @@ TestCase {
         const mock = find(page, "preset_mock")
         verify(!box.checked)
         verify(!mock.visible, "only real devices are offered")
-        verify(find(page, "preset_j2534").visible)
+        find(page, "presetsToggle").clicked()   // the presets start closed
+        verify(find(page, "preset_j2534").visible === (Qt.platform.os === "windows"),
+               "j2534:// where there is a J2534 driver")
         verify(find(page, "preset_elm327").visible)
 
         box.click()   // on the Advanced page, which is not shown

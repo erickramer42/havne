@@ -3,7 +3,10 @@
 // Testing: UNIT: CliTransferTest (test_cli)
 //
 // `export <recording> <out> --format folder|csv|pcapng [--from S] [--to S]
-// [--raw]`, `import candump <in> <folder> [--interface <name>]` and
+// [--raw] [--layout wide|long] [--rows sweep|<ms>] [--units metric|imperial]
+// [--signal <name>]...` (the last four the CSV's shape, ADR-0056 section
+// 5: wide by default, a column a named signal), `import candump <in>
+// <folder> [--interface <name>]` and
 // `import csv <in> <folder> [--map <file> | --time-unit s|ms|us]` or
 // `import csv <in> --print-map [--time-unit ...]`: their arguments, and
 // their lines, each in core's words (recording.h): `exported` with what a
@@ -20,8 +23,10 @@
 #include "ecuio/recording.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace cli {
 
@@ -29,8 +34,58 @@ struct ExportArgs {
     const char* folder = nullptr;
     const char* out = nullptr;
     const char* format_word = nullptr;
+    const char* layout_word = nullptr; /* --layout, or none */
+    const char* rows_word = nullptr;   /* --rows, or none */
+    bool units_given = false;
+    std::vector<const char*> signals; /* --signal, in order; options'
+                                         columns point into it */
     ecuio_export_options_t options{};
+
+    /* options.columns_utf8 points into signals: a copy would point into
+     * the original's, so there is none */
+    ExportArgs() = default;
+    ExportArgs(const ExportArgs&) = delete;
+    ExportArgs& operator=(const ExportArgs&) = delete;
 };
+
+// The named columns the recording has no values for, in their order: a
+// typo stays an empty column (core's call), so havne-cli says so
+inline std::vector<const char*>
+missing_names(const std::vector<const char*>& named,
+              const std::vector<std::string>& recorded)
+{
+    std::vector<const char*> missing;
+    for (const char* name : named) {
+        bool found = false;
+        for (const std::string& r : recorded) {
+            found = found || r == name;
+        }
+        if (!found) {
+            missing.push_back(name);
+        }
+    }
+    return missing;
+}
+
+// --rows' milliseconds: digits alone, 1 to a day
+inline bool parse_row_ms(const char* word, uint32_t* ms)
+{
+    if (word[0] == '\0') {
+        return false;
+    }
+    for (const char* p = word; *p != '\0'; ++p) {
+        if (*p < '0' || *p > '9') {
+            return false;
+        }
+    }
+    char* end = nullptr;
+    const unsigned long v = std::strtoul(word, &end, 10);
+    if (end == nullptr || *end != '\0' || v < 1 || v > 86400000ul) {
+        return false;
+    }
+    *ms = static_cast<uint32_t>(v);
+    return true;
+}
 
 struct ImportArgs {
     const char* format_word = nullptr; /* candump or csv */
@@ -89,6 +144,46 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
             }
         } else if (s == "--raw") {
             a.options.flags |= ECUIO_EXPORT_RAW;
+        } else if (s == "--layout" && has_value) {
+            a.layout_word = argv[++i];
+            if (std::strcmp(a.layout_word, "wide") == 0) {
+                a.options.layout = ECUIO_CSV_WIDE;
+            } else if (std::strcmp(a.layout_word, "long") == 0) {
+                a.options.layout = ECUIO_CSV_LONG;
+            } else {
+                *why = "--layout takes wide or long";
+                return false;
+            }
+        } else if (s == "--rows" && has_value) {
+            a.rows_word = argv[++i];
+            uint32_t ms = 0;
+            if (std::strcmp(a.rows_word, "sweep") == 0) {
+                a.options.row_ms = 0;
+            } else if (parse_row_ms(a.rows_word, &ms)) {
+                a.options.row_ms = ms;
+            } else {
+                *why = "--rows takes sweep or a number of milliseconds, 1 to "
+                       "86400000";
+                return false;
+            }
+        } else if (s == "--units" && has_value) {
+            const char* u = argv[++i];
+            if (std::strcmp(u, "metric") == 0) {
+                a.options.units = ECUIO_UNITS_METRIC;
+            } else if (std::strcmp(u, "imperial") == 0) {
+                a.options.units = ECUIO_UNITS_IMPERIAL;
+            } else {
+                *why = "--units takes metric or imperial";
+                return false;
+            }
+            a.units_given = true;
+        } else if (s == "--signal" && has_value) {
+            const char* name = argv[++i];
+            if (name[0] == '\0') {
+                *why = "--signal takes a signal's name";
+                return false;
+            }
+            a.signals.push_back(name);
         } else if (s.rfind("--", 0) == 0) {
             *why = "unexpected '" + s + "'";
             return false;
@@ -113,6 +208,20 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
         *why = "--to comes after --from";
         return false;
     }
+    /* The CSV's shape: the wide layout's alone */
+    const bool shape =
+        a.rows_word != nullptr || a.units_given || !a.signals.empty();
+    if (a.options.format != ECUIO_EXPORT_CSV &&
+        (a.layout_word != nullptr || shape)) {
+        *why = "--layout, --rows, --units and --signal go with --format csv";
+        return false;
+    }
+    if (a.options.layout == ECUIO_CSV_LONG && shape) {
+        *why = "--rows, --units and --signal go with the wide layout";
+        return false;
+    }
+    a.options.column_count = static_cast<uint32_t>(a.signals.size());
+    a.options.columns_utf8 = a.signals.empty() ? nullptr : a.signals.data();
     a.options.folder_utf8 = a.folder;
     a.options.out_path_utf8 = a.out;
     return true;
@@ -259,10 +368,12 @@ inline void guessed_line(Line& l, const std::string& text)
 
 // {"type":"exported","format":...,"file":...,"scrubbed":...,"frames":N,
 //  "made_up":N,"left_out":{"identification":N,...}}; csv and folder add
-//  "values":N and "signals":N after made_up, folder then "files":N and
+//  "values":N and "signals":N after made_up, csv then "layout":"wide"|"long",
+//  "rows":N, "row_ms":N and "missing":N (the named columns the recording
+//  has no values for; schema 1 growth), folder "files":N and
 //  "files_left_out":N
 inline void exported_line(Line& l, const ExportArgs& a,
-                          const ecuio_export_report_t& r)
+                          const ecuio_export_report_t& r, uint64_t missing = 0)
 {
     l.raw("{\"type\":\"exported\"");
     l.key("format");
@@ -281,6 +392,17 @@ inline void exported_line(Line& l, const ExportArgs& a,
         l.u64(r.values);
         l.key("signals");
         l.u64(r.signal_count);
+    }
+    if (a.options.format == ECUIO_EXPORT_CSV) {
+        l.key("layout");
+        l.string(a.options.layout == ECUIO_CSV_LONG ? "long" : "wide",
+                 SIZE_MAX);
+        l.key("rows");
+        l.u64(r.rows);
+        l.key("row_ms");
+        l.u64(a.options.row_ms);
+        l.key("missing");
+        l.u64(missing);
     }
     if (a.options.format == ECUIO_EXPORT_FOLDER) {
         l.key("files");

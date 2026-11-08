@@ -329,8 +329,10 @@ def csv_export(cli, recording):
             for t, name, value, unit in recorded]
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, "values.csv")
-        exported = one(run(cli, ["export", recording, out, "--format", "csv"]),
-                       "exported")
+        exported = one(run(cli, ["export", recording, out, "--format", "csv",
+                                 "--layout", "long"]), "exported")
+        if (exported["layout"], exported["row_ms"]) != ("long", 0):
+            raise SystemExit(f"FAIL  exported {exported}")
         names = {r[1] for r in want}
         if (exported["values"], exported["signals"], exported["frames"],
                 exported["scrubbed"]) != (len(want), len(names), 0, True):
@@ -344,19 +346,91 @@ def csv_export(cli, recording):
         if len(rows) != len(want):
             raise SystemExit(f"FAIL  {len(rows)} rows, not {len(want)}")
         again = os.path.join(d, "again.csv")
-        run(cli, ["export", recording, again, "--format", "csv"])
+        run(cli, ["export", recording, again, "--format", "csv", "--layout",
+                  "long"])
         with open(out, "rb") as a, open(again, "rb") as b:
             if a.read() != b.read():
                 raise SystemExit("FAIL  two exports differ")
         part = os.path.join(d, "part.csv")
         cut = one(run(cli, ["export", recording, part, "--format", "csv",
-                            "--from", "10", "--to", "20"]), "exported")
+                            "--layout", "long", "--from", "10", "--to", "20"]),
+                  "exported")
         inside = [r for r in want if 10.0 <= float(r[0]) <= 20.0]
         if cut["values"] != len(inside) or csv_rows(part)[1] != inside:
             raise SystemExit(f"FAIL  the range wrote {cut}")
+        # The wide layout, the default (ADR-0056 section 5): Time (ms)
+        # then a column a number signal, each cell a number or empty,
+        # the times whole ms ascending; a grid thins the sweeps; named
+        # columns come in their order
+        wide = os.path.join(d, "wide.csv")
+        shaped = one(run(cli, ["export", recording, wide, "--format", "csv"]),
+                     "exported")
+        head, rows = wide_rows(wide)
+        if head[0] != "Time (ms)" or len(head) != shaped["signals"] + 1:
+            raise SystemExit(f"FAIL  the wide header reads {head}")
+        if (shaped["layout"], shaped["row_ms"], shaped["rows"]) != \
+                ("wide", 0, len(rows)):
+            raise SystemExit(f"FAIL  wide exported {shaped}, {len(rows)} rows")
+        cells = sum(1 for r in rows for c in r[1:] if c != "")
+        if shaped["values"] != cells or not rows:
+            raise SystemExit(f"FAIL  {cells} cells against {shaped}")
+        grid = os.path.join(d, "grid.csv")
+        gridded = one(run(cli, ["export", recording, grid, "--format", "csv",
+                                "--rows", "1000"]), "exported")
+        ghead, grows = wide_rows(grid)
+        if gridded["row_ms"] != 1000 or len(grows) > len(rows) or \
+                any(int(r[0]) % 1000 for r in grows):
+            raise SystemExit(f"FAIL  the grid wrote {gridded}")
+        picked = os.path.join(d, "picked.csv")
+        named = one(run(cli, ["export", recording, picked, "--format", "csv",
+                              "--signal", head[2].split(" (")[0],
+                              "--signal", head[1].split(" (")[0]]), "exported")
+        phead, _ = wide_rows(picked)
+        if phead != [head[0], head[2], head[1]] or named["signals"] != 2 or \
+                named["missing"] != 0:
+            raise SystemExit(f"FAIL  the named columns read {phead}")
+        # A named column the recording lacks: an empty column, a stderr
+        # line naming it, the exported line counting it, exit 0
+        typo = os.path.join(d, "typo.csv")
+        done = subprocess.run([cli, "export", recording, typo, "--format",
+                               "csv", "--signal", head[1].split(" (")[0],
+                               "--signal", "Nothing here"],
+                              capture_output=True, stdin=subprocess.DEVNULL)
+        err = done.stderr.decode("utf-8", "replace")
+        if done.returncode != 0 or "'Nothing here'" not in err or \
+                "empty" not in err:
+            raise SystemExit(f"FAIL  the typo's run: exit {done.returncode}, "
+                             f"stderr {err!r}")
+        typo_line = one([json.loads(l) for l in
+                         done.stdout.decode("utf-8").splitlines()], "exported")
+        thead, trows = wide_rows(typo)
+        if thead != [head[0], head[1], "Nothing here"] or \
+                typo_line["missing"] != 1 or typo_line["signals"] != 2 or \
+                any(r[2] != "" for r in trows):
+            raise SystemExit(f"FAIL  the typo's column: {thead}, {typo_line}")
     print(f"ok    {len(want)} values of {len(names)} signals exported as CSV "
-          "and read back")
+          f"long and read back; wide {len(rows)} rows, grid {len(grows)}")
     return 0
+
+
+def wide_rows(path):
+    """The wide CSV: its header cells and its rows, each cell a number or
+    empty and the times whole ms ascending"""
+    with open(path, encoding="utf-8", newline="") as f:
+        raw = f.read()
+    if "\r\n" not in raw or "\n" in raw.replace("\r\n", ""):
+        raise SystemExit("FAIL  the wide CSV isn't CRLF throughout")
+    rows = list(csv.reader(raw.splitlines()))
+    head, body = rows[0], rows[1:]
+    last = -1
+    for r in body:
+        if len(r) != len(head) or not r[0].isdigit() or int(r[0]) < last:
+            raise SystemExit(f"FAIL  a wide row reads {r}")
+        last = int(r[0])
+        for c in r[1:]:
+            if c != "":
+                float(c)
+    return head, body
 
 
 def replayed(cli, folder):

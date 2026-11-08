@@ -53,8 +53,17 @@ ApplicationWindow {
     palette.disabled.text: Theme.textDim
     palette.disabled.buttonText: Theme.textDim
 
+    // A phone keeps its tab bar upright and on its side: the form follows
+    // the platform (ADR-0057), not a width that a turn would cross.
+    // testMobile stands in for Theme.mobile in a test. A tablet (a short
+    // side of 600 dp or more) and a desktop go by the layout's width
+    property bool testMobile: false
+    // The short side is the window's own dp, not the layout's: a phone
+    // zoomed out is still a phone
+    readonly property bool phoneForm: (Theme.mobile || testMobile)
+                                      && Math.min(root.width, root.height) < 600
     // The layout width, after the zoom
-    readonly property bool isCompact: zoomRoot.width < 720
+    readonly property bool isCompact: phoneForm || zoomRoot.width < 720
     // A phone on its side, or a window as short (the bars' insets apart)
     readonly property bool isShort: zoomRoot.height - zoomRoot.insetTop - zoomRoot.insetBottom < 480
     Binding { target: Theme; property: "dense"; value: root.isCompact || root.isShort }
@@ -64,6 +73,16 @@ ApplicationWindow {
     // The system's bars over the window, per side: Qt's safe area, or a
     // test's stand-in where larger (a test can't set SafeArea). The
     // header and the tab bar paint theirs in their own color.
+    // The window's own safe area (an item's SafeArea reads its own overlap)
+    // testWindowSafe stands in for it where larger (a test's window has no
+    // bars), so zoomRoot's reach over them can be pinned
+    property var testWindowSafe: ({ left: 0, top: 0, right: 0, bottom: 0 })
+    readonly property var windowSafe: {
+        const s = SafeArea.margins
+        const t = testWindowSafe
+        return { left: Math.max(s.left, t.left), top: Math.max(s.top, t.top),
+                 right: Math.max(s.right, t.right), bottom: Math.max(s.bottom, t.bottom) }
+    }
     property var testInsets: ({ left: 0, top: 0, right: 0, bottom: 0 })
     readonly property var insets: {
         const s = SafeArea.margins
@@ -74,6 +93,7 @@ ApplicationWindow {
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
+    readonly property int recordingsPage: 5
     readonly property int settingsPage: 6
 
     function gotoPage(index) { stack.currentIndex = index }
@@ -86,6 +106,26 @@ ApplicationWindow {
     function replayRecording(uri) {
         settingsView.pickRecording(uri)
         gotoPage(settingsPage)
+    }
+    // A log's time as m:ss, or h:mm:ss past an hour; 0:00 for a value
+    // that isn't a time
+    function logTimeText(ms) {
+        const s = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0
+        const two = n => (n < 10 ? "0" : "") + n
+        return s >= 3600 ? Math.floor(s / 3600) + ":" + two(Math.floor(s / 60) % 60) + ":" + two(s % 60)
+                         : Math.floor(s / 60) + ":" + two(s % 60)
+    }
+    // After Stop log the log opens in the viewer (ADR-0056 section 1); a
+    // log the session's end or a failed write closed leaves the page as
+    // it is, since the driver may be reading Live
+    Connections {
+        target: Bridge
+        function onLogStopped(folder, byUser) {
+            if (!byUser)
+                return
+            root.gotoPage(root.recordingsPage)
+            recordingsView.openFolder(folder)
+        }
     }
 
     // ---- Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
@@ -169,14 +209,20 @@ ApplicationWindow {
     // and navigation bars, edge to edge; elsewhere the insets are 0).
     Item {
         id: zoomRoot
+        objectName: "zoomRoot"
         readonly property var safe: root.insets
         // The top and bottom insets in the layout's units
         readonly property real insetTop: safe.top / Theme.zoom
         readonly property real insetBottom: safe.bottom / Theme.zoom
-        x: safe.left
-        y: 0
-        width: (parent.width - safe.left - safe.right) / Theme.zoom
-        height: parent.height / Theme.zoom
+        // ApplicationWindow's content item already lies inside Qt's safe
+        // area, so this item reaches back out over the top and bottom
+        // bars (the header and the tab bar paint them) and takes no side
+        // inset a second time
+        readonly property var qtSafe: root.windowSafe
+        x: 0
+        y: -qtSafe.top
+        width: parent.width / Theme.zoom
+        height: (parent.height + qtSafe.top + qtSafe.bottom) / Theme.zoom
         scale: Theme.zoom
         transformOrigin: Item.TopLeft
 
@@ -188,6 +234,8 @@ ApplicationWindow {
                 objectName: "headerBar"
                 Layout.fillWidth: true
                 Layout.preferredHeight: Theme.toolBarHeight + zoomRoot.insetTop
+                // The row below pads the inset itself; the style would pad it too
+                topPadding: 0
                 background: Rectangle {
                     color: Theme.surface
                     Rectangle { // 2px accent underline
@@ -204,10 +252,12 @@ ApplicationWindow {
                     anchors.rightMargin: 16
                     spacing: 12
 
-                    // The name gives way to Mark on a phone's width
+                    // The name gives way to Mark or the log's controls on a
+                    // phone's width
                     Label {
                         objectName: "headerTitle"
-                        visible: !markButton.visible || headerRow.width >= 420
+                        visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
+                                 || headerRow.width >= 420
                         text: qsTr("Havne")
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
@@ -267,18 +317,55 @@ ApplicationWindow {
                     ThemedButton {
                         id: markButton
                         objectName: "markButton"
-                        visible: Bridge.recordingActive
+                        visible: Bridge.recordingActive && !Bridge.logActive
                         text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
                                                    : qsTr("Mark")
                         Accessible.name: qsTr("Mark the recording")
                         onClicked: Bridge.mark()
                     }
 
+                    // The analysis log (ADR-0056 section 1): Live's ticked rows,
+                    // recorded from now on and asked alone until Stop log. A
+                    // replay plays a recording already; Record sessions' own
+                    // recorder is the session's one
+                    ThemedButton {
+                        id: startLogButton
+                        objectName: "startLogButton"
+                        visible: Bridge.connected && !Bridge.recordingActive
+                                 && !Bridge.currentUri.toLowerCase().startsWith("replay://")
+                        enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                        text: qsTr("Start log")
+                        Accessible.name: qsTr("Start a log of the ticked signals")
+                        onClicked: Bridge.startLog()
+                    }
+                    // While a log runs: its time over its folder's size, two
+                    // short lines, so a ten-hour log's readout fits beside
+                    // the name at 420 px
+                    Label {
+                        objectName: "logReadout"
+                        visible: Bridge.logActive
+                        text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
+                                                .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                        horizontalAlignment: Text.AlignRight
+                        font.pixelSize: 12
+                        color: Theme.text
+                    }
+                    ThemedButton {
+                        objectName: "stopLogButton"
+                        visible: Bridge.logActive
+                        enabled: !Bridge.disconnecting
+                        text: qsTr("Stop log")
+                        onClicked: Bridge.stopLog()
+                    }
+
                     // Settings owns connecting: this button opens it, or ends the
                     // session from any page. On Settings itself, its Connect
                     // button is the one to use.
+                    // A log's Stop log takes its place while the log runs
                     ThemedButton {
-                        visible: Bridge.connected || root.currentPage !== root.settingsPage
+                        objectName: "disconnectButton"
+                        visible: !Bridge.logActive
+                                 && (Bridge.connected || root.currentPage !== root.settingsPage)
                         // A teardown can take seconds with a wedged adapter; no
                         // connect starts until it ends
                         enabled: !Bridge.connecting && !Bridge.disconnecting
@@ -360,6 +447,7 @@ ApplicationWindow {
                     }
                     LogPage { objectName: "logPage" }
                     RecordingsPage {
+                        id: recordingsView
                         objectName: "recordingsPage"
                         // A vehicle's baseline: Settings keeps the vehicles
                         vehicles: settingsView.vehicles
@@ -384,6 +472,12 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Theme.touchTarget + Theme.barGap + zoomRoot.insetBottom
                 spacing: 0
+                // The bar's height already holds the bottom inset, painted in
+                // its color: the style pads none of it again
+                topPadding: 0
+                bottomPadding: 0
+                leftPadding: 0
+                rightPadding: 0
                 currentIndex: stack.currentIndex
                 onCurrentIndexChanged: stack.currentIndex = currentIndex
 
@@ -445,7 +539,8 @@ ApplicationWindow {
         function show() { opacity = 1; zoomBadgeTimer.restart() }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24 + zoomRoot.safe.bottom
+        // The content item lies inside the system's bars already
+        anchors.bottomMargin: 24
         width: zoomBadgeLabel.implicitWidth + 32
         height: 36
         radius: 18
@@ -494,9 +589,10 @@ ApplicationWindow {
         visible: Theme.developerMode
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.rightMargin: 8 + zoomRoot.safe.right
-        // Above the tab bar on a phone, so it covers none of the tabs
-        anchors.bottomMargin: 8 + (tabBar.visible ? tabBar.height * Theme.zoom : zoomRoot.safe.bottom)
+        anchors.rightMargin: 8
+        // Above the tab bar on a phone, so it covers none of the tabs: the
+        // bar's part under the navigation bar lies outside this item's parent
+        anchors.bottomMargin: 8 + (tabBar.visible ? tabBar.height * Theme.zoom - root.windowSafe.bottom : 0)
         width: frameRateLabel.implicitWidth + 12
         height: frameRateLabel.implicitHeight + 6
         radius: 4

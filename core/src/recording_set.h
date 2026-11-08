@@ -38,6 +38,12 @@ struct header {
     std::string profile;
     std::string uri;
     std::vector<std::string> text_names; /* signals declared text */
+    /* Every signal line as written, in its order (format 2 and later;
+     * none in an older recording) */
+    std::vector<ecuio_recording_rows::header_signal> signals;
+    /* The focus line's names in their order (ADR-0056 section 3); none
+     * without one */
+    std::vector<std::string> focus;
 };
 
 namespace detail {
@@ -85,9 +91,19 @@ inline header read_header(const std::string& folder)
         } else if (rows::starts_with(buf.data(), n, "signal  ")) {
             rows::header_signal hs;
             const char* bad = nullptr;
-            if (rows::parse_header_signal(buf.data() + 8, n - 8, hs, &bad) &&
-                hs.text) {
-                h.text_names.emplace_back(hs.name);
+            if (rows::parse_header_signal(buf.data() + 8, n - 8, hs, &bad)) {
+                if (hs.text) {
+                    h.text_names.emplace_back(hs.name);
+                }
+                h.signals.push_back(hs);
+            }
+        } else if (rows::starts_with(buf.data(), n, "focus  ")) {
+            const char* p = buf.data() + 7;
+            const char* end = buf.data() + n;
+            std::string name;
+            bool last = false;
+            while (!last && rows::next_field(p, end, name, &last)) {
+                h.focus.push_back(name);
             }
         }
     }

@@ -726,6 +726,13 @@ scrub leaves out; `tests/golden/recording/replay-obd2`'s copy viewed as
 the source; a mock's recording made with a label, its copy's URI
 `mock://<label>`, its `info` and replay the source's).
 
+Amended 2026-11-07: `latency.csv`'s `t_s` is the recording's time to the
+ms ([ADR-0017](0017-session-recording.md)'s appendix of 2026-11-07), so
+the range reads it as it reads `host_us`; a recording from before that
+wrote the session time there, and its rows land by that. The export
+keeps the header's `focus` and `link` lines ([ADR-0049](0049-recordings-in-core.md)'s
+appendix of 2026-11-07).
+
 ## Appendix: the health report as built (2026-11-06)
 
 Section 2's health report: a car's health as one scrubbed file, in core
@@ -1515,3 +1522,119 @@ Step 2 settled these:
   taken) once Import would be enabled, so a map with no time unit is
   never saved; a **Saved maps** list offers them, and choosing one, like
   **Column map...**, skips the guess until **Use the guess**.
+
+## Appendix: the wide CSV as built (2026-11-07)
+
+[ADR-0056](0056-analysis-log.md) sections 4 and 5 make the wide layout
+the CSV export's default; the long form of the appendix "the CSV export
+as built" stays behind `ECUIO_CSV_LONG` (`havne-cli export --layout
+long`), byte for byte.
+
+**The options grow within `reserved`** (the C API appendix's
+`reserved[4]` is now `layout`, `row_ms`, `units`, `column_count`,
+`columns_utf8` and `reserved[1]`): `layout` at 24 plus two pointers (40
+on 64-bit, 32 on 32-bit), `columns_utf8` at 40 plus two pointers, the
+size 56 plus two pointers, each pinned in `test_c_abi`. A caller that
+zeroed `reserved` gets the wide CSV. The report's `reserved[1]` is
+`rows` (at 112), the last reserved word it had: the report can't grow
+again within its size, so a later figure needs a struct of its own (a
+known limit). The fields are the wide CSV's alone: set for another
+format or for the long layout, `ECUIO_ERR_INVALID_ARGUMENT`.
+
+**The file:**
+
+```
+Time (ms),RPM (rpm),Speed (km/h),Throttle (%)
+160,812,0,10.5
+260,815,0,10.0
+```
+
+- `Time (ms)` first, then each column as `Name (unit)` (the name alone
+  with no unit), RFC 4180 quotes only where a cell needs them, CRLF, no
+  comment line: the analyst's tools want the header first.
+- **The columns:** `columns_utf8`'s names in order (`--signal <name>`
+  repeated); with none, the header's `focus` line's names in its order
+  (a log begun with a focus exports its picks by itself); with neither,
+  every number signal that has a sample in range, the header's signal
+  lines first in their order, then any the header lacks as first met.
+  A named column the recording lacks is an empty column (a focus pick
+  the session never answered is a column of a log; `havne-cli export`
+  says so on stderr for each, the exit code unchanged); one that names
+  a text or identification signal, or a name twice, is
+  `ECUIO_ERR_INVALID_ARGUMENT` with the reason in the detail. Text and
+  identification signals are never columns and their values are
+  counted left out as the long form counts them.
+- **The rows** (section 4's rule): a row once every column in the rule
+  has a sample newer than the last row, at the completing sample's
+  time in whole ms (rounded) from the recording's zero, each cell the
+  column's newest value, held. A column with samples in range starts
+  in the rule (its first sample is due with the first sweep's); one
+  with none, a named pick the recording never answered, starts outside
+  it and holds no row up. A column with no sample for 1 s, or 3x its
+  usual interval when that is longer (the median of the gaps between
+  its samples, from a log-linear histogram as reply timing keeps),
+  leaves the rule when the next sample of any column finds it quiet,
+  and its cells stay empty until its next sample, which puts it back.
+- **A grid** (`row_ms`, `--rows <ms>`): rows at the multiples of the
+  interval from the recording's zero (so two exports of one log align,
+  `--from` or not), each the newest values at its time under the same
+  silence rule, a step with no new cell since the last written row
+  skipped (a stretch of them in one move: nothing is new until the
+  next sample, so a gap of hours at `--rows 1` costs no loop, and the
+  silence is judged at the step that writes), and a last row at the
+  step at or after the last sample so the newest values are in.
+- **Cells:** each in its signal's decimal places from the header's
+  signal line (an older recording's: the most its values show, at most
+  3), converted to `units` (`ECUIO_UNITS_*`, `--units metric|imperial`)
+  through `ecuio_display_convert`, which adds a place where the
+  conversion needs it (kPa to psi); the head cell carries the unit
+  shown. Formatted by core's own digits, a `.` whatever the locale, no
+  `-0.0`; a value past the fixed digits' reach (9e15 once scaled) is
+  written as `signals.csv` writes it (`%.12g`), never an empty cell.
+- **The report:** `rows`, `values` the filled cells, `signal_count` the
+  columns; the file goes through the same check as the long form and
+  the same formula refusal for a name or unit.
+
+**The estimate** (`ecuio_export_estimate(options, row_ms, count, out)`):
+one pass over the recording answers each interval in `row_ms` with its
+rows, the file's exact bytes (every cell formatted, nothing written,
+the check not run) and the columns, for the app's choices beside each
+other and for scripts; the wide CSV's alone, `out_path_utf8` may be
+NULL.
+
+**`havne-cli export`:** `--layout wide|long` (wide the default),
+`--rows sweep|<ms>` (1 to 86400000), `--units metric|imperial`,
+`--signal <name>` repeated; the four go with `--format csv`, the last
+three with the wide layout, else usage. The `exported` line adds
+`layout`, `rows`, `row_ms` and `missing` for CSV (schema 1 growth):
+`missing` counts the named columns the recording has no values for
+(the reader's signal list, `ecuio_recording_open`, which lists the
+signals with a sample), each also a stderr line
+`havne-cli: the recording has no values for '<name>': its column is
+empty`.
+
+**Tests:** `CsvExportTest.Wide*` (test_core: a row a sweep over every
+number signal, a range and an empty one; a column that stops leaving
+the rule at 1 s and rejoining; a slow column's 3x; a 100 ms grid
+holding values, skipping an empty step and ending on the step after
+the last sample, aligned to the zero under `--from`; decimals and
+units from the header, metric and imperial; named columns in order
+with an empty one, a text, an identification and a repeated name
+refused; the focus line's columns; text and identification signals
+never columns; a quoted head and a formula refused),
+`ExportTest.TheEstimateMatchesTheFileForEachInterval` and
+`.ArgumentsAreCheckedBeforeAnythingIsRead` (the shape fields and the
+estimate's refusals; the estimate also over named columns, one quoted
+and one the recording lacks, a range and imperial units),
+`FolderExportTest.EachFileIsCopiedThroughItsClasses` (a copy exported
+wide through its focus line), `test_c_abi` (the offsets),
+`CliTransferTest` (the flags, their bad forms, the line, the missing
+names), `CliTransferRunTest.csv` (the replay fixture's recording
+exported long as before and wide: the header, every cell a number or
+empty, the times whole ms ascending, a 1 s grid, named columns in
+order, a named column the recording lacks warned and counted). The
+sweep row's time to the nearest ms, the silence judged at a grid's
+writing step, a gap jumped in one move and a value past the fixed
+digits have a case each (`CsvExportTest.WideA*`), and
+`RequestTimingTest.ASamplePastThirtyOneBitsLandsInTheLastBucket` pins
+the histogram's bound, which the survey's gaps reach.

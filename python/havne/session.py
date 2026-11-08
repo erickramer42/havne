@@ -122,8 +122,9 @@ class Stream:
 
 
 class Recorder:
-    """A recording of a session (ADR-0049), opened before its start; it
-    outlives the session, so notes and marks go on until close()"""
+    """A recording of a session (ADR-0049), opened before or after its
+    start (ADR-0056 section 3) and counting from then; it outlives the
+    session, so notes and marks go on until close()"""
 
     def __init__(self, session, root, label=None):
         opts = e.ecuio_record_options_t()
@@ -171,7 +172,8 @@ class Session:
     """A session on uri (core.h): mock://, replay://, elm327://,
     socketcan:// (Linux), j2534:// (Windows). signals: a SignalFile whose
     profile decodes it; plugin and variant: a Plugin's variant to decode
-    with. Open streams and a recorder before start()."""
+    with. Open streams before start(); a recorder at any time, one at a
+    time; set_focus() at any time."""
 
     def __init__(self, uri, signals=None, plugin=None, variant=None):
         if signals is not None and plugin is not None:
@@ -235,7 +237,12 @@ class Session:
         return s
 
     def record(self, root, label=None):
-        """A recording of the session into a new folder under root, before start()"""
+        """A recording of the session into a new folder under root, from
+        now on: before start() it holds the whole session, after it the
+        analysis log of a run under way (ADR-0056 section 3), its times
+        counted from this call. One recorder at a time: a second while
+        one is open is core's INVALID_ARGUMENT; after close() another can
+        open."""
         r = Recorder(self, root, label)
         self._recorders.append(r)
         return r

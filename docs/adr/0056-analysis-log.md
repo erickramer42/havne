@@ -287,3 +287,133 @@ v0.7.1's, decided 2026-11-07.
   ends. The front ends see each drop in the support report, as for any
   dropped request. Between a drop and the worker's next take, the
   askable map the call judges by can still name a PID no longer asked.
+
+**Section 3, the recorder attached to a running session, as built:**
+
+- `ecuio_session_record` takes a started session. The recording starts
+  at the call, whose moment is its zero, not at a frame boundary on
+  the worker: the worker reads the recorder and its zero together, so
+  every frame dispatched after the attach is in, with its `host_us`
+  from that zero. A second attach while one is live is refused, as the
+  section says; a recorder that has closed frees the session for
+  another, which counts from its own attach. The session's link exists
+  from create, so a worker started before the attach finds it.
+- The header's `focus` line is the focus as it stands at the attach,
+  the names in the order they were picked, written when one is set;
+  the `link` line is the link's state and episode count at the attach
+  (`ecuio_session_get_error_state`'s pair, in the link lines' words),
+  written for a started session only. Both go between `frame flags` and
+  the `signal` lines; [ADR-0049](0049-recordings-in-core.md)'s appendix
+  of 2026-11-07 has the format.
+- `latency.csv`'s `t_s` moves to the recording's clock with it (that
+  appendix), so a log begun mid-session plots its reply timing against
+  its frames.
+- Python: `Session.record(root)` after `start()` as before it; one
+  recorder at a time.
+- The header's `link` line says `healthy (state 0, 0 episodes)` for a
+  link that is OK with no episode; `link_text`'s "recovered" stays for
+  the event lines, where OK after a vehicle timeout (which counts no
+  episode) is a recovery.
+- Reply timing's counts in `latency.csv` are the session's, cumulative
+  since it started, as in any recording: a log begun mid-session finds
+  them already counted up, and the rows still say which requests
+  changed since the last snapshot. The attach resets nothing.
+- A refused attach (another recorder is live) leaves the recorder as it
+  was: everything the attach makes goes into locals and the recorder
+  takes them only once the link is taken, under its mutex, so the same
+  recorder attaches whole on a later try.
+- `ecuio_session_record` runs on the thread that starts and closes the
+  session, as `recording.h` says; `started` stays a plain bool.
+- `RecorderTest`'s cases are listed in that appendix.
+
+**Sections 4 and 5, the rows and the wide CSV, as built:**
+
+- The rule as section 4 says, with two things it left open: a column
+  with samples in range starts in the rule at its first sample, one
+  with none (a named pick the session never answered) starts outside
+  it and holds no row up, and a column's usual interval is the median
+  gap between its samples. A row's time is the completing sample's
+  host_us to the nearest ms.
+- `ecuio_export_options_t` grows within its reserved words (`layout`,
+  `row_ms`, `units`, `column_count`, `columns_utf8`), the report's
+  reserved word is `rows`, and the estimate is `ecuio_export_estimate`
+  over several intervals in one pass; [ADR-0054](0054-exports-and-imports.md)'s
+  appendix "the wide CSV as built" has the file, the columns' order
+  and the CLI's flags. Columns are picked by name: the file is keyed
+  by name and so are the app's plot choices.
+- With no columns named, the recording's `focus` header line (section
+  3) picks them, so a log's export needs no list; with no focus line
+  either, every number signal in range.
+- The grid's last row sits on the step at or after the last sample, so
+  the newest values reach the file.
+- The MAF's two decimals (section 5) are the mock's and obd2's defs
+  together, the sets' shared names and units pinned by
+  `SignalsTest.MockAndObd2ShareDisplayNamesAndUnits`.
+- `havne-cli export` writes the wide layout by default; the long form
+  is `--layout long`. A named column the recording has no values for
+  is said on stderr and counted in the `exported` line's `missing`, so
+  a typo isn't silent. The app's Export (step 6) takes the same options.
+- The export's report has no reserved word left (`rows` took the last):
+  a later figure needs a struct of its own.
+
+**Section 7, the app's Start log and Stop log, as built:**
+
+- The bridge's `startLog()` and `stopLog()`, with `logActive`,
+  `logElapsedMs`, `logBytes` and `logStopped(folder, byUser)` (the
+  folder absolute; `byUser` true for Stop log alone). Start focuses the session on Live's plotted rows
+  (`SignalListModel::plottedIds`, the ticked rows Live shows), then
+  opens a recorder as Record sessions does (the same root, label and
+  `caller` lines, the signal file) and attaches it to the running
+  session. The focus goes first, so a focus core refuses opens no
+  folder; a recorder that fails to open, or that the session refuses,
+  puts the whole set back. A refused recorder's folder, made by that
+  open and holding no frame, is removed (in the open Record sessions
+  shares, so its refusal leaves none either).
+- Start is refused, its reason in the activity log as "Log not
+  started: ...", while a log runs, while not connected, while Record
+  sessions' recorder is live ("Recording this session already": one
+  recorder a session), on a replay unless replays are recorded, with no
+  row plotted, and when core refuses the focus (its detail, "the focus
+  leaves nothing to request: ..."). A refusal opens no recorder.
+- The log takes the bridge's one recorder slot, so `recordingActive`
+  holds during it and the notes, a failed write and a disconnect close
+  it as they close a Record sessions recording. Every end (Stop log, a
+  disconnect, a failed write) goes through the recording's close, which
+  then ends the log: the focus back to the whole set while the session
+  runs (after the close, so the log never holds the widened rotation),
+  the readout's last figures kept, `logStopped` emitted. A Stop log
+  during a teardown waits for the teardown's close. A disconnect or a
+  failed write is reported as it is for a Record sessions recording
+  ("Disconnected: ...", "Recording stopped: ..."), with `byUser` false.
+  A teardown closes the recording before it clears `disconnecting`, so
+  a connect started from that change finds the slot free.
+- Ticks on Live during a log change the plot only; the focus is the
+  one taken at Start.
+- The readout: the time on the bridge's host clock, which counts a
+  sleep, and the folder's file sizes summed once a second on the GUI
+  thread. That is one directory listing of a handful of files a second,
+  no file opened or read, so it holds the GUI thread for well under a
+  millisecond on a phone's storage.
+- Main's header: "Start log" while connected with no recorder live (not
+  on a replay), enabled with a row plotted; while a log runs, the
+  readout (`m:ss`, or `h:mm:ss` past an hour, over MB to a tenth: two
+  lines, so a ten-hour log's fits beside the name) and "Stop log", with
+  Mark and Disconnect hidden and the name hidden under 420 px, so the
+  header fits 384 px. After Stop log the app goes to
+  Recordings and opens the folder in the viewer; a log the session's
+  end or a failed write closes leaves the page as it is, since the
+  driver may be reading Live.
+- Tests: `BridgeTest.StartLogIsRefusedWithItsReason` (a replay
+  among them), `ALogRecordsTheRunningSessionUntilStopped` (mock; Stop
+  log's end is the user's, a disconnect's isn't),
+  `AStartLogTheSessionRefusesLeavesNoFolderAndNoFocus` (a recorder of
+  the test's own holds the slot), `AFailedWriteEndsALogNotAsTheUsers`,
+  `AConnectAtTheTeardownsEndFindsTheRecordingClosed`, and over the fake
+  ECU `ALogAsksThePlottedPidsAlone` (the fake's writes are the plotted
+  PIDs alone, a tick leaves them so, the first `host_us` is near zero,
+  Stop asks the whole set again) and `AFocusCoreRefusesStartsNoLog`;
+  `QmlTest.phone`'s `test_theHeadersLogStartsStopsAndOpensItsFolder`
+  (the header within 384 px before and during a log, a ten-hour
+  readout within 420 px with and without the name, a disconnect during
+  a log staying on Live) and `test_theLogsTimeReadsMinutesThenHours`
+  (a negative or non-finite time reads 0:00).

@@ -165,7 +165,7 @@ TestCase {
     function test_thePagesOpenFromTheListAndGoBack_data() {
         return [
             { tag: "connection", title: "Connection", summary: "1 found · Default",
-              parts: ["deviceCount", "deviceList", "preset_wifi_obdx", "profile_raw", "uriField"] },
+              parts: ["deviceCount", "deviceList", "presetsToggle", "profile_raw", "uriField"] },
             { tag: "vehicle", title: "Vehicle", summary: "None",
               parts: ["vehicle_none", "vehicleLabelField", "vehicleNew", "vehicleMore"] },
             { tag: "signals", title: "Signals", summary: "pick a vehicle",
@@ -402,6 +402,89 @@ TestCase {
         find(page, "uriField").text = "replay://C:/rec/x"
         Bridge.recording = false
         verify(status.text !== "Replays aren't recorded", "nothing to say with Record off")
+    }
+
+    // The presets start closed (five buttons would fill a phone's page),
+    // open on a tap of their row, and close again; the mock's stays out of
+    // a user's view, and j2534:// is offered where there are J2534 drivers
+    function test_thePresetsStartClosedAndOpenOnATap() {
+        const page = createPage()
+        const adapter = find(page, "adapterSection")
+        const toggle = find(page, "presetsToggle")
+        const names = ["preset_elm327", "preset_wifi_obdx", "preset_wifi_elm"]
+        verify(toggle.visible, "the row is there")
+        verify(!adapter.presetsOpen, "closed by default")
+        for (const n of names.concat(["preset_j2534", "preset_mock"]))
+            verify(!find(page, n).visible, n + " hidden while closed")
+        compare(toggle.text, "Not listed: show")
+        toggle.clicked()
+        verify(adapter.presetsOpen)
+        compare(toggle.text, "Not listed: hide")
+        for (const n of names)
+            verify(find(page, n).visible, n + " shown once open")
+        verify(!find(page, "preset_mock").visible, "the mock needs developer mode")
+        toggle.clicked()
+        verify(!find(page, "preset_wifi_obdx").visible, "closed again")
+    }
+
+    // The row says whether it is open, for a screen reader
+    function test_thePresetsRowSaysWhetherItIsOpen() {
+        const page = createPage()
+        const toggle = find(page, "presetsToggle")
+        verify(toggle.Accessible.checkable, "it has a state")
+        verify(!toggle.Accessible.checked, "closed")
+        toggle.clicked()
+        verify(toggle.Accessible.checked, "open")
+    }
+
+    // Back from Android's settings the page reads the permission again,
+    // only while Connection is shown (the wiring to the app's state change
+    // itself is the phone run's)
+    function test_theBluetoothAnswerIsReadAgainOnlyWhileConnectionIsShown() {
+        const page = createPage(true)
+        page.width = 384
+        const before = page.bluetoothRechecks
+        page.recheckBluetoothIfSeen()
+        compare(page.bluetoothRechecks, before, "the list is shown, not Connection")
+        page.open("connection")
+        page.recheckBluetoothIfSeen()
+        compare(page.bluetoothRechecks, before + 1, "Connection is shown")
+        const asks = page.bluetoothAsks
+        page.recheckBluetoothIfSeen()
+        compare(page.bluetoothAsks, asks, "a read, never an ask")
+    }
+
+    function test_j2534IsOfferedOnlyWhereTheresAJ2534Driver() {
+        const page = createPage()
+        const adapter = find(page, "adapterSection")
+        compare(adapter.j2534Offered, Qt.platform.os === "windows",
+                "by platform: only Windows has a J2534 driver")
+        adapter.presetsOpen = true
+        adapter.j2534Offered = false
+        verify(!find(page, "preset_j2534").visible, "no J2534 drivers here")
+        adapter.j2534Offered = true
+        verify(find(page, "preset_j2534").visible, "Windows offers it")
+    }
+
+    // The WiFi presets name the adapter and show the address smaller
+    function test_theWifiPresetsNameTheAdapterAndShowTheAddress() {
+        const page = createPage()
+        find(page, "adapterSection").presetsOpen = true
+        compare(find(page, "preset_wifi_obdx").text, "WiFi: OBDX")
+        compare(find(page, "preset_wifi_obdx").Accessible.name, "WiFi: OBDX 192.168.4.1:23")
+        compare(find(page, "preset_wifi_elm").text, "WiFi: other adapters")
+        compare(find(page, "preset_elm327").text, "elm327:// (type an address)")
+    }
+
+    // Open settings is the way to Android's Nearby devices switch: a
+    // phone build's, where Android refuses the dialog. A computer has
+    // no Bluetooth to ask for, so the button is never there (the
+    // Denied-then-ask path itself needs Android: the phone run)
+    function test_openSettingsIsNeverOnAComputer() {
+        const page = createPage()
+        verify(!Bluetooth.available, "no Bluetooth on this build")
+        verify(!Bluetooth.needsSettings)
+        verify(!find(page, "bluetoothSettingsButton").visible)
     }
 
     // WiFi adapters aren't discovered: the two common addresses are

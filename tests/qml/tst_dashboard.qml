@@ -457,8 +457,11 @@ TestCase {
         return [
             { tag: "a desktop window", form: "desktop", w: 1280, h: 800, columns: 6 },
             { tag: "a narrow desktop window", form: "desktop", w: 500, h: 900, columns: 2 },
+            { tag: "a desktop window under 2 columns", form: "desktop", w: 300, h: 900, columns: 2 },
             { tag: "a wide desktop window", form: "desktop", w: 1900, h: 1400, columns: 8 },
             { tag: "a 4K desktop window", form: "desktop", w: 3840, h: 2000, columns: 12 },
+            { tag: "a desktop window over 12 columns", form: "desktop", w: 5000, h: 1400,
+              columns: 12 },
             { tag: "a phone upright", form: "phone", w: 384, h: 832, columns: 2 },
             { tag: "a phone on its side", form: "phone", w: 832, h: 384, columns: 4 }
         ]
@@ -673,6 +676,21 @@ TestCase {
         compare(stored.value("desktop"), data.text, "the stored text is kept")
     }
 
+    // Dismissing hides the line for that text; a different stored text
+    // is a different problem and shows it again
+    function test_aChangedStoredTextShowsItsProblemAgain() {
+        const stored = createTemporaryObject(storeComponent, testCase)
+        stored.setValue("desktop", "{")
+        const page = pageOf({}, null, true)
+        const line = findChild(page, "dashProblem")
+        verify(line.visible, "the line shows")
+        mouseClick(findChild(page, "dashProblemDismiss"))
+        verify(!line.visible, "dismissed")
+        findChild(page, "dashStore").desktop = "["
+        compare(page.problem, "damaged")
+        verify(line.visible, "another damaged text shows the line again")
+    }
+
     // A kind this version doesn't draw is an empty card saying so,
     // under the cell's label; the five it draws load their gauge
     function test_aKindThisVersionDoesntDrawIsAnEmptyCard_data() {
@@ -812,9 +830,52 @@ TestCase {
         verify(tachs.every(g => isNaN(g.peakValue)), "both cleared")
     }
 
+    // A page whose gauges load after the sweep was requested sweeps them
+    // as they load while the sweep is on, and shows them as they are once
+    // it is over. The last page holds one dial, so it has one gauge to watch
+    function test_aGaugeLoadedAfterTheSweepSweeps_data() {
+        return [
+            { tag: "the sweep is on", sweptAt: "now", sweeps: true },
+            { tag: "the sweep is over", sweptAt: "never", sweeps: false }
+        ]
+    }
+    function test_aGaugeLoadedAfterTheSweepSweeps(data) {
+        const d = pagesDoc(4)
+        d.pages[3].cells = d.pages[3].cells.filter(c => c.kind === "analog").slice(0, 1)
+        const page = pageOf({}, d, true)
+        const loader = findChild(findChild(page, "dashCell_3_0"), "gauge")
+        verify(loader.asynchronous, "the last page loads later")
+        // Set before the event loop runs, so the load is still to come
+        page.sweepMs = 600000
+        page.sweptAt = data.sweptAt === "now" ? Date.now() : 0
+        tryCompare(loader, "status", Loader.Ready, 10000)
+        if (data.sweeps) {
+            verify(loader.item.sweeping, "the gauge sweeps as it loads")
+        } else {
+            wait(100)
+            verify(!loader.item.sweeping, "the gauge shows its value")
+        }
+    }
+
+    // A page and its neighbors load at once, so a swipe never drags in
+    // an empty card; a page two or more away loads between frames
+    function test_theNeighborsOfTheShownPageLoadAtOnce() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, pagesDoc(5), true)
+        const at = p => findChild(findChild(page, "dashCell_" + p + "_0"), "gauge")
+        for (let p = 0; p < 5; ++p)
+            compare(at(p).asynchronous, p > 1, "page " + p + " from page 0")
+        compare(at(0).status, Loader.Ready, "the shown page")
+        compare(at(1).status, Loader.Ready, "the next page, at once")
+        page.goTo(2)
+        for (let p = 0; p < 5; ++p)
+            compare(at(p).asynchronous, p === 0 || p === 4, "page " + p + " from page 2")
+        for (let p = 1; p <= 3; ++p)
+            tryCompare(at(p), "status", Loader.Ready, 5000, "page " + p)
+    }
+
     // A full document (every page, every cell) draws its first frame
-    // with only the shown page's gauges made; the rest load between
-    // frames, and a page moved to finishes at once
+    // with only the near pages' gauges made; the rest load between
+    // frames, and a page moved to stops loading later
     function test_aFullDocumentsOtherPagesLoadLater() {
         const d = DashboardBook.builtIn("desktop")
         const base = d.pages[0].cells
@@ -831,11 +892,12 @@ TestCase {
         for (let i = 0; i < DashboardBook.maxCells; ++i)
             compare(at(0, i).status, Loader.Ready, "the shown page's cell " + i)
         const last = DashboardBook.maxPages - 1
-        verify(at(last, 0).asynchronous, "another page's loads later")
-        verify(at(last, 0).status !== Loader.Ready, "and isn't in yet")
+        verify(at(last, 0).asynchronous, "a far page's loads later")
+        verify(at(5, 0).asynchronous, "so does a middle one's")
         page.goTo(5)
+        verify(!at(5, 0).asynchronous, "the page moved to loads at once")
         for (let i = 0; i < DashboardBook.maxCells; ++i)
-            compare(at(5, i).status, Loader.Ready, "the page moved to, cell " + i)
+            tryCompare(at(5, i), "status", Loader.Ready, 10000, "the page moved to, cell " + i)
         tryVerify(() => allLoaded(page), 30000, "every page loads")
         compare(loaders(page).length, DashboardBook.maxPages * DashboardBook.maxCells)
     }
