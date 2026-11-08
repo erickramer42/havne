@@ -694,20 +694,26 @@ TestCase {
         live.listShare = kept
     }
 
-    // The Dashboard's two dials share a row on a phone upright, and stack
-    // only on a narrower page
+    // The Dashboard's phone form: two columns upright, the tach and the
+    // speedo side by side under the shift lights, and four on its side
     function test_theDashboardsDialsShareARowUpright_data() {
-        return [{ tag: "a phone upright", w: 384, columns: 2 },
-                { tag: "narrower", w: 300, columns: 1 }]
+        return [{ tag: "a phone upright", w: 384, h: 832, columns: 2 },
+                { tag: "a phone on its side", w: 832, h: 384, columns: 4 }]
     }
     function test_theDashboardsDialsShareARowUpright(data) {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
         main.width = data.w
-        main.height = 832
+        main.height = data.h
         const dash = find(main.contentItem, "dashboardPage")
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
-        tryCompare(find(dash, "dialGrid"), "columns", data.columns, 3000)
+        dash.form = "phone"   // the platform's on a phone, so set here
+        tryCompare(find(dash, "dashPage_0"), "columns", data.columns, 3000)
+        const tach = find(dash, "dashCell_0_1")
+        const speedo = find(dash, "dashCell_0_2")
+        tryVerify(() => tach.width > 0, 3000, "the grid lays the dials out")
+        compare(tach.y, speedo.y, "side by side")
+        verify(tach.x + tach.width <= speedo.x, "the tach first")
     }
 
     // Live's window by a pinch or the wheel: a step at a time through

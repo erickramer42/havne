@@ -1,7 +1,8 @@
 // File/layer: app/qml/GaugeBase.qml | Qt6 Quick, UI layer
 // Testing: manual smoke via DashboardPage under mock://demo, needles
 //          ease between batches, sweep once per session, peaks reset;
-//          test_qml (tst_dashboard.qml) the held peak of a replay
+//          test_qml (QmlTest.dashboard): the held peak of a replay,
+//          an enumeration's label
 
 import QtQuick
 
@@ -38,7 +39,10 @@ Item {
     // Drawn position 0..1: the eased value, or the sweep while it plays
     readonly property real fraction: Math.max(sweepPos, fractionOf(smoothed))
     readonly property bool sweeping: sweepAnim.running
-    readonly property string valueText: hasValue ? format(value) : qsTr("—")
+    // An enumeration's label, shown in place of the number
+    property string valueLabel: ""
+    readonly property string valueText: hasValue ? (valueLabel !== "" ? valueLabel : format(value))
+                                                 : qsTr("—")
 
     property real peakValue: NaN
     property real lowValue: NaN

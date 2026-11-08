@@ -2,6 +2,8 @@
 // Testing: manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
+//          QML: QmlTest.dashboard (no negative tick count while a
+//          reused cell rebinds)
 
 import QtQuick
 import QtQuick.Shapes
@@ -40,8 +42,9 @@ GaugeBase {
     readonly property real ringWidth: Math.max(2.5, size * 0.013)
     readonly property real numRadius: r * 0.63
 
-    readonly property int majorCount: Math.round((to - from) / majorStep) + 1
-    readonly property int minorCount: Math.round((to - from) / minorStep) + 1
+    // None while a reused cell rebinds its ends one at a time
+    readonly property int majorCount: Math.max(0, Math.round((to - from) / majorStep) + 1)
+    readonly property int minorCount: Math.max(0, Math.round((to - from) / minorStep) + 1)
     // Numerals shrink to fit the arc between them, down to 9 px; past
     // that every other one (or more) is dropped
     readonly property real labelGap: numRadius * sweepAngle * Math.PI / 180

@@ -1,7 +1,7 @@
 # ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
 
-- **Status:** Accepted. Built: section 10's steps 1 to 3 (steps 1 and
-  3 in the appendices of 2026-11-07); steps 4 to 8 not built.
+- **Status:** Accepted. Built: section 10's steps 1 to 4 (each in an
+  appendix); steps 5 to 8 not built.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
   gets final display values); [ADR-0022](0022-display-units.md) (the
@@ -52,10 +52,11 @@ What the code gives this decision:
   `0-9` and `_`. A plugin variant's signals are a signal file
   (`ecuio_plugin_variant_file`), keys included. `uds-generic`'s IDs
   follow the URI's `did=` order and its defs have no key.
-- **Names aren't stable.** The mock and `obd2` name one quantity
-  differently ("RPM" and "Engine speed"), a set may reword a name, and
-  `test_aRenamedSetStillDrivesEveryGauge` pins that the gauges don't
-  depend on names.
+- **Names aren't stable.** A set may reword a name, and a gauge's
+  label isn't its def's name: the tach is "Engine speed", and the mock
+  and `obd2` both name its def "RPM". `QmlTest.dashboard`'s
+  `test_aGaugeBindsByRefNotByName` pins that a gauge binds by reference,
+  never by name.
 - **Core finds a def by its key** (`ecuio_signal_file_find`) **but
   can't name the key of a def**, so the bridge can't tell QML which key
   a row carries. `obd2`'s own key names (`rpm`, `pid_0c`) exist only
@@ -604,6 +605,57 @@ Section 10's step 1.
   keeps each signal inside its range; `SignalFileTest.EachOwnDefNamesItsKeyAndNoOtherDefDoes`;
   `PluginTest.AVariantsFileNamesEachOfItsOwnDefsKeys`; `c_abi`.
 
+## Appendix: the bridge and the hub as built (2026-11-07)
+
+Section 10's step 2. No ABI change; the Dashboard looks and reads as
+before it.
+
+- **A row's reference** (`SignalListModel`'s `RefRole`, `ref`, fixed
+  per set): `id:<n>` for a def of the registered mock or `obd2` set
+  (the def `ecuio_profile_lookup` gives, by address) and for a file's
+  `extends` base; `key:<k>` for a file's or a plugin variant's own def,
+  through `ecuio_signal_file_key`; "" for every other set's def. A set
+  registered through the C ABI without a signal file is among those:
+  its rows show and get values, but no layout binds them, since its IDs
+  are its own numbering (a copy of the mock's carries the mock's) and
+  it has no keys. `SessionBridge::fileOfSet(set)` finds a set's file:
+  the signal store, the plugin store, then the replay's own files.
+- **A row's range** (`RangeLowRole` and `RangeHighRole`, `rangeLow` and
+  `rangeHigh`): `ecuio_def_range`, NaN at both ends for any refusal.
+  Both ends go through the display conversion, and the range is none
+  (NaN at both ends) when either converts past a double (a deg C end
+  near `DBL_MAX`, in deg F) or the converted ends meet. The roles are
+  notified with `UnitRole`, so a change of units moves them.
+- **`IsEnumRole`** (`isEnum`) marks an enumeration row, which section 3
+  offers to `digital` alone.
+- **`Bridge.profileSignals(uri)`** gives the same facts as the model's
+  rows (section 2's fields, `id` and `isEnum`) for the set the URI's
+  profile names, with no session, in the current unit system. It gives
+  [] for a URI whose scheme or `profile=` core refuses, and for
+  `uds-generic`, `raw` and an unknown name. A URI core refuses for
+  another reason (an unknown key, too many segments) still gives its
+  profile's rows. A replay's own `signals.json` is registered only when
+  it connects, so its URI gives [] before then. The profile is
+  `SessionBridge::profileOfUri`'s, core's choice at
+  `ecuio_session_create`, pinned against the session's info for each
+  URI core takes.
+- **`Bridge.gaugeSignals`** gives `id:` reference lists. `SignalHub`
+  keys its entries by reference (`byRef`; `lookup(refs)`, the first
+  that matches), and a "" row has no entry. Its `Entry` adds `ref`,
+  `hidden`, `refusedCode`, `label`, `isText`, `isEnum`, `rangeLow` and
+  `rangeHigh`.
+- **Tests:** `BridgeTest.SignalRoleNamesMatchQmlBindings`,
+  `.ABuiltInSetsRowsAreReferencedByTheirIds`, `.ASetWithNoFileHasNoRefs`,
+  `.ASignalFilesRowsAreReferencedByTheirKeys`,
+  `.APluginVariantsRowsHaveRefs`, `.ARowsRangeIsShownInTheUnitSystem`,
+  `.ARangeOfAnEndPastADoubleIsNoRange`,
+  `.ProfileSignalsGivesTheProfilesRows`,
+  `.ProfileSignalsOfAReplaysOwnFileFollowTheConnect` and
+  `.ProfileOfUriIsTheProfileCoreChooses`; `QmlTest.dashboard`'s
+  `test_hubFindsSignalsByRef`, `test_hubEntryCarriesTheRowsFacts`,
+  `test_aTextEntryHasNoRange`, `test_aSetWithNoFileHasNoRefs` and
+  `test_aGaugeBindsByRefNotByName`.
+
 ## Appendix: the rules as built (2026-11-07)
 
 Section 10's step 3: `app/qml/DashboardBook.qml`, a `pragma Singleton`
@@ -732,3 +784,77 @@ Dashboard's speed dial reads. A kind with no `majorStep` keeps the
 converted end as it is. A value past an end pins the needle, arc or
 bar at that end while the readout shows the value, as `GaugeBase`'s
 clamp does.
+
+## Appendix: the renderer as built (2026-11-08)
+
+Section 10's step 4: `app/qml/DashboardPage.qml` draws a form's pages
+from its document. Editing is step 6's.
+
+- **The document** is read from `Settings`' `dashboards` category:
+  `phone` and `desktop` hold each form's text, `phonePage` and
+  `desktopPage` the page last shown on each, stored when it changes and
+  restored when the page is made, clamped to the document's pages. The
+  text goes through `DashboardBook.parse`. None shows the built-in
+  layout. A damaged or newer text shows the built-in layout under a
+  line saying which, with Dismiss, and the stored text is left as it
+  is.
+- **The grid:** the phone's 2 columns upright and 4 on its side; the
+  desktop's one per 220 px of the page's width less its margins,
+  rounded, between 2 and 12, with no cap on a column's width. A row is
+  a quarter of a column plus the gap, or less where that would make the
+  page's tallest cell taller than the area that shows the page (with a
+  floor of 160 px, below which the page scrolls), so a short, wide
+  window keeps a dial whole.
+- **Moving between pages:** one `SwipeView`, swiped on the phone form
+  only, with a `PageIndicator` that shows the page and isn't pressed.
+  The desktop's page buttons sit under the header's line, one per page
+  with its name ("Page N" for a page with none), the shown one
+  highlighted, and none for a document of one page. Left and Right
+  step back and forward, stopping at the ends, on the desktop form
+  only, with more than one page, while the page is visible and no
+  `TextInput` or `TextEdit` has the focus.
+- **A cell** is a `GaugeCard` whose `Loader` makes its kind: `analog`,
+  `ring`, `bar`, `digital` or `shift-light`. Any other kind (step 5's
+  `segments`, `seven-segment` and `sparkline`, or one unknown) is an
+  empty card saying this version doesn't have that gauge, and stays in
+  the document.
+- **A page not shown loads later:** its cells make their gauges
+  asynchronously, between frames, and a page moved to finishes at once.
+  So a full document (10 pages of 24 cells) draws its first frame about
+  as soon as one page of 24 does: offscreen on the software renderer on
+  the development desktop, under 1 s, against 11 to 19 s with every
+  gauge made before the first frame.
+- **The notes** are section 3's, first that applies. A row of another
+  unit than the cell's (section 6) adds "(expected <unit>)" to them,
+  and gives the gauge the row's unit, its range (0 to 100 when the row
+  has none) and no zones. A gauge shows its note only while it has no
+  value.
+- **The scale:** the stored `from` and `to`, or `defaultRange`'s, in
+  the current unit system. An analog dial's converted end snaps to its
+  major step (the appendix on ticks); an end the conversion left as
+  stored is kept. A `majorStep` that would draw more than 40 ticks over
+  the span gives way to a round step (1, 2 or 5 times a power of ten)
+  near an eighth of it, and a `minorStep` that would draw more than 200
+  to half the major. `AnalogGauge` never counts fewer than no ticks,
+  which a reused cell asks for while it rebinds its ends one at a time.
+- **An enumeration's label:** `digital` shows the row's label for its
+  value (`GaugeBase.valueLabel`), and the number where it has none.
+- **The sweep and the peaks** reach every page: the once-a-session
+  sweep plays on the analog, ring and shift-light kinds, not on a bar
+  or a digital tile; Reset peaks clears every kind; a connect and a
+  change of units reset the peaks.
+- **Tests:** `QmlTest.dashboard` (`tests/qml/tst_dashboard.qml`):
+  `test_theGridFollowsTheForm` (desktop windows of 500 to 3840 px and
+  the phone both ways: the columns, each cell where `place` puts it, no
+  overlap, a square tach), `test_aWholeDialFitsAShortPage`,
+  `test_thePhonesDialsShareARow`, `test_theDesktopsPageButtonsAndKeys`,
+  `test_thePhonesPagesSwipe`, `test_theLastPageShownIsKept`,
+  `test_aStoredDocumentThatCantBeUsedSaysSo` (damaged and newer),
+  `test_aKindThisVersionDoesntDrawIsAnEmptyCard`,
+  `test_aCellOverAnotherUnitTakesTheRowsRange`,
+  `test_anEnumerationShowsItsLabel`, `test_aValueThatStopsComingDims`,
+  `test_theEcusAnswersAreTheNotes` (the fake DLL's ECU: a withheld PID
+  and a refused DID), `test_theSweepAndThePeaksReachEveryPage` and
+  `test_aFullDocumentsOtherPagesLoadLater`. `QmlTest.phone`'s
+  `test_theDashboardsDialsShareARowUpright` (the phone form upright and
+  on its side, in `Main`).
