@@ -67,6 +67,9 @@ ColumnLayout {
         }
         guess = result
         timeColumn = time
+        // Emptied first so the rows below are made anew, never kept with
+        // bindings an edit has replaced
+        columns = []
         columns = list
         timeUnit = ["s", "ms", "us"].includes(result.timeUnit) ? result.timeUnit : ""
         notesOpen = false
@@ -80,6 +83,10 @@ ColumnLayout {
         columns = []
         timeUnit = ""
         included = 0
+        notesOpen = false
+        saveNote = ""
+        saveFailed = false
+        saveName.text = ""
     }
     property var timeColumn: null
 
@@ -331,7 +338,7 @@ ColumnLayout {
             compact: true
             Layout.preferredHeight: Theme.touchTarget
             text: qsTr("Save as map")
-            enabled: preview.included > 0 && !Bridge.recordingImport.busy
+            enabled: preview.ready && !Bridge.recordingImport.busy
             onClicked: preview.saveAs(saveName.text)
         }
     }

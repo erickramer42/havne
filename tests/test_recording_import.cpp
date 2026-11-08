@@ -475,6 +475,55 @@ TEST(BridgeTest, ImportShowsTheFirstRowsAsTheFileHasThem)
         EXPECT_FALSE(v.toString().contains(path));
 }
 
+/* A left-out column can be put back unless its header can't name it: an
+ * empty header, or one the file has twice (core refuses a map naming it) */
+TEST(BridgeTest, ImportGuessPutsBackOnlyAColumnAMapCanName)
+{
+    QTemporaryDir dir;
+    RecordingImport im([] { return QString(); });
+    const QVariantMap g =
+        guessed(im, fileUrl(write(dir, "twice.csv",
+                                  "time (s),rpm,dup,dup,empty,\n"
+                                  "0,800,1,2,,\n1,900,3,4,,\n2,950,5,6,,\n")));
+    ASSERT_TRUE(ok({g}))
+        << g.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(g.value(QStringLiteral("columns")).toList().size(), 6);
+    EXPECT_FALSE(column(g, 2).value(QStringLiteral("used")).toBool());
+    EXPECT_FALSE(column(g, 2).value(QStringLiteral("canPutBack")).toBool());
+    EXPECT_FALSE(column(g, 3).value(QStringLiteral("canPutBack")).toBool());
+    EXPECT_TRUE(column(g, 4).value(QStringLiteral("canPutBack")).toBool());
+    EXPECT_FALSE(column(g, 5).value(QStringLiteral("canPutBack")).toBool());
+}
+
+/* A name or a shown cell is cut on a character, never between the halves
+ * of a surrogate pair */
+TEST(BridgeTest, ImportCutsNamesAndCellsOnWholeCharacters)
+{
+    QTemporaryDir dir;
+    RecordingImport im([] { return QString(); });
+    const QString emoji = QString::fromUtf8("\xF0\x9F\x98\x80");
+    // 30 bytes, then a 4-byte character that crosses the 31-byte limit
+    const QString header = QString(30, QLatin1Char('a')) + emoji;
+    const QString cell =
+        QString(28, QLatin1Char('x')) + emoji + QString(10, QLatin1Char('y'));
+    const QByteArray csv = "time (s),rpm," + header.toUtf8() +
+                           ",note\n0,800,," + cell.toUtf8() + "\n1,900,," +
+                           cell.toUtf8() + "\n";
+    const QVariantMap g = guessed(im, fileUrl(write(dir, "astral.csv", csv)));
+    ASSERT_TRUE(ok({g}))
+        << g.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(g.value(QStringLiteral("columns")).toList().size(), 4);
+    const QVariantMap col = column(g, 2);
+    const QString name = col.value(QStringLiteral("name")).toString();
+    EXPECT_EQ(name, QString(30, QLatin1Char('a')));
+    EXPECT_EQ(QString::fromUtf8(name.toUtf8()), name);
+    ASSERT_FALSE(
+        column(g, 3).value(QStringLiteral("samples")).toStringList().isEmpty());
+    EXPECT_EQ(
+        column(g, 3).value(QStringLiteral("samples")).toStringList().first(),
+        QString(28, QLatin1Char('x')) + QStringLiteral("..."));
+}
+
 /* A time of plain numbers has no unit until one is given, and the one the
  * caller gives wins; a file with no header is refused in core's words */
 TEST(BridgeTest, ImportGuessTakesTheTimeUnitTheCallerGives)
@@ -520,7 +569,8 @@ TEST(BridgeTest, ImportGuessCopiesAFileItCantReadInPlace)
 
 /* The edits become the map the import gets: a column left out or renamed,
  * a unit dropped, a kind changed (a text keeps no decimals), a left-out
- * column put back, the time's unit set; a map that isn't JSON gives "" */
+ * column put back, the time's unit set, the time column never a signal; a
+ * map that isn't JSON gives "" */
 TEST(BridgeTest, ImportComposesTheMapFromTheEdits)
 {
     RecordingImport im([] { return QString(); });
@@ -548,24 +598,28 @@ TEST(BridgeTest, ImportComposesTheMapFromTheEdits)
               QStringLiteral(";"))
         << "what the edits don't touch is the guess's";
     const QJsonArray sigs = map.value(QStringLiteral("signals")).toArray();
-    ASSERT_EQ(sigs.size(), 4) << "an excluded column is out";
-    EXPECT_EQ(sigs[0].toObject().value(QStringLiteral("name")).toString(),
-              QStringLiteral("Time"));
-    const QJsonObject rpm = sigs[1].toObject();
+    ASSERT_EQ(sigs.size(), 3)
+        << "an excluded column and the time column are out";
+    for (const QJsonValue s : sigs) {
+        EXPECT_NE(s.toObject().value(QStringLiteral("column")).toString(),
+                  QStringLiteral("Time [s]"))
+            << "core refuses the time column as a signal";
+    }
+    const QJsonObject rpm = sigs[0].toObject();
     EXPECT_EQ(rpm.value(QStringLiteral("name")).toString(),
               QStringLiteral("RPM"));
     EXPECT_FALSE(rpm.contains(QStringLiteral("unit")))
         << "an empty unit is dropped";
     EXPECT_EQ(rpm.value(QStringLiteral("decimals")).toInt(), 2)
         << "a number keeps its other keys";
-    const QJsonObject lambda = sigs[2].toObject();
+    const QJsonObject lambda = sigs[1].toObject();
     EXPECT_EQ(lambda.value(QStringLiteral("kind")).toString(),
               QStringLiteral("text"));
     EXPECT_FALSE(lambda.contains(QStringLiteral("decimals")))
         << "a text has no decimals, which core refuses";
     EXPECT_EQ(lambda.value(QStringLiteral("unit")).toString(),
               QStringLiteral("l"));
-    EXPECT_EQ(sigs[3].toObject().value(QStringLiteral("column")).toString(),
+    EXPECT_EQ(sigs[2].toObject().value(QStringLiteral("column")).toString(),
               QStringLiteral("Brand new"));
 
     EXPECT_EQ(im.composeMap(QStringLiteral("not json"), edits, {}), QString());

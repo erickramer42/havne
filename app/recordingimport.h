@@ -73,7 +73,9 @@ public:
     // The map text with the panel's edits: edits is one { column, include,
     // name, unit, kind } per header column in the header's order, timeUnit
     // "" to keep the map's. A column in the base map keeps its other keys
-    // (decimals, rank, group); one put back is { column, name, kind }.
+    // (decimals, rank, group); one put back is { column, name, kind }. An
+    // edit of the map's time column is skipped: it is the time, never a
+    // signal.
     // Returns "" when mapText isn't a JSON object. The map is not checked
     // here: ecuio_import refuses a bad name or unit with its words.
     Q_INVOKABLE QString composeMap(const QString& mapText,

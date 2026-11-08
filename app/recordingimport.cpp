@@ -290,16 +290,25 @@ QString shownCell(const QStringList& row, qsizetype column)
     }
     QString text = row[column];
     if (text.size() > kShownCellChars) {
-        text = text.left(kShownCellChars - 3) + QStringLiteral("...");
+        text.truncate(kShownCellChars - 3);
+        // A cut between the halves of a surrogate pair leaves half a character
+        if (text.back().isHighSurrogate()) {
+            text.chop(1);
+        }
+        text += QStringLiteral("...");
     }
     return text;
 }
 
-// A name of at most 31 bytes, cut on a character
+// A name of at most 31 bytes, cut on a character (never between the halves
+// of a surrogate pair)
 QString nameFrom(const QString& header)
 {
     QString text = header.trimmed();
     while (text.toUtf8().size() > 31) {
+        text.chop(1);
+    }
+    if (!text.isEmpty() && text.back().isHighSurrogate()) {
         text.chop(1);
     }
     return text;
@@ -392,6 +401,12 @@ QVariantMap runGuess(const QUrl& file, const QString& timeUnit, bool copyLocal)
 
     QVariantList columns;
     const QJsonArray listed = root.value(QStringLiteral("columns")).toArray();
+    // A header text the file has twice can't be named by a map, so such a
+    // column is never put back
+    QHash<QString, int> headerCount;
+    for (const QJsonValue v : listed) {
+        ++headerCount[v.toObject().value(QStringLiteral("column")).toString()];
+    }
     for (qsizetype i = 0; i < listed.size(); ++i) {
         const QJsonObject c = listed[i].toObject();
         const QString header = c.value(QStringLiteral("column")).toString();
@@ -409,8 +424,11 @@ QVariantMap runGuess(const QUrl& file, const QString& timeUnit, bool copyLocal)
         col.insert(QStringLiteral("why"),
                    c.value(QStringLiteral("why")).toString());
         col.insert(QStringLiteral("isTime"), isTime);
-        // A column with an empty header can't be named in a map
-        col.insert(QStringLiteral("canPutBack"), !used && !header.isEmpty());
+        // A column with an empty header, or a header the file has twice,
+        // can't be named in a map
+        col.insert(QStringLiteral("canPutBack"),
+                   !used && !header.isEmpty() &&
+                       headerCount.value(header) == 1);
         const bool signal = used && !isTime;
         col.insert(QStringLiteral("name"),
                    signal ? sig.value(QStringLiteral("name")).toString()
@@ -587,6 +605,10 @@ QString RecordingImport::composeMap(const QString& mapText,
         const QJsonObject o = v.toObject();
         had.insert(o.value(QStringLiteral("column")).toString(), o);
     }
+    const QString timeColumn = map.value(QStringLiteral("time"))
+                                   .toObject()
+                                   .value(QStringLiteral("column"))
+                                   .toString();
     QJsonArray signalList;
     for (const QVariant& e : edits) {
         const QVariantMap edit = e.toMap();
@@ -594,6 +616,10 @@ QString RecordingImport::composeMap(const QString& mapText,
             continue;
         }
         const QString column = edit.value(QStringLiteral("column")).toString();
+        if (column == timeColumn) {
+            // The time column is the map's time, never also a signal
+            continue;
+        }
         QJsonObject sig = had.value(column);
         sig.insert(QStringLiteral("column"), column);
         sig.insert(QStringLiteral("name"),

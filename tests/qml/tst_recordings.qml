@@ -277,6 +277,32 @@ TestCase {
         compare(JSON.parse(preview.mapText()).time.unit, "us")
     }
 
+    // Save as map is enabled exactly when Import would be: a map with no
+    // time unit is one every later import refuses
+    function test_saveWaitsForATimeUnitToo() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-save-unit.csv",
+            "time,rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        verify(!preview.ready)
+        verify(preview.included > 0)
+        verify(!find(preview, "saveMapButton").enabled, "no unit chosen")
+        find(preview, "guessTimeUnit_ms").clicked()
+        verify(find(preview, "saveMapButton").enabled, "unit chosen")
+    }
+
+    // A column whose header the file has twice is left out for good
+    function test_aDuplicatedHeaderColumnCantBePutBack() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-dup.csv",
+            "time (s),rpm,dup,dup\n0,800,1,2\n1,900,3,4\n2,950,5,6\n"))
+        const preview = guessed(page)
+        compare(preview.columns.length, 3)
+        verify(!find(guessRow(preview, 1), "include").enabled, "the header names it twice")
+        verify(!find(guessRow(preview, 2), "include").enabled)
+        verify(find(guessRow(preview, 1), "why").text.indexOf("put it back") < 0)
+    }
+
     // A time with a zone to give, not a unit, can't be fixed here
     function test_aTimeThatNeedsAZoneAsksForAMap() {
         const page = createPage()
@@ -373,11 +399,20 @@ TestCase {
         find(preview, "saveMapName").text = ""
         find(preview, "saveMapButton").clicked()
         compare(find(preview, "saveMapNote").text, "give the map a name")
+        find(preview, "saveMapName").text = "left over"
 
         // Next file: the saved map is offered; picking it skips the guess
         page.chooseImportFile(Harness.writeScratchFile("guess-next.csv",
             "time (s),rpm\n0,800\n1,900\n"))
-        guessed(page)
+        verify(page.importGuessing, "reading the second file")
+        compare(find(preview, "saveMapNote").text, "", "the last file's note is gone while reading")
+        verify(!find(preview, "saveMapNote").visible)
+        const second = guessed(page)
+        compare(second, preview, "one preview serves each file")
+        compare(find(second, "saveMapNote").text, "", "the last file's note is gone")
+        verify(!find(second, "saveMapNote").visible)
+        compare(find(second, "saveMapName").text, "")
+        compare(second.columns.length, 1, "the second file's columns")
         verify(find(page, "savedMaps").visible)
         const at = page.savedMaps.findIndex(m => m.name === safe)
         page.chooseImportMap(page.savedMaps[at].url)
