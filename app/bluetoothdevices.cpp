@@ -212,9 +212,11 @@ QString BluetoothDevices::prepare(const QString& uri)
 // settings (needsSettings)
 void BluetoothDevices::deniedStatus()
 {
-    setStatus(tr("Allow Nearby devices for Havne: Android settings > Apps > "
-                 "Havne > Permissions"),
-              true);
+    // All three set before the one emit, so a binding never sees the
+    // status with the button not yet shown
+    m_status = tr("Allow Nearby devices for Havne: Android settings > Apps > "
+                  "Havne > Permissions");
+    m_statusWarns = true;
     m_needsSettings = true;
     emit statusChanged();
 }

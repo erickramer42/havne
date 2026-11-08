@@ -262,6 +262,7 @@ Page {
         importKind = Bridge.recordingImport.guessKind(url)
         importMap = ""
         importAsksInterface = false
+        importInterface.text = ""
         importNote = ""
         importFailed = false
         importOpen = true
@@ -1656,7 +1657,8 @@ Page {
                       : viewFrames.frames.filterTerms > 0
                         ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
                                                          .arg(viewFrames.frames.heldCount)
-                        : qsTr("%n frame(s) in view", "", viewFrames.rows)
+                        : viewFrames.rows === 1 ? qsTr("1 frame in view")
+                                               : qsTr("%1 frames in view").arg(viewFrames.rows)
             }
 
             // A fixed height: the page scrolls and the table scrolls inside

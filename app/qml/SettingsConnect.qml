@@ -17,8 +17,6 @@ ColumnLayout {
     property alias uriField: uriField
     property alias errorLabel: errorLabel
 
-    Heading { text: qsTr("Connection") }
-
     Label {
         objectName: "sessionStatus"
         text: Bridge.connected

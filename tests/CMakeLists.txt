@@ -1218,7 +1218,7 @@ endif()
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT HAVNE_BUILD_CORE_ONLY)
 
-    find_package(Qt6 6.12 COMPONENTS Core Network REQUIRED)   # app/CMakeLists.txt's minimum
+    find_package(Qt6 6.12 COMPONENTS Core Gui Network REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
@@ -1240,7 +1240,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/btconnect.cpp
         ../app/carryover.cpp
         ../app/adapterrelay.cpp
+        ../app/windowtheme.cpp
         fake_bt_socket.h
+        fake_theme.h
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
@@ -1268,9 +1270,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_link_libraries(test_bridge PRIVATE
         ecuio-core
         Qt6::Core
+        Qt6::Gui
         Qt6::Network
         GTest::gtest
     )
+    # windowtheme.cpp colors the title bar through dwmapi
+    if(WIN32)
+        target_link_libraries(test_bridge PRIVATE dwmapi)
+    endif()
 
     # Copy Qt DLLs at build time
     if(WIN32)

@@ -2898,12 +2898,17 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
 
 namespace {
 
-// A recorder's folder, absolute
+// A recorder's folder, absolute; empty if core couldn't give it whole, so
+// a caller never acts on a cut path
 QString folderOf(ecuio_recorder_t* recorder)
 {
-    char folder[4096];
+    char folder[4096] = {};
     uint32_t length = 0;
-    (void)ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length);
+    if (ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length) !=
+            ECUIO_OK ||
+        length >= sizeof folder) {
+        return QString();
+    }
     return QString::fromUtf8(folder);
 }
 
@@ -2989,7 +2994,7 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
         const QString folder = folderOf(recorder);
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");
-        if (!holdsFrames(folder)) {
+        if (!folder.isEmpty() && !holdsFrames(folder)) {
             (void)QDir(folder).removeRecursively();
         }
         emit logMessage(QStringLiteral("%1: %2").arg(

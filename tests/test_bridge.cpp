@@ -47,11 +47,13 @@
 #include "carryover.h"
 #include "healthreport.h"
 #include "fake_bt_socket.h"
+#include "fake_theme.h"
 #include "obdbimport.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
+#include "windowtheme.h"
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 #include <ecuio/version.h>
@@ -11053,4 +11055,61 @@ TEST(BridgeTest, HealthReportCarriesLivesValuesInTheAppsUnits)
                                                  "F")))
         << units.join(' ').toStdString();
     EXPECT_FALSE(units.contains(QStringLiteral("km/h")));
+}
+
+namespace {
+
+QStringList g_themeWarnings;
+
+void collectWarnings(QtMsgType type, const QMessageLogContext&,
+                     const QString& message)
+{
+    if (type == QtWarningMsg) {
+        g_themeWarnings << message;
+    }
+}
+
+} // namespace
+
+// Each of bg, surface and text, changed, applies the theme once, with no
+// window to color
+TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
+{
+    FakeTheme theme;
+    WindowTheme follower(&theme, nullptr);
+    int applied = 0;
+    QObject::connect(&follower, &WindowTheme::applied, &follower,
+                     [&] { ++applied; });
+    theme.setBg(Qt::red);
+    EXPECT_EQ(applied, 1);
+    theme.setSurface(Qt::green);
+    EXPECT_EQ(applied, 2);
+    theme.setText(Qt::blue);
+    EXPECT_EQ(applied, 3);
+}
+
+// A property the theme lacks, or does not notify, is a warning: a rename
+// would otherwise leave the window not following the theme
+TEST(BridgeTest, WindowThemeWarnsOfAColorItCannotFollow)
+{
+    g_themeWarnings.clear();
+    const QtMessageHandler previous = qInstallMessageHandler(collectWarnings);
+    {
+        FakeTheme whole;
+        WindowTheme follower(&whole, nullptr);
+    }
+    EXPECT_TRUE(g_themeWarnings.isEmpty()) << "a whole theme says nothing";
+    {
+        FakeThemeWithoutSurface partial;
+        WindowTheme follower(&partial, nullptr);
+        int applied = 0;
+        QObject::connect(&follower, &WindowTheme::applied, &follower,
+                         [&] { ++applied; });
+        partial.setBg(Qt::red);
+        EXPECT_EQ(applied, 1) << "the colors it has still follow";
+    }
+    qInstallMessageHandler(previous);
+    ASSERT_EQ(g_themeWarnings.size(), 1);
+    EXPECT_TRUE(g_themeWarnings[0].contains(QStringLiteral("'surface'")))
+        << g_themeWarnings[0].toStdString();
 }
