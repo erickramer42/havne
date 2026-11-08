@@ -354,6 +354,18 @@ Page {
         recording.open(row.folder)
     }
 
+    // A folder just recorded (a stopped log), opened from the list as a
+    // tap on its row would; one the list can't show stays on the list
+    function openFolder(folder) {
+        if (viewing)
+            backToList()
+        else
+            refresh()
+        const row = Bridge.recordingRow(folder)
+        if (row.folder !== undefined)
+            open(row)
+    }
+
     // Seconds to the ms with no trailing zeros, as core's replay takes them
     function secondsText(ms) {
         return String(Number((ms / 1000).toFixed(3)))
