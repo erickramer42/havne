@@ -325,3 +325,65 @@ v0.7.1's, decided 2026-11-07.
 - `ecuio_session_record` runs on the thread that starts and closes the
   session, as `recording.h` says; `started` stays a plain bool.
 - `RecorderTest`'s cases are listed in that appendix.
+
+**Section 7, the app's Start log and Stop log, as built:**
+
+- The bridge's `startLog()` and `stopLog()`, with `logActive`,
+  `logElapsedMs`, `logBytes` and `logStopped(folder, byUser)` (the
+  folder absolute; `byUser` true for Stop log alone). Start focuses the session on Live's plotted rows
+  (`SignalListModel::plottedIds`, the ticked rows Live shows), then
+  opens a recorder as Record sessions does (the same root, label and
+  `caller` lines, the signal file) and attaches it to the running
+  session. The focus goes first, so a focus core refuses opens no
+  folder; a recorder that fails to open, or that the session refuses,
+  puts the whole set back. A refused recorder's folder, made by that
+  open and holding no frame, is removed (in the open Record sessions
+  shares, so its refusal leaves none either).
+- Start is refused, its reason in the activity log as "Log not
+  started: ...", while a log runs, while not connected, while Record
+  sessions' recorder is live ("Recording this session already": one
+  recorder a session), on a replay unless replays are recorded, with no
+  row plotted, and when core refuses the focus (its detail, "the focus
+  leaves nothing to request: ..."). A refusal opens no recorder.
+- The log takes the bridge's one recorder slot, so `recordingActive`
+  holds during it and the notes, a failed write and a disconnect close
+  it as they close a Record sessions recording. Every end (Stop log, a
+  disconnect, a failed write) goes through the recording's close, which
+  then ends the log: the focus back to the whole set while the session
+  runs (after the close, so the log never holds the widened rotation),
+  the readout's last figures kept, `logStopped` emitted. A Stop log
+  during a teardown waits for the teardown's close. A disconnect or a
+  failed write is reported as it is for a Record sessions recording
+  ("Disconnected: ...", "Recording stopped: ..."), with `byUser` false.
+  A teardown closes the recording before it clears `disconnecting`, so
+  a connect started from that change finds the slot free.
+- Ticks on Live during a log change the plot only; the focus is the
+  one taken at Start.
+- The readout: the time on the bridge's host clock, which counts a
+  sleep, and the folder's file sizes summed once a second on the GUI
+  thread. That is one directory listing of a handful of files a second,
+  no file opened or read, so it holds the GUI thread for well under a
+  millisecond on a phone's storage.
+- Main's header: "Start log" while connected with no recorder live (not
+  on a replay), enabled with a row plotted; while a log runs, the
+  readout (`m:ss`, or `h:mm:ss` past an hour, over MB to a tenth: two
+  lines, so a ten-hour log's fits beside the name) and "Stop log", with
+  Mark and Disconnect hidden and the name hidden under 420 px, so the
+  header fits 384 px. After Stop log the app goes to
+  Recordings and opens the folder in the viewer; a log the session's
+  end or a failed write closes leaves the page as it is, since the
+  driver may be reading Live.
+- Tests: `BridgeTest.StartLogIsRefusedWithItsReason` (a replay
+  among them), `ALogRecordsTheRunningSessionUntilStopped` (mock; Stop
+  log's end is the user's, a disconnect's isn't),
+  `AStartLogTheSessionRefusesLeavesNoFolderAndNoFocus` (a recorder of
+  the test's own holds the slot), `AFailedWriteEndsALogNotAsTheUsers`,
+  `AConnectAtTheTeardownsEndFindsTheRecordingClosed`, and over the fake
+  ECU `ALogAsksThePlottedPidsAlone` (the fake's writes are the plotted
+  PIDs alone, a tick leaves them so, the first `host_us` is near zero,
+  Stop asks the whole set again) and `AFocusCoreRefusesStartsNoLog`;
+  `QmlTest.phone`'s `test_theHeadersLogStartsStopsAndOpensItsFolder`
+  (the header within 384 px before and during a log, a ten-hour
+  readout within 420 px with and without the name, a disconnect during
+  a log staying on Live) and `test_theLogsTimeReadsMinutesThenHours`
+  (a negative or non-finite time reads 0:00).
