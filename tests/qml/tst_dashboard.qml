@@ -692,13 +692,13 @@ TestCase {
     }
 
     // A kind this version doesn't draw is an empty card saying so,
-    // under the cell's label; the five it draws load their gauge
+    // under the cell's label; the eight it draws load their gauge
     function test_aKindThisVersionDoesntDrawIsAnEmptyCard_data() {
         return [
             { tag: "unknown", kind: "gizmo", drawn: false },
-            { tag: "segments", kind: "segments", drawn: false },
-            { tag: "seven-segment", kind: "seven-segment", drawn: false },
-            { tag: "sparkline", kind: "sparkline", drawn: false },
+            { tag: "segments", kind: "segments", drawn: true },
+            { tag: "seven-segment", kind: "seven-segment", drawn: true },
+            { tag: "sparkline", kind: "sparkline", drawn: true },
             { tag: "analog", kind: "analog", drawn: true },
             { tag: "ring", kind: "ring", drawn: true },
             { tag: "bar", kind: "bar", drawn: true },
@@ -718,6 +718,35 @@ TestCase {
             compare(empty.text, "a gauge this version of Havne doesn't have")
         else
             compare(gaugeOf(cell).label, "Odd")
+    }
+
+    // Step 5's kinds and options reach their gauges: the cells' count and
+    // curve, the digits, the sparkline's window, the bar standing up and
+    // without its ticks, and the held peak on every kind
+    function test_theNewKindsTakeTheirOptions_data() {
+        return [
+            { tag: "segments", kind: "segments", options: { cells: 12, rise: 2, peak: true },
+              check: g => g.count === 12 && g.rise === 2 && g.showPeak },
+            { tag: "seven-segment", kind: "seven-segment", options: { digits: 3 },
+              check: g => g.count === 3 && !g.showPeak },
+            { tag: "sparkline", kind: "sparkline", options: { window: 60 },
+              check: g => g.span === 60 && g.historyLength === 600 },
+            { tag: "a vertical bar", kind: "bar", options: { vertical: true, marks: false, peak: true },
+              check: g => g.vertical && !g.marks && g.showPeak },
+            { tag: "a bar's defaults", kind: "bar", options: {},
+              check: g => !g.vertical && g.marks && !g.showPeak },
+            { tag: "a ring's peak", kind: "ring", options: { peak: true }, check: g => g.showPeak },
+            { tag: "a dial's peak", kind: "analog", options: { peak: true }, check: g => g.showPeak }
+        ]
+    }
+    function test_theNewKindsTakeTheirOptions(data) {
+        const page = pageOf({}, docOf([{ kind: data.kind, w: 2, h: 4, label: "Odd", refs: ["id:1001"],
+                          unit: "RPM", options: data.options }]), true)
+        const cell = findChild(page, "dashCell_0_0")
+        verify(cell, "the cell is there")
+        const g = gaugeOf(cell)
+        verify(g !== null, "the gauge loads")
+        verify(data.check(g), "the options reach the gauge")
     }
 
     // Section 6: a cell over a row of another unit takes the row's

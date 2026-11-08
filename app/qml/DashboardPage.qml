@@ -156,9 +156,10 @@ Page {
         // it finishes at once
         property bool later: false
 
-        // The sweep plays on the dials and the shift lights only
+        // The sweep plays on the dials, the cells and the shift lights only
         function sweep() {
-            if (gauge.item && kind !== "bar" && kind !== "digital")
+            if (gauge.item && kind !== "bar" && kind !== "digital"
+                    && kind !== "seven-segment" && kind !== "sparkline")
                 (gauge.item as GaugeBase).sweep()
         }
 
@@ -260,6 +261,15 @@ Page {
         readonly property string caption: opt("caption", unit)
         readonly property string peakLabel: opt("peakLabel", qsTr("PEAK"))
         readonly property bool showPeak: opt("peak", false)
+        // The new kinds' own options (ADR-0057 section 1): the cells' count
+        // and curve, the digits, the sparkline's window, the bar standing up
+        // and its ticks
+        readonly property int cells: opt("cells", 24)
+        readonly property real rise: opt("rise", 1.6)
+        readonly property int digits: opt("digits", 4)
+        readonly property int windowS: opt("window", 30)
+        readonly property bool vertical: opt("vertical", false)
+        readonly property bool marks: opt("marks", true)
         readonly property bool showProgress: opt("progress", false)
         readonly property string description: opt("description", "")
         readonly property var scaleMarks: {
@@ -276,11 +286,14 @@ Page {
 
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "accent"]
+                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "showPeak"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
-                       "showPeak", "showProgress"],
-            "bar": ["scaleMarks"],
+                       "showProgress"],
+            "bar": ["scaleMarks", "vertical", "marks"],
+            "segments": ["cells", "rise"],
+            "seven-segment": ["digits"],
+            "sparkline": ["windowS"],
             "digital": ["description", "valueLabel"],
             "shift-light": ["count", "ledSpacing"]
         })
@@ -295,6 +308,9 @@ Page {
                            : card.kind === "bar" ? barKind
                            : card.kind === "digital" ? digitalKind
                            : card.kind === "shift-light" ? shiftKind
+                           : card.kind === "segments" ? segmentsKind
+                           : card.kind === "seven-segment" ? readoutKind
+                           : card.kind === "sparkline" ? sparkKind
                            : null
             onLoaded: {
                 const g = item
@@ -330,6 +346,9 @@ Page {
     Component { id: barKind; BarGauge {} }
     Component { id: digitalKind; DigitalGauge {} }
     Component { id: shiftKind; ShiftLightBar {} }
+    Component { id: segmentsKind; SegmentGauge {} }
+    Component { id: readoutKind; SegmentReadout {} }
+    Component { id: sparkKind; SparkGauge {} }
 
     // ---- The header: title, link state, peak reset; the desktop's
     // page buttons; why the stored layout isn't shown

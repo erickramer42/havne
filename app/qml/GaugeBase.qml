@@ -31,6 +31,10 @@ Item {
     property real warnFrom: NaN
     property real dangerFrom: NaN
     property color accent: Theme.gaugeValue   // normal-zone color
+    // The hold shown: a kind with a scale marks its peak on it (the dial's
+    // tell-tale, the bar's and the ring's mark, the cells' notch); off by
+    // default. Reset peaks clears it
+    property bool showPeak: false
 
     // A little over one batch interval, so motion never stalls between
     // samples. Shift lights want less.

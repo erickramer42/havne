@@ -104,6 +104,18 @@ GaugeBase {
         }
     }
 
+    // The held peak: a small mark on the zone strip at its angle, only when
+    // asked for
+    Rectangle {
+        objectName: "peakMark"
+        visible: gauge.showPeak && !isNaN(gauge.peakValue)
+        readonly property real a: gauge.angleOf(isNaN(gauge.peakValue) ? gauge.from : gauge.peakValue)
+        width: gauge.zoneWidth * 2.6; height: width; radius: width / 2
+        x: gauge.px(a, gauge.zoneRadius) - width / 2
+        y: gauge.py(a, gauge.zoneRadius) - height / 2
+        color: Theme.gaugeWarn
+    }
+
     // Tip knob
     Rectangle {
         visible: gauge.hasValue || gauge.sweeping
