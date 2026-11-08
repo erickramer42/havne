@@ -1,7 +1,7 @@
 # ADR-0057: Configurable dashboards: the app's pages of gauges, one set for every vehicle, each gauge bound to a signal by a reference that outlives the profile, stored per form in the app's settings
 
-- **Status:** Accepted. Built: section 10's steps 1 to 4 (each in an
-  appendix); steps 5 to 8 not built.
+- **Status:** Accepted. Built: section 10's steps 1 to 4 and 6 (each
+  in an appendix); steps 5, 7 and 8 not built.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (rule 2: the UI
   gets final display values); [ADR-0022](0022-display-units.md) (the
@@ -858,3 +858,84 @@ from its document. Editing is step 6's.
   `test_aFullDocumentsOtherPagesLoadLater`. `QmlTest.phone`'s
   `test_theDashboardsDialsShareARowUpright` (the phone form upright and
   on its side, in `Main`).
+
+## Appendix: edit mode as built (2026-11-08)
+
+Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
+3's rules. Where it differs from section 5, this is what's built.
+
+- **Saving:** each edit is stored in `Settings` as it's made (the
+  page's `Settings` writes within half a second, and when the page
+  goes), so **Done** only leaves edit mode and there is no Cancel. A
+  closed app or a crash mid-edit loses nothing made before it. An edit
+  that changes nothing (a write the rules refused gives an equal copy)
+  stores nothing. The first edit after a stored text that couldn't be
+  used (damaged or newer) keeps that text in `phoneUnread` or
+  `desktopUnread` (`DashboardBook.saveTexts`), and any edit or reset
+  hides the line about it until the stored text next changes.
+- **Starting:** the header's **Edit** on both forms; on the phone a
+  long press on a cell of the shown page also starts it, with that
+  cell's panel open. A long press on the desktop does nothing.
+- **The edit bar** holds three buttons on both forms: **Done**,
+  **Add** (off while the page is full) and **More**. On the phone they
+  are compact, so the row fits a phone's width. **More** opens an
+  in-page row under the bar, never a `Menu` (a `Popup`): the page's
+  name, **Add page**, **Move page left**, **Move page right**,
+  **Remove page** (never the last) and **Reset**. Reset replaces the
+  row with its question and **Reset** and **Keep**. Reset stores no
+  text for the form, so a later version's built-in layout reaches it.
+- **One panel** at the top of the page's scroll area, full width on
+  both forms, the grid below it: the cell's panel, Add's kinds and the
+  signals take the same place. The cell being edited is outlined; a tap
+  on another cell of the shown page switches the panel to it, and a
+  page change closes the cell's panel. Every cell shows a remove button at
+  `Theme.touchTarget` in its corner, and the page ends with a "+" cell
+  while it has room.
+- **Add:** `drawnKinds`, the one list of the kinds the page draws, in
+  the order Add offers them, each with a still preview (the real gauge
+  at 60 of a 0 to 100 range, with no binding, sweep or peaks), then
+  the signals through `SignalFilterBar`. A dial, ring, bar or shift
+  light takes a number; a digital tile also takes an enumeration;
+  text rows and rows without a reference aren't offered. The rows are
+  `Bridge.profileSignals` of the session's URI while connected, and of
+  Settings' URI otherwise.
+- **The decoded unit and range:** `profileSignals`' maps carry
+  `decodedUnit`, `decodedLow` and `decodedHigh`, the def's own unit
+  and range as core decodes them, the same in every unit system (NaN
+  for no range). A new gauge stores those (section 6), not the
+  converted `unit`, `rangeLow` and `rangeHigh`, so a gauge added
+  under imperial stores km/h and deg C. Its span is a kind's default:
+  1 x 4 for a dial, ring or digital tile, 2 x 2 for a bar, 12 x 1 for
+  a shift light. Picking another signal for a cell sets its
+  references, unit, label and range and drops its zones.
+- **The cell's panel:** the signal, label, from, to, the three zones
+  (an emptied field removes the zone), decimals, the span's `w` and
+  `h`, peak hold, the kind's own (an analog dial's major step and
+  caption, a digital tile's description, a shift light's count), and
+  **Move earlier**, **Move later**, **To the start**, **To the end**.
+  The selection follows a moved cell, and a removal before it keeps
+  it on its own cell.
+- **Density on the phone:** every control in the bar, the More row,
+  Reset's question and the three panels is at least
+  `Theme.touchTarget` tall. The header's link state takes a line of
+  its own under the title row, at the header's small size with no
+  extra padding, and keeps its words beside the dot, so the state is
+  never told by color alone. The desktop header is unchanged.
+- **A tap on a peak-holding dial** in edit mode also clears its peaks:
+  `AnalogGauge`'s own `TapHandler` takes the same tap as the cell's.
+- **Tests:** `QmlTest.dashedit` (`tests/qml/tst_dashedit.qml`):
+  `test_editAndDone`, `test_addTakesTheDecodedUnitAndRange` (metric and
+  imperial), `test_thePickerOffersWhatTheKindCanShow`,
+  `test_withNoSessionThePickerReadsTheLastUri`,
+  `test_theCellsPanelSetsItsOptions`, `test_resizeMoveAndRemove`,
+  `test_aFullPageTakesNoMore`, `test_thePagesControls`,
+  `test_resetAsksFirst`, `test_aLayoutBuiltInEditModeSurvivesARestart`
+  (a layout built through the controls, the page destroyed and a new
+  one made: the same document, on the page it was left on),
+  `test_theFirstEditKeepsATextThatCantBeRead` (damaged and newer) and
+  `test_aLongPressOnThePhoneStartsEditing`. `QmlTest.phone`: the edit
+  controls in `Main` at the phone widths of its edge check (no item
+  past the window's edge), `test_thePhonesEditControlsAreTouchTargets`
+  and `test_thePhonesLinkStateTakesACompactLine`.
+  `BridgeTest.ARowsRangeIsShownInTheUnitSystem` checks the three
+  decoded keys under both unit systems.
