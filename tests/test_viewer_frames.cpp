@@ -245,14 +245,15 @@ TEST(ViewerFramesTest, AnOlderReadThatEndsFirstIsDropped)
 {
     QTemporaryDir root;
     const QString folder = writeRecording(root, 5);
-    std::atomic<int> calls{0};
     std::atomic<bool> release{false};
     RecordingFrames r;
     Releases guard{release};
     r.setReadForTesting([&](const char* f, uint64_t from, uint64_t to,
                             ecuio_frame_row_callback_t cb, void* user,
                             ecuio_frames_read_t* summary) {
-        if (++calls == 2) {
+        // The reads run on their own threads and may reach here in either
+        // order, so the newer is picked out by its start (400 ms, in us)
+        if (from == 400000u) {
             while (!release.load()) {
                 std::this_thread::yield();
             }
