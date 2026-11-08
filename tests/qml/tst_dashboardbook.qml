@@ -277,7 +277,8 @@ TestCase {
                 }
             }
             const r = read(d)
-            compare(r.problem, "", name)
+            compare(r.problem, "dropped", name)
+            compare(r.dropped, { pages: 0, cells: 1 }, name)
             compare(r.doc.pages.length, 2, name)
             compare(labels(r.doc, 0), ["Oil"], name)
             verify(DashboardBook.cellProblem(d.pages[0].cells[0]) !== "", name)
@@ -327,7 +328,8 @@ TestCase {
             const d = book()
             d.pages.splice(1, 0, p)
             const r = read(d)
-            compare(r.problem, "", JSON.stringify(p))
+            compare(r.problem, "dropped", JSON.stringify(p))
+            compare(r.dropped, { pages: 1, cells: 0 }, JSON.stringify(p))
             compare(r.doc, book(), JSON.stringify(p))
         }
         // The name's 40 is counted after trimming
@@ -388,15 +390,19 @@ TestCase {
     // <form>Unread, and what's saved reads as it is
     function test_theFirstEditKeepsAnUnreadText() {
         const doc = DashboardBook.builtIn("phone")
+        const part = book()
+        part.pages[0].cells[0].w = "x"
         const cases = [["damaged", "{"], ["newer", JSON.stringify({ format: 2 })],
-                       ["none", ""], ["", JSON.stringify(book())]]
+                       ["dropped", JSON.stringify(part)], ["none", ""],
+                       ["", JSON.stringify(book())]]
         for (const [problem, stored] of cases) {
             const r = DashboardBook.parse(stored, "phone")
             compare(r.problem, problem, stored)
             const edited = DashboardBook.renamePage(r.doc, 0, "Street")
             const s = DashboardBook.saveTexts(r.problem, stored, edited)
             compare(s.text, DashboardBook.serialize(edited), problem)
-            compare(s.unread, problem === "damaged" || problem === "newer" ? stored : "", problem)
+            compare(s.unread, problem === "damaged" || problem === "newer" || problem === "dropped"
+                              ? stored : "", problem)
             const again = DashboardBook.parse(s.text, "phone")
             compare(again.problem, "", problem)
             compare(again.doc, edited, problem)

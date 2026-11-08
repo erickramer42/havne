@@ -107,7 +107,8 @@ GaugeBase {
                 id: digit
                 required property int index
                 objectName: "digit"
-                readonly property var entry: gauge.shown[index]
+                // The model can outrun `shown` by a binding when `digits` changes
+                readonly property var entry: gauge.shown[index] ?? ({ ch: " ", dp: false })
                 readonly property string on: gauge.lit[entry.ch] ?? ""
                 readonly property real t: Math.max(2, row.digitH * 0.12)
                 readonly property real w: row.digitH * 0.5

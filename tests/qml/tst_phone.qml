@@ -89,7 +89,10 @@ TestCase {
     // The test phone upright, in device-independent pixels (1440 px
     // at 600 dpi)
     function test_everyPageFitsAPhonesWidth_data() {
-        return [{ tag: "homePage" }, { tag: "dashboardPage" }, { tag: "livePage" },
+        return [{ tag: "homePage" }, { tag: "dashboardPage" },
+                { tag: "dashboardPhone" }, { tag: "dashboardPhoneCell" },
+                { tag: "dashboardPhoneAdd" }, { tag: "dashboardPhoneSignal" },
+                { tag: "dashboardPhoneReset" }, { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
                 { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
@@ -112,11 +115,32 @@ TestCase {
         // still showing; recordingsViewer: a cursor placed
         const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare"].includes(data.tag)
         const importing = data.tag.startsWith("recordingsImport")
+        // dashboardPage is the desktop form at a phone's width;
+        // dashboardPhone* the phone's, in edit mode with each of its
+        // panels (none of which stores anything)
+        const dashPhone = data.tag.startsWith("dashboardPhone")
         const name = data.tag === "logFrames" ? "logPage"
-                   : viewer || importing ? "recordingsPage" : data.tag
+                   : viewer || importing ? "recordingsPage"
+                   : dashPhone ? "dashboardPage" : data.tag
         const page = find(main.contentItem, name)
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
         verify(page.visible, name + " is on screen")
+        if (dashPhone) {
+            page.form = "phone"
+            if (data.tag !== "dashboardPhone")
+                page.startEditing()
+            if (data.tag === "dashboardPhoneCell") {
+                page.select(1)
+                page.moreShown = true
+            } else if (data.tag === "dashboardPhoneAdd") {
+                page.startAdd()
+            } else if (data.tag === "dashboardPhoneSignal") {
+                page.pickKind("analog")
+            } else if (data.tag === "dashboardPhoneReset") {
+                page.moreShown = true
+                page.confirmReset = true
+            }
+        }
         if (data.tag === "logFrames")
             find(page, "view_frames").clicked()
         // A long title and source, and the findings fixture in the viewer
@@ -704,6 +728,80 @@ TestCase {
         verify(waitForPolish(main), "laid out")
         verify(list.height > 0.1 * list.parent.height + 1, "sized to its rows again")
         live.listShare = kept
+    }
+
+    // The phone's link state: a line of its own under the title row,
+    // no taller than its words, which name the state (never the color
+    // alone)
+    function test_thePhonesLinkStateTakesACompactLine() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        // the Loader after the header row; the desktop one's label may
+        // still be in the tree, waiting for its deletion
+        const header = find(dash, "resetPeaks").parent
+        const line = header.parent.children[1]
+        tryVerify(() => line.item && line.item.children[1].width > 0, 3000, "the line is laid out")
+        const words = line.item.children[1]
+        compare(words.objectName, "linkLabel", "the line's words")
+        tryVerify(() => words.mapToItem(header, 0, 0).y >= header.height, 3000,
+                  "below the title row: " + words.mapToItem(header, 0, 0).y + " in " + header.height)
+        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
+        compare(words.truncated, false, "whole at 384 px")
+        verify(line.height <= words.implicitHeight + 0.5,
+               "the line is " + line.height + " px for " + words.implicitHeight + " px of words")
+        verify(words.font.pixelSize <= 13, "the small font")
+    }
+
+    // Edit mode's controls on the phone: each a touch target, the bar at
+    // most three buttons
+    function test_thePhonesEditControlsAreTouchTargets() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        verify(find(dash, "dashEdit").height >= Theme.touchTarget - 0.5, "Edit")
+        dash.startEditing()
+        const bar = find(dash, "dashEditBar")
+        compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").length, 3,
+                "three on the bar")
+        const tall = names => {
+            waitForRendering(main.contentItem)
+            for (const n of names) {
+                const item = find(dash, n)
+                verify(item.visible, n + " shows")
+                verify(item.height >= Theme.touchTarget - 0.5,
+                       n + " is " + item.height + " px tall")
+            }
+        }
+        tall(["dashDone", "dashAdd", "dashMore", "dashAddCell_0"])
+        find(dash, "dashMore").clicked()
+        tall(["moreRename", "moreAddPage", "moreLeft", "moreRight", "moreRemovePage", "moreReset"])
+        dash.confirmReset = true
+        tall(["resetConfirm", "resetKeep"])
+        dash.confirmReset = false
+        dash.confirmRemovePage = true
+        tall(["removePageConfirm", "removePageKeep"])
+        dash.confirmRemovePage = false
+        dash.moreShown = false
+        dash.select(1)
+        tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
+              "panelDecimals", "panelW", "panelH", "panelPeak", "panelEarlier", "panelLater",
+              "panelStart", "panelEnd"])
+        dash.startAdd()
+        tall(["addClose", "addKind_analog", "addKind_digital"])
+        dash.pickKind("analog")
+        tall(["signalBack", "pickSignal_" + Bridge.gaugeSignals["rpm"][0]])
+        dash.stopEditing()
     }
 
     // The Dashboard's phone form: two columns upright, the tach and the

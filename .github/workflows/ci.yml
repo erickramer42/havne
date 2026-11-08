@@ -676,9 +676,10 @@ jobs:
           cmake --build build
 
       # linuxdeploy and its Qt plugin, which make-appimage.sh downloads
-      # from GitHub's releases (a 504 there has failed the job) and checks
-      # by SHA-256 either way. Keyed on the script, which pins them; one
-      # copy an arch, saved on main's pushes only.
+      # from GitHub's releases (curl with retries, then the API through
+      # gh, since the asset URLs' host can answer 504 for long stretches)
+      # and checks by SHA-256 either way. Keyed on the script, which pins
+      # them; one copy an arch, saved on main's pushes only.
       - name: Restore linuxdeploy from the cache
         id: linuxdeploy-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -687,6 +688,8 @@ jobs:
           key: linuxdeploy-${{ runner.arch }}-${{ hashFiles('packaging/linux/make-appimage.sh') }}
 
       - name: Pack and check the AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           QMAKE="$QT_ROOT_DIR/bin/qmake" bash packaging/linux/make-appimage.sh "$VERSION-ci" build dist
