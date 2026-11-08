@@ -770,6 +770,50 @@ TestCase {
         tryVerify(() => a.history.length === 0 || a.history.length <= 1, 2000, "the page left starts again")
     }
 
+    // The header's line about the log (Bridge.logNotice): a refusal of
+    // Start log and an end the user didn't ask for show in words, whole
+    // at a phone's width, until Dismiss or the next log
+    function test_theLogsNoticeShowsInTheHeaderUntilDismissed_data() {
+        return [{ tag: "phone", form: "phone", width: 384 },
+                { tag: "desktop", form: "desktop", width: 1280 }]
+    }
+    function test_theLogsNoticeShowsInTheHeaderUntilDismissed(data) {
+        Bridge.clearLogNotice()
+        const page = pageOf({ form: data.form, width: data.width, height: 800 }, undefined, true)
+        const line = findChild(page, "dashLogNotice")
+        const words = findChild(page, "dashLogNoticeText")
+        verify(line && words, "the line is there")
+        verify(!line.visible, "nothing to say")
+
+        // A refusal: no session
+        compare(Bridge.startLog(), false)
+        compare(Bridge.logNotice, "Log not started: not connected")
+        tryVerify(() => line.visible && words.width > 0, 2000, "the line shows")
+        compare(words.text, Bridge.logNotice)
+        compare(words.truncated, false, "whole at " + data.width + " px")
+        verify(words.mapToItem(page, 0, 0).y > 0, "in the header, under the title row")
+        findChild(page, "dashLogNoticeDismiss").clicked()
+        compare(Bridge.logNotice, "")
+        tryVerify(() => !line.visible, 2000, "Dismiss hides it")
+
+        // A log the session's end closes, told; the next log clears it
+        connect("mock://demo")
+        compare(Bridge.startLog(), true)
+        compare(Bridge.logNotice, "")
+        verify(!line.visible, "a running log says nothing")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "disconnect ends")
+        compare(Bridge.logNotice, "Log ended: disconnected")
+        tryVerify(() => line.visible, 2000, "the end shows")
+        compare(words.text, "Log ended: disconnected")
+        connect("mock://demo")
+        compare(Bridge.startLog(), true)
+        compare(Bridge.logNotice, "", "the next log clears it")
+        tryVerify(() => !line.visible, 2000)
+        Bridge.stopLog()
+        compare(Bridge.logNotice, "", "Stop log says nothing")
+    }
+
     // Section 6: a cell over a row of another unit takes the row's
     // range and no zones, and its note names the unit it expected
     function test_aCellOverAnotherUnitTakesTheRowsRange() {
