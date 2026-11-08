@@ -275,9 +275,13 @@ if(WIN32)
     if(QT_WINDEPLOYQT_LOCATION)
         add_custom_command(TARGET havne POST_BUILD
             # Outside Debug, no qmltooling plugins: the debug server's
-            # half, which nothing but a QT_QML_DEBUG build loads
+            # half, which nothing but a QT_QML_DEBUG build loads.
+            # Microsoft's shader compilers stay out: Qt Quick runs without
+            # them, and each brings the Windows SDK's distribution terms
             COMMAND ${QT_WINDEPLOYQT_LOCATION}
                     --no-compiler-runtime
+                    --no-system-d3d-compiler
+                    --no-system-dxc-compiler
                     "$<$<NOT:$<CONFIG:Debug>>:--skip-plugin-types;qmltooling>"
                     --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml
                     $<TARGET_FILE:havne>

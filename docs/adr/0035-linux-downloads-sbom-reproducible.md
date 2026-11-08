@@ -172,7 +172,7 @@ contains:
 
 | Download | Components |
 |---|---|
-| Windows zip | Havne, Qt (each `Qt6*.dll`, plugin and QML module windeployqt deployed), the Visual C++ runtime, Direct3D's and DirectX's shader compilers, Mesa's software OpenGL; each at its DLL's version resource. A DLL that matches none fails `stage.ps1` |
+| Windows zip | Havne, Qt (each `Qt6*.dll`, plugin and QML module windeployqt deployed), the Visual C++ runtime, Mesa's software OpenGL; each at its DLL's version resource. A DLL that matches none fails `stage.ps1` |
 | AppImage | Havne, Qt and its ICU (what came from the Qt kit), the AppImage runtime, each other bundled library by its Ubuntu package and version (`dpkg -S` on the build runner), as `pkg:deb/ubuntu/<name>@<version>` |
 | APK | Havne, Qt for Android (each `libQt6*`, `libplugins_*` and `libqml_*` in `lib/arm64-v8a`), the NDK's libc++, and the Java libraries Gradle resolved for the Release build (`gradlew dependencies`). A native library from anywhere else fails the job |
 | Core deb and tarball | Havne core; it bundles nothing, so the libraries its `Depends` names (`libc6`, `libgcc-s1`, `libstdc++6`) are listed as what it depends on |

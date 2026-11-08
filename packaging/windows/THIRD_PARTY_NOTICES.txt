@@ -23,32 +23,11 @@ https://code.qt.io. Qt's own third-party components, with the copyright
 lines, credits and license texts they ask for, are in
 licenses\Qt-third-party.txt.
 
-Qt's Windows deployment also places graphics runtime files in the
-folder; the two sections after this one cover them.
+Qt's Windows deployment also places a software OpenGL renderer in the
+folder; the Mesa llvmpipe section below covers it.
 
 Havne is an independent project, not affiliated with or endorsed by
 The Qt Company.
-
-
-Microsoft DirectX shader compilers
-----------------------------------
-
-D3Dcompiler_47.dll, dxcompiler.dll and dxil.dll are Microsoft's
-unmodified files, copyright (c) Microsoft Corporation, all rights
-reserved. Qt's deployment tool places them here: D3Dcompiler_47.dll
-is the copy in Qt's Windows kit, and the other two come from the
-Windows SDK on the machine that builds this package.
-
-Microsoft's terms for distributing them are the "Distributable Code"
-part of its Windows SDK license:
-https://learn.microsoft.com/en-us/legal/windows-sdk/license
-Its list of files that may be distributed names all three:
-https://learn.microsoft.com/en-us/legal/windows-sdk/redist
-The open-source parts of dxcompiler.dll have their notices at
-https://github.com/microsoft/DirectXShaderCompiler/blob/main/ThirdPartyNotices.txt
-
-Which SDK's terms applied when Qt took its copy of D3Dcompiler_47.dll
-is not established.
 
 
 Mesa llvmpipe
