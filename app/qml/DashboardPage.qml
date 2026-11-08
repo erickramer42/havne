@@ -54,6 +54,18 @@ Page {
     readonly property var parsed: DashboardBook.parse(storedText, form)
     property var doc: parsed.doc
     readonly property string problem: parsed.problem
+    // What a "dropped" read left out, in words
+    readonly property string droppedWords: {
+        const d = parsed.dropped
+        if (!d)
+            return ""
+        const words = []
+        if (d.pages > 0)
+            words.push(d.pages === 1 ? qsTr("1 page") : qsTr("%1 pages").arg(d.pages))
+        if (d.cells > 0)
+            words.push(d.cells === 1 ? qsTr("1 gauge") : qsTr("%1 gauges").arg(d.cells))
+        return words.join(qsTr(" and "))
+    }
     readonly property var pages: doc && Array.isArray(doc.pages) ? doc.pages : []
     property bool problemDismissed: false
     // A different stored text is a different problem, so its line shows again
@@ -69,6 +81,7 @@ Page {
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool moreShown: false
     property bool confirmReset: false
+    property bool confirmRemovePage: false
 
     // The kinds this page draws, in the order Add offers them, and the
     // component that makes each (a cell's and Add's preview); null for
@@ -82,6 +95,8 @@ Page {
              : kind === "shift-light" ? shiftKind
              : null
     }
+    // The kinds that draw a peak, so the panel offers Peak hold only there
+    readonly property var peakKinds: ["analog"]
     readonly property var kindNames: ({
         "analog": qsTr("Dial"), "ring": qsTr("Ring"), "bar": qsTr("Bar"),
         "digital": qsTr("Number"), "shift-light": qsTr("Shift lights")
@@ -108,6 +123,22 @@ Page {
         panel = ""
         moreShown = false
         confirmReset = false
+        confirmRemovePage = false
+    }
+
+    // Takes the focus off a text field, so the field commits what was
+    // typed to the cell or page it was typed for before the selection or
+    // the page changes (a tap on a cell and a swipe take no focus). Its
+    // fields exist only in edit mode, and outside it the focus is left
+    // where it is. The field's own focus goes: the page is a focus scope,
+    // so focusing the page would give it back to the field
+    function commitTyping() {
+        if (!editing)
+            return
+        const f = Window.activeFocusItem
+        if (f !== null && (f instanceof TextInput || f instanceof TextEdit))
+            f.focus = false
+        Qt.inputMethod.hide()
     }
 
     // Stores next as this form's document, unless it's the same (a
@@ -140,6 +171,7 @@ Page {
     }
 
     function select(i) {
+        commitTyping()
         selected = i
         panel = "cell"
     }
@@ -158,6 +190,7 @@ Page {
     function startAdd() {
         if (!DashboardBook.canAddCell(doc, pageIndex))
             return
+        commitTyping()
         selected = -1
         addKind = ""
         panel = "add"
@@ -204,12 +237,15 @@ Page {
         }
         if (selected < 0)
             return
-        // Another signal: its name, unit and range, and no zones
+        // Another signal: its name, unit and range, and none of the old
+        // signal's zones, steps, words or decimals, which were its own
         const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
         let next = DashboardBook.setCell(doc, pageIndex, selected, {
             refs: counterparts(row.ref), unit: row.decodedUnit, label: labelFor(row) })
         next = DashboardBook.setOptions(next, pageIndex, selected, {
-            from: r.from, to: r.to, coldBelow: null, warnFrom: null, dangerFrom: null })
+            from: r.from, to: r.to, coldBelow: null, warnFrom: null, dangerFrom: null,
+            majorStep: null, minorStep: null, labelDivisor: null, caption: null,
+            description: null, peakLabel: null, decimals: null })
         edit(next)
         panel = "cell"
     }
@@ -250,7 +286,7 @@ Page {
         }
     }
 
-    // ---- Pages
+    // ---- The pages' edits
 
     function addPage() {
         if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1))))
@@ -261,7 +297,12 @@ Page {
         if (edit(DashboardBook.movePage(doc, pageIndex, to)))
             goTo(to)
     }
+    // Another page takes this one's index, so nothing stays selected
     function removePage() {
+        confirmRemovePage = false
+        selected = -1
+        panel = ""
+        addKind = ""
         edit(DashboardBook.removePage(doc, pageIndex))
     }
 
@@ -271,12 +312,17 @@ Page {
     property bool restored: false
     function goTo(i) {
         const n = Math.max(1, pages.length)
-        pageIndex = Math.max(0, Math.min(n - 1, Math.round(i)))
+        const to = Math.max(0, Math.min(n - 1, Math.round(i)))
+        if (to !== pageIndex)
+            commitTyping()
+        pageIndex = to
     }
     onPagesChanged: goTo(pageIndex)
+    // A page change closes whatever panel was open
     onPageIndexChanged: {
         selected = -1
-        if (panel === "cell") panel = ""
+        panel = ""
+        addKind = ""
         if (swipe.count > pageIndex && swipe.currentIndex !== pageIndex)
             swipe.setCurrentIndex(pageIndex)
         if (!restored) return
@@ -554,30 +600,35 @@ Page {
                 root.select(card.cellIndex)
             }
         }
-        Rectangle {
-            objectName: "cellSelected"
+        // The outline and Remove exist only while the cell is editable
+        Loader {
             z: 2
-            visible: card.editable && root.selected === card.cellIndex
+            active: card.editable && root.selected === card.cellIndex
             anchors.fill: parent
             anchors.margins: -card.padding + 2
-            color: "transparent"
-            border.color: Theme.primary
-            border.width: 2
-            radius: Theme.radius
+            sourceComponent: Rectangle {
+                objectName: "cellSelected"
+                color: "transparent"
+                border.color: Theme.primary
+                border.width: 2
+                radius: Theme.radius
+            }
         }
-        ThemedButton {
-            objectName: "cellRemove"
+        Loader {
             z: 3
-            visible: card.editable
+            active: card.editable
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: -card.padding + 2
             width: Theme.touchTarget
             height: Theme.touchTarget
-            compact: true
-            text: "\u00D7"
-            Accessible.name: qsTr("Remove %1").arg(card.label)
-            onClicked: root.removeCell(card.cellIndex)
+            sourceComponent: ThemedButton {
+                objectName: "cellRemove"
+                compact: true
+                text: "\u00D7"
+                Accessible.name: qsTr("Remove %1").arg(card.label)
+                onClicked: root.removeCell(card.cellIndex)
+            }
         }
 
         // A kind this version doesn't draw, kept so it can be removed
@@ -643,6 +694,8 @@ Page {
             readonly property string kind: cell ? cell.kind : ""
             readonly property string unitShown: cell ? root.shownUnit(cell.unit ?? "") : ""
             readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
+            // The row the cell shows, whose decimals it uses until it has its own
+            readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
             readonly property bool phone: root.form === "phone"
             implicitHeight: panelColumn.implicitHeight + 2 * padding
             padding: 12
@@ -728,7 +781,8 @@ Page {
                         to: 6
                         value: panelCard.cell && panelCard.cell.options
                                && panelCard.cell.options.decimals !== undefined
-                               ? panelCard.cell.options.decimals : 0
+                               ? panelCard.cell.options.decimals
+                               : panelCard.entry ? panelCard.entry.decimals : 0
                         onValueModified: root.setOptions({ decimals: value })
                     }
 
@@ -751,9 +805,13 @@ Page {
                         onValueModified: root.resize(panelCard.cell.w, value)
                     }
 
-                    Caption { text: qsTr("Peak hold") }
+                    Caption {
+                        visible: root.peakKinds.indexOf(panelCard.kind) >= 0
+                        text: qsTr("Peak hold")
+                    }
                     Switch {
                         objectName: "panelPeak"
+                        visible: root.peakKinds.indexOf(panelCard.kind) >= 0
                         implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
                                                  Theme.touchTarget)
                         checked: panelCard.cell && panelCard.cell.options
@@ -930,10 +988,11 @@ Page {
             readonly property real touchMin: Theme.touchTarget
             // The rows the bar leaves: every filter property shares one
             // change signal, so reading active re-filters on any change
+            readonly property var offered: root.pickable(root.addKind !== "" ? root.addKind
+                                                         : root.selectedCell ? root.selectedCell.kind : "")
             readonly property var rows: {
                 const f = rowFilter
-                const all = root.pickable(root.addKind !== "" ? root.addKind
-                                          : root.selectedCell ? root.selectedCell.kind : "")
+                const all = offered
                 if (!f.active)
                     return all
                 return all.filter(r => f.matches(r.name, r.unit, r.group, false))
@@ -963,11 +1022,13 @@ Page {
                         onClicked: root.panel = root.addKind !== "" ? "add" : "cell"
                     }
                 }
+                // The text alone: a Popup doesn't take the page's zoom, and
+                // Plotted only means nothing to a gauge
                 SignalFilterBar {
                     objectName: "signalFilter"
                     Layout.fillWidth: true
                     filter: rowFilter
-                    codes: root.profileRows.map(r => r.group)
+                    filterButtonShown: false
                 }
                 Label {
                     objectName: "signalNone"
@@ -975,9 +1036,9 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
-                    text: root.profileRows.length === 0
-                          ? qsTr("No signals: connect, or choose a profile in Settings.")
-                          : qsTr("No signal matches.")
+                    text: signalCard.offered.length > 0 ? qsTr("No signal matches.")
+                        : Bridge.connected ? qsTr("This session's profile has no signal a gauge can show.")
+                        : qsTr("No signals: connect, or choose a profile in Settings.")
                 }
                 Flow {
                     Layout.fillWidth: true
@@ -1108,6 +1169,7 @@ Page {
                 onClicked: {
                     root.moreShown = !root.moreShown
                     root.confirmReset = false
+                    root.confirmRemovePage = false
                 }
             }
             Item { Layout.fillWidth: true }
@@ -1118,7 +1180,7 @@ Page {
             objectName: "dashMoreRow"
             readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
-            visible: root.editing && root.moreShown && !root.confirmReset
+            visible: root.editing && root.moreShown && !root.confirmReset && !root.confirmRemovePage
             spacing: 8
             TextField {
                 id: pageName
@@ -1157,12 +1219,41 @@ Page {
                 objectName: "moreRemovePage"
                 enabled: DashboardBook.canRemovePage(root.doc)
                 text: qsTr("Remove page")
-                onClicked: root.removePage()
+                onClicked: root.confirmRemovePage = true
             }
             ThemedButton {
                 objectName: "moreReset"
                 text: qsTr("Reset")
                 onClicked: root.confirmReset = true
+            }
+        }
+        RowLayout {
+            objectName: "dashRemovePageConfirm"
+            readonly property real touchMin: Theme.touchTarget
+            Layout.fillWidth: true
+            visible: root.editing && root.confirmRemovePage
+            spacing: 8
+            Label {
+                objectName: "removePageQuestion"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                wrapMode: Text.WordWrap
+                color: Theme.warning
+                font.pixelSize: 13
+                text: qsTr("Remove the page \"%1\" and its gauges?")
+                      .arg(root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : "")
+            }
+            ThemedButton {
+                objectName: "removePageConfirm"
+                compact: root.form === "phone"
+                text: qsTr("Remove")
+                onClicked: root.removePage()
+            }
+            ThemedButton {
+                objectName: "removePageKeep"
+                compact: root.form === "phone"
+                text: qsTr("Keep")
+                onClicked: root.confirmRemovePage = false
             }
         }
         RowLayout {
@@ -1215,8 +1306,8 @@ Page {
         RowLayout {
             objectName: "dashProblem"
             Layout.fillWidth: true
-            visible: (root.problem === "damaged" || root.problem === "newer")
-                     && !root.problemDismissed
+            visible: (root.problem === "damaged" || root.problem === "newer"
+                      || root.problem === "dropped") && !root.problemDismissed
             Label {
                 objectName: "dashProblemText"
                 Layout.fillWidth: true
@@ -1226,6 +1317,9 @@ Page {
                 text: root.problem === "newer"
                       ? qsTr("The saved dashboard was made by a newer version of Havne. "
                              + "This shows the built-in one; the saved one is kept.")
+                      : root.problem === "dropped"
+                      ? qsTr("Part of the saved dashboard couldn't be read: %1 left out. "
+                             + "The saved text is kept.").arg(root.droppedWords)
                       : qsTr("The saved dashboard couldn't be read. "
                              + "This shows the built-in one; the saved text is kept.")
             }
@@ -1257,8 +1351,11 @@ Page {
                 setCurrentIndex(root.pageIndex)
         }
         onCurrentIndexChanged: {
-            if (count === root.pages.length && currentIndex >= 0)
+            if (count === root.pages.length && currentIndex >= 0) {
+                if (currentIndex !== root.pageIndex)
+                    root.commitTyping()
                 root.pageIndex = currentIndex
+            }
         }
 
         Repeater {

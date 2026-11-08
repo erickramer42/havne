@@ -15,7 +15,9 @@ import QtQml
 // wrong type or out of its bounds drops its cell (or its page, for the
 // page's name and cells); the document's own bounds (pages, cells on a
 // page, the text's size) and an unreadable or newer text give the
-// built-in layout and a problem instead, the stored text left alone.
+// built-in layout and a problem instead, the stored text left alone. A
+// read that drops a page or cell names that as its problem too, since
+// the next write stores the document without it.
 //
 // Every function takes the document and returns a new one, never
 // changing what it was given. A write that would leave a document that
@@ -77,9 +79,11 @@ QtObject {
 
     // ---- Reading and writing the stored text
 
-    // { doc, problem }: problem "" (read), "none" (no stored text),
-    // "damaged" or "newer"; doc is the built-in layout of the form for
-    // every problem, so the page always has pages to show
+    // { doc, problem, dropped }: problem "" (read), "dropped" (read,
+    // with pages or cells left out: dropped holds their counts, { pages,
+    // cells }), "none" (no stored text), "damaged" or "newer"; doc is the
+    // built-in layout of the form for the last three, so the page always
+    // has pages to show
     function parse(text, form) {
         if (typeof text !== "string" || text === "")
             return { doc: builtIn(form), problem: "none" }
@@ -99,13 +103,22 @@ QtObject {
                 || d.pages.some(p => isObject(p) && Array.isArray(p.cells)
                                      && p.cells.length > maxCells))
             return { doc: builtIn(form), problem: "damaged" }
+        const pagesRead = d.pages.length
         d.pages = d.pages.filter(p => pageProblem(p) === "")
-        for (const p of d.pages)
+        let cellsDropped = 0
+        for (const p of d.pages) {
+            const cellsRead = p.cells.length
             p.cells = p.cells.filter(c => cellProblem(c) === "")
+            cellsDropped += cellsRead - p.cells.length
+        }
         // What's left must be what a write stores: with no page left, or
         // past 64 KiB once written back (1e5 is written 100000), it isn't
         if (documentProblem(d) !== "")
             return { doc: builtIn(form), problem: "damaged" }
+        const pagesDropped = pagesRead - d.pages.length
+        if (pagesDropped > 0 || cellsDropped > 0)
+            return { doc: d, problem: "dropped",
+                     dropped: { pages: pagesDropped, cells: cellsDropped } }
         return { doc: d, problem: "" }
     }
 
@@ -115,9 +128,10 @@ QtObject {
 
     // What the page stores on its first edit after a read: the new text,
     // and the stored text to keep in <form>Unread ("" for none), which
-    // is the stored text only when it couldn't be read or was newer
+    // is the stored text only when it couldn't be read, was newer or
+    // lost a page or cell to the read
     function saveTexts(problem, stored, doc) {
-        const keep = problem === "damaged" || problem === "newer"
+        const keep = problem === "damaged" || problem === "newer" || problem === "dropped"
         return { text: serialize(doc), unread: keep ? String(stored) : "" }
     }
 

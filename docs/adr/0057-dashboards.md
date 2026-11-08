@@ -729,6 +729,10 @@ Section 10's step 3: `app/qml/DashboardBook.qml`, a `pragma Singleton`
   their state and words. `saveTexts(problem, stored, doc)` gives the
   text to save and the one for `<form>Unread`: the stored text after a
   damaged or newer read, else "".
+  Note (2026-11-08): `parse` also reports `"dropped"` when it read the
+  text but left out a page or cell with a wrong field, with their counts
+  in `dropped` (`{ pages, cells }`), and `saveTexts` keeps the stored
+  text after that read too. The edit-mode appendix below says why.
 - **The built-in layout** (`builtIn(form)`, also `reset(form)`): one
   page, "Engine", with the Dashboard's gauges in its order, each bound
   to the refs the bridge's `gaugeSignals` gives it, in the units core's
@@ -869,32 +873,50 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   goes), so **Done** only leaves edit mode and there is no Cancel. A
   closed app or a crash mid-edit loses nothing made before it. An edit
   that changes nothing (a write the rules refused gives an equal copy)
-  stores nothing. The first edit after a stored text that couldn't be
-  used (damaged or newer) keeps that text in `phoneUnread` or
-  `desktopUnread` (`DashboardBook.saveTexts`), and any edit or reset
-  hides the line about it until the stored text next changes.
+  stores nothing. The first edit or reset after a stored text that
+  couldn't be used (damaged or newer), or was read only in part (a
+  page or cell left out for a wrong field: `"dropped"`, with a line
+  naming how many), keeps that text in `phoneUnread` or
+  `desktopUnread` (`DashboardBook.saveTexts`), so an edit never makes
+  a drop final. Any edit or reset hides the line about it until the
+  stored text next changes.
 - **Starting:** the header's **Edit** on both forms; on the phone a
   long press on a cell of the shown page also starts it, with that
   cell's panel open. A long press on the desktop does nothing.
 - **The edit bar** holds three buttons on both forms: **Done**,
-  **Add** (off while the page is full) and **More**. On the phone they
-  are compact, so the row fits a phone's width. **More** opens an
-  in-page row under the bar, never a `Menu` (a `Popup`): the page's
-  name, **Add page**, **Move page left**, **Move page right**,
-  **Remove page** (never the last) and **Reset**. Reset replaces the
-  row with its question and **Reset** and **Keep**. Reset stores no
-  text for the form, so a later version's built-in layout reaches it.
+  **Add gauge** (off while the page is full) and **Pages**. On the
+  phone they are compact, so the row fits a phone's width. **Pages**
+  opens an in-page row under the bar, never a `Menu` (a `Popup`): the
+  page's name, **Add page**, **Move page left**, **Move page right**,
+  **Remove page** (never the last) and **Reset**. Remove page and
+  Reset each replace the row with their question: "Remove the page
+  ... and its gauges?" with **Remove** and **Keep**, and Reset's with
+  **Reset** and **Keep**. Reset stores no text for the form, so a
+  later version's built-in layout reaches it. A cell's remove button
+  asks nothing.
 - **One panel** at the top of the page's scroll area, full width on
   both forms, the grid below it: the cell's panel, Add's kinds and the
   signals take the same place. The cell being edited is outlined; a tap
-  on another cell of the shown page switches the panel to it, and a
-  page change closes the cell's panel. Every cell shows a remove button at
+  on another cell of the shown page switches the panel to it. A page
+  change, and removing the page shown, close whatever panel is open.
+  In edit mode every cell of the shown page shows a remove button at
   `Theme.touchTarget` in its corner, and the page ends with a "+" cell
-  while it has room.
+  while it has room; the button and the outline are made only while
+  editing (a `Loader` each), so a page that isn't edited builds
+  neither.
+- **Typing:** a field commits what was typed when it loses the focus.
+  A tap on a cell and a swipe take no focus, so selecting a cell,
+  Add, and a page change first clear the focused field's own focus,
+  and the text goes to the cell or page it was typed for. Focusing the
+  page wouldn't do: it's a focus scope, which gives the focus back to
+  the field.
 - **Add:** `drawnKinds`, the one list of the kinds the page draws, in
   the order Add offers them, each with a still preview (the real gauge
   at 60 of a 0 to 100 range, with no binding, sweep or peaks), then
-  the signals through `SignalFilterBar`. A dial, ring, bar or shift
+  the signals through `SignalFilterBar`'s text field (its **Filter**
+  button, whose options open a `Popup`, is hidden here). When the
+  profile of the session has nothing to offer, the list says so; with
+  no session, it says to connect or choose a profile. A dial, ring, bar or shift
   light takes a number; a digital tile also takes an enumeration;
   text rows and rows without a reference aren't offered. The rows are
   `Bridge.profileSignals` of the session's URI while connected, and of
@@ -907,16 +929,22 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   under imperial stores km/h and deg C. Its span is a kind's default:
   1 x 4 for a dial, ring or digital tile, 2 x 2 for a bar, 12 x 1 for
   a shift light. Picking another signal for a cell sets its
-  references, unit, label and range and drops its zones.
+  references, unit, label and range, and drops what belonged to the
+  old signal: its zones, major and minor step, label divisor, caption,
+  description, peak label and decimals. Its kind, span, peak hold and
+  accent stay.
 - **The cell's panel:** the signal, label, from, to, the three zones
   (an emptied field removes the zone), decimals, the span's `w` and
-  `h`, peak hold, the kind's own (an analog dial's major step and
-  caption, a digital tile's description, a shift light's count), and
+  `h`, peak hold (for the kinds in `peakKinds`, the dial alone, since
+  only it draws peaks), the kind's own (an analog dial's major step,
+  typed in the stored unit, and caption, a digital tile's description,
+  a shift light's count), and
   **Move earlier**, **Move later**, **To the start**, **To the end**.
   The selection follows a moved cell, and a removal before it keeps
-  it on its own cell.
-- **Density on the phone:** every control in the bar, the More row,
-  Reset's question and the three panels is at least
+  it on its own cell. Decimals shows the row's own while the cell sets
+  none.
+- **Density on the phone:** every control in the bar, the Pages row,
+  both questions and the three panels is at least
   `Theme.touchTarget` tall. The header's link state takes a line of
   its own under the title row, at the header's small size with no
   extra padding, and keeps its words beside the dot, so the state is
@@ -928,12 +956,23 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   imperial), `test_thePickerOffersWhatTheKindCanShow`,
   `test_withNoSessionThePickerReadsTheLastUri`,
   `test_theCellsPanelSetsItsOptions`, `test_resizeMoveAndRemove`,
-  `test_aFullPageTakesNoMore`, `test_thePagesControls`,
-  `test_resetAsksFirst`, `test_aLayoutBuiltInEditModeSurvivesARestart`
+  `test_aFullPageTakesNoMore`, `test_thePagesControls` (Remove page's
+  question), `test_removingThePageShownClosesItsPanel`,
+  `test_aPageChangeClosesAnyPanel`,
+  `test_typedTextStaysWithItsCellAndPage` (keys typed, then a tap or
+  a swipe), `test_resetAsksFirst`, `test_resetClosesThePanel`,
+  `test_resetKeepsATextThatCantBeRead`,
+  `test_doneClosesTheRowAndTheQuestions`,
+  `test_peakHoldOnlyWhereItDraws`,
+  `test_theDecimalsStepperStartsAtTheRows`,
+  `test_aProfileWithNothingToPickSaysSo`,
+  `test_theMajorStepIsNotConverted`,
+  `test_aLayoutBuiltInEditModeSurvivesARestart`
   (a layout built through the controls, the page destroyed and a new
   one made: the same document, on the page it was left on),
-  `test_theFirstEditKeepsATextThatCantBeRead` (damaged and newer) and
-  `test_aLongPressOnThePhoneStartsEditing`. `QmlTest.phone`: the edit
+  `test_theFirstEditKeepsATextThatCantBeRead` (damaged, newer and
+  dropped) and `test_aLongPressOnThePhoneStartsEditing`.
+  `QmlTest.dashboardbook` checks `"dropped"` and its counts. `QmlTest.phone`: the edit
   controls in `Main` at the phone widths of its edge check (no item
   past the window's edge), `test_thePhonesEditControlsAreTouchTargets`
   and `test_thePhonesLinkStateTakesACompactLine`.

@@ -137,7 +137,7 @@ TestCase {
         const page = pageOf({}, docOf([cellOf("A"), peaked]))
         const bar = find(page, "dashEditBar")
         verify(!bar.visible, "no bar outside edit mode")
-        verify(!find(find(page, "dashCell_0_0"), "cellRemove").visible)
+        verify(!findChild(find(page, "dashCell_0_0"), "cellRemove"), "no Remove outside edit mode")
         verify(!find(page, "dashAddCell_0").visible, "no + cell outside edit mode")
         click(page, "dashEdit")
         verify(page.editing)
@@ -150,7 +150,7 @@ TestCase {
         compare(page.selected, 1)
         compare(page.panel, "cell")
         verify(find(find(page, "dashCell_0_1"), "cellSelected").visible, "outlined")
-        verify(!find(find(page, "dashCell_0_0"), "cellSelected").visible)
+        verify(!findChild(find(page, "dashCell_0_0"), "cellSelected"))
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
         click(page, "panelClose")
@@ -159,6 +159,8 @@ TestCase {
         verify(!page.editing)
         verify(!bar.visible)
         compare(page.selected, -1)
+        tryVerify(() => !findChild(find(page, "dashCell_0_1"), "cellRemove"), 3000,
+                  "Remove goes with edit mode")
         compare(storedText(page), "", "no edit, nothing stored")
         // Outside edit mode a tap selects nothing
         press(find(page, "dashCell_0_0"))
@@ -177,8 +179,8 @@ TestCase {
         compare(page.selected, 0)
         const other = find(page, "dashCell_1_0")
         verify(find(find(page, "dashCell_0_0"), "cellRemove").visible)
-        verify(!find(other, "cellRemove").visible, "no Remove off the page shown")
-        verify(!find(other, "cellSelected").visible, "no outline off the page shown")
+        verify(!findChild(other, "cellRemove"), "no Remove off the page shown")
+        verify(!findChild(other, "cellSelected"), "no outline off the page shown")
     }
 
     // Add: a kind with its still preview, then a signal of the session's;
@@ -287,7 +289,8 @@ TestCase {
 
     // Change signal: the bar narrows the rows; the cell takes the row's
     // name, decoded unit, default range and counterpart's ref, its kind,
-    // size and decimals stay, and its zones go with the old signal
+    // size and peak hold stay, and its zones, scale, words and decimals
+    // go with the old signal
     function test_anotherSignalDropsTheZones() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const zoned = cellOf("A")
@@ -295,6 +298,13 @@ TestCase {
         zoned.options.warnFrom = 6000
         zoned.options.dangerFrom = 7000
         zoned.options.decimals = 1
+        zoned.options.majorStep = 1000
+        zoned.options.minorStep = 250
+        zoned.options.labelDivisor = 1000
+        zoned.options.caption = "x1000 r/min"
+        zoned.options.description = "Engine"
+        zoned.options.peakLabel = "max"
+        zoned.options.peak = true
         const page = pageOf({}, docOf([zoned]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))
@@ -305,6 +315,7 @@ TestCase {
         // The bar narrows the rows; a find with no match says so
         const panel = find(page, "dashSignalPanel")
         const findField = find(panel, "filterText")
+        verify(!find(panel, "filterButton").visible, "no Filter button: its options are a Popup")
         verify(find(panel, "pickSignal_" + speed).visible)
         findField.text = "coolant"
         findField.textEdited()
@@ -326,7 +337,10 @@ TestCase {
         compare(JSON.stringify(c.refs), JSON.stringify(coolant))
         compare(c.options.from, 0)
         compare(c.options.to, 150)
-        compare(c.options.decimals, 1)
+        for (const gone of ["decimals", "majorStep", "minorStep", "labelDivisor", "caption",
+                            "description", "peakLabel"])
+            verify(c.options[gone] === undefined, gone + " goes with the old signal")
+        compare(c.options.peak, true, "peak hold stays")
         verify(c.options.coldBelow === undefined, "no cold zone")
         verify(c.options.warnFrom === undefined, "no warning zone")
         verify(c.options.dangerFrom === undefined, "no danger zone")
@@ -463,7 +477,18 @@ TestCase {
         click(page, "moreRight")
         compare(page.doc.pages.map(p => p.name), ["Test", "Temps"])
         compare(page.pageIndex, 1)
+        // Remove page asks in the page; Keep changes nothing
         click(page, "moreRemovePage")
+        verify(find(page, "dashRemovePageConfirm").visible)
+        verify(!find(page, "dashMoreRow").visible)
+        verify(find(page, "removePageQuestion").text.indexOf("Temps") >= 0, "names the page")
+        click(page, "removePageKeep")
+        verify(!find(page, "dashRemovePageConfirm").visible)
+        verify(find(page, "dashMoreRow").visible)
+        compare(page.doc.pages.length, 2, "kept")
+        click(page, "moreRemovePage")
+        click(page, "removePageConfirm")
+        verify(!find(page, "dashRemovePageConfirm").visible)
         compare(page.doc.pages.map(p => p.name), ["Test"])
         compare(page.pageIndex, 0)
         compare(storedText(page), DashboardBook.serialize(page.doc))
@@ -475,6 +500,98 @@ TestCase {
         page.goTo(1)
         compare(page.selected, -1)
         compare(page.panel, "")
+    }
+
+    // Removing the page shown closes its panel, though the next page takes
+    // its index (so no page change says so)
+    function test_removingThePageShownClosesItsPanel_data() {
+        return [{ tag: "a cell", add: false }, { tag: "Add", add: true }]
+    }
+    function test_removingThePageShownClosesItsPanel(data) {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const two = docOf([cellOf("A"), cellOf("B")])
+        two.pages.push({ name: "More", cells: [cellOf("C"), cellOf("D")] })
+        const page = pageOf({}, two)
+        page.startEditing()
+        if (data.add) {
+            page.startAdd()
+            page.pickKind("ring")
+            compare(page.panel, "signal")
+            compare(page.addKind, "ring")
+        } else {
+            press(find(page, "dashCell_0_1"))
+            compare(page.selected, 1)
+            compare(page.panel, "cell")
+        }
+        click(page, "dashMore")
+        click(page, "moreRemovePage")
+        click(page, "removePageConfirm")
+        compare(page.doc.pages.map(p => p.name), ["More"])
+        compare(page.pageIndex, 0)
+        compare(page.selected, -1)
+        compare(page.panel, "")
+        compare(page.addKind, "")
+    }
+
+    // A page change closes whatever panel was open: a cell's signal, Add
+    // and Add's signals
+    function test_aPageChangeClosesAnyPanel() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const two = docOf([cellOf("A")])
+        two.pages.push({ name: "More", cells: [cellOf("B")] })
+        const page = pageOf({}, two)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelSignal")
+        compare(page.panel, "signal")
+        page.goTo(1)
+        compare(page.panel, "", "the signal panel of a cell no longer selected")
+        page.startAdd()
+        compare(page.panel, "add")
+        page.goTo(0)
+        compare(page.panel, "")
+        page.startAdd()
+        page.pickKind("bar")
+        compare(page.addKind, "bar")
+        page.goTo(1)
+        compare(page.panel, "")
+        compare(page.addKind, "")
+    }
+
+    // Typed text goes to the cell or page it was typed for: a tap on
+    // another cell and a swipe take no focus of their own
+    function test_typedTextStaysWithItsCellAndPage() {
+        const two = docOf([cellOf("A"), cellOf("B")])
+        two.pages.push({ name: "More", cells: [cellOf("C")] })
+        const page = pageOf({}, two)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const label = find(page, "panelLabel")
+        label.forceActiveFocus()
+        label.selectAll()
+        keyClick("t")
+        keyClick("a")
+        keyClick("c")
+        keyClick("h")
+        compare(label.text, "tach", "typed")
+        press(find(page, "dashCell_0_1"))
+        compare(page.selected, 1)
+        compare(labels(page), ["tach", "B"], "the label went to the cell it was typed for")
+
+        click(page, "dashMore")
+        const rename = find(page, "moreRename")
+        rename.forceActiveFocus()
+        rename.selectAll()
+        keyClick("x")
+        keyClick("y")
+        find(page, "dashPages").setCurrentIndex(1)
+        tryCompare(page, "pageIndex", 1)
+        compare(page.doc.pages.map(p => p.name), ["xy", "More"], "the name went to its page")
+        rename.forceActiveFocus()
+        rename.selectAll()
+        keyClick("z")
+        page.goTo(0)
+        compare(page.doc.pages.map(p => p.name), ["xy", "z"])
     }
 
     // Reset asks first; Keep changes nothing; Reset stores nothing, so the
@@ -501,6 +618,124 @@ TestCase {
         compare(page.pageIndex, 0)
         compare(storedText(page), "", "nothing stored")
         verify(page.editing, "still editing")
+    }
+
+    // Reset closes the cell's panel on the page it was on, and keeps a
+    // text that couldn't be read in <form>Unread as an edit does
+    function test_resetClosesThePanel() {
+        const stored = createTemporaryObject(storeComponent, testCase)
+        const two = docOf([cellOf("A")])
+        two.pages.push({ name: "More", cells: [cellOf("B")] })
+        stored.setValue("desktop", DashboardBook.serialize(two))
+        const page = pageOf({}, null)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(page.panel, "cell")
+        click(page, "dashMore")
+        click(page, "moreReset")
+        click(page, "resetConfirm")
+        compare(page.pageIndex, 0)
+        compare(page.selected, -1)
+        compare(page.panel, "")
+    }
+    function test_resetKeepsATextThatCantBeRead() {
+        const stored = createTemporaryObject(storeComponent, testCase)
+        stored.setValue("desktop", "{")
+        const page = pageOf({}, null)
+        compare(page.problem, "damaged")
+        page.startEditing()
+        click(page, "dashMore")
+        click(page, "moreReset")
+        click(page, "resetConfirm")
+        const store = find(page, "dashStore")
+        compare(store.desktopUnread, "{", "kept")
+        compare(store.desktop, "", "nothing stored")
+    }
+
+    // Done closes the pages' row and each question, so Edit opens the
+    // bar alone
+    function test_doneClosesTheRowAndTheQuestions() {
+        const two = docOf([cellOf("A")])
+        two.pages.push({ name: "More", cells: [cellOf("B")] })
+        const page = pageOf({}, two)
+        page.startEditing()
+        click(page, "dashMore")
+        verify(find(page, "dashMoreRow").visible)
+        click(page, "dashDone")
+        click(page, "dashEdit")
+        verify(!find(page, "dashMoreRow").visible, "the row closed")
+        click(page, "dashMore")
+        click(page, "moreReset")
+        verify(find(page, "dashResetConfirm").visible)
+        click(page, "dashDone")
+        click(page, "dashEdit")
+        verify(!find(page, "dashResetConfirm").visible, "Reset's question closed")
+        verify(!find(page, "dashMoreRow").visible)
+        click(page, "dashMore")
+        click(page, "moreRemovePage")
+        verify(find(page, "dashRemovePageConfirm").visible)
+        click(page, "dashDone")
+        click(page, "dashEdit")
+        verify(!find(page, "dashRemovePageConfirm").visible, "Remove page's question closed")
+        compare(page.doc.pages.length, 2)
+    }
+
+    // Peak hold shows only for a kind that draws it
+    function test_peakHoldOnlyWhereItDraws() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("R", "ring"), cellOf("D", "digital")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(find(page, "panelPeak").visible, "a dial's")
+        press(find(page, "dashCell_0_1"))
+        verify(!find(page, "panelPeak").visible, "not a ring's")
+        press(find(page, "dashCell_0_2"))
+        verify(!find(page, "panelPeak").visible, "not a digital tile's")
+    }
+
+    // The Decimals stepper starts at the row's when the cell sets none
+    function test_theDecimalsStepperStartsAtTheRows() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const maf = cellOf("MAF")
+        maf.refs = Array.from(Bridge.gaugeSignals["maf"])
+        maf.unit = "g/s"
+        maf.options = { from: 0, to: 300 }
+        const page = pageOf({}, docOf([maf]))
+        page.startEditing()
+        const cell = find(page, "dashCell_0_0")
+        tryVerify(() => cell.entry !== null && cell.entry.decimals > 0, 5000, "the row's decimals")
+        press(cell)
+        const box = find(page, "panelDecimals")
+        compare(box.value, cell.entry.decimals)
+        verify(page.doc.pages[0].cells[0].options.decimals === undefined, "nothing stored")
+        spin(box, 0)
+        compare(page.doc.pages[0].cells[0].options.decimals, 0)
+        compare(box.value, 0)
+    }
+
+    // A profile with no number to show says so, not "connect"
+    function test_aProfileWithNothingToPickSaysSo() {
+        compare(Bridge.connectSession("mock://demo?profile=raw"), "", "raw connects")
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        page.startAdd()
+        page.pickKind("ring")
+        const none = find(page, "signalNone")
+        verify(none.visible)
+        compare(none.text, "This session's profile has no signal a gauge can show.")
+    }
+
+    // The major step is typed in the stored unit, in any unit system
+    function test_theMajorStepIsNotConverted() {
+        Bridge.unitSystem = 1
+        const t = cellOf("T")
+        t.unit = "°C"
+        t.options = { from: 0, to: 150 }
+        const page = pageOf({}, docOf([t]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        type(find(page, "panelMajorStep"), "20")
+        compare(page.doc.pages[0].cells[0].options.majorStep, 20)
+        compare(find(page, "panelMajorStep").text, "20")
     }
 
     // ADR-0057 section 10's restart: a layout built through the controls
@@ -539,17 +774,27 @@ TestCase {
         compare(find(again, "dashCell_1_1").cell.label, "RPM")
     }
 
-    // A stored text that can't be read: the first edit keeps it in
-    // <form>Unread and stores the edited document; a later one leaves it
+    // A stored text that can't be read, or read only in part: the first
+    // edit keeps it in <form>Unread and stores the edited document; a
+    // later one leaves it
     function test_theFirstEditKeepsATextThatCantBeRead_data() {
+        const part = docOf([cellOf("Bad"), cellOf("Good")])
+        part.pages[0].cells[0].w = "x"
         return [{ tag: "damaged", text: "{" },
-                { tag: "newer", text: JSON.stringify({ format: 2, pages: [] }) }]
+                { tag: "newer", text: JSON.stringify({ format: 2, pages: [] }) },
+                { tag: "dropped", text: JSON.stringify(part) }]
     }
     function test_theFirstEditKeepsATextThatCantBeRead(data) {
         const stored = createTemporaryObject(storeComponent, testCase)
         stored.setValue("desktop", data.text)
         const page = pageOf({}, null)
         compare(page.problem, data.tag)
+        if (data.tag === "dropped") {
+            compare(labels(page), ["Good"], "the cell that reads")
+            verify(find(page, "dashProblem").visible)
+            verify(find(page, "dashProblemText").text.indexOf("1 gauge left out") >= 0,
+                   find(page, "dashProblemText").text)
+        }
         page.startEditing()
         press(find(page, "dashCell_0_0"))
         type(find(page, "panelLabel"), "Edited")

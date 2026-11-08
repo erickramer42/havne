@@ -730,8 +730,6 @@ TestCase {
         live.listShare = kept
     }
 
-    // The Dashboard's phone form: two columns upright, the tach and the
-    // speedo side by side under the shift lights, and four on its side
     // The phone's link state: a line of its own under the title row,
     // no taller than its words, which name the state (never the color
     // alone)
@@ -791,6 +789,9 @@ TestCase {
         dash.confirmReset = true
         tall(["resetConfirm", "resetKeep"])
         dash.confirmReset = false
+        dash.confirmRemovePage = true
+        tall(["removePageConfirm", "removePageKeep"])
+        dash.confirmRemovePage = false
         dash.moreShown = false
         dash.select(1)
         tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
@@ -803,6 +804,8 @@ TestCase {
         dash.stopEditing()
     }
 
+    // The Dashboard's phone form: two columns upright, the tach and the
+    // speedo side by side under the shift lights, and four on its side
     function test_theDashboardsDialsShareARowUpright_data() {
         return [{ tag: "a phone upright", w: 384, h: 832, columns: 2 },
                 { tag: "a phone on its side", w: 832, h: 384, columns: 4 }]
