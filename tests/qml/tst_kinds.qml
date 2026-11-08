@@ -1,10 +1,5 @@
 // File/layer: tests/qml/tst_kinds.qml | Qt Quick Test, QML tier
-// Testing: ADR-0057 step 5's kinds on their own, no session: SegmentGauge
-//          (cells, rise, lit up to the value, the peak notch), SegmentReadout
-//          (digits, the point, overflow, the zones), SparkGauge (the window,
-//          the history, the scale), the bar's `vertical` and `marks`, and
-//          the held peak on the other kinds; each at two sizes and in each
-//          theme, with the danger mark's slot that never moves the readout.
+// Testing: QML: QmlTest.kinds
 
 import QtQuick
 import QtTest
@@ -63,8 +58,23 @@ TestCase {
                 { tag: "200 reads as 64", cells: 200, count: 64 }]
     }
     function test_segmentsCountTheirCells(data) {
-        const g = make(segmentsC, data.cells === undefined ? {} : { cells: data.cells })
+        const g = make(segmentsC, data.cells === undefined ? { width: 600 } : { cells: data.cells, width: 600 })
         compare(all(g, "cell").length, data.count)
+    }
+
+    // A card too narrow for its cells draws what fits at a pitch of 3 px
+    // and never a collapsed row: 64 cells on a phone's 120 px
+    function test_aNarrowCardDrawsTheCellsThatFit() {
+        const g = make(segmentsC, { cells: 64, width: 120, height: 64 })
+        waitForRendering(g)
+        const cells = all(g, "cell")
+        compare(cells.length, g.drawn)
+        verify(g.drawn < 64 && g.drawn >= 2, "fewer than asked: " + g.drawn)
+        for (const c of cells)
+            verify(c.width >= 2, "a cell is " + c.width + " wide")
+        const last = cells[cells.length - 1]
+        verify(last.x + last.width <= g.width + 0.5, "the row ends inside the card")
+        compare(make(segmentsC, { cells: 24, width: 300 }).drawn, 24, "room enough: all of them")
     }
 
     // Each cell taller than the one before, its height by the curve; a
@@ -88,44 +98,69 @@ TestCase {
     function test_segmentsLightUpToTheValue() {
         const g = make(segmentsC, { cells: 8 })
         g.hasValue = true
-        g.value = 4000   // half of 0 to 8000
-        tryVerify(() => Math.abs(g.fraction - 0.5) < 0.001, 2000, "the value settles")
+        g.value = 4500   // 0.5625 of 0 to 8000: four cells and half of the fifth
+        tryVerify(() => Math.abs(g.fraction - 0.5625) < 0.001, 2000, "the value settles")
         const fills = all(g, "cell").map(c => c.fill)
         compare(fills.slice(0, 4).join(","), "1,1,1,1")
-        compare(fills.slice(4).join(","), "0,0,0,0")
+        fuzzyCompare(fills[4], 0.5, 0.01, "the leading cell fades in")
+        compare(fills.slice(5).join(","), "0,0,0")
+        // Out of range: clamped, all lit or none
+        g.value = 9000
+        tryVerify(() => all(g, "cell").every(c => c.fill === 1), 2000, "past the top")
+        g.value = -50
+        tryVerify(() => all(g, "cell").every(c => c.fill === 0), 2000, "below the bottom")
     }
 
     // The danger cells are outlined, the others not; each cell takes its
     // zone's color
     function test_segmentsOutlineTheirDangerCells() {
-        const g = make(segmentsC, { cells: 16 })
+        const g = make(segmentsC, { cells: 16, dangerFrom: 6700 })
         const cells = all(g, "cell")
-        let danger = 0
-        for (const c of cells) {
-            compare(c.border.width, c.inDangerZone ? 2 : 0)
-            if (c.inDangerZone) {
-                ++danger
-                same(c.lit, Theme.gaugeDanger, "a danger cell")
-            }
+        // A cell is in the danger zone when its middle is: (i + 0.5) / 16 of
+        // 8000 is 6700 or more from cell 13 on
+        const dangerous = cells.map((c, i) => c.inDangerZone ? i : -1).filter(i => i >= 0)
+        compare(dangerous.join(","), "13,14,15")
+        for (let i = 0; i < cells.length; ++i) {
+            compare(cells[i].border.width, i >= 13 ? 2 : 0)
+            same(cells[i].lit, i >= 13 ? Theme.gaugeDanger : (i * 500 + 250 >= 5500 ? Theme.gaugeWarn : Theme.gaugeValue),
+                 "cell " + i)
         }
-        verify(danger > 0 && danger < cells.length, "some, not all: " + danger)
-        same(cells[0].lit, Theme.gaugeValue, "the first cell is in the normal zone")
     }
 
     // A held peak shows as a notch over its cell, only when asked for
     function test_segmentsNotchTheirPeak() {
         const g = make(segmentsC, { cells: 8 })
         g.hasValue = true
-        g.value = 6000
-        g.windowHigh = 6000
+        g.value = 6500   // 6.5 cells in: the cell is the 6th (floor)
+        g.windowHigh = 6500
         const notch = find(g, "peakNotch")
         verify(!notch.visible, "no peak asked for")
         g.showPeak = true
         tryVerify(() => !isNaN(g.peakValue), 2000, "a peak is held")
+        waitForRendering(g)
         verify(notch.visible, "the notch shows")
-        compare(notch.at, 6, "over the cell the peak reached (6000 of 8000 in 8 cells)")
+        compare(notch.at, 6, "over the cell the peak reached")
+        const cell = all(g, "cell")[6]
+        fuzzyCompare(notch.x, cell.x, 0.5, "over that cell's column")
+        fuzzyCompare(notch.width, cell.width, 0.5, "its width")
+        fuzzyCompare(notch.y, cell.y - 6, 0.5, "6 px over its top")
+        verify(notch.y >= 0, "inside the card")
+        verify(!Qt.colorEqual(notch.color, cell.lit), "not the color of the cell it sits over")
         g.resetPeaks()
         verify(!notch.visible, "Reset peaks clears it")
+    }
+
+    // The notch over the tallest cell stays inside the card
+    function test_theNotchOverTheTallestCellStaysInsideTheCard() {
+        const g = make(segmentsC, { cells: 8, showPeak: true })
+        g.hasValue = true
+        g.value = 7900
+        g.windowHigh = 7900
+        tryVerify(() => !isNaN(g.peakValue), 2000, "a peak is held")
+        waitForRendering(g)
+        const notch = find(g, "peakNotch")
+        compare(notch.at, 7)
+        verify(notch.y >= 0, "the notch is at " + notch.y)
     }
 
     // ---- SegmentReadout
@@ -147,6 +182,71 @@ TestCase {
         g.value = data.v
         compare(shownText(g), data.text)
         compare(all(g, "digit").length, data.n)
+    }
+
+    // Edge values: a minus zero is a zero, a number that doesn't fit or
+    // isn't finite is dashes, not a number is blanks
+    function test_digitsHandleTheEdgeValues_data() {
+        return [{ tag: "-0.4 at no decimals", v: -0.4, d: 0, n: 3, text: "  0" },
+                { tag: "-0.5 at one", v: -0.5, d: 1, n: 3, text: "-0.5" },
+                { tag: "-100 in 3 digits", v: -100, d: 0, n: 3, text: "---" },
+                { tag: "1e21", v: 1e21, d: 0, n: 4, text: "----" },
+                { tag: "1e15", v: 1e15, d: 0, n: 8, text: "--------" },
+                { tag: "Infinity", v: Infinity, d: 0, n: 4, text: "----" },
+                { tag: "-Infinity", v: -Infinity, d: 0, n: 4, text: "----" },
+                { tag: "Infinity at eight digits", v: Infinity, d: 0, n: 8, text: "--------" },
+                { tag: "1e21 at eight digits", v: 1e21, d: 0, n: 8, text: "--------" },
+                { tag: "NaN", v: NaN, d: 0, n: 4, text: "    " }]
+    }
+    function test_digitsHandleTheEdgeValues(data) {
+        const g = make(readoutC, { digits: data.n, decimals: data.d })
+        g.hasValue = true
+        g.value = data.v
+        compare(shownText(g), data.text)
+    }
+
+    // The digits take the cell's accent in the normal zone
+    function test_theDigitsTakeTheAccent() {
+        const g = make(readoutC, { digits: 3, accent: "#00ff00" })
+        g.hasValue = true
+        g.value = 30
+        same(g.digitColor, "#00ff00", "the accent")
+        g.value = 70
+        same(g.digitColor, Theme.gaugeWarn, "the zones still win")
+    }
+
+    // The unit's slot never resizes the digits: the first value, a danger
+    // mark and a dropped value leave them as they were
+    function test_theDigitsKeepTheirSizeAsTheValueComes() {
+        const g = make(readoutC, { digits: 3, unit: "mph", dangerFrom: 85 })
+        waitForRendering(g)
+        const row = find(g, "digits")
+        const before = { h: row.height, x: row.x, u: find(g, "unitBox").x }
+        g.hasValue = true
+        g.value = 50
+        waitForRendering(g)
+        compare(row.height, before.h, "the first value")
+        g.value = 90
+        verify(find(g, "dangerMark").opacity === 1, "the mark is up")
+        waitForRendering(g)
+        compare(row.height, before.h, "the danger mark")
+        fuzzyCompare(find(g, "unitBox").x, before.u, 0.5, "the unit's box")
+        g.hasValue = false
+        waitForRendering(g)
+        compare(row.height, before.h, "no value again")
+    }
+
+    // Eight digits on a narrow card end before the unit, inside the card
+    function test_eightDigitsFitANarrowCard() {
+        const g = make(readoutC, { digits: 8, width: 120, height: 64, unit: "rpm", dangerFrom: 85 })
+        g.hasValue = true
+        g.value = 12345678
+        waitForRendering(g)
+        const row = find(g, "digits")
+        verify(row.x + row.width <= find(g, "unitBox").x + 0.5,
+               "the digits end at " + (row.x + row.width) + ", the unit starts at " + find(g, "unitBox").x)
+        verify(find(g, "unitBox").x + find(g, "unitBox").width <= g.width + 0.5, "the unit ends inside")
+        verify(row.height >= 8, "and they are not too small to read: " + row.height)
     }
 
     function test_digitsAreBlankWithoutAValue() {
@@ -270,6 +370,64 @@ TestCase {
         fuzzyCompare(flat.extent.hi - flat.extent.lo, 4, 0.001, "padded to 4 % of 0 to 100")
     }
 
+    // A reset empties the trace (a connect, a change of units), a page
+    // that stops being shown starts again, and a value that is not a number
+    // is never kept
+    function test_theTraceStartsAgain() {
+        const g = make(sparkC, { windowS: 10 })
+        g.hasValue = true
+        g.value = 5
+        for (let i = 0; i < 5; ++i) g.takeSample()
+        compare(g.history.length, 5)
+        g.resetPeaks()
+        compare(g.history.length, 0, "Reset peaks empties it")
+        for (let i = 0; i < 5; ++i) g.takeSample()
+        g.shown = false
+        compare(g.history.length, 0, "a page that is no longer shown")
+        g.shown = true
+        compare(g.history.length, 0, "and back again, still empty")
+        g.value = NaN
+        g.takeSample()
+        g.value = Infinity
+        g.takeSample()
+        compare(g.history.length, 0, "no sample of a value that is not a number")
+        verify(isFinite(g.extent.lo) && isFinite(g.extent.hi), "the scale stays finite")
+    }
+
+    function test_theTraceSamplesOnlyWhenItsPageIsShown() {
+        const g = make(sparkC, {})
+        g.hasValue = true
+        g.value = 10
+        g.shown = false
+        wait(350)
+        compare(g.history.length, 0, "a page that is not the one shown takes none")
+        g.shown = true
+        tryVerify(() => g.history.length > 2, 2000, "and takes them once shown")
+    }
+
+    // About one point per 1.5 px, the newest kept, a flat range a midline
+    function test_theTraceHasAboutOnePointPer1_5Px() {
+        const g = make(sparkC, { windowS: 120 })
+        g.hasValue = true
+        for (let i = 0; i < 1200; ++i) {
+            g.value = 50 + 30 * Math.sin(i / 20)
+            g.takeSample()
+        }
+        const points = g.tracePoints(300, 80)
+        verify(points.length <= 300 / 1.5 + 2, points.length + " points for 300 px")
+        verify(points.length > 100, "still a trace: " + points.length)
+        fuzzyCompare(points[points.length - 1].x, 300, 0.01, "the newest at the right edge")
+        for (const pt of points)
+            verify(pt.y >= 0 && pt.y <= 80 && isFinite(pt.y), "a point inside the box")
+        const flat = make(sparkC, { windowS: 10, from: 50, to: 50 })
+        flat.hasValue = true
+        flat.value = 50
+        flat.takeSample()
+        flat.takeSample()
+        for (const pt of flat.tracePoints(300, 80))
+            compare(pt.y, 40, "a flat range draws a midline")
+    }
+
     // It samples only while shown
     function test_theTraceSamplesOnlyWhileShown() {
         const g = make(sparkC, {})
@@ -322,7 +480,7 @@ TestCase {
         Theme.theme = data.theme
         const g = make(data.c, { width: data.w, height: data.h })
         g.hasValue = true
-        g.value = 70
+        g.value = g.dangerFrom + 1   // in the danger zone: the mark's slot is in use
         g.label = "Engine speed"
         g.unit = "rpm"
         waitForRendering(g)
@@ -337,12 +495,14 @@ TestCase {
                     const r = c.mapToItem(g, c.width, c.height)
                     if (r.x > g.width + 1)
                         past.push((c.objectName || c.toString()) + " ends at " + r.x.toFixed(0))
+                    if (r.y > g.height + 1)
+                        past.push((c.objectName || c.toString()) + " ends below, at " + r.y.toFixed(0))
                 }
                 walk(c)
             }
         }
         walk(g)
-        compare(past.join("; "), "", "nothing past the right edge at " + data.w + " wide")
+        compare(past.join("; "), "", "nothing past the edges at " + data.w + " x " + data.h)
     }
 
     // ---- The bar: vertical and marks; the peak on the bar and the ring
@@ -384,8 +544,44 @@ TestCase {
         verify(!mark.visible, "no peak asked for")
         g.showPeak = true
         tryVerify(() => !isNaN(g.peakValue), 2000, "a peak is held")
+        waitForRendering(g)
         verify(mark.visible, "the mark shows")
+        if (data.tag === "bar") {
+            const bar = find(g, "bar")
+            fuzzyCompare(mark.x + mark.width / 2, bar.x + 0.7 * bar.width, 1, "at 70 % along the bar")
+        } else {
+            fuzzyCompare(mark.x + mark.width / 2, g.px(g.angleOf(70), g.zoneRadius), 1, "at the peak's angle, x")
+            fuzzyCompare(mark.y + mark.height / 2, g.py(g.angleOf(70), g.zoneRadius), 1, "at the peak's angle, y")
+        }
         g.resetPeaks()
         verify(!mark.visible, "Reset peaks clears it")
+    }
+
+    // Standing up, the peak's mark is as far up as its value; at either end
+    // it stays inside the track
+    function test_theVerticalBarsPeakMarkIsAsHighAsItsValue() {
+        const g = make(barC, { vertical: true, width: 100, height: 260, showPeak: true })
+        g.hasValue = true
+        g.value = 70
+        g.windowHigh = 70
+        tryVerify(() => !isNaN(g.peakValue), 2000, "a peak is held")
+        waitForRendering(g)
+        const bar = find(g, "bar")
+        const mark = find(g, "peakMark")
+        fuzzyCompare(mark.y + mark.height / 2, bar.y + 0.3 * bar.height, 1, "70 % up")
+        g.resetPeaks()
+        g.value = 100
+        g.windowHigh = 100
+        tryVerify(() => g.peakValue === 100, 2000, "a peak at the top")
+        waitForRendering(g)
+        verify(mark.y >= bar.y - 0.5, "not above the track")
+        const flat = make(barC, { showPeak: true })
+        flat.hasValue = true
+        flat.value = 100
+        flat.windowHigh = 100
+        tryVerify(() => flat.peakValue === 100, 2000, "a horizontal peak at the end")
+        waitForRendering(flat)
+        const fm = findChild(flat, "peakMark")
+        verify(fm.x + fm.width <= findChild(flat, "bar").x + findChild(flat, "bar").width + 0.5, "not past the track's end")
     }
 }

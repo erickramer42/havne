@@ -155,6 +155,10 @@ Page {
         // one; on the page shown and its neighbors (a swipe drags one in)
         // it finishes at once
         property bool later: false
+        // Whether this card's page is the one on screen and the app is
+        // active: the sparkline samples only then (a SwipeView keeps its
+        // neighbors visible)
+        property bool shown: true
 
         // The sweep plays on the dials, the cells and the shift lights only
         function sweep() {
@@ -293,7 +297,7 @@ Page {
             "bar": ["scaleMarks", "vertical", "marks"],
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
-            "sparkline": ["windowS"],
+            "sparkline": ["windowS", "shown"],
             "digital": ["description", "valueLabel"],
             "shift-light": ["count", "ledSpacing"]
         })
@@ -513,6 +517,8 @@ Page {
                             objectName: "dashCell_" + pageView.index + "_" + index
                             cell: pageView.cells[index]
                             later: Math.abs(pageView.index - root.pageIndex) > 1
+                            shown: pageView.index === root.pageIndex
+                                   && Qt.application.state === Qt.ApplicationActive
                             x: box ? box.x * (pageView.columnWidth + root.gap) : 0
                             y: box ? box.y * pageView.pitch : 0
                             width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0

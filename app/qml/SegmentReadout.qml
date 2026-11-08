@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentReadout.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.gauges, QmlTest.dashboard (test_qml)
+// Testing: QML: QmlTest.kinds, QmlTest.dashboard
 
 import QtQuick
 
@@ -7,11 +7,13 @@ pragma ComponentBehavior: Bound
 
 // Digits of seven segments (ADR-0057 section 1), the unlit segments faint,
 // the unit beside. It has no scale to color, so it colors its digits by the
-// zones instead: lit in the theme's value color, warm past warnFrom, danger
-// past dangerFrom (with the mark beside the unit). A value too long for
-// `digits` shows dashes in every digit, never a wrong number; no value
-// shows blanks. A digit is seven static segments whose opacity follows the
-// character.
+// zones instead: lit in the gauge's accent, warm past warnFrom, danger past
+// dangerFrom (with the mark beside the unit). A value too long for `digits`
+// (or past 1e15, or infinite) shows dashes in every digit, never a wrong
+// number; no value shows blanks; a minus zero shows 0. The unit's box is
+// always laid out and sized from the card, never from the digits, so the
+// first value never resizes them. A digit is seven static segments whose
+// opacity follows the character.
 GaugeBase {
     id: gauge
 
@@ -19,6 +21,13 @@ GaugeBase {
     property int digits: 4
 
     readonly property int count: Math.max(1, Math.min(8, Math.round(digits)))
+
+    function dashes() {
+        const out = []
+        for (let i = 0; i < count; ++i)
+            out.push({ ch: "-", dp: false })
+        return out
+    }
 
     // What the digits show, one entry per digit, right aligned: the
     // character ("0" to "9", "-" or " ") and whether its point is lit
@@ -28,20 +37,20 @@ GaugeBase {
             blank.push({ ch: " ", dp: false })
         if (!hasValue || isNaN(value))
             return blank
-        const text = Number(value).toFixed(decimals)
-        let chars = []
+        if (Math.abs(value) >= 1e15)   // also Infinity: more than any digits show
+            return dashes()
+        let text = Number(value).toFixed(decimals)
+        if (/^-0(\.0+)?$/.test(text))
+            text = text.slice(1)   // a minus zero is a zero
+        const chars = []
         for (const c of text) {
             if (c === ".")
                 chars[chars.length - 1].dp = true
             else
                 chars.push({ ch: c, dp: false })
         }
-        if (chars.length > count) {
-            const dashes = []
-            for (let i = 0; i < count; ++i)
-                dashes.push({ ch: "-", dp: false })
-            return dashes
-        }
+        if (chars.length > count)
+            return dashes()
         while (chars.length < count)
             chars.unshift({ ch: " ", dp: false })
         return chars
@@ -54,7 +63,11 @@ GaugeBase {
         "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg",
         "-": "g", " ": ""
     })
-    readonly property color digitColor: hasValue ? zoneColor(value, Theme.gaugeValue) : Theme.textDim
+    readonly property color digitColor: hasValue ? zoneColor(value, accent) : Theme.textDim
+
+    // The unit's box: always there, its size from the card
+    readonly property real unitPx: Math.max(11, Math.min(16, height * 0.16))
+    readonly property real markPx: Math.max(12, Math.min(18, height * 0.2))
 
     implicitHeight: 64
 
@@ -80,8 +93,10 @@ GaugeBase {
         id: row
         objectName: "digits"
         anchors { left: parent.left; top: title.bottom; topMargin: 6 }
-        readonly property real digitH: Math.max(24, Math.min(gauge.height - title.height - 14,
-            (gauge.width - unitBox.width - 12) / (gauge.count * 0.62)))
+        // The room left of the unit's box, divided among the digits (each a
+        // little over half its height wide), at most the card's own height
+        readonly property real digitH: Math.max(8, Math.min(gauge.height - title.height - 14,
+            (gauge.width - unitBox.width - 14) / (gauge.count * 0.62)))
         height: digitH
         spacing: digitH * 0.14
         opacity: gauge.stale ? 0.45 : 1.0
@@ -129,21 +144,23 @@ GaugeBase {
 
     Row {
         id: unitBox
-        anchors { left: row.right; leftMargin: 10; bottom: row.bottom }
+        objectName: "unitBox"
+        anchors { right: parent.right; bottom: row.bottom }
         spacing: 4
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
             objectName: "unit"
-            visible: gauge.hasValue
+            // Kept laid out without a value, so the digits keep their size
+            opacity: gauge.hasValue ? 1 : 0
             text: gauge.unit
-            font.pixelSize: Math.max(11, row.digitH * 0.28)
+            font.pixelSize: gauge.unitPx
             color: Theme.textDim
         }
         // Past dangerFrom, beside the unit; its slot stays
         DangerMark {
             visible: !isNaN(gauge.dangerFrom)
             opacity: gauge.inDanger ? 1 : 0
-            size: Math.max(12, row.digitH * 0.3)
+            size: gauge.markPx
         }
     }
 }

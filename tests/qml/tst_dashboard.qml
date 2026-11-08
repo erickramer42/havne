@@ -749,6 +749,27 @@ TestCase {
         verify(data.check(g), "the options reach the gauge")
     }
 
+    // A sparkline samples only while its page is the one shown: the other
+    // page's takes none (a SwipeView keeps it visible), the page left starts
+    // its trace again, and the one reached starts sampling
+    function test_aSparklineOnAnotherPageTakesNoSamples() {
+        const cell = label => ({ kind: "sparkline", w: 2, h: 3, label: label,
+                                 refs: refsOf("Engine speed"), unit: "RPM", options: { window: 10 } })
+        const d = docOf([cell("First")])
+        d.pages.push({ name: "Second", cells: [cell("Second")] })
+        const page = pageOf({}, d, true)
+        connect("mock://demo")
+        const a = gaugeOf(findChild(page, "dashCell_0_0"))
+        const b = gaugeOf(findChild(page, "dashCell_1_0"))
+        verify(a && b, "both load (the neighbor loads at once)")
+        tryVerify(() => a.history.length > 3, 5000, "the shown page samples")
+        wait(300)
+        compare(b.history.length, 0, "the other page takes none")
+        page.goTo(1)
+        tryVerify(() => b.history.length > 3, 5000, "the page reached samples")
+        tryVerify(() => a.history.length === 0 || a.history.length <= 1, 2000, "the page left starts again")
+    }
+
     // Section 6: a cell over a row of another unit takes the row's
     // range and no zones, and its note names the unit it expected
     function test_aCellOverAnotherUnitTakesTheRowsRange() {

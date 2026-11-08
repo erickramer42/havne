@@ -1,33 +1,46 @@
 // File/layer: app/qml/SparkGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.gauges, QmlTest.dashboard (test_qml)
+// Testing: QML: QmlTest.kinds, QmlTest.dashboard
 
 import QtQuick
 import QtQuick.Shapes
 
 // One trace over a window (ADR-0057 section 1): the newest value at its end,
 // the window's low and high as a scale. DigitalGauge's ShapePath trace with
-// a longer window: at 10 Hz at most 1,200 points. It samples only while it
-// is on screen, so a page left and returned to starts its trace again; the
-// trace is a glance, Live's chart is the record.
+// a longer window: at 10 Hz at most 1,200 samples, drawn as about one point
+// per 1.5 px of width. It samples only while its page is the one shown and
+// the app is active (`shown`, from the dashboard: a SwipeView keeps its
+// neighbors visible, so `visible` alone would not stop them), and it starts
+// its trace again when it stops being shown, on Reset peaks (a connect, a
+// change of units) and never keeps a value that is not a number. The trace
+// is a glance, Live's chart is the record.
 GaugeBase {
     id: gauge
 
     // The window in seconds (10 to 120)
     property int windowS: 30
+    // Whether the dashboard's page holding this gauge is the one on screen
+    // and the app is active
+    property bool shown: true
 
     readonly property int span: Math.max(10, Math.min(120, Math.round(windowS)))
     readonly property int historyLength: span * 10
     property var history: []
+
+    onPeaksReset: history = []
+    onShownChanged: if (!shown) history = []
+    onVisibleChanged: if (!visible) history = []
 
     // One sample every 100 ms while a value is coming: a value that holds
     // still still advances the trace, so the x axis stays time
     Timer {
         interval: 100
         repeat: true
-        running: gauge.hasValue && gauge.visible
+        running: gauge.hasValue && gauge.visible && gauge.shown
         onTriggered: gauge.takeSample()
     }
     function takeSample() {
+        if (!isFinite(value))
+            return
         const h = history.slice(1 - historyLength)
         h.push(value)
         history = h
@@ -52,18 +65,31 @@ GaugeBase {
         return { lo: lo, hi: hi }
     }
 
-    function tracePoints(w, h) {
+    // The trace's points for a box, newest at the right edge, one point per
+    // 1.5 px at most (the newest kept), and the area under them for the fill
+    // (the same points between two corners). A flat range draws a midline
+    function buildTrace(w, h) {
         const n = history.length
-        if (n < 2) return []
+        if (n < 2 || w <= 0)
+            return { points: [], area: [] }
         const step = w / (historyLength - 1)
+        const stride = Math.max(1, Math.ceil(n / (w / 1.5 + 1)))
         const range = extent.hi - extent.lo
-        const pts = []
-        for (let i = 0; i < n; ++i) {
-            pts.push(Qt.point(w - (n - 1 - i) * step,
-                              h - 2 - (history[i] - extent.lo) / range * (h - 4)))
+        const points = []
+        for (let i = n - 1; i >= 0; i -= stride) {
+            const y = range > 0 && isFinite(range)
+                ? h - 2 - (history[i] - extent.lo) / range * (h - 4) : h / 2
+            points.push(Qt.point(w - (n - 1 - i) * step, y))
         }
-        return pts
+        points.reverse()
+        const area = [Qt.point(points[0].x, h)]
+        for (const p of points)
+            area.push(p)
+        area.push(Qt.point(w, h))
+        return { points: points, area: area }
     }
+    // The points alone, as the tests and the trace read them
+    function tracePoints(w, h) { return buildTrace(w, h).points }
 
     implicitHeight: 96
 
@@ -118,7 +144,7 @@ GaugeBase {
 
     // The scale: the window's high at the top, its low at the bottom
     Column {
-        id: scale
+        id: scaleBox
         anchors { left: parent.left; top: trace.top; bottom: trace.bottom }
         width: Math.max(highText.implicitWidth, lowText.implicitWidth)
         Text {
@@ -129,7 +155,7 @@ GaugeBase {
             font.features: ({ "tnum": 1 })
             color: Qt.alpha(Theme.textDim, 0.8)
         }
-        Item { width: 1; height: Math.max(0, scale.height - highText.height - lowText.height) }
+        Item { width: 1; height: Math.max(0, scaleBox.height - highText.height - lowText.height) }
         Text {
             id: lowText
             objectName: "scaleLow"
@@ -143,13 +169,11 @@ GaugeBase {
     Shape {
         id: trace
         objectName: "trace"
-        anchors { left: scale.right; leftMargin: 6; right: parent.right
+        anchors { left: scaleBox.right; leftMargin: 6; right: parent.right
                   top: readout.bottom; topMargin: 6; bottom: parent.bottom }
         preferredRendererType: Shape.CurveRenderer
 
-        readonly property var points: gauge.tracePoints(width, height)
-        readonly property var area: points.length < 2 ? []
-            : [Qt.point(points[0].x, height)].concat(points, [Qt.point(width, height)])
+        readonly property var drawn: gauge.buildTrace(width, height)
 
         ShapePath {   // baseline
             strokeColor: Qt.alpha(Theme.gaugeTick, 0.06)
@@ -165,7 +189,7 @@ GaugeBase {
                 GradientStop { position: 0.0; color: Qt.alpha(gauge.accent, 0.30) }
                 GradientStop { position: 1.0; color: Qt.alpha(gauge.accent, 0.0) }
             }
-            PathPolyline { path: trace.area }
+            PathPolyline { path: trace.drawn.area }
         }
         ShapePath {
             strokeColor: gauge.stale ? Theme.textDim : gauge.accent
@@ -173,7 +197,7 @@ GaugeBase {
             fillColor: "transparent"
             joinStyle: ShapePath.RoundJoin
             capStyle: ShapePath.RoundCap
-            PathPolyline { path: trace.points }
+            PathPolyline { path: trace.drawn.points }
         }
     }
 }

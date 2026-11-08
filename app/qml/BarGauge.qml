@@ -138,8 +138,10 @@ GaugeBase {
         readonly property real at: gauge.fractionOf(isNaN(gauge.peakValue) ? gauge.from : gauge.peakValue)
         color: Theme.gaugeWarn
         radius: 1
-        x: gauge.vertical ? bar.x - 3 : bar.x + at * bar.width - width / 2
-        y: gauge.vertical ? bar.y + (1 - at) * bar.height - height / 2 : bar.y - 3
+        // Inside the track at either end
+        x: gauge.vertical ? bar.x - 3 : bar.x + Math.max(0, Math.min(bar.width - width, at * bar.width - width / 2))
+        y: gauge.vertical ? bar.y + Math.max(0, Math.min(bar.height - height, (1 - at) * bar.height - height / 2))
+                          : bar.y - 3
         width: gauge.vertical ? bar.width + 6 : 3
         height: gauge.vertical ? 3 : bar.height + 6
     }

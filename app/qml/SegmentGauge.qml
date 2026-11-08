@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.gauges, QmlTest.dashboard (test_qml)
+// Testing: QML: QmlTest.kinds, QmlTest.dashboard
 
 import QtQuick
 
@@ -7,10 +7,13 @@ pragma ComponentBehavior: Bound
 
 // A tachometer's cells (ADR-0057 section 1): `cells` Rectangles in a row
 // along a rising curve, each taller than the one before, lit up to the
-// value. The cell's color is its zone's (warm, then danger past dangerFrom,
-// the danger cells outlined like the bar's), the leading cell fades in as
-// the value reaches it, and a held peak is a notch over its cell. Static
-// items built once for a size; per frame only the opacities change.
+// value. A card too narrow for them draws as many as fit at a pitch of
+// 3 px plus the gap (`drawn`), so a 64-cell option on a phone's narrow card
+// shows fewer, wider cells and never a collapsed row. The cell's color is
+// its zone's (warm, then danger past dangerFrom, the danger cells outlined
+// like the bar's), the leading cell fades in as the value reaches it, and a
+// held peak is a notch over its cell. Static items built for a size; per
+// frame only the opacities change.
 GaugeBase {
     id: gauge
 
@@ -22,13 +25,18 @@ GaugeBase {
     readonly property int count: Math.max(2, Math.min(64, Math.round(cells)))
     readonly property real curve: Math.max(0, Math.min(4, rise))
     readonly property real cellGap: width > 240 ? 3 : 2
+    // The cells that fit at a pitch of at least 3 px
+    readonly property int drawn: Math.max(2, Math.min(count,
+        Math.floor((field.width + cellGap) / (cellGap + 3))))
+    // The room above the tallest cell, for the peak's notch
+    readonly property real headroom: 7
 
     // A cell's height as a fraction of the cells' room: 0.2 for the first,
     // 1 for the last
     function heightOf(i) {
-        return 0.2 + 0.8 * (curve === 0 ? 1 : Math.pow(i / (count - 1), curve))
+        return 0.2 + 0.8 * (curve === 0 ? 1 : Math.pow(i / (drawn - 1), curve))
     }
-    function valueAt(i) { return from + (i + 0.5) / count * (to - from) }
+    function valueAt(i) { return from + (i + 0.5) / drawn * (to - from) }
 
     implicitHeight: 96
 
@@ -87,19 +95,19 @@ GaugeBase {
                   bottom: ends.top; bottomMargin: 4 }
 
         Repeater {
-            model: gauge.count
+            model: gauge.drawn
             delegate: Rectangle {
                 id: cell
                 required property int index
                 objectName: "cell"
                 readonly property color lit: gauge.zoneColor(gauge.valueAt(index), gauge.accent)
                 readonly property real fill: Math.max(0, Math.min(1,
-                    gauge.fraction * gauge.count - index))
+                    gauge.fraction * gauge.drawn - index))
                 readonly property bool inDangerZone: !isNaN(gauge.dangerFrom)
                                                      && gauge.valueAt(index) >= gauge.dangerFrom
 
-                width: (field.width - (gauge.count - 1) * gauge.cellGap) / gauge.count
-                height: field.height * gauge.heightOf(index)
+                width: (field.width - (gauge.drawn - 1) * gauge.cellGap) / gauge.drawn
+                height: (field.height - gauge.headroom) * gauge.heightOf(index)
                 x: index * (width + gauge.cellGap)
                 y: field.height - height
                 radius: 2
@@ -123,15 +131,16 @@ GaugeBase {
         Rectangle {
             objectName: "peakNotch"
             readonly property int at: isNaN(gauge.peakValue) ? 0
-                : Math.max(0, Math.min(gauge.count - 1,
-                      Math.floor(gauge.fractionOf(gauge.peakValue) * gauge.count)))
+                : Math.max(0, Math.min(gauge.drawn - 1,
+                      Math.floor(gauge.fractionOf(gauge.peakValue) * gauge.drawn)))
             visible: gauge.showPeak && !isNaN(gauge.peakValue)
-            width: (field.width - (gauge.count - 1) * gauge.cellGap) / gauge.count
+            width: (field.width - (gauge.drawn - 1) * gauge.cellGap) / gauge.drawn
             height: 3
             radius: 1
             x: at * (width + gauge.cellGap)
-            y: Math.max(0, field.height - field.height * gauge.heightOf(at) - 6)
-            color: Theme.gaugeWarn
+            y: field.height - (field.height - gauge.headroom) * gauge.heightOf(at) - 6
+            // The tick color, which no zone's cell shares
+            color: Theme.gaugeTick
         }
     }
 
