@@ -166,6 +166,48 @@ public:
         return QUrl::fromLocalFile(f.fileName());
     }
 
+    // A recording folder of the harness's own holding frames.csv alone (and
+    // the events.log that names its format): rows frames, the nth at
+    // (n + 1) * stepUs microseconds, the folder's path, "" when it can't be
+    // written
+    Q_INVOKABLE QString writeFramesRecording(const QString& name, int rows,
+                                             int stepUs)
+    {
+        const QString folder = m_scratch.path() + QLatin1Char('/') + name;
+        if (!m_scratch.isValid() || !QDir().mkpath(folder)) {
+            return {};
+        }
+        QFile events(folder + QStringLiteral("/events.log"));
+        if (!events.open(QIODevice::WriteOnly)) {
+            return {};
+        }
+        events.write(
+            "ecuio session recording, format 2 (ADR-0049)\n"
+            "started  2026-11-07 10:00:00.000 (local time)\n"
+            "utc  2026-11-07T16:00:00.000Z\n"
+            "core  0.5.0\n"
+            "uri  elm327://COM3?profile=obd2\n"
+            "profile  obd2\n"
+            "frame flags  complete\n"
+            "caller  havne-cli 0.5.0\n"
+            "\n"
+            "10:00:01.000  +1.000  end  havne-cli: seconds: 3 frames, 0 "
+            "values, 0 records dropped, 0 notes dropped\n");
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        if (!frames.open(QIODevice::WriteOnly)) {
+            return {};
+        }
+        QByteArray csv = "host_us,timestamp_us,id,flags,data\n";
+        for (int n = 0; n < rows; ++n) {
+            const qint64 host = static_cast<qint64>(n + 1) * stepUs;
+            csv += QByteArray::number(host) + ',' +
+                   QByteArray::number(host + 7) +
+                   ",0x7E8,0x0,04 41 0C 0C 90 00 00 00\n";
+        }
+        frames.write(csv);
+        return folder;
+    }
+
     // A file's text, as a Save wrote it: "" when it can't be read
     Q_INVOKABLE QString readScratchFile(const QUrl& url) const
     {

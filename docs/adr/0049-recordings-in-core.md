@@ -1538,3 +1538,38 @@ a torn last row, a stop, the refusals' words), `test_c_abi`, the
 `fuzz_recording` folder's frames read whole and in a stretch, compared,
 `CliFramesTest`, `CliUsageTest.Frames*`, goldens `frames-stretch.jsonl`
 and `frames-missing-folder.jsonl`, `PythonTest.test_frames_read`.
+
+## Appendix: the viewer's Frames view (2026-11-07)
+
+The recordings page has a Values | Frames switch for a recording with a
+`frames.csv`; the values each time a recording opens, and the switch is
+absent for one that holds values alone. Frames shows the Log page's
+table, filter and By ID list (the same components, over models of their
+own) for the part of the recording in view, read through
+`ecuio_recording_read_frames` on a thread of its own.
+
+**Time.** The viewer's axis is `host_us`, so the view's edges go to the
+call as they are, and a row is placed by the `host_us` the call hands
+on, never by the frame's own session time. The table's times and the
+filter's Time span read on the same axis.
+
+**The cap.** At most 10,000 rows, the first from the view's left edge:
+the callback stops the read on the row after them, and the page says
+"the first 10,000 frames from 12.3 s: zoom in for the rest". Both a stop
+of its own and a stop for a newer read end as `ECUIO_ERR_CANCELED`, so
+the reader keeps its own flag to tell them apart. A row is kept as its
+ID, flags, `host_us` and the bytes it has, never as a 4,120-byte
+`ecuio_frame_t`.
+
+**Refilling.** The view moving asks for a new read 150 ms after its last
+change, as the chart's settle does. A read under way is stopped through
+the callback and a generation number keeps its rows, and any read's
+that was stopped, from the models. A tap on a row puts the chart's
+cursor at the row's time, whether or not a signal has a sample there.
+
+Tests: `ViewerFramesTest` (test_bridge: the part in view with its times,
+a read to the end, the cap's edge and its note, a folder with no
+frames, a refill during a read, a stopped read that ends last, clear),
+`QmlTest.recordings` (the switch, the rows following the view, a tap's
+cursor, a recording with no frames, the note), `QmlTest.phone` (the
+Frames view at a phone's width).

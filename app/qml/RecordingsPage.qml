@@ -104,6 +104,24 @@ Page {
     // the cursor's time (NaN for none)
     property real viewT0: 0
     property real viewT1: 1000
+    // What the signal area shows: the values at the cursor, or the frames
+    // of the part in view (a recording with a frames.csv). The values each
+    // time a recording opens
+    property string detailView: "values"
+    readonly property bool framesShown: detailView === "frames"
+                                        && recording.state === RecordingView.Open
+                                        && recording.hasFrames
+    // The Frames view's By ID table and filter panel
+    property bool framesById: false
+    property bool framesFilterOpen: false
+    onViewT0Changed: refillFramesSoon()
+    onViewT1Changed: refillFramesSoon()
+    onFramesShownChanged: {
+        if (framesShown)
+            refillFrames()
+        else
+            viewFrames.clear()
+    }
     property real cursorMs: NaN
     readonly property bool hasCursor: !isNaN(cursorMs)
     // Signal index -> plotted, from the recording's default at the open
@@ -312,6 +330,8 @@ Page {
 
     function backToList() {
         recording.close()
+        viewFrames.clear()
+        detailView = "values"
         stopComparing()
         alignChoice.currentIndex = 0
         alignOn = "start"
@@ -336,6 +356,18 @@ Page {
     function axisEnd() {
         return compareAligned ? Math.max(durationMs(), compareOffsetMs + compare.durationMs)
                               : durationMs()
+    }
+
+    // The Frames view's rows again for the part in view, once it has rested
+    // for settleMs: a drag or a pinch asks for none until it stops
+    function refillFramesSoon() {
+        if (framesShown)
+            framesRefill.restart()
+    }
+    function refillFrames() {
+        framesRefill.stop()
+        if (framesShown)
+            viewFrames.load(recording.folder, viewT0, viewT1)
     }
 
     // The view, kept inside the axis and no narrower than minSpanMs.
@@ -769,6 +801,10 @@ Page {
                 rows += s.samples
             root.rowsPerSecond = rows / (root.durationMs() / 1000)
             root.cursorMs = NaN
+            root.detailView = "values"
+            root.framesById = false
+            root.framesFilterOpen = false
+            framesFilterPanel.clear()
             root.showAll()
         }
         onSignalListChanged: {
@@ -832,6 +868,14 @@ Page {
         id: settle
         interval: root.settleMs
         onTriggered: chart.moving = false
+    }
+
+    // The part in view's frames (ADR-0049's appendix "frames read back")
+    RecordingFrames { id: viewFrames }
+    Timer {
+        id: framesRefill
+        interval: root.settleMs
+        onTriggered: root.refillFrames()
     }
 
     FrameAnimation {
@@ -1248,6 +1292,34 @@ Page {
                 text: qsTr("Save report…")
                 onClicked: reportDialog.open()
             }
+            // The signal area's two views: the values at the cursor, or the
+            // frames in view. Hidden for a recording with no frames.csv
+            Rectangle {
+                visible: recording.state === RecordingView.Open && recording.hasFrames
+                         && !root.chartMaximized
+                implicitWidth: detailSwitch.implicitWidth + 4
+                implicitHeight: detailSwitch.implicitHeight + 4
+                radius: Theme.radius
+                color: Theme.surface
+
+                Row {
+                    id: detailSwitch
+                    anchors.centerIn: parent
+                    spacing: 2
+                    SegmentButton {
+                        objectName: "detailView_values"
+                        text: qsTr("Values")
+                        selected: !root.framesShown
+                        onClicked: root.detailView = "values"
+                    }
+                    SegmentButton {
+                        objectName: "detailView_frames"
+                        text: qsTr("Frames")
+                        selected: root.framesShown
+                        onClicked: root.detailView = "frames"
+                    }
+                }
+            }
             Label {
                 objectName: "reportNote"
                 Layout.fillWidth: true
@@ -1403,9 +1475,111 @@ Page {
             text: root.compareStatus
         }
 
+        // ---- The frames of the part in view, read from frames.csv ----
+        ColumnLayout {
+            objectName: "viewerFrames"
+            visible: root.framesShown && !root.chartMaximized
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
+                Rectangle {
+                    implicitWidth: framesTableSwitch.implicitWidth + 4
+                    implicitHeight: framesTableSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    Row {
+                        id: framesTableSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            objectName: "framesTable_frames"
+                            text: qsTr("Frames")
+                            selected: !root.framesById
+                            onClicked: root.framesById = false
+                        }
+                        SegmentButton {
+                            objectName: "framesTable_byId"
+                            text: qsTr("By ID")
+                            selected: root.framesById
+                            onClicked: {
+                                root.framesById = true
+                                viewFrames.ids.refresh()
+                            }
+                        }
+                    }
+                }
+                ThemedButton {
+                    objectName: "framesFilterToggle"
+                    text: viewFrames.frames.filterTerms > 0
+                          ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
+                          : qsTr("Filter")
+                    highlighted: root.framesFilterOpen
+                    onClicked: root.framesFilterOpen = !root.framesFilterOpen
+                }
+            }
+
+            FrameFilterPanel {
+                id: framesFilterPanel
+                visible: root.framesFilterOpen
+                frames: viewFrames.frames
+            }
+
+            // How many rows the part in view has, and when it has more than
+            // the table holds, where the table begins
+            Label {
+                objectName: "framesWords"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                wrapMode: Text.WordWrap
+                color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
+                font.pixelSize: 13
+                text: viewFrames.error !== "" ? viewFrames.error
+                      : viewFrames.loading ? qsTr("Reading the frames…")
+                      : viewFrames.note !== "" ? viewFrames.note
+                      : viewFrames.frames.filterTerms > 0
+                        ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
+                                                         .arg(viewFrames.frames.heldCount)
+                        : qsTr("%n frame(s) in view", "", viewFrames.rows)
+            }
+
+            // A fixed height: the page scrolls and the table scrolls inside
+            FrameTable {
+                objectName: "viewerFrameTable"
+                visible: !root.framesById
+                Layout.preferredHeight: 280
+                live: false
+                frames: viewFrames.frames
+                emptyText: viewFrames.loading ? qsTr("Reading the frames…")
+                         : viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
+                         : qsTr("No frame in view")
+                // A tap puts the chart's cursor at the frame's time, whether
+                // or not a signal has a sample there
+                onRowClicked: (index, modifiers, timestampUs) => root.setCursor(timestampUs / 1000)
+            }
+            FrameIdList {
+                objectName: "viewerFrameIds"
+                visible: root.framesById
+                Layout.preferredHeight: 280
+                ids: viewFrames.ids
+                refreshing: root.framesById && root.framesShown
+                emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
+                                                           : qsTr("No frame in view")
+                onIdTapped: (id, extended) => {
+                    framesFilterPanel.showId(id, extended)
+                    root.framesFilterOpen = true
+                    root.framesById = false
+                }
+            }
+        }
+
         SignalFilterBar {
             objectName: "recordingFilter"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             filter: signalFilter
             codes: recording.signalList.map(s => s.group)
@@ -1416,7 +1590,7 @@ Page {
         ListView {
             id: signalRows
             objectName: "signalRows"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             Layout.preferredHeight: count * root.rowHeight
             Layout.maximumHeight: Math.max(root.rowHeight, column.height * 0.3)
@@ -1499,7 +1673,7 @@ Page {
         // the chart draws: the chart keeps every ticked signal (ADR-0050)
         Label {
             objectName: "filterCount"
-            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim

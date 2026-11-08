@@ -10,6 +10,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "adapterrelay.h"
+#include "recordingframes.h"
 #include "recordingview.h"
 #include "sessionbridge.h"
 
@@ -67,6 +68,15 @@ struct RecordingViewForeign {
     Q_GADGET
     QML_FOREIGN(RecordingView)
     QML_NAMED_ELEMENT(RecordingView)
+};
+
+// The viewer's Frames table: the rows of the part in view, read from
+// frames.csv (ADR-0049's appendix "frames read back"); each page makes
+// its own
+struct RecordingFramesForeign {
+    Q_GADGET
+    QML_FOREIGN(RecordingFrames)
+    QML_NAMED_ELEMENT(RecordingFrames)
 };
 
 // Finding a signal among many (ADR-0050): Live's list holds one, and the

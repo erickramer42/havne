@@ -278,6 +278,107 @@ TestCase {
         compare(note.text, "")
     }
 
+    // The viewer's Frames view (ADR-0049's appendix "frames read back"):
+    // the switch is there for a recording with frames, the table holds the
+    // rows of the part in view, times on the viewer's axis, and a tap puts
+    // the cursor at the row's time
+    function test_theFramesViewShowsThePartInView() {
+        const page = openFindings()
+        const values = find(page, "detailView_values")
+        const frames = find(page, "detailView_frames")
+        verify(values.visible && frames.visible, "a recording with frames has the switch")
+        compare(page.detailView, "values", "the values each time it opens")
+        verify(find(page, "signalRows").visible)
+        verify(!find(page, "viewerFrames").visible)
+
+        mouseClick(frames)
+        verify(page.framesShown)
+        verify(find(page, "viewerFrames").visible)
+        verify(!find(page, "signalRows").visible, "the values give way")
+        verify(!find(page, "recordingFilter").visible)
+        const words = find(page, "framesWords")
+        tryVerify(() => /^\d+ frame\(s\) in view$/.test(words.text), 10000,
+                  "the part in view is read: " + words.text)
+        const total = parseInt(words.text)
+        verify(total > 0, words.text)
+        const list = find(find(page, "viewerFrameTable"), "frameList")
+        compare(list.count, total)
+
+        // The part in view alone: zoomed to the first second there are
+        // fewer rows, once the view has rested
+        page.setView(0, 1000)
+        tryVerify(() => parseInt(words.text) < total, 10000,
+                  "the rows follow the view: " + words.text)
+
+        // The rows run oldest first in the viewer, each at its host_us:
+        // the first at 0.100 s, the frame's own 0.101 s not shown
+        tryVerify(() => list.itemAtIndex(0) !== null)
+        const first = list.itemAtIndex(0)
+        compare(first.model.timestampUs, 100000)
+
+        // A tap puts the cursor at the row's time
+        verify(!page.hasCursor)
+        mouseClick(find(first, "frameRowArea"))
+        verify(page.hasCursor)
+        compare(page.cursorMs, 100)
+
+        // A filter on the frames carries to nothing else: the next
+        // recording opened has none
+        mouseClick(find(page, "framesFilterToggle"))
+        const ids = find(page, "filterIds")
+        ids.text = "7E8"
+        find(page, "filterPanel").apply()
+        compare(find(page, "framesFilterToggle").text, "Filter (1)")
+
+        // Back to the values; the frames are let go
+        mouseClick(values)
+        verify(!page.framesShown)
+        verify(find(page, "signalRows").visible)
+        compare(page.detailView, "values")
+
+        page.backToList()
+        page.open(findingsRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens again")
+        compare(find(page, "filterIds").text, "")
+        compare(find(page, "framesFilterToggle").text, "Filter")
+    }
+
+    function test_aRecordingWithNoFramesHasNoFramesSwitch() {
+        const page = createPage()
+        const folder = Harness.importCsvFixture("logger-a", "viewer-frames-import")
+        verify(folder !== "", "the import is made")
+        page.open({ title: "Imported", folder: folder })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        verify(!find(page, "detailView_frames").visible)
+        verify(!find(page, "detailView_values").visible)
+        compare(find(page, "viewerFrames").visible, false)
+    }
+
+    // A part with more rows than the table holds says where the table
+    // begins; a zoom into fewer drops the note
+    function test_aLongPartSaysWhereTheTableBegins() {
+        const folder = Harness.writeFramesRecording("viewer-frames-long", 10200, 1000)
+        verify(folder !== "")
+        const page = createPage()
+        page.open({ title: "Long", folder: folder })
+        tryVerify(() => page.viewing && find(page, "detailView_frames").visible, 10000)
+        mouseClick(find(page, "detailView_frames"))
+        const words = find(page, "framesWords")
+        tryVerify(() => words.text === "the first 10,000 frames from 0.0 s: zoom in for the rest",
+                  10000, words.text)
+        compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
+        page.setView(0, 2000)
+        tryVerify(() => words.text === "2000 frame(s) in view", 10000, words.text)
+
+        // A view that does not start at the recording's start: the rows
+        // are those from its left edge
+        page.setView(5000, 6000)
+        tryVerify(() => words.text === "1001 frame(s) in view", 10000, words.text)
+        const list = find(find(page, "viewerFrameTable"), "frameList")
+        tryVerify(() => list.itemAtIndex(0) !== null)
+        compare(list.itemAtIndex(0).model.timestampUs, 5000000)
+    }
+
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)
