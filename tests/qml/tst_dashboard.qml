@@ -11,6 +11,13 @@ import AppTest
 TestCase {
     id: testCase
     name: "Dashboard"
+
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
     when: windowShown
 
     Component { id: hubComponent; SignalHub {} }
@@ -71,6 +78,11 @@ TestCase {
     }
 
     function cleanup() {
+        Theme.night = "off"
+        Theme.nightFrom = "19:00"
+        Theme.nightUntil = "07:00"
+        Theme.now = () => new Date()
+        Theme.shortLayout = false
         Bridge.unitSystem = 0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -999,14 +1011,14 @@ TestCase {
     // The lit parts take Theme's gaugeValue in every theme, not a color
     // derived from the primary
     function test_gaugesTakeTheirValueColorFromTheTheme() {
-        for (const name of Theme.themeNames) {
-            Theme.theme = name
+        for (const name of Theme.paletteNames) {
+            usePalette(name)
             const page = createTemporaryObject(pageComponent, testCase)
             const tach = gauges(page)["Engine speed"]
             verify(Qt.colorEqual(tach.accent, Theme.gaugeValue),
                    name + ": " + tach.accent + ", expected " + Theme.gaugeValue)
         }
-        Theme.theme = "dark"
+        usePalette("dark")
     }
 
     // A ref that names an inherited object key is no signal
@@ -1014,5 +1026,71 @@ TestCase {
         const hub = createTemporaryObject(hubComponent, testCase)
         compare(hub.lookup(["constructor"]), null)
         compare(hub.lookup(["toString", "__proto__"]), null)
+    }
+
+    // ---- The Night switch (ADR-0058 section 6)
+
+    // The switch: one per page, at the end of the link state, wherever that
+    // is shown (the desktop's title row, a phone on its side, the phone's line)
+    function nightSwitchOf(page) {
+        return findChild(page, "nightSwitch")
+    }
+
+    function test_theSwitchFlipsTheModeInOnAndOff() {
+        const page = pageOf({ form: "desktop" }, null, true)
+        const sw = nightSwitchOf(page)
+        verify(sw, "the switch is on the page")
+        compare(sw.text, "Night")
+        compare(sw.highlighted, false, "off")
+        sw.clicked()
+        compare(Theme.night, "on")
+        compare(Theme.nightActive, true)
+        compare(sw.highlighted, true, "highlighted while night is on")
+        sw.clicked()
+        compare(Theme.night, "off")
+        compare(sw.highlighted, false)
+    }
+
+    function test_theSwitchHoldsAnOverrideUnderASchedule() {
+        const page = pageOf({ form: "desktop" }, null, true)
+        const sw = nightSwitchOf(page)
+        Theme.now = () => new Date(2026, 10, 10, 18, 0, 0, 0)
+        Theme.night = "schedule"
+        Theme.refreshNight()
+        compare(sw.highlighted, false, "the schedule says off at 18:00")
+        sw.clicked()
+        compare(Theme.night, "schedule", "the mode is kept")
+        compare(Theme.nightOverride, "on")
+        compare(sw.highlighted, true, "highlighted follows nightActive")
+        compare(sw.Accessible.name, "Night is on until 07:00. Turn it off")
+        sw.clicked()
+        compare(Theme.nightOverride, "")
+        compare(sw.highlighted, false)
+        compare(sw.Accessible.name, "Night is off until 19:00. Turn it on")
+    }
+
+    // Both places the link state shows: the desktop's title row and the
+    // phone's line, and a phone on its side moves it to the row
+    function test_theSwitchSitsWithTheLinkState_data() {
+        return [
+            { tag: "desktop", form: "desktop", short: false, loader: "linkInRow" },
+            { tag: "phone upright", form: "phone", short: false, loader: "linkLine" },
+            { tag: "phone on its side", form: "phone", short: true, loader: "linkInRow" }
+        ]
+    }
+    function test_theSwitchSitsWithTheLinkState(data) {
+        Theme.shortLayout = data.short
+        const page = pageOf({ form: data.form }, null, true)
+        connect("mock://demo")
+        const loader = findChild(page, data.loader)
+        tryVerify(() => loader.active && loader.item, 3000, data.loader + " is shown")
+        const sw = nightSwitchOf(page)
+        verify(sw, "the switch exists")
+        compare(sw.parent, loader.item, "in the link state's row")
+        compare(Array.from(loader.item.children).indexOf(sw), loader.item.children.length - 1,
+                "at its end")
+        // the other loader holds none
+        const other = findChild(page, data.loader === "linkLine" ? "linkInRow" : "linkLine")
+        verify(!other.active, "the other place is empty")
     }
 }

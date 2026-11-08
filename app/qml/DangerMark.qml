@@ -6,7 +6,7 @@ import QtQuick.Shapes
 
 // The mark beside a readout once its value is past dangerFrom: a filled
 // triangle with an exclamation point, so danger is told from warning by
-// more than hue (the low-glare and night themes draw both in warm colors).
+// more than hue (the night palettes draw both in warm colors).
 // The gauge shows it only while it applies.
 Item {
     id: mark

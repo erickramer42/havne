@@ -66,19 +66,107 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // The theme: Dark, or Low glare and Night (amber and red on near black)
-    // for a cabin after dark. Takes effect at once; Theme.qml stores it.
+    // Night (ADR-0058): off, on, or on a schedule; and its style, amber or
+    // red on near black, for a cabin after dark. Each takes effect at once;
+    // Theme.qml stores it. The Dashboard's switch is the same control
     LabeledFlow {
-        label: qsTr("Theme:")
+        label: qsTr("Night:")
         Repeater {
-            model: Theme.themeNames
+            model: [
+                { mode: "off", label: qsTr("Off") },
+                { mode: "on", label: qsTr("On") },
+                { mode: "schedule", label: qsTr("Scheduled") }
+            ]
             ThemedButton {
-                required property string modelData
-                objectName: "theme_" + modelData
-                text: Theme.themeLabel(modelData)
-                highlighted: Theme.active === modelData
-                onClicked: Theme.theme = modelData
+                required property var modelData
+                objectName: "night_" + modelData.mode
+                text: modelData.label
+                highlighted: Theme.clampNight(Theme.night) === modelData.mode
+                onClicked: Theme.night = modelData.mode
             }
+        }
+    }
+    // Chosen ahead of the evening too; the Dashboard's switch shows the result
+    LabeledFlow {
+        label: qsTr("Night style:")
+        Repeater {
+            model: [
+                { style: "amber", label: qsTr("Amber") },
+                { style: "red", label: qsTr("Red") }
+            ]
+            ThemedButton {
+                required property var modelData
+                objectName: "nightStyle_" + modelData.style
+                text: modelData.label
+                highlighted: Theme.clampStyle(Theme.nightStyle) === modelData.style
+                onClicked: Theme.nightStyle = modelData.style
+            }
+        }
+    }
+    // The schedule's window: a masked field takes a phone's numeric
+    // keyboard and the desktop's alike (a popup picker would draw outside
+    // the zoom). A time is stored when it is valid and the two differ
+    ColumnLayout {
+        id: schedule
+        objectName: "nightSchedule"
+        Layout.fillWidth: true
+        visible: Theme.clampNight(Theme.night) === "schedule"
+        spacing: Theme.spacing
+        property string problem: ""
+        // A field's text on leaving it: stored, or said why not
+        function commit(isFrom, text) {
+            const other = isFrom ? Theme.nightUntil : Theme.nightFrom
+            if (Theme.minutesOf(text) < 0) {
+                problem = qsTr("Not a time")
+            } else if (text === other) {
+                problem = qsTr("From and Until are the same time")
+            } else {
+                problem = ""
+                if (isFrom)
+                    Theme.nightFrom = text
+                else
+                    Theme.nightUntil = text
+            }
+        }
+        RowLayout {
+            spacing: Theme.spacing
+            Label { text: qsTr("From"); color: Theme.textDim }
+            TextField {
+                id: fromField
+                objectName: "nightFrom"
+                implicitWidth: 80
+                inputMask: "99:99"
+                inputMethodHints: Qt.ImhDigitsOnly
+                color: Theme.text
+                text: Theme.nightFrom
+                onEditingFinished: schedule.commit(true, text)
+            }
+            Label { text: qsTr("Until"); color: Theme.textDim }
+            TextField {
+                id: untilField
+                objectName: "nightUntil"
+                implicitWidth: 80
+                inputMask: "99:99"
+                inputMethodHints: Qt.ImhDigitsOnly
+                color: Theme.text
+                text: Theme.nightUntil
+                onEditingFinished: schedule.commit(false, text)
+            }
+        }
+        Label {
+            objectName: "nightProblem"
+            visible: schedule.problem !== ""
+            text: schedule.problem
+            color: Theme.danger
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        Label {
+            objectName: "nightWords"
+            text: Theme.scheduleWords()
+            color: Theme.textDim
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
     }
 

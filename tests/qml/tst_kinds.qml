@@ -8,6 +8,13 @@ import App
 TestCase {
     id: testCase
     name: "Kinds"
+
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
     when: windowShown
 
     Component { id: segmentsC; SegmentGauge { width: 300; height: 110; from: 0; to: 8000; warnFrom: 5500; dangerFrom: 6800 } }
@@ -18,9 +25,9 @@ TestCase {
 
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
-        Theme.theme = "dark"
+        usePalette("dark")
     }
-    function cleanup() { Theme.theme = "dark" }
+    function cleanup() { usePalette("dark") }
 
     function find(item, name) {
         const found = findChild(item, name)
@@ -315,10 +322,10 @@ TestCase {
 
     // The digits take the zones' colors, in every theme
     function test_theDigitsTakeTheZonesColors_data() {
-        return Theme.themeNames.map(n => ({ tag: n, name: n }))
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_theDigitsTakeTheZonesColors(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         const g = make(readoutC, { digits: 3 })
         g.hasValue = true
         g.value = 30
@@ -469,7 +476,7 @@ TestCase {
 
     function test_everyNewKindLoadsAtTwoSizesInEachTheme_data() {
         const rows = []
-        for (const n of Theme.themeNames)
+        for (const n of Theme.paletteNames)
             for (const k of [{ t: "segments", c: segmentsC }, { t: "seven-segment", c: readoutC },
                              { t: "sparkline", c: sparkC }])
                 for (const s of [{ w: 300, h: 110 }, { w: 120, h: 64 }])
@@ -477,7 +484,7 @@ TestCase {
         return rows
     }
     function test_everyNewKindLoadsAtTwoSizesInEachTheme(data) {
-        Theme.theme = data.theme
+        usePalette(data.theme)
         const g = make(data.c, { width: data.w, height: data.h })
         g.hasValue = true
         g.value = g.dangerFrom + 1   // in the danger zone: the mark's slot is in use

@@ -1,43 +1,247 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: QML: QmlTest.theme, QmlTest.liveview, QmlTest.log, QmlTest.phone
-//          (test_qml); Manual smoke
+// Testing: QML: QmlTest.theme, QmlTest.settings, QmlTest.dashboard,
+//          QmlTest.liveview, QmlTest.log, QmlTest.phone (test_qml); Manual smoke
 pragma Singleton
 import QtCore
 import QtQuick
 
-// Central palette: three themes, the one in `theme` read through the roles
-// below. main.cpp colors the platform's own window (Android's background,
-// Windows' title bar) from bg, surface and text when the theme changes.
-// Dark is the default. Low glare (amber and orange on near black) and Night
-// (red on near black) keep the light low for a car's cabin after dark; red
-// is the danger color there too, so danger is told from the rest by more
-// than hue (GaugeBase: a mark beside the readout and a heavier zone stroke).
+// Central palette: three palettes (dark, nightAmber, nightRed), the one in
+// `active` read through the roles below. main.cpp colors the platform's own
+// window (Android's background, Windows' title bar) from bg, surface and
+// text when the palette changes. Dark is the default. The two night
+// palettes (amber and orange, or red, on near black) keep the light low for
+// a car's cabin after dark; red is the danger color there too, so danger is
+// told from the rest by more than hue (GaugeBase: a mark beside the readout
+// and a heavier zone stroke). In them nothing outshines the text: no trace
+// and no readout is brighter than it.
 // Text holds 4.5:1 or more against the surfaces it sits on in each theme,
 // except text on the selected-row color (primary), held to Dark's own 4.2:1
 // (a lighter primary would be a bright row in a dark cabin); the readouts,
 // the zone colors and the trace colors have their floors too
 // (tests/qml/tst_theme.qml measures each).
 QtObject {
-    // The chosen theme, kept between runs under the `ui` settings. It is
-    // read here, when the singleton is made, so the first frame already has
-    // it. A name that is not a theme reads as dark (`active`)
-    property string theme: "dark"
-    readonly property string active: clampTheme(theme)
+    id: theme
+    // ---- The look, Night and its style (ADR-0058). Three controls give
+    // the palette on screen, `active`, which every role reads through:
+    // the look (Dark, the only one so far), Night (off, on, or on a
+    // schedule) and the style Night takes (amber or red). All are kept
+    // between runs under the `ui` settings and read here, when the
+    // singleton is made, so the first frame already has the palette. A
+    // value outside its list reads as the default.
+    property string look: "dark"
+    property string night: "off"
+    property string nightStyle: "amber"
+    // The schedule's window, 24-hour local times "HH:MM"; from is inclusive,
+    // until exclusive, and the window may cross midnight
+    property string nightFrom: "19:00"
+    property string nightUntil: "07:00"
+    // A tap on the switch in schedule mode: "on" or "off" until the next
+    // boundary (nightOverrideUntil, ms since the epoch). Any change to
+    // Night, From or Until clears it
+    property string nightOverride: ""
+    property double nightOverrideUntil: 0
+    // The clock, a seam: a test replaces it
+    property var now: () => new Date()
+    // Whether night is shown now; set by refreshNight() on every change of
+    // the settings above, every 30 s and when the application is active again
+    property bool shownNight: false
+    readonly property bool nightActive: shownNight
+    readonly property string active: nightActive ? (clampStyle(nightStyle) === "red" ? "nightRed" : "nightAmber")
+                                                 : clampLook(look)
+
+    readonly property var lookNames: ["dark"]
+    readonly property var nightModes: ["off", "on", "schedule"]
+    readonly property var nightStyles: ["amber", "red"]
+    readonly property var paletteNames: ["dark", "nightAmber", "nightRed"]
+    function clampLook(name) { return lookNames.indexOf(name) >= 0 ? name : "dark" }
+    function clampNight(name) { return nightModes.indexOf(name) >= 0 ? name : "off" }
+    function clampStyle(name) { return nightStyles.indexOf(name) >= 0 ? name : "amber" }
+
+    // What the stored `theme` of v0.7.0 becomes: Night and its style
+    function migrateTheme(name) {
+        return name === "lowGlare" ? { night: "on", nightStyle: "amber" }
+             : name === "night"    ? { night: "on", nightStyle: "red" }
+             :                       { night: "off", nightStyle: "amber" }
+    }
+
+    // "HH:MM" to minutes after midnight, or -1 when it isn't a time
+    function minutesOf(text) {
+        const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(text))
+        return m === null ? -1 : Number(m[1]) * 60 + Number(m[2])
+    }
+    // The window holds a time: on at from, off at until, across midnight
+    // too; a pair that isn't two different times holds none
+    function inWindow(date, from, until) {
+        const f = minutesOf(from), u = minutesOf(until)
+        if (f < 0 || u < 0 || f === u)
+            return false
+        const m = date.getHours() * 60 + date.getMinutes()
+        return f < u ? (m >= f && m < u) : (m >= f || m < u)
+    }
+    // The next time after `date` the window opens or closes
+    function nextBoundary(date, from, until) {
+        let best = null
+        for (const t of [from, until]) {
+            const m = minutesOf(t)
+            if (m < 0)
+                continue
+            const d = new Date(date.getTime())
+            d.setHours(Math.floor(m / 60), m % 60, 0, 0)
+            if (d.getTime() <= date.getTime())
+                d.setDate(d.getDate() + 1)
+            if (best === null || d.getTime() < best.getTime())
+                best = d
+        }
+        return best
+    }
+
+    function nightNow() {
+        const mode = clampNight(night)
+        if (mode !== "schedule")
+            return mode === "on"
+        if (nightOverride === "on" || nightOverride === "off")
+            return nightOverride === "on"
+        return inWindow(now(), nightFrom, nightUntil)
+    }
+    // Recompute what is shown; an override past its expiry goes first
+    function refreshNight() {
+        if (nightOverride !== "" && now().getTime() >= nightOverrideUntil)
+            clearOverride()
+        shownNight = nightNow()
+    }
+    function clearOverride() {
+        nightOverride = ""
+        nightOverrideUntil = 0
+    }
+    // The switch: On and Off flip the mode; a schedule gets an override
+    // to the opposite of what it shows, until its next boundary, and a
+    // second tap clears it
+    function toggleNight() {
+        const mode = clampNight(night)
+        if (mode === "on") {
+            night = "off"
+        } else if (mode === "off") {
+            night = "on"
+        } else if (nightOverride !== "") {
+            clearOverride()
+        } else {
+            const when = now()
+            const boundary = nextBoundary(when, nightFrom, nightUntil)
+            nightOverride = shownNight ? "off" : "on"
+            nightOverrideUntil = boundary === null ? when.getTime() : boundary.getTime()
+        }
+        refreshNight()
+    }
+    // When the shown state next changes, for the switch and Settings: "On
+    // until 07:00" while night is on, "Off until 19:00" while it is off.
+    // In On and Off there is no time to say
+    function nightWords() {
+        const mode = clampNight(night)
+        if (mode !== "schedule")
+            return mode === "on" ? qsTr("On") : qsTr("Off")
+        return nightActive ? qsTr("On until %1").arg(nightUntil) : qsTr("Off until %1").arg(nightFrom)
+    }
+    // Settings' page under Scheduled: the window, or the words while a tap
+    // holds it
+    function scheduleWords() {
+        return nightOverride !== "" ? nightWords() : qsTr("Scheduled %1 to %2").arg(nightFrom).arg(nightUntil)
+    }
+    // Settings' list row
+    function nightSummary() {
+        const mode = clampNight(night)
+        if (mode === "off")
+            return qsTr("Night off")
+        if (mode === "on")
+            return clampStyle(nightStyle) === "red" ? qsTr("Night on, red") : qsTr("Night on, amber")
+        return nightOverride !== "" ? qsTr("Night %1").arg(nightWords().toLowerCase())
+                                    : qsTr("Night scheduled %1 to %2").arg(nightFrom).arg(nightUntil)
+    }
+    // The switch's accessible words: the state, then what a tap does
+    function nightSwitchName() {
+        const state = clampNight(night) === "schedule" ? nightWords().toLowerCase()
+                                                       : nightActive ? qsTr("on") : qsTr("off")
+        return qsTr("Night is %1. %2").arg(state).arg(nightActive ? qsTr("Turn it off") : qsTr("Turn it on"))
+    }
+
     property Settings store: Settings {
         category: "ui"
-        property string theme: "dark"
+        property string look: ""
+        property string night: ""
+        property string nightStyle: ""
+        property string nightFrom: ""
+        property string nightUntil: ""
+        property string nightOverride: ""
+        property double nightOverrideUntil: 0
+        // v0.7.0's one theme: read once to migrate, never written
+        property string theme: ""
     }
+    property bool loading: true
     // qmllint disable missing-property
-    Component.onCompleted: theme = clampTheme(store.theme)
-    onThemeChanged: store.theme = theme
+    // The settings as they were stored: the one a window made now reads. A
+    // value outside its list, a bad time or an expired override gives the
+    // default; with no Night stored, the v0.7.0 theme is migrated
+    function loadStored(src) {
+        loading = true
+        if (src.night === "") {
+            const m = migrateTheme(src.theme)
+            night = m.night
+            nightStyle = m.nightStyle
+        } else {
+            night = clampNight(src.night)
+            nightStyle = clampStyle(src.nightStyle)
+        }
+        look = clampLook(src.look)
+        const okTimes = minutesOf(src.nightFrom) >= 0 && minutesOf(src.nightUntil) >= 0
+                        && src.nightFrom !== src.nightUntil
+        nightFrom = okTimes ? src.nightFrom : "19:00"
+        nightUntil = okTimes ? src.nightUntil : "07:00"
+        if ((src.nightOverride === "on" || src.nightOverride === "off")
+                && src.nightOverrideUntil > now().getTime()) {
+            nightOverride = src.nightOverride
+            nightOverrideUntil = src.nightOverrideUntil
+        } else {
+            clearOverride()
+        }
+        loading = false
+        // Writes every key, so a migrated one is kept in its new form
+        store.look = look
+        store.night = night
+        store.nightStyle = nightStyle
+        store.nightFrom = nightFrom
+        store.nightUntil = nightUntil
+        store.nightOverride = nightOverride
+        store.nightOverrideUntil = nightOverrideUntil
+        refreshNight()
+    }
+    Component.onCompleted: loadStored(store)
+    onLookChanged: if (!loading) { store.look = look; refreshNight() }
+    onNightChanged: if (!loading) { clearOverride(); store.night = night; refreshNight() }
+    onNightStyleChanged: if (!loading) store.nightStyle = nightStyle
+    onNightFromChanged: if (!loading) { clearOverride(); store.nightFrom = nightFrom; refreshNight() }
+    onNightUntilChanged: if (!loading) { clearOverride(); store.nightUntil = nightUntil; refreshNight() }
+    onNightOverrideChanged: if (!loading) store.nightOverride = nightOverride
+    onNightOverrideUntilChanged: if (!loading) store.nightOverrideUntil = nightOverrideUntil
     // qmllint enable missing-property
-    readonly property var themeNames: ["dark", "lowGlare", "night"]
-    function clampTheme(name) { return themeNames.indexOf(name) >= 0 ? name : "dark" }
-    function themeLabel(name) {
-        switch (name) {
-        case "lowGlare": return qsTr("Low glare")
-        case "night":    return qsTr("Night")
-        default:         return qsTr("Dark")
+
+    // A boundary takes effect within 30 s: a tick compares two times, with
+    // no arithmetic about the next boundary for a sleep or a clock change
+    // to break
+    property Timer ticker: Timer {
+        interval: 30000
+        repeat: true
+        running: true
+        onTriggered: theme.refreshNight()
+    }
+    // A suspended phone's timers don't fire, so the app coming back to the
+    // front shows the time it is now. The source is a seam for a test
+    property QtObject stateSource: Qt.application
+    property Connections wake: Connections {
+        target: theme.stateSource
+        function onStateChanged() {
+            // qmllint disable missing-property
+            if (theme.stateSource.state === Qt.ApplicationActive)
+                theme.refreshNight()
+            // qmllint enable missing-property
         }
     }
 
@@ -72,28 +276,28 @@ QtObject {
                      "#a3e635",   // lime
                      "#e879f9"]   // fuchsia
         },
-        lowGlare: {
+        nightAmber: {
             bg: "#0d0a07", surface: "#18120c", elevated: "#261c12", elevatedLight: "#31241a",
             outline: "#85694a", primary: "#7f440d", text: "#f3c895", textDim: "#b58f64",
             success: "#f0a53a", warning: "#ff8a3a", danger: "#ff4a38", info: "#d2a86a",
             gaugeFace: "#1a130c", gaugeValue: "#f0a53a",
             shades: shadesOf("#1a130c"),
-            gaugeReadout: "#f7c98a", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
+            gaugeReadout: "#f3c895", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
             gaugeWarn: "#ff8a3a", gaugeDanger: "#ff4a38",
             // Warm, told apart by lightness and saturation as much as hue
-            series: ["#fff5bf", "#ff4000", "#ffd900", "#9e5d47", "#d17d00",
-                     "#9e9147", "#ffb299", "#ffe373", "#ff794d", "#b89c00"]
+            series: ["#f0b45a", "#ff4000", "#e6c200", "#9e5d47", "#d17d00",
+                     "#9e9147", "#ffb299", "#d9c27a", "#ff794d", "#b89c00"]
         },
-        night: {
+        nightRed: {
             bg: "#080404", surface: "#130909", elevated: "#201010", elevatedLight: "#2b1616",
             outline: "#934a44", primary: "#7a241c", text: "#ff9484", textDim: "#c46a5e",
             success: "#e8584a", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
             gaugeFace: "#150909", gaugeValue: "#ff5a4a",
             shades: shadesOf("#150909"),
-            gaugeReadout: "#ff9686", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
+            gaugeReadout: "#ff9484", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
             gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
-            series: ["#ffdfbf", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
-                     "#ff8000", "#ffab73", "#d1431f", "#b86253", "#ebb0b0"]
+            series: ["#ee9a7c", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
+                     "#ff8000", "#e08a4a", "#d1431f", "#b86253", "#d9a3a3"]
         }
     })
     readonly property var colors: palettes[active]
@@ -206,9 +410,9 @@ QtObject {
                                          ? "Menlo"
                                          : "monospace"
 
-    // Chart trace colors, per theme (each palette's `series`): one per hue
+    // Chart trace colors, per palette (each palette's `series`): one per hue
     // family on Dark so traces stay distinct on the dark surface, warm in
-    // the night themes. LiveView keys them by model row. Dark has no red:
+    // the night palettes, none brighter than their text. LiveView keys them by model row. Dark has no red:
     // it is the danger color, so a trace drawn in it would read as an alarm.
     readonly property var seriesColors: colors.series
     // A trace's style by its row (Live's model row, a recording's signal

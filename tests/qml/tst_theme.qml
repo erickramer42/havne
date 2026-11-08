@@ -8,6 +8,7 @@ import QtQuick
 import QtTest
 import App
 TestCase {
+    id: testCase
     name: "Theme"
 
     function sameColor(actual, expected, what) {
@@ -88,7 +89,21 @@ TestCase {
 
     // ---- Themes: Dark (the default), Low glare and Night
 
-    function cleanup() { Theme.theme = "dark" }
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
+    function cleanup() {
+        Theme.stateSource = Qt.application
+        Theme.now = () => new Date()
+        Theme.night = "off"
+        Theme.nightStyle = "amber"
+        Theme.nightFrom = "19:00"
+        Theme.nightUntil = "07:00"
+        Theme.look = "dark"
+    }
 
     readonly property var roles: [
         "bg", "surface", "elevated", "elevatedLight", "outline", "primary",
@@ -107,19 +122,22 @@ TestCase {
         sameColor(s.needleBase, "#2a2a38", "needleBase")
         sameColor(s.hubHi, "#4b4b63", "hubHi")
         sameColor(Theme.gaugeFace, "#1b1b28", "the face")
-        Theme.theme = "night"
+        usePalette("nightRed")
         verify(!Qt.colorEqual(Theme.gaugeShade.bezelHi, "#3a3a52"), "night has its own")
     }
 
-    function test_themeNames() {
-        compare(Theme.themeNames.join(","), "dark,lowGlare,night")
-        compare(Theme.theme, "dark", "dark until chosen")
-        compare(Theme.clampTheme("night"), "night")
-        compare(Theme.clampTheme("nonsense"), "dark", "an unknown name reads as dark")
-        compare(Theme.clampTheme(undefined), "dark")
-        compare(Theme.themeLabel("lowGlare"), "Low glare")
-        compare(Theme.themeLabel("night"), "Night")
-        compare(Theme.themeLabel("dark"), "Dark")
+    function test_paletteNamesAndClamps() {
+        compare(Theme.paletteNames.join(","), "dark,nightAmber,nightRed")
+        compare(Theme.look, "dark", "dark until chosen")
+        compare(Theme.night, "off")
+        compare(Theme.nightStyle, "amber")
+        compare(Theme.active, "dark")
+        compare(Theme.clampNight("schedule"), "schedule")
+        compare(Theme.clampNight("nonsense"), "off", "an unknown mode reads as off")
+        compare(Theme.clampNight(undefined), "off")
+        compare(Theme.clampStyle("red"), "red")
+        compare(Theme.clampStyle("nonsense"), "amber", "an unknown style reads as amber")
+        compare(Theme.clampLook("nonsense"), "dark", "an unknown look reads as dark")
     }
 
     // The default theme is today's palette, unchanged
@@ -134,10 +152,10 @@ TestCase {
     }
 
     function test_everyThemeDefinesEveryRole_data() {
-        return Theme.themeNames.map(n => ({ tag: n, name: n }))
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_everyThemeDefinesEveryRole(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         for (const r of roles) {
             const c = Theme[r]
             verify(c !== undefined && c !== null, r + " is defined in " + data.name)
@@ -148,10 +166,10 @@ TestCase {
     // Distinct where they must be: the gauge's zones and its face, and
     // the surfaces a panel is read against
     function test_theRolesAreDistinctWhereTheyMustBe_data() {
-        return Theme.themeNames.map(n => ({ tag: n, name: n }))
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_theRolesAreDistinctWhereTheyMustBe(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         const pairs = [["gaugeValue", "gaugeWarn"], ["gaugeValue", "gaugeDanger"],
                        ["gaugeWarn", "gaugeDanger"], ["gaugeFace", "gaugeReadout"],
                        ["gaugeFace", "gaugeNeedle"], ["gaugeFace", "gaugeTick"],
@@ -166,10 +184,10 @@ TestCase {
     // (hue 0 to 60 degrees, red to amber), so they keep a driver's night
     // vision; the cold-zone info color is warm there too
     function test_theNightThemesAreWarm_data() {
-        return [{ tag: "lowGlare", name: "lowGlare" }, { tag: "night", name: "night" }]
+        return [{ tag: "nightAmber", name: "nightAmber" }, { tag: "nightRed", name: "nightRed" }]
     }
     function test_theNightThemesAreWarm(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         for (const r of ["primary", "text", "textDim", "success", "warning", "danger", "info",
                          "gaugeValue", "gaugeReadout", "gaugeNeedle", "gaugeTick", "gaugeWarn",
                          "gaugeDanger"]) {
@@ -193,10 +211,10 @@ TestCase {
     // theme: the readouts against the gauge face and the card, the zone
     // colors a readout takes, and the page text against the page
     function test_textContrastIsAtLeast4_5_data() {
-        return Theme.themeNames.map(n => ({ tag: n, name: n }))
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_textContrastIsAtLeast4_5(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         const rows = [["text", "bg"], ["text", "surface"], ["text", "elevated"],
                       ["textDim", "bg"], ["textDim", "surface"],
                       ["gaugeReadout", "gaugeFace"], ["gaugeReadout", "surface"],
@@ -223,10 +241,10 @@ TestCase {
     // apart (3:1 against the chart's surface and page, and no two within 38
     // of each other in RGB), warm in the night themes
     function test_theSeriesPaletteIsPerTheme_data() {
-        return Theme.themeNames.map(n => ({ tag: n, name: n }))
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_theSeriesPaletteIsPerTheme(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         const colors = Theme.seriesColors
         compare(colors.length, 10)
         for (let i = 0; i < colors.length; ++i) {
@@ -237,8 +255,12 @@ TestCase {
                    colors[i] + " on bg is " + contrast(colors[i], Theme.bg).toFixed(2) + ":1 in " + data.name)
             verify(contrast(colors[i], Theme.surface) >= 3.5,
                    colors[i] + " on surface is " + contrast(colors[i], Theme.surface).toFixed(2) + ":1 in " + data.name)
-            if (data.name !== "dark")
+            if (data.name !== "dark") {
                 verify(a.hsvHue * 360 <= 60, colors[i] + " is warm in " + data.name)
+                // At night nothing outshines the text (ADR-0058 section 3)
+                verify(lum(colors[i]) <= lum(Theme.text) + 1e-9,
+                       colors[i] + " is brighter than the text in " + data.name)
+            }
             for (let j = i + 1; j < colors.length; ++j) {
                 const b = Qt.color(colors[j])
                 const d = 255 * Math.sqrt(Math.pow(a.r - b.r, 2) + Math.pow(a.g - b.g, 2)
@@ -257,49 +279,359 @@ TestCase {
             sameColor(Theme.seriesColor(i), was[i], "row " + i)
     }
 
-    // A name that is not a theme reads as dark everywhere: the colors and
-    // the one `active` name the Display buttons highlight by
-    function test_anUnknownNameReadsAsDark() {
-        Theme.theme = "nonsense"
+    // A mode or style that is not in its list reads as the default
+    // everywhere: the colors and the one `active` name
+    function test_anUnknownValueReadsAsTheDefault() {
+        Theme.night = "nonsense"
         compare(Theme.active, "dark")
         sameColor(Theme.bg, "#14141c", "bg")
         sameColor(Theme.gaugeValue, Qt.lighter("#6d4aff", 1.3), "gaugeValue")
-        Theme.theme = "night"
-        compare(Theme.active, "night")
+        Theme.night = "on"
+        Theme.nightStyle = "nonsense"
+        compare(Theme.active, "nightAmber", "an unknown style is amber")
+        Theme.look = "nonsense"
+        Theme.night = "off"
+        compare(Theme.active, "dark", "an unknown look is dark")
+    }
+
+    // At night the readout is the text color, so nothing outshines the text
+    function test_theReadoutIsTheTextAtNight_data() {
+        return [{ tag: "nightAmber", name: "nightAmber" }, { tag: "nightRed", name: "nightRed" }]
+    }
+    function test_theReadoutIsTheTextAtNight(data) {
+        usePalette(data.name)
+        verify(lum(Theme.gaugeReadout) <= lum(Theme.text) + 1e-9, "no brighter than the text")
+        sameColor(Theme.gaugeReadout, Theme.text, "the text color")
     }
 
     Component {
         id: storeComponent
-        Settings { category: "ui"; property string theme: "unset" }
+        Settings {
+            category: "ui"
+            property string look: "unset"
+            property string night: "unset"
+            property string nightStyle: "unset"
+            property string nightFrom: "unset"
+            property string nightUntil: "unset"
+            property string nightOverride: "unset"
+            property double nightOverrideUntil: -1
+        }
     }
-    // The stored name, as a window made later would read it
-    function stored() {
+    // A stored key, as a window made later would read it
+    function stored(key) {
         const reader = storeComponent.createObject(null)
-        const name = reader.theme
+        const value = reader[key]
         reader.destroy()
-        return name
+        return value
     }
 
-    // The chosen theme is written to the `ui` settings as it changes, and
-    // Theme reads it when it is made (before the first frame)
-    function test_theThemeIsKept() {
-        Theme.theme = "night"
-        tryVerify(() => stored() === "night", 2000, "stored")
-        Theme.theme = "lowGlare"
-        tryVerify(() => stored() === "lowGlare", 2000, "stored again")
-        Theme.theme = "dark"
-        tryVerify(() => stored() === "dark", 2000, "and back")
+    // Each control is written to the `ui` settings as it changes
+    function test_theControlsAreKept() {
+        Theme.night = "on"
+        tryVerify(() => stored("night") === "on", 2000, "night")
+        Theme.nightStyle = "red"
+        tryVerify(() => stored("nightStyle") === "red", 2000, "style")
+        Theme.night = "schedule"
+        Theme.nightFrom = "20:15"
+        tryVerify(() => stored("nightFrom") === "20:15", 2000, "from")
+        Theme.nightUntil = "06:45"
+        tryVerify(() => stored("nightUntil") === "06:45", 2000, "until")
+        Theme.look = "dark"
+        tryVerify(() => stored("look") === "dark", 2000, "look")
+        Theme.night = "off"
+        tryVerify(() => stored("night") === "off", 2000, "and back")
     }
 
-    // Switching the theme moves the roles: a binding on a role follows
+    // What v0.7.0's one theme becomes
+    function test_theOldThemeMigrates_data() {
+        return [
+            { tag: "dark", old: "dark", night: "off", style: "amber" },
+            { tag: "lowGlare", old: "lowGlare", night: "on", style: "amber" },
+            { tag: "night", old: "night", night: "on", style: "red" },
+            { tag: "unknown", old: "nonsense", night: "off", style: "amber" },
+            { tag: "absent", old: undefined, night: "off", style: "amber" }
+        ]
+    }
+    function test_theOldThemeMigrates(data) {
+        const m = Theme.migrateTheme(data.old)
+        compare(m.night, data.night)
+        compare(m.nightStyle, data.style)
+    }
+
+    // Switching the palette moves the roles: a binding on a role follows
     function test_switchingMovesTheRoles() {
         const dark = Qt.color(Theme.bg)
-        Theme.theme = "night"
+        usePalette("nightRed")
         verify(!Qt.colorEqual(Theme.bg, dark), "bg moved")
-        sameColor(Theme.gaugeValue, "#ff5a4a", "night's lit color")
-        Theme.theme = "lowGlare"
-        sameColor(Theme.gaugeValue, "#f0a53a", "low glare's lit color")
-        Theme.theme = "dark"
+        sameColor(Theme.gaugeValue, "#ff5a4a", "red's lit color")
+        usePalette("nightAmber")
+        sameColor(Theme.gaugeValue, "#f0a53a", "amber's lit color")
+        usePalette("dark")
         sameColor(Theme.bg, dark, "back to dark")
+    }
+
+    // ---- The schedule
+
+    // A fake clock: a local time on 2026-11-10
+    function at(h, m) { return new Date(2026, 10, 10, h, m, 0, 0) }
+    function tomorrowAt(h, m) { return new Date(2026, 10, 11, h, m, 0, 0) }
+    function setClock(date) { Theme.now = () => date }
+    function schedule(from, until) {
+        Theme.night = "schedule"
+        Theme.nightFrom = from
+        Theme.nightUntil = until
+    }
+
+    function test_theWindowHoldsFromAndNotUntil() {
+        compare(Theme.inWindow(at(19, 0), "19:00", "07:00"), true, "on at from")
+        compare(Theme.inWindow(at(18, 59), "19:00", "07:00"), false, "off before from")
+        compare(Theme.inWindow(at(7, 0), "19:00", "07:00"), false, "off at until")
+        compare(Theme.inWindow(at(6, 59), "19:00", "07:00"), true, "on before until")
+        compare(Theme.inWindow(at(23, 59), "19:00", "07:00"), true, "on before midnight")
+        compare(Theme.inWindow(at(0, 0), "19:00", "07:00"), true, "on after midnight")
+        compare(Theme.inWindow(at(12, 0), "19:00", "07:00"), false, "off by day")
+        compare(Theme.inWindow(at(8, 0), "06:00", "09:00"), true, "a window by day")
+        compare(Theme.inWindow(at(9, 0), "06:00", "09:00"), false, "off at its until")
+        compare(Theme.inWindow(at(5, 59), "06:00", "09:00"), false, "off before its from")
+        compare(Theme.inWindow(at(12, 0), "12:00", "12:00"), false, "from == until holds nothing")
+        compare(Theme.inWindow(at(12, 0), "12:0", "13:00"), false, "a bad time holds nothing")
+    }
+
+    function test_theNextBoundary() {
+        const b = Theme.nextBoundary(at(18, 0), "19:00", "07:00")
+        compare(b.getHours(), 19)
+        compare(b.getDate(), 10, "today")
+        const c = Theme.nextBoundary(at(20, 0), "19:00", "07:00")
+        compare(c.getHours(), 7)
+        compare(c.getDate(), 11, "tomorrow")
+        const d = Theme.nextBoundary(at(19, 0), "19:00", "07:00")
+        compare(d.getHours(), 7, "after the one that has just passed")
+    }
+
+    // Mode x style x in the window x an override: the palette shown
+    function test_theResolutionTable_data() {
+        const rows = []
+        for (const mode of ["off", "on", "schedule"])
+            for (const style of ["amber", "red"])
+                for (const inside of [true, false])
+                    for (const over of ["", "on", "off"]) {
+                        const night = mode === "on" ? true : mode === "off" ? false
+                                    : over !== "" ? over === "on" : inside
+                        rows.push({ tag: mode + " " + style + " " + (inside ? "in" : "out") + " " + (over || "-"),
+                                    mode: mode, style: style, inside: inside, over: over,
+                                    want: night ? (style === "red" ? "nightRed" : "nightAmber") : "dark" })
+                    }
+        return rows
+    }
+    function test_theResolutionTable(data) {
+        setClock(data.inside ? at(22, 0) : at(12, 0))
+        Theme.nightStyle = data.style
+        schedule("19:00", "07:00")
+        Theme.night = data.mode
+        Theme.nightOverride = data.over
+        Theme.nightOverrideUntil = data.over === "" ? 0 : tomorrowAt(23, 0).getTime()
+        Theme.refreshNight()
+        compare(Theme.active, data.want)
+        compare(Theme.nightActive, data.want !== "dark")
+    }
+
+    // A tap in a schedule sets the opposite for now, a second hands back
+    function test_theSwitchHoldsTheOppositeUntilTheBoundary() {
+        schedule("19:00", "07:00")
+        setClock(at(18, 0))
+        Theme.refreshNight()
+        compare(Theme.nightActive, false, "the schedule says off at 18:00")
+        Theme.toggleNight()
+        compare(Theme.nightOverride, "on")
+        compare(Theme.nightActive, true, "the tap shows night")
+        compare(Theme.nightOverrideUntil, at(19, 0).getTime(), "until the next boundary")
+        Theme.toggleNight()
+        compare(Theme.nightOverride, "", "a second tap clears it")
+        compare(Theme.nightActive, false, "the schedule rules again")
+        Theme.toggleNight()
+        compare(Theme.nightOverride, "on", "a third tap holds night again, not off")
+        Theme.toggleNight()
+        compare(Theme.nightOverride, "")
+        // the other way: in the window at 20:00
+        setClock(at(20, 0))
+        Theme.refreshNight()
+        compare(Theme.nightActive, true)
+        Theme.toggleNight()
+        compare(Theme.nightOverride, "off")
+        compare(Theme.nightActive, false)
+        compare(Theme.nightOverrideUntil, tomorrowAt(7, 0).getTime(), "until 07:00 tomorrow")
+    }
+
+    // In On and Off the switch flips the mode itself: no override
+    function test_theSwitchFlipsTheModeInOnAndOff() {
+        Theme.night = "off"
+        Theme.toggleNight()
+        compare(Theme.night, "on")
+        compare(Theme.nightActive, true)
+        compare(Theme.nightOverride, "", "no override in On")
+        Theme.toggleNight()
+        compare(Theme.night, "off")
+        compare(Theme.nightActive, false)
+        compare(Theme.nightOverride, "")
+    }
+
+    // A change to Night, From or Until clears an override, so a setting
+    // made in Settings shows at once; a change of style leaves it
+    function test_aSettingClearsTheOverride_data() {
+        return [
+            { tag: "night", set: () => { Theme.night = "off"; Theme.night = "schedule" }, cleared: true },
+            { tag: "from", set: () => { Theme.nightFrom = "20:00" }, cleared: true },
+            { tag: "until", set: () => { Theme.nightUntil = "08:00" }, cleared: true },
+            { tag: "style", set: () => { Theme.nightStyle = "red" }, cleared: false }
+        ]
+    }
+    function test_aSettingClearsTheOverride(data) {
+        schedule("19:00", "07:00")
+        setClock(at(18, 0))
+        Theme.refreshNight()
+        Theme.toggleNight()
+        compare(Theme.nightOverride, "on")
+        data.set()
+        compare(Theme.nightOverride === "", data.cleared)
+        if (data.cleared)
+            compare(Theme.nightActive, false, "the schedule's own state at 18:00")
+    }
+
+    // The override ends at the next boundary, through the tick
+    function test_theOverrideEndsAtTheBoundaryThroughTheTick() {
+        schedule("19:00", "07:00")
+        setClock(at(18, 0))
+        Theme.refreshNight()
+        Theme.toggleNight()
+        compare(Theme.nightActive, true)
+        setClock(at(18, 59))
+        Theme.ticker.triggered()
+        compare(Theme.nightOverride, "on", "still held before the boundary")
+        setClock(at(19, 0))
+        Theme.ticker.triggered()
+        compare(Theme.nightOverride, "", "gone at the boundary")
+        compare(Theme.nightActive, true, "and the window is open: nothing visible changes")
+        setClock(tomorrowAt(7, 0))
+        Theme.ticker.triggered()
+        compare(Theme.nightActive, false, "closed at 07:00")
+    }
+
+    // The tick follows the schedule with no tap at all
+    function test_theTickFollowsTheClock() {
+        schedule("19:00", "07:00")
+        setClock(at(12, 0))
+        Theme.ticker.triggered()
+        compare(Theme.nightActive, false)
+        setClock(at(19, 0))
+        Theme.ticker.triggered()
+        compare(Theme.nightActive, true)
+    }
+    function test_theTickRuns() {
+        verify(Theme.ticker.running, "the timer runs")
+        compare(Theme.ticker.interval, 30000)
+        verify(Theme.ticker.repeat)
+    }
+
+    // The app coming back to the front shows the time it is
+    Component {
+        id: fakeStateComponent
+        QtObject { property int state: Qt.ApplicationSuspended }
+    }
+    function test_comingBackToTheFrontRefreshes() {
+        const fake = createTemporaryObject(fakeStateComponent, testCase)
+        Theme.stateSource = fake
+        schedule("19:00", "07:00")
+        setClock(at(12, 0))
+        Theme.refreshNight()
+        compare(Theme.nightActive, false)
+        setClock(at(22, 0))
+        fake.state = Qt.ApplicationHidden
+        compare(Theme.nightActive, false, "not while it stays in the background")
+        fake.state = Qt.ApplicationActive
+        compare(Theme.nightActive, true, "at once when it is active again")
+    }
+
+    // The words: the next change of what is shown, never the expiry
+    function test_theWordsSayTheNextChange() {
+        schedule("19:00", "07:00")
+        setClock(at(18, 0))
+        Theme.refreshNight()
+        compare(Theme.nightWords(), "Off until 19:00", "the schedule, before")
+        Theme.toggleNight()
+        compare(Theme.nightWords(), "On until 07:00", "the tap at 18:00")
+        compare(Theme.scheduleWords(), "On until 07:00", "Settings says it too while a tap holds")
+        Theme.toggleNight()
+        compare(Theme.scheduleWords(), "Scheduled 19:00 to 07:00", "and the window without one")
+        setClock(at(20, 0))
+        Theme.refreshNight()
+        compare(Theme.nightWords(), "On until 07:00")
+        Theme.toggleNight()
+        compare(Theme.nightWords(), "Off until 19:00", "the tap at 20:00")
+        compare(Theme.nightSwitchName(), "Night is off until 19:00. Turn it on")
+        Theme.toggleNight()
+        compare(Theme.nightSwitchName(), "Night is on until 07:00. Turn it off")
+        Theme.night = "on"
+        compare(Theme.nightSwitchName(), "Night is on. Turn it off")
+        Theme.night = "off"
+        compare(Theme.nightSwitchName(), "Night is off. Turn it on")
+    }
+
+    // The override is stored with its expiry, and its end is stored too
+    function test_theOverrideIsStored() {
+        schedule("19:00", "07:00")
+        setClock(at(18, 0))
+        Theme.refreshNight()
+        Theme.toggleNight()
+        tryVerify(() => stored("nightOverride") === "on", 2000, "stored")
+        tryVerify(() => stored("nightOverrideUntil") === at(19, 0).getTime(), 2000, "with its expiry")
+        setClock(at(19, 30))
+        Theme.ticker.triggered()
+        compare(Theme.nightOverride, "")
+        tryVerify(() => stored("nightOverride") === "", 2000, "and the store follows its end")
+    }
+
+    // What a window made later reads (the load's rules, on a stand-in store)
+    function loaded(over) {
+        const base = { look: "", night: "", nightStyle: "", nightFrom: "", nightUntil: "",
+                       nightOverride: "", nightOverrideUntil: 0, theme: "" }
+        Theme.loadStored(Object.assign(base, over))
+    }
+    function test_theOldThemeIsReadOnceAndNeverNeeded() {
+        loaded({ theme: "lowGlare" })
+        compare(Theme.night, "on")
+        compare(Theme.nightStyle, "amber")
+        compare(Theme.active, "nightAmber")
+        loaded({ theme: "night" })
+        compare(Theme.nightStyle, "red")
+        compare(Theme.active, "nightRed")
+        loaded({ theme: "dark" })
+        compare(Theme.night, "off")
+        // a stored Night wins over a leftover theme
+        loaded({ theme: "night", night: "off", nightStyle: "amber", look: "dark" })
+        compare(Theme.night, "off")
+        compare(Theme.active, "dark")
+    }
+    function test_theLoadClampsAndKeepsTheSchedule() {
+        loaded({ night: "nonsense", nightStyle: "nonsense", look: "nonsense", nightFrom: "20:00", nightUntil: "06:00" })
+        compare(Theme.night, "off")
+        compare(Theme.nightStyle, "amber")
+        compare(Theme.nightFrom, "20:00")
+        compare(Theme.nightUntil, "06:00")
+        loaded({ night: "schedule", nightFrom: "25:00", nightUntil: "06:00" })
+        compare(Theme.nightFrom, "19:00", "a bad stored time keeps the default")
+        loaded({ night: "schedule", nightFrom: "08:00", nightUntil: "08:00" })
+        compare(Theme.nightFrom, "19:00", "an equal stored pair keeps the default")
+        compare(Theme.nightUntil, "07:00")
+    }
+    function test_anOverrideIsReadBackAndAnExpiredOneDropped() {
+        setClock(at(18, 0))
+        loaded({ night: "schedule", nightOverride: "on", nightOverrideUntil: at(19, 0).getTime() })
+        compare(Theme.nightOverride, "on", "kept across a restart")
+        compare(Theme.nightActive, true)
+        loaded({ night: "schedule", nightOverride: "on", nightOverrideUntil: at(17, 0).getTime() })
+        compare(Theme.nightOverride, "", "an expired one is dropped on load")
+        compare(Theme.nightActive, false)
+        loaded({ night: "schedule", nightOverride: "sideways", nightOverrideUntil: at(19, 0).getTime() })
+        compare(Theme.nightOverride, "", "an unknown one is dropped")
     }
 }

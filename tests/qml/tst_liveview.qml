@@ -8,6 +8,13 @@ import AppTest
 TestCase {
     id: testCase
     name: "LiveView"
+
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
     when: windowShown
 
     Component {
@@ -60,13 +67,13 @@ TestCase {
         verify(chart, "the chart is there")
         tryVerify(() => chart.available, 2000, "the canvas is ready")
         const spy = createTemporaryObject(spyComponent, testCase, { target: chart })
-        Theme.theme = "night"
+        usePalette("nightRed")
         spy.wait(2000)
         verify(spy.count >= 1, "painted again for the night theme")
         const before = spy.count
-        Theme.theme = "lowGlare"
+        usePalette("nightAmber")
         tryVerify(() => spy.count > before, 2000, "and again for low glare")
-        Theme.theme = "dark"
+        usePalette("dark")
     }
 
     Component {

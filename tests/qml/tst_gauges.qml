@@ -11,6 +11,13 @@ import App
 TestCase {
     id: testCase
     name: "Gauges"
+
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
     when: windowShown
 
     // Each kind with a range whose zones are warm from 60 and past danger
@@ -28,9 +35,9 @@ TestCase {
 
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
-        Theme.theme = "dark"
+        usePalette("dark")
     }
-    function cleanup() { Theme.theme = "dark" }
+    function cleanup() { usePalette("dark") }
 
     function find(item, name) {
         const found = findChild(item, name)
@@ -54,12 +61,12 @@ TestCase {
     function test_everyKindTakesItsColorsFromTheme_data() {
         const rows = []
         for (const k of kinds)
-            for (const name of Theme.themeNames)
+            for (const name of Theme.paletteNames)
                 rows.push({ tag: k.tag + ", " + name, kind: k, theme: name })
         return rows
     }
     function test_everyKindTakesItsColorsFromTheme(data) {
-        Theme.theme = data.theme
+        usePalette(data.theme)
         const g = gaugeOf(data.kind, 30)
         same(g.accent, Theme.gaugeValue, "the lit color")
         same(find(g, "readout").color, Theme.gaugeReadout, "a value in the normal zone")
@@ -68,8 +75,8 @@ TestCase {
         g.value = 90
         same(find(g, "readout").color, Theme.gaugeDanger, "past the danger")
         // The same gauge follows a switch of the theme
-        const other = Theme.themeNames[(Theme.themeNames.indexOf(data.theme) + 1) % Theme.themeNames.length]
-        Theme.theme = other
+        const other = Theme.paletteNames[(Theme.paletteNames.indexOf(data.theme) + 1) % Theme.paletteNames.length]
+        usePalette(other)
         same(g.accent, Theme.gaugeValue, "after the switch to " + other)
         same(find(g, "readout").color, Theme.gaugeDanger, "the danger readout after the switch")
         g.value = 30
@@ -78,8 +85,8 @@ TestCase {
 
     // The needle's literal is a role now
     function test_theNeedleIsARole() {
-        for (const name of Theme.themeNames) {
-            Theme.theme = name
+        for (const name of Theme.paletteNames) {
+            usePalette(name)
             same(gaugeOf(kinds[0], 10).needleColor, Theme.gaugeNeedle, name)
         }
     }
@@ -146,7 +153,7 @@ TestCase {
 
     // Dark renders as it did: the colors the gauges had as literals
     function test_darkRendersAsItDid() {
-        Theme.theme = "dark"
+        usePalette("dark")
         const analog = gaugeOf(kinds[0], 30)
         same(analog.needleColor, "#ff5a5f", "the needle")
         same(analog.accent, Qt.lighter("#6d4aff", 1.3), "the lit color")
@@ -208,8 +215,8 @@ TestCase {
     // The shift lights take the roles: the low LEDs the theme's success, the
     // middle the warning, the last the danger
     function test_theShiftLightsTakeTheRoles() {
-        for (const name of Theme.themeNames) {
-            Theme.theme = name
+        for (const name of Theme.paletteNames) {
+            usePalette(name)
             const bar = createTemporaryObject(shiftC, testCase.parent)
             verify(bar, "the strip loads")
             const slots = []
@@ -237,8 +244,8 @@ TestCase {
         home.visible = false   // the idle animation runs only while Home shows
         const logo = find(home, "homeLogo")
         logo.rpm = 800
-        for (const name of Theme.themeNames) {
-            Theme.theme = name
+        for (const name of Theme.paletteNames) {
+            usePalette(name)
             same(logo.litColor, Theme.success, name + " idle")
             same(logo.color, Theme.surface, name + " panel")
         }

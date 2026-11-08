@@ -993,3 +993,12 @@ page does not draw one: the cell's note ("not supported by this car",
 user tidying a page sees which gauges the vehicle can't fill without it.
 The mark stays out of the first release; a cell with no value is shown
 by its note alone.
+
+## Appendix: section 9 amended (2026-11-08)
+
+Amended 2026-11-08: the themes section's "low-glare and night themes" are
+the night styles of [ADR-0058](0058-night-mode.md): Night is a mode (off,
+on, or on a schedule) beside the look, and its style is amber or red. The
+palettes are `dark`, `nightAmber` and `nightRed`, and in the two night
+palettes `gaugeReadout` is the text color and no chart trace is brighter
+than the text. The gauge roles of section 9 are unchanged.

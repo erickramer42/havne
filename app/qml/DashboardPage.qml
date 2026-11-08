@@ -1209,7 +1209,8 @@ Page {
     Component { id: readoutKind; SegmentReadout {} }
     Component { id: sparkKind; SparkGauge {} }
 
-    // The link's dot and words
+    // The link's dot and words, and the Night switch at their end (ADR-0058
+    // section 6: a status with a tap), wherever the state is shown
     Component {
         id: linkState
         RowLayout {
@@ -1233,6 +1234,7 @@ Page {
                 font.pixelSize: 13
                 color: Theme.linkColor(Bridge.linkState)
             }
+            NightSwitch {}
         }
     }
 

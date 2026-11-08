@@ -49,6 +49,10 @@ TestCase {
     function cleanup() {
         Theme.compact = false
         Theme.dense = false
+        Theme.night = "off"
+        Theme.nightStyle = "amber"
+        Theme.nightFrom = "19:00"
+        Theme.nightUntil = "07:00"
         Bridge.unitSystem = 0
         Bridge.recording = false
         tryVerify(() => !Bridge.connecting, 10000, "a connect in flight ends")
@@ -172,7 +176,7 @@ TestCase {
               parts: ["pluginsNone"] },
             { tag: "recording", title: "Recording", summary: "off",
               parts: ["recordBox", "recordStatus"] },
-            { tag: "display", title: "Display", summary: "100 % · metric",
+            { tag: "display", title: "Display", summary: "100 % · metric · Night off",
               parts: ["units_metric"] },
             { tag: "advanced", title: "Advanced", summary: "off", parts: ["developerBox"] },
         ]
@@ -522,32 +526,107 @@ TestCase {
         compare(uri.text, "elm327://192.168.0.10:35000?profile=raw")
     }
 
-    // The Display page's theme buttons set Theme.theme at once and the
-    // chosen one is highlighted (Theme.qml stores it: tst_phone's case)
-    function test_theThemeButtonsSetTheTheme() {
+    // The Display page's Night buttons set Theme.night at once and the
+    // chosen one is highlighted (Theme.qml stores it: tst_theme's case)
+    function test_theNightButtonsSetNight() {
         const page = createPage()
         page.open("display")
-        for (const name of ["night", "lowGlare", "dark"]) {
-            const b = find(page, "theme_" + name)
+        for (const name of ["on", "schedule", "off"]) {
+            const b = find(page, "night_" + name)
             verify(b.visible, name + " is offered")
             b.clicked()
-            compare(Theme.theme, name)
+            compare(Theme.night, name)
             verify(b.highlighted, name + " is highlighted")
-            for (const other of Theme.themeNames.filter(n => n !== name))
-                verify(!find(page, "theme_" + other).highlighted, other + " is not")
+            for (const other of Theme.nightModes.filter(n => n !== name))
+                verify(!find(page, "night_" + other).highlighted, other + " is not")
         }
-        compare(find(page, "theme_lowGlare").text, "Low glare")
+        compare(find(page, "night_off").text, "Off")
+        compare(find(page, "night_on").text, "On")
+        compare(find(page, "night_schedule").text, "Scheduled")
     }
 
-    // An unknown stored name reads as dark, and the buttons agree
-    function test_anUnknownThemeNameHighlightsDark() {
+    // The style is chosen with Night off too, and shows when Night is on
+    function test_theNightStyleButtonsSetTheStyle() {
         const page = createPage()
         page.open("display")
-        Theme.theme = "nonsense"
-        verify(find(page, "theme_dark").highlighted, "dark is shown as the theme in use")
-        verify(!find(page, "theme_night").highlighted)
-        verify(!find(page, "theme_lowGlare").highlighted)
-        Theme.theme = "dark"
+        compare(Theme.night, "off")
+        for (const name of ["red", "amber"]) {
+            const b = find(page, "nightStyle_" + name)
+            verify(b.visible && b.enabled, name + " is offered")
+            b.clicked()
+            compare(Theme.nightStyle, name)
+            verify(b.highlighted, name + " is highlighted")
+            verify(!find(page, "nightStyle_" + (name === "red" ? "amber" : "red")).highlighted)
+        }
+        compare(find(page, "nightStyle_amber").text, "Amber")
+        compare(find(page, "nightStyle_red").text, "Red")
+        find(page, "night_on").clicked()
+        find(page, "nightStyle_red").clicked()
+        compare(Theme.active, "nightRed")
+    }
+
+    // A stored mode or style outside the lists reads as the default, and
+    // the buttons agree
+    function test_anUnknownNightValueHighlightsTheDefault() {
+        const page = createPage()
+        page.open("display")
+        Theme.night = "nonsense"
+        Theme.nightStyle = "nonsense"
+        verify(find(page, "night_off").highlighted, "off is shown as the mode in use")
+        verify(!find(page, "night_on").highlighted)
+        verify(!find(page, "night_schedule").highlighted)
+        verify(find(page, "nightStyle_amber").highlighted)
+        verify(!find(page, "nightStyle_red").highlighted)
+    }
+
+    // From and Until show under Scheduled and nowhere else; a valid time is
+    // stored, a bad one or an equal pair refused with the words
+    function test_theScheduleFieldsStoreATimeAndRefuseABadOne() {
+        const page = createPage()
+        page.open("display")
+        const sched = find(page, "nightSchedule")
+        compare(sched.visible, false, "hidden while Night is off")
+        find(page, "night_schedule").clicked()
+        compare(sched.visible, true, "shown under Scheduled")
+        const from = find(page, "nightFrom"), until = find(page, "nightUntil")
+        const problem = find(page, "nightProblem")
+        compare(from.text, "19:00")
+        compare(until.text, "07:00")
+        compare(problem.visible, false)
+        from.text = "20:30"
+        from.editingFinished()
+        compare(Theme.nightFrom, "20:30", "a valid time is stored")
+        compare(problem.visible, false)
+        until.text = "25:00"
+        until.editingFinished()
+        compare(Theme.nightUntil, "07:00", "a bad time is refused")
+        compare(problem.text, "Not a time")
+        verify(problem.visible)
+        until.text = "20:30"
+        until.editingFinished()
+        compare(Theme.nightUntil, "07:00", "an equal pair is refused")
+        compare(problem.text, "From and Until are the same time")
+        until.text = "06:15"
+        until.editingFinished()
+        compare(Theme.nightUntil, "06:15")
+        compare(problem.visible, false, "the words go with a good time")
+        compare(find(page, "nightWords").text, "Scheduled 20:30 to 06:15")
+        find(page, "night_off").clicked()
+        compare(sched.visible, false, "hidden again")
+    }
+
+    // The list's row says the night state
+    function test_theDisplayRowSaysTheNightState() {
+        const page = createPage()
+        const summary = () => page.pageList.find(p => p.key === "display").summary
+        compare(summary(), "100 % · metric · Night off")
+        Theme.night = "on"
+        Theme.nightStyle = "red"
+        compare(summary(), "100 % · metric · Night on, red")
+        Theme.nightStyle = "amber"
+        compare(summary(), "100 % · metric · Night on, amber")
+        Theme.night = "schedule"
+        compare(summary(), "100 % · metric · Night scheduled 19:00 to 07:00")
     }
 
     // A preset or row of another scheme keeps the query's keys that
