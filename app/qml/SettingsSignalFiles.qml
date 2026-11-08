@@ -76,7 +76,7 @@ ColumnLayout {
         objectName: "signalFilesNone"
         visible: root.host.pickedVehicle !== null && root.host.pickedVehicle.signals.length === 0
         text: qsTr("None yet. Import adds a file of your own signals, each "
-                   + "then a profile under What to read")
+                   + "then a profile under Profile")
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true

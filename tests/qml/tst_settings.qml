@@ -500,7 +500,7 @@ TestCase {
     }
 
     // The Display page's theme buttons set Theme.theme at once and the
-    // chosen one is highlighted (Main.qml stores it: tst_phone's case)
+    // chosen one is highlighted (Theme.qml stores it: tst_phone's case)
     function test_theThemeButtonsSetTheTheme() {
         const page = createPage()
         page.open("display")
@@ -1247,7 +1247,7 @@ TestCase {
         verify(!find(page, "signalFilesNone").visible)
         compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
 
-        // The file's profile is a choice under What to read
+        // The file's profile is a choice under Profile
         find(page, "uriField").text = "mock://demo"
         press(page, "profile_user.extras")
         compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
@@ -1595,7 +1595,7 @@ TestCase {
     // A packed plugin imported is listed with its variants; the VIN
     // (typed in the lookup here: the mock has none) proposes the variants
     // it covers for the picked vehicle, and the one picked is kept in the
-    // vehicle, read through the URI's profile, offered under What to read
+    // vehicle, read through the URI's profile, offered under Profile
     // and connected; removed, it goes from the list and the row. An
     // import of its id replaces it, and a package core refuses says so
     function test_aPluginIsImportedMatchedByTheVinAndConnected() {
@@ -1967,7 +1967,7 @@ TestCase {
         compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
         compare(find(find(page, "signalFile_0"), "signalFileText").text,
                 "Vehicle 1 own: 1 signal, profile user.vehicle-1-own")
-        verify(findChild(page, "profile_user.vehicle-1-own"), "a profile under What to read")
+        verify(findChild(page, "profile_user.vehicle-1-own"), "a profile under Profile")
         compare(page.pickedVehicle.own, page.pickedVehicle.signals[0].sha256)
         compare(Harness.storedSignalFiles().length, 1)
 
