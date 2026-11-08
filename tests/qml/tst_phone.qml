@@ -687,7 +687,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "settingsPage")
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
-        find(page, "adapterSection").open = true   // the relay's box is in it
+        page.open("connection")   // the relay's box is in it
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
         const traffic = find(page, "relayTraffic")
         const button = find(page, "relayButton")

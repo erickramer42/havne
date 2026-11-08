@@ -182,8 +182,6 @@ TestCase {
 
     function test_settingsDeveloperBoxSetsTheModeAndTheMockPreset() {
         const page = create(settingsComponent)
-        find(page, "adapterSection").open = true
-        find(page, "displaySection").open = true
         const box = find(page, "developerBox")
         const mock = find(page, "preset_mock")
         verify(!box.checked)
@@ -191,7 +189,7 @@ TestCase {
         verify(find(page, "preset_j2534").visible)
         verify(find(page, "preset_elm327").visible)
 
-        box.click()   // below the test page's fold once the sections open
+        box.click()   // on the Advanced page, which is not shown
         verify(Theme.developerMode, "the box sets the mode")
         verify(mock.visible, "the mock:// preset in developer mode")
 

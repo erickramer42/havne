@@ -22,7 +22,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
 
-        CheckBox {
+        ThemedCheckBox {
             id: recordBox
             objectName: "recordBox"
             text: qsTr("Record sessions")

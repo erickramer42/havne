@@ -85,6 +85,17 @@ ColumnLayout {
             onClicked: root.host.duplicateVehicle()
         }
         ThemedButton {
+            objectName: "vehicleMore"
+            text: qsTr("More")
+            enabled: root.host.idle
+            onClicked: moreMenu.popup(this, 0, height)
+        }
+    }
+
+    // The destructive actions apart from New, each still confirming
+    Menu {
+        id: moreMenu
+        MenuItem {
             objectName: "vehicleRename"
             text: qsTr("Rename")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.typedLabel !== ""
@@ -93,19 +104,19 @@ ColumnLayout {
                                                  root.host.pickedVehicle.id) === ""
             onClicked: root.host.changeVehicles(VehicleBook.rename(root.host.vehicles, root.host.typedLabel))
         }
-        ThemedButton {
+        MenuItem {
             objectName: "vehicleForgetVin"
             text: qsTr("Forget the VIN")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
             onClicked: root.host.changeVehicles(VehicleBook.forgetVin(root.host.vehicles))
         }
-        ThemedButton {
+        MenuItem {
             objectName: "vehicleForget"
             text: qsTr("Forget")
             enabled: root.host.idle && root.host.pickedVehicle !== null
             onClicked: root.host.confirming = "forget"
         }
-        ThemedButton {
+        MenuItem {
             objectName: "vehicleForgetAll"
             text: qsTr("Forget all vehicles")
             enabled: root.host.idle && root.host.vehicles.list.length > 0

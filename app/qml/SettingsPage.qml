@@ -1,7 +1,6 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
-// Testing: UNIT: SignalsTest (test_signals); BRIDGE: BridgeTest
-//          (test_bridge); QML: QmlTest.settings, QmlTest.linkhealth,
-//          QmlTest.log, QmlTest.phone (test_qml); Manual smoke
+// Testing: QML: QmlTest.settings, QmlTest.linkhealth, QmlTest.log,
+//          QmlTest.phone (test_qml)
 
 import QtCore
 import QtQuick
@@ -22,20 +21,20 @@ Pane {
     property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
     property alias obdbYearField: settingsSignalFiles.obdbYearField
     property alias saveDialog: settingsSignalFiles.saveDialog
-    property alias formName: settingsOwnSignals.formName
-    property alias formRx: settingsOwnSignals.formRx
-    property alias formTx: settingsOwnSignals.formTx
-    property alias formNumber: settingsOwnSignals.formNumber
-    property alias formByte: settingsOwnSignals.formByte
-    property alias formBits: settingsOwnSignals.formBits
-    property alias formBit: settingsOwnSignals.formBit
-    property alias formBytes: settingsOwnSignals.formBytes
-    property alias formSigned: settingsOwnSignals.formSigned
-    property alias formScale: settingsOwnSignals.formScale
-    property alias formOffset: settingsOwnSignals.formOffset
-    property alias formUnit: settingsOwnSignals.formUnit
-    property alias formDecimals: settingsOwnSignals.formDecimals
-    property alias formValues: settingsOwnSignals.formValues
+    property alias formName: settingsOwnForm.formName
+    property alias formRx: settingsOwnForm.formRx
+    property alias formTx: settingsOwnForm.formTx
+    property alias formNumber: settingsOwnForm.formNumber
+    property alias formByte: settingsOwnForm.formByte
+    property alias formBits: settingsOwnForm.formBits
+    property alias formBit: settingsOwnForm.formBit
+    property alias formBytes: settingsOwnForm.formBytes
+    property alias formSigned: settingsOwnForm.formSigned
+    property alias formScale: settingsOwnForm.formScale
+    property alias formOffset: settingsOwnForm.formOffset
+    property alias formUnit: settingsOwnForm.formUnit
+    property alias formDecimals: settingsOwnForm.formDecimals
+    property alias formValues: settingsOwnForm.formValues
     property alias vinLookupField: settingsVinLookup.vinLookupField
     property alias didField: settingsProfile.didField
 
@@ -549,7 +548,7 @@ Pane {
     // The vehicle a Read once was asked for: its reply shows only there
     property string readOnceFor: ""
 
-    // The form and the section's notes are the picked vehicle's: a pick,
+    // The form and the page's notes are the picked vehicle's: a pick,
     // New, Duplicate, Forget or a car recognized starts them afresh, and a
     // question asked about the last one goes with it
     readonly property string pickedId: pickedVehicle !== null ? pickedVehicle.id : ""
@@ -764,7 +763,7 @@ Pane {
             uriField.text = pickedVehicle.uri
     }
 
-    // A change of the list from the section's buttons: the field empties
+    // A change of the list from the page's buttons: the field empties
     // for the next label
     function changeVehicles(doc) {
         confirming = ""
@@ -808,79 +807,72 @@ Pane {
     // rewrite the grayed field under the connect in flight.
     readonly property bool idle: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
 
-    // The page is the connect bar, then five sections, each folded
-    // until its heading is pressed: what to connect to, the vehicle, what
-    // to read, recording and the display. Unfolded, the page ran to
-    // several screens on a phone and an adapter sat at its bottom. Each
-    // heading says what its section holds now, so the page reads folded
-    // (docs/bench-sessions/2026-10-28-android-5.md)
-    component Section: ColumnLayout {
-        id: section
-        property string title
-        property string summary
-        property bool open: false
-        default property alias content: body.data
-        Layout.fillWidth: true
-        spacing: Theme.spacing * 2
+    // ---- Navigation: the list of pages, and the page shown. A phone shows
+    // one at a time (the list is the root, a page pushes over it); 900 and
+    // wider shows the list at the left and a page beside it. The pages are
+    // all made once and shown or hidden, so the state in them (a typed
+    // URI, a half-filled form) survives a visit elsewhere ----
+    property string pageKey: ""    // "" is the list, on a phone
+    readonly property bool twoPane: width >= 900
+    readonly property string shownKey: twoPane && pageKey === "" ? "connection" : pageKey
+    readonly property var pageList: [
+        { key: "connection", title: qsTr("Connection"),
+          summary: (devices.length === 0 ? qsTr("none found") : qsTr("%1 found").arg(devices.length))
+                   + " · " + profileLabel() },
+        { key: "vehicle", title: qsTr("Vehicle"),
+          summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
+                   + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
+        { key: "signals", title: qsTr("Signals"),
+          summary: pickedVehicle === null ? qsTr("pick a vehicle")
+                   : qsTr("%1 files").arg(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)) },
+        { key: "recording", title: qsTr("Recording"),
+          summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off") },
+        { key: "display", title: qsTr("Display"),
+          summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
+                   + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric")) },
+        { key: "advanced", title: qsTr("Advanced"),
+          summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
+    ]
 
-        ThemedButton {
-            objectName: section.objectName + "Heading"
-            Layout.fillWidth: true
-            Accessible.name: section.title
-            onClicked: section.open = !section.open
-            contentItem: RowLayout {
-                spacing: 10
-                // Drawn, not a glyph: Android's fonts have no ▸ or ▾,
-                // which showed as a box
-                Shape {
-                    objectName: "sectionChevron"
-                    Layout.preferredWidth: 10
-                    Layout.preferredHeight: 10
-                    rotation: section.open ? 90 : 0
-                    preferredRendererType: Shape.CurveRenderer
-                    ShapePath {
-                        strokeColor: Theme.text
-                        strokeWidth: 1.5
-                        fillColor: "transparent"
-                        capStyle: ShapePath.RoundCap
-                        joinStyle: ShapePath.RoundJoin
-                        startX: 3.5; startY: 1
-                        PathLine { x: 7.5; y: 5 }
-                        PathLine { x: 3.5; y: 9 }
-                    }
-                }
-                Label {
-                    text: section.title
-                    color: Theme.text
-                    font.pixelSize: 16
-                    font.weight: Font.DemiBold
-                }
-                Label {
-                    objectName: "sectionSummary"
-                    text: section.summary
-                    color: Theme.textDim
-                    elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignRight
-                    Layout.fillWidth: true
-                }
-            }
+    function open(key) {
+        pageKey = key
+    }
+    // Back from a page: the form returns to Signals, the rest to the list
+    function back() {
+        pageKey = pageKey === "ownform" ? "signals" : ""
+    }
+    // The form for a new signal (Add a signal), as a page of its own
+    function openOwnForm() {
+        open("ownform")
+    }
+    // The phone's Bluetooth permission is asked for when what to connect to
+    // is seen: Connection is the page shown and Settings is on screen. Not
+    // at launch, and not when the width crosses 900 while Settings is
+    // hidden. bluetoothAsks counts the asks
+    property int bluetoothAsks: 0
+    function askBluetoothIfSeen() {
+        if (visible && shownKey === "connection") {
+            ++bluetoothAsks
+            Bluetooth.refresh(true)
         }
+    }
+    onShownKeyChanged: askBluetoothIfSeen()
+    onVisibleChanged: askBluetoothIfSeen()
 
-        ColumnLayout {
-            id: body
-            visible: section.open
-            Layout.fillWidth: true
-            Layout.leftMargin: Theme.spacing
-            Layout.bottomMargin: Theme.spacing
-            spacing: Theme.spacing * 2
+    // A best-effort back key: where Qt delivers it, it repeats the back
+    // arrow. Nothing relies on it
+    focus: true
+    Keys.onBackPressed: event => {
+        if (!twoPane && pageKey !== "") {
+            back()
+            event.accepted = true
         }
     }
 
     // Connect... on Home, Live or the header lands here: what to connect to
-    // is open, folded or not before
     function showAdapters() {
-        adapterSection.open = true
-        flick.contentY = 0
+        open("connection")
+        connectionPage.contentY = 0
     }
 
     function profileLabel() {
@@ -906,6 +898,8 @@ Pane {
     // needs nothing typed. Set like typed text, so the profile row and the
     // DID field read it
     function pickRecording(uri) {
+        // The field is on Connection, which a phone may not be showing
+        open("connection")
         uriField.text = uri
         showUriField()
     }
@@ -920,9 +914,10 @@ Pane {
     // Connect and the error line under them when they're above the view,
     // as on a phone, where the pick otherwise seems to do nothing
     function showUriField() {
-        const top = uriField.mapToItem(column, 0, 0).y + column.y - Theme.spacing
-        if (top < flick.contentY)
-            flick.contentY = Math.max(0, top)
+        const body = connectionPage.body
+        const top = uriField.mapToItem(body, 0, 0).y + body.y - Theme.spacing
+        if (top < connectionPage.contentY)
+            connectionPage.contentY = Math.max(0, top)
     }
 
     // The URI is composed from three choices, so none of it needs typing:
@@ -1189,7 +1184,7 @@ Pane {
         useSignalFiles()
         loadPlugins()
         refreshDevices()
-        Bluetooth.refresh(false)   // asked for when Adapter first opens
+        Bluetooth.refresh(false)   // asked for when Connection first opens
         // Set like typed text, so the profile row and the DID field read
         // it back
         if (uriField.text === "")
@@ -1253,93 +1248,59 @@ Pane {
         }
     }
 
-    // Scrolls when the content doesn't fit (a short laptop screen);
-    // otherwise the activity log takes the height that's left
-    Flickable {
-        id: flick
-        objectName: "settingsFlick"
+    RowLayout {
         anchors.fill: parent
-        contentWidth: width
-        contentHeight: column.height + 2 * Theme.pageMargin
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {
-            policy: flick.contentHeight > flick.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+        spacing: 0
+
+        SettingsList {
+            objectName: "settingsSideList"
+            visible: page.twoPane
+            Layout.preferredWidth: 200
+            Layout.fillHeight: true
+            Layout.alignment: Qt.AlignTop
+            Layout.margins: Theme.pageMargin
+            pages: page.pageList
+            current: page.shownKey
+            onChosen: key => page.open(key)
         }
 
-        ColumnLayout {
-            id: column
-            objectName: "settingsColumn"
-            x: Theme.pageMargin
-            y: Theme.pageMargin
-            width: flick.width - 2 * Theme.pageMargin
-            // Its content's height: stretched to the page, a layout spreads
-            // the spare height between the folded headings
-            height: implicitHeight
-            spacing: Theme.spacing * 2
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
 
-            PageHeader { title: qsTr("Settings") }
+            // The list, a phone's root
+            SettingsSubpage {
+                objectName: "settingsListPage"
+                anchors.fill: parent
+                visible: !page.twoPane && page.pageKey === ""
+                title: qsTr("Settings")
 
-            // ---- Connection ----
-            SettingsConnect {
-                id: settingsConnect
-                host: page
+                SettingsList {
+                    objectName: "settingsList"
+                    Layout.fillWidth: true
+                    pages: page.pageList
+                    onChosen: key => page.open(key)
+                }
             }
 
-            // ---- Adapter: what to connect to, found or typed ----
-            Section {
-                id: adapterSection
-                objectName: "adapterSection"
-                title: qsTr("Adapter")
-                summary: page.devices.length === 0 ? qsTr("none found")
-                                                   : qsTr("%1 found").arg(page.devices.length)
-                // The phone's Bluetooth permission is asked for here, when
-                // the list is first wanted, not at launch
-                onOpenChanged: if (open) Bluetooth.refresh(true)
+            SettingsSubpage {
+                id: connectionPage
+                objectName: "settingsConnectionPage"
+                anchors.fill: parent
+                visible: page.shownKey === "connection"
+                title: qsTr("Connection")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
+
+                SettingsConnect {
+                    id: settingsConnect
+                    host: page
+                }
 
                 SettingsAdapter {
                     id: settingsAdapter
                     host: page
                 }
-            }
-
-            // ---- Vehicle ----
-            Section {
-                id: vehicleSection
-                objectName: "vehicleSection"
-                title: qsTr("Vehicle")
-                summary: (page.pickedVehicle !== null ? page.pickedVehicle.label : qsTr("None"))
-                         + (page.vehicles.list.length > 0
-                            ? qsTr(" · %1 saved").arg(page.vehicles.list.length) : "")
-
-                SettingsVehiclePicker {
-                    id: settingsVehiclePicker
-                    host: page
-                }
-                SettingsSignalFiles {
-                    id: settingsSignalFiles
-                    host: page
-                }
-                SettingsPlugins {
-                    id: settingsPlugins
-                    host: page
-                }
-                SettingsOwnSignals {
-                    id: settingsOwnSignals
-                    host: page
-                }
-                SettingsVinLookup {
-                    id: settingsVinLookup
-                    host: page
-                }
-            }
-
-            // ---- What to read: the profile ----
-            Section {
-                id: profileSection
-                objectName: "profileSection"
-                title: qsTr("What to read")
-                summary: page.profileLabel()
 
                 SettingsProfile {
                     id: settingsProfile
@@ -1347,12 +1308,71 @@ Pane {
                 }
             }
 
-            // ---- Recording ----
-            Section {
-                id: recordingSection
-                objectName: "recordingSection"
+            SettingsSubpage {
+                objectName: "settingsVehiclePage"
+                anchors.fill: parent
+                visible: page.shownKey === "vehicle"
+                title: qsTr("Vehicle")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
+
+                SettingsVehiclePicker {
+                    id: settingsVehiclePicker
+                    host: page
+                }
+
+                SettingsVinLookup {
+                    id: settingsVinLookup
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsSignalsPage"
+                anchors.fill: parent
+                visible: page.shownKey === "signals"
+                title: qsTr("Signals")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
+
+                SettingsSignalFiles {
+                    id: settingsSignalFiles
+                    host: page
+                }
+
+                SettingsPlugins {
+                    id: settingsPlugins
+                    host: page
+                }
+
+                SettingsOwnSignals {
+                    id: settingsOwnSignals
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsOwnFormPage"
+                anchors.fill: parent
+                visible: page.shownKey === "ownform"
+                title: qsTr("Add a signal")
+                backName: qsTr("Back to Signals")
+                backShown: true
+                onBackRequested: page.back()
+
+                SettingsOwnForm {
+                    id: settingsOwnForm
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsRecordingPage"
+                anchors.fill: parent
+                visible: page.shownKey === "recording"
                 title: qsTr("Recording")
-                summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
                 SettingsRecording {
                     id: settingsRecording
@@ -1360,17 +1380,30 @@ Pane {
                 }
             }
 
-            // ---- Display ----
-            Section {
-                id: displaySection
-                objectName: "displaySection"
+            SettingsSubpage {
+                objectName: "settingsDisplayPage"
+                anchors.fill: parent
+                visible: page.shownKey === "display"
                 title: qsTr("Display")
-                summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
-                         + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric"))
-                         + (Theme.developerMode ? qsTr(" · developer mode") : "")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
 
                 SettingsDisplay {
                     id: settingsDisplay
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsAdvancedPage"
+                anchors.fill: parent
+                visible: page.shownKey === "advanced"
+                title: qsTr("Advanced")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
+
+                SettingsAdvanced {
+                    id: settingsAdvanced
                     host: page
                 }
             }

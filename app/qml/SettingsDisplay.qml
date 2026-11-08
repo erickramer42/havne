@@ -1,6 +1,6 @@
 // File/layer: app/qml/SettingsDisplay.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
-// Zoom, units and developer mode: one part of SettingsPage, which holds the state
+// Zoom and units: one part of SettingsPage, which holds the state
 
 import QtQuick
 import QtQuick.Controls
@@ -15,33 +15,46 @@ ColumnLayout {
     spacing: Theme.spacing * 2
 
     // The whole UI's zoom; Main.qml applies and stores it
-    LabeledFlow {
-        label: qsTr("Display size:")
-        ThemedButton {
-            id: smaller
-            text: "−"
-            Accessible.name: qsTr("Smaller")
-            enabled: Theme.zoom > Theme.zoomSteps[0] + 0.001
-            onClicked: Theme.stepZoom(-1)
-        }
+    // One row of four: a button never wraps alone onto a second line
+    ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Theme.spacing
         Label {
-            width: Math.max(52, implicitWidth)
-            height: smaller.height
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            text: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
-            color: Theme.text
+            text: qsTr("Display size:")
+            color: Theme.textDim
         }
-        ThemedButton {
-            text: "+"
-            Accessible.name: qsTr("Larger")
-            enabled: Theme.zoom < Theme.zoomSteps[Theme.zoomSteps.length - 1] - 0.001
-            onClicked: Theme.stepZoom(1)
-        }
-        ThemedButton {
-            text: qsTr("Reset")
-            enabled: Math.abs(Theme.zoom - 1) > 0.001
-            onClicked: Theme.zoom = 1
+        RowLayout {
+            spacing: Theme.spacing
+            ThemedButton {
+                id: smaller
+                compact: true
+                implicitWidth: Math.max(40, Theme.touchTarget)
+                text: "−"
+                Accessible.name: qsTr("Smaller")
+                enabled: Theme.zoom > Theme.zoomSteps[0] + 0.001
+                onClicked: Theme.stepZoom(-1)
+            }
+            Label {
+                Layout.preferredWidth: Math.max(52, implicitWidth)
+                Layout.preferredHeight: smaller.height
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                text: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
+                color: Theme.text
+            }
+            ThemedButton {
+                compact: true
+                implicitWidth: Math.max(40, Theme.touchTarget)
+                text: "+"
+                Accessible.name: qsTr("Larger")
+                enabled: Theme.zoom < Theme.zoomSteps[Theme.zoomSteps.length - 1] - 0.001
+                onClicked: Theme.stepZoom(1)
+            }
+            ThemedButton {
+                text: qsTr("Reset")
+                enabled: Math.abs(Theme.zoom - 1) > 0.001
+                onClicked: Theme.zoom = 1
+            }
         }
     }
     // A phone has no keyboard to zoom with
@@ -65,31 +78,13 @@ ColumnLayout {
             ]
             ThemedButton {
                 required property var modelData
+                // A long label wraps rather than run past a phone's edge
+                width: Math.min(implicitWidth, parent.width)
                 objectName: "units_" + modelData.name
                 text: modelData.label
                 highlighted: Bridge.unitSystem === modelData.system
                 onClicked: Bridge.unitSystem = modelData.system
             }
-        }
-    }
-
-    // Developer mode (Theme.developerMode); Main.qml stores it
-    CheckBox {
-        id: developerBox
-        objectName: "developerBox"
-        text: qsTr("Developer mode: the mock:// preset, and the raw frames on the Log page")
-        checked: Theme.developerMode
-        Layout.fillWidth: true
-        onToggled: {
-            Theme.developerMode = checked
-            checked = Qt.binding(() => Theme.developerMode)
-        }
-        contentItem: Label {
-            text: developerBox.text
-            color: Theme.text
-            leftPadding: developerBox.indicator.width + developerBox.spacing
-            verticalAlignment: Text.AlignVCenter
-            wrapMode: Text.WordWrap
         }
     }
 }
