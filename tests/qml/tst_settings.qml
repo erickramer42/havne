@@ -272,6 +272,29 @@ TestCase {
         verify(find(page, "settingsSideList").visible, "the list stays")
     }
 
+    // The list keeps its 200 and the page beside it gets the rest: a layout
+    // fills its row by default, and the list once took the whole width and
+    // pushed the pages past the edge. Geometry, since the window is 200 px
+    // and a click would miss
+    function test_theListLeavesThePageItsWidth() {
+        const page = createPage(true)
+        const list = find(page, "settingsSideList")
+        compare(list.width, 200, "the list is 200 wide")
+        const shown = ["settingsConnectionPage", "settingsDisplayPage"]
+        for (let i = 0; i < shown.length; ++i) {
+            if (i === 1)
+                page.open("display")
+            const p = find(page, shown[i])
+            verify(p.visible, shown[i] + " shows")
+            const left = p.mapToItem(page, 0, 0).x
+            verify(left >= list.mapToItem(page, list.width, 0).x,
+                   shown[i] + " starts past the list: " + left)
+            verify(p.width > page.width - 200 - 4 * Theme.pageMargin,
+                   shown[i] + " has its width: " + p.width)
+            verify(left + p.width <= page.width + 1, shown[i] + " ends inside the page")
+        }
+    }
+
     // The back key repeats the arrow where Qt delivers it; the form's back
     // lands on Signals, not the list
     function test_theBackKeyPopsAPage() {

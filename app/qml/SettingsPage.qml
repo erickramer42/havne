@@ -1280,6 +1280,9 @@ Pane {
             objectName: "settingsSideList"
             visible: page.twoPane
             Layout.preferredWidth: 200
+            // A nested layout fills its row by default, which would leave
+            // the pages beside it no width
+            Layout.fillWidth: false
             Layout.fillHeight: true
             Layout.alignment: Qt.AlignTop
             Layout.margins: Theme.pageMargin
