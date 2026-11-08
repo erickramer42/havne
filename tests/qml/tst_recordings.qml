@@ -132,7 +132,8 @@ TestCase {
     }
 
     // Import: a picked file's kind guessed from its first line; a CSV
-    // waits for its column map, then imports and joins the list; a candump
+    // given a column map file imports through it and joins the list (the
+    // guess is skipped); a candump
     // log of two buses is refused in core's words, the interface field
     // shows, and the bus named imports; the kind switches; Cancel closes
     function test_importMakesARecordingOfALoggersFile() {
@@ -151,10 +152,12 @@ TestCase {
         verify(panel.visible)
         compare(find(page, "importFileName").text, "Import import-log.csv")
         verify(find(page, "importKind_csv").selected, "guessed from its first line")
-        compare(find(page, "importMapName").text, "None chosen")
+        compare(find(page, "importMapName").text, "Guessed from the header")
         verify(!find(page, "importInterface").visible)
-        verify(!find(page, "importStart").enabled, "a CSV waits for its column map")
-        page.importMap = map
+        tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
+        verify(!find(page, "importStart").enabled, "its time has no unit yet")
+        page.chooseImportMap(map)
+        verify(!find(page, "guessPreview").visible, "a map file skips the guess")
         compare(find(page, "importMapName").text, "import-map.json")
         verify(find(page, "importStart").enabled)
         find(page, "importStart").clicked()
@@ -193,10 +196,198 @@ TestCase {
         page.chooseImportFile(log)
         find(page, "importKind_csv").clicked()
         compare(page.importKind, RecordingImport.Csv)
-        verify(!find(page, "importStart").enabled, "now it wants a column map")
+        tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
+        verify(!find(page, "importStart").enabled, "a candump log guesses no map")
         find(page, "importCancel").clicked()
         verify(!panel.visible)
         verify(!note.visible)
+    }
+
+    // Waits for a picked CSV's guess to show
+    function guessed(page) {
+        tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
+                  "the guess ends")
+        return find(page, "guessPreview")
+    }
+    function guessRow(preview, i) {
+        return find(preview, "guessRow_" + i)
+    }
+
+    // A CSV with no column map: its guess is shown (the time column and
+    // its unit from the header, each other column with its name, unit and
+    // kind and the first rows of its cells); an edit changes the map the
+    // import gets, and the recording holds what the edits left
+    function test_aCsvIsImportedThroughItsGuessedMapWithEdits() {
+        const page = createPage()
+        const csv = Harness.writeScratchFile("guess-log.csv",
+            "Time (ms),RPM [rpm],Note,Load [%]\n0,800,a,12\n500,900,b,30\n1000,950,c,55\n")
+        page.chooseImportFile(csv)
+        const preview = guessed(page)
+        verify(preview.visible)
+        compare(find(page, "importMapName").text, "Guessed from the header")
+        compare(find(preview, "guessTime").text, "Time: Time (ms)")
+        compare(find(preview, "guessTimeFixed").text, "Its unit: ms")
+        compare(find(preview, "guessTimeSamples").text, "0  500  1000")
+        verify(!find(preview, "guessWaiting").visible)
+        compare(preview.columns.length, 3, "the header columns but the time's")
+        const rpm = guessRow(preview, 0)
+        compare(find(rpm, "name").text, "RPM")
+        compare(find(rpm, "unit").text, "rpm")
+        compare(find(rpm, "kind").text, "number")
+        compare(find(rpm, "samples").text, "800  900  950")
+        compare(find(guessRow(preview, 1), "kind").text, "text")
+        verify(find(page, "importStart").enabled, "its unit is known")
+
+        // Edits: a name, Note out, Load's kind text
+        find(rpm, "name").text = "Engine speed"
+        const note = find(guessRow(preview, 1), "include")
+        note.toggle()
+        note.toggled()
+        compare(preview.included, 2)
+        find(guessRow(preview, 2), "kind").clicked()
+        compare(find(guessRow(preview, 2), "kind").text, "text")
+        const map = JSON.parse(preview.mapText())
+        compare(map.signals.length, 2)
+        compare(map.signals[0].name, "Engine speed")
+        compare(map.signals[1].column, "Load [%]")
+        compare(map.signals[1].kind, "text")
+
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(find(page, "importNote").text, "Imported 6 values; columns ignored: 1")
+        verify(!find(page, "importPanel").visible, "done with the file")
+    }
+
+    // A time of plain numbers has no unit to guess: Import waits for the
+    // choice and says so
+    function test_aTimeWithoutAUnitWaitsForOne() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-plain.csv",
+            "time,rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        verify(find(preview, "guessWaiting").visible)
+        compare(find(preview, "guessWaiting").text, "Choose the time column's unit to import")
+        verify(!find(page, "importStart").enabled)
+        find(preview, "guessTimeUnit_ms").clicked()
+        verify(!find(preview, "guessWaiting").visible)
+        verify(find(page, "importStart").enabled)
+        compare(JSON.parse(preview.mapText()).time.unit, "ms")
+        find(preview, "guessTimeUnit_us").clicked()
+        compare(JSON.parse(preview.mapText()).time.unit, "us")
+    }
+
+    // A time with a zone to give, not a unit, can't be fixed here
+    function test_aTimeThatNeedsAZoneAsksForAMap() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-zone.csv",
+            "time,rpm\n2026-11-05T22:03:22,800\n2026-11-05T22:03:23,900\n2026-11-05T22:03:24,950\n"))
+        const preview = guessed(page)
+        verify(find(preview, "guessWaiting").visible)
+        verify(find(preview, "guessWaiting").text.indexOf("column map that says its zone") >= 0)
+        verify(!find(preview, "guessTimeUnit_ms").visible, "no unit to choose")
+        verify(!find(page, "importStart").enabled)
+    }
+
+    // A file core can't guess a map for is refused in core's words, with
+    // the way out
+    function test_aFileWithNoHeaderIsRefusedInCoresWords() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-none.csv",
+                                                       "just,words\nmore,words\n"))
+        guessed(page)
+        const note = find(page, "importNote")
+        verify(note.visible)
+        verify(Qt.colorEqual(note.color, Theme.danger))
+        verify(note.text.startsWith("no row within the file's first 1000"), note.text)
+        verify(note.text.endsWith("Column map... picks a map instead."), note.text)
+        verify(!find(page, "importStart").enabled)
+        verify(find(page, "importMapButton").enabled)
+    }
+
+    // A column the guess left out can be put back, as text named by its
+    // header; one with no header can't
+    function test_aLeftOutColumnCanBePutBack() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-back.csv",
+            "time (s),rpm,empty,\n0,800,,\n1,900,,\n2,950,,\n"))
+        const preview = guessed(page)
+        compare(preview.columns.length, 3)
+        compare(preview.included, 1)
+        const empty = guessRow(preview, 1)
+        verify(find(empty, "why").visible)
+        verify(find(empty, "why").text.indexOf("Check it to put it back") >= 0, find(empty, "why").text)
+        verify(find(empty, "include").enabled)
+        const unnamed = guessRow(preview, 2)
+        verify(!find(unnamed, "include").enabled, "no header to name it by")
+        verify(find(unnamed, "why").text.indexOf("put it back") < 0)
+        const box = find(empty, "include")
+        box.toggle()
+        box.toggled()
+        compare(preview.included, 2)
+        compare(find(empty, "name").text, "empty")
+        compare(find(empty, "kind").text, "text")
+        const map = JSON.parse(preview.mapText())
+        compare(map.signals.map(s => s.column).join(), "rpm,empty")
+    }
+
+    // A refused import keeps the panel and the edits; core's words say why
+    function test_aRefusedGuessImportKeepsItsEdits() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
+            "time (s),rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        const longName = "n".repeat(40)
+        find(guessRow(preview, 0), "name").text = longName
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        verify(page.importFailed)
+        verify(Qt.colorEqual(find(page, "importNote").color, Theme.danger))
+        verify(find(page, "importPanel").visible, "the panel stays")
+        compare(find(guessRow(preview, 0), "name").text, longName, "the edit stays")
+        find(guessRow(preview, 0), "name").text = "RPM"
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && !page.importFailed, 10000,
+                  "the corrected import ends")
+        verify(!find(page, "importPanel").visible)
+    }
+
+    // Save as map keeps the edited map under a safe name, never over
+    // another; it is offered next time, and picking it skips the guess
+    function test_aGuessedMapIsSavedAndOfferedNextTime() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-save.csv",
+            "time (s),rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        const stamp = String(Date.now())
+        const safe = "my-map-" + stamp
+        find(preview, "saveMapName").text = "my map " + stamp
+        find(preview, "saveMapButton").clicked()
+        compare(find(preview, "saveMapNote").text, "Saved as " + safe)
+        verify(!preview.saveFailed)
+        verify(page.savedMaps.some(m => m.name === safe), "listed")
+        find(preview, "saveMapButton").clicked()
+        verify(preview.saveFailed, "never over another")
+        compare(find(preview, "saveMapNote").text, "a map named " + safe + " is saved already")
+        find(preview, "saveMapName").text = ""
+        find(preview, "saveMapButton").clicked()
+        compare(find(preview, "saveMapNote").text, "give the map a name")
+
+        // Next file: the saved map is offered; picking it skips the guess
+        page.chooseImportFile(Harness.writeScratchFile("guess-next.csv",
+            "time (s),rpm\n0,800\n1,900\n"))
+        guessed(page)
+        verify(find(page, "savedMaps").visible)
+        const at = page.savedMaps.findIndex(m => m.name === safe)
+        page.chooseImportMap(page.savedMaps[at].url)
+        compare(find(page, "importMapName").text, safe + ".json")
+        verify(!preview.visible)
+        verify(find(page, "importStart").enabled)
+        find(page, "useTheGuess").clicked()
+        guessed(page)
+        verify(preview.visible)
+        compare(find(page, "importMapName").text, "Guessed from the header")
     }
 
     // Replay hands the row's replay:// URI on, for Main to put in

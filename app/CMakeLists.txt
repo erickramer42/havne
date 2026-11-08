@@ -72,6 +72,7 @@ qt_add_qml_module(app_ui
         qml/HomePage.qml
         qml/ThemedButton.qml
         qml/SegmentButton.qml
+        qml/CsvGuessPreview.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml

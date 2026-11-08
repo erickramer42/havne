@@ -55,6 +55,14 @@ Page {
     property int importKind: RecordingImport.Csv
     property url importMap: ""
     property bool importOpen: false
+    // A CSV with no column map file is imported through the map guessed
+    // from its header (CsvGuessPreview); picking a map file skips the guess
+    property bool importGuessing: false
+    readonly property bool importUsesGuess: importKind === RecordingImport.Csv
+                                            && importMap.toString() === ""
+                                            && guessPreview.guess !== null
+    // [{ name, url }]: the maps kept under the settings folder's maps/
+    property var savedMaps: []
     // After a candump import is refused, the interface field shows: core
     // names a log's interfaces when it has several
     property bool importAsksInterface: false
@@ -257,11 +265,46 @@ Page {
         importNote = ""
         importFailed = false
         importOpen = true
+        savedMaps = Bridge.recordingImport.savedMaps()
+        guessImportFile()
     }
+
+    // A CSV's map guessed from its header, unless a map file is chosen
+    function guessImportFile() {
+        guessPreview.clear()
+        if (importKind !== RecordingImport.Csv || importMap.toString() !== "")
+            return
+        importGuessing = Bridge.recordingImport.guess(importFile, "")
+    }
+
+    // A map file chosen (the dialog, or one saved earlier) instead of the
+    // guess
+    function chooseImportMap(url) {
+        importMap = url
+        importNote = ""
+        importFailed = false
+        guessPreview.clear()
+    }
+
+    // Back to the guess after a map file was chosen
+    function useTheGuess() {
+        importMap = ""
+        importNote = ""
+        importFailed = false
+        guessImportFile()
+    }
+
+    readonly property bool importReady: importKind === RecordingImport.Candump
+                                        || importMap.toString() !== ""
+                                        || (importUsesGuess && guessPreview.ready)
 
     function startImport() {
         importNote = ""
         importFailed = false
+        if (importUsesGuess) {
+            Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
+            return
+        }
         Bridge.recordingImport.start(importFile, importKind, importMap,
                                      importKind === RecordingImport.Candump
                                      ? importInterface.text : "")
@@ -736,7 +779,7 @@ Page {
         fileMode: FileDialog.OpenFile
         nameFilters: [qsTr("Column maps (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.importMap = mapDialog.selectedFile
+        onAccepted: root.chooseImportMap(mapDialog.selectedFile)
     }
 
     // Save report's file: text first, the one a shop or a buyer reads
@@ -839,6 +882,19 @@ Page {
 
     Connections {
         target: Bridge.recordingImport
+        function onGuessFinished(result) {
+            root.importGuessing = false
+            // The panel was closed, or a map file chosen, meanwhile
+            if (!root.importOpen || root.importMap.toString() !== ""
+                    || root.importKind !== RecordingImport.Csv)
+                return
+            if (result.ok) {
+                guessPreview.load(result)
+            } else {
+                root.importFailed = true
+                root.importNote = qsTr("%1. Column map... picks a map instead.").arg(result.words)
+            }
+        }
         function onFinished(result) {
             root.importFailed = !result.ok
             if (result.ok) {
@@ -969,14 +1025,21 @@ Page {
                             text: qsTr("CSV")
                             selected: root.importKind === RecordingImport.Csv
                             enabled: !Bridge.recordingImport.busy
-                            onClicked: root.importKind = RecordingImport.Csv
+                            onClicked: {
+                                root.importKind = RecordingImport.Csv
+                                if (guessPreview.guess === null && !root.importGuessing)
+                                    root.guessImportFile()
+                            }
                         }
                         SegmentButton {
                             objectName: "importKind_candump"
                             text: qsTr("candump")
                             selected: root.importKind === RecordingImport.Candump
                             enabled: !Bridge.recordingImport.busy
-                            onClicked: root.importKind = RecordingImport.Candump
+                            onClicked: {
+                                root.importKind = RecordingImport.Candump
+                                root.importNote = ""
+                            }
                         }
                     }
                 }
@@ -1006,16 +1069,55 @@ Page {
                     wrapMode: Text.WrapAnywhere
                     color: root.importMap.toString() !== "" ? Theme.text : Theme.textDim
                     text: root.importMap.toString() !== "" ? root.fileNameOf(root.importMap)
-                                                         : qsTr("None chosen")
+                                                         : qsTr("Guessed from the header")
+                }
+            }
+            // A map kept earlier, or back to the guess
+            RowLayout {
+                visible: root.importKind === RecordingImport.Csv
+                         && (root.savedMaps.length > 0 || root.importMap.toString() !== "")
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ComboBox {
+                    id: savedMapChoice
+                    objectName: "savedMaps"
+                    visible: root.savedMaps.length > 0
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.preferredHeight: Theme.touchTarget
+                    enabled: !Bridge.recordingImport.busy
+                    model: [qsTr("Saved maps...")].concat(root.savedMaps.map(m => m.name))
+                    currentIndex: 0
+                    onActivated: index => {
+                        if (index > 0)
+                            root.chooseImportMap(root.savedMaps[index - 1].url)
+                        currentIndex = 0
+                    }
+                }
+                ThemedButton {
+                    objectName: "useTheGuess"
+                    visible: root.importMap.toString() !== ""
+                    compact: true
+                    Layout.preferredHeight: Theme.touchTarget
+                    text: qsTr("Use the guess")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: root.useTheGuess()
                 }
             }
             Label {
-                visible: root.importKind === RecordingImport.Csv
+                objectName: "importGuessing"
+                visible: root.importGuessing
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.textDim
-                font.pixelSize: 12
-                text: qsTr("A JSON file naming the time column and each signal's column, the one havne-cli import csv takes with --map")
+                text: qsTr("Reading the file's header...")
+            }
+            CsvGuessPreview {
+                id: guessPreview
+                objectName: "guessPreview"
+                visible: root.importKind === RecordingImport.Csv && root.importMap.toString() === ""
+                Layout.fillWidth: true
+                onMapSaved: root.savedMaps = Bridge.recordingImport.savedMaps()
             }
 
             // A candump log's bus, once core has said the log holds several
@@ -1043,9 +1145,7 @@ Page {
                     objectName: "importStart"
                     text: qsTr("Import")
                     highlighted: true
-                    enabled: !Bridge.recordingImport.busy
-                             && (root.importKind === RecordingImport.Candump
-                                 || root.importMap.toString() !== "")
+                    enabled: !Bridge.recordingImport.busy && root.importReady
                     onClicked: root.startImport()
                 }
                 ThemedButton {
@@ -1063,7 +1163,7 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
-                    text: qsTr("Importing...")
+                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
                 }
             }
         }
