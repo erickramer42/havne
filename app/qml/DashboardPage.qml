@@ -1105,12 +1105,20 @@ Page {
             id: header
             Layout.fillWidth: true
             title: qsTr("Dashboard")
+            // At a narrow width the row's buttons are compact, the link
+            // state gives way first and the title last, so the row fits
+            // whatever the font's widths
+            titleShrinks: true
+            // Reset peaks and Edit at a phone's touch size
+            readonly property real touchMin: Theme.touchTarget
 
             // The desktop's link state follows the title; the phone's
             // row has no room for it beside Reset peaks and Edit, so it
-            // takes a line of its own below
+            // takes a line of its own below. No width of its own: it
+            // takes what the title and buttons leave
             Loader {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 0
                 active: root.form !== "phone"
                 visible: active
                 sourceComponent: linkState
@@ -1121,11 +1129,13 @@ Page {
             }
             ThemedButton {
                 objectName: "resetPeaks"
+                compact: root.compact
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
             }
             ThemedButton {
                 objectName: "dashEdit"
+                compact: root.compact
                 visible: !root.editing
                 text: qsTr("Edit")
                 onClicked: root.startEditing()

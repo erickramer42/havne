@@ -525,7 +525,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **`Theme`** holds the palette, the chart's series colors, the
   monospace family and page margin, and the link-state color and
   label functions, so every page shows a state the same way.
-  `PageHeader` gives every page but Home the same title row.
+  `PageHeader` gives every page but Home the same title row; where
+  the row is crowded (the Dashboard's), its title can give way,
+  eliding, so the row fits whatever the font.
 - **Live** keys each chart trace's color to its list row, so the
   row's swatch is the legend and a trace keeps its color when
   another signal is unsubscribed. The ticks choose what's plotted and
