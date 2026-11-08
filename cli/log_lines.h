@@ -41,6 +41,16 @@ struct LogArgs {
     std::vector<const char*> names; /* --signal, in order */
 };
 
+// The longest --seconds any command takes: a year and a day, which no run
+// reaches and which keeps seconds * 1e6 far inside 64 bits
+constexpr uint64_t kMaxRunSeconds = 366ull * 86400ull;
+
+// "--seconds takes ..." for the commands that run until a deadline
+inline const char* run_seconds_why()
+{
+    return "--seconds takes a whole number from 1 to 31622400";
+}
+
 // A whole number above 0, decimal digits alone (stream's --count rule)
 inline bool parse_whole(const char* text, uint64_t& out)
 {
@@ -73,8 +83,9 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
         } else if (s == "--label" && has_value) {
             a.label = argv[++i];
         } else if (s == "--seconds" && has_value) {
-            if (!parse_whole(argv[++i], a.seconds)) {
-                *why = "--seconds takes a whole number above 0";
+            if (!parse_whole(argv[++i], a.seconds) ||
+                a.seconds > kMaxRunSeconds) {
+                *why = run_seconds_why();
                 return false;
             }
         } else if (s == "--signals" && has_value) {
@@ -206,16 +217,20 @@ inline size_t log_end_line_bytes(const char* folder)
     return 192 + Line::string_bytes(folder);
 }
 
-// {"type":"end", reason interrupted|seconds, folder, seconds, bytes,
-// values}: the recording's folder and its last readout
+// {"type":"end", reason, folder, seconds, bytes, values}: reason is
+// interrupted, seconds, recording-failed, replay-end or output-failed; the
+// recording's folder and its last readout. A null folder leaves the key
+// out: the line the recording keeps of itself names no path
 inline void log_end_line(Line& l, const char* reason, const char* folder,
                          const LogReadout& r)
 {
     l.raw("{\"type\":\"end\"");
     l.key("reason");
     l.string(reason, std::strlen(reason));
-    l.key("folder");
-    l.string(folder, std::strlen(folder));
+    if (folder != nullptr) {
+        l.key("folder");
+        l.string(folder, std::strlen(folder));
+    }
     l.key("seconds");
     l.u64(r.seconds);
     l.key("bytes");

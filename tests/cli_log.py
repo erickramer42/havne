@@ -126,9 +126,17 @@ def demo(cli):
         if want not in events.splitlines():
             print(f"FAIL  events.log has no line {want!r}")
             return 1
-        if f"  note  {json.dumps(end, separators=(',', ':'))}" not in events:
+        # The recording's note of the end is the stdout line without its
+        # folder, and no path of the machine is in the log
+        kept = {k: v for k, v in end.items() if k != "folder"}
+        if f"  note  {json.dumps(kept, separators=(',', ':'))}" not in events:
             print("FAIL  events.log has no note of the end line")
             return 1
+        for path in {str(root), Path(root).as_posix(), str(folder),
+                     folder.as_posix(), json.dumps(str(root))[1:-1]}:
+            if path in events:
+                print(f"FAIL  events.log holds the path {path!r}")
+                return 1
 
         out = Path(root) / "wide.csv"
         code, erows, err = run(cli, ["export", str(folder), str(out),

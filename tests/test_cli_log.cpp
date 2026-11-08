@@ -100,6 +100,16 @@ TEST(CliLogTest, TheUriTheFolderAndEachOptionAreTaken)
     EXPECT_TRUE(lb.names.empty());
 }
 
+TEST(CliLogTest, TheSecondsCapIsTakenAndOneMoreIsNot)
+{
+    Args b({"havne-cli", "log", "mock://y", "root", "--seconds", "31622400"});
+    cli::LogArgs a;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), a, &why)) << why;
+    EXPECT_EQ(a.seconds, 31622400U);
+    EXPECT_EQ(a.seconds, cli::kMaxRunSeconds);
+}
+
 TEST(CliLogTest, BadArgumentsSayWhy)
 {
     EXPECT_EQ(why_of({"havne-cli", "log"}),
@@ -114,10 +124,20 @@ TEST(CliLogTest, BadArgumentsSayWhy)
               "--signal takes a signal's name");
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--signal"}),
               "unexpected '--signal'");
+    const std::string seconds_why =
+        "--seconds takes a whole number from 1 to 31622400";
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--seconds", "0"}),
-              "--seconds takes a whole number above 0");
+              seconds_why);
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--seconds", "2s"}),
-              "--seconds takes a whole number above 0");
+              seconds_why);
+    // The cap is a year and a day of seconds; one more, or a number that
+    // would wrap seconds * 1e6, is refused
+    EXPECT_EQ(
+        why_of({"havne-cli", "log", "mock://x", "a", "--seconds", "31622401"}),
+        seconds_why);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--seconds",
+                      "18446744073710"}),
+              seconds_why);
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--layout", "wide"}),
               "unexpected '--layout'");
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--signals", "s",
@@ -174,6 +194,12 @@ TEST(CliLogTest, TheLinesSayThePicksTheReadoutAndTheEnd)
                        folder +
                        "\",\"seconds\":20,\"bytes\":123456,\"values\":4000}");
     EXPECT_LE(end.size(), cli::log_end_line_bytes(folder.c_str()));
+    // The recording's own note names no folder
+    EXPECT_EQ(text([&](cli::Line& l) {
+                  cli::log_end_line(l, "seconds", nullptr, r);
+              }),
+              "{\"type\":\"end\",\"reason\":\"seconds\",\"seconds\":20,"
+              "\"bytes\":123456,\"values\":4000}");
 }
 
 TEST(CliLogTest,
