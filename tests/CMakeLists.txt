@@ -246,7 +246,8 @@ endif()
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
-        test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp)
+        test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
+        test_cli_log.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -533,6 +534,41 @@ if(TARGET havne-cli)
             CliRecordTest.ARecordingHoldsItsSignalFile
             CliRecordTest.APluginsRecordingHoldsItsVariantsFile
             PROPERTIES TIMEOUT 60)
+        # log (ADR-0056 section 7): the mock logged for 2 s with two picks,
+        # the log line's period shortened by the test knob; the folder's
+        # focus line, and an export with no --signal taking those columns
+        set(_cli_log ${CMAKE_CURRENT_SOURCE_DIR}/cli_log.py)
+        add_test(NAME CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} demo $<TARGET_FILE:havne-cli>)
+        # Its ends: a folder that can't be made, a replay's last frame, an
+        # interrupt (skip 77 without a console on Windows), the output
+        # closed under it and under stream --record (the recording whole
+        # either way)
+        add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} replay $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        add_test(NAME CliLogRunTest.AnInterruptEndsTheLogWhole
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} interrupt $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} closed-pipe $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
+            CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
+            CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
+            PROPERTIES TIMEOUT 60)
+        set_tests_properties(CliLogRunTest.AnInterruptEndsTheLogWhole
+            PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+        if(WIN32)
+            # A focus the session can't ask (a ?poll= session, a pick that
+            # isn't the polled PID) against the fake DLL
+            add_test(NAME CliLogRunTest.AFocusTheSessionCantAskIsAnError
+                COMMAND ${Python3_EXECUTABLE} ${_cli_log} focus-refused
+                        $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliLogRunTest.AFocusTheSessionCantAskIsAnError
+                PROPERTIES TIMEOUT 60)
+        endif()
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later
         # into it, its UTC start 90 s later, a marker 0.5 s before each):
@@ -776,6 +812,18 @@ if(TARGET havne-cli)
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
+    app_cli_usage(LogWithoutAUriIsUsage "log")
+    app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
+    app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
+    app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
+    app_cli_usage(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|")
+    # The names are checked against the session's set after the connect,
+    # before any line: a typo and a repeat are usage with nothing written
+    app_cli_usage(LogAnUnknownSignalIsUsage "log|mock://x|f|--signal|Nothing")
+    app_cli_usage(LogASignalTwiceIsUsage "log|mock://x|f|--signal|RPM|--signal|RPM")
+    app_cli_usage(LogAnExportOptionIsUsage "log|mock://x|f|--layout|wide")
+    app_cli_usage(LogSecondsOfZeroIsUsage "log|mock://x|f|--seconds|0")
+    app_cli_usage(LogSignalsAndAPluginIsUsage "log|mock://x|f|--signals|a.json|--plugin|p")
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
         "stream|mock://x?profile=obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
@@ -927,6 +975,14 @@ if(TARGET havne-cli)
                     -DDLL=$<TARGET_FILE:fake_j2534>
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_connect_deadline.cmake)
         set_tests_properties(CliConnectTest.AConnectPastItsDeadlineEnds
+            PROPERTIES TIMEOUT 30)
+        # log writes nothing before its connect: the deadline's error line
+        # comes after a start line of its own
+        add_test(NAME CliConnectTest.ALogsConnectPastItsDeadlineEndsAfterAStartLine
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli>
+                    -DDLL=$<TARGET_FILE:fake_j2534> -DVERB=log
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_connect_deadline.cmake)
+        set_tests_properties(CliConnectTest.ALogsConnectPastItsDeadlineEndsAfterAStartLine
             PROPERTIES TIMEOUT 30)
     endif()
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
@@ -1326,10 +1382,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
         string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
+        # A file's bound is a hang guard, not a measurement: each case
+        # waits for what it checks with tryVerify, and tst_recordings
+        # alone opens a 10,200-frame recording, which a machine building
+        # beside the suite took past 60 s in all
         add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
         set_tests_properties(QmlTest.${_qml_name} PROPERTIES
             ENVIRONMENT "${_qml_test_env}"
-            TIMEOUT 60
+            TIMEOUT 180
         )
     endforeach()
 endif()

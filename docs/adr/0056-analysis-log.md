@@ -417,3 +417,37 @@ v0.7.1's, decided 2026-11-07.
   readout within 420 px with and without the name, a disconnect during
   a log staying on Live) and `test_theLogsTimeReadsMinutesThenHours`
   (a negative or non-finite time reads 0:00).
+
+**Section 7, `havne-cli log`, as built:**
+
+- `havne-cli log <uri> <folder> [--signal <name>]... [--label <name>]
+  [--seconds S] [--signals <file> | --plugin <pkg>]` (`cli/log_lines.h`,
+  `run_log` in `cli/main.cpp`): the session as `stream` makes it (the
+  same profile sources), the names resolved against its set in the
+  order given (a name it lacks, or one twice, is usage: exit 2 with the
+  reason on stderr and nothing on stdout, the check made after the
+  connect and before any line), `ecuio_session_set_focus` with the ids
+  (a focus the session refuses, "the focus leaves nothing to request",
+  is an `error` line, exit 3), then a recorder opened under `<folder>`
+  and attached before start, so the header's `focus` line is the picks
+  and `export` with no `--signal` takes those columns. Lines: `start`,
+  `session`, `focus` {signals [{id, name}]}, `recording` started (or
+  failed, exit 1), `health` on a change of the error state, `slept` as
+  stream's, a `log` line every 10 s of session time {seconds, bytes (the
+  recorder's files summed), values (rows in signals.csv)}, `end`
+  {reason interrupted|seconds, folder, seconds, bytes, values}, the end
+  line also the recording's last note. No frame or values lines: the
+  folder is the output. `HAVNE_CLI_LOG_EVERY_MS` (tests only, 100 or
+  more) shortens the period. The log runs until Ctrl+C, `--seconds`, a
+  failed recording (reason `recording-failed`, exit 1: the log is what
+  the command is for) or a replay's last frame (`replay-end`, as
+  stream's); a lost or dead link is logged in health lines and waited
+  out, since an unattended log must survive a dropout. An output that
+  fails under it (a closed pipe) ends it quietly with the recording
+  closed whole, `output-failed` the close's why (stream --record the
+  same; its close had no why on that path and crashed). Exit codes as
+  stream's; the recorder closes after the session's close, attached if
+  an interrupted close hangs 2 s, as stream's does.
+- Not built: markers typed on standard input (stream --record's); a log
+  from the command line is left to run, and the app's Mark button marks
+  the app's log.

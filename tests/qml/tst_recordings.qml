@@ -587,21 +587,26 @@ TestCase {
         verify(folder !== "")
         const page = createPage()
         page.open({ title: "Long", folder: folder })
-        tryVerify(() => page.viewing && find(page, "detailView_frames").visible, 10000)
+        // Each wait covers a read of 10,200 rows and a 10,000-row table
+        // on whatever else the machine is doing (a build beside the
+        // suite took the open past 10 s); the case measures the cap and
+        // the words, nothing about time, so the waits are long
+        const longWait = 60000
+        tryVerify(() => page.viewing && find(page, "detailView_frames").visible, longWait)
         mouseClick(find(page, "detailView_frames"))
         const words = find(page, "framesWords")
         tryVerify(() => words.text === "the first 10,000 frames from 0.0 s: zoom in for the rest",
-                  10000, words.text)
+                  longWait, words.text)
         compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
         page.setView(0, 2000)
-        tryVerify(() => words.text === "2000 frame(s) in view", 10000, words.text)
+        tryVerify(() => words.text === "2000 frame(s) in view", longWait, words.text)
 
         // A view that does not start at the recording's start: the rows
         // are those from its left edge
         page.setView(5000, 6000)
-        tryVerify(() => words.text === "1001 frame(s) in view", 10000, words.text)
+        tryVerify(() => words.text === "1001 frame(s) in view", longWait, words.text)
         const list = find(find(page, "viewerFrameTable"), "frameList")
-        tryVerify(() => list.itemAtIndex(0) !== null)
+        tryVerify(() => list.itemAtIndex(0) !== null, longWait)
         compare(list.itemAtIndex(0).model.timestampUs, 5000000)
     }
 

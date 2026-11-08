@@ -1510,6 +1510,34 @@ TEST(CsvExportTest, WideTakesTheFocusLinesColumnsWhenNoneAreNamed)
     EXPECT_EQ(all.bytes, "Time (ms),Throttle (%)\r\n160,10.5\r\n260,11.5\r\n");
 }
 
+/* A focus line that names a column twice, or a text or identification
+ * signal, is the recording's fault: LOAD_FAILED with the reason, not the
+ * caller's INVALID_ARGUMENT, and no file */
+TEST(CsvExportTest, WideAFocusLineThatCannotBeColumnsIsABadRecording)
+{
+    const std::string rows =
+        "1000,DID D802,ECM,\n2000,DID F18C,4242,\n3000,RPM,1,rpm\n";
+    const struct {
+        const char* focus;
+        const char* reason;
+    } cases[] = {{"RPM,RPM", "named twice"},
+                 {"DID D802", "text signal"},
+                 {"DID F18C", "identification signal"}};
+    for (const auto& c : cases) {
+        Folder g;
+        recording(g, "", rows,
+                  std::string("uri  mock://x?profile=uds-generic&did="
+                              "D802:text,F18C:u16\n"
+                              "profile  uds-generic\n"
+                              "focus  ") +
+                      c.focus + "\n");
+        WideExported e(g);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED) << c.focus;
+        EXPECT_NE(e.detail.find(c.reason), std::string::npos) << e.detail;
+        EXPECT_FALSE(fs::exists(g.path / "wide.csv")) << c.focus;
+    }
+}
+
 /* Text and identification signals are never columns, scrubbed, and
  * their values are counted left out as the long form counts them; the
  * header's number signals come first, in its order, with no sample

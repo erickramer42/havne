@@ -300,8 +300,17 @@ GaugeBase {
         id: needle
         property color tint: gauge.needleColor
         property bool shadow: false
+        property real shiftX: 0     // the shadow's offset
+        property real shiftY: 0
 
-        width: gauge.width; height: gauge.height
+        // The box is the square whose corners lie as far from the center
+        // as the needle's tip, so turning it never carries a corner past
+        // the dial (a dial-sized box would, by up to 41%); the path
+        // draws beyond the box, which a Shape doesn't clip. Centered on
+        // the dial, so the box's center is the rotation's
+        width: body.len * Math.SQRT2; height: width
+        x: gauge.cx - width / 2 + shiftX
+        y: gauge.cy - height / 2 + shiftY
         rotation: gauge.needleAngle
         opacity: gauge.hasValue || gauge.sweeping ? 1.0 : 0.4
         preferredRendererType: Shape.CurveRenderer
@@ -317,18 +326,18 @@ GaugeBase {
             strokeColor: "transparent"
             fillColor: needle.shadow ? Qt.rgba(0, 0, 0, 0.45) : "transparent"
             fillGradient: needle.shadow ? null : grad
-            startX: gauge.cx - body.tail; startY: gauge.cy - body.tailW
-            PathLine { x: gauge.cx; y: gauge.cy - body.baseW }
-            PathLine { x: gauge.cx + body.len; y: gauge.cy - body.tipW }
-            PathLine { x: gauge.cx + body.len; y: gauge.cy + body.tipW }
-            PathLine { x: gauge.cx; y: gauge.cy + body.baseW }
-            PathLine { x: gauge.cx - body.tail; y: gauge.cy + body.tailW }
-            PathLine { x: gauge.cx - body.tail; y: gauge.cy - body.tailW }
+            startX: needle.width / 2 - body.tail; startY: needle.height / 2 - body.tailW
+            PathLine { x: needle.width / 2; y: needle.height / 2 - body.baseW }
+            PathLine { x: needle.width / 2 + body.len; y: needle.height / 2 - body.tipW }
+            PathLine { x: needle.width / 2 + body.len; y: needle.height / 2 + body.tipW }
+            PathLine { x: needle.width / 2; y: needle.height / 2 + body.baseW }
+            PathLine { x: needle.width / 2 - body.tail; y: needle.height / 2 + body.tailW }
+            PathLine { x: needle.width / 2 - body.tail; y: needle.height / 2 - body.tailW }
         }
         LinearGradient {
             id: grad
-            x1: gauge.cx - gauge.r * 0.18; y1: 0
-            x2: gauge.cx + gauge.r * 0.80; y2: 0
+            x1: needle.width / 2 - gauge.r * 0.18; y1: 0
+            x2: needle.width / 2 + gauge.r * 0.80; y2: 0
             GradientStop { position: 0.0; color: Theme.gaugeShade.needleBase }
             GradientStop { position: 0.17; color: Theme.gaugeShade.needleBase }
             GradientStop { position: 0.19; color: Qt.darker(needle.tint, 1.25) }
@@ -337,7 +346,7 @@ GaugeBase {
     }
     Needle {
         shadow: true
-        x: gauge.size * 0.006; y: gauge.size * 0.014
+        shiftX: gauge.size * 0.006; shiftY: gauge.size * 0.014
     }
     Needle {}
 
