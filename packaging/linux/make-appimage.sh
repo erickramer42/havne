@@ -244,6 +244,7 @@ mkdir -p "$doc/licenses" "$doc/common-licenses"
 cp LICENSE "$doc/LICENSE.txt"
 cp "$notice" "$doc/THIRD_PARTY_NOTICES.txt"
 cp packaging/windows/licenses/LGPL-3.0.txt packaging/windows/licenses/GPL-3.0.txt \
+   packaging/windows/licenses/Qt-third-party.txt \
    packaging/notices/licenses/ICU.txt "$doc/licenses/"
 # The runtime's license, and those of what it links statically
 runtime_licenses="AppImage-runtime.txt LGPL-2.1.txt musl.txt mimalloc.txt squashfuse.txt zstd.txt zlib.txt"
@@ -262,7 +263,8 @@ for pkg in $packages; do
 done
 
 # ---- Check: the notices are there and name what was packed
-for f in LICENSE.txt THIRD_PARTY_NOTICES.txt licenses/LGPL-3.0.txt licenses/GPL-3.0.txt licenses/ICU.txt \
+for f in LICENSE.txt THIRD_PARTY_NOTICES.txt licenses/LGPL-3.0.txt licenses/GPL-3.0.txt \
+         licenses/Qt-third-party.txt licenses/ICU.txt \
          $(printf 'licenses/%s ' $runtime_licenses); do
     [ -s "$doc/$f" ] || die "the AppDir has no usr/share/doc/havne/$f"
 done
