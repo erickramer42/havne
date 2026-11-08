@@ -53,29 +53,30 @@ GaugeBase {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.zoneRadius
             startAngle: gauge.angleOf(gauge.coldEnd)
             sweepAngle: Math.max(0, gauge.angleOf(gauge.warnStart) - startAngle - gauge.gapDeg)
-            strokeColor: Qt.alpha(Theme.text, 0.14)
+            strokeColor: Qt.alpha(Theme.gaugeTick, 0.14)
             strokeWidth: gauge.zoneWidth
         }
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.zoneRadius
             startAngle: gauge.angleOf(gauge.warnStart)
             sweepAngle: Math.max(0, gauge.angleOf(gauge.dangerStart) - startAngle - gauge.gapDeg)
-            strokeColor: Theme.warning
+            strokeColor: Theme.gaugeWarn
             strokeWidth: gauge.zoneWidth
         }
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.zoneRadius
             startAngle: gauge.angleOf(gauge.dangerStart)
             sweepAngle: gauge.endAngle - startAngle
-            strokeColor: Theme.danger
-            strokeWidth: gauge.zoneWidth
+            strokeColor: Theme.gaugeDanger
+            // Heavier than the warning strip: danger is more than a hue
+            strokeWidth: gauge.zoneWidth * 2
         }
 
         // Track
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.rr
             startAngle: gauge.startAngle; sweepAngle: gauge.sweepAngle
-            strokeColor: Qt.alpha(Theme.text, 0.07)
+            strokeColor: Qt.alpha(Theme.gaugeTick, 0.07)
             strokeWidth: gauge.ringWidth
             capStyle: ShapePath.RoundCap
         }
@@ -109,7 +110,7 @@ GaugeBase {
         width: gauge.ringWidth * 0.46; height: width; radius: width / 2
         x: gauge.px(gauge.valueAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.valueAngle, gauge.rr) - height / 2
-        color: Qt.alpha("white", 0.92)
+        color: Qt.alpha(Theme.gaugeTick, 0.92)
     }
 
     // Range ends under the arc tips
@@ -140,13 +141,24 @@ GaugeBase {
             spacing: gauge.rr * 0.03
             Text {
                 id: readout
+                objectName: "readout"
                 text: gauge.valueText
                 font.pixelSize: Math.max(16, gauge.rr * 0.5)
                 font.weight: Font.DemiBold
                 font.features: ({ "tnum": 1 })
-                color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.text) : Theme.textDim
+                color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+            }
+            // Past dangerFrom, beside the value
+            DangerMark {
+                // The slot stays once a gauge has a danger zone, so the readout
+                // never moves as the mark appears
+                visible: !isNaN(gauge.dangerFrom)
+                opacity: gauge.inDanger ? 1 : 0
+                size: Math.max(12, gauge.rr * 0.3)
+                anchors.verticalCenter: readout.verticalCenter
             }
             Text {
+                objectName: "unit"
                 visible: gauge.hasValue
                 anchors.baseline: readout.baseline
                 text: gauge.unit
