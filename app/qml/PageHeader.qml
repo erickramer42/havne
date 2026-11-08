@@ -21,7 +21,10 @@ RowLayout {
 
     Label {
         Layout.fillWidth: header.titleShrinks
-        Layout.maximumWidth: header.titleShrinks ? implicitWidth : Number.POSITIVE_INFINITY
+        // A whole pixel: the layout rounds a fractional maximum down, which
+        // leaves the text short of its own width and elides a title that fits
+        Layout.maximumWidth: header.titleShrinks ? Math.ceil(implicitWidth)
+                                                 : Number.POSITIVE_INFINITY
         elide: header.titleShrinks ? Text.ElideRight : Text.ElideNone
         text: header.title
         font.pixelSize: 20
