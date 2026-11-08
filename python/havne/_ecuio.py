@@ -79,6 +79,10 @@ ECUIO_COMPUTED_MULTIPLY = 34
 ECUIO_COMPUTED_PUSH_CONSTANT = 16
 ECUIO_COMPUTED_PUSH_INPUT = 0
 ECUIO_COMPUTED_SUBTRACT = 33
+ECUIO_CSV_GUESS_DECIMAL_COMMA = 2
+ECUIO_CSV_GUESS_PREAMBLE = 4
+ECUIO_CSV_GUESS_TIME_NUMBERS = 8
+ECUIO_CSV_GUESS_TIME_UNIT_KNOWN = 1
 ECUIO_DECODE_ERR_BAD_PARAMS = 3
 ECUIO_DECODE_ERR_MUX_MISMATCH = 5
 ECUIO_DECODE_ERR_NULL = 1
@@ -369,6 +373,9 @@ class ecuio_check_summary_t(Structure):
     pass
 
 class ecuio_computed_t(Structure):
+    pass
+
+class ecuio_csv_guess_t(Structure):
     pass
 
 class ecuio_display_value_t(Structure):
@@ -677,6 +684,15 @@ ecuio_computed_t._fields_ = [
     ('steps', (c_uint8 * 36)),
     ('constants', (c_double * 16)),
     ('reserved', (c_uint32 * 4)),
+]
+ecuio_csv_guess_t._fields_ = [
+    ('flags', c_uint32),
+    ('columns', c_uint32),
+    ('left_out', c_uint32),
+    ('rows_read', c_uint32),
+    ('map_offset', c_uint32),
+    ('map_length', c_uint32),
+    ('reserved', (c_uint64 * 3)),
 ]
 ecuio_display_value_t._fields_ = [
     ('value', c_double),
@@ -1119,6 +1135,7 @@ FUNCTIONS = {
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h
     'ecuio_identity_vin': (c_int, [POINTER(ecuio_channel_identity_t), c_char_p, c_uint32]),  # core.h
     'ecuio_import': (c_int, [POINTER(ecuio_import_options_t), POINTER(ecuio_import_report_t)]),  # recording.h
+    'ecuio_import_csv_guess': (c_int, [c_char_p, c_char_p, c_char_p, c_size_t, POINTER(c_size_t), POINTER(ecuio_csv_guess_t)]),  # recording.h
     'ecuio_init': (c_int, []),  # core.h
     'ecuio_j2534_close': (c_int, [POINTER(ecuio_j2534_handle_t)]),  # j2534.h
     'ecuio_j2534_discover_devices': (c_int, [POINTER(POINTER(ecuio_j2534_device_t)), POINTER(c_uint32)]),  # j2534.h

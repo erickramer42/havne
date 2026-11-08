@@ -129,8 +129,6 @@ TEST(CliTransferTest, ImportTakesACsvAFolderAndItsMap)
     EXPECT_STREQ(im.map_path, "map.json");
     EXPECT_EQ(im.options.interface_utf8, nullptr);
     EXPECT_EQ(im.options.column_map_utf8, nullptr); // main reads the file
-    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec"}),
-              "import csv needs --map <map.json>, the file's column map");
     EXPECT_EQ(import_why(
                   {"havne-cli", "import", "csv", "log.csv", "--map", "m.json"}),
               "import needs the file and the folder to make");
@@ -248,6 +246,89 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "{\"type\":\"imported\",\"format\":\"csv\",\"folder\":\"rec\","
               "\"lines\":11,\"values\":22,\"columns_ignored\":1,"
               "\"utc_start_us\":1793883802250000,\"duration_us\":3500000}");
+}
+
+// With no --map the map is guessed: --time-unit gives a plain time its
+// unit, --print-map prints the guess and takes no folder
+TEST(CliTransferTest, ImportGuessesACsvsMapWithoutOne)
+{
+    Args a(
+        {"havne-cli", "import", "csv", "log.csv", "rec", "--time-unit", "ms"});
+    cli::ImportArgs im;
+    std::string why;
+    ASSERT_TRUE(cli::parse_import(a.argc(), a.argv.data(), im, &why)) << why;
+    EXPECT_EQ(im.map_path, nullptr);
+    EXPECT_STREQ(im.time_unit, "ms");
+    EXPECT_FALSE(im.print_map);
+    EXPECT_STREQ(im.options.out_folder_utf8, "rec");
+    Args b({"havne-cli", "import", "csv", "--print-map", "log.csv"});
+    cli::ImportArgs printed;
+    ASSERT_TRUE(cli::parse_import(b.argc(), b.argv.data(), printed, &why))
+        << why;
+    EXPECT_TRUE(printed.print_map);
+    EXPECT_EQ(printed.time_unit, nullptr);
+    EXPECT_STREQ(printed.options.in_path_utf8, "log.csv");
+    EXPECT_EQ(printed.folder, nullptr);
+    for (const char* unit : {"s", "ms", "us"}) {
+        Args c({"havne-cli", "import", "csv", "log.csv", "rec", "--time-unit",
+                unit});
+        cli::ImportArgs each;
+        ASSERT_TRUE(cli::parse_import(c.argc(), c.argv.data(), each, &why))
+            << unit;
+        EXPECT_STREQ(each.time_unit, unit);
+    }
+    for (const char* bad : {"S", "sec", "h", ""}) {
+        EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec",
+                              "--time-unit", bad}),
+                  "--time-unit takes s, ms or us")
+            << bad;
+    }
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec",
+                          "--print-map"}),
+              "import csv --print-map takes one file and no folder");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv",
+                          "--print-map", "rec"}),
+              "import csv --print-map takes one file and no folder");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec",
+                          "--map", "m.json", "--time-unit", "s"}),
+              "--time-unit is a guessed map's: a map given with --map names "
+              "its own");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv",
+                          "--print-map", "--map", "m.json"}),
+              "--print-map prints a guessed map: give no --map");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "--print-map"}),
+              "import needs the file and the folder to make");
+    EXPECT_EQ(import_why({"havne-cli", "import", "candump", "bus.log", "rec",
+                          "--time-unit", "s"}),
+              "unexpected '--time-unit'");
+    EXPECT_EQ(import_why(
+                  {"havne-cli", "import", "candump", "bus.log", "--print-map"}),
+              "unexpected '--print-map'");
+}
+
+// The guess's text on one line, its keys the line's own: every line
+// break and the indent after it go, a string's spaces stay
+TEST(CliTransferTest, AGuessIsOneLine)
+{
+    /* Spaces inside a string stay, an escaped quote doesn't end one */
+    const std::string guess_text =
+        "{\n\"map\": {\n  \"havne_column_map\": 1,\n"
+        "  \"signals\": [\n    {\"column\": \"Load  [%]\""
+        ", \"name\": \"a\\nb, \\\"c d\\\": e\"}\n  ]\n},\n"
+        "\"columns\": [\n  {\"column\": \"x\", "
+        "\"used\": true}\n],\n\"notes\": [\"a, b: c\"]\n}\n";
+    EXPECT_EQ(cli::one_line(guess_text),
+              "{\"map\":{\"havne_column_map\":1,\"signals\":[{\"column\":"
+              "\"Load  [%]\",\"name\":\"a\\nb, \\\"c d\\\": e\"}]},"
+              "\"columns\":[{\"column\":\"x\",\"used\":true}],"
+              "\"notes\":[\"a, b: c\"]}");
+    std::vector<char> buf(cli::guessed_line_bytes(guess_text));
+    cli::Line l(buf.data(), buf.size());
+    cli::guessed_line(l, guess_text);
+    ASSERT_TRUE(l.finish());
+    EXPECT_EQ(text(l).rfind("{\"type\":\"guessed\",\"map\":{", 0), 0u)
+        << text(l);
+    EXPECT_EQ(text(l).find('\n'), text(l).size() - 1);
 }
 
 // Paths at their longest escape (every byte a control character's six)

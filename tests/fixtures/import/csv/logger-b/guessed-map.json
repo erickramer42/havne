@@ -1,0 +1,13 @@
+{
+  "havne_column_map": 1,
+  "header_row": 1,
+  "delimiter": ",",
+  "decimal": ".",
+  "time": {"column": "timestamp", "unit": "iso8601"},
+  "signals": [
+    {"column": "speed_kmh", "name": "speed_kmh", "kind": "number", "decimals": 1},
+    {"column": "gear", "name": "gear", "kind": "text"},
+    {"column": "throttle", "name": "throttle", "kind": "number", "decimals": 1},
+    {"column": "comment", "name": "comment", "kind": "text"}
+  ]
+}

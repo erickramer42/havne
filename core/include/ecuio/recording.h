@@ -940,6 +940,85 @@ _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
 ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
                             ecuio_import_report_t* report);
 
+/* ecuio_csv_guess_t.flags: TIME_UNIT_KNOWN the map's time has a unit;
+ * DECIMAL_COMMA its decimal mark is a comma; PREAMBLE lines above the
+ * header are left out (the map's header_row is above 1); TIME_NUMBERS
+ * the time column holds plain numbers, which time_unit can give a unit */
+#define ECUIO_CSV_GUESS_TIME_UNIT_KNOWN 0x00000001u
+#define ECUIO_CSV_GUESS_DECIMAL_COMMA   0x00000002u
+#define ECUIO_CSV_GUESS_PREAMBLE        0x00000004u
+#define ECUIO_CSV_GUESS_TIME_NUMBERS    0x00000008u
+
+typedef struct ecuio_csv_guess {
+    uint32_t flags;      /* ECUIO_CSV_GUESS_* */
+    uint32_t columns;    /* signals in the map */
+    uint32_t left_out;   /* header columns left out ("columns" says why) */
+    uint32_t rows_read;  /* the rows below the header the guess read */
+    uint32_t map_offset; /* the map's value in the text written: bytes */
+    uint32_t map_length; /* from map_offset, its braces included */
+    uint64_t reserved[3];
+} ecuio_csv_guess_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_csv_guess_t) == 48, "ecuio_csv_guess_t size is ABI");
+static_assert(offsetof(ecuio_csv_guess_t, map_offset) == 16,
+              "ecuio_csv_guess_t layout is ABI");
+static_assert(offsetof(ecuio_csv_guess_t, reserved) == 24,
+              "ecuio_csv_guess_t layout is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_csv_guess_t) == 48,
+               "ecuio_csv_guess_t size is ABI");
+_Static_assert(offsetof(ecuio_csv_guess_t, map_offset) == 16,
+               "ecuio_csv_guess_t layout is ABI");
+_Static_assert(offsetof(ecuio_csv_guess_t, reserved) == 24,
+               "ecuio_csv_guess_t layout is ABI");
+#endif
+
+/*
+ * Guesses a CSV file's column map from its header (ADR-0054's appendix
+ * "a column map guessed from the header") and writes one JSON text:
+ *
+ *   {"map": {...}, "columns": [{"column": "<header text>", "used": true},
+ *    {"column": ..., "used": false, "why": "<words>"}, ...],
+ *    "notes": ["<a line>", ...]}
+ *
+ * "map" is a column map (havne_column_map 1) that ecuio_import takes as
+ * it is; core checks it before handing it out. Its byte range in the text
+ * this call wrote is report->map_offset and map_length: that slice alone
+ * is complete JSON, to print, save or pass as column_map_utf8. Imports
+ * nothing and writes no file; the same file always gives the same text.
+ * It reads the first 1000 rows within 1 MiB for the header, then up to
+ * 200 rows or 64 KiB below it. Notes and words name columns as the header
+ * has them, never a cell's value or the file's path.
+ *
+ * A time column of numbers takes time_unit ("s", "ms" or "us") when it
+ * is given, else the unit its header names ("Time (s)", "[ms]"); with
+ * neither the map's time has no unit and the flag is clear, and the
+ * import refuses the map until one is given. ISO 8601 times with their
+ * offset are "iso8601" whatever time_unit says. Any other time
+ * (ISO 8601 with no offset, times of day, cells not all times) needs a
+ * column map with the zone (or the date and offset): no time_unit gives
+ * it a unit, and TIME_NUMBERS is clear. The start is never guessed.
+ *
+ * map_out and cap follow ecuio_serial_ports' contract: on ECUIO_OK
+ * *needed is the text's length plus its NUL; the text is written only
+ * when cap holds it all (otherwise map_out, when cap > 0, is ""), and cap
+ * 0 with a NULL map_out asks the size. On any failure, the arguments'
+ * refusals too, *needed (when not NULL) is 0, the report zero and
+ * map_out, when not NULL with cap > 0, "". report may be NULL.
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL path or needed, or a NULL
+ * map_out with a cap; ECUIO_ERR_INVALID_ARGUMENT for a time_unit not "s",
+ * "ms" or "us"; ECUIO_ERR_LOAD_FAILED, the detail saying why, for a file
+ * that can't be opened or read, one whose first 1152 KiB hold no line
+ * end, or one with no header row, no time column or no column of values
+ * ("line 12: ..." where a line is at fault).
+ */
+ecuio_status_t ecuio_import_csv_guess(const char* path_utf8,
+                                      const char* time_unit, char* map_out,
+                                      size_t cap, size_t* needed,
+                                      ecuio_csv_guess_t* report);
+
 /* --- The health report (ADR-0054's appendix "the health report as
  * built") ------------------------------------------------------------ */
 

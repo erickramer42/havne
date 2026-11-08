@@ -3,11 +3,13 @@
 // Testing: UNIT: CliTransferTest (test_cli)
 //
 // `export <recording> <out> --format folder|csv|pcapng [--from S] [--to S]
-// [--raw]` and `import candump <in> <folder> [--interface <name>]`: their
-// arguments, and their lines, each in core's words (recording.h):
-// `exported` with what a scrubbed export left out by class, `imported`
-// with the log's counts, and `export_failed` naming the class a failed
-// check found, never its value.
+// [--raw]`, `import candump <in> <folder> [--interface <name>]` and
+// `import csv <in> <folder> [--map <file> | --time-unit s|ms|us]` or
+// `import csv <in> --print-map [--time-unit ...]`: their arguments, and
+// their lines, each in core's words (recording.h): `exported` with what a
+// scrubbed export left out by class, `imported` with the log's counts,
+// `guessed` with a guessed column map, and `export_failed` naming the
+// class a failed check found, never its value.
 
 #ifndef HAVNE_CLI_TRANSFER_LINES_H
 #define HAVNE_CLI_TRANSFER_LINES_H
@@ -36,6 +38,8 @@ struct ImportArgs {
     const char* folder = nullptr;
     const char* interface_name = nullptr; /* candump */
     const char* map_path = nullptr;       /* csv: --map, read by main */
+    const char* time_unit = nullptr;      /* csv, no --map: s, ms or us */
+    bool print_map = false;               /* csv: the guess printed alone */
     ecuio_import_options_t options{};
 };
 
@@ -115,7 +119,9 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
 }
 
 // The arguments after `import`; false with *why, a usage error. The
-// CSV's map is read by main from map_path into options.column_map_utf8
+// CSV's map is read by main from map_path into options.column_map_utf8,
+// or with none guessed from the file (ecuio_import_csv_guess, its time
+// unit time_unit's); --print-map prints the guess and imports nothing
 inline bool parse_import(int argc, char** argv, ImportArgs& a, std::string* why)
 {
     const bool candump = argc >= 3 && std::strcmp(argv[2], "candump") == 0;
@@ -132,25 +138,43 @@ inline bool parse_import(int argc, char** argv, ImportArgs& a, std::string* why)
             a.interface_name = argv[++i];
         } else if (csv && s == "--map" && i + 1 < argc) {
             a.map_path = argv[++i];
+        } else if (csv && s == "--time-unit" && i + 1 < argc) {
+            const std::string u = argv[++i];
+            if (u != "s" && u != "ms" && u != "us") {
+                *why = "--time-unit takes s, ms or us";
+                return false;
+            }
+            a.time_unit = argv[i];
+        } else if (csv && s == "--print-map") {
+            a.print_map = true;
         } else if (s.rfind("--", 0) == 0) {
             *why = "unexpected '" + s + "'";
             return false;
         } else if (a.in == nullptr) {
             a.in = argv[i];
-        } else if (a.folder == nullptr) {
+        } else if (a.folder == nullptr && !a.print_map) {
             a.folder = argv[i];
         } else {
-            *why = std::string("import takes one ") + what + " and one folder";
+            *why = a.print_map ? std::string("import csv --print-map takes "
+                                             "one file and no folder")
+                               : std::string("import takes one ") + what +
+                                     " and one folder";
             return false;
         }
     }
-    if (a.in == nullptr || a.folder == nullptr) {
+    if (a.print_map && a.folder != nullptr) {
+        *why = "import csv --print-map takes one file and no folder";
+        return false;
+    }
+    if (a.in == nullptr || (a.folder == nullptr && !a.print_map)) {
         *why =
             std::string("import needs the ") + what + " and the folder to make";
         return false;
     }
-    if (csv && a.map_path == nullptr) {
-        *why = "import csv needs --map <map.json>, the file's column map";
+    if (a.map_path != nullptr && (a.time_unit != nullptr || a.print_map)) {
+        *why = a.print_map ? "--print-map prints a guessed map: give no --map"
+                           : "--time-unit is a guessed map's: a map given "
+                             "with --map names its own";
         return false;
     }
     a.options.format = candump ? ECUIO_IMPORT_CANDUMP : ECUIO_IMPORT_CSV;
@@ -192,6 +216,45 @@ inline size_t imported_line_bytes(const ImportArgs& a)
 {
     return 1024 + Line::string_bytes(a.folder) +
            Line::string_bytes(a.interface_name);
+}
+
+// A guess's text on one line: core writes no line break inside a string
+// (each is escaped), so every break and the indent after it go
+inline std::string one_line(const std::string& text)
+{
+    std::string o;
+    o.reserve(text.size());
+    bool in_string = false;
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (in_string) {
+            o += c;
+            if (c == '\\' && i + 1 < text.size()) {
+                o += text[++i]; /* an escape's second byte, a quote too */
+            } else if (c == '"') {
+                in_string = false;
+            }
+        } else if (c != ' ' && c != '\n' && c != '\r' && c != '\t') {
+            o += c;
+            in_string = c == '"';
+        }
+    }
+    return o;
+}
+
+// {"type":"guessed","map":{...},"columns":[...],"notes":[...]}: the
+// guess's text (ecuio_import_csv_guess) on one line, its keys the line's
+inline size_t guessed_line_bytes(const std::string& text)
+{
+    return 64 + text.size();
+}
+
+inline void guessed_line(Line& l, const std::string& text)
+{
+    const std::string o = one_line(text);
+    l.raw("{\"type\":\"guessed\",");
+    /* core's text is one object: its members after its opening brace */
+    l.raw(o.size() > 1 ? o.c_str() + 1 : "}");
 }
 
 // {"type":"exported","format":...,"file":...,"scrubbed":...,"frames":N,

@@ -26,7 +26,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
-    test_frames_read.cpp)
+    test_frames_read.cpp test_csv_guess.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -382,6 +382,13 @@ if(TARGET havne-cli)
                     csv-import $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
+        # The same CSVs with no map: guessed, printed as committed, imported;
+        # a time with no unit and a file with no header refused
+        add_test(NAME CliTransferRunTest.csv-guess
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    csv-guess $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
+        set_tests_properties(CliTransferRunTest.csv-guess PROPERTIES TIMEOUT 60)
         # The health report (ADR-0054): the mock's, a session whose
         # reports are never asked, the simulated car as an ELM327 adapter
         # on loopback; a recording of values alone, a range past its end
@@ -898,7 +905,16 @@ if(TARGET havne-cli)
         "health|mock://x|out|--format|json|--signals|a.json|--plugin|p")
     app_cli_usage(ImportWithoutAFolderIsUsage "import|candump|bus.log")
     app_cli_usage(ImportAnUnknownOptionIsUsage "import|candump|bus.log|rec|--map|m.json")
-    app_cli_usage(ImportCsvWithoutAMapIsUsage "import|csv|log.csv|rec")
+    app_cli_usage(ImportCsvMapAndATimeUnitIsUsage
+        "import|csv|log.csv|rec|--map|m.json|--time-unit|s")
+    app_cli_usage(ImportCsvATimeUnitThatIsntOneIsUsage
+        "import|csv|log.csv|rec|--time-unit|h")
+    app_cli_usage(ImportCsvPrintMapWithAFolderIsUsage
+        "import|csv|log.csv|rec|--print-map")
+    app_cli_usage(ImportCsvPrintMapAndAMapIsUsage
+        "import|csv|log.csv|--print-map|--map|m.json")
+    app_cli_usage(ImportCandumpATimeUnitIsUsage
+        "import|candump|bus.log|rec|--time-unit|s")
     app_cli_usage(ImportCsvWithAnInterfaceIsUsage
         "import|csv|log.csv|rec|--map|m.json|--interface|can0")
     app_cli_usage(ImportCsvWithoutAFolderIsUsage "import|csv|log.csv|--map|m.json")

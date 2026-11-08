@@ -9,6 +9,7 @@
 #   python tests/cli_transfer.py csv <havne-cli> <recording>
 #   python tests/cli_transfer.py folder <havne-cli> <findings> <values>
 #   python tests/cli_transfer.py csv-import <havne-cli> <csv fixtures>
+#   python tests/cli_transfer.py csv-guess <havne-cli> <csv fixtures>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -33,6 +34,11 @@
 # CSVs imported by their column maps and viewed (each signal's samples and
 # range, the UTC start or null); a missing map, a map core refuses and a
 # folder already there each exit 3 with words, leaving nothing made.
+# csv-guess: the same CSVs with no map: --print-map prints each logger's
+# guessed-map.json byte for byte, and the import writes the guess's line
+# (that map) before its own; a time of plain numbers with no unit is
+# refused until --time-unit gives one, and a file with no header is
+# refused, each exit 3 with words and nothing made.
 
 import csv
 import json
@@ -490,11 +496,118 @@ def csv_import(cli, fixtures):
     return 0
 
 
+GUESSED = [
+    # name, values imported with the guessed map (each column's samples)
+    ("logger-a", 25),
+    ("logger-b", 27),
+]
+
+
+def printed(cli, args, want=0):
+    """--print-map's stdout as bytes and its stderr, which aren't lines"""
+    done = subprocess.run([cli] + args, capture_output=True,
+                          stdin=subprocess.DEVNULL)
+    if done.returncode != want:
+        raise SystemExit(f"FAIL  {' '.join(args)} exited {done.returncode}, "
+                         f"not {want}: {done.stderr.decode()}")
+    return done.stdout, done.stderr.decode("utf-8")
+
+
+def committed(path):
+    with open(path, "rb") as f:
+        return f.read().replace(b"\r", b"")
+
+
+def csv_guess(cli, fixtures):
+    with tempfile.TemporaryDirectory() as d:
+        for name, values in GUESSED:
+            base = os.path.join(fixtures, name)
+            log = os.path.join(base, "log.csv")
+            want = committed(os.path.join(base, "guessed-map.json"))
+            # --print-map is core's slice byte for byte, which
+            # CsvGuessTest.TheMadeUpLoggersAreGuessedAndImported pins too
+            out, err = printed(cli, ["import", "csv", log, "--print-map"])
+            if out != want or err:
+                raise SystemExit(f"FAIL  {name}'s printed map: {out!r} {err}")
+            # With no map: the guess on a line, then the import with it
+            rec = os.path.join(d, name)
+            lines = run(cli, ["import", "csv", log, rec])
+            if [l["type"] for l in lines] != ["start", "guessed", "imported"]:
+                raise SystemExit(f"FAIL  {name} wrote {lines}")
+            guessed = one(lines, "guessed")
+            same(f"{name}'s guessed map", json.loads(want), guessed["map"])
+            if not all(c["used"] for c in guessed["columns"]):
+                raise SystemExit(f"FAIL  {name} left a column out: {guessed}")
+            imported = one(lines, "imported")
+            if (imported["values"], imported["columns_ignored"]) != (values, 0):
+                raise SystemExit(f"FAIL  {name} imported {imported}")
+            if sorted(os.listdir(rec)) != ["events.log", "signals.csv"]:
+                raise SystemExit(f"FAIL  {name} made {os.listdir(rec)}")
+        # A time of plain numbers whose header names no unit: refused
+        # without --time-unit, printed with a word on stderr, imported with
+        # --time-unit ms
+        plain = os.path.join(d, "plain.csv")
+        with open(plain, "w", newline="\n") as f:
+            f.write("time,A\n0,1\n1,2\n")
+        rec = os.path.join(d, "plain")
+        lines = run(cli, ["import", "csv", plain, rec], 3)
+        if "unit" in one(lines, "guessed")["map"]["time"]:
+            raise SystemExit(f"FAIL  a unit came from nowhere: {lines}")
+        error = one(lines, "error")
+        if "--time-unit" not in error["detail"] or os.path.exists(rec):
+            raise SystemExit(f"FAIL  no unit said {error}")
+        out, err = printed(cli, ["import", "csv", plain, "--print-map"])
+        if "unit" in json.loads(out)["time"] or "--time-unit" not in err:
+            raise SystemExit(f"FAIL  no unit printed {out!r} {err}")
+        out, err = printed(cli, ["import", "csv", plain, "--print-map",
+                                 "--time-unit", "ms"])
+        if json.loads(out)["time"]["unit"] != "ms" or err:
+            raise SystemExit(f"FAIL  --time-unit printed {out!r} {err}")
+        imported = one(run(cli, ["import", "csv", plain, rec, "--time-unit",
+                                 "ms"]), "imported")
+        if (imported["values"], imported["duration_us"]) != (2, 1000):
+            raise SystemExit(f"FAIL  --time-unit imported {imported}")
+        # ISO 8601 times with no offset: no --time-unit gives them a unit,
+        # so the refusal and stderr name a map, never --time-unit
+        zoneless = os.path.join(d, "zoneless.csv")
+        with open(zoneless, "w", newline="\n") as f:
+            f.write("timestamp,A\n2026-11-05T22:03:22.250,1\n"
+                    "2026-11-05T22:03:22.750,2\n")
+        rec = os.path.join(d, "zoneless")
+        error = one(run(cli, ["import", "csv", zoneless, rec, "--time-unit",
+                              "ms"], 3), "error")
+        if ("--time-unit" in error["detail"] or "--map" not in error["detail"]
+                or os.path.exists(rec)):
+            raise SystemExit(f"FAIL  a zoneless time said {error}")
+        out, err = printed(cli, ["import", "csv", zoneless, "--print-map"])
+        if "unit" in json.loads(out)["time"] or "--time-unit" in err or "zone" not in err:
+            raise SystemExit(f"FAIL  a zoneless time printed {out!r} {err}")
+        # A file with no header: core's words, exit 3, nothing printed
+        numbers = os.path.join(d, "numbers.csv")
+        with open(numbers, "w", newline="\n") as f:
+            f.write("1,2\n3,4\n")
+        error = one(run(cli, ["import", "csv", numbers,
+                              os.path.join(d, "none")], 3), "error")
+        if not error["detail"].startswith("no row within the file's first"):
+            raise SystemExit(f"FAIL  no header said {error}")
+        out, err = printed(cli, ["import", "csv", numbers, "--print-map"], 3)
+        if out or not err.startswith("havne-cli: no row within"):
+            raise SystemExit(f"FAIL  no header printed {out!r} {err}")
+        if os.path.exists(os.path.join(d, "none")):
+            raise SystemExit("FAIL  a refused guess left a folder")
+    print(f"ok    {len(GUESSED)} loggers' maps guessed, printed as committed "
+          "and imported; a time with no unit and a file with no header "
+          "refused")
+    return 0
+
+
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
     if len(sys.argv) == 4 and sys.argv[1] == "csv-import":
         sys.exit(csv_import(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 4 and sys.argv[1] == "csv-guess":
+        sys.exit(csv_guess(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 5 and sys.argv[1] == "folder":

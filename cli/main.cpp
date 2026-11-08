@@ -263,6 +263,64 @@ struct BigLine {
     cli::Line line;
 };
 
+// The CSV's column map guessed by core (ecuio_import_csv_guess): its whole
+// text, asked its size first, then read; a file grown between the two
+// calls is read again, a few times at most. A failure's words in *why
+ecuio_status_t guess_map(const cli::ImportArgs& im, std::string* text,
+                         ecuio_csv_guess_t* guess, std::string* why)
+{
+    size_t needed = 0;
+    ecuio_status_t rc =
+        ecuio_import_csv_guess(im.in, im.time_unit, nullptr, 0, &needed, guess);
+    for (int tries = 0; rc == ECUIO_OK && tries < 4; ++tries) {
+        std::vector<char> buf(needed);
+        size_t now = 0;
+        rc = ecuio_import_csv_guess(im.in, im.time_unit, buf.data(), buf.size(),
+                                    &now, guess);
+        if (rc == ECUIO_OK && now <= buf.size()) {
+            text->assign(buf.data(), now - 1);
+            return ECUIO_OK;
+        }
+        needed = now;
+    }
+    if (rc == ECUIO_OK) {
+        *why = "the file changed while it was read";
+        return ECUIO_ERR_LOAD_FAILED;
+    }
+    *why = ecuio_last_error_detail();
+    return rc;
+}
+
+// `import csv <file> --print-map`: the guessed map's JSON alone on stdout
+// (core's slice, byte for byte, and a line end), to save and pass with
+// --map; no lines. A refusal is stderr's, exit 3; a map whose time has no
+// unit is printed with a stderr line saying so, for its unit to be added
+int print_guessed_map(const cli::ImportArgs& im)
+{
+    std::string text;
+    std::string why;
+    ecuio_csv_guess_t guess{};
+    if (guess_map(im, &text, &guess, &why) != ECUIO_OK) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        return kExitConnect;
+    }
+    const std::string map = text.substr(guess.map_offset, guess.map_length);
+    if (std::fwrite(map.data(), 1, map.size(), stdout) != map.size() ||
+        std::fputc('\n', stdout) == EOF || std::fflush(stdout) != 0) {
+        return 1;
+    }
+    if ((guess.flags & ECUIO_CSV_GUESS_TIME_UNIT_KNOWN) == 0) {
+        std::fprintf(stderr, "%s",
+                     (guess.flags & ECUIO_CSV_GUESS_TIME_NUMBERS) != 0
+                         ? "havne-cli: the map's time has no unit: add one, "
+                           "or give --time-unit s, ms or us\n"
+                         : "havne-cli: the map's time has no unit: its "
+                           "cells need one with the zone (or the date and "
+                           "offset)\n");
+    }
+    return kExitOk;
+}
+
 void write_line(Output& out, cli::Line& l)
 {
     if (l.finish()) {
@@ -1845,7 +1903,9 @@ void usage(FILE* to)
         "       havne-cli export <recording> <out> --format folder|csv|pcapng\n"
         "                      [--from S] [--to S] [--raw]\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
-        "       havne-cli import csv <file> <folder> --map <map.json>\n"
+        "       havne-cli import csv <file> <folder> [--map <map.json> |\n"
+        "                      --time-unit s|ms|us]\n"
+        "       havne-cli import csv <file> --print-map [--time-unit s|ms|us]\n"
         "       havne-cli health <uri> <out> --format json|text "
         "[--units metric|imperial]\n"
         "                      [--seconds S] [--signals <file> | --plugin "
@@ -1977,7 +2037,10 @@ void usage(FILE* to)
         "         view --frames, info and replay:// read. import csv reads\n"
         "         a logger's CSV by its column map (--map: the time column\n"
         "         and each signal's column, name and unit) into a\n"
-        "         recording's folder that view and info read.\n"
+        "         recording's folder that view and info read; with no map\n"
+        "         it guesses one from the header (--time-unit for a time of\n"
+        "         plain numbers whose header names no unit), and\n"
+        "         --print-map prints that guess alone, to edit and pass.\n"
         "signals  check reads a signal file as a session would: what it\n"
         "         holds, each unit that never converts, or why it's "
         "refused.\n"
@@ -4185,12 +4248,45 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
+        if (im.print_map) {
+            return print_guessed_map(im);
+        }
         Output out;
         write_start(out);
         // A CSV's column map: core takes its text, up to the JSON reader's
         // 1 MiB, and refuses a larger one in its own words
         std::string map;
-        if (im.map_path != nullptr) {
+        if (im.options.format == ECUIO_IMPORT_CSV && im.map_path == nullptr) {
+            // None given: guessed from the file, the guess written first,
+            // so its notes come before an import's words
+            std::string text;
+            ecuio_csv_guess_t guess{};
+            const ecuio_status_t grc = guess_map(im, &text, &guess, &why);
+            if (grc != ECUIO_OK) {
+                write_error(out, grc, why.c_str());
+                return ended(out, kExitConnect);
+            }
+            {
+                BigLine g(cli::guessed_line_bytes(text));
+                cli::guessed_line(g.line, text);
+                write_line(out, g.line);
+            }
+            if ((guess.flags & ECUIO_CSV_GUESS_TIME_UNIT_KNOWN) == 0) {
+                // --time-unit gives a unit only to plain numbers
+                write_error(out, ECUIO_ERR_LOAD_FAILED,
+                            (guess.flags & ECUIO_CSV_GUESS_TIME_NUMBERS) != 0
+                                ? "the guessed map's time has no unit: give "
+                                  "--time-unit s, ms or us, or a map with "
+                                  "--map"
+                                : "the guessed map's time has no unit a "
+                                  "guess can give: its cells need a map "
+                                  "with the zone (or the date and offset), "
+                                  "given with --map");
+                return ended(out, kExitConnect);
+            }
+            map = text.substr(guess.map_offset, guess.map_length);
+            im.options.column_map_utf8 = map.c_str();
+        } else if (im.map_path != nullptr) {
             if (!read_whole(im.map_path, size_t{1} << 20, "column map", &map,
                             &why)) {
                 write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());

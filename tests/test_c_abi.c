@@ -214,6 +214,8 @@ int main(void)
     ecuio_export_report_t export_report;
     ecuio_import_options_t import_options;
     ecuio_import_report_t import_report;
+    ecuio_csv_guess_t csv_guess;
+    size_t csv_guess_needed = 1;
     ecuio_health_options_t health_options;
     ecuio_health_report_t health_report;
     ecuio_frames_read_t frames_read;
@@ -487,6 +489,23 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         frames_read.rows != 0 || frames_read.torn_rows != 0 ||
         frames_read.reserved[1] != 0) {
+        return 1;
+    }
+    /* The CSV map guess (ADR-0054's appendix): its layout and refusals */
+    if (sizeof(ecuio_csv_guess_t) != 48 ||
+        offsetof(ecuio_csv_guess_t, rows_read) != 12 ||
+        offsetof(ecuio_csv_guess_t, map_offset) != 16 ||
+        offsetof(ecuio_csv_guess_t, map_length) != 20 ||
+        offsetof(ecuio_csv_guess_t, reserved) != 24 ||
+        ECUIO_CSV_GUESS_TIME_UNIT_KNOWN != 0x1u ||
+        ECUIO_CSV_GUESS_DECIMAL_COMMA != 0x2u ||
+        ECUIO_CSV_GUESS_PREAMBLE != 0x4u ||
+        ECUIO_CSV_GUESS_TIME_NUMBERS != 0x8u ||
+        ecuio_import_csv_guess(NULL, NULL, NULL, 0, &csv_guess_needed,
+                               &csv_guess) != ECUIO_ERR_NULL_ARGUMENT ||
+        csv_guess_needed != 0 ||
+        ecuio_import_csv_guess("log.csv", "h", NULL, 0, &csv_guess_needed,
+                               NULL) != ECUIO_ERR_INVALID_ARGUMENT) {
         return 1;
     }
     /* The health report (ADR-0054's appendix): its layouts and refusals */

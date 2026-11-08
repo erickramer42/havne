@@ -7,8 +7,10 @@
 # force at a time, and finding a threshold's crossing or a marker. Times
 # are the recording's host_us, microseconds from its start. import_csv and
 # import_candump make a recording's folder from a logger's file
-# (ADR-0054, ecuio_import). read_frames reads its frames.csv back as
-# recorded (ADR-0049's appendix "frames read back").
+# (ADR-0054, ecuio_import); guess_csv_map guesses a CSV's column map from
+# its header (ecuio_import_csv_guess), which import_csv uses without one.
+# read_frames reads its frames.csv back as recorded (ADR-0049's appendix
+# "frames read back").
 
 import ctypes
 import json
@@ -17,6 +19,7 @@ from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8
+from .errors import Error
 
 Signal = namedtuple("Signal", "index name unit kind samples lowest highest first_us last_us "
                               "decimal_places group")
@@ -32,6 +35,10 @@ RecordedFrame = namedtuple("RecordedFrame", "host_us timestamp_us id flags data"
 RecordedFrame.__doc__ = ("A frames.csv row as recorded: its host_us (the time Recording's "
                          "queries take), its session time in us, its CAN ID, "
                          "ECUIO_FRAME_FLAG_* and its payload as bytes")
+GuessedMap = namedtuple("GuessedMap", "map notes flags columns")
+GuessedMap.__doc__ = ("A CSV's column map as core guessed it: map the column map (a dict "
+                      "import_csv takes), notes its lines of words, flags ECUIO_CSV_GUESS_*, "
+                      "columns each header column as {'column', 'used'} and, left out, 'why'")
 
 NONE = e.ECUIO_RECORDING_NONE
 
@@ -163,13 +170,66 @@ def _import(options, folder):
                     report.utc_start_us or None, report.duration_us)
 
 
-def import_csv(path, folder, column_map):
+def _guessed(path, time_unit):
+    """core's guess: its whole text and its report"""
+    if time_unit not in (None, "s", "ms", "us"):
+        raise ValueError("time_unit is 's', 'ms', 'us' or None")
+    unit = None if time_unit is None else utf8(time_unit)
+    report = e.ecuio_csv_guess_t()
+    needed = ctypes.c_size_t()
+    check(lib.ecuio_import_csv_guess(utf8(str(path)), unit, None, 0, ctypes.byref(needed),
+                                     ctypes.byref(report)), "ecuio_import_csv_guess")
+    for _ in range(4):  # a file grown between the calls is read again
+        buf = ctypes.create_string_buffer(needed.value)
+        now = ctypes.c_size_t()
+        check(lib.ecuio_import_csv_guess(utf8(str(path)), unit, buf, len(buf),
+                                         ctypes.byref(now), ctypes.byref(report)),
+              "ecuio_import_csv_guess")
+        if now.value <= len(buf):
+            return buf.raw[:now.value - 1], report
+        needed = now
+    raise Error(e.ECUIO_ERR_LOAD_FAILED, text(lib.ecuio_status_string(e.ECUIO_ERR_LOAD_FAILED)),
+                "the file changed while it was read", "ecuio_import_csv_guess")
+
+
+def guess_csv_map(path, time_unit=None):
+    """The column map core guesses from the header of the CSV at path
+    (ADR-0054's appendix "a column map guessed from the header"), as a
+    GuessedMap. A time column of plain numbers takes time_unit ('s', 'ms'
+    or 'us') when given, else the unit its header names; with neither the
+    map's time has no unit and flags lacks ECUIO_CSV_GUESS_TIME_UNIT_KNOWN.
+    Reads the file only; a file it can't guess raises Error with core's
+    words."""
+    raw, report = _guessed(path, time_unit)
+    whole = json.loads(raw.decode("utf-8"))
+    return GuessedMap(whole["map"], whole["notes"], report.flags, whole["columns"])
+
+
+def import_csv(path, folder, column_map=None, time_unit=None):
     """A logger's CSV at path made into a recording's folder (signals.csv
     and events.log) at folder, which must not exist yet, by column_map: a
     dict or its JSON text (ADR-0054's column map: the time column and each
-    signal's column, name and unit). Returns an Imported; a refused file or
-    map raises Error with core's words, leaving nothing made."""
-    if isinstance(column_map, dict):
+    signal's column, name and unit). With no column_map, the map
+    guess_csv_map(path, time_unit) gives, taken as core wrote it; one whose
+    time has no unit raises Error before anything is made. Returns an
+    Imported; a refused file or map raises Error with core's words, leaving
+    nothing made."""
+    if column_map is None:
+        raw, report = _guessed(path, time_unit)
+        if not report.flags & e.ECUIO_CSV_GUESS_TIME_UNIT_KNOWN:
+            # time_unit gives a unit only to plain numbers
+            words = ("the guessed map's time has no unit: give time_unit 's', 'ms' or 'us', "
+                     "or a column_map"
+                     if report.flags & e.ECUIO_CSV_GUESS_TIME_NUMBERS else
+                     "the guessed map's time has no unit a guess can give: its cells need a "
+                     "column_map with the zone (or the date and offset)")
+            raise Error(e.ECUIO_ERR_LOAD_FAILED,
+                        text(lib.ecuio_status_string(e.ECUIO_ERR_LOAD_FAILED)),
+                        words, "ecuio_import_csv_guess")
+        column_map = raw[report.map_offset:report.map_offset + report.map_length].decode("utf-8")
+    elif time_unit is not None:
+        raise ValueError("time_unit is a guessed map's: a column_map names its own")
+    elif isinstance(column_map, dict):
         column_map = json.dumps(column_map)
     elif not isinstance(column_map, str):
         raise TypeError("column_map is a dict or its JSON text")

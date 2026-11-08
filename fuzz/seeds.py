@@ -203,6 +203,11 @@ def main(argv):
         with open(os.path.join(folder, "log.csv"), "rb") as f:
             log = f.read()
         write(out, "fuzz_csv_import", os.path.basename(folder), cmap + b"\n" + log)
+        # The guess over the same file, with no unit and with one given
+        write(out, "fuzz_csv_import", os.path.basename(folder) + "-guess",
+              b"guess\n" + log)
+        write(out, "fuzz_csv_import", os.path.basename(folder) + "-guess-ms",
+              b"guess ms\n" + log)
     return 0
 
 
