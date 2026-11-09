@@ -217,6 +217,9 @@ if(Python3_Interpreter_FOUND)
     # scripts/api_check.py, the ABI check's source half: the declarations
     add_test(NAME ApiCheckTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/api_check.py selftest)
+    # scripts/verify_scope.py, which steps verify.sh --changed takes
+    add_test(NAME VerifyScopeTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/verify_scope.py selftest)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)

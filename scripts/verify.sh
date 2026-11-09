@@ -4,7 +4,9 @@
 # the relevant lines are printed and the script stops.
 #
 # Usage: scripts/verify.sh [--tests-only | --build-only] [--no-cross]
-#                          [--no-devices] [-R <ctest regex>]
+#                          [--no-devices] [-R <ctest regex> | --suite <names>]
+#        scripts/verify.sh --changed [base] [--no-devices]
+#        either with --dry-run: print the plan and run nothing
 #
 #   win32       build-win32's surrogate and fake DLLs (Windows, when
 #               build-win32 exists). First, because the app build copies
@@ -40,17 +42,39 @@
 # --build-only runs win32 and build and stops: fresh binaries without the
 # suite, for a machine that only runs them (the laptop at the car).
 #
+# --suite Bridge,Qml,c_abi runs the named suites: BridgeTest.*, QmlTest.*
+# and c_abi, a single test. A name that matches no test fails.
+#
+# --changed [base] picks the steps from what changed since base (default
+# the merge-base with origin/dev), uncommitted and untracked files
+# included, by scripts/verify_scope.py's table: docs and markdown only run
+# nothing, QML only runs build and QmlTest.*, and anything else, or a
+# change it can't read, is the full run.
+#
+# Anything less than the full run prints what it skipped and ends with a
+# "not a full verify" line, and says whether clang-tidy applies. A full
+# run that ran every step writes Testing/verify/full-run.stamp (HEAD's
+# SHA and whether the tree stayed clean), which a PR's preflight reads.
+#
 # The trees must already be configured (docs/development.md).
 set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/verify
+STAMP=$LOGDIR/full-run.stamp
 mkdir -p "$LOGDIR"
+
+usage_error() { echo "$1" >&2; exit 2; }
 
 tests_only=0
 build_only=0
 cross=1
 devices=1
 regex=""
+have_suite=0
+suites=""
+changed=0
+base=""
+dry=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
@@ -58,20 +82,181 @@ while [ $# -gt 0 ]; do
         --no-cross) cross=0 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
-        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+        --suite) have_suite=1; suites="${2:-}"; shift ;;
+        --changed)
+            changed=1
+            case "${2:-}" in ""|-*) ;; *) base=$2; shift ;; esac
+            ;;
+        --dry-run) dry=1 ;;
+        -h|--help) sed -n '2,/^set -u$/{/^set -u$/!p}' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
 done
-if [ "$build_only" = 1 ] && { [ "$tests_only" = 1 ] || [ -n "$regex" ]; }; then
-    echo "--build-only runs no tests: it takes neither --tests-only nor -R" >&2
-    exit 2
+if [ "$build_only" = 1 ] && { [ "$tests_only" = 1 ] || [ -n "$regex" ] || [ "$have_suite" = 1 ]; }; then
+    usage_error "--build-only runs no tests: it takes neither --tests-only, -R nor --suite"
+fi
+if [ -n "$regex" ] && [ "$have_suite" = 1 ]; then
+    usage_error "-R and --suite both pick the tests: use one"
+fi
+if [ "$changed" = 1 ] && { [ "$tests_only" = 1 ] || [ "$build_only" = 1 ] || [ "$cross" = 0 ] \
+        || [ -n "$regex" ] || [ "$have_suite" = 1 ]; }; then
+    usage_error "--changed picks the steps itself: it takes only a base, --no-devices and --dry-run"
 fi
 
 windows=0
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) windows=1 ;; esac
 have_win32=0
 [ "$windows" = 1 ] && [ -d build-win32 ] && have_win32=1
+
+python_cmd() {
+    local p
+    for p in python python3; do
+        "$p" -I -c '' 2>/dev/null && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+# Sets plan, plan_reason, tidy and tidy_why for the paths changed since $1
+classify() {
+    local py tracked untracked out key value
+    plan=""
+    py=$(python_cmd) || return 1
+    # --no-renames lists a moved file's old path too
+    tracked=$(git -c core.quotepath=off diff --name-only --no-renames "$1" --) || return 1
+    untracked=$(git -c core.quotepath=off ls-files --others --exclude-standard) || return 1
+    out=$(printf '%s\n%s\n' "$tracked" "$untracked" | "$py" -I scripts/verify_scope.py classify) || return 1
+    while IFS='=' read -r key value; do
+        value=${value%$'\r'}
+        case "$key" in
+            plan) plan=$value ;;
+            reason) plan_reason=$value ;;
+            tidy) tidy=$value ;;
+            tidy_why) tidy_why=$value ;;
+        esac
+    done <<< "$out"
+    [ -n "$plan" ]
+}
+
+suite_each=""
+if [ "$have_suite" = 1 ]; then
+    py=$(python_cmd) || usage_error "--suite needs Python 3"
+    out=$("$py" -I scripts/verify_scope.py suite "$suites") || exit 2
+    out=$(printf '%s' "$out" | tr -d '\r')
+    regex=${out%%$'\n'*}
+    suite_each=${out#*$'\n'}
+fi
+
+# What runs. scope says why this isn't the full run; empty on the full run
+do_win32=1
+do_build=1
+do_tests=1
+do_cross=1
+scope=""
+plan=""
+plan_reason=""
+tidy=""
+tidy_why=""
+add_scope() { scope="${scope:+$scope, }$1"; }
+
+if [ "$changed" = 1 ]; then
+    if [ -n "$base" ]; then
+        git rev-parse -q --verify "$base^{commit}" > /dev/null \
+            || usage_error "--changed: no commit named $base"
+    else
+        base=$(git merge-base HEAD origin/dev 2> /dev/null)
+    fi
+    if [ -z "$base" ] || ! classify "$base"; then
+        plan=full
+        plan_reason="the changed files can't be read (no origin/dev, or no Python)"
+    fi
+    case "$plan" in
+        none)
+            do_win32=0; do_build=0; do_tests=0; do_cross=0
+            add_scope "$plan_reason"
+            ;;
+        qml)
+            do_win32=0; do_cross=0
+            regex='^QmlTest\.'
+            add_scope "$plan_reason"
+            ;;
+    esac
+fi
+[ "$tests_only" = 1 ] && { do_win32=0; do_build=0; add_scope "--tests-only"; }
+[ "$build_only" = 1 ] && { do_tests=0; do_cross=0; add_scope "--build-only"; }
+[ "$cross" = 0 ] && { do_cross=0; add_scope "--no-cross"; }
+if [ "$have_suite" = 1 ]; then
+    do_cross=0
+    add_scope "--suite $suites"
+elif [ "$changed" = 0 ] && [ -n "$regex" ]; then
+    do_cross=0
+    add_scope "-R $regex"
+fi
+[ "$windows" = 1 ] && [ "$devices" = 0 ] && add_scope "--no-devices"
+
+# What a scoped run left out, for its last line
+skipped=""
+add_skipped() { skipped="${skipped:+$skipped, }$1"; }
+[ "$have_win32" = 1 ] && [ "$do_win32" = 0 ] && add_skipped win32
+[ "$do_build" = 0 ] && add_skipped build
+if [ "$do_tests" = 0 ]; then
+    add_skipped "the suite"
+elif [ -n "$regex" ]; then
+    add_skipped "the suite outside $regex"
+fi
+[ "$have_win32" = 1 ] && [ "$do_cross" = 0 ] && add_skipped cross-arch
+[ "$windows" = 1 ] && [ "$devices" = 0 ] && add_skipped "the J2534 device check"
+
+note() { printf '%-11s %s\n' "$1" "$2"; }
+
+tidy_line() {
+    if [ -z "$tidy" ]; then
+        local b
+        b=$(git merge-base HEAD origin/dev 2> /dev/null)
+        [ -n "$b" ] && classify "$b" || { note tidy "unknown: no origin/dev to compare with"; return; }
+    fi
+    if [ "$tidy" = yes ]; then note tidy "applies: $tidy_why"
+    else note tidy "doesn't apply: $tidy_why"; fi
+}
+
+if [ "$changed" = 1 ]; then
+    if [ "$plan" = full ]; then note scope "full run: $plan_reason"
+    else note scope "$plan: $plan_reason"; fi
+elif [ -n "$scope" ]; then
+    note scope "$scope"
+fi
+
+if [ "$dry" = 1 ]; then
+    run_or_skip() { if [ "$2" = 1 ]; then note "$1" "run${3:+: $3}"; else note "$1" skip; fi; }
+    [ "$have_win32" = 1 ] && run_or_skip win32 "$do_win32"
+    run_or_skip build "$do_build"
+    run_or_skip ctest "$do_tests" "${regex:-the whole suite}"
+    [ "$have_win32" = 1 ] && run_or_skip cross-arch "$do_cross"
+    { [ -n "$scope" ] || [ "$changed" = 1 ]; } && tidy_line
+    [ -n "$scope" ] && note skipped "${skipped:-nothing}"
+    echo "dry run: nothing ran"
+    exit 0
+fi
+
+# The last word of any scoped run, a failed one included
+finish_scoped() {
+    tidy_line
+    echo "not a full verify: skipped ${skipped:-nothing}; run scripts/verify.sh before a PR"
+}
+if [ -n "$scope" ]; then
+    trap finish_scoped EXIT
+elif [ "$changed" = 1 ]; then
+    tidy_line
+fi
+
+# A failed or partial full run must not leave an earlier run's stamp behind
+full=0
+if [ -z "$scope" ] && [ "$have_win32" = 1 ]; then
+    full=1
+    rm -f "$STAMP"
+    head_start=$(git rev-parse HEAD)
+    dirty_start=$(git status --porcelain)
+fi
 
 line() { printf '%-11s %-5s %4s s  %s\n' "$1" "$2" "$3" "$4"; }
 
@@ -117,8 +302,8 @@ ctest_failed() {
     exit 1
 }
 
-if [ "$tests_only" = 0 ]; then
-    if [ "$have_win32" = 1 ]; then
+if [ "$do_build" = 1 ]; then
+    if [ "$do_win32" = 1 ] && [ "$have_win32" = 1 ]; then
         run win32 cmake --build build-win32 --config Release --parallel \
             --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
         [ "$rc" = 0 ] || build_failed win32
@@ -139,12 +324,18 @@ if [ "$tests_only" = 0 ]; then
     [ "$rc" = 0 ] || build_failed build
     line build ok "$dur" "$(warnings build) warnings"
 fi
-[ "$build_only" = 1 ] && exit 0
+[ "$do_tests" = 0 ] && exit 0
 
 if [ "$windows" = 1 ] && [ "$devices" = 1 ]; then
     export ECUIO_EXPECT_J2534_DEVICES=1
 fi
 jobs=${HAVNE_VERIFY_JOBS:-8}
+if [ -n "$suite_each" ]; then
+    registered=$(ctest --test-dir build -C Release -N | sed -nE 's/^ *Test +#[0-9]+: //p' | tr -d '\r')
+    while IFS=$'\t' read -r name one; do
+        grep -qE "$one" <<< "$registered" || usage_error "--suite: no test in build matches $name"
+    done <<< "$suite_each"
+fi
 if [ -n "$regex" ]; then
     run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error -R "$regex"
 else
@@ -153,7 +344,7 @@ fi
 [ "$rc" = 0 ] || ctest_failed ctest
 line ctest ok "$dur" "$(ctest_summary "$LOGDIR/ctest.log")"
 
-if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
+if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
     ECUIO_SURROGATE_EXE="$(cygpath -m "$PWD")/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe"
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
@@ -186,4 +377,14 @@ if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
         }
     fi
     line cross-arch ok "$dur" "$summary$x86${skips:+: $skips}"
+fi
+
+if [ "$full" = 1 ]; then
+    clean=1
+    { [ -n "$dirty_start" ] || [ -n "$(git status --porcelain)" ] \
+        || [ "$(git rev-parse HEAD)" != "$head_start" ]; } && clean=0
+    printf 'sha=%s\nclean=%s\ndate=%s\n' "$head_start" "$clean" \
+        "$(date '+%Y-%m-%d %H:%M:%S %z')" > "$STAMP"
+    if [ "$clean" = 1 ]; then note stamp "${head_start:0:7}, tree clean"
+    else note stamp "${head_start:0:7}, tree not clean: no use to a PR's preflight"; fi
 fi
