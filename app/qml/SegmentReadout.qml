@@ -80,8 +80,10 @@ GaugeBase {
         color: Theme.textDim
     }
     Text {
-        anchors { left: title.right; leftMargin: 10; baseline: title.baseline }
-        visible: !gauge.hasValue
+        objectName: "gaugeNote"
+        anchors { left: title.right; leftMargin: 10; right: parent.right; baseline: title.baseline }
+        visible: !gauge.hasValue && width > 0
+        elide: Text.ElideRight
         text: gauge.note
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
