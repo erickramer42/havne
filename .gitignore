@@ -13,3 +13,6 @@ dist/
 
 # Editor swap files
 *.sw[op]
+
+# Python bytecode, from importing a test script by hand
+__pycache__/
