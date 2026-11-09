@@ -1,7 +1,6 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo; sparkline
-//          scrolls at 10 Hz, flat-line guard holds at idle; "not in
-//          profile" note for signals the active set lacks
+// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.dashboard;
+//          manual smoke: DashboardPage under mock://demo
 
 import QtQuick
 import QtQuick.Shapes
@@ -39,6 +38,8 @@ GaugeBase {
     }
 
     readonly property bool roomy: height >= 160
+    // Too short for the trace and the footer: the label and the value alone
+    readonly property bool brief: height < 84
     readonly property color levelColor: gauge.hasValue
                                         ? gauge.zoneColor(gauge.value, Theme.gaugeReadout)
                                         : Theme.textDim
@@ -138,11 +139,14 @@ GaugeBase {
     // Vertical slot the readout centers in
     Item {
         id: valueBand
-        anchors { left: parent.left; right: parent.right; top: heading.bottom; bottom: trace.top }
+        anchors { left: parent.left; right: parent.right; top: heading.bottom
+                  bottom: gauge.brief ? parent.bottom : trace.top }
     }
 
     Shape {
         id: trace
+        objectName: "trace"
+        visible: !gauge.brief
         anchors { left: parent.left; right: parent.right; bottom: footer.top; bottomMargin: 6 }
         height: Math.max(20, gauge.height * 0.24)
         preferredRendererType: Shape.CurveRenderer
@@ -187,6 +191,8 @@ GaugeBase {
 
     Row {
         id: footer
+        objectName: "footer"
+        visible: !gauge.brief
         anchors { left: parent.left; bottom: parent.bottom }
         spacing: 14
         Repeater {

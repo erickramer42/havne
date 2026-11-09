@@ -106,11 +106,20 @@ Page {
         "digital": qsTr("Number"), "shift-light": qsTr("Shift lights"),
         "segments": qsTr("Cells"), "seven-segment": qsTr("Digits"), "sparkline": qsTr("Sparkline")
     })
+    // A form's spans: the phone's grid has three columns for the desktop's one
+    readonly property bool phoneForm: form === "phone"
+    readonly property int spanScale: phoneForm ? DashboardBook.phoneSpanScale : 1
     // A new gauge's span: columns, and rows of a quarter column
-    readonly property var newSpans: ({
-        "analog": [1, 4], "ring": [1, 4], "bar": [2, 2], "digital": [1, 4],
-        "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3]
-    })
+    readonly property var newSpans: {
+        const spans = {
+            "analog": [1, 4], "ring": [1, 4], "bar": [2, 2], "digital": [1, 4],
+            "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3]
+        }
+        for (const k in spans)
+            spans[k] = [Math.min(DashboardBook.maxColumns, spans[k][0] * spanScale),
+                        spans[k][1] * spanScale]
+        return spans
+    }
 
     readonly property string formKey: form === "phone" ? "phone" : "desktop"
     readonly property var shownCells: pages[pageIndex] && Array.isArray(pages[pageIndex].cells)
@@ -835,10 +844,15 @@ Page {
                         objectName: "panelH"
                         Accessible.name: qsTr("Height")
                         Layout.preferredHeight: Theme.touchTarget
-                        from: 1
-                        to: DashboardBook.maxRows
+                        // A stored h under the phone's step stays reachable
+                        from: root.phoneForm && panelCard.cell
+                              ? Math.min(root.spanScale, panelCard.cell.h) : 1
+                        to: root.phoneForm ? DashboardBook.maxRows : DashboardBook.format1MaxRows
+                        stepSize: root.spanScale
                         value: panelCard.cell ? panelCard.cell.h : 1
-                        onValueModified: root.resize(panelCard.cell.w, value)
+                        onValueModified: root.resize(panelCard.cell.w, root.phoneForm
+                            ? DashboardBook.stepRows(panelCard.cell.h, value > panelCard.cell.h)
+                            : value)
                     }
 
                     Caption {
@@ -961,10 +975,11 @@ Page {
                             // (the resize rebinds this switch, so its state is read first)
                             const on = checked
                             const c = panelCard.cell
-                            if (c && on && c.w === 2 && c.h === 2)
-                                root.resize(1, 4)
-                            else if (c && !on && c.w === 1 && c.h === 4)
-                                root.resize(2, 2)
+                            const s = root.spanScale
+                            if (c && on && c.w === 2 * s && c.h === 2 * s)
+                                root.resize(s, 4 * s)
+                            else if (c && !on && c.w === s && c.h === 4 * s)
+                                root.resize(2 * s, 2 * s)
                             root.setOptions({ vertical: on })
                         }
                     }
@@ -1573,11 +1588,11 @@ Page {
                                                                      : ScrollBar.AsNeeded
                 }
 
-                // The grid (section 4): the phone's 2 columns upright and
-                // 4 on its side, the desktop's one per 220 px from 2 to 12
+                // The grid (section 4): the phone's 6 columns upright and
+                // 12 on its side, the desktop's one per 220 px from 2 to 12
                 readonly property real gridWidth: Math.max(0, width - 2 * root.margin)
                 readonly property int columns: root.form === "phone"
-                    ? (root.width > root.height ? 4 : 2)
+                    ? (root.width > root.height ? 12 : 6)
                     : Math.max(2, Math.min(12, Math.round(gridWidth / 220)))
                 readonly property real columnWidth: Math.max(0, (gridWidth - (columns - 1)
                                                                  * root.gap) / columns)
@@ -1585,7 +1600,8 @@ Page {
                 // In edit mode the page ends with a "+" cell while it has room
                 readonly property bool addCell: root.editing && shown
                                                 && DashboardBook.canAddCell(root.doc, index)
-                readonly property var placed: addCell ? cells.concat([{ w: 1, h: 2 }]) : cells
+                readonly property var placed: addCell
+                    ? cells.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : cells
                 readonly property var boxes: DashboardBook.place(placed, columns)
                 readonly property int tallest: placed.reduce((m, c) => Math.max(m, c.h), 1)
                 // The row unit is a quarter of a column, so h = 4w is
@@ -1658,7 +1674,7 @@ Page {
                         visible: pageView.addCell
                         x: box ? box.x * (pageView.columnWidth + root.gap) : 0
                         y: box ? box.y * pageView.pitch : 0
-                        width: box ? pageView.columnWidth : 0
+                        width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0
                         height: box ? Math.max(Theme.touchTarget, box.h * pageView.pitch - root.gap) : 0
                         text: "+"
                         font.pixelSize: Theme.fontHero

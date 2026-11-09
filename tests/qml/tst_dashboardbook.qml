@@ -22,7 +22,7 @@ TestCase {
     // Two pages, the first with two cells
     function book() {
         return {
-            format: 1,
+            format: DashboardBook.format,
             pages: [
                 { name: "Engine", cells: [cell("IAT"), cell("Oil")] },
                 { name: "Track", cells: [] }
@@ -35,7 +35,7 @@ TestCase {
         const cells = []
         for (let i = 0; i < n; ++i)
             cells.push(cell("c" + i))
-        return { format: 1, pages: [{ name: "P", cells: cells }] }
+        return { format: DashboardBook.format, pages: [{ name: "P", cells: cells }] }
     }
 
     function read(d) {
@@ -54,8 +54,9 @@ TestCase {
 
     // A document whose text is exactly n bytes, padded in an unknown key
     // with characters of one to four bytes
-    function docOfBytes(n) {
-        const d = { format: 1, pages: [{ name: "P", cells: [] }], pad: "\u20AC" + emoji }
+    function docOfBytes(n, format) {
+        const d = { format: format === undefined ? DashboardBook.format : format,
+                    pages: [{ name: "P", cells: [] }], pad: "\u20AC" + emoji }
         let pad = n - bytes(JSON.stringify(d))
         d.pad += "\u00E9".repeat(Math.floor(pad / 2)) + (pad % 2 ? "a" : "")
         return d
@@ -83,41 +84,57 @@ TestCase {
 
     // The built-in gauges in their order, each bound to the refs the
     // bridge pairs for it, at spans that keep their proportions
-    function test_theBuiltInLayoutsGauges() {
-        const want = [
-            ["Shift lights", "shift-light", "rpm", "RPM", [12, 1], [12, 1]],
-            ["Engine speed", "analog", "rpm", "RPM", [1, 4], [2, 8]],
-            ["Vehicle speed", "analog", "speed", "km/h", [1, 4], [2, 8]],
-            ["Coolant", "ring", "coolant", degC, [1, 4], [1, 4]],
-            ["Oil temp", "ring", "oil", degC, [1, 4], [1, 4]],
-            ["IAT", "digital", "iat", degC, [1, 4], [1, 4]],
-            ["MAF", "digital", "maf", "g/s", [1, 4], [1, 4]],
-            ["Throttle", "bar", "throttle", "%", [1, 2], [2, 2]],
-            ["Engine load", "bar", "load", "%", [1, 2], [2, 2]]
+    function test_theBuiltInLayoutsGauges_data() {
+        return [
+            { tag: "phone", form: "phone", count: 11, want: [
+                ["Shift lights", "shift-light", "rpm", "RPM", [12, 3]],
+                ["Engine speed", "analog", "rpm", "RPM", [4, 18]],
+                ["Speed", "digital", "speed", "km/h", [2, 6]],
+                ["Coolant", "digital", "coolant", degC, [2, 6]],
+                ["Oil temp", "digital", "oil", degC, [2, 6]],
+                ["MAF", "digital", "maf", "g/s", [6, 8]],
+                ["IAT", "digital", "iat", degC, [2, 7]],
+                ["Load", "digital", "load", "%", [2, 7]],
+                ["Throttle", "digital", "throttle", "%", [2, 7]]
+            ] },
+            { tag: "desktop", form: "desktop", count: 15, want: [
+                ["Shift lights", "shift-light", "rpm", "RPM", [12, 1]],
+                ["Engine speed", "analog", "rpm", "RPM", [2, 8]],
+                ["Vehicle speed", "analog", "speed", "km/h", [2, 8]],
+                ["Coolant", "ring", "coolant", degC, [1, 4]],
+                ["Oil temp", "ring", "oil", degC, [1, 4]],
+                ["IAT", "digital", "iat", degC, [1, 4]],
+                ["MAF", "digital", "maf", "g/s", [1, 4]],
+                ["Throttle", "bar", "throttle", "%", [2, 2]],
+                ["Engine load", "bar", "load", "%", [2, 2]]
+            ] }
         ]
-        for (const form of ["phone", "desktop"]) {
-            const b = DashboardBook.builtIn(form)
-            compare(b.pages.length, 1)
-            compare(b.pages[0].name, "Engine")
-            const cells = b.pages[0].cells
-            compare(cells.length, want.length)
-            for (let i = 0; i < want.length; ++i) {
-                const [label, kind, key, unit, phone, desktop] = want[i]
-                const c = cells[i]
-                compare(c.label, label)
-                compare(c.kind, kind, label)
-                verify(DashboardBook.knownKind(c.kind), label)
-                compare(c.refs, refsOf(key), label)
-                compare(c.unit, unit, label)
-                const span = form === "phone" ? phone : desktop
-                compare([c.w, c.h], span, label + " " + form)
-                const accent = c.options.accent
-                verify(accent === undefined || DashboardBook.knownAccent(accent), label)
-            }
-            compare(cells[0].options, { from: 4500, to: 6500, count: form === "phone" ? 11 : 15 })
-            // The two RPM cells' lists are each their own
-            verify(cells[0].refs !== cells[1].refs, form)
+    }
+    function test_theBuiltInLayoutsGauges(data) {
+        const b = DashboardBook.builtIn(data.form)
+        compare(b.format, 2)
+        compare(b.pages.length, 1)
+        compare(b.pages[0].name, "Engine")
+        const cells = b.pages[0].cells
+        compare(cells.length, data.want.length)
+        for (let i = 0; i < data.want.length; ++i) {
+            const [label, kind, key, unit, span] = data.want[i]
+            const c = cells[i]
+            compare(c.label, label)
+            compare(c.kind, kind, label)
+            verify(DashboardBook.knownKind(c.kind), label)
+            compare(c.refs, refsOf(key), label)
+            compare(c.unit, unit, label)
+            compare([c.w, c.h], span, label)
+            const accent = c.options.accent
+            verify(accent === undefined || DashboardBook.knownAccent(accent), label)
         }
+        compare(cells[0].options, { from: 4500, to: 6500, count: data.count })
+        // The two RPM cells' lists are each their own
+        verify(cells[0].refs !== cells[1].refs)
+    }
+
+    function test_theDesktopsBuiltInOptions() {
         const c = DashboardBook.builtIn("desktop").pages[0].cells
         compare(c[1].options, { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
                                 labelDivisor: 1000, dangerFrom: 6800,
@@ -131,6 +148,178 @@ TestCase {
         compare(c[6].options, { from: 0, to: 300, description: "Mass air flow", accent: "info" })
         compare(c[7].options, { from: 0, to: 100, accent: "success" })
         compare(c[8].options, { from: 0, to: 100 })
+    }
+
+    // ---- Format 1, read and upgraded (ADR-0057's appendix on the six columns)
+
+    // ADR-0057 section 7's sample as a format 1 text
+    function sampleCells() {
+        const rpm = ["id:1001", "id:7003"]
+        return [
+            { kind: "shift-light", w: 12, h: 1, label: "Shift lights", refs: rpm.slice(), unit: "RPM",
+              options: { from: 4500, to: 6500 } },
+            { kind: "analog", w: 2, h: 8, label: "Engine speed", refs: rpm.slice(), unit: "RPM",
+              options: { from: 0, to: 8000, dangerFrom: 6800, majorStep: 1000,
+                         labelDivisor: 1000, peak: true } },
+            { kind: "digital", w: 1, h: 4, label: "Boost", refs: ["key:boost"], unit: "kPa",
+              options: { from: -100, to: 150 } }
+        ]
+    }
+    function format1Text(cells, extra) {
+        const d = { format: 1, pages: [{ name: "Engine", cells: cells }] }
+        for (const k in extra)
+            d[k] = extra[k]
+        return JSON.stringify(d)
+    }
+    function spans(doc) {
+        return doc.pages[0].cells.map(c => [c.w, c.h])
+    }
+
+    // A phone document is three times the spans, in the same places
+    function test_aFormat1PhoneDocumentIsScaled() {
+        const r = DashboardBook.parse(format1Text(sampleCells()), "phone")
+        compare(r.problem, "")
+        compare(r.doc.format, 2)
+        compare(spans(r.doc), [[12, 3], [6, 24], [3, 12]])
+        // Everything else as read
+        const want = sampleCells()
+        for (let i = 0; i < want.length; ++i) {
+            for (const k of ["kind", "label", "refs", "unit", "options"])
+                compare(r.doc.pages[0].cells[i][k], want[i][k], k)
+        }
+        for (const [before, after] of [[2, 6], [4, 12]]) {
+            const was = DashboardBook.place(sampleCells(), before)
+            const is = DashboardBook.place(r.doc.pages[0].cells, after)
+            compare(is.map(b => [b.x, b.y, b.h]), was.map(b => [b.x * 3, b.y * 3, b.h * 3]),
+                    before + " columns to " + after)
+            compare(is.map(b => b.w), was.map(b => b.w * 3), before + " columns' widths")
+        }
+    }
+
+    function test_aFormat1DesktopDocumentKeepsItsSpans() {
+        const r = DashboardBook.parse(format1Text(sampleCells()), "desktop")
+        compare(r.problem, "")
+        compare(r.doc.format, 2)
+        compare(spans(r.doc), [[12, 1], [2, 8], [1, 4]])
+    }
+
+    // The clamp changes nothing on screen: past 4 of 4 is the whole row
+    // on 12, and h takes its whole range
+    function test_theUpgradesClampAndItsLargestH() {
+        const r = DashboardBook.parse(format1Text([cell("Wide", { w: 5, h: 16 })]), "phone")
+        compare(r.problem, "")
+        compare(spans(r.doc), [[12, 48]])
+        compare(spots(DashboardBook.place(r.doc.pages[0].cells, 12)), [[0, 0, 12, 48]])
+        compare(spans(DashboardBook.parse(format1Text([cell("Most", { w: 4 })]), "phone").doc),
+                [[12, 12]])
+    }
+
+    // Format 2 is never multiplied; a format 1 text reads the same twice
+    function test_theUpgradeRunsOnceAndOnlyOnFormat1() {
+        const two = JSON.stringify({ format: 2, pages: [{ name: "P", cells: sampleCells() }] })
+        const r = DashboardBook.parse(two, "phone")
+        compare(r.problem, "")
+        compare(spans(r.doc), [[12, 1], [2, 8], [1, 4]])
+        const text = format1Text(sampleCells())
+        compare(DashboardBook.parse(text, "phone").doc, DashboardBook.parse(text, "phone").doc)
+    }
+
+    // What's stored after the first edit is format 2 and reads back as is
+    function test_theFirstWriteIsFormat2AndRoundTrips() {
+        const r = DashboardBook.parse(format1Text(sampleCells()), "phone")
+        const text = DashboardBook.serialize(r.doc)
+        compare(JSON.parse(text).format, 2)
+        compare(JSON.parse(text).pages[0].cells[1].h, 24)
+        const again = DashboardBook.parse(text, "phone")
+        compare(again.problem, "")
+        compare(again.doc, r.doc)
+    }
+
+    // What this version doesn't know is kept, and an unknown kind scales
+    function test_anUnknownCellAndKeysScale() {
+        const later = cell("Later", { kind: "hologram", w: 2, h: 3, depth: 9 })
+        later.options = { glow: true }
+        const r = DashboardBook.parse(format1Text([later], { theme: "x" }), "phone")
+        compare(r.problem, "")
+        const c = r.doc.pages[0].cells[0]
+        compare([c.kind, c.w, c.h, c.depth, c.options.glow], ["hologram", 6, 9, 9, true])
+        compare(r.doc.theme, "x")
+    }
+
+    function test_aFormat3TextIsNewer() {
+        const r = DashboardBook.parse(JSON.stringify({ format: 3, pages: book().pages }), "phone")
+        compare(r.problem, "newer")
+        compare(r.doc, DashboardBook.builtIn("phone"))
+    }
+
+    // Format 1's bounds are checked before the upgrade, on either form
+    function test_format1sBoundsAreCheckedFirst_data() {
+        return [{ tag: "phone", form: "phone" }, { tag: "desktop", form: "desktop" }]
+    }
+    function test_format1sBoundsAreCheckedFirst(data) {
+        for (const [name, bad] of [["h 17", { h: 17 }], ["w 13", { w: 13 }], ["h 0", { h: 0 }]]) {
+            const r = DashboardBook.parse(format1Text([cell("Bad", bad), cell("Good")]), data.form)
+            compare(r.problem, "dropped", name)
+            compare(r.dropped, { pages: 0, cells: 1 }, name)
+            compare(labels(r.doc, 0), ["Good"], name)
+        }
+        const scale = data.form === "phone" ? 3 : 1
+        const edge = DashboardBook.parse(format1Text([cell("Edge", { w: 1, h: 16 })]), data.form)
+        compare(edge.problem, "")
+        compare(edge.doc.pages[0].cells[0].h, 16 * scale)
+    }
+
+    function test_format2sBoundOnH() {
+        const of = h => DashboardBook.parse(JSON.stringify(
+            { format: 2, pages: [{ name: "P", cells: [cell("A", { h: h })] }] }), "desktop")
+        compare(of(48).problem, "")
+        compare(of(48).doc.pages[0].cells[0].h, 48)
+        compare(of(17).problem, "")
+        compare(of(49).problem, "dropped")
+        compare(of(49).dropped, { pages: 0, cells: 1 })
+    }
+
+    // The fullest format 1 document that grows: ten pages of 24 cells,
+    // each w and h a digit longer, padded to exactly n bytes of text
+    function fullFormat1(n) {
+        const page = () => ({ name: "P", cells: Array.from({ length: 24 },
+                                                           () => cell("c", { w: 4, h: 4 })) })
+        const d = { format: 1, pages: Array.from({ length: 10 }, page), pad: "" }
+        d.pad = "a".repeat(n - bytes(JSON.stringify(d)))
+        return JSON.stringify(d)
+    }
+
+    // A document at format 1's limit stays readable and survives its first edit
+    function test_theUpgradesGrowthIsAllowed() {
+        const text = fullFormat1(DashboardBook.format1MaxBytes)
+        compare(bytes(text), 65536)
+        const r = DashboardBook.parse(text, "phone")
+        compare(r.problem, "", "it reads")
+        const grown = bytes(DashboardBook.serialize(r.doc))
+        compare(grown, 65536 + 480, "two bytes for each of its cells")
+        compare(grown, DashboardBook.maxBytes, "exactly the allowance")
+        compare(DashboardBook.documentProblem(r.doc), "")
+        const edited = DashboardBook.renamePage(r.doc, 0, "Q")
+        compare(edited.pages[0].name, "Q", "the first edit is kept")
+        const again = DashboardBook.parse(DashboardBook.serialize(edited), "phone")
+        compare(again.problem, "")
+        compare(again.doc, edited)
+        // A byte past format 1's own limit is damaged, as it always was
+        compare(DashboardBook.parse(fullFormat1(65537), "phone").problem, "damaged")
+    }
+
+    // ---- The phone's height control
+
+    function test_aRowStepMovesToTheNextMultipleOfThree() {
+        compare(DashboardBook.stepRows(12, true), 15)
+        compare(DashboardBook.stepRows(12, false), 9)
+        compare(DashboardBook.stepRows(4, true), 6, "a stored odd h, up")
+        compare(DashboardBook.stepRows(4, false), 3, "and down")
+        compare(DashboardBook.stepRows(1, true), 3)
+        compare(DashboardBook.stepRows(3, false), 3, "no lower than one step")
+        compare(DashboardBook.stepRows(2, false), 2, "an odd h under it stays")
+        compare(DashboardBook.stepRows(47, true), 48)
+        compare(DashboardBook.stepRows(48, true), 48, "the bound")
     }
 
     // ---- Reading
@@ -214,7 +403,7 @@ TestCase {
 
     // A newer format may change anything, so nothing of it is read
     function test_aNewerFormatGivesTheBuiltInLayout() {
-        for (const d of [{ format: 2, pages: book().pages }, { format: 2, pages: "x" },
+        for (const d of [{ format: 3, pages: book().pages }, { format: 3, pages: "x" },
                          { format: 9 }]) {
             const r = DashboardBook.parse(JSON.stringify(d), "desktop")
             compare(r.problem, "newer", JSON.stringify(d))
@@ -231,7 +420,7 @@ TestCase {
             "no kind": { kind: undefined }, "an empty kind": { kind: "" }, "a kind not text": { kind: 7 },
             "w 0": { w: 0 }, "w 13": { w: 13 }, "w 1.5": { w: 1.5 }, "w text": { w: "2" },
             "no w": { w: undefined },
-            "h 0": { h: 0 }, "h 17": { h: 17 }, "no h": { h: undefined },
+            "h 0": { h: 0 }, "h 49": { h: 49 }, "no h": { h: undefined },
             "no refs": { refs: undefined }, "refs text": { refs: "id:1" }, "a ref not text": { refs: [1] },
             "9 refs": { refs: nine },
             "a label not text": { label: 7 }, "a label of 41": { label: long },
@@ -289,7 +478,7 @@ TestCase {
     function test_eachBoundsEdgeReads() {
         const eight = ["a", "b", "c", "d", "e", "f", "g", "h"]
         const ok = {
-            "w 1": { w: 1 }, "w 12": { w: 12 }, "h 1": { h: 1 }, "h 16": { h: 16 },
+            "w 1": { w: 1 }, "w 12": { w: 12 }, "h 1": { h: 1 }, "h 48": { h: 48 },
             "8 refs": { refs: eight }, "no refs": { refs: [] }, "an empty label": { label: "" },
             "a label of 40": { label: "x".repeat(40) },
             "a label of 40 code points": { label: emoji.repeat(40) },
@@ -363,12 +552,12 @@ TestCase {
         droppedPage.pages.push({ name: "Q", cells: [] })
         compare(read(droppedPage).problem, "damaged")
 
-        // 64 KiB, as UTF-8 bytes of the text
-        const atBound = docOfBytes(65536)
+        // 64 KiB for format 1, as UTF-8 bytes of the text
+        const atBound = docOfBytes(65536, 1)
         compare(bytes(JSON.stringify(atBound)), 65536)
         verify(JSON.stringify(atBound).length < 65536)
         compare(read(atBound).problem, "")
-        const pastBound = docOfBytes(65537)
+        const pastBound = docOfBytes(65537, 1)
         compare(bytes(JSON.stringify(pastBound)), 65537)
         compare(read(pastBound).problem, "damaged")
         // The text as stored counts, spaces and all, though it would be
@@ -384,6 +573,12 @@ TestCase {
         verify(bytes(DashboardBook.serialize(JSON.parse(longer))) > 65536)
         compare(DashboardBook.parse(longer, "phone").problem, "damaged")
         compare(DashboardBook.parse(longer.replace(/1e5/g, "1e1"), "phone").problem, "")
+
+        // Format 2's bound holds what format 1's upgrade can add
+        compare(DashboardBook.maxBytes, 65536 + 2 * 10 * 24)
+        const twoAtBound = docOfBytes(DashboardBook.maxBytes)
+        compare(read(twoAtBound).problem, "")
+        compare(read(docOfBytes(DashboardBook.maxBytes + 1)).problem, "damaged")
     }
 
     // The first edit after a text that couldn't be read keeps it in
@@ -392,7 +587,7 @@ TestCase {
         const doc = DashboardBook.builtIn("phone")
         const part = book()
         part.pages[0].cells[0].w = "x"
-        const cases = [["damaged", "{"], ["newer", JSON.stringify({ format: 2 })],
+        const cases = [["damaged", "{"], ["newer", JSON.stringify({ format: 3 })],
                        ["dropped", JSON.stringify(part)], ["none", ""],
                        ["", JSON.stringify(book())]]
         for (const [problem, stored] of cases) {
@@ -420,12 +615,14 @@ TestCase {
     function test_placementOfTheBuiltInLayouts() {
         const phone = DashboardBook.builtIn("phone").pages[0].cells
         const desktop = DashboardBook.builtIn("desktop").pages[0].cells
-        compare(spots(DashboardBook.place(phone, 2)), [
-            [0, 0, 2, 1], [0, 1, 1, 4], [1, 1, 1, 4], [0, 5, 1, 4], [1, 5, 1, 4],
-            [0, 9, 1, 4], [1, 9, 1, 4], [0, 13, 1, 2], [1, 13, 1, 2]])
-        compare(spots(DashboardBook.place(phone, 4)), [
-            [0, 0, 4, 1], [0, 1, 1, 4], [1, 1, 1, 4], [2, 1, 1, 4], [3, 1, 1, 4],
-            [0, 5, 1, 4], [1, 5, 1, 4], [2, 5, 1, 2], [3, 5, 1, 2]])
+        // Upright: the dial with its three readouts stacked beside it, a
+        // trace across, three readouts across
+        compare(spots(DashboardBook.place(phone, 6)), [
+            [0, 0, 6, 3], [0, 3, 4, 18], [4, 3, 2, 6], [4, 9, 2, 6], [4, 15, 2, 6],
+            [0, 21, 6, 8], [0, 29, 2, 7], [2, 29, 2, 7], [4, 29, 2, 7]])
+        compare(spots(DashboardBook.place(phone, 12)), [
+            [0, 0, 12, 3], [0, 3, 4, 18], [4, 3, 2, 6], [6, 3, 2, 6], [8, 3, 2, 6],
+            [4, 9, 6, 8], [10, 3, 2, 7], [10, 10, 2, 7], [4, 17, 2, 7]])
         compare(spots(DashboardBook.place(desktop, 12)), [
             [0, 0, 12, 1], [0, 1, 2, 8], [2, 1, 2, 8], [4, 1, 1, 4], [5, 1, 1, 4],
             [6, 1, 1, 4], [7, 1, 1, 4], [8, 1, 2, 2], [10, 1, 2, 2]])
@@ -521,8 +718,8 @@ TestCase {
         }
         compare(size(0, 0), [1, 1])
         compare(size(-5, -5), [1, 1])
-        compare(size(99, 99), [12, 16])
-        compare(size(12, 16), [12, 16])
+        compare(size(99, 99), [12, 48])
+        compare(size(12, 48), [12, 48])
         compare(size(2.4, 3.6), [2, 4])
     }
 
@@ -594,7 +791,7 @@ TestCase {
     // A write that would leave a document that doesn't read back as it is
     // returns a copy equal to its input, and never changes the input
     function test_aRefusedWriteReturnsAnEqualCopy() {
-        const near = docOfBytes(65400)
+        const near = docOfBytes(DashboardBook.maxBytes - 136)
         const tenPages = book()
         while (tenPages.pages.length < 10)
             tenPages.pages.push({ name: "P", cells: [] })
@@ -603,7 +800,7 @@ TestCase {
             ["a bad cell", book(), d => DashboardBook.addCell(d, 0, cell("x", { w: 0 }))],
             ["a cell not an object", book(), d => DashboardBook.addCell(d, 0, "x")],
             ["a cell on no page", book(), d => DashboardBook.addCell(d, 2, cell("x"))],
-            ["a cell past 64 KiB", near, d => DashboardBook.addCell(d, 0,
+            ["a cell past the size bound", near, d => DashboardBook.addCell(d, 0,
                                                  cell("x", { more: "y".repeat(200) }))],
             ["removing no cell", book(), d => DashboardBook.removeCell(d, 0, 2)],
             ["removing a cell of no page", book(), d => DashboardBook.removeCell(d, 5, 0)],

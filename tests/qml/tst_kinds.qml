@@ -20,6 +20,7 @@ TestCase {
     Component { id: segmentsC; SegmentGauge { width: 300; height: 110; from: 0; to: 8000; warnFrom: 5500; dangerFrom: 6800 } }
     Component { id: readoutC;  SegmentReadout { width: 260; height: 90; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: sparkC;    SparkGauge { width: 300; height: 110; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
+    Component { id: digitalC;  DigitalGauge { width: 180; height: 122; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: barC;      BarGauge { width: 300; height: 72; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: ringC;     RingGauge { width: 240; height: 220; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
 
@@ -470,6 +471,35 @@ TestCase {
         const after = where()
         fuzzyCompare(after.x, before.x, 0.5, "the readout's x")
         fuzzyCompare(after.u, before.u, 0.5, "the unit's x")
+    }
+
+    // ---- A number tile too short for its trace
+
+    // A phone's 2-wide readout: the label and the value, nothing under them
+    function test_aShortDigitalTileShowsItsLabelAndValueAlone() {
+        const g = make(digitalC, { width: 91, height: 60 })
+        g.hasValue = true
+        g.value = 50
+        g.label = "Coolant"
+        g.unit = "C"
+        waitForRendering(g)
+        verify(g.brief, "brief at 60")
+        const value = find(g, "readout")
+        const top = value.mapToItem(g, 0, 0).y
+        verify(top >= 14, "below the label: " + top)
+        verify(top + value.height <= g.height + 1, "inside the tile: " + (top + value.height))
+        verify(!find(g, "trace").visible, "no trace")
+        verify(!find(g, "footer").visible, "no footer")
+
+        const tall = make(digitalC, { width: 180, height: 122 })
+        waitForRendering(tall)
+        verify(!tall.brief, "a tile with the room keeps its trace")
+        verify(find(tall, "trace").visible, "the trace")
+        verify(find(tall, "footer").visible, "the footer")
+        const edge = make(digitalC, { width: 180, height: 84 })
+        verify(!edge.brief, "84 is enough")
+        edge.height = 83
+        verify(edge.brief, "83 isn't")
     }
 
     // ---- Every new kind, at two sizes and in each theme

@@ -5,9 +5,15 @@ pragma Singleton
 import QtQml
 
 // The dashboards (ADR-0057) as rules on one form's document,
-// { format: 1, pages: [{ name, cells: [{ kind, w, h, label, refs, unit,
+// { format: 2, pages: [{ name, cells: [{ kind, w, h, label, refs, unit,
 // options }] }] }: a form is "phone" or "desktop", each stored as its
 // own text, and a page's cells are in order, placed by place().
+//
+// Format 1 is read and upgraded in memory (ADR-0057's appendix on the
+// six columns): its bounds are checked first, then a phone document's
+// spans are scaled to the 6 and 12 column grid and a desktop document
+// only takes the new number. The stored text is rewritten by the first
+// edit, never by a read.
 //
 // Reading keeps what it can (section 7): a key it doesn't know, in the
 // document, a page, a cell or its options, and a kind or an accent it
@@ -26,14 +32,20 @@ import QtQml
 // whatever the page stores reads back equal; canAddPage, canAddCell,
 // canRemovePage and cellProblem give its controls their state.
 QtObject {
-    readonly property int format: 1
+    readonly property int format: 2
     readonly property int maxPages: 10
     readonly property int maxCells: 24
     readonly property int maxRefs: 8
     readonly property int maxLabel: 40
     readonly property int maxColumns: 12
-    readonly property int maxRows: 16
-    readonly property int maxBytes: 65536
+    readonly property int maxRows: 48
+    readonly property int format1MaxRows: 16
+    readonly property int format1MaxBytes: 65536
+    // Format 1's bound plus what its upgrade can add: two bytes per cell
+    readonly property int maxBytes: format1MaxBytes + 2 * maxPages * maxCells
+    // A format 1 phone span times this is the same shape on the 6 and 12
+    // column grid; the phone's size control steps by it
+    readonly property int phoneSpanScale: 3
 
     // Append-only: a name is never reused for another drawing (section 1)
     readonly property var kinds: ["analog", "ring", "bar", "segments", "digital",
@@ -104,15 +116,21 @@ QtObject {
                                      && p.cells.length > maxCells))
             return { doc: builtIn(form), problem: "damaged" }
         const pagesRead = d.pages.length
+        const rows = d.format === 1 ? format1MaxRows : maxRows
         d.pages = d.pages.filter(p => pageProblem(p) === "")
         let cellsDropped = 0
         for (const p of d.pages) {
             const cellsRead = p.cells.length
-            p.cells = p.cells.filter(c => cellProblem(c) === "")
+            p.cells = p.cells.filter(c => cellProblem(c, rows) === "")
             cellsDropped += cellsRead - p.cells.length
         }
+        if (d.format === 1) {
+            if (utf8Bytes(text) > format1MaxBytes || utf8Bytes(serialize(d)) > format1MaxBytes)
+                return { doc: builtIn(form), problem: "damaged" }
+            upgrade(d, form)
+        }
         // What's left must be what a write stores: with no page left, or
-        // past 64 KiB once written back (1e5 is written 100000), it isn't
+        // past the bound once written back (1e5 is written 100000), it isn't
         if (documentProblem(d) !== "")
             return { doc: builtIn(form), problem: "damaged" }
         const pagesDropped = pagesRead - d.pages.length
@@ -120,6 +138,20 @@ QtObject {
             return { doc: d, problem: "dropped",
                      dropped: { pages: pagesDropped, cells: cellsDropped } }
         return { doc: d, problem: "" }
+    }
+
+    // A format 1 document, its bounds already checked, as format 2. The
+    // form is the key the text came from, never guessed from the content
+    function upgrade(d, form) {
+        d.format = format
+        if (form !== "phone")
+            return
+        for (const p of d.pages) {
+            for (const c of p.cells) {
+                c.w = Math.min(maxColumns, c.w * phoneSpanScale)
+                c.h = c.h * phoneSpanScale
+            }
+        }
     }
 
     function serialize(doc) {
@@ -157,16 +189,18 @@ QtObject {
     }
 
     // "" when a cell may be kept, else why not (its own fields: the
-    // count of cells is the page's, judged where the page is)
-    function cellProblem(c) {
+    // count of cells is the page's, judged where the page is). rows is
+    // the bound on h, the current format's unless the caller gives another
+    function cellProblem(c, rows) {
+        const rowBound = rows === undefined ? maxRows : rows
         if (!isObject(c))
             return qsTr("A gauge isn't an object")
         if (typeof c.kind !== "string" || c.kind === "")
             return qsTr("A gauge needs a kind")
         if (!Number.isInteger(c.w) || c.w < 1 || c.w > maxColumns)
             return qsTr("A gauge is 1 to %1 columns wide").arg(maxColumns)
-        if (!Number.isInteger(c.h) || c.h < 1 || c.h > maxRows)
-            return qsTr("A gauge is 1 to %1 rows high").arg(maxRows)
+        if (!Number.isInteger(c.h) || c.h < 1 || c.h > rowBound)
+            return qsTr("A gauge is 1 to %1 rows high").arg(rowBound)
         if (!Array.isArray(c.refs) || !c.refs.every(r => typeof r === "string"))
             return qsTr("A gauge's signals are a list of references")
         if (c.refs.length > maxRefs)
@@ -228,45 +262,72 @@ QtObject {
     // ---- The built-in layout
 
     function builtIn(form) {
-        const phone = form === "phone"
+        return { format: format, pages: [{ name: qsTr("Engine"),
+                                           cells: form === "phone" ? phoneCells() : desktopCells() }] }
+    }
+
+    function gaugeCell(kind, w, h, label, refs, unit, options) {
+        return { kind: kind, w: w, h: h, label: label, refs: refs, unit: unit, options: options }
+    }
+
+    // On 6 columns: the dial 4 wide with three readouts stacked beside it,
+    // a trace across, then three readouts across
+    function phoneCells() {
         const rpm = ["id:1001", "id:7003"]
-        const cell = (kind, w, h, label, refs, unit, options) =>
-            ({ kind: kind, w: w, h: h, label: label, refs: refs, unit: unit, options: options })
         const degC = "\u00B0C"
-        return {
-            format: format,
-            pages: [{
-                name: qsTr("Engine"),
-                cells: [
-                    cell("shift-light", 12, 1, qsTr("Shift lights"), rpm.slice(), "RPM",
-                         { from: 4500, to: 6500, count: phone ? 11 : 15 }),
-                    cell("analog", phone ? 1 : 2, phone ? 4 : 8, qsTr("Engine speed"), rpm.slice(),
-                         "RPM",
-                         { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
-                           labelDivisor: 1000, dangerFrom: 6800,
-                           caption: qsTr("\u00D71000 r/min"), peak: true, progress: true }),
-                    // No caption: the dial shows its unit
-                    cell("analog", phone ? 1 : 2, phone ? 4 : 8, qsTr("Vehicle speed"),
-                         ["id:3001", "id:7004"], "km/h",
-                         { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true,
-                           peakLabel: qsTr("TOP") }),
-                    cell("ring", 1, 4, qsTr("Coolant"), ["id:2001", "id:7002"], degC,
-                         { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
-                    cell("ring", 1, 4, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
-                         { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
-                    cell("digital", 1, 4, qsTr("IAT"), ["id:5001", "id:7005"], degC,
-                         { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
-                           description: qsTr("Intake air temperature") }),
-                    cell("digital", 1, 4, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                         { from: 0, to: 300, description: qsTr("Mass air flow"),
-                           accent: "info" }),
-                    cell("bar", phone ? 1 : 2, 2, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
-                         { from: 0, to: 100, accent: "success" }),
-                    cell("bar", phone ? 1 : 2, 2, qsTr("Engine load"), ["id:6001", "id:7001"], "%",
-                         { from: 0, to: 100 })
-                ]
-            }]
-        }
+        return [
+            gaugeCell("shift-light", 12, 3, qsTr("Shift lights"), rpm.slice(), "RPM",
+                      { from: 4500, to: 6500, count: 11 }),
+            gaugeCell("analog", 4, 18, qsTr("Engine speed"), rpm.slice(), "RPM",
+                      { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
+                        labelDivisor: 1000, dangerFrom: 6800,
+                        caption: qsTr("\u00D71000 r/min"), peak: true, progress: true }),
+            gaugeCell("digital", 2, 6, qsTr("Speed"), ["id:3001", "id:7004"], "km/h",
+                      { from: 0, to: 260 }),
+            gaugeCell("digital", 2, 6, qsTr("Coolant"), ["id:2001", "id:7002"], degC,
+                      { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
+            gaugeCell("digital", 2, 6, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
+                      { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
+            gaugeCell("digital", 6, 8, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
+                      { from: 0, to: 300, description: qsTr("Mass air flow"), accent: "info" }),
+            gaugeCell("digital", 2, 7, qsTr("IAT"), ["id:5001", "id:7005"], degC,
+                      { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
+                        description: qsTr("Intake air temperature") }),
+            gaugeCell("digital", 2, 7, qsTr("Load"), ["id:6001", "id:7001"], "%",
+                      { from: 0, to: 100 }),
+            gaugeCell("digital", 2, 7, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
+                      { from: 0, to: 100 })
+        ]
+    }
+
+    function desktopCells() {
+        const rpm = ["id:1001", "id:7003"]
+        const degC = "\u00B0C"
+        return [
+            gaugeCell("shift-light", 12, 1, qsTr("Shift lights"), rpm.slice(), "RPM",
+                      { from: 4500, to: 6500, count: 15 }),
+            gaugeCell("analog", 2, 8, qsTr("Engine speed"), rpm.slice(), "RPM",
+                      { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
+                        labelDivisor: 1000, dangerFrom: 6800,
+                        caption: qsTr("\u00D71000 r/min"), peak: true, progress: true }),
+            // No caption: the dial shows its unit
+            gaugeCell("analog", 2, 8, qsTr("Vehicle speed"), ["id:3001", "id:7004"], "km/h",
+                      { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true,
+                        peakLabel: qsTr("TOP") }),
+            gaugeCell("ring", 1, 4, qsTr("Coolant"), ["id:2001", "id:7002"], degC,
+                      { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
+            gaugeCell("ring", 1, 4, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
+                      { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
+            gaugeCell("digital", 1, 4, qsTr("IAT"), ["id:5001", "id:7005"], degC,
+                      { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
+                        description: qsTr("Intake air temperature") }),
+            gaugeCell("digital", 1, 4, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
+                      { from: 0, to: 300, description: qsTr("Mass air flow"), accent: "info" }),
+            gaugeCell("bar", 2, 2, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
+                      { from: 0, to: 100, accent: "success" }),
+            gaugeCell("bar", 2, 2, qsTr("Engine load"), ["id:6001", "id:7001"], "%",
+                      { from: 0, to: 100 })
+        ]
     }
 
     function reset(form) {
@@ -370,7 +431,7 @@ QtObject {
         })
     }
 
-    // The span, rounded and clamped to 1 to 12 columns and 1 to 16 rows
+    // The span, rounded and clamped to 1 to 12 columns and 1 to 48 rows
     function resizeCell(doc, page, index, w, h) {
         return write(doc, d => {
             if (!hasCell(d, page, index) || typeof w !== "number" || typeof h !== "number"
@@ -381,6 +442,16 @@ QtObject {
             c.h = clamp(Math.round(h), 1, maxRows)
             return true
         })
+    }
+
+    // The phone's height control: the next multiple of the scale up or
+    // down, and no lower than one scale's rows (a stored odd h stays until
+    // a step moves it)
+    function stepRows(h, up) {
+        if (up)
+            return Math.min(maxRows, (Math.floor(h / phoneSpanScale) + 1) * phoneSpanScale)
+        const down = (Math.ceil(h / phoneSpanScale) - 1) * phoneSpanScale
+        return down >= phoneSpanScale ? down : h
     }
 
     // label, refs and unit, merged; null removes label or unit, and a key

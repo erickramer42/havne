@@ -884,7 +884,7 @@ TestCase {
         const part = docOf([cellOf("Bad"), cellOf("Good")])
         part.pages[0].cells[0].w = "x"
         return [{ tag: "damaged", text: "{" },
-                { tag: "newer", text: JSON.stringify({ format: 2, pages: [] }) },
+                { tag: "newer", text: JSON.stringify({ format: 3, pages: [] }) },
                 { tag: "dropped", text: JSON.stringify(part) }]
     }
     function test_theFirstEditKeepsATextThatCantBeRead(data) {
@@ -989,31 +989,164 @@ TestCase {
         compare(labels(page), ["tach"])
     }
 
-    // Standing up moves the bar's default span to the ADR's 1 x 4 and back;
-    // a span the user chose stays
-    function test_standingUpTakesTheTallSpanAndBack() {
+    // Standing up moves the bar's default span to the tall one and back,
+    // on each form's own grid; a span the user chose stays
+    function test_standingUpTakesTheTallSpanAndBack_data() {
+        return [{ tag: "desktop", props: {}, flat: [2, 2], tall: [1, 4] },
+                { tag: "phone", props: { form: "phone", width: 384, height: 832 },
+                  flat: [6, 6], tall: [3, 12] }]
+    }
+    function test_standingUpTakesTheTallSpanAndBack(data) {
         const bar = cellOf("Level", "bar")
-        bar.w = 2
-        bar.h = 2
+        bar.w = data.flat[0]
+        bar.h = data.flat[1]
         const odd = cellOf("Odd", "bar")
         odd.w = 3
         odd.h = 2
-        const page = pageOf({}, docOf([bar, odd]))
+        const page = pageOf(data.props, docOf([bar, odd]))
         page.startEditing()
         const at = i => page.doc.pages[0].cells[i]
-        press(find(page, "dashCell_0_0"))
+        page.select(0)
         const vertical = find(page, "panelVertical")
         vertical.toggle()
         vertical.toggled()
-        compare([at(0).w, at(0).h], [1, 4], "tall")
+        compare([at(0).w, at(0).h], data.tall, "tall")
         compare(at(0).options.vertical, true)
         vertical.toggle()
         vertical.toggled()
-        compare([at(0).w, at(0).h], [2, 2], "and back")
-        press(find(page, "dashCell_0_1"))
+        compare([at(0).w, at(0).h], data.flat, "and back")
+        page.select(1)
         vertical.toggle()
         vertical.toggled()
         compare([at(1).w, at(1).h], [3, 2], "a chosen span stays")
+    }
+
+    // A form's new gauges and the "+" cell take that form's spans
+    function test_newCellsTakeTheFormsSpans_data() {
+        return [{ tag: "desktop", props: {}, spans: {
+                    analog: [1, 4], ring: [1, 4], bar: [2, 2], digital: [1, 4],
+                    "shift-light": [12, 1], segments: [2, 3], "seven-segment": [1, 2],
+                    sparkline: [2, 3] }, plus: [1, 2] },
+                { tag: "phone", props: { form: "phone", width: 384, height: 832 }, spans: {
+                    analog: [3, 12], ring: [3, 12], bar: [6, 6], digital: [3, 12],
+                    "shift-light": [12, 3], segments: [6, 9], "seven-segment": [3, 6],
+                    sparkline: [6, 9] }, plus: [3, 6] }]
+    }
+    function test_newCellsTakeTheFormsSpans(data) {
+        const page = pageOf(data.props, docOf([cellOf("A")]))
+        for (const kind in data.spans) {
+            const made = page.newCell(kind, { name: "x", ref: "id:1001", decodedUnit: "RPM",
+                                              decodedLow: 0, decodedHigh: 8000 })
+            compare([made.w, made.h], data.spans[kind], kind)
+        }
+        page.startEditing()
+        const view = find(page, "dashPage_0")
+        const plus = find(page, "dashAddCell_0")
+        tryVerify(() => view.width > 0 && plus.width > 0, 3000, "laid out")
+        compare(view.placed[view.placed.length - 1].w, data.plus[0])
+        compare(view.placed[view.placed.length - 1].h, data.plus[1])
+        fuzzyCompare(plus.width, data.plus[0] * view.columnWidth + (data.plus[0] - 1) * page.gap,
+                     1e-6, "the + cell is as wide as its span")
+    }
+
+    // The phone's height control moves in old rows; the desktop's by one to 16
+    function test_theHeightControlsStep() {
+        const start = cellOf("A")
+        start.w = 3
+        start.h = 12
+        const phone = pageOf({ form: "phone", width: 384, height: 832 }, docOf([start]))
+        const h = () => phone.doc.pages[0].cells[0].h
+        const setH = v => {
+            const d = docOf([cellOf("A")])
+            d.pages[0].cells[0].w = 3
+            d.pages[0].cells[0].h = v
+            phone.doc = d
+        }
+        phone.startEditing()
+        phone.select(0)
+        const box = find(phone, "panelH")
+        compare(box.to, 48)
+        compare(box.stepSize, 3)
+        const step = up => {
+            if (up) box.increase()
+            else box.decrease()
+            box.valueModified()
+        }
+        step(true)
+        compare(h(), 15, "up by 3")
+        tryCompare(box, "value", 15)
+        step(false)
+        compare(h(), 12, "and down")
+        tryCompare(box, "value", 12)
+        // A stored odd h shows as it is and moves to the next multiple
+        setH(4)
+        tryCompare(box, "value", 4)
+        compare(box.from, 3)
+        step(false)
+        compare(h(), 3)
+        tryCompare(box, "value", 3)
+        verify(box.value === box.from, "the bottom of the control")
+        setH(1)
+        tryCompare(box, "value", 1)
+        compare(box.from, 1, "an h under the step still shows")
+        step(true)
+        compare(h(), 3)
+        tryCompare(box, "value", 3)
+        phone.destroy()
+
+        const desk = pageOf({}, docOf([cellOf("A")]))
+        desk.startEditing()
+        desk.select(0)
+        const deskBox = find(desk, "panelH")
+        compare(deskBox.to, 16, "the desktop's control stays as it was")
+        compare(deskBox.stepSize, 1)
+        compare(deskBox.from, 1)
+        spin(deskBox, 5)
+        compare(desk.doc.pages[0].cells[0].h, 5)
+    }
+
+    // A layout made on 2 and 4 columns keeps every cell's box on 6 and 12,
+    // with the page's own gap, and the store is only written by an edit
+    function test_aStoredPhoneLayoutKeepsItsBoxes_data() {
+        return [{ tag: "upright", w: 384, h: 832, before: 2, after: 6, capped: false },
+                { tag: "on its side, with the row's height capped", w: 832, h: 384,
+                  before: 4, after: 12, capped: true }]
+    }
+    function test_aStoredPhoneLayoutKeepsItsBoxes(data) {
+        const rows = (w, h, kind) => ({ kind: kind || "digital", w: w, h: h, label: "c",
+                                        refs: ["id:1001"], unit: "RPM", options: { from: 0, to: 100 } })
+        const cells = [rows(12, 1, "shift-light"), rows(1, 4), rows(1, 8), rows(2, 3), rows(1, 2),
+                       rows(3, 5), rows(1, 4)]
+        const text = JSON.stringify({ format: 1, pages: [{ name: "P", cells: cells }] })
+        createTemporaryObject(storeComponent, testCase).setValue("phone", text)
+        const page = pageOf({ form: "phone", width: data.w, height: data.h })
+        const view = find(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        compare(view.columns, data.after)
+        const gap = page.gap
+        verify(gap > 0, "a gap to get right")
+        // The grid as it was, from DashboardPage's own formula
+        const col = (view.gridWidth - (data.before - 1) * gap) / data.before
+        const tallest = cells.reduce((m, c) => Math.max(m, c.h), 1)
+        const cap = (Math.max(160, view.height - 2 * page.margin) + gap) / tallest
+        const pitch = Math.max(1, Math.min((col + gap) / 4, cap))
+        compare(cap < (col + gap) / 4, data.capped, "the case means what it says")
+        const was = DashboardBook.place(cells, data.before)
+        for (let i = 0; i < cells.length; ++i) {
+            const c = find(page, "dashCell_0_" + i)
+            const b = was[i]
+            tryVerify(() => c.width > 0, 3000, "cell " + i + " laid out")
+            fuzzyCompare(c.x, b.x * (col + gap), 1e-6, "cell " + i + " x")
+            fuzzyCompare(c.y, b.y * pitch, 1e-6, "cell " + i + " y")
+            fuzzyCompare(c.width, b.w * col + (b.w - 1) * gap, 1e-6, "cell " + i + " width")
+            fuzzyCompare(c.height, b.h * pitch - gap, 1e-6, "cell " + i + " height")
+        }
+        compare(page.problem, "", "it reads")
+        compare(storedText(page), text, "a read writes nothing")
+        verify(page.edit(DashboardBook.renamePage(page.doc, 0, "Q")), "an edit")
+        const written = JSON.parse(storedText(page))
+        compare(written.format, 2, "the first edit writes format 2")
+        compare(written.pages[0].cells[1].h, 12, "with the scaled spans")
     }
 
     // A digital tile samples only while its page is the one shown

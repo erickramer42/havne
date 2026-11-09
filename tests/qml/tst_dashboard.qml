@@ -461,7 +461,7 @@ TestCase {
         return loaders(page).every(l => l.status === Loader.Ready)
     }
 
-    // Section 4's grid: the phone's 2 columns upright and 4 on its
+    // Section 4's grid: the phone's 6 columns upright and 12 on its
     // side, the desktop's one per 220 px from 2 to 12, each cell where
     // DashboardBook.place puts it, a row a quarter of a column (the
     // desktop's 2 x 8 tach square), and no two cells overlapping
@@ -474,8 +474,8 @@ TestCase {
             { tag: "a 4K desktop window", form: "desktop", w: 3840, h: 2000, columns: 12 },
             { tag: "a desktop window over 12 columns", form: "desktop", w: 5000, h: 1400,
               columns: 12 },
-            { tag: "a phone upright", form: "phone", w: 384, h: 832, columns: 2 },
-            { tag: "a phone on its side", form: "phone", w: 832, h: 384, columns: 4 }
+            { tag: "a phone upright", form: "phone", w: 384, h: 832, columns: 6 },
+            { tag: "a phone on its side", form: "phone", w: 832, h: 384, columns: 12 }
         ]
     }
     function test_theGridFollowsTheForm(data) {
@@ -507,11 +507,16 @@ TestCase {
             }
         }
         const tach = findChild(page, "dashCell_0_1")
-        fuzzyCompare(view.pitch, pitchX / 4, 1e-6, "a row is a quarter of a column")
-        fuzzyCompare(tach.height, tach.width, 1e-6, "the tach is square")
+        const tallest = cells.reduce((m, c) => Math.max(m, c.h), 1)
+        const cap = (Math.max(160, view.height - 2 * page.margin) + page.gap) / tallest
+        fuzzyCompare(view.pitch, Math.min(pitchX / 4, cap), 1e-6,
+                     "a row is a quarter of a column, unless the tallest cell wouldn't fit")
+        if (data.form === "desktop")
+            fuzzyCompare(tach.height, tach.width, 1e-6, "the tach is square")
     }
 
-    // The phone's dials share the first row under the shift lights
+    // The phone's dial and its first readout share the row under the
+    // shift lights
     function test_thePhonesDialsShareARow() {
         const page = createTemporaryObject(pageComponent, testCase,
                                            { form: "phone", width: 384, height: 832 })
@@ -663,7 +668,7 @@ TestCase {
     function test_aStoredDocumentThatCantBeUsedSaysSo_data() {
         return [
             { tag: "damaged", text: "{", words: "couldn't be read" },
-            { tag: "newer", text: JSON.stringify({ format: 2, pages: [] }),
+            { tag: "newer", text: JSON.stringify({ format: 3, pages: [] }),
               words: "a newer version of Havne" }
         ]
     }

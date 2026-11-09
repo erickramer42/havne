@@ -980,11 +980,12 @@ TestCase {
         dash.stopEditing()
     }
 
-    // The Dashboard's phone form: two columns upright, the tach and the
-    // speedo side by side under the shift lights, and four on its side
+    // The Dashboard's phone form: six columns upright, the tach and its
+    // first readout side by side under the shift lights, and twelve on
+    // its side
     function test_theDashboardsDialsShareARowUpright_data() {
-        return [{ tag: "a phone upright", w: 384, h: 832, columns: 2 },
-                { tag: "a phone on its side", w: 832, h: 384, columns: 4 }]
+        return [{ tag: "a phone upright", w: 384, h: 832, columns: 6 },
+                { tag: "a phone on its side", w: 832, h: 384, columns: 12 }]
     }
     function test_theDashboardsDialsShareARowUpright(data) {
         const main = createTemporaryObject(mainComponent, testCase)
