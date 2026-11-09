@@ -631,18 +631,22 @@ TestCase {
         // the words, nothing about time, so the waits are long
         const longWait = 60000
         tryVerify(() => page.viewing && find(page, "detailView_frames").visible, longWait)
+        // The switch reaches its place at the layout's next polish: a press
+        // before that lands where it isn't
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
         mouseClick(find(page, "detailView_frames"))
+        verify(page.framesShown, "the press reached the switch")
         const words = find(page, "framesWords")
         tryVerify(() => words.text === "the first 10,000 frames from 0.0 s: zoom in for the rest",
-                  longWait, words.text)
+                  longWait, "the table's cap is said")
         compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
         page.setView(0, 2000)
-        tryVerify(() => words.text === "2000 frames in view", longWait, words.text)
+        tryVerify(() => words.text === "2000 frames in view", longWait, "the rows of 2 s")
 
         // A view that does not start at the recording's start: the rows
         // are those from its left edge
         page.setView(5000, 6000)
-        tryVerify(() => words.text === "1001 frames in view", longWait, words.text)
+        tryVerify(() => words.text === "1001 frames in view", longWait, "the rows from 5 s")
         const list = find(find(page, "viewerFrameTable"), "frameList")
         tryVerify(() => list.itemAtIndex(0) !== null, longWait)
         compare(list.itemAtIndex(0).model.timestampUs, 5000000)
