@@ -316,7 +316,7 @@ counts the frames per CAN ID.
   there too: the deb's `havne-cli` streams the mock at the release's
   version, the AppImage stays up 10 s offscreen, and the aarch64 wheel
   installs into a fresh venv with `pip --no-index` and reads `mock://`
-  through `python/examples/read_pids.py` (v0.6.0, 2026-11-07).
+  through `python/examples/read_pids.py` (v0.7.0, 2026-11-08).
 - **A laptop on native Ubuntu 26.04** (no WSL), on the test car's OBD
   port through a Y-splitter, `dev` at bbc9050, built with GCC 15.2 and
   Qt 6.12.0: the OBDLink MX+ over Bluetooth through `rfcomm`, the OBDX
