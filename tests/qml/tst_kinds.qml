@@ -312,16 +312,23 @@ TestCase {
         compare(row.height, before.h, "no value again")
     }
 
-    // Eight digits on a narrow card end before the unit, inside the card
+    // Eight digits on a narrow card never overlap the unit and stay inside it,
+    // whichever layout the fonts' metrics pick (beside or stacked)
     function test_eightDigitsFitANarrowCard() {
         const g = make(readoutC, { digits: 8, width: 120, height: 64, unit: "rpm", dangerFrom: 85 })
         g.hasValue = true
         g.value = 12345678
         waitForRendering(g)
         const row = find(g, "digits")
-        verify(row.x + row.width <= find(g, "unitBox").x + 0.5,
-               "the digits end at " + (row.x + row.width) + ", the unit starts at " + find(g, "unitBox").x)
-        verify(find(g, "unitBox").x + find(g, "unitBox").width <= g.width + 0.5, "the unit ends inside")
+        const unit = find(g, "unitBox")
+        const apart = row.x + row.width <= unit.x + 0.5 || row.y + row.height <= unit.y + 0.5
+        verify(apart, (g.tall ? "stacked" : "beside") + ": the digits span x " + row.x + " to "
+                      + (row.x + row.width) + " and y " + row.y + " to " + (row.y + row.height)
+                      + ", the unit x " + unit.x + " to " + (unit.x + unit.width)
+                      + " and y " + unit.y + " to " + (unit.y + unit.height))
+        verify(row.x >= -0.5 && row.x + row.width <= g.width + 0.5, "the digits end inside")
+        verify(unit.x >= -0.5 && unit.x + unit.width <= g.width + 0.5, "the unit ends inside")
+        verify(unit.y + unit.height <= g.height + 0.5, "the unit ends above the card's bottom")
         verify(row.height >= 8, "and they are not too small to read: " + row.height)
     }
 
