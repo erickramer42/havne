@@ -444,7 +444,10 @@ ApplicationWindow {
                         objectName: "homePage"
                         onConnectRequested: root.openConnect()
                     }
-                    DashboardPage { objectName: "dashboardPage" }
+                    DashboardPage {
+                        objectName: "dashboardPage"
+                        offlineUri: settingsView.offlineUri
+                    }
                     LiveViewPage {
                         objectName: "livePage"
                         onConnectRequested: root.openConnect()

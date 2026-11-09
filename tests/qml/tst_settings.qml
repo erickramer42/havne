@@ -1358,6 +1358,34 @@ TestCase {
         return page.importSignalFile(url)
     }
 
+    // With no session a page lists its signals from Settings' choice: the
+    // field's URI, or the chosen profile alone when no URI is typed
+    function test_theOfflineUriFollowsTheFieldAndTheChoice() {
+        const page = createPage()
+        page.uriField.text = ""
+        compare(page.offlineUri, "", "nothing typed, nothing chosen")
+
+        page.chooseProfile("obd2")
+        compare(page.uriField.text, "", "no URI is made up in the field")
+        compare(page.offlineUri, "mock://?profile=obd2")
+        verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
+               "a built-in profile's rows, with no URI typed")
+
+        page.uriField.text = "mock://demo"
+        compare(page.offlineUri, "mock://demo", "a typed URI is read as it is")
+        page.chooseProfile("obd2")
+        compare(page.offlineUri, "mock://demo?profile=obd2", "with the choice it composes")
+
+        page.uriField.text = ""
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "offline.json", "Offline"))
+        page.chooseProfile("user.offline")
+        compare(page.offlineUri, "mock://?profile=user.offline")
+        compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"],
+                "the picked vehicle's own file, before any connect")
+    }
+
     function test_anImportedFileIsTheVehiclesAndAProfile() {
         let page = createPage()
         verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")

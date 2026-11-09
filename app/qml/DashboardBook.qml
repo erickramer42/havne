@@ -49,7 +49,7 @@ QtObject {
 
     // Append-only: a name is never reused for another drawing (section 1)
     readonly property var kinds: ["analog", "ring", "bar", "segments", "digital",
-                                  "seven-segment", "sparkline", "shift-light"]
+                                  "seven-segment", "sparkline", "shift-light", "blank"]
     // The Theme roles a cell's accent names; any other string is kept and
     // draws as "accent", the gauges' default
     readonly property var accents: ["accent", "info", "success"]
@@ -388,6 +388,45 @@ QtObject {
         return { from: 0, to: 100 }
     }
 
+    // ---- A drag (section 4): one cell's order while it's held
+
+    // The list with the item at from moved to place to
+    function reordered(list, from, to) {
+        const out = list.slice()
+        out.splice(to, 0, out.splice(from, 1)[0])
+        return out
+    }
+
+    // Where the item at i lands when the item at from goes to place to
+    function movedIndex(i, from, to) {
+        if (i === from)
+            return to
+        if (from < to && i > from && i <= to)
+            return i - 1
+        if (to < from && i >= to && i < from)
+            return i + 1
+        return i
+    }
+
+    // The box the cell at from takes at each place it could be dropped
+    function dropBoxes(cells, from, columns) {
+        return cells.map((_, to) => place(reordered(cells, from, to), columns)[to])
+    }
+
+    // The index of the point nearest (x, y), the lowest on a tie, -1 for
+    // none. It reads only the finger, so a place can't flip back and forth
+    function nearest(points, x, y) {
+        let best = -1, bestDistance = Infinity
+        points.forEach((p, i) => {
+            const d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y)
+            if (d < bestDistance) {
+                best = i
+                bestDistance = d
+            }
+        })
+        return best
+    }
+
     // ---- Writes: each returns a new document, or an unchanged copy
 
     function canAddPage(doc) {
@@ -427,6 +466,24 @@ QtObject {
                 return false
             const cells = d.pages[page].cells
             cells.splice(to, 0, cells.splice(from, 1)[0])
+            return true
+        })
+    }
+
+    // The cell at index as a copy of its own, null when there's none
+    function copyCell(doc, page, index) {
+        return documentProblem(doc) === "" && hasCell(doc, page, index)
+               ? copy(doc.pages[page].cells[index]) : null
+    }
+
+    // A copy of cell, after place index (-1 for the page's start); a full
+    // page refuses it, as every write refuses a 25th cell
+    function pasteCell(doc, page, index, cell) {
+        return write(doc, d => {
+            if (!hasPage(d, page) || !plain(cell) || !Number.isInteger(index) || index < -1
+                    || index >= d.pages[page].cells.length)
+                return false
+            d.pages[page].cells.splice(index + 1, 0, cell)
             return true
         })
     }

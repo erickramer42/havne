@@ -61,11 +61,6 @@ GaugeBase {
     function px(deg, radius) { return cx + radius * Math.cos(deg * Math.PI / 180) }
     function py(deg, radius) { return cy + radius * Math.sin(deg * Math.PI / 180) }
 
-    TapHandler {
-        enabled: gauge.showPeak
-        onTapped: gauge.resetPeaks()
-    }
-
     // ---- Bezel and face
     Rectangle {
         anchors.centerIn: parent

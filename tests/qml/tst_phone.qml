@@ -972,11 +972,34 @@ TestCase {
         dash.select(1)
         tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
               "panelDecimals", "panelW", "panelH", "panelPeak", "panelEarlier", "panelLater",
-              "panelStart", "panelEnd"])
+              "panelStart", "panelEnd", "panelCopy", "panelPaste"])
+        dash.copySelected()
+        tall(["dashPaste"])
+        compare(pastTheEdge(find(dash, "dashEditBar"), main.contentItem, []).length, 0,
+                "Paste fits the edit bar")
         dash.startAdd()
         tall(["addClose", "addKind_analog", "addKind_digital"])
         dash.pickKind("analog")
         tall(["signalBack", "pickSignal_" + Bridge.gaugeSignals["rpm"][0]])
+        dash.stopEditing()
+    }
+
+    // Settings' profile reaches the Dashboard's picker with no session, and
+    // a change there reaches a list already open
+    function test_theDashboardsPickerFollowsSettingsOffline() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        const settings = find(main.contentItem, "settingsPage")
+        settings.uriField.text = ""
+        settings.chooseProfile("obd2")
+        dash.startEditing()
+        dash.pickKind("ring")
+        verify(dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
+               "obd2's speed, with no URI typed")
+        settings.uriField.text = "mock://demo"
+        tryVerify(() => dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][0]),
+                  3000, "the list follows the field")
         dash.stopEditing()
     }
 

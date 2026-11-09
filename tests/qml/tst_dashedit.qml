@@ -32,22 +32,6 @@ TestCase {
             property string desktopUnread: ""
         }
     }
-    Component {
-        id: sessionComponent
-        Settings {
-            category: "session"
-            property string uri: ""
-        }
-    }
-
-    property string keptUri: ""
-
-    function initTestCase() {
-        keptUri = String(createTemporaryObject(sessionComponent, testCase).value("uri", ""))
-    }
-    function cleanupTestCase() {
-        createTemporaryObject(sessionComponent, testCase).setValue("uri", keptUri)
-    }
 
     // A binding error in the app's QML fails the test. The page's
     // Settings stores a write when the page goes, so the store is put
@@ -59,7 +43,6 @@ TestCase {
             store.setValue(key, "")
         store.setValue("phonePage", 0)
         store.setValue("desktopPage", 0)
-        createTemporaryObject(sessionComponent, testCase).setValue("uri", "")
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
         failOnWarning(/^Model size of /)
     }
@@ -270,20 +253,22 @@ TestCase {
     }
 
     // No session: the rows of the last URI that connected; none, a line
-    function test_withNoSessionThePickerReadsTheLastUri() {
-        const none = pageOf({}, docOf([cellOf("A")]))
-        none.startEditing()
-        none.pickKind("ring")
-        find(none, "dashSignalPanel")
-        verify(find(none, "signalNone").visible, "nothing to pick")
-        none.destroy()
-        wait(0)
-
-        createTemporaryObject(sessionComponent, testCase).setValue("uri", "mock://demo")
+    function test_withNoSessionThePickerReadsWhatSettingsChose() {
         const page = pageOf({}, docOf([cellOf("A")]))
         page.startEditing()
         page.pickKind("ring")
+        find(page, "dashSignalPanel")
+        verify(find(page, "signalNone").visible, "nothing chosen, nothing to pick")
+
+        // While the list is open it follows Settings
+        page.offlineUri = "mock://?profile=obd2"
+        tryVerify(() => findChild(page, "pickSignal_" + Bridge.gaugeSignals["speed"][1]) !== null,
+                  3000, "obd2's speed, offered")
         verify(!find(page, "signalNone").visible)
+
+        page.offlineUri = "mock://demo"
+        tryVerify(() => findChild(page, "pickSignal_" + Bridge.gaugeSignals["speed"][1]) === null,
+                  3000, "and gone with obd2")
         click(page, "pickSignal_" + Bridge.gaugeSignals["speed"][0])
         compare(page.doc.pages[0].cells[1].kind, "ring")
         compare(page.doc.pages[0].cells[1].unit, "km/h")
@@ -913,26 +898,493 @@ TestCase {
         compare(String(stored.value("desktopUnread")), data.text, "stored as the page goes")
     }
 
-    // The phone: a long press starts edit mode at the cell; the desktop's
-    // does nothing
-    function test_aLongPressOnThePhoneStartsEditing() {
-        const desk = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
-        const deskCell = find(desk, "dashCell_0_1")
-        mousePress(deskCell)
-        wait(1200)
-        mouseRelease(deskCell)
-        verify(!desk.editing, "not on the desktop")
-        desk.destroy()
+    // ---- The gesture (ADR-0057's appendix, section 4)
 
-        const page = pageOf({ form: "phone", width: 384, height: 832 },
-                            docOf([cellOf("A"), cellOf("B")]))
-        const cell = find(page, "dashCell_0_1")
+    // The finger down on a cell until the page lifts it
+    function hold(page, cell) {
         tryVerify(() => cell.width > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
         mousePress(cell)
-        tryVerify(() => page.editing, 3000, "edit mode")
+        tryVerify(() => page.held >= 0, 10000, "the hold completes")
+    }
+    // An item's middle, in the page's coordinates
+    function centerOf(page, item) {
+        return item.mapToItem(page, item.width / 2, item.height / 2)
+    }
+    readonly property int holdMs: Application.styleHints.mousePressAndHoldInterval
+
+    // A release after the hold opens the cell's menu, on both forms and
+    // in or out of edit mode, and leaves the mode as it was
+    function test_aHoldThenReleaseOpensTheMenu_data() {
+        return [{ tag: "phone", phone: true, edit: false },
+                { tag: "phone in edit mode", phone: true, edit: true },
+                { tag: "desktop", phone: false, edit: false },
+                { tag: "desktop in edit mode", phone: false, edit: true }]
+    }
+    function test_aHoldThenReleaseOpensTheMenu(data) {
+        const page = pageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
+                            docOf([cellOf("A"), cellOf("B")]))
+        if (data.edit)
+            page.startEditing()
+        const cell = find(page, "dashCell_0_1")
+        const view = find(page, "dashPage_0")
+        const swipe = find(page, "dashPages")
+        hold(page, cell)
+        verify(cell.lifted, "the cell lifts")
+        verify(!view.interactive, "the page doesn't scroll under a held cell")
+        verify(!swipe.interactive, "nor swipe")
+        compare(page.panel, "", "the menu waits for the release")
+        mouseMove(cell, cell.width / 2 + 1, cell.height / 2, -1, Qt.LeftButton)
+        compare(page.dropAt, -1, "a finger's tremble isn't a drag")
         mouseRelease(cell)
+        compare(page.held, -1)
         compare(page.selected, 1)
         compare(page.panel, "cell")
+        compare(page.editing, data.edit, "edit mode is as it was")
+        verify(find(cell, "cellSelected").visible, "the panel's cell is outlined")
+        verify(find(page, "panelCopy").visible)
+        verify(find(page, "panelPaste").visible)
+        verify(view.interactive, "the page scrolls again")
+        compare(swipe.interactive, data.phone, "and swipes where it did")
+
+        click(page, "panelClose")
+        compare(page.panel, "")
+        compare(page.selected, data.edit ? 1 : -1, "only edit mode keeps a selection")
+    }
+
+    // A press let go before the hold is a tap
+    function test_aTapIsNotAHold() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        press(find(page, "dashCell_0_0"))
+        compare(page.held, -1)
+        compare(page.panel, "", "no menu outside edit mode")
+    }
+
+    // A finger that moves before the hold completes is a swipe or a
+    // scroll; the desktop's sideways move has nothing to take it
+    function test_aMoveBeforeTheHoldEndsIt_data() {
+        return [{ tag: "phone, up", phone: true, dx: 0, dy: -60 },
+                { tag: "phone, sideways", phone: true, dx: 60, dy: 0 },
+                { tag: "desktop, down", phone: false, dx: 0, dy: 60 },
+                { tag: "desktop, sideways", phone: false, dx: 60, dy: 0 }]
+    }
+    function test_aMoveBeforeTheHoldEndsIt(data) {
+        const page = pageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
+                            docOf([cellOf("A"), cellOf("B")]))
+        page.startEditing()
+        const cell = find(page, "dashCell_0_0")
+        tryVerify(() => cell.width > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
+        const at = centerOf(page, cell)
+        mousePress(page, at.x, at.y)
+        mouseMove(page, at.x + data.dx, at.y + data.dy, -1, Qt.LeftButton)
+        wait(holdMs + 300)
+        compare(page.held, -1, "the hold was canceled")
+        mouseRelease(page, at.x + data.dx, at.y + data.dy)
+        compare(page.panel, "", "and it isn't a tap either")
+        compare(labels(page), ["A", "B"])
+    }
+
+    // After the hold a move drags: the others reflow as it passes them,
+    // the drop is the change of order, and only the drop stores it
+    function test_aHeldCellDragsToANewPlace() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C"), cellOf("D")]))
+        const a = find(page, "dashCell_0_0")
+        const c = find(page, "dashCell_0_2")
+        hold(page, a)
+        const from = centerOf(page, a)
+        const to = centerOf(page, c)
+        mouseMove(page, (from.x + to.x) / 2, (from.y + to.y) / 2, -1, Qt.LeftButton)
+        mouseMove(page, to.x, to.y, -1, Qt.LeftButton)
+        tryCompare(page, "dropAt", 2)
+        verify(a.carried, "the cell follows the finger")
+        fuzzyCompare(centerOf(page, a).x, to.x, 2, "under the finger")
+        // Index 1's cell (B) has moved to the first place, C to the second
+        compare([find(page, "dashCell_0_1").box.x, find(page, "dashCell_0_1").box.y], [0, 0])
+        compare([find(page, "dashCell_0_2").box.x, find(page, "dashCell_0_2").box.y], [2, 0])
+        compare(labels(page), ["A", "B", "C", "D"], "the order waits for the drop")
+        compare(storedText(page), "", "nothing stored yet")
+
+        mouseRelease(page, to.x, to.y)
+        compare(labels(page), ["B", "C", "A", "D"])
+        compare(storedText(page), DashboardBook.serialize(page.doc), "stored by the drop")
+        compare(page.held, -1)
+        compare(page.dropAt, -1)
+        compare(page.panel, "", "a drag opens no menu")
+        verify(find(page, "dashPage_0").interactive, "the page scrolls again")
+    }
+
+    // Dragged away and brought back: nothing changed, nothing stored
+    function test_aDragBackToItsPlaceChangesNothing() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        const a = find(page, "dashCell_0_0")
+        const c = find(page, "dashCell_0_2")
+        hold(page, a)
+        const from = centerOf(page, a)
+        const to = centerOf(page, c)
+        mouseMove(page, to.x, to.y, -1, Qt.LeftButton)
+        tryCompare(page, "dropAt", 2)
+        mouseMove(page, from.x, from.y, -1, Qt.LeftButton)
+        tryCompare(page, "dropAt", 0)
+        mouseRelease(page, from.x, from.y)
+        compare(labels(page), ["A", "B", "C"])
+        compare(storedText(page), "")
+        compare(page.panel, "", "a drag opens no menu even when it comes back")
+    }
+
+    // A page change under a held finger ends the hold, and the release
+    // opens nothing
+    function test_aPageChangeEndsTheHold() {
+        const d = docOf([cellOf("A")])
+        d.pages.push({ name: "P2", cells: [cellOf("B")] })
+        const page = pageOf({}, d)
+        const a = find(page, "dashCell_0_0")
+        hold(page, a)
+        page.goTo(1)
+        compare(page.held, -1)
+        verify(find(page, "dashPage_0").interactive, "the page scrolls again")
+        mouseRelease(a)
+        compare(page.panel, "")
+    }
+
+    // A label typed into one cell's menu stays with that cell when
+    // another cell is held, outside edit mode too
+    function test_aTypedLabelStaysWithItsCellOutsideEditMode() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
+        const a = find(page, "dashCell_0_0")
+        const b = find(page, "dashCell_0_1")
+        hold(page, a)
+        mouseRelease(a)
+        const field = find(page, "panelLabel")
+        field.forceActiveFocus()
+        tryVerify(() => field.activeFocus, 3000, "the field takes the focus")
+        field.text = "Typed"
+        hold(page, b)
+        compare(labels(page), ["Typed", "B"], "committed as the cell lifts")
+        mouseRelease(b)
+        compare(page.selected, 1)
+        compare(labels(page), ["Typed", "B"])
+    }
+
+    // The reflow places the others by their own spans in the new order
+    function test_theOthersReflowByTheirOwnSpans() {
+        const wide = cellOf("A")
+        wide.w = 4
+        const page = pageOf({}, docOf([wide, cellOf("B"), cellOf("C")]))
+        const a = find(page, "dashCell_0_0")
+        const b = find(page, "dashCell_0_1")
+        const view = find(page, "dashPage_0")
+        tryCompare(view, "columns", 6, 3000)
+        hold(page, a)
+        const slot = a.parent.mapToItem(page, view.dropCenters[2].x, view.dropCenters[2].y)
+        mouseMove(page, slot.x, slot.y, -1, Qt.LeftButton)
+        tryCompare(page, "dropAt", 2)
+        compare(b.box.w, 2, "B keeps its own span")
+        compare([b.box.x, b.box.y], [0, 0])
+        mouseRelease(page, slot.x, slot.y)
+        compare(labels(page), ["B", "C", "A"])
+    }
+
+    // What changes the page under a held finger ends the hold: nothing
+    // stays non-interactive, and the release moves and opens nothing
+    function test_aChangeUnderTheFingerEndsTheHold_data() {
+        return [{ tag: "a cell removed before it", act: p => p.removeCell(0), left: ["B", "C", "D"] },
+                { tag: "another page added", act: p => p.addPage(), left: ["A", "B", "C", "D"] },
+                { tag: "Done", act: p => p.stopEditing(), left: ["A", "B", "C", "D"] }]
+    }
+    function test_aChangeUnderTheFingerEndsTheHold(data) {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C"), cellOf("D")]))
+        page.startEditing()
+        const c = find(page, "dashCell_0_2")
+        const view = find(page, "dashPage_0")
+        hold(page, c)
+        const from = centerOf(page, c)
+        mouseMove(page, from.x - 200, from.y, -1, Qt.LeftButton)
+        tryVerify(() => page.dropAt >= 0, 3000, "the drag is under way")
+        data.act(page)
+        compare(page.held, -1)
+        compare(page.dropAt, -1)
+        verify(!view.reflowing, "no reflow, so the edge timer stops")
+        verify(view.interactive, "the page scrolls again")
+        mouseRelease(page, from.x - 200, from.y)
+        const shown = page.doc.pages[0].cells.map(c => c.label)
+        compare(shown, data.left, "the release moves nothing")
+        compare(page.panel, "", "and opens nothing")
+    }
+
+    // Another grid under a drag ends it: its places were measured on the old one
+    function test_anotherGridEndsTheHold_data() {
+        return [{ tag: "columns, the phone turned", phone: true, w: 832, h: 384, rows: 8 },
+                { tag: "the row height alone", phone: false, w: 1280, h: 300, rows: 8 },
+                { tag: "the columns alone, the height's cap the row", phone: false, w: 640, h: 800,
+                  rows: 48, samePitch: true }]
+    }
+    function test_anotherGridEndsTheHold(data) {
+        const tall = cellOf("A")
+        tall.h = data.rows
+        const page = pageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
+                            docOf([tall, cellOf("B"), cellOf("C")]))
+        const a = find(page, "dashCell_0_0")
+        const view = find(page, "dashPage_0")
+        hold(page, a)
+        const from = centerOf(page, a)
+        mouseMove(page, from.x + 100, from.y, -1, Qt.LeftButton)
+        tryVerify(() => page.dropAt >= 0, 3000, "the drag is under way")
+        const columns = view.columns
+        const pitch = view.pitch
+        page.width = data.w
+        page.height = data.h
+        tryVerify(() => page.held === -1, 3000, "the hold ends")
+        if (data.samePitch) {
+            fuzzyCompare(view.pitch, pitch, 1e-6, "the row height held")
+            verify(view.columns !== columns, "and the columns didn't")
+        }
+        compare(page.dropAt, -1)
+        verify(view.interactive, "the page scrolls again")
+        mouseRelease(page, from.x + 100, from.y)
+        compare(labels(page), ["A", "B", "C"], "the release moves nothing")
+    }
+
+    // A hold the system takes away changes nothing
+    function test_aCanceledHoldChangesNothing() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        const a = find(page, "dashCell_0_0")
+        const c = find(page, "dashCell_0_2")
+        hold(page, a)
+        const to = centerOf(page, c)
+        mouseMove(page, to.x, to.y, -1, Qt.LeftButton)
+        tryCompare(page, "dropAt", 2)
+        a.holdEnded(true)
+        compare(page.held, -1)
+        compare(page.dropAt, -1)
+        compare(labels(page), ["A", "B", "C"])
+        compare(page.panel, "")
+        mouseRelease(page, to.x, to.y)
+        compare(labels(page), ["A", "B", "C"], "the finger's release does nothing after it")
+    }
+
+    // The selection follows its cell through another cell's drag
+    function test_aDragKeepsTheSelectionOnItsCell() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(page.selected, 0)
+        const a = find(page, "dashCell_0_0")
+        const c = find(page, "dashCell_0_2")
+        hold(page, c)
+        const to = centerOf(page, a)
+        mouseMove(page, to.x, to.y, -1, Qt.LeftButton)
+        tryCompare(page, "dropAt", 0)
+        mouseRelease(page, to.x, to.y)
+        compare(labels(page), ["C", "A", "B"])
+        compare(page.selected, 1, "still A")
+        compare(page.panel, "cell", "and its panel stays")
+    }
+
+    // A drag near the view's top or bottom edge scrolls the page, and
+    // carrying on past what a page holds stops at its end
+    function test_aDragNearTheEdgeScrollsThePage() {
+        const cells = []
+        for (let i = 0; i < 6; ++i)
+            cells.push({ kind: "analog", w: 6, h: 8, label: "C" + i, refs: ["id:1001"], unit: "RPM",
+                         options: { from: 0, to: 8000 } })
+        const page = pageOf({ height: 400 }, docOf(cells))
+        const view = find(page, "dashPage_0")
+        const first = find(page, "dashCell_0_0")
+        tryVerify(() => view.contentHeight > view.height + 100, 3000, "it has somewhere to scroll")
+        hold(page, first)
+        const edge = view.mapToItem(page, view.width / 2, view.height - 4)
+        mouseMove(page, edge.x, edge.y - 60, -1, Qt.LeftButton)
+        mouseMove(page, edge.x, edge.y, -1, Qt.LeftButton)
+        tryVerify(() => view.contentY > 50, 5000, "the page scrolls down")
+        tryVerify(() => page.dropAt >= 1, 5000, "and the drag follows it")
+        const top = view.mapToItem(page, view.width / 2, 4)
+        mouseMove(page, top.x, top.y, -1, Qt.LeftButton)
+        tryCompare(view, "contentY", 0, 8000, "and back to the top, no further")
+        mouseRelease(page, top.x, top.y)
+    }
+
+    function test_aPageThatFitsDoesNotScrollAtTheEdge() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
+        const view = find(page, "dashPage_0")
+        const a = find(page, "dashCell_0_0")
+        hold(page, a)
+        const edge = view.mapToItem(page, view.width / 2, view.height - 4)
+        mouseMove(page, edge.x, edge.y, -1, Qt.LeftButton)
+        wait(300)
+        compare(view.contentY, 0)
+        mouseRelease(page, edge.x, edge.y)
+    }
+
+    // A dial's tap resets its peak, through the cell's hold area
+    function test_aDialsTapStillResetsItsPeak() {
+        const c = cellOf("A")
+        c.options.peak = true
+        const page = pageOf({}, docOf([c]))
+        const cell = find(page, "dashCell_0_0")
+        const loader = find(cell, "gauge")
+        tryVerify(() => loader.item !== null, 3000, "it loads")
+        const dial = loader.item
+        dial.peakValue = 1000
+        hold(page, cell)
+        mouseRelease(cell)
+        compare(dial.peakValue, 1000, "a hold leaves the peak")
+        page.closePanel()
+        press(cell)
+        tryVerify(() => isNaN(dial.peakValue), 3000, "a tap resets it")
+    }
+
+    // ---- Copy and paste (section 5)
+
+    function test_copyAndPasteAfterACell() {
+        const a = cellOf("A", "digital")
+        const page = pageOf({}, docOf([a, cellOf("B")]))
+        page.startEditing()
+        verify(!find(page, "dashPaste").visible, "nothing to paste yet")
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelPaste").enabled, "nothing to paste yet")
+        click(page, "panelCopy")
+        verify(find(page, "panelPaste").enabled)
+        click(page, "panelPaste")
+        compare(labels(page), ["A", "A", "B"])
+        compare(page.selected, 0, "the menu stays on the source")
+        compare(page.doc.pages[0].cells[1].kind, "digital", "the whole cell")
+        compare(storedText(page), DashboardBook.serialize(page.doc), "stored")
+
+        page.select(1)
+        type(find(page, "panelLabel"), "Copy")
+        compare(labels(page), ["A", "Copy", "B"], "the pasted cell is its own")
+    }
+
+    function test_theSlotKeepsWhatWasCopied() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelCopy")
+        type(find(page, "panelLabel"), "Changed")
+        compare(labels(page), ["Changed", "B"])
+        click(page, "dashPaste")
+        compare(labels(page), ["Changed", "B", "A"], "Paste appends what was copied")
+    }
+
+    function test_pasteOutsideEditModeThroughTheMenu() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
+        hold(page, find(page, "dashCell_0_0"))
+        mouseRelease(find(page, "dashCell_0_0"))
+        click(page, "panelCopy")
+        click(page, "panelPaste")
+        compare(labels(page), ["A", "A", "B"])
+        compare(page.editing, false)
+    }
+
+    function test_theSlotSurvivesAPageChange() {
+        const d = docOf([cellOf("A")])
+        d.pages.push({ name: "P2", cells: [] })
+        const page = pageOf({}, d)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelCopy")
+        page.goTo(1)
+        tryCompare(page, "pageIndex", 1)
+        click(page, "dashPaste")
+        compare(page.doc.pages[1].cells.map(c => c.label), ["A"])
+    }
+
+    function test_aFullPageRefusesAPaste() {
+        const cells = []
+        for (let i = 0; i < DashboardBook.maxCells; ++i)
+            cells.push(cellOf("C" + i))
+        const page = pageOf({}, docOf(cells))
+        page.startEditing()
+        page.select(0)
+        page.copySelected()
+        verify(!find(page, "dashPaste").enabled, "the bar's is off")
+        verify(!find(page, "panelPaste").enabled, "the menu's is off")
+        page.pasteAfter(0)
+        compare(page.doc.pages[0].cells.length, DashboardBook.maxCells)
+    }
+
+    function test_theOtherFormsCellCantBePasted() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
+        page.startEditing()
+        page.select(0)
+        page.copied = { form: "phone", cell: cellOf("Other") }
+        verify(!find(page, "dashPaste").enabled, "the bar's is off")
+        verify(!find(page, "panelPaste").enabled, "the menu's is off")
+        page.pasteAfter(0)
+        compare(labels(page), ["A", "B"])
+        page.copySelected()
+        verify(find(page, "panelPaste").enabled, "a copy on this form replaces it")
+    }
+
+    // ---- The blank cell
+
+    function test_aBlankCellIsOfferedAndNeedsNoSignal() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        page.startAdd()
+        verify(find(page, "preview_blank").item, "its preview loads")
+        click(page, "addKind_blank")
+        const added = page.doc.pages[0].cells[1]
+        compare(added.kind, "blank")
+        compare(added.refs, [])
+        compare(page.panel, "cell", "straight to its menu, no signal to pick")
+        compare(page.selected, 1)
+        for (const name of ["panelLabel", "panelSignal", "panelFrom", "panelTo", "panelColdBelow",
+                            "panelWarnFrom", "panelDangerFrom", "panelDecimals"])
+            verify(!find(page, name).visible, name + " is for a gauge with a signal")
+        for (const name of ["panelW", "panelH", "panelCopy", "panelEarlier"])
+            verify(find(page, name).visible, name + " is for any cell")
+    }
+
+    function test_aBlankCellDrawsNothingOutsideEditMode() {
+        const blank = { kind: "blank", w: 2, h: 4, refs: [] }
+        const page = pageOf({}, docOf([blank, cellOf("B")]))
+        const cell = find(page, "dashCell_0_0")
+        tryVerify(() => find(cell, "gauge").item !== null, 3000, "it loads")
+        const outline = find(find(cell, "gauge").item, "blankOutline")
+        verify(!outline.visible, "no outline outside edit mode")
+        compare(String(cell.color), "#00000000", "no card behind it")
+        compare(cell.border.width, 0)
+        page.startEditing()
+        verify(outline.visible, "an outline in edit mode")
+        verify(!find(cell, "unknownKind").visible, "it isn't an unknown kind")
+        verify(!find(cell, "gauge").item.Accessible.ignored, "announced where it's drawn")
+        page.stopEditing()
+        verify(find(cell, "gauge").item.Accessible.ignored, "not announced where it isn't")
+    }
+
+    // Outside edit mode a blank cell has nothing to hold
+    function test_aBlankCellIsHeldOnlyInEditMode() {
+        const blank = { kind: "blank", w: 2, h: 4, refs: [] }
+        const page = pageOf({}, docOf([blank, cellOf("B")]))
+        const cell = find(page, "dashCell_0_0")
+        tryVerify(() => cell.width > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
+        mousePress(cell)
+        wait(holdMs + 300)
+        compare(page.held, -1, "not held outside edit mode")
+        mouseRelease(cell)
+        compare(page.panel, "")
+        page.startEditing()
+        hold(page, cell)
+        mouseRelease(cell)
+        compare(page.panel, "cell")
+        compare(page.selected, 0)
+    }
+
+    function test_aBlankCellHoldsItsPlaceAndCopies() {
+        const blank = { kind: "blank", w: 2, h: 4, refs: [] }
+        const page = pageOf({}, docOf([cellOf("A"), blank, cellOf("C")]))
+        const a = find(page, "dashCell_0_0")
+        const c = find(page, "dashCell_0_2")
+        tryVerify(() => c.width > 0, 3000, "laid out")
+        verify(c.x >= a.x + a.width + find(page, "dashCell_0_1").width,
+               "the next gauge goes past the blank")
+        page.select(1)
+        page.copySelected()
+        page.pasteAfter(1)
+        compare(page.doc.pages[0].cells[2], blank, "a blank cell pastes as one")
     }
 
     // A held peak, low and trace belong to the signal that made them:
@@ -1026,11 +1478,11 @@ TestCase {
         return [{ tag: "desktop", props: {}, spans: {
                     analog: [1, 4], ring: [1, 4], bar: [2, 2], digital: [1, 4],
                     "shift-light": [12, 1], segments: [2, 3], "seven-segment": [1, 2],
-                    sparkline: [2, 3] }, plus: [1, 2] },
+                    sparkline: [2, 3], blank: [1, 4] }, plus: [1, 2] },
                 { tag: "phone", props: { form: "phone", width: 384, height: 832 }, spans: {
                     analog: [3, 12], ring: [3, 12], bar: [6, 6], digital: [3, 12],
                     "shift-light": [12, 3], segments: [6, 9], "seven-segment": [3, 6],
-                    sparkline: [6, 9] }, plus: [3, 6] }]
+                    sparkline: [6, 9], blank: [3, 12] }, plus: [3, 6] }]
     }
     function test_newCellsTakeTheFormsSpans(data) {
         const page = pageOf(data.props, docOf([cellOf("A")]))

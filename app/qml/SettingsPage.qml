@@ -1009,6 +1009,16 @@ Pane {
                      + "once and the DIDs the ECU answers join the polling") }
     ])
 
+    // What a page that works with no session lists its signals from: the
+    // field's URI, which carries the chosen profile, or with no URI typed
+    // the chosen profile alone
+    readonly property string offlineUri: {
+        const typed = uriField.text.trim()
+        if (typed !== "")
+            return typed
+        return profileChoice === "default" ? "" : composeUri("mock://", [])
+    }
+
     // True while a typed URI is being read into the choices, so the DID
     // field's change doesn't recompose the URI that set it; and true
     // while the page writes the field from the choices, so that text

@@ -41,13 +41,9 @@ Page {
         property string phoneUnread: ""
         property string desktopUnread: ""
     }
-    // The last URI that connected (SettingsPage's), whose profile's
-    // signals Add offers when there's no session
-    Settings {
-        id: sessionStore
-        category: "session"
-        property string uri: ""
-    }
+    // Settings' URI and profile, whose signals Add offers with no session
+    property string offlineUri: ""
+    onOfflineUriChanged: if (panel === "signal") refreshRows()
 
     // The stored text read: the document, or the built-in layout with
     // the reason when there is none or it can't be used
@@ -83,11 +79,20 @@ Page {
     property bool confirmReset: false
     property bool confirmRemovePage: false
 
+    // ---- The gesture (section 4): hold, then release or drag
+
+    property int held: -1            // the cell lifted on the page shown, -1 for none
+    property int dropAt: -1          // the place a drag would drop it; -1 until it moves
+    // A copied cell and the form it came from (section 5), for the app's run
+    property var copied: null        // { form, cell }
+    readonly property bool canPaste: copied !== null && copied.form === form
+                                     && DashboardBook.canAddCell(doc, pageIndex)
+
     // The kinds this page draws, in the order Add offers them, and the
     // component that makes each (a cell's and Add's preview); null for
     // a kind this version doesn't draw
     readonly property var drawnKinds: ["analog", "ring", "bar", "segments", "digital",
-                                       "seven-segment", "sparkline", "shift-light"]
+                                       "seven-segment", "sparkline", "shift-light", "blank"]
     function kindComponent(kind) {
         return kind === "analog" ? analogKind
              : kind === "ring" ? ringKind
@@ -97,6 +102,7 @@ Page {
              : kind === "segments" ? segmentsKind
              : kind === "seven-segment" ? readoutKind
              : kind === "sparkline" ? sparkKind
+             : kind === "blank" ? blankKind
              : null
     }
     // The kinds that draw a peak, so the panel offers Peak hold only there
@@ -104,7 +110,8 @@ Page {
     readonly property var kindNames: ({
         "analog": qsTr("Dial"), "ring": qsTr("Ring"), "bar": qsTr("Bar"),
         "digital": qsTr("Number"), "shift-light": qsTr("Shift lights"),
-        "segments": qsTr("Cells"), "seven-segment": qsTr("Digits"), "sparkline": qsTr("Sparkline")
+        "segments": qsTr("Cells"), "seven-segment": qsTr("Digits"), "sparkline": qsTr("Sparkline"),
+        "blank": qsTr("Blank")
     })
     // A form's spans: the phone's grid has three columns for the desktop's one
     readonly property bool phoneForm: form === "phone"
@@ -113,7 +120,8 @@ Page {
     readonly property var newSpans: {
         const spans = {
             "analog": [1, 4], "ring": [1, 4], "bar": [2, 2], "digital": [1, 4],
-            "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3]
+            "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3],
+            "blank": [1, 4]
         }
         for (const k in spans)
             spans[k] = [Math.min(DashboardBook.maxColumns, spans[k][0] * spanScale),
@@ -124,7 +132,7 @@ Page {
     readonly property string formKey: form === "phone" ? "phone" : "desktop"
     readonly property var shownCells: pages[pageIndex] && Array.isArray(pages[pageIndex].cells)
                                       ? pages[pageIndex].cells : []
-    readonly property var selectedCell: editing && selected >= 0 && selected < shownCells.length
+    readonly property var selectedCell: selected >= 0 && selected < shownCells.length
                                         ? shownCells[selected] : null
     onSelectedCellChanged: if (selectedCell === null && panel === "cell") panel = ""
 
@@ -133,6 +141,7 @@ Page {
     }
     function stopEditing() {
         commitTyping()
+        cancelHold()
         editing = false
         selected = -1
         panel = ""
@@ -144,11 +153,11 @@ Page {
     // Takes the focus off a text field, so the field commits what was
     // typed to the cell or page it was typed for before the selection or
     // the page changes (a tap on a cell and a swipe take no focus). Its
-    // fields exist only in edit mode, and outside it the focus is left
-    // where it is. The field's own focus goes: the page is a focus scope,
-    // so focusing the page would give it back to the field
+    // fields exist only while a panel is open, and otherwise the focus is
+    // left where it is. The field's own focus goes: the page is a focus
+    // scope, so focusing the page would give it back to the field
     function commitTyping() {
-        if (!editing)
+        if (!editing && panel === "")
             return
         const f = Window.activeFocusItem
         if (f !== null && (f instanceof TextInput || f instanceof TextEdit))
@@ -193,11 +202,41 @@ Page {
         panel = "cell"
     }
 
+    // Ends a hold with no drop: the page, its document or its grid changed
+    // under the finger
+    function cancelHold() {
+        held = -1
+        dropAt = -1
+    }
+    onDocChanged: cancelHold()
+
+    // Outside edit mode nothing stays selected once the menu is gone
+    function closePanel() {
+        commitTyping()
+        panel = ""
+        if (!editing)
+            selected = -1
+    }
+
+    // ---- Copy and paste (section 5)
+
+    function copySelected() {
+        const c = DashboardBook.copyCell(doc, pageIndex, selected)
+        if (c !== null)
+            copied = { form: form, cell: c }
+    }
+    function pasteAfter(i) {
+        if (!canPaste)
+            return
+        commitTyping()
+        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell))
+    }
+
     // ---- Add: a kind, then a signal
 
     property var profileRows: []
     function refreshRows() {
-        profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : sessionStore.uri)
+        profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : offlineUri)
     }
     // The rows a gauge of `kind` can show: numbers with references, an
     // enumeration only on a digital tile
@@ -213,6 +252,12 @@ Page {
         panel = "add"
     }
     function pickKind(kind) {
+        if (kind === "blank") {
+            const span = newSpans[kind]
+            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] })))
+                select(shownCells.length - 1)
+            return
+        }
         addKind = kind
         refreshRows()
         panel = "signal"
@@ -338,6 +383,7 @@ Page {
     onPagesChanged: goTo(pageIndex)
     // A page change closes whatever panel was open
     onPageIndexChanged: {
+        cancelHold()
         selected = -1
         panel = ""
         addKind = ""
@@ -459,6 +505,21 @@ Page {
         property int pageNo: -1
         property int cellIndex: -1
         readonly property bool editable: root.editing && pageNo === root.pageIndex
+        readonly property bool lifted: root.held === cellIndex && pageNo === root.pageIndex
+        // The panel names this cell, in edit mode or out of it
+        readonly property bool chosen: pageNo === root.pageIndex && root.selected === cellIndex
+                                       && (root.editing || root.panel !== "")
+
+        // A press held still lifts the cell; these go to its page's grid
+        signal holdStarted(point scene)
+        signal holdMoved(point scene)
+        signal holdEnded(bool canceled)
+
+        // A blank cell draws its own outline in edit mode and nothing else
+        color: kind === "blank" ? "transparent" : Theme.surface
+        border.width: kind === "blank" ? 0 : 1
+        scale: lifted ? 1.03 : 1
+        z: lifted ? 5 : 0
 
         // The sweep plays on the dials, the cells and the shift lights only
         function sweep() {
@@ -627,22 +688,51 @@ Page {
             }
         }
 
-        // In edit mode a tap opens the cell's panel; on the phone a long
-        // press starts edit mode at the cell
-        TapHandler {
+        // A tap on a dial that shows its peak resets the peak, and in edit
+        // mode a tap opens the cell's panel. A hold, in or out of edit mode,
+        // lifts the cell. A blank cell has nothing to hold outside edit mode
+        MouseArea {
             objectName: "cellTap"
-            onTapped: if (card.editable) root.select(card.cellIndex)
-            onLongPressed: {
-                if (root.form !== "phone" || card.pageNo !== root.pageIndex)
-                    return
-                root.startEditing()
-                root.select(card.cellIndex)
+            z: 1
+            anchors.fill: parent
+            anchors.margins: -card.padding
+            enabled: card.pageNo === root.pageIndex && (card.kind !== "blank" || root.editing)
+            // Moved past the drag distance before the hold completed: a
+            // swipe or a scroll, even where nothing has taken the finger
+            property bool strayed: false
+            property point pressedAt: Qt.point(0, 0)
+            onPressed: (mouse) => {
+                strayed = false
+                pressedAt = Qt.point(mouse.x, mouse.y)
             }
+            onClicked: {
+                if (strayed)
+                    return
+                if (card.kind === "analog" && card.showPeak && gauge.item)
+                    (gauge.item as GaugeBase).resetPeaks()
+                if (card.editable)
+                    root.select(card.cellIndex)
+            }
+            onPressAndHold: (mouse) => {
+                if (strayed)
+                    mouse.accepted = false
+                else
+                    card.holdStarted(mapToItem(null, mouse.x, mouse.y))
+            }
+            onPositionChanged: (mouse) => {
+                if (card.lifted)
+                    card.holdMoved(mapToItem(null, mouse.x, mouse.y))
+                else if (Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y)
+                         > Application.styleHints.startDragDistance)
+                    strayed = true
+            }
+            onReleased: if (card.lifted) card.holdEnded(false)
+            onCanceled: if (card.lifted) card.holdEnded(true)
         }
         // The outline and Remove exist only while the cell is editable
         Loader {
             z: 2
-            active: card.editable && root.selected === card.cellIndex
+            active: card.chosen || card.lifted
             anchors.fill: parent
             anchors.margins: -card.padding + 2
             sourceComponent: Rectangle {
@@ -736,6 +826,7 @@ Page {
             // The row the cell shows, whose decimals it uses until it has its own
             readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
             readonly property bool phone: root.form === "phone"
+            readonly property bool hasSignal: kind !== "blank"
             implicitHeight: panelColumn.implicitHeight + 2 * padding
             padding: 12
 
@@ -752,16 +843,32 @@ Page {
                         font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
-                        text: (root.kindNames[panelCard.kind] ?? panelCard.kind) + ": "
-                              + (panelCard.cell && panelCard.cell.label ? panelCard.cell.label : "")
+                        text: (root.kindNames[panelCard.kind] ?? panelCard.kind)
+                              + (panelCard.cell && panelCard.cell.label ? ": " + panelCard.cell.label : "")
                     }
                     ThemedButton {
                         objectName: "panelClose"
                         text: qsTr("Close")
-                        onClicked: {
-                            root.commitTyping()
-                            root.panel = ""
-                        }
+                        onClicked: root.closePanel()
+                    }
+                }
+
+                // A copy of the whole cell, for this run (section 5)
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ThemedButton {
+                        objectName: "panelCopy"
+                        Layout.fillWidth: true
+                        text: qsTr("Copy")
+                        onClicked: root.copySelected()
+                    }
+                    ThemedButton {
+                        objectName: "panelPaste"
+                        Layout.fillWidth: true
+                        enabled: root.canPaste
+                        text: qsTr("Paste after")
+                        onClicked: root.pasteAfter(root.selected)
                     }
                 }
 
@@ -771,10 +878,11 @@ Page {
                     columnSpacing: 8
                     rowSpacing: 8
 
-                    Caption { text: qsTr("Label") }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Label") }
                     TextField {
                         id: labelField
                         objectName: "panelLabel"
+                        visible: panelCard.hasSignal
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.touchTarget
                         maximumLength: DashboardBook.maxLabel
@@ -785,39 +893,43 @@ Page {
                                                     ? panelCard.cell.label : "")
                         }
                     }
-                    Caption { text: qsTr("Signal") }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Signal") }
                     ThemedButton {
                         objectName: "panelSignal"
+                        visible: panelCard.hasSignal
                         Layout.fillWidth: true
                         text: qsTr("Change signal")
                         onClicked: root.changeSignal()
                     }
 
-                    Caption { text: qsTr("From (%1)").arg(panelCard.unitShown) }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("From (%1)").arg(panelCard.unitShown) }
                     OptionField {
                         objectName: "panelFrom"
+                        visible: panelCard.hasSignal
                         option: "from"
                         clearable: false
                         fallback: panelCard.range.from
                     }
-                    Caption { text: qsTr("To (%1)").arg(panelCard.unitShown) }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("To (%1)").arg(panelCard.unitShown) }
                     OptionField {
                         objectName: "panelTo"
+                        visible: panelCard.hasSignal
                         option: "to"
                         clearable: false
                         fallback: panelCard.range.to
                     }
 
-                    Caption { text: qsTr("Cold below") }
-                    OptionField { objectName: "panelColdBelow"; option: "coldBelow" }
-                    Caption { text: qsTr("Warning from") }
-                    OptionField { objectName: "panelWarnFrom"; option: "warnFrom" }
-                    Caption { text: qsTr("Danger from") }
-                    OptionField { objectName: "panelDangerFrom"; option: "dangerFrom" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Cold below") }
+                    OptionField { objectName: "panelColdBelow"; visible: panelCard.hasSignal; option: "coldBelow" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Warning from") }
+                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.hasSignal; option: "warnFrom" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Danger from") }
+                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.hasSignal; option: "dangerFrom" }
 
-                    Caption { text: qsTr("Decimals") }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Decimals") }
                     SpinBox {
                         objectName: "panelDecimals"
+                        visible: panelCard.hasSignal
                         Accessible.name: qsTr("Decimals")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 0
@@ -1136,7 +1248,7 @@ Page {
     }
 
     // A signal for Add's kind, or the edited cell's new one: the session's
-    // rows with references, or those of the last URI that connected
+    // rows with references, or those of the profile Settings has chosen
     Component {
         id: signalPanel
         GaugeCard {
@@ -1223,6 +1335,25 @@ Page {
     Component { id: segmentsKind; SegmentGauge {} }
     Component { id: readoutKind; SegmentReadout {} }
     Component { id: sparkKind; SparkGauge {} }
+    // A spot held open: an outline to find it by in edit mode, else nothing
+    Component {
+        id: blankKind
+        GaugeBase {
+            // Nothing to announce where nothing is drawn
+            Accessible.ignored: !root.editing
+            Accessible.name: root.kindNames["blank"]
+            Accessible.description: ""
+            Rectangle {
+                objectName: "blankOutline"
+                anchors.fill: parent
+                visible: root.editing
+                color: "transparent"
+                border.color: Theme.outline
+                border.width: 1
+                radius: Theme.radius
+            }
+        }
+    }
 
     // The link's dot and words, and the Night switch at their end (ADR-0058
     // section 6: a status with a tap), wherever the state is shown
@@ -1369,6 +1500,14 @@ Page {
                 enabled: DashboardBook.canAddCell(root.doc, root.pageIndex)
                 text: qsTr("Add gauge")
                 onClicked: root.startAdd()
+            }
+            ThemedButton {
+                objectName: "dashPaste"
+                compact: root.form === "phone"
+                visible: root.copied !== null
+                enabled: root.canPaste
+                text: qsTr("Paste")
+                onClicked: root.pasteAfter(root.shownCells.length - 1)
             }
             ThemedButton {
                 objectName: "dashMore"
@@ -1554,7 +1693,7 @@ Page {
         anchors.top: topBar.bottom
         anchors.bottom: indicator.visible ? indicator.top : parent.bottom
         clip: true
-        interactive: root.form === "phone"
+        interactive: root.form === "phone" && root.held < 0
         // The page shown goes in once every page is in: the first page
         // added makes the index 0, which would override a stored one
         onCountChanged: {
@@ -1581,6 +1720,7 @@ Page {
                 clip: true
                 contentWidth: width
                 contentHeight: grid.y + grid.height + root.margin
+                interactive: root.held < 0
                 // Shown whenever there's more below, not only while
                 // scrolling, so a short window says it scrolls
                 ScrollBar.vertical: ScrollBar {
@@ -1600,8 +1740,12 @@ Page {
                 // In edit mode the page ends with a "+" cell while it has room
                 readonly property bool addCell: root.editing && shown
                                                 && DashboardBook.canAddCell(root.doc, index)
+                // While a held cell moves, the order its drop would make
+                readonly property bool reflowing: shown && root.dropAt >= 0
+                readonly property var ordered: reflowing
+                    ? DashboardBook.reordered(cells, root.held, root.dropAt) : cells
                 readonly property var placed: addCell
-                    ? cells.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : cells
+                    ? ordered.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : ordered
                 readonly property var boxes: DashboardBook.place(placed, columns)
                 readonly property int tallest: placed.reduce((m, c) => Math.max(m, c.h), 1)
                 // The row unit is a quarter of a column, so h = 4w is
@@ -1612,6 +1756,78 @@ Page {
                     (columnWidth + root.gap) / 4,
                     (Math.max(160, height - 2 * root.margin) + root.gap) / tallest))
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
+                // The drop's places are measured on this grid
+                onColumnsChanged: root.cancelHold()
+                onPitchChanged: root.cancelHold()
+
+                function boxLeft(b) { return b.x * (columnWidth + root.gap) }
+                function boxTop(b) { return b.y * pitch }
+                function boxWidth(b) { return b.w * columnWidth + (b.w - 1) * root.gap }
+                function boxHeight(b) { return Math.max(0, b.h * pitch - root.gap) }
+
+                // ---- The held cell (section 4)
+
+                property var dropCenters: []     // the held cell's center at each place
+                property size heldSize: Qt.size(0, 0)
+                property point grab: Qt.point(0, 0)      // the finger within the cell
+                property point pressedAt: Qt.point(0, 0)
+                property point finger: Qt.point(0, 0)
+                property real dragX: 0
+                property real dragY: 0
+
+                function lift(i, scene) {
+                    root.commitTyping()
+                    const at = grid.mapFromItem(null, scene.x, scene.y)
+                    const b = boxes[i]
+                    grab = Qt.point(at.x - boxLeft(b), at.y - boxTop(b))
+                    heldSize = Qt.size(boxWidth(b), boxHeight(b))
+                    pressedAt = scene
+                    finger = scene
+                    dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(
+                        d => ({ x: boxLeft(d) + boxWidth(d) / 2, y: boxTop(d) + boxHeight(d) / 2 }))
+                    root.held = i
+                }
+                function follow(scene) {
+                    finger = scene
+                    if (root.dropAt < 0 && Math.hypot(scene.x - pressedAt.x, scene.y - pressedAt.y)
+                            <= Application.styleHints.startDragDistance)
+                        return
+                    const at = grid.mapFromItem(null, scene.x, scene.y)
+                    dragX = at.x - grab.x
+                    dragY = at.y - grab.y
+                    root.dropAt = DashboardBook.nearest(dropCenters, dragX + heldSize.width / 2,
+                                                        dragY + heldSize.height / 2)
+                }
+                function letGo(canceled) {
+                    const from = root.held, to = root.dropAt
+                    root.cancelHold()
+                    if (canceled)
+                        return
+                    if (to < 0)
+                        root.select(from)
+                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to))
+                             && root.selected >= 0)
+                        root.selected = DashboardBook.movedIndex(root.selected, from, to)
+                }
+                // Near the view's top or bottom edge the page scrolls, at
+                // up to a quarter of the edge's width per tick
+                function scrollAtTheEdge() {
+                    const y = mapFromItem(null, finger.x, finger.y).y
+                    const edge = Theme.touchTarget
+                    const by = y < edge ? y - edge : y > height - edge ? y - (height - edge) : 0
+                    if (by === 0)
+                        return
+                    const bottom = Math.max(0, contentHeight - height)
+                    contentY = Math.max(0, Math.min(bottom,
+                        contentY + Math.max(-edge, Math.min(edge, by)) / 4))
+                    follow(finger)
+                }
+                Timer {
+                    interval: 16
+                    repeat: true
+                    running: pageView.reflowing
+                    onTriggered: pageView.scrollAtTheEdge()
+                }
 
                 // The edit panel, in the page above its grid (never a Popup)
                 Loader {
@@ -1620,7 +1836,7 @@ Page {
                     x: (pageView.width - width) / 2
                     y: root.margin
                     width: pageView.gridWidth
-                    active: root.editing && pageView.shown && root.panel !== ""
+                    active: pageView.shown && root.panel !== ""
                     sourceComponent: root.panel === "cell" ? cellPanel
                                    : root.panel === "add" ? addPanel
                                    : root.panel === "signal" ? signalPanel : null
@@ -1649,8 +1865,11 @@ Page {
                         model: pageView.cells.length
 
                         Cell {
+                            id: placedCell
                             required property int index
-                            readonly property var box: pageView.boxes[index]
+                            readonly property var box: pageView.boxes[pageView.reflowing
+                                ? DashboardBook.movedIndex(index, root.held, root.dropAt) : index]
+                            readonly property bool carried: pageView.reflowing && root.held === index
                             objectName: "dashCell_" + pageView.index + "_" + index
                             cell: pageView.cells[index]
                             pageNo: pageView.index
@@ -1661,10 +1880,21 @@ Page {
                                    && Qt.application.state !== Qt.ApplicationSuspended
                                    && Qt.application.state !== Qt.ApplicationHidden
                             // qmllint enable missing-property
-                            x: box ? box.x * (pageView.columnWidth + root.gap) : 0
-                            y: box ? box.y * pageView.pitch : 0
-                            width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0
-                            height: box ? Math.max(0, box.h * pageView.pitch - root.gap) : 0
+                            x: carried ? pageView.dragX : box ? pageView.boxLeft(box) : 0
+                            y: carried ? pageView.dragY : box ? pageView.boxTop(box) : 0
+                            width: box ? pageView.boxWidth(box) : 0
+                            height: box ? pageView.boxHeight(box) : 0
+                            Behavior on x {
+                                enabled: pageView.reflowing && !placedCell.carried
+                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                            }
+                            Behavior on y {
+                                enabled: pageView.reflowing && !placedCell.carried
+                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                            }
+                            onHoldStarted: (scene) => pageView.lift(index, scene)
+                            onHoldMoved: (scene) => pageView.follow(scene)
+                            onHoldEnded: (canceled) => pageView.letGo(canceled)
                         }
                     }
 
@@ -1672,10 +1902,10 @@ Page {
                         readonly property var box: pageView.boxes[pageView.cells.length]
                         objectName: "dashAddCell_" + pageView.index
                         visible: pageView.addCell
-                        x: box ? box.x * (pageView.columnWidth + root.gap) : 0
-                        y: box ? box.y * pageView.pitch : 0
-                        width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0
-                        height: box ? Math.max(Theme.touchTarget, box.h * pageView.pitch - root.gap) : 0
+                        x: box ? pageView.boxLeft(box) : 0
+                        y: box ? pageView.boxTop(box) : 0
+                        width: box ? pageView.boxWidth(box) : 0
+                        height: box ? Math.max(Theme.touchTarget, pageView.boxHeight(box)) : 0
                         text: "+"
                         font.pixelSize: Theme.fontHero
                         Accessible.name: qsTr("Add a gauge")

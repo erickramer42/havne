@@ -932,4 +932,127 @@ TestCase {
             }
         }
     }
+
+    // ---- Copy and paste (ADR-0057's appendix, section 5)
+
+    function test_copyCellGivesACellOfItsOwn() {
+        const d = book()
+        const c = DashboardBook.copyCell(d, 0, 1)
+        compare(c, d.pages[0].cells[1])
+        c.options.from = 99
+        compare(d.pages[0].cells[1].options.from, 0, "the source is its own")
+        compare(DashboardBook.copyCell(d, 0, 2), null, "past the end")
+        compare(DashboardBook.copyCell(d, 5, 0), null, "no such page")
+        compare(DashboardBook.copyCell(d, 0, 0.5), null, "not an index")
+        compare(DashboardBook.copyCell({ format: 99 }, 0, 0), null, "not a document")
+    }
+
+    function test_pasteCellPutsACopyAfterTheIndex() {
+        const d = pageOf(3)
+        const paste = DashboardBook.copyCell(d, 0, 0)
+        paste.label = "new"
+        compare(labels(DashboardBook.pasteCell(d, 0, -1, paste), 0), ["new", "c0", "c1", "c2"])
+        compare(labels(DashboardBook.pasteCell(d, 0, 0, paste), 0), ["c0", "new", "c1", "c2"])
+        compare(labels(DashboardBook.pasteCell(d, 0, 2, paste), 0), ["c0", "c1", "c2", "new"])
+        compare(labels(d, 0), ["c0", "c1", "c2"], "its input unchanged")
+
+        const out = DashboardBook.pasteCell(d, 0, 0, paste)
+        out.pages[0].cells[1].options.from = 42
+        compare(paste.options.from, 0, "the pasted cell is its own")
+    }
+
+    function test_pasteCellRefusesWhatItCantTake() {
+        const d = pageOf(2)
+        const c = DashboardBook.copyCell(d, 0, 0)
+        const same = out => compare(DashboardBook.serialize(out), DashboardBook.serialize(d))
+        same(DashboardBook.pasteCell(d, 0, -2, c))
+        same(DashboardBook.pasteCell(d, 0, 2, c))
+        same(DashboardBook.pasteCell(d, 3, 0, c))
+        same(DashboardBook.pasteCell(d, 0, 0.5, c))
+        same(DashboardBook.pasteCell(d, 0, 0, null))
+        same(DashboardBook.pasteCell(d, 0, 0, { kind: "digital", w: 99, h: 1, refs: [] }))
+        same(DashboardBook.pasteCell(d, 0, 0, { kind: "digital", w: 1, h: 1, refs: [],
+                                                options: { from: Date } }))
+    }
+
+    function test_aFullPageRefusesAPaste() {
+        const d = pageOf(DashboardBook.maxCells)
+        const c = DashboardBook.copyCell(d, 0, 0)
+        const out = DashboardBook.pasteCell(d, 0, 0, c)
+        compare(DashboardBook.serialize(out), DashboardBook.serialize(d))
+        verify(!DashboardBook.canAddCell(d, 0))
+    }
+
+    // ---- A drag's order
+
+    function test_reorderedMovesOneAndLeavesItsInput() {
+        const list = ["a", "b", "c", "d"]
+        compare(DashboardBook.reordered(list, 0, 2), ["b", "c", "a", "d"])
+        compare(DashboardBook.reordered(list, 3, 1), ["a", "d", "b", "c"])
+        compare(DashboardBook.reordered(list, 1, 1), list)
+        compare(list, ["a", "b", "c", "d"], "its input unchanged")
+    }
+
+    // For every from and to, the moved index agrees with the reordered list
+    function test_movedIndexAgreesWithReordered() {
+        const list = ["a", "b", "c", "d", "e"]
+        for (let from = 0; from < list.length; ++from) {
+            for (let to = 0; to < list.length; ++to) {
+                const out = DashboardBook.reordered(list, from, to)
+                for (let i = 0; i < list.length; ++i) {
+                    compare(out[DashboardBook.movedIndex(i, from, to)], list[i],
+                            from + " to " + to + ", item " + i)
+                }
+            }
+        }
+    }
+
+    function test_dropBoxesAreTheBoxesOfEachPlace() {
+        const cells = [{ w: 2, h: 2 }, { w: 2, h: 2 }, { w: 2, h: 2 }]
+        const boxes = DashboardBook.dropBoxes(cells, 0, 4)
+        compare(boxes.length, 3)
+        compare([boxes[0].x, boxes[0].y], [0, 0])
+        compare([boxes[1].x, boxes[1].y], [2, 0])
+        compare([boxes[2].x, boxes[2].y], [0, 2])
+    }
+
+    function test_nearestTakesTheClosestAndTheFirstOnATie() {
+        const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]
+        compare(DashboardBook.nearest(pts, 9, 1), 1)
+        compare(DashboardBook.nearest(pts, 1, 9), 2)
+        compare(DashboardBook.nearest(pts, 5, 0), 0, "a tie is the first")
+        compare(DashboardBook.nearest([], 0, 0), -1)
+    }
+
+    // ---- The blank kind
+
+    function test_kindsAreAppendOnly() {
+        compare(DashboardBook.kinds.slice(0, 8),
+                ["analog", "ring", "bar", "segments", "digital", "seven-segment", "sparkline",
+                 "shift-light"])
+        compare(DashboardBook.kinds[8], "blank")
+        verify(DashboardBook.knownKind("blank"))
+    }
+
+    function test_aBlankCellNeedsNoSignal() {
+        const blank = { kind: "blank", w: 3, h: 12, refs: [] }
+        compare(DashboardBook.cellProblem(blank), "")
+        const d = book()
+        d.pages[0].cells.splice(1, 0, blank)
+        const r = read(d)
+        compare(r.problem, "")
+        compare(r.doc.pages[0].cells[1], blank, "it reads back as written")
+        const copied = DashboardBook.copyCell(r.doc, 0, 1)
+        compare(copied, blank)
+        const pasted = DashboardBook.pasteCell(r.doc, 0, 0, copied)
+        compare(pasted.pages[0].cells[1], blank)
+    }
+
+    // A blank holds its spot: the next gauge goes past it, never into it
+    function test_placementKeepsABlankCellsSpotOpen() {
+        const a = { w: 2, h: 2 }, blank = { kind: "blank", w: 2, h: 2, refs: [] }, c = { w: 2, h: 2 }
+        const boxes = DashboardBook.place([a, blank, c], 4)
+        compare([boxes[1].x, boxes[1].y], [2, 0])
+        compare([boxes[2].x, boxes[2].y], [0, 2], "wrapped past the blank")
+    }
 }
