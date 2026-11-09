@@ -35,6 +35,7 @@ TestCase {
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
         stored.setValue("uri", "")
+        stored.setValue("recentUris", "[]")
         stored.setValue("recording", false)
         stored.setValue("adapterVersions", "{}")
         stored.sync()
@@ -1147,6 +1148,95 @@ TestCase {
         verify(find(page, "profile_raw").checked, "read back into the row")
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
+    }
+
+    function sameList(a, b, what) {
+        compare(JSON.stringify(a), JSON.stringify(b), what)
+    }
+
+    // The recent addresses: newest first, a duplicate moved to the top, at
+    // most five
+    function test_recentUrisAreNewestFirstAndCapped() {
+        const page = createPage()
+        sameList(page.withRecentUri([], "a"), ["a"], "the first")
+        sameList(page.withRecentUri(["a", "b"], "c"), ["c", "a", "b"], "newest first")
+        sameList(page.withRecentUri(["a", "b", "c"], "b"), ["b", "a", "c"], "a duplicate moves up")
+        sameList(page.withRecentUri(["a", "b"], "a"), ["a", "b"], "the top stays")
+        sameList(page.withRecentUri(["a", "b", "c", "d", "e"], "f"), ["f", "a", "b", "c", "d"],
+                 "the oldest goes past five")
+        sameList(page.withRecentUri(["a", "b", "c", "d", "e"], "e"), ["e", "a", "b", "c", "d"],
+                 "a duplicate doesn't cost a row")
+    }
+
+    // The stored list as it reads back: strings only, damage reads as none,
+    // and with none the last URI seeds it
+    function test_recentUrisReadBackFromTheStoreOrTheLastUri() {
+        const page = createPage()
+        sameList(page.parseRecentUris('["a","b"]', "z"), ["a", "b"], "the stored list")
+        sameList(page.parseRecentUris('[]', "z"), ["z"], "seeded from the last URI")
+        sameList(page.parseRecentUris('[]', ""), [], "nothing at all")
+        sameList(page.parseRecentUris('not json', "z"), ["z"], "damage reads as none")
+        sameList(page.parseRecentUris('{"a":1}', ""), [], "not a list")
+        sameList(page.parseRecentUris('["a",3,"",null]', ""), ["a"], "strings only")
+        sameList(page.parseRecentUris('["a","b","c","d","e","f"]', ""), ["a", "b", "c", "d", "e"],
+                 "at most five")
+    }
+
+    function test_aFirstRunWithAnOlderUriSeedsTheList() {
+        stored.setValue("uri", "mock://demo?profile=raw")
+        stored.sync()
+        const page = createPage()
+        sameList(page.recentUris, ["mock://demo?profile=raw"], "what session/uri holds")
+    }
+
+    // Only a connect that succeeded is written, the newest first, and the
+    // list survives a restart
+    function test_onlyASuccessfulConnectWritesTheRecentUris() {
+        let page = createPage()
+        sameList(page.recentUris, [], "nothing yet")
+        const field = find(page, "uriField")
+        for (const uri of ["mock://demo", "mock://demo?profile=raw", "mock://demo"]) {
+            field.text = uri
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 5000, uri + " connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        }
+        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "newest first, once")
+
+        field.text = "mock://demo?profile=uds-generic"
+        press(page, "connectButton")
+        tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
+        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "a refusal writes nothing")
+
+        // The page's store writes when the page goes, as at a quit
+        page.destroy()
+        wait(10)
+        page = createPage()
+        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "kept between runs")
+    }
+
+    // The bridge's URI can differ from the request: a connect from this
+    // page leaves its field as it was typed
+    function test_aConnectLeavesTheFieldAsTyped() {
+        const page = createPage()
+        const field = find(page, "uriField")
+        field.text = "  mock://demo  "
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connects")
+        compare(field.text, "  mock://demo  ")
+    }
+
+    // Dash's list: the address connects through the field, like one typed
+    function test_aConnectFromTheListFillsTheFieldFirst() {
+        const page = createPage()
+        const field = find(page, "uriField")
+        field.text = "mock://other"
+        page.connectFromList("mock://demo")
+        compare(field.text, "mock://demo", "before the connect answers")
+        verify(Bridge.connecting)
+        tryVerify(() => Bridge.connected, 5000, "connects")
+        compare(Bridge.currentUri, "mock://demo")
     }
 
     function versionsOf(page, index) {

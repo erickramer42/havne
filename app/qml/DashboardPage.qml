@@ -1327,6 +1327,41 @@ Page {
         }
     }
 
+    // No session on the phone: the connect list, in the panel's place above
+    // the gauges, on every page. Settings owns connecting
+    property var connectUris: []
+    property string connectVehicleUri: ""
+    // A tapped row is the user's choice; else the picked vehicle's address
+    property string connectTapped: ""
+    readonly property int connectPick: {
+        const wanted = connectTapped !== "" ? connectTapped : connectVehicleUri
+        return Math.max(0, connectUris.indexOf(wanted))
+    }
+    property string connectError: ""
+    readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
+    signal connectToUri(string uri)
+    signal otherAddressRequested()
+    onConnectUrisChanged: connectTapped = ""
+    onConnectVehicleUriChanged: connectTapped = ""
+    Connections {
+        target: Bridge
+        function onConnectResult(uri, error) { root.connectError = error }
+    }
+    Component {
+        id: connectPanel
+        DashConnectList {
+            uris: root.connectUris
+            selected: root.connectPick
+            errorText: root.connectError
+            onPicked: index => root.connectTapped = root.connectUris[index]
+            onConnectTo: uri => {
+                root.connectError = ""
+                root.connectToUri(uri)
+            }
+            onOtherAddress: root.otherAddressRequested()
+        }
+    }
+
     Component { id: analogKind; AnalogGauge {} }
     Component { id: ringKind; RingGauge {} }
     Component { id: barKind; BarGauge {} }
@@ -1836,10 +1871,11 @@ Page {
                     x: (pageView.width - width) / 2
                     y: root.margin
                     width: pageView.gridWidth
-                    active: pageView.shown && root.panel !== ""
+                    active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
                                    : root.panel === "add" ? addPanel
-                                   : root.panel === "signal" ? signalPanel : null
+                                   : root.panel === "signal" ? signalPanel
+                                   : root.connectShown ? connectPanel : null
                     onLoaded: pageView.contentY = 0
                 }
 

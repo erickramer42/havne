@@ -1189,14 +1189,50 @@ Pane {
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
-    // ---- The last URI that connected, the Record switch and each
-    // device's versions (seenVersions, as JSON), kept between runs as
-    // Main.qml keeps the zoom and units. Only a URI that connected is
+    // The addresses that connected, newest first, for Dash's connect list
+    readonly property int maxRecentUris: 5
+    property var recentUris: []
+    // The stored list, or `lastUri` alone when it holds none; a damaged
+    // list reads as none, and anything but a non-empty string is left out
+    function parseRecentUris(text, lastUri) {
+        let list = []
+        try {
+            const read = JSON.parse(text)
+            if (Array.isArray(read))
+                list = read.filter(u => typeof u === "string" && u !== "")
+        } catch (e) {
+            // none, until the next connect writes one
+        }
+        if (list.length === 0 && lastUri !== "")
+            list = [lastUri]
+        return list.slice(0, maxRecentUris)
+    }
+    // `uri` first and only once, the list cut to its most recent
+    function withRecentUri(list, uri) {
+        return [uri].concat(list.filter(u => u !== uri)).slice(0, maxRecentUris)
+    }
+    // What Dash lists: the recent addresses, the picked vehicle's saved one
+    // first when absent. Display only: recentUris holds what connected
+    readonly property string vehicleUri: pickedVehicle !== null ? pickedVehicle.uri : ""
+    function connectRows(recents, vehicle) {
+        return vehicle === "" || recents.includes(vehicle) ? recents : [vehicle].concat(recents)
+    }
+    readonly property var connectUris: connectRows(recentUris, vehicleUri)
+    // Dash's Connect: the field shows it as typed text, before the connect
+    function connectFromList(uri) {
+        uriField.text = uri
+        requestConnect(uri)
+    }
+
+    // ---- The last URI that connected, the recent ones, the Record switch
+    // and each device's versions (seenVersions, as JSON), kept between runs
+    // as Main.qml keeps the zoom and units. Only a URI that connected is
     // stored, so a typo or a refused query doesn't come back
     Settings {
         id: sessionSettings
         category: "session"
         property string uri: ""
+        property string recentUris: "[]"
         property bool recording: false
         property string adapterVersions: "{}"
     }
@@ -1224,6 +1260,7 @@ Pane {
         // it back
         if (uriField.text === "")
             uriField.text = sessionSettings.uri
+        recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
         Bridge.recording = sessionSettings.recording
     }
 
@@ -1239,6 +1276,8 @@ Pane {
             page.errorLabel.visible = (error !== "")
             if (error === "") {
                 sessionSettings.uri = uri
+                page.recentUris = page.withRecentUri(page.recentUris, uri)
+                sessionSettings.recentUris = JSON.stringify(page.recentUris)
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
                 // for an adapter's session only (ADR-0027 section 1, section 2)
@@ -1318,6 +1357,16 @@ Pane {
                     Layout.fillWidth: true
                     pages: page.pageList
                     onChosen: key => page.open(key)
+                }
+
+                // The phone has no Home page to show it, and a bug report needs it
+                Label {
+                    objectName: "settingsCoreVersion"
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacing
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: qsTr("core %1").arg(Bridge.coreVersion)
                 }
             }
 
