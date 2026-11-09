@@ -1290,6 +1290,82 @@ TEST(BridgeTest, AConnectAtTheTeardownsEndFindsTheRecordingClosed)
  * and its time, Stop log's folder in logStopped as the user's; a second
  * log in the same session, which the session's end closes and reports
  * with its folder, not as the user's. */
+/* ADR-0056 section 4: Settings' minimum time takes only its choices,
+ * and on a session that asks nothing (the mock), where it changes
+ * nothing, neither the log's line nor its header name it; a session
+ * that asks is ALogOnARequestingSessionNamesItsMinimumTime */
+TEST(BridgeTest, ALogTakesItsMinimumTimeBetweenSweeps)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    EXPECT_EQ(bridge.minSweepMs(), 0);
+    EXPECT_EQ(bridge.minSweepChoices(), (QVariantList{0, 100, 250, 500, 1000}));
+    int changes = 0;
+    QObject::connect(&bridge, &SessionBridge::minSweepMsChanged,
+                     [&changes]() { ++changes; });
+    bridge.setMinSweepMs(250);
+    EXPECT_EQ(bridge.minSweepMs(), 250);
+    EXPECT_EQ(changes, 1);
+    bridge.setMinSweepMs(251);
+    bridge.setMinSweepMs(-100);
+    bridge.setMinSweepMs(250);
+    EXPECT_EQ(bridge.minSweepMs(), 250) << "anything but a choice is ignored";
+    EXPECT_EQ(changes, 1);
+
+    ASSERT_TRUE(bridge.connectSession("mock://paced").isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    SignalListModel* model = bridge.signalModel();
+    std::vector<uint16_t> picks;
+    for (int r = 0; r < model->rowCount() && picks.size() < 2; ++r) {
+        const QModelIndex i = model->index(r);
+        if (!model->data(i, SignalListModel::IsTextRole).toBool()) {
+            picks.push_back(static_cast<uint16_t>(
+                model->data(i, SignalListModel::IdRole).toUInt()));
+        }
+    }
+    ASSERT_EQ(picks.size(), 2u);
+    plotOnly(model, picks);
+
+    const auto header = [](const QString& folder) {
+        QFile f(folder + QStringLiteral("/events.log"));
+        return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll())
+                                           : QString();
+    };
+    const auto stoppedFolder = [&bridge]() {
+        return bridge.recordingFolderUrl().toLocalFile();
+    };
+
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_TRUE(log.contains(QStringLiteral("Log started: %1 (2 signals)")
+                                 .arg(bridge.recordingFolder())))
+        << log.join('\n').toStdString();
+    QString folder = stoppedFolder();
+    bridge.stopLog();
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    EXPECT_FALSE(header(folder).contains(QLatin1String("min sweep")))
+        << header(folder).toStdString();
+
+    bridge.setMinSweepMs(0);
+    log.clear();
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_TRUE(log.contains(QStringLiteral("Log started: %1 (2 signals)")
+                                 .arg(bridge.recordingFolder())))
+        << log.join('\n').toStdString();
+    folder = stoppedFolder();
+    bridge.stopLog();
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    EXPECT_FALSE(header(folder).contains(QLatin1String("min sweep")))
+        << header(folder).toStdString();
+    disconnectAndWait(bridge);
+}
+
 TEST(BridgeTest, ALogRecordsTheRunningSessionUntilStopped)
 {
     QTemporaryDir root;
@@ -6711,6 +6787,54 @@ TEST(BridgeTest, TimingTextNamesTheRequestsAndTheClock)
 }
 
 #ifdef _WIN32
+
+/* A log on a session that asks takes the minimum, and its line and its
+ * header say so (ADR-0056 section 4) */
+TEST(BridgeTest, ALogOnARequestingSessionNamesItsMinimumTime)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setMinSweepMs(250);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri = QStringLiteral("j2534://%1?identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    SignalListModel* model = bridge.signalModel();
+    std::vector<uint16_t> picks;
+    for (int r = 0; r < model->rowCount() && picks.size() < 2; ++r) {
+        const QModelIndex i = model->index(r);
+        if (!model->data(i, SignalListModel::IsTextRole).toBool()) {
+            picks.push_back(static_cast<uint16_t>(
+                model->data(i, SignalListModel::IdRole).toUInt()));
+        }
+    }
+    ASSERT_EQ(picks.size(), 2u);
+    plotOnly(model, picks);
+
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_TRUE(log.contains(
+        QStringLiteral(
+            "Log started: %1 (2 signals, at least 250 ms between sweeps)")
+            .arg(bridge.recordingFolder())))
+        << log.join('\n').toStdString();
+    const QString folder = bridge.recordingFolderUrl().toLocalFile();
+    bridge.stopLog();
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    QFile f(folder + QStringLiteral("/events.log"));
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    const QString header = QString::fromUtf8(f.readAll());
+    EXPECT_TRUE(header.contains(QLatin1String("min sweep  250 ms")))
+        << header.toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
 
 /* A recording of a requesting session holds latency.csv (ADR-0042
  * section 3), which core writes (ADR-0049): its header is

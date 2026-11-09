@@ -1906,9 +1906,9 @@ void usage(FILE* to)
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli log <uri> <folder> [--signal <name>]... "
-        "[--label <name>]\n"
-        "                      [--seconds S] [--signals <file> | --plugin "
-        "<pkg>]\n"
+        "[--min-sweep <ms>]\n"
+        "                      [--label <name>] [--seconds S]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -2804,8 +2804,9 @@ int run_log(const cli::LogArgs& args)
     write_session(out, info);
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
-    st = ecuio_session_set_focus(session, ids.empty() ? nullptr : ids.data(),
-                                 static_cast<uint32_t>(ids.size()));
+    st = ecuio_session_set_focus_with(
+        session, ids.empty() ? nullptr : ids.data(),
+        static_cast<uint32_t>(ids.size()), args.min_sweep_ms, 0);
     if (st != ECUIO_OK) {
         write_error(out, st, ecuio_last_error_detail());
         out.flush();
@@ -2814,7 +2815,7 @@ int run_log(const cli::LogArgs& args)
     }
     {
         BigLine b(cli::focus_line_bytes(ids.size()));
-        cli::focus_line(b.line, set, ids);
+        cli::focus_line(b.line, set, ids, args.min_sweep_ms);
         write_line(out, b.line);
     }
     ecuio_recorder_t* recorder = nullptr;

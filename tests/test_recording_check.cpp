@@ -590,6 +590,44 @@ void remove_between(std::vector<Row>& rows, uint64_t a, uint64_t b)
 
 } // namespace
 
+/* A log with a minimum time between sweeps (ADR-0056 section 4) is paced
+ * on purpose: the gap limit is the default or the caller's plus the
+ * minimum, tested at the boundary. A line no focus can have is none. */
+TEST(RecordingCheckTest, AMinimumTimeBetweenSweepsRaisesTheGapLimit)
+{
+    const auto gaps = [](uint64_t quiet, const std::string& line,
+                         const ecuio_check_options_t* options = nullptr) {
+        std::vector<Row> rows;
+        every(rows, 0x7E8, 0, 100000, 3);
+        every(rows, 0x7E8, 200000 + quiet, 100000, 3);
+        std::string events = events_v2("complete");
+        const std::string flags = "frame flags  complete\n";
+        events.insert(events.find(flags) + flags.size(), line);
+        Folder f("-floor");
+        f.write("frames.csv", frames_csv(rows));
+        f.write("events.log", events);
+        const Checked c(f.utf8(), options);
+        EXPECT_EQ(c.rc, ECUIO_OK) << ecuio_last_error_detail();
+        return c.summary.counts[ECUIO_CHECK_GAP];
+    };
+    const std::string floor = "min sweep  1000 ms\n";
+    EXPECT_EQ(gaps(1200000, ""), 1u) << "a paced sweep, its minimum unread";
+    EXPECT_EQ(gaps(1200000, floor), 0u) << "one reply a sweep, overshot";
+    EXPECT_EQ(gaps(2000000, floor), 0u) << "the 1 s gap plus the minimum";
+    EXPECT_EQ(gaps(2000001, floor), 1u) << "past them";
+
+    ecuio_check_options_t caller{};
+    caller.gap_us = 500000;
+    EXPECT_EQ(gaps(1500000, floor, &caller), 0u) << "the caller's gap too";
+    EXPECT_EQ(gaps(1500001, floor, &caller), 1u);
+
+    for (const char* bad :
+         {"min sweep  60001 ms\n", "min sweep  0 ms\n", "min sweep  x ms\n",
+          "min sweep  1000 sec\n", "min sweep  1000\n"}) {
+        EXPECT_EQ(gaps(1200000, bad), 1u) << bad;
+    }
+}
+
 TEST(RecordingCheckTest, TheFixtureWithOneOfEachFindingReportsEachAtItsTime)
 {
     const std::vector<Row> plain = fixture_rows();

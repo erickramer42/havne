@@ -401,8 +401,9 @@ TEST_F(Elm327SessionTest, TheSessionInfoSaysWhatItRunsOn)
     EXPECT_STREQ(info.dll_version, "");
     EXPECT_STREQ(info.api_version, "");
     EXPECT_EQ(info.vbatt_mv, 13800u);
-    EXPECT_EQ(info.flags,
-              ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS);
+    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT |
+                              ECUIO_SESSION_INFO_VERSIONS |
+                              ECUIO_SESSION_INFO_REQUESTS);
     EXPECT_STREQ(info.profile, "obd2") << "elm327://'s default";
 }
 
@@ -778,6 +779,111 @@ TEST_F(Elm327SessionTest, AFocusAsksOnlyThePickedPids)
         },
         5000))
         << "the whole set is asked again";
+}
+
+/* ADR-0056 section 4: two picks with a minimum time of 200 ms, judged by
+ * the fake's own stamps on its requests: from one sweep's first request
+ * to the next's, the median is at least the minimum (a stall only adds)
+ * and each sweep's second request follows at the engine's floor, not
+ * spread over the gap */
+TEST_F(Elm327SessionTest, AMinimumTimeSpacesTheFocusSweeps)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0&probe=0")), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, ids.data(), 2, 200, 0),
+              ECUIO_OK);
+    s.start();
+    static constexpr uint32_t want = 12; /* no capture: MSVC and Clang agree */
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return on_fake<uint32_t>([](fake_elm327::adapter& a) {
+                       return a.requests;
+                   }) >= want;
+        },
+        5000));
+    const std::vector<int64_t> stamps =
+        on_fake<std::vector<int64_t>>([](fake_elm327::adapter& a) {
+            return std::vector<int64_t>(a.request_us, a.request_us + want);
+        });
+    std::vector<int64_t> sweeps;
+    std::vector<int64_t> within;
+    for (size_t i = 0; i + 2 < stamps.size(); i += 2) {
+        sweeps.push_back(stamps[i + 2] - stamps[i]);
+        within.push_back(stamps[i + 1] - stamps[i]);
+    }
+    std::sort(sweeps.begin(), sweeps.end());
+    std::sort(within.begin(), within.end());
+    const int64_t sweep = sweeps[sweeps.size() / 2];
+    const int64_t inner = within[within.size() / 2];
+    RecordProperty("sweep_median_us", static_cast<int>(sweep));
+    EXPECT_GE(sweep, 190000) << "sweeps came faster than the minimum";
+    EXPECT_LT(inner, 100000) << "a sweep's requests were spread over the gap";
+}
+
+/* A session that asks says so in its info, and a recording of it names
+ * the focus's minimum time, after the focus line and before the signals */
+TEST_F(Elm327SessionTest, ARecordingNamesTheMinimumTimeOfASessionThatAsks)
+{
+    const fs::path root =
+        fs::temp_directory_path() / temp_name("ecuio-elm327-floor");
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0&probe=0")), ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    uint16_t rpm = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Cu) {
+            rpm = d.id;
+        }
+    }
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 250, 0), ECUIO_OK);
+    const std::string root8 = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len), ECUIO_OK);
+    const fs::path folder = fs::u8path(buf);
+    ASSERT_EQ(ecuio_session_record(s.s, rec), ECUIO_OK);
+    ecuio_session_destroy(s.s);
+    s.s = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+    std::ifstream f(folder / "events.log", std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::string events;
+    for (char c : ss.str()) {
+        if (c != '\r') {
+            events += c;
+        }
+    }
+    const size_t focus = events.find("\nfocus  ");
+    const size_t floor = events.find("\nmin sweep  250 ms\n");
+    const size_t signal = events.find("\nsignal  ");
+    ASSERT_NE(focus, std::string::npos) << events;
+    ASSERT_NE(floor, std::string::npos) << events;
+    EXPECT_TRUE(focus < floor && floor < signal) << events;
+    fs::remove_all(root, ec);
 }
 
 /* A focus is judged by what the session can still ask: once the walk

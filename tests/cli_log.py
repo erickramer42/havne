@@ -8,6 +8,7 @@
 #   python tests/cli_log.py interrupt <havne-cli>
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
+#   python tests/cli_log.py pace <havne-cli>
 #
 # demo: mock://demo logged for 2 s with two signals picked, the log line's
 # period shortened through HAVNE_CLI_LOG_EVERY_MS (set here): the lines
@@ -27,7 +28,12 @@
 # its end line's why output-failed (the crash this pins: a null reason
 # on that path). focus-refused: a focus the session can't ask (a
 # ?poll= session, a pick that isn't the polled PID) is an error line
-# after the session line, exit 3, no recording made.
+# after the session line, exit 3, no recording made. pace: --min-sweep over
+# a simulated ELM327 on TCP: the same two signals logged for 3 s with no
+# minimum and with 250 ms, the focus line and the header saying so only
+# with one, and the wide export's sweep rows at most the time allows
+# (a floor only takes rows away, so load can't fail it) and fewer than
+# the free run's.
 
 import csv
 import json
@@ -50,6 +56,80 @@ def run(cli, args, env=None):
     done = subprocess.run([cli] + args, capture_output=True, env=env)
     rows = golden.parse(done.stdout.decode("utf-8"), "stdout")
     return done.returncode, rows, done.stderr.decode("utf-8", "replace")
+
+
+class Emulator:
+    """havne-cli sim's ELM327 on an OS-picked port, as a child"""
+
+    def __init__(self, cli):
+        self.p = subprocess.Popen(
+            [cli, "sim", "mock://sim?values=canned", "--elm327", "tcp:0",
+             "--seconds", "90"],
+            stdout=subprocess.PIPE, text=True)
+        self.port = None
+        for line in self.p.stdout:
+            j = json.loads(line)
+            if j["type"] == "elm327":
+                self.port = int(j["listen"].rsplit(":", 1)[1])
+                return
+        raise SystemExit("FAIL  the emulator wrote no elm327 line")
+
+    def end(self):
+        self.p.terminate()
+        self.p.communicate(timeout=60)
+
+
+def paced_rows(cli, port, root, floor):
+    """A log of PACE_SIGNALS for 3 s: its focus line, its events.log and
+    the number of the wide export's sweep rows"""
+    uri = (f"elm327://127.0.0.1:{port}"
+           "?profile=obd2&identify=0&diagnose=0&probe=0")
+    args = ["log", uri, str(root), "--seconds", "3"]
+    for name in PICKS:
+        args += ["--signal", name]
+    if floor:
+        args += ["--min-sweep", str(floor)]
+    code, rows, err = run(cli, args)
+    if code != 0:
+        raise SystemExit(f"FAIL  log exit {code}: {err} {rows}")
+    focus = [r for r in rows if r["type"] == "focus"][0]
+    folder = the_folder(root)
+    events = (folder / "events.log").read_text("utf-8")
+    out = Path(root) / "wide.csv"
+    code, rows, err = run(cli, ["export", str(folder), str(out), "--format",
+                                "csv", "--rows", "sweep"])
+    if code != 0:
+        raise SystemExit(f"FAIL  export exit {code}: {err} {rows}")
+    with open(out, newline="", encoding="utf-8-sig") as f:
+        table = [row for row in csv.reader(f) if row and not row[0].startswith("#")]
+    return focus, events, len(table) - 1
+
+
+def pace(cli):
+    emulator = Emulator(cli)
+    try:
+        with tempfile.TemporaryDirectory() as free_root:
+            focus, events, free = paced_rows(cli, emulator.port, free_root, 0)
+            if "min_sweep_ms" in focus:
+                raise SystemExit(f"FAIL  a focus with none says one: {focus}")
+            if "min sweep" in events:
+                raise SystemExit("FAIL  a log with none has a min sweep line")
+        with tempfile.TemporaryDirectory() as root:
+            focus, events, paced = paced_rows(cli, emulator.port, root, 250)
+    finally:
+        emulator.end()
+    if focus.get("min_sweep_ms") != 250:
+        raise SystemExit(f"FAIL  the focus line: {focus}")
+    if "\nmin sweep  250 ms\n" not in events.replace("\r\n", "\n"):
+        raise SystemExit("FAIL  the header has no min sweep line")
+    # 3 s of log at most, 4 sweeps a second; the first row's sweep and the
+    # log's own edges are worth a row or two, which the bound leaves
+    if not 3 <= paced <= 15:
+        raise SystemExit(f"FAIL  {paced} rows at 250 ms in 3 s")
+    if free <= paced:
+        raise SystemExit(f"FAIL  the free run's {free} rows, at 250 ms {paced}")
+    print(f"ok    {free} rows free, {paced} at 250 ms")
+    return 0
 
 
 def the_folder(root):
@@ -362,6 +442,8 @@ def main(argv):
         return closed_pipe(argv[2])
     if len(argv) >= 4 and argv[1] == "focus-refused":
         return focus_refused(argv[2], argv[3])
+    if len(argv) >= 3 and argv[1] == "pace":
+        return pace(argv[2])
     print(__doc__ or "usage: cli_log.py <mode> <havne-cli> ...")
     return 2
 

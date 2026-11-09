@@ -138,6 +138,7 @@ ApplicationWindow {
         // bridge and recordings stay in core's decoded, metric units
         property int unitSystem: 1
         property bool developerMode: false
+        property int minSweepMs: 0
     }
     property bool zoomRestored: false
     Component.onCompleted: {
@@ -150,10 +151,12 @@ ApplicationWindow {
         zoomRestored = true
         Bridge.unitSystem = uiSettings.unitSystem   // anything but 0 or 1 is ignored
         Theme.developerMode = uiSettings.developerMode
+        Bridge.minSweepMs = uiSettings.minSweepMs   // anything but a choice is ignored
     }
     Connections {
         target: Bridge
         function onUnitSystemChanged() { uiSettings.unitSystem = Bridge.unitSystem }
+        function onMinSweepMsChanged() { uiSettings.minSweepMs = Bridge.minSweepMs }
     }
     Connections {
         target: Theme

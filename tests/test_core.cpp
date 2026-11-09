@@ -6193,6 +6193,78 @@ TEST(CoreTest, AFocusThatLeavesNothingToRequestIsRefused)
     ecuio_session_destroy(s);
 }
 
+/* ADR-0056 section 4: the call's refusals, each changing nothing, and
+ * the minimum reaching the engine with the focus at the worker's take;
+ * the focus's end takes it away */
+TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    const uint16_t rpm = focus_id_of(set, {0x01, 0x0C});
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+
+    EXPECT_EQ(ecuio_session_set_focus_with(nullptr, &rpm, 1, 100, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_set_focus_with(s, nullptr, 1, 100, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_EQ(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u)
+        << "the mock asks nothing";
+    const uint32_t generation = s->focus_generation.load();
+    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 100, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(), "the focus takes no flags yet");
+    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1,
+                                           ECUIO_FOCUS_MIN_SWEEP_MAX_MS + 1, 0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "a minimum time between sweeps is at most 60000 ms");
+    EXPECT_EQ(ecuio_session_set_focus_with(s, nullptr, 0, 100, 0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(s->focus_generation.load(), generation) << "nothing changed";
+
+    ASSERT_EQ(ecuio_session_set_focus_with(s, &rpm, 1,
+                                           ECUIO_FOCUS_MIN_SWEEP_MAX_MS, 0),
+              ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_TRUE(e->focused);
+    EXPECT_EQ(e->min_sweep_us, 60000 * int64_t{1000});
+
+    ASSERT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 250, 0), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(e->min_sweep_us, 250000);
+
+    /* The plain call is the same focus with none */
+    ASSERT_EQ(ecuio_session_set_focus(s, &rpm, 1), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_TRUE(e->focused);
+    EXPECT_EQ(e->min_sweep_us, 0);
+
+    ASSERT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 250, 0), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    ASSERT_EQ(ecuio_session_set_focus_with(s, nullptr, 0, 0, 0), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_FALSE(e->focused);
+    EXPECT_EQ(e->min_sweep_us, 0);
+
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 250, 0),
+              ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+}
+
 /* uds-generic: a DID the scan finds under a focus joins parked and is
  * unparked at the worker's next take when the focus names it; one it
  * doesn't name stays parked. A focus on a DID the scan hasn't found is
@@ -6242,5 +6314,69 @@ TEST(CoreTest, AScannedDidFoundUnderAFocusJoinsItWhenPicked)
     EXPECT_EQ(e->chans[0].requests, 2u);
     EXPECT_EQ(ecuio_session_set_focus(s, &picked, 1), ECUIO_OK)
         << "found, it is askable";
+    ecuio_session_destroy(s);
+}
+
+/* A scanned DID found under a focus with a minimum time between sweeps
+ * neither starts the sweep under way over nor ends its wait: DIDs found
+ * faster than a sweep runs would otherwise keep it from ever ending */
+TEST(CoreTest, AScannedDidJoiningLeavesTheSweepUnderWayAlone)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=uds-generic"
+                                   "&did=1E1C:u16,1E1D:u16,1E18-1E1A",
+                                   &s),
+              ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    request_params params;
+    params.probe = false; /* the rotation alone */
+    params.identify = false;
+    params.diagnose = false;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ASSERT_EQ(e->count, 2u) << "the polled DIDs; the scan's are unasked";
+    /* The finds come by hand (join): the scan's own requests stay out */
+    e->chans[0].scan_pending = 0;
+    e->chans[0].scanning = false;
+    const uint16_t ids[3] = {focus_id_of(set, {0x22, 0x1E, 0x1C}),
+                             focus_id_of(set, {0x22, 0x1E, 0x1D}),
+                             focus_id_of(set, {0x22, 0x1E, 0x19})};
+    ASSERT_EQ(ecuio_session_set_focus_with(s, ids, 3, 500, 0), ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+    ASSERT_EQ(e->min_sweep_us, 500000);
+
+    const auto ask = [&e](int64_t at) {
+        const int32_t r = ecuio_engine_due(e.get(), 0, at);
+        if (r != ECUIO_ENGINE_NONE) {
+            ecuio_engine_sent(e.get(), 0, r, true, at);
+            (void)ecuio_engine_expire(e.get(), 0, at + ECUIO_ENGINE_WAIT_US);
+        }
+        return r;
+    };
+    const auto join = [&](uint8_t lo) {
+        const uint8_t req[3] = {0x22, 0x1E, lo};
+        EXPECT_EQ(ecuio_engine_add(e.get(), 0, req, 3),
+                  ecuio_engine_add_result::added);
+        ++e->chans[0].generation; /* the scan's settle */
+        ecuio_take_focus(s, e.get(), seen);
+    };
+    EXPECT_NE(ask(0), ECUIO_ENGINE_NONE);
+    join(0x19); /* picked: the rotation is three rows now */
+    ASSERT_EQ(e->chans[0].requests, 3u);
+    EXPECT_NE(ask(120000), ECUIO_ENGINE_NONE);
+    EXPECT_NE(ask(240000), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ask(360000), ECUIO_ENGINE_NONE)
+        << "three rows asked: the sweep ended, counted from its start";
+    EXPECT_EQ(e->chans[0].next_sweep_us, 500000);
+    join(0x1A); /* not picked */
+    EXPECT_EQ(ask(499999), ECUIO_ENGINE_NONE) << "the wait stands";
+    EXPECT_NE(ask(500000), ECUIO_ENGINE_NONE);
     ecuio_session_destroy(s);
 }

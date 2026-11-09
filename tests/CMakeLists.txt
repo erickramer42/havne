@@ -545,6 +545,11 @@ if(TARGET havne-cli)
         # interrupt (skip 77 without a console on Windows), the output
         # closed under it and under stream --record (the recording whole
         # either way)
+        add_test(NAME CliLogRunTest.AMinimumTimeBetweenSweepsLimitsTheRows
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pace
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.AMinimumTimeBetweenSweepsLimitsTheRows
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
@@ -820,6 +825,9 @@ if(TARGET havne-cli)
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
     app_cli_usage(LogWithoutAUriIsUsage "log")
+    app_cli_usage(LogMinSweepWithoutASignalIsUsage "log|mock://x|out|--min-sweep|250")
+    app_cli_usage(LogMinSweepPastItsMostIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|60001")
+    app_cli_usage(LogMinSweepOfZeroIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|0")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
@@ -1267,6 +1275,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(test_bridge)
+    # One file of many tests, past MSVC's default section limit
+    if(MSVC)
+        target_compile_options(test_bridge PRIVATE /bigobj)
+    endif()
 
     # core/src for pid_support.h: core's judgment of the unsupported
     # signals, fed to the model (test_core's precedent)

@@ -340,6 +340,11 @@ ecuio_status_t ecuio_session_get_error_state(
                                                           corrupted or held
                                                           back on purpose
                                                           (ADR-0041) */
+#define ECUIO_SESSION_INFO_REQUESTS      0x00000040u   /* the session asks an
+                                                          ECU for what it
+                                                          reads: a focus's
+                                                          minimum time between
+                                                          sweeps applies */
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
@@ -1035,6 +1040,36 @@ ecuio_status_t ecuio_session_set_focus(
     ecuio_session_t* session,
     const uint16_t* signal_ids,
     uint32_t count
+);
+
+/* The longest minimum time between sweeps, in ms */
+#define ECUIO_FOCUS_MIN_SWEEP_MAX_MS 60000u
+
+/*
+ * ecuio_session_set_focus, with a minimum time between sweeps (ADR-0056
+ * section 4), for a slow adapter or a busy ECU; min_sweep_ms 0 is none,
+ * and the same as ecuio_session_set_focus. Each channel starts a sweep of
+ * the picks at most once every min_sweep_ms, measured from one sweep's
+ * first request to the next's, so a sweep that takes longer than that
+ * waits for nothing. Only the picks' rotation waits: the probe, the DID
+ * scan, identification, diagnostics and a clear go out in the gap. It
+ * lasts as long as the focus; a session with no focus has no minimum. A
+ * session that asks nothing (the mock, a replay, listening;
+ * ECUIO_SESSION_INFO_REQUESTS clear) takes it and changes nothing.
+ * "Not responding" is ten unanswered requests in a row whatever the
+ * minimum, so with one request a sweep an ECU that stops answering is
+ * reported after ten times min_sweep_ms.
+ * flags: none yet, must be 0.
+ * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
+ * detail, for a flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a time
+ * with no signals picked, and whatever ecuio_session_set_focus refuses.
+ */
+ecuio_status_t ecuio_session_set_focus_with(
+    ecuio_session_t* session,
+    const uint16_t* signal_ids,
+    uint32_t count,
+    uint32_t min_sweep_ms,
+    uint32_t flags
 );
 
 #ifdef __cplusplus

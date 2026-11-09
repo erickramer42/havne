@@ -139,6 +139,7 @@ ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE = 1
 ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED = 4
 ECUIO_EXPORT_PCAPNG = 3
 ECUIO_EXPORT_RAW = 1
+ECUIO_FOCUS_MIN_SWEEP_MAX_MS = 0xea60
 ECUIO_FRAME_DATA_MAX = 0x1000
 ECUIO_FRAME_FLAG_BITRATE_SWITCH = 8
 ECUIO_FRAME_FLAG_ERROR = 16
@@ -233,6 +234,7 @@ ECUIO_SESSION_INFO_PENDING_OFF = 8
 ECUIO_SESSION_INFO_PROFILE_LEN = 64
 ECUIO_SESSION_INFO_REPLAY_FAULTS = 32
 ECUIO_SESSION_INFO_REPLAY_LOOP = 4
+ECUIO_SESSION_INFO_REQUESTS = 64
 ECUIO_SESSION_INFO_TEXT_LEN = 80
 ECUIO_SESSION_INFO_VBATT = 1
 ECUIO_SESSION_INFO_VERSIONS = 2
@@ -1230,6 +1232,7 @@ FUNCTIONS = {
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h
     'ecuio_session_send': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t)]),  # core.h
     'ecuio_session_set_focus': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32]),  # core.h
+    'ecuio_session_set_focus_with': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, c_uint32, c_uint32]),  # core.h
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h

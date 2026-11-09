@@ -102,10 +102,13 @@ struct ecuio_session {
      * focus_askable, one byte per def (1: its request is in the table and
      * not dropped), set by ecuio_build_requests and kept by the worker
      * as the table changes; a requesting session refuses a focus whose
-     * picks are none of them askable. */
+     * picks are none of them askable. focus_min_sweep_ms, the focus's
+     * minimum time between sweeps (section 4), 0 for none, under the
+     * mutex too. */
     std::mutex focus_mutex;
     std::vector<uint16_t> focus_ids;
     std::vector<uint8_t> focus_defs;
+    uint32_t focus_min_sweep_ms = 0;
     std::atomic<uint32_t> focus_generation{0};
     bool focus_requests = false;
     std::vector<uint8_t> focus_askable;

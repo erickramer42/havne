@@ -454,9 +454,32 @@ ecuio_status_t ecuio_session_set_focus(ecuio_session_t* session,
                                        const uint16_t* signal_ids,
                                        uint32_t count)
 {
+    return ecuio_session_set_focus_with(session, signal_ids, count, 0, 0);
+}
+
+ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
+                                            const uint16_t* signal_ids,
+                                            uint32_t count,
+                                            uint32_t min_sweep_ms,
+                                            uint32_t flags)
+{
     ecuio_detail_clear();
     if (session == nullptr || (signal_ids == nullptr && count > 0)) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (flags != 0) {
+        ecuio_detail_set("the focus takes no flags yet");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (min_sweep_ms > ECUIO_FOCUS_MIN_SWEEP_MAX_MS) {
+        ecuio_detail_set("a minimum time between sweeps is at most %u ms",
+                         static_cast<unsigned>(ECUIO_FOCUS_MIN_SWEEP_MAX_MS));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (min_sweep_ms != 0 && count == 0) {
+        ecuio_detail_set("a minimum time between sweeps goes with a focus: "
+                         "no signals were picked");
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (session->closed.load()) {
         return ECUIO_ERR_SESSION_CLOSED;
@@ -510,6 +533,7 @@ ecuio_status_t ecuio_session_set_focus(ecuio_session_t* session,
         }
         session->focus_ids.swap(ids);
         session->focus_defs.swap(picked);
+        session->focus_min_sweep_ms = min_sweep_ms;
     }
     /* The picks first: a worker that sees the count moved reads them */
     session->focus_generation.fetch_add(1);
@@ -911,7 +935,11 @@ ecuio_status_t ecuio_session_create(
     if (status != ECUIO_OK) {
         return status;
     }
-    /* After attach, which fills the rest of the info. */
+    /* After attach, which fills the rest of the info; the worker hasn't
+     * started, so no lock */
+    if (s->focus_requests) {
+        s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
+    }
     static_assert(ECUIO_PROFILE_NAME_MAX < ECUIO_SESSION_INFO_PROFILE_LEN,
                   "the session info holds any profile name");
     char* profile = s->info.profile;

@@ -367,9 +367,12 @@ void request_worker(ecuio_socketcan_transport* t)
         }
 
         /* Until the next event: the echo's N_As, the engine's next wait or
-         * floor, ISO-TP's N_Cr; at most one quiet window */
-        int64_t next_us = ecuio_engine_next_event_us(&e, now);
-        const bool asking = next_us != INT64_MAX;
+         * floor, ISO-TP's N_Cr; at most one quiet window. A halted session
+         * sends nothing more, so what the engine calls due isn't one: it
+         * waits the window out, still asking, so no quiet read counts */
+        const int64_t in_us = ecuio_engine_next_event_us(&e, now);
+        const bool asking = in_us != INT64_MAX;
+        int64_t next_us = asking && !t->proof.halted ? now + in_us : INT64_MAX;
         if (pending.active) {
             next_us =
                 std::min(next_us, pending.at_us + ECUIO_ISOTP_N_AS_US + 1);

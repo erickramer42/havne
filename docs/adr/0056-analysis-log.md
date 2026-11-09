@@ -561,3 +561,63 @@ newest estimate winning), `QmlTest.recordings`' Export cases,
 `QmlTest.phone`'s `test_theExportPanelFitsAPhone`, `CliTransferTest`,
 `CliUsageTest.ExportEstimate*`, `CliGoldenTest.ExportEstimateSizesTheWideCsv`
 and `CliTransferRunTest.csv` (each estimate's bytes the file's).
+
+## Appendix: the minimum time between sweeps as built (2026-11-08)
+
+Section 4's advanced setting belongs to the focus: it is asked for with
+the picks and lasts as long as they do.
+
+- `ecuio_session_set_focus_with(session, ids, count, min_sweep_ms,
+  flags)` (`core.h`); `ecuio_session_set_focus` is the same call with
+  0 and 0. 0 is none; the most is `ECUIO_FOCUS_MIN_SWEEP_MAX_MS`
+  (60000). A flag, a time past that, or a time with no signals picked
+  is `ECUIO_ERR_INVALID_ARGUMENT` with nothing changed.
+- It is on the focus call rather than a URI key, since a key needs a
+  reconnect to change, and rather than a call of its own, which would
+  be a second state that does nothing outside a focus.
+- **Only a focused session has one.** Live, Record sessions and
+  `havne-cli stream` keep their pace, and the focus's end takes it
+  away. A sweep is defined here because a focus runs every pick in one
+  class; across the fast and slow classes of a whole set it isn't, and
+  a busy ECU gets no relief on Live.
+- **In the engine, per channel, from one sweep's start to the next's**
+  (`ecuio_engine_focus`'s `min_sweep_us`, `ecuio_engine_count_sweep`;
+  the time is the driver's, as for every engine rule). A sweep ends once
+  as many rows have been asked as the rotation holds, and the rows are
+  consecutive, so every pick has been asked. A sweep longer than the
+  minimum waits for nothing.
+- **Packing:** a pack counts each of its rows. Eight picks at six PIDs
+  a pack are two requests a sweep, four rows asked twice; the count
+  starts over at each sweep, since the wait can only fall between two
+  requests.
+- **Only the rotation waits.** The walk, identification, diagnostics, a
+  clear and the DID scan go out in the gap.
+  `ecuio_engine_next_event_us` reports the wait, so the workers sleep
+  through it and, still having something to ask, count no quiet reads:
+  a long minimum raises no link-health banner. "Not responding" stays
+  ten unanswered requests in a row, so with one request a sweep it comes
+  after ten times the minimum: 10 s at 1000 ms.
+- A later call with the same time keeps a wait under way; a different
+  time ends it. A scanned DID joining the focus changes neither the
+  sweep under way nor its wait, so DIDs found faster than a sweep runs
+  can't keep it from ending.
+- `mock://`, `replay://` and a listening session accept it and change
+  nothing, as with the focus, so neither the recording's header nor the
+  activity log's line names it there. `ECUIO_SESSION_INFO_REQUESTS` (set
+  at create) says which sessions ask.
+- **The front ends:** Settings' Advanced page, Off (the default), 100,
+  250, 500 or 1000 ms, kept between runs and read at each Start log, so
+  no reconnect, and the activity log's line says it;
+  `havne-cli log --min-sweep <ms>` (with `--signal`), the `focus` line's
+  `min_sweep_ms` when one is set; Python's `set_focus(signals,
+  min_sweep_ms=0)`.
+- **The recording** has `min sweep  250 ms` after its `focus` line, so
+  a log's row rate can be explained later; the folder export keeps it.
+  A row of the wide CSV is unchanged: a minimum gives fewer of them, and
+  the silence rule's 3x interval follows the sweep's.
+- **The frames check** reads that line and adds the minimum to its
+  bus-gap limit (the default or the caller's): a sweep of one reply can
+  be that quiet, start to start, plus its overshoot. A limit of the
+  larger of the two would call every sweep at 1000 ms a gap.
+- No real adapter has run it; the checks are the fakes' and the
+  simulated ELM327's.
