@@ -1214,6 +1214,9 @@ The Edit button's mode remains for Add, Remove, the pages' controls and
 Reset to the built-in layout, and in it the same gesture works the same
 way. Drag-to-reorder is v0.7.1's, as section 5 already says.
 
+Added 2026-11-09. Qt has no haptic from QML without native code, so
+the hold shows only the cell lifting.
+
 ### 5. Copy and paste
 
 **Copy** takes the whole cell: kind, refs, unit, label, options and
@@ -1228,3 +1231,18 @@ page, i)` returning the cell and `pasteCell(doc, page, i, cell)`, both
 pure, with the bound check; the slot is page state. The slot is per
 form, and Paste is disabled when it holds the other form's cell, whose
 spans are meant for the other grid.
+
+Added 2026-11-09. As built it is one slot, `{form, cell}`, for the
+app's run: a copy on either form replaces it, and Paste is disabled
+while it holds the other form's cell.
+
+### 6. A blank cell
+
+Added 2026-11-08. A new kind, `blank`, appended to
+`DashboardBook.kinds` and offered in Add: sized and placed like any
+gauge, needing no signal (its `refs` are empty), drawing nothing
+outside edit mode and an outlined empty cell in it. It holds a spot
+open, for instance beside a floating overlay app, so placement doesn't
+pack the next gauges into it. Its panel has the size, the order, Copy
+and Paste after. Outside edit mode it has nothing to hold, so section
+4's gesture starts on it only in edit mode.
