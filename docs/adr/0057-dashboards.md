@@ -1057,3 +1057,174 @@ on, or on a schedule) beside the look, and its style is amber or red. The
 palettes are `dark`, `nightAmber` and `nightRed`, and in the two night
 palettes `gaugeReadout` is the text color and no chart trace is brighter
 than the text. The gauge roles of section 9 are unchanged.
+
+## Appendix: six columns, the panel, one gesture, copy and paste (2026-11-08)
+
+Sections 1 and 2 of this appendix are built. Sections 3 to 5 are decided
+and not built.
+
+### 1. Six columns upright, twelve on the side
+
+Section 4 gives the phone 2 columns upright and 4 on its side. The
+decided layout puts an RPM dial at two thirds of the width with three
+readouts stacked beside it, and three readouts across a row; neither is
+a half or a whole. The phone form moves to **6 columns upright and 12
+on the side**. The row unit stays a quarter of the column width, so a
+column is a third as wide as before and a row a third as tall, and the
+same shape on screen needs `w` and `h` three times larger. The bound on
+`h` rises from 16 to **48**; `w` stays 1 to 12 (12 is the whole row on
+the side, and anything 6 or more is the whole row upright, as section 4
+already says of a span wider than the grid). The built-in phone layout
+(`DashboardBook.builtIn("phone")`) is written with the new spans
+directly: the shift lights at 12 x 3, the dial at 4 x 18 with three
+digital tiles at 2 x 6 stacked beside it, a digital trace across the
+grid at 6 x 8, and three digital tiles at 2 x 7 across. A digital tile
+too short for its trace and footer (under 84 px of gauge) draws its
+label and value alone. The desktop form is unchanged: its columns
+follow the width (2 to 12), its documents do not move, and its height
+control stays 1 to 16.
+
+### 2. The migration of a stored layout
+
+v0.7.0 ships format 1 with phone layouts on 2 and 4 columns. A user
+who edited theirs has a `dashboards/phone` document whose spans mean
+half and whole widths; read on 6 columns unchanged, every gauge would
+shrink to a third. So:
+
+- **Format 2.** `format` becomes 2. The only difference from 1 is the
+  meaning of a phone document's spans and the `h` bound of 48. The
+  desktop document's spans mean the same in 1 and 2.
+- **When it runs.** In `DashboardBook.parse(text, form)`, which already
+  has the form (`"phone"` or `"desktop"`). A format 1 document is first
+  checked against **format 1's bounds** (`w` 1 to 12, `h` 1 to 16), with
+  a bad page or cell dropped exactly as v0.7.0 drops it; only then is it
+  upgraded. So `cellProblem` takes the bound from the text's format: a
+  format 1 `h` of 17 stays invalid on either form, and a format 1 `w` of
+  13 is dropped, not clamped. A format 1 phone document is then upgraded
+  in memory: every cell's `w` and `h` are multiplied by 3, `w` clamped
+  to 12. A format 1 desktop document is upgraded by setting `format`
+  alone, before `documentProblem`, which compares it. Nothing is written
+  at read time: as with the built-in layout, the stored text changes on
+  the user's first edit, when `serialize` writes format 2. Until then a
+  user who goes back to v0.7.0 finds their format 1 text as it was.
+- **After the first edit,** v0.7.0 reads format 2 as "made by a newer
+  version of Havne" and shows the built-in layout, leaving the text
+  alone, by section 7's existing rule (a format 2 text past 64 KiB reads
+  there as damaged instead, with the same result). Nothing is lost in
+  either direction.
+- **A span that does not scale cleanly.** With a factor of 3 on
+  integers there is none; the one edge is the bound. `h` x 3 is at most
+  48, the new bound. `w` x 3 above 12 is clamped to 12, and the clamp
+  changes nothing on screen: upright, a format 1 `w` of 2 or more was
+  the whole row and becomes 6 or more, still the whole row; on the
+  side, a `w` of 4 or more was the whole row and becomes 12, the whole
+  row. So the upgrade is exact, and at any gap between cells: a row's
+  pitch is (column + gap) / 4 and a cell's height is `h` x pitch - gap,
+  one gap whatever its rows, and three times the columns makes column +
+  gap exactly a third, so three times the rows at a third of the pitch
+  is the same height. The cap on the pitch, (shown height + gap) /
+  tallest `h`, scales the same way.
+- **`phonePage` and `desktopPage`** (the page last shown) are not part
+  of the document and need nothing.
+- **The two forms differ.** Each document has its own `format`, so a
+  phone document at 1 and a desktop document at 2 read correctly side
+  by side, and a device that has only one of the two (a phone never
+  used as a desktop) upgrades the one it has. The form is the key the
+  text came from, never guessed from the content.
+- **The 64 KiB bound.** Scaling can add up to two bytes per cell, so a
+  format 1 document just under the limit could pass the read's check
+  and fail `documentProblem` as written back. The upgrade must not turn
+  a readable document into "damaged": format 1 keeps its 64 KiB
+  (`format1MaxBytes`), and format 2's bound, `maxBytes`, is that plus
+  two bytes for each of the most cells a document can hold, which the
+  first edit's write follows too.
+- **Spans written in the code.** Everything that names a phone span
+  moves to the new grid with the form known: the built-in layout, the
+  bar's vertical switch (2 x 2 and 1 x 4 become 6 x 6 and 3 x 12 on the
+  phone), the add placeholder and a new cell's default span. The
+  desktop's stay as they are.
+- **The size control.** The phone's height control steps by 3 (one old
+  row), not by 1 up to 48; `w` steps by 1. A stored odd `h` still reads
+  and displays; a step moves to the next multiple of 3.
+- **Idempotence.** A format 2 document is never multiplied again; a
+  format 1 document read twice (two launches before the first edit)
+  gives the same result each time, since the stored text has not
+  changed.
+- **Unknown cells and keys** (section 7's "within format 1" rule) are
+  kept and, if they are cells, scaled like the rest: their `w` and `h`
+  are known fields even when their kind is not.
+
+**The tests** are in `tst_dashboardbook.qml`, the last in
+`tst_dashedit.qml`:
+
+1. The sample document of section 7 as a format 1 phone text: after
+   `parse`, `format` is 2, the shift lights are `w` 12 `h` 3, the dial
+   `w` 6 `h` 24, the digital `w` 3 `h` 12; `place` on 6 columns puts
+   them in the same relative positions as `place` on 2 columns put the
+   original.
+2. The same text as a desktop document: `format` 2, spans unchanged.
+3. A format 1 phone cell with `w` 5 (whole row on 4 columns) becomes
+   `w` 12 and is still the whole row on 12 columns; `h` 16 becomes 48
+   and reads.
+4. A format 2 phone text through `parse` is unchanged.
+5. `serialize(parse(format1))` writes `"format": 2` and the scaled
+   spans; `parse` of that gives the same document (round trip).
+6. An unknown kind's cell keeps its keys and scales.
+7. A format 3 text shows the built-in layout and the "newer version"
+   notice, as before.
+8. A format 1 cell with `h` 17 is dropped, phone and desktop; with `w`
+   13 is dropped, not clamped; the dropped count is reported as in
+   v0.7.0. A format 2 cell with `h` 48 reads, with `h` 49 is dropped.
+9. A format 1 phone document at 64 KiB, whose upgrade passes that
+   limit, reads with no problem and survives its first edit.
+10. On the real page at its own gap, a stored format 1 phone layout
+    gives every cell the box the 2 and 4 column grid gave it, and the
+    store changes only on the first edit.
+11. The bar's vertical switch on a format 2 phone cell at 6 x 6 and at
+    3 x 12; on a desktop cell at 2 x 2 and 1 x 4.
+
+### 3. The panel chrome
+
+Cells on the phone meet at hairlines on one flat surface: the grid's
+spacing is 0 and it draws a 1 dp line (`Theme.hairline`, the outline at
+55 % over surface) between neighbors and around the panel, with
+radius 6 on the panel; `GaugeCard` paints no gradient, no border and no
+radius of its own. Hierarchy comes from the spans. The desktop keeps
+its cards in v0.7.1 and takes this design in the release after it.
+
+### 4. One gesture on a gauge
+
+Press and hold on a gauge (the platform's long-press time,
+`styleHints.mousePressAndHoldInterval`), in or out of edit mode, except
+in the drive view, where the long press does nothing. Then:
+
+- **release** opens the cell's menu (section 5's panel with Copy and
+  Paste after added), in the page, in its scroll area;
+- **move** drags the cell; the drop is a change of order (section 4),
+  and placement reflows the page as the drag passes other cells.
+
+It yields to the page swipe and to scrolling by time: a finger that
+moves before the hold completes is a swipe or a scroll and the hold is
+canceled; once the hold completes (a short haptic, the cell lifts) the
+`SwipeView` and the page's `Flickable` are made non-interactive until
+release, and a drag near the top or bottom edge scrolls the page
+itself. Nothing in the two gestures' timing collides, since both
+alternatives need motion before the hold and the hold needs stillness.
+The Edit button's mode remains for Add, Remove, the pages' controls and
+Reset to the built-in layout, and in it the same gesture works the same
+way. Drag-to-reorder is v0.7.1's, as section 5 already says.
+
+### 5. Copy and paste
+
+**Copy** takes the whole cell: kind, refs, unit, label, options and
+span, into one in-app slot that lives for the app's run (not the system
+clipboard: a dashboard cell is not text a user pastes elsewhere, and
+the slot survives a page swipe without a serialization step). **Paste
+after**, in a cell's menu, inserts a copy after that cell; **Paste**, in
+the edit bar, appends it to the page shown. A paste onto a full page
+(24 cells) is refused with the page's existing message. The pasted cell
+is independent of its source. `DashboardBook` gains `copyCell(doc,
+page, i)` returning the cell and `pasteCell(doc, page, i, cell)`, both
+pure, with the bound check; the slot is page state. The slot is per
+form, and Paste is disabled when it holds the other form's cell, whose
+spans are meant for the other grid.
