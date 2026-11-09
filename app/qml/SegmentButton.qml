@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone, QmlTest.settings (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -9,6 +9,7 @@ import QtQuick.Controls
 AbstractButton {
     id: seg
     property bool selected: false
+    property alias wrapMode: segLabel.wrapMode
 
     implicitWidth: segLabel.implicitWidth + 24
     implicitHeight: 30

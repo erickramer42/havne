@@ -29,6 +29,10 @@ TestCase {
         id: storedVehicles
         category: "vehicles"
     }
+    Settings {
+        id: uiStore
+        category: "ui"
+    }
 
     // A binding error in the app's QML fails the test. Each case starts
     // with nothing stored, or the last case's URI would fill the field
@@ -40,6 +44,11 @@ TestCase {
         stored.sync()
         storedVehicles.setValue("document", "")
         storedVehicles.sync()
+        // After a turn: the last case's page writes its Settings as it goes
+        wait(0)
+        uiStore.setValue("driveHideMs", undefined)
+        uiStore.setValue("driveOrientation", undefined)
+        uiStore.sync()
     }
 
     // Every connect here is asynchronous, so a case that fails between
@@ -1356,6 +1365,69 @@ TestCase {
         const url = Harness.writeScratchFile(fileName, signalFileText(name, did))
         verify(url.toString() !== "", "the scratch file is written")
         return page.importSignalFile(url)
+    }
+
+    // The drive view's settings (ADR-0059 section 9), a phone's: stored at
+    // once and read back, each value one segment
+    function test_theDriveViewsSettingsRoundTrip_data() {
+        return [{ tag: "2 s", ms: 2000 }, { tag: "4 s", ms: 4000 },
+                { tag: "8 s", ms: 8000 }, { tag: "Never", ms: 0 }]
+    }
+    function test_theDriveViewsSettingsRoundTrip(data) {
+        const page = createPage()
+        page.open("display")
+        const display = find(page, "driveHideRow").parent
+        display.driveShown = true
+        display.orientationShown = true
+        waitForRendering(page)
+        // From another value: a click on the stored one writes nothing
+        mouseClick(find(page, "driveHide_" + (data.ms === 4000 ? 2000 : 4000)))
+        const seg = find(page, "driveHide_" + data.ms)
+        mouseClick(seg)
+        verify(seg.selected, "the chosen segment shows it")
+        for (const other of [2000, 4000, 8000, 0]) {
+            if (other !== data.ms)
+                verify(!find(page, "driveHide_" + other).selected, "only one")
+        }
+        compare(find(page, "driveSettings").driveHideMs, data.ms)
+        for (const mode of ["side", "follow", "upright"]) {
+            const button = find(page, "driveOrientation_" + mode)
+            mouseClick(button)
+            compare(find(page, "driveSettings").driveOrientation, mode)
+            verify(button.selected, mode + " shows it")
+        }
+        // A Settings object writes a change on a short timer: until it has, a read from the store sees the old value
+        tryVerify(() => { uiStore.sync(); return uiStore.value("driveHideMs", -1) === data.ms }, 3000, "written where it's read")
+        tryVerify(() => { uiStore.sync(); return uiStore.value("driveOrientation", "") === "upright" }, 3000, "and the orientation")
+    }
+
+    function test_theDriveViewsSettingsStartAtFourSecondsAndFollow() {
+        const page = createPage()
+        page.open("display")
+        const stored = find(page, "driveSettings")
+        compare(stored.driveHideMs, 4000)
+        compare(stored.driveOrientation, "follow")
+    }
+
+    function test_theDriveSettingsAreAPhonesAndTheLockWhereThereIsOne() {
+        const page = createPage()
+        page.open("display")
+        const row = find(page, "driveHideRow")
+        const display = row.parent
+        const lock = find(page, "driveOrientationRow")
+        compare(display.driveShown, false, "a desktop's")
+        compare(display.orientationShown, false, "a desktop's")
+        display.orientationShown = true
+        verify(!lock.visible, "the lock is a phone's too")
+        display.orientationShown = false
+        display.driveShown = false
+        verify(!row.visible, "none on the desktop")
+        display.driveShown = true
+        display.orientationShown = false
+        verify(row.visible)
+        verify(!lock.visible, "no lock where the phone can't hold one")
+        display.orientationShown = true
+        verify(lock.visible)
     }
 
     // With no session a page lists its signals from Settings' choice: the
