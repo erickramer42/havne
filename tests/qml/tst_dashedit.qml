@@ -1497,8 +1497,9 @@ TestCase {
         tryVerify(() => view.width > 0 && plus.width > 0, 3000, "laid out")
         compare(view.placed[view.placed.length - 1].w, data.plus[0])
         compare(view.placed[view.placed.length - 1].h, data.plus[1])
-        fuzzyCompare(plus.width, data.plus[0] * view.columnWidth + (data.plus[0] - 1) * page.gap,
-                     1e-6, "the + cell is as wide as its span")
+        fuzzyCompare(plus.width, data.plus[0] * view.columnWidth
+                     + (data.plus[0] - 1) * page.cellGap - (page.joined ? 8 : 0),
+                     1e-6, "the + cell is as wide as its span, 4 in from a joined panel's lines")
     }
 
     // The phone's height control moves in old rows; the desktop's by one to 16
@@ -1575,12 +1576,11 @@ TestCase {
         const view = find(page, "dashPage_0")
         tryVerify(() => view.width > 0, 3000, "laid out")
         compare(view.columns, data.after)
-        const gap = page.gap
-        verify(gap > 0, "a gap to get right")
-        // The grid as it was, from DashboardPage's own formula
+        // The phone's cells meet, so the columns are the width's shares
+        const gap = page.cellGap
         const col = (view.gridWidth - (data.before - 1) * gap) / data.before
         const tallest = cells.reduce((m, c) => Math.max(m, c.h), 1)
-        const cap = (Math.max(160, view.height - 2 * page.margin) + gap) / tallest
+        const cap = (Math.max(160, view.height - page.topGap - page.margin) + gap) / tallest
         const pitch = Math.max(1, Math.min((col + gap) / 4, cap))
         compare(cap < (col + gap) / 4, data.capped, "the case means what it says")
         const was = DashboardBook.place(cells, data.before)

@@ -20,6 +20,7 @@ RowLayout {
     spacing: 10
 
     Label {
+        visible: header.title !== ""
         Layout.fillWidth: header.titleShrinks
         // A whole pixel: the layout rounds a fractional maximum down, which
         // leaves the text short of its own width and elides a title that fits

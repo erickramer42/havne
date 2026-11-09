@@ -22,6 +22,18 @@ Page {
     readonly property bool compact: width < 600
     readonly property real margin: Theme.pageMargin
     readonly property real gap: compact ? 10 : 16
+    // The phone's gauges are one panel (ADR-0057's appendix, section 3):
+    // the cells meet, the grid draws the surface, the edge and the
+    // hairlines between neighbors, and no cell paints its own
+    readonly property bool joined: phoneForm
+    readonly property real cellGap: joined ? 0 : gap
+    // The space above the header and above the panel
+    readonly property real topGap: joined ? 12 : margin
+    // One pixel of the display in the layout's units, and a hairline
+    // that many whole pixels wide, so every line draws the same width
+    readonly property real pixel: 1 / ((Screen.devicePixelRatio || 1) * Theme.zoom)
+    readonly property real hairlineWidth: Math.max(1, Math.round(1 / pixel)) * pixel
+    function snap(v) { return Math.round(v / pixel) * pixel }
 
     // The platform's form, never the window's width (section 4)
     property string form: Theme.mobile ? "phone" : "desktop"
@@ -515,9 +527,10 @@ Page {
         signal holdMoved(point scene)
         signal holdEnded(bool canceled)
 
-        // A blank cell draws its own outline in edit mode and nothing else
-        color: kind === "blank" ? "transparent" : Theme.surface
-        border.width: kind === "blank" ? 0 : 1
+        // A blank cell draws its own outline in edit mode and nothing else.
+        // On a joined panel no cell paints, except the one held up: a card
+        // again, which covers what it passes over
+        plain: (root.joined && !lifted) || kind === "blank"
         scale: lifted ? 1.03 : 1
         z: lifted ? 5 : 0
 
@@ -1390,8 +1403,8 @@ Page {
         }
     }
 
-    // The link's dot and words, and the Night switch at their end (ADR-0058
-    // section 6: a status with a tap), wherever the state is shown
+    // The desktop's link state: the dot and words, and the Night switch at
+    // their end (ADR-0058 section 6: a status with a tap)
     Component {
         id: linkState
         RowLayout {
@@ -1418,21 +1431,25 @@ Page {
             NightSwitch {}
         }
     }
+    Component { id: toolNight; NightSwitch {} }
 
-    // ---- The header: title, link state, peak reset; the desktop's
-    // page buttons; why the stored layout isn't shown
+    // ---- The header: on the desktop the title, the link state and the
+    // tools, on the phone the tools alone (the tab bar names the page and
+    // the top bar has the link state); the desktop's page buttons; why
+    // the stored layout isn't shown
 
     ColumnLayout {
         id: topBar
         x: (root.width - width) / 2
-        y: root.margin
+        y: root.topGap
         width: Math.max(0, root.width - 2 * root.margin)
         spacing: root.gap / 2
 
         PageHeader {
             id: header
             Layout.fillWidth: true
-            title: qsTr("Dashboard")
+            title: root.phoneForm ? "" : qsTr("Dashboard")
+            spacing: root.phoneForm ? 8 : 10
             // At a narrow width the row's buttons are compact, the link
             // state gives way first and the title last, so the row fits
             // whatever the font's widths
@@ -1440,46 +1457,43 @@ Page {
             // Reset peaks and Edit at a phone's touch size
             readonly property real touchMin: Theme.touchTarget
 
-            // The desktop's link state follows the title; the phone's
-            // row has no room for it beside Reset peaks and Edit, so it
-            // takes a line of its own below, except on its side, where
-            // the row has the width and the line's height is the
-            // gauges'. No width of its own: it takes what the title and
-            // buttons leave
+            // The desktop's link state follows the title. No width of
+            // its own: it takes what the title and buttons leave
             Loader {
                 objectName: "linkInRow"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
-                active: root.form !== "phone" || Theme.shortLayout
+                active: !root.phoneForm
                 visible: active
                 sourceComponent: linkState
             }
+            // The phone's row starts empty; its tools sit at the right
             Item {
+                objectName: "toolRowStart"
                 Layout.fillWidth: true
-                visible: root.form === "phone" && !Theme.shortLayout
+                visible: root.phoneForm
             }
             ThemedButton {
                 objectName: "resetPeaks"
                 flat: true
-                compact: root.compact
+                compact: root.compact || root.phoneForm
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
             }
             ThemedButton {
                 objectName: "dashEdit"
-                compact: root.compact
+                compact: root.compact || root.phoneForm
+                horizontalPadding: root.phoneForm ? 18 : (compact ? 6 : 8)
                 visible: !root.editing
                 text: qsTr("Edit")
                 onClicked: root.startEditing()
             }
-        }
-
-        Loader {
-            objectName: "linkLine"
-            Layout.fillWidth: true
-            active: root.form === "phone" && !Theme.shortLayout
-            visible: active
-            sourceComponent: linkState
+            Loader {
+                objectName: "toolRowNight"
+                active: root.phoneForm
+                visible: active
+                sourceComponent: toolNight
+            }
         }
 
         // What the log did without being asked: Start log's refusal, or
@@ -1770,7 +1784,7 @@ Page {
                     ? (root.width > root.height ? 12 : 6)
                     : Math.max(2, Math.min(12, Math.round(gridWidth / 220)))
                 readonly property real columnWidth: Math.max(0, (gridWidth - (columns - 1)
-                                                                 * root.gap) / columns)
+                                                                 * root.cellGap) / columns)
                 readonly property bool shown: index === root.pageIndex
                 // In edit mode the page ends with a "+" cell while it has room
                 readonly property bool addCell: root.editing && shown
@@ -1782,23 +1796,25 @@ Page {
                 readonly property var placed: addCell
                     ? ordered.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : ordered
                 readonly property var boxes: DashboardBook.place(placed, columns)
+                readonly property var seams: root.joined
+                    ? DashboardBook.seams(placed, boxes, columns) : []
                 readonly property int tallest: placed.reduce((m, c) => Math.max(m, c.h), 1)
                 // The row unit is a quarter of a column, so h = 4w is
                 // square; never so tall that the tallest cell overflows
                 // what the page shows, down to a floor of 160 px, below
                 // which the page scrolls instead
                 readonly property real pitch: Math.max(1, Math.min(
-                    (columnWidth + root.gap) / 4,
-                    (Math.max(160, height - 2 * root.margin) + root.gap) / tallest))
+                    (columnWidth + root.cellGap) / 4,
+                    (Math.max(160, height - root.topGap - root.margin) + root.cellGap) / tallest))
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
                 // The drop's places are measured on this grid
                 onColumnsChanged: root.cancelHold()
                 onPitchChanged: root.cancelHold()
 
-                function boxLeft(b) { return b.x * (columnWidth + root.gap) }
+                function boxLeft(b) { return b.x * (columnWidth + root.cellGap) }
                 function boxTop(b) { return b.y * pitch }
-                function boxWidth(b) { return b.w * columnWidth + (b.w - 1) * root.gap }
-                function boxHeight(b) { return Math.max(0, b.h * pitch - root.gap) }
+                function boxWidth(b) { return b.w * columnWidth + (b.w - 1) * root.cellGap }
+                function boxHeight(b) { return Math.max(0, b.h * pitch - root.cellGap) }
 
                 // ---- The held cell (section 4)
 
@@ -1869,7 +1885,7 @@ Page {
                     id: panelHost
                     objectName: "dashPanel"
                     x: (pageView.width - width) / 2
-                    y: root.margin
+                    y: root.topGap
                     width: pageView.gridWidth
                     active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
@@ -1883,7 +1899,7 @@ Page {
                     objectName: "dashEmptyPage"
                     visible: pageView.cells.length === 0 && !root.editing
                     x: root.margin
-                    y: root.margin
+                    y: root.topGap
                     width: pageView.gridWidth
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
@@ -1892,10 +1908,42 @@ Page {
 
                 Item {
                     id: grid
-                    x: (pageView.width - width) / 2
-                    y: root.margin + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)
+                    // On whole pixels of the display, so the seams snapped inside it are
+                    x: root.snap((pageView.width - width) / 2)
+                    y: root.snap(swipe.y + root.topGap + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
                     width: pageView.gridWidth
-                    height: Math.max(0, pageView.rows * pageView.pitch - root.gap)
+                    height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
+
+                    // The joined panel, under its cells: the flat surface
+                    // with its edge, and the hairlines between neighbors
+                    Rectangle {
+                        objectName: "dashPanelSurface"
+                        anchors.fill: parent
+                        visible: root.joined && pageView.rows > 0
+                        color: Theme.surface
+                        radius: Theme.radiusCard
+                        border.color: Theme.hairline
+                        border.width: root.hairlineWidth
+                    }
+                    Repeater {
+                        model: pageView.seams
+                        Rectangle {
+                            required property var modelData
+                            readonly property real along: modelData.vertical
+                                ? modelData.y * pageView.pitch : modelData.x * pageView.columnWidth
+                            readonly property real across: root.snap((modelData.vertical
+                                ? modelData.x * pageView.columnWidth : modelData.y * pageView.pitch)
+                                - root.hairlineWidth / 2)
+                            readonly property real run: modelData.length
+                                * (modelData.vertical ? pageView.pitch : pageView.columnWidth)
+                            objectName: "dashSeam"
+                            x: modelData.vertical ? across : along
+                            y: modelData.vertical ? along : across
+                            width: modelData.vertical ? root.hairlineWidth : run
+                            height: modelData.vertical ? run : root.hairlineWidth
+                            color: Theme.hairline
+                        }
+                    }
 
                     Repeater {
                         model: pageView.cells.length
@@ -1936,12 +1984,15 @@ Page {
 
                     ThemedButton {
                         readonly property var box: pageView.boxes[pageView.cells.length]
+                        // Off the joined panel's hairlines
+                        readonly property real inset: root.joined ? 4 : 0
                         objectName: "dashAddCell_" + pageView.index
                         visible: pageView.addCell
-                        x: box ? pageView.boxLeft(box) : 0
-                        y: box ? pageView.boxTop(box) : 0
-                        width: box ? pageView.boxWidth(box) : 0
-                        height: box ? Math.max(Theme.touchTarget, pageView.boxHeight(box)) : 0
+                        x: box ? pageView.boxLeft(box) + inset : 0
+                        y: box ? pageView.boxTop(box) + inset : 0
+                        width: box ? pageView.boxWidth(box) - 2 * inset : 0
+                        height: box ? Math.max(Theme.touchTarget,
+                                               pageView.boxHeight(box) - 2 * inset) : 0
                         text: "+"
                         font.pixelSize: Theme.fontHero
                         Accessible.name: qsTr("Add a gauge")

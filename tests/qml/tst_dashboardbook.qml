@@ -1055,4 +1055,32 @@ TestCase {
         compare([boxes[1].x, boxes[1].y], [2, 0])
         compare([boxes[2].x, boxes[2].y], [0, 2], "wrapped past the blank")
     }
+
+    // The joined panel's lines (ADR-0057's appendix, section 3). The same
+    // four columns throughout; a cell's kind is all that matters to a line
+    function test_seams_data() {
+        const c = (w, h) => ({ w: w, h: h })
+        const blank = (w, h) => ({ kind: "blank", w: w, h: h, refs: [] })
+        const v = (x, y, length) => ({ vertical: true, x: x, y: y, length: length })
+        const h = (x, y, length) => ({ vertical: false, x: x, y: y, length: length })
+        return [
+            { tag: "one cell across", cells: [c(4, 2)], lines: [] },
+            { tag: "two side by side", cells: [c(2, 2), c(2, 2)], lines: [v(2, 0, 2)] },
+            { tag: "two stacked", cells: [c(4, 1), c(4, 1)], lines: [h(0, 1, 4)] },
+            { tag: "two beside a tall one", cells: [c(2, 2), c(2, 1), c(2, 1)],
+              lines: [v(2, 0, 2), h(2, 1, 2)] },
+            { tag: "a line past several pairs is one",
+              cells: [c(2, 1), c(2, 1), c(2, 1), c(2, 1)], lines: [v(2, 0, 2), h(0, 1, 4)] },
+            { tag: "beside an empty square", cells: [c(2, 2)], lines: [v(2, 0, 2)] },
+            { tag: "a gauge beside a blank", cells: [c(2, 2), blank(2, 2)], lines: [v(2, 0, 2)] },
+            { tag: "two blanks draw nothing", cells: [blank(2, 2), blank(2, 2)], lines: [] },
+            { tag: "a blank beside an empty square", cells: [blank(2, 2)], lines: [] },
+            { tag: "any other kind is drawn, the + cell's none included",
+              cells: [{ kind: "ring", w: 2, h: 2 }, c(2, 2)], lines: [v(2, 0, 2)] }
+        ]
+    }
+    function test_seams(data) {
+        const boxes = DashboardBook.place(data.cells, 4)
+        compare(DashboardBook.seams(data.cells, boxes, 4), data.lines)
+    }
 }

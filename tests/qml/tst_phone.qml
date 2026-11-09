@@ -813,17 +813,14 @@ TestCase {
     // The Dashboard's title row fits a phone's width whatever the font:
     // a title longer than any font makes "Dashboard" stands in for a wide
     // one, and gives way, eliding, while the buttons keep their words
-    function test_theDashboardsHeaderFitsWhateverTheFont_data() {
-        return [{ tag: "phone" }, { tag: "desktop" }]
-    }
-    function test_theDashboardsHeaderFitsWhateverTheFont(data) {
+    function test_theDashboardsHeaderFitsWhateverTheFont() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
         main.width = 384
         main.height = 832
         const dash = find(main.contentItem, "dashboardPage")
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
-        dash.form = data.tag
+        dash.form = "desktop"
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
         verify(waitForPolish(main), "laid out at 384 px")
@@ -861,7 +858,6 @@ TestCase {
     // makes one on any platform; the title stays whole wherever it has room
     function test_aFractionalTitleIsNotElided_data() {
         return [
-            { tag: "phone at 384", form: "phone", w: 384 },
             { tag: "desktop at 384", form: "desktop", w: 384 },
             { tag: "desktop at 1280", form: "desktop", w: 1280 }
         ]
@@ -887,83 +883,39 @@ TestCase {
         Bridge.disconnectSession()
     }
 
-    // The phone's link state: a line of its own under the title row,
-    // no taller than its words, which name the state (never the color
-    // alone)
-    function test_thePhonesLinkStateTakesACompactLine() {
-        const main = createTemporaryObject(mainComponent, testCase)
-        verify(main, "Main loads")
-        main.width = 384
-        main.height = 832
-        const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
-        dash.form = "phone"
-        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        // the Loader after the header row; the desktop one's label may
-        // still be in the tree, waiting for its deletion
-        const header = find(dash, "resetPeaks").parent
-        const line = header.parent.children[1]
-        tryVerify(() => line.item && line.item.children[1].width > 0, 3000, "the line is laid out")
-        const words = line.item.children[1]
-        compare(words.objectName, "linkLabel", "the line's words")
-        tryVerify(() => words.mapToItem(header, 0, 0).y >= header.height, 3000,
-                  "below the title row: " + words.mapToItem(header, 0, 0).y + " in " + header.height)
-        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
-        compare(words.truncated, false, "whole at 384 px")
-        // as tall as the Night switch's hit area at its end, no taller
-        const night = find(dash, "nightSwitch")
-        verify(night.parent === line.item, "the switch ends the line")
-        verify(night.height >= Theme.touchTarget - 0.5, "the switch is " + night.height + " px tall")
-        verify(line.height <= Math.max(words.implicitHeight, night.height) + 0.5,
-               "the line is " + line.height + " px for a " + night.height + " px switch")
-        verify(words.font.pixelSize <= 12, "the small font")
+    // The phone's one tool row: inside the page at any width and font,
+    // one line of words on each button, every tool a touch target
+    function test_thePhonesToolRowFits_data() {
+        return [
+            { tag: "at 320", w: 320, h: 800 },
+            { tag: "at 384", w: 384, h: 832 },
+            { tag: "on its side", w: 832, h: 384 }
+        ]
     }
-
-    // The title is whole at 384 px with the Night switch in the link line
-    function test_theTitleIsWholeWithTheNightSwitch() {
+    function test_thePhonesToolRowFits(data) {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
-        main.width = 384
-        main.height = 832
+        main.width = data.w
+        main.height = data.h
         const dash = find(main.contentItem, "dashboardPage")
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
         dash.form = "phone"
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        tryVerify(() => find(dash, "toolRowNight").item, 3000, "the row is there")
         verify(waitForPolish(main), "laid out")
         waitForRendering(main.contentItem)
-        verify(find(dash, "nightSwitch"), "the switch is there")
-        const title = find(dash, "resetPeaks").parent.children[0]
-        compare(title.truncated, false, "the title is whole")
-        verify(title.width >= title.implicitWidth - 0.5, "no narrower than its words")
+        const row = find(dash, "resetPeaks").parent
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "inside the page")
+        for (const n of ["resetPeaks", "dashEdit"]) {
+            const b = find(dash, n)
+            compare(b.contentItem.lineCount, 1, n + " on one line")
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " px tall")
+        }
+        const night = find(dash, "nightSwitch")
+        verify(night.height >= Theme.touchTarget - 0.5, "Night is " + night.height + " px tall")
+        verify(night.width >= Theme.touchTarget - 0.5, "Night is " + night.width + " px wide")
+        fuzzyCompare(row.height, Theme.touchTarget, 0.5, "one touch target tall")
         Bridge.disconnectSession()
-    }
-
-    // A phone on its side has the link state in the title row, so the line
-    // under it, a gauge row's height, is gone
-    function test_aPhoneOnItsSideKeepsTheLinkStateInTheTitleRow() {
-        const main = createTemporaryObject(mainComponent, testCase)
-        verify(main, "Main loads")
-        main.width = 384
-        main.height = 832
-        const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
-        dash.form = "phone"
-        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const line = find(dash, "linkLine")
-        const inRow = find(dash, "linkInRow")
-        tryVerify(() => line.active && !inRow.active, 3000, "upright: a line of its own")
-        main.width = 832
-        main.height = 384
-        tryVerify(() => Theme.shortLayout, 2000, "on its side")
-        tryVerify(() => !line.active && inRow.active, 3000, "on its side: in the row")
-        const header = find(dash, "resetPeaks").parent
-        tryVerify(() => inRow.item && inRow.item.children[1].width > 0, 3000, "laid out")
-        const words = inRow.item.children[1]
-        verify(words.mapToItem(header, 0, 0).y < header.height, "in the title row")
-        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
-        main.width = 384
-        main.height = 832
-        tryVerify(() => line.active && !inRow.active, 3000, "upright again")
     }
 
     // Edit mode's controls on the phone: each a touch target, the bar at
@@ -1699,6 +1651,9 @@ TestCase {
             verify(find(find(list, "connectRow_0"), "connectRowAddress").truncated, "the address elides")
         const view = find(main.contentItem, "dashPage_0")
         verify(view.contentHeight > list.height, "the gauges follow the list in the page")
+        const under = find(view, "dashPanelSurface").mapToItem(list, 0, 0).y
+        verify(under >= list.height, "the joined panel starts " + under + " down a list "
+               + list.height + " tall")
     }
 
     // The readout's time: m:ss, then h:mm:ss past an hour
