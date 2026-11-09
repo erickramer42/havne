@@ -1155,7 +1155,7 @@ Page {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
-                TextField {
+                ThemedTextField {
                     id: importInterface
                     objectName: "importInterface"
                     Layout.fillWidth: true
@@ -1610,7 +1610,7 @@ Page {
                 model: recording.state === RecordingView.Open ? root.numberNames() : []
                 onActivated: root.alignSignal = currentText
             }
-            TextField {
+            ThemedTextField {
                 objectName: "alignLevel"
                 visible: root.alignOn === "rise" || root.alignOn === "fall"
                 width: 100
@@ -1618,7 +1618,7 @@ Page {
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
                 onEditingFinished: root.alignLevel = root.numberOf(text)
             }
-            TextField {
+            ThemedTextField {
                 objectName: "alignHysteresis"
                 visible: root.alignOn === "rise" || root.alignOn === "fall"
                 width: 100
@@ -1781,7 +1781,7 @@ Page {
                     anchors.fill: parent
                     anchors.leftMargin: 8
                     anchors.rightMargin: 12
-                    CheckBox {
+                    ThemedCheckBox {
                         objectName: "plotCheck"
                         checked: root.plotted[signalRow.signalIndex] === true
                         enabled: !signalRow.modelData.isText

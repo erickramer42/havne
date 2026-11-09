@@ -215,7 +215,7 @@ ColumnLayout {
                 anchors.margins: 8
                 spacing: 4
 
-                CheckBox {
+                ThemedCheckBox {
                     id: includeBox
                     objectName: "include"
                     Layout.fillWidth: true
@@ -233,7 +233,6 @@ ColumnLayout {
                         wrapMode: Text.WrapAnywhere
                         verticalAlignment: Text.AlignVCenter
                         leftPadding: includeBox.indicator.width + includeBox.spacing
-                        opacity: includeBox.enabled ? 1 : 0.6
                     }
                 }
                 // Why a column was left out, and whether it can be put back
@@ -253,7 +252,7 @@ ColumnLayout {
                     visible: row.on
                     Layout.fillWidth: true
                     spacing: Theme.spacing
-                    TextField {
+                    ThemedTextField {
                         objectName: "name"
                         Layout.fillWidth: true
                         Layout.preferredWidth: 0   // the row's width, not its text's
@@ -262,7 +261,7 @@ ColumnLayout {
                         text: row.col.name
                         onTextChanged: row.col.name = text
                     }
-                    TextField {
+                    ThemedTextField {
                         objectName: "unit"
                         Layout.preferredWidth: 72
                         Layout.preferredHeight: Theme.touchTarget
@@ -324,7 +323,7 @@ ColumnLayout {
         visible: preview.guess !== null
         Layout.fillWidth: true
         spacing: Theme.spacing
-        TextField {
+        ThemedTextField {
             id: saveName
             objectName: "saveMapName"
             Layout.fillWidth: true

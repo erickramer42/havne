@@ -133,7 +133,7 @@ ColumnLayout {
         RowLayout {
             spacing: Theme.spacing
             Label { text: qsTr("From"); color: Theme.textDim }
-            TextField {
+            ThemedTextField {
                 id: fromField
                 objectName: "nightFrom"
                 implicitWidth: 80
@@ -144,7 +144,7 @@ ColumnLayout {
                 onEditingFinished: schedule.commit(true, text)
             }
             Label { text: qsTr("Until"); color: Theme.textDim }
-            TextField {
+            ThemedTextField {
                 id: untilField
                 objectName: "nightUntil"
                 implicitWidth: 80

@@ -35,7 +35,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
 
-        TextField {
+        ThemedTextField {
             id: uriField
             objectName: "uriField"
             Layout.fillWidth: true

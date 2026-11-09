@@ -20,7 +20,7 @@ ColumnLayout {
     LabeledFlow {
         label: qsTr("Look up a VIN:")
 
-        TextField {
+        ThemedTextField {
             id: vinLookupField
             objectName: "vinLookupField"
             width: Math.min(300, parent.width)

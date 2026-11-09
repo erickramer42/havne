@@ -379,6 +379,43 @@ TestCase {
         compare(small.length, 0, "under " + Theme.touchTarget + ": " + small.join(", "))
     }
 
+    // The text fields are a touch's size on a phone without a page asking
+    function test_theFieldsAreATouchsSizeOnAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        tryCompare(Theme, "compact", true)
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        verify(waitForPolish(main), "laid out")
+        const field = find(live, "filterText")
+        verify(field && field.visible, "Find a signal shows")
+        const h = field.mapToItem(main.contentItem, 0, field.height).y
+                  - field.mapToItem(main.contentItem, 0, 0).y
+        verify(h >= Theme.touchTarget - 0.5, "Find a signal is " + h + " tall")
+        verify(field.width >= 80, "and not squeezed out: " + field.width)
+        // A signal row's plot box has no text and is a touch's width, and
+        // the row still fits the phone
+        const box = find(live, "plotCheck")
+        verify(box && box.visible, "a plot box shows")
+        verify(box.width >= Theme.touchTarget - 0.5, "the plot box is " + box.width + " wide")
+        const row = box.parent.parent
+        const edge = row.mapToItem(main.contentItem, row.width, 0).x
+        const names = []
+        const walk = item => {
+            for (const c of item.children) {
+                if (c.visible && c.width > 0
+                        && c.mapToItem(main.contentItem, c.width, 0).x > edge + 0.5)
+                    names.push(c.objectName || String(c))
+                walk(c)
+            }
+        }
+        walk(row)
+        compare(names.length, 0, "past the row's edge: " + names.join(", "))
+    }
+
     // A phone's density: upright (narrower than 720) and on its side
     // (shorter than 480), and not in a desktop's window
     function test_densityFollowsThePhonesShape_data() {

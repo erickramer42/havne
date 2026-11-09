@@ -283,7 +283,7 @@ Page {
 
                     // Plots the row on the chart; the value keeps
                     // updating either way, here and on the Dashboard
-                    CheckBox {
+                    ThemedCheckBox {
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
                         enabled: !signalDelegate.isText   // nothing to plot

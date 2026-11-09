@@ -112,7 +112,7 @@ ColumnLayout {
     LabeledFlow {
         visible: root.host.pickedVehicle !== null
         label: qsTr("OBDb model year:")
-        TextField {
+        ThemedTextField {
             id: obdbYearField
             objectName: "obdbYearField"
             width: Math.min(120, parent.width)

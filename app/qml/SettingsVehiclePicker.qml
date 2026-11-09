@@ -68,7 +68,7 @@ ColumnLayout {
         spacing: Theme.spacing
         visible: root.host.confirming === ""
 
-        TextField {
+        ThemedTextField {
             id: vehicleLabelField
             objectName: "vehicleLabelField"
             width: Math.min(300, parent.width)
