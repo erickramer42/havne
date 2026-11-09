@@ -59,6 +59,13 @@ TestCase {
     // A recording that opens moves the page's items at the layout's next
     // polish, a frame later; a case whose checks all pass at once would
     // otherwise press where an item was before it opened
+    function openEarlyViewer() {
+        const page = createPage()
+        page.open(earlyRow)
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        return page
+    }
+
     // Opens pull-early with pull-late listed beside it
     function openEarly() {
         const page = createPage()
@@ -483,6 +490,198 @@ TestCase {
     // Save report: the whole recording's (the zoom never narrows it), on
     // the view's thread, the picked vehicle's baseline named, the note and
     // one log line when it ends
+    // The Export panel over an opened recording, its sizes in
+    function openExport(page) {
+        find(page, "exportButton").clicked()
+        const panel = find(page, "exportPanel")
+        tryVerify(() => panel.visible, 2000, "the panel opens")
+        return panel
+    }
+    function sizesIn(panel) {
+        tryVerify(() => panel.sizes.length >= 3, 10000, "the sizes come back")
+    }
+    function restoreExportChoices(panel) {
+        panel.rowChoice = "sweep"
+        panel.customText = ""
+    }
+    // The directory of a scratch file, to pick as a folder
+    function scratchFolder(name) {
+        const url = Harness.writeScratchFile(name + "-marker", "").toString()
+        return url.substring(0, url.lastIndexOf("/"))
+    }
+
+    function test_theExportPanelTakesTheChartsPlaceAndClosesAgain() {
+        const page = openEarlyViewer()
+        const chart = find(page, "chartFrame")
+        verify(chart.visible, "the chart first")
+        const panel = openExport(page)
+        verify(!chart.visible, "the panel takes its place")
+        verify(!find(page, "chartSplitter").visible)
+        find(panel, "exportClose").clicked()
+        tryVerify(() => chart.visible, 2000, "the chart comes back")
+        verify(!panel.visible)
+    }
+
+    function test_theExportSizesEachIntervalAndTheCustomOne() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
+        verify(/^[\d,. ]+ rows, [\d.]+ (B|KB|MB)$/.test(sweep.text), sweep.text)
+        const grid = findChild(find(panel, "exportRows_250"), "intervalSize")
+        verify(/ rows, /.test(grid.text), grid.text)
+        verify(sweep.text !== grid.text, sweep.text + " and " + grid.text)
+
+        // A custom interval is asked for once typed, and a bad one is said
+        find(panel, "exportRows_custom").clicked()
+        const field = find(panel, "exportCustomMs")
+        verify(field.visible)
+        panel.customText = "40"
+        tryVerify(() => panel.sizes.length === 4, 10000, "the custom interval sized")
+        compare(panel.chosenMs, 40)
+        verify(find(panel, "exportGo").enabled)
+        panel.customText = "12x"
+        compare(panel.customMs, -1)
+        verify(!find(panel, "exportGo").enabled, "not with a bad interval")
+        compare(find(panel, "exportCustomProblem").text, "ms, 1 to 86400000")
+        restoreExportChoices(panel)
+    }
+
+    function test_theRowIntervalIsRememberedAndTheRestStartsOver() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        find(panel, "exportRows_100").clicked()
+        find(panel, "exportLayout_long").clicked()
+        find(panel, "exportColumns_plotted")
+        panel.columnChoice = "plotted"
+        panel.raw = true
+        find(panel, "exportClose").clicked()
+        const again = openExport(page)
+        compare(again.format, "csv")
+        verify(!again.longLayout, "wide each time")
+        compare(again.columnChoice, "own")
+        verify(!again.raw, "raw is off each time")
+        // Kept between runs: a page of its own reads it back from the store
+        page.destroy()
+        wait(0)
+        const next = openEarlyViewer()
+        const nextPanel = openExport(next)
+        compare(nextPanel.rowChoice, "100", "the interval is kept")
+        restoreExportChoices(nextPanel)
+    }
+
+    function test_theExportWritesTheChosenWideCsvAndSaysSo() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        find(panel, "exportRows_250").clicked()
+        const url = "file:///" + scratchFolder("wide").replace(/^file:\/+/, "") + "/early-wide.csv"
+        verify(panel.exportTo(url))
+        const note = find(panel, "exportNote")
+        tryVerify(() => note.text.indexOf("Saved: ") === 0, 10000, note.text)
+        verify(/ rows of \d+ signals?, left out: 1 text value$/.test(note.text), note.text)
+        const text = Harness.readScratchFile(url)
+        verify(text.indexOf("Time (ms),") === 0, text.substring(0, 40))
+        const seconds = text.split("\r\n")[2].split(",")[0]
+        compare(Number(seconds) % 250, 0, "on the grid: " + seconds)
+        restoreExportChoices(panel)
+    }
+
+    function test_thePlottedColumnsAreOffered() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        verify(page.plottedNames.length > 0, "some plotted")
+        const plotted = find(panel, "exportColumns_plotted")
+        compare(plotted.text, "The " + page.plottedNames.length + " plotted")
+        sizesIn(panel)
+        panel.columnChoice = "plotted"
+        verify(panel.usePlotted)
+        compare(panel.columnNames(), page.plottedNames)
+        // The sizes are asked again for the columns
+        tryVerify(() => panel.sizes.length === 0 || panel.sizes.length >= 3, 2000)
+        sizesIn(panel)
+        // Nothing plotted, nothing to offer: the log's own again
+        const none = {}
+        for (const s of panel.view.signalList)
+            none[s.index] = false
+        page.plotted = none
+        tryVerify(() => !panel.plottedOffered, 2000)
+        verify(!panel.usePlotted, "back to the log's own")
+        compare(panel.columnNames(), [])
+        restoreExportChoices(panel)
+    }
+
+    function test_aRecordingOfFramesAloneExportsNoCsv() {
+        const page = createPage()
+        const folder = Harness.writeFramesRecording("export-frames-only", 50, 10000)
+        verify(folder !== "")
+        page.open({ title: "Frames", uri: "replay://x?profile=raw", source: "", folder: folder, profile: "raw" })
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        const panel = openExport(page)
+        compare(panel.format, "pcapng", "CSV isn't offered")
+        verify(!find(panel, "exportFormat_csv").enabled)
+        verify(find(panel, "exportNoValues").visible)
+        verify(find(panel, "exportGo").enabled)
+    }
+
+    function test_aRecordingOfValuesAloneHasNoPcapng() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        verify(!find(panel, "exportFormat_pcapng").visible, "pull-early has no frames.csv")
+        verify(find(panel, "exportFormat_folder").visible)
+    }
+
+    function test_aDecodedViewSaysTheCsvIsAsRecorded() {
+        const page = openFindings()
+        page.decodeWith("obd2")
+        tryVerify(() => page.viewing && find(page, "recordingInfo").visible
+                        && find(page, "recordingInfo").text.indexOf("decoded") >= 0, 10000, "decoded")
+        const panel = openExport(page)
+        verify(find(panel, "exportDecodedNote").visible)
+        verify(!panel.plottedOffered, "a decode's names aren't the recording's columns")
+        panel.format = "pcapng"
+        verify(!find(panel, "exportDecodedNote").visible, "the CSV's note alone")
+    }
+
+    function test_rawIsDevelopersAndWarnsAboutTheVin() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        const box = find(panel, "exportRaw")
+        const was = Theme.developerMode
+        Theme.developerMode = false
+        verify(!box.visible, "hidden outside Developer mode")
+        panel.raw = true
+        verify(!panel.rawOn, "and no effect")
+        Theme.developerMode = true
+        verify(box.visible)
+        verify(panel.rawOn)
+        const warning = find(panel, "exportRawWarning")
+        verify(warning.visible)
+        verify(warning.text.indexOf("VIN") >= 0, warning.text)
+        panel.raw = false
+        verify(!warning.visible)
+        Theme.developerMode = was
+    }
+
+    function test_aFolderCopyAndAFailedExportSaySo() {
+        const page = openFindings()
+        const panel = openExport(page)
+        panel.format = "folder"
+        compare(find(panel, "exportGo").text, "Choose a folder...")
+        verify(panel.exportTo(scratchFolder("copy")))
+        const note = find(panel, "exportNote")
+        tryVerify(() => note.text.indexOf("Saved as ") === 0, 10000, note.text)
+        verify(/^Saved as recording(-\d+)?: \d+ files?, /.test(note.text), note.text)
+        panel.format = "pcapng"
+        verify(panel.exportTo("file:///" + scratchFolder("bad").replace(/^file:\/+/, "") + "/no-such/out.pcapng"))
+        tryVerify(() => note.text.indexOf("Not exported: ") === 0, 10000, note.text)
+        compare(note.color, Theme.danger)
+    }
+
     function test_saveReportWritesTheWholeRecording() {
         const page = openFindings()
         const button = find(page, "saveReport")

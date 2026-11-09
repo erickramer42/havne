@@ -5,7 +5,8 @@
 // `export <recording> <out> --format folder|csv|pcapng [--from S] [--to S]
 // [--raw] [--layout wide|long] [--rows sweep|<ms>] [--units metric|imperial]
 // [--signal <name>]...` (the last four the CSV's shape, ADR-0056 section
-// 5: wide by default, a column a named signal), `import candump <in>
+// 5: wide by default, a column a named signal), `export <recording> --format
+// csv --estimate` (the wide CSV's rows and bytes, no file), `import candump <in>
 // <folder> [--interface <name>]` and
 // `import csv <in> <folder> [--map <file> | --time-unit s|ms|us]` or
 // `import csv <in> --print-map [--time-unit ...]`: their arguments, and
@@ -37,6 +38,7 @@ struct ExportArgs {
     const char* layout_word = nullptr; /* --layout, or none */
     const char* rows_word = nullptr;   /* --rows, or none */
     bool units_given = false;
+    bool estimate = false;            /* --estimate: sizes, no file */
     std::vector<const char*> signals; /* --signal, in order; options'
                                          columns point into it */
     ecuio_export_options_t options{};
@@ -144,6 +146,8 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
             }
         } else if (s == "--raw") {
             a.options.flags |= ECUIO_EXPORT_RAW;
+        } else if (s == "--estimate") {
+            a.estimate = true;
         } else if (s == "--layout" && has_value) {
             a.layout_word = argv[++i];
             if (std::strcmp(a.layout_word, "wide") == 0) {
@@ -196,8 +200,12 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
             return false;
         }
     }
-    if (a.folder == nullptr || a.out == nullptr) {
+    if (a.folder == nullptr || (a.out == nullptr && !a.estimate)) {
         *why = "export needs a recording's folder and the file to write";
+        return false;
+    }
+    if (a.estimate && a.out != nullptr) {
+        *why = "--estimate writes no file: give no file to write";
         return false;
     }
     if (a.format_word == nullptr) {
@@ -220,11 +228,26 @@ inline bool parse_export(int argc, char** argv, ExportArgs& a, std::string* why)
         *why = "--rows, --units and --signal go with the wide layout";
         return false;
     }
+    if (a.estimate && (a.options.format != ECUIO_EXPORT_CSV ||
+                       a.options.layout == ECUIO_CSV_LONG)) {
+        *why = "--estimate sizes the wide CSV: --format csv, no --layout long";
+        return false;
+    }
     a.options.column_count = static_cast<uint32_t>(a.signals.size());
     a.options.columns_utf8 = a.signals.empty() ? nullptr : a.signals.data();
     a.options.folder_utf8 = a.folder;
     a.options.out_path_utf8 = a.out;
     return true;
+}
+
+// The row intervals --estimate sizes: --rows' alone, else the ones the
+// app's Export offers (a row a sweep, every 100 ms, every 250 ms)
+inline std::vector<uint32_t> estimate_intervals(const ExportArgs& a)
+{
+    if (a.rows_word != nullptr) {
+        return {a.options.row_ms};
+    }
+    return {0u, 100u, 250u};
 }
 
 // The arguments after `import`; false with *why, a usage error. The
@@ -425,6 +448,35 @@ inline void exported_line(Line& l, const ExportArgs& a,
         l.u64(r.left_out[c]);
     }
     l.raw("}}");
+}
+
+// {"type":"estimate","format":"csv","layout":"wide","columns":N,"missing":N,
+//  "sizes":[{"row_ms":N,"rows":N,"bytes":N},...]}: what ecuio_export_estimate
+//  says the wide CSV would hold at each interval, the bytes exact
+inline void estimate_line(Line& l, const uint32_t* row_ms,
+                          const ecuio_export_estimate_t* sized, size_t count,
+                          uint64_t missing)
+{
+    l.raw("{\"type\":\"estimate\",\"format\":\"csv\",\"layout\":\"wide\"");
+    l.key("columns");
+    l.u64(count > 0 ? sized[0].columns : 0);
+    l.key("missing");
+    l.u64(missing);
+    l.key("sizes");
+    l.ch('[');
+    for (size_t i = 0; i < count; ++i) {
+        if (i > 0) {
+            l.ch(',');
+        }
+        l.raw("{\"row_ms\":");
+        l.u64(row_ms[i]);
+        l.key("rows");
+        l.u64(sized[i].rows);
+        l.key("bytes");
+        l.u64(sized[i].bytes);
+        l.ch('}');
+    }
+    l.raw("]}");
 }
 
 // {"type":"export_failed","class":...}: a failed check, before the error

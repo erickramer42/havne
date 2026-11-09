@@ -46,6 +46,8 @@ qt_add_library(app_ui STATIC
     signalstore.h
     recordingimport.cpp
     recordingimport.h
+    recordingexport.cpp
+    recordingexport.h
     recordingframes.cpp
     recordingframes.h
     recordingview.cpp
@@ -77,6 +79,7 @@ qt_add_qml_module(app_ui
         qml/ThemedCheckBox.qml
         qml/SegmentButton.qml
         qml/CsvGuessPreview.qml
+        qml/RecordingExportPanel.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml

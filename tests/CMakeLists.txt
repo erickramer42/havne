@@ -786,6 +786,12 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> frames
                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
                --from 100 --to 101)
+        # The wide CSV's size per row interval, no file written (ADR-0056's
+        # appendix "the viewer's Export as built")
+        app_cli_golden(ExportEstimateSizesTheWideCsv export-estimate.jsonl
+            -- $<TARGET_FILE:havne-cli> export
+               ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2
+               --format csv --estimate)
         app_cli_golden(FramesRefusesAMissingFolder frames-missing-folder.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> frames
                ${CMAKE_CURRENT_BINARY_DIR}/never-there)
@@ -948,6 +954,10 @@ if(TARGET havne-cli)
         "export|rec|out|--format|pcapng|--from|5|--to|4")
     app_cli_usage(ExportANegativeFromIsUsage "export|rec|out|--format|pcapng|--from|-1")
     app_cli_usage(ExportAnUnknownOptionIsUsage "export|rec|out|--format|pcapng|--scrub")
+    app_cli_usage(ExportEstimateWithAFileIsUsage "export|rec|out|--format|csv|--estimate")
+    app_cli_usage(ExportEstimateWithoutAFormatIsUsage "export|rec|--estimate")
+    app_cli_usage(ExportEstimateOfPcapngIsUsage "export|rec|--format|pcapng|--estimate")
+    app_cli_usage(ExportEstimateOfTheLongFormIsUsage "export|rec|--format|csv|--layout|long|--estimate")
     app_cli_usage(ImportWithoutCandumpIsUsage "import|bus.log|rec")
     # health (ADR-0054): refused before a session opens or a file is read
     app_cli_usage(HealthWithoutAFileIsUsage "health|mock://x")
@@ -1233,7 +1243,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
+        test_recording_export.cpp
         ../app/recordingview.cpp
+        ../app/recordingexport.cpp
         ../app/recordingframes.cpp
         ../app/sessionbridge.cpp
         ../app/recordingimport.cpp

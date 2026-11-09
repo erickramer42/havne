@@ -216,6 +216,45 @@ TestCase {
     // The viewer's Frames view on a phone's width: the switch, the table
     // narrowed to the page (no DLC column), its rows inside the window, and
     // the filter's fields inside it too
+    function test_theExportPanelFitsAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.developerMode = true
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const button = find(page, "exportButton")
+        verify(button.mapToItem(main.contentItem, button.width, 0).x <= main.contentItem.width + 0.5,
+               "the button is on the screen")
+        button.clicked()
+        const panel = find(page, "exportPanel")
+        tryVerify(() => panel.visible && panel.sizes.length >= 3, 10000, "the sizes")
+        panel.rowChoice = "custom"
+        panel.raw = true
+        verify(waitForPolish(main), "laid out")
+        const over = []
+        pastTheEdge(panel, main.contentItem, over)
+        compare(over, [], "past the edge: " + over.join(", "))
+        // The panel's controls are a touch's size on the glass
+        for (const name of ["exportFormat_csv", "exportFormat_folder", "exportLayout_wide",
+                            "exportRows_sweep", "exportRows_custom", "exportCustomMs",
+                            "exportGo", "exportClose", "exportRaw"]) {
+            const item = find(panel, name)
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+        }
+        panel.rowChoice = "sweep"
+        panel.raw = false
+        Theme.developerMode = false
+    }
+
     function test_theViewersFramesViewFitsAPhone() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
