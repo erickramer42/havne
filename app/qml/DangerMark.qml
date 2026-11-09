@@ -43,6 +43,6 @@ Item {
         text: "!"
         font.pixelSize: mark.size * 0.62
         font.weight: Font.Bold
-        color: Theme.gaugeFace
+        color: Theme.surface
     }
 }

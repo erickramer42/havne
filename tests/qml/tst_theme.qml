@@ -108,23 +108,8 @@ TestCase {
     readonly property var roles: [
         "bg", "surface", "elevated", "elevatedLight", "outline", "primary", "textOnPrimary",
         "hairline", "text", "textDim", "success", "warning", "danger", "info",
-        "gaugeFace", "gaugeValue", "gaugeReadout", "gaugeNeedle",
+        "gaugeValue", "gaugeReadout", "gaugeNeedle",
         "gaugeTick", "gaugeWarn", "gaugeDanger"]
-
-    // Dark's dial shades are fixed colors (the other themes'
-    // derive from their face)
-    function test_darkKeepsTheDialsShades() {
-        const s = Theme.gaugeShade
-        sameColor(s.bezelHi, "#3a3a3f", "bezelHi")
-        sameColor(s.bezelLo, "#2c2c31", "bezelLo")
-        sameColor(s.faceHi, "#252529", "faceHi")
-        sameColor(s.faceLo, "#0e0e10", "faceLo")
-        sameColor(s.needleBase, "#2a2a2e", "needleBase")
-        sameColor(s.hubHi, "#4b4b52", "hubHi")
-        sameColor(Theme.gaugeFace, "#1b1b1e", "the face")
-        usePalette("nightRed")
-        verify(!Qt.colorEqual(Theme.gaugeShade.bezelHi, "#3a3a3f"), "night has its own")
-    }
 
     function test_paletteNamesAndClamps() {
         compare(Theme.paletteNames.join(","), "dark,nightAmber,nightRed")
@@ -189,16 +174,16 @@ TestCase {
         }
     }
 
-    // Distinct where they must be: the gauge's zones and its face, and
-    // the surfaces a panel is read against
+    // Distinct where they must be: the gauge's zones and what it sits on,
+    // and the surfaces a panel is read against
     function test_theRolesAreDistinctWhereTheyMustBe_data() {
         return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_theRolesAreDistinctWhereTheyMustBe(data) {
         usePalette(data.name)
         const pairs = [["gaugeValue", "gaugeWarn"], ["gaugeValue", "gaugeDanger"],
-                       ["gaugeWarn", "gaugeDanger"], ["gaugeFace", "gaugeReadout"],
-                       ["gaugeFace", "gaugeNeedle"], ["gaugeFace", "gaugeTick"],
+                       ["gaugeWarn", "gaugeDanger"], ["surface", "gaugeReadout"],
+                       ["surface", "gaugeNeedle"], ["surface", "gaugeTick"],
                        ["bg", "surface"], ["surface", "elevated"], ["bg", "text"],
                        ["text", "textDim"], ["warning", "danger"]]
         for (const [a, b] of pairs)
@@ -234,7 +219,7 @@ TestCase {
     }
 
     // Text holds 4.5:1 or more against the surfaces it sits on, in every
-    // theme: the readouts against the gauge face and the card, the zone
+    // theme: the readouts against the card or panel, the zone
     // colors a readout takes, and the page text against the page
     function test_textContrastIsAtLeast4_5_data() {
         return Theme.paletteNames.map(n => ({ tag: n, name: n }))
@@ -243,10 +228,9 @@ TestCase {
         usePalette(data.name)
         const rows = [["text", "bg"], ["text", "surface"], ["text", "elevated"],
                       ["textDim", "bg"], ["textDim", "surface"],
-                      ["gaugeReadout", "gaugeFace"], ["gaugeReadout", "surface"],
-                      ["gaugeTick", "gaugeFace"], ["gaugeWarn", "gaugeFace"],
-                      ["gaugeWarn", "surface"], ["gaugeDanger", "gaugeFace"],
-                      ["gaugeDanger", "surface"], ["warning", "bg"], ["danger", "bg"]]
+                      ["gaugeReadout", "surface"], ["gaugeTick", "surface"],
+                      ["gaugeWarn", "surface"], ["gaugeDanger", "surface"],
+                      ["warning", "bg"], ["danger", "bg"]]
         for (const [fg, bgName] of rows) {
             const c = contrast(Theme[fg], Theme[bgName])
             verify(c >= 4.5, fg + " on " + bgName + " is " + c.toFixed(2) + ":1 in " + data.name)
@@ -256,8 +240,8 @@ TestCase {
         const textOnPrimary = contrast(Theme.textOnPrimary, Theme.primary)
         verify(textOnPrimary >= 4.2, "textOnPrimary on primary is " + textOnPrimary.toFixed(2) + ":1 in " + data.name)
         // Control borders and the lit color against what they sit on: 3:1
-        for (const [fg, bgName] of [["outline", "bg"], ["gaugeValue", "gaugeFace"],
-                                    ["gaugeNeedle", "gaugeFace"]]) {
+        for (const [fg, bgName] of [["outline", "bg"], ["gaugeValue", "surface"],
+                                    ["gaugeNeedle", "surface"]]) {
             const c = contrast(Theme[fg], Theme[bgName])
             verify(c >= 3, fg + " on " + bgName + " is " + c.toFixed(2) + ":1 in " + data.name)
         }

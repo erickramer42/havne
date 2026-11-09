@@ -5,6 +5,7 @@
 //          it), the danger zone's heavier outline on the bar. No session.
 
 import QtQuick
+import QtQuick.Shapes
 import QtTest
 import App
 
@@ -27,6 +28,8 @@ TestCase {
     Component { id: digitalC; DigitalGauge { width: 300; height: 120; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: ringC;   RingGauge   { width: 240; height: 220; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: shiftC;  ShiftLightBar { width: 400; height: 40; from: 0; to: 100 } }
+    Component { id: sparkC; SparkGauge { width: 300; height: 120; from: 0; to: 100; value: 50; hasValue: true } }
+    Component { id: segmentC; SegmentGauge { width: 300; height: 120; from: 0; to: 100; value: 50; hasValue: true } }
     Component { id: homeC;   HomePage    { width: 400; height: 800 } }
 
     readonly property var kinds: [
@@ -89,6 +92,123 @@ TestCase {
             usePalette(name)
             same(gaugeOf(kinds[0], 10).needleColor, Theme.gaugeNeedle, name)
         }
+    }
+
+    // The dial draws on what's behind it: nothing of the dial's size paints
+    // a disc under the ticks
+    function test_theDialHasNoBezelOrFace() {
+        const g = gaugeOf(kinds[0], 30)
+        for (let i = 0; i < g.children.length; ++i) {
+            const c = g.children[i]
+            verify(!(c instanceof Rectangle && c.width >= g.size * 0.9 && c.radius > 0),
+                   "a disc of " + c.width + " px at child " + i)
+            if (!(c instanceof Shape) || c.width < g.width)
+                continue
+            for (const p of c.data)
+                verify(!(p instanceof ShapePath) || !p.fillGradient,
+                       "a filled face in the shape at child " + i)
+        }
+    }
+
+    // The dial grows into its item and nothing it draws passes the item's
+    // edge, at any size: a small dial is held in by the progress arc's
+    // minimum width, a large one by the 6 % it may grow. The sizes are
+    // worked out by hand: (box - 10) / 0.89 below 176.6 px, else 1.06 * box
+    function test_theDialReachesItsItem_data() {
+        return [
+            { tag: "a cell still sizing up", w: 0, h: 0, size: 0 },
+            { tag: "under the floor's own margin", w: 8, h: 8, size: 0 },
+            { tag: "100 px", w: 100, h: 100, size: 101.1236 },
+            { tag: "130 px", w: 130, h: 130, size: 134.8315 },
+            { tag: "130 px high and wide", w: 400, h: 130, size: 134.8315 },
+            { tag: "176 px", w: 176, h: 176, size: 186.5169 },
+            { tag: "180 px", w: 180, h: 180, size: 190.8 },
+            { tag: "300 px", w: 300, h: 300, size: 318 }
+        ]
+    }
+    function test_theDialReachesItsItem(data) {
+        const g = createTemporaryObject(analogC, testCase,
+                                        { width: data.w, height: data.h, showProgress: true,
+                                          value: 100 })
+        fuzzyCompare(g.size, data.size, 1e-3, "the drawing's square")
+        // The glow's outer edge: the ring's radius and half the 4x stroke,
+        // from the drawing's own numbers, at its 2.5 px minimum width
+        const edge = g.size / 2 * 0.89 + 2 * Math.max(2.5, g.size * 0.013)
+        if (g.size > 0)
+            verify(edge <= Math.min(data.w, data.h) / 2 + 1e-6,
+                   "the progress glow reaches " + edge + " of " + Math.min(data.w, data.h) / 2)
+    }
+
+    // The needle and the hub are flat, in the theme's colors, in every
+    // palette; the needle casts no shadow
+    function test_theNeedleAndHubAreFlat_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_theNeedleAndHubAreFlat(data) {
+        usePalette(data.name)
+        const g = gaugeOf(kinds[0], 30)
+        const shapes = Array.from(g.children).filter(c => c instanceof Shape && c.width < g.width)
+        compare(shapes.length, 1, "one needle, no shadow")
+        const path = Array.from(shapes[0].data).filter(p => p instanceof ShapePath)[0]
+        verify(!path.fillGradient, "no gradient on the needle")
+        same(path.fillColor, Theme.gaugeNeedle, "the needle's color")
+        const hub = findChild(g, "hub")
+        verify(!hub.gradient, "no gradient on the hub")
+        same(hub.color, Theme.elevatedLight, "the hub")
+        same(findChild(g, "hubPin").color, Theme.gaugeNeedle, "the pin")
+    }
+
+    // The danger mark's point is cut out in the color the gauge sits on
+    function test_theDangerMarksPointIsTheSurface() {
+        for (const name of Theme.paletteNames) {
+            usePalette(name)
+            const mark = findChild(gaugeOf(kinds[0], 99), "dangerMark")
+            const point = Array.from(mark.children).filter(c => c.text === "!")[0]
+            same(point.color, Theme.surface, name)
+        }
+    }
+
+    // A trace is its line alone: nothing fills the area under it
+    function test_aTraceIsItsLineAlone_data() {
+        return [{ tag: "digital", component: digitalC }, { tag: "sparkline", component: sparkC }]
+    }
+    function test_aTraceIsItsLineAlone(data) {
+        const g = createTemporaryObject(data.component, testCase)
+        const trace = findChild(g, "trace")
+        verify(trace instanceof Shape, "the trace")
+        let paths = 0
+        for (const p of trace.data) {
+            if (!(p instanceof ShapePath))
+                continue
+            ++paths
+            verify(!p.fillGradient, "a gradient fill in " + data.tag)
+            compare(p.fillColor.a, 0, "a solid fill in " + data.tag)
+        }
+        verify(paths > 0, "the trace has its paths")
+    }
+
+    // A lit segment is one flat color
+    function test_aLitSegmentIsFlat_data() {
+        return [{ tag: "bar", make: () => createTemporaryObject(barC, testCase, { value: 50, hasValue: true }) },
+                { tag: "cells", make: () => createTemporaryObject(segmentC, testCase) }]
+    }
+    function test_aLitSegmentIsFlat(data) {
+        const g = data.make()
+        let segments = 0
+        function walk(item) {
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (c.objectName === "segment" || c.objectName === "cell") {
+                    ++segments
+                    const fill = c.children[0]
+                    verify(!fill.gradient, "a gradient in " + data.tag)
+                    same(fill.color, c.lit, "the " + data.tag + " segment's fill")
+                }
+                walk(c)
+            }
+        }
+        walk(g)
+        verify(segments > 0, "the segments were walked")
     }
 
     // Warning and danger differ by more than hue: a mark beside the readout

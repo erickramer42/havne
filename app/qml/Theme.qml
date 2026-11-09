@@ -245,14 +245,6 @@ QtObject {
         }
     }
 
-    // The analog dial's bezel, face, needle and hub shades from its face
-    // color, for a theme with no hand-picked ones
-    function shadesOf(face) {
-        return { bezelHi: Qt.lighter(face, 2.1), bezelLo: Qt.lighter(face, 1.6),
-                 faceHi: Qt.lighter(face, 1.45), faceLo: Qt.darker(face, 1.9),
-                 needleBase: Qt.lighter(face, 1.7), hubHi: Qt.lighter(face, 2.5) }
-    }
-
     readonly property var palettes: ({
         dark: {
             // Near-neutral graphite; the accent is the text color as a fill
@@ -260,9 +252,7 @@ QtObject {
             outline: "#65656f",   // control borders; 3:1 on bg
             primary: "#ebebee", textOnPrimary: "#141416", text: "#ebebee", textDim: "#9a9aa3",
             success: "#4ade80", warning: "#ffd166", danger: "#f87171", info: "#60a5fa",
-            gaugeFace: "#1b1b1e", gaugeValue: "#ebebee",
-            shades: { bezelHi: "#3a3a3f", bezelLo: "#2c2c31", faceHi: "#252529", faceLo: "#0e0e10",
-                      needleBase: "#2a2a2e", hubHi: "#4b4b52" },
+            gaugeValue: "#ebebee",
             gaugeReadout: "#ebebee", gaugeNeedle: "#ff5a5f", gaugeTick: "#ebebee",
             gaugeWarn: "#ffd166", gaugeDanger: "#f87171",
             // One per hue family, so traces stay distinct on the dark surface
@@ -281,8 +271,7 @@ QtObject {
             bg: "#0d0a07", surface: "#18120c", elevated: "#261c12", elevatedLight: "#31241a",
             outline: "#85694a", primary: "#7f440d", textOnPrimary: "#f3c895", text: "#f3c895", textDim: "#b58f64",
             success: "#f0a53a", warning: "#ff8a3a", danger: "#ff4a38", info: "#d2a86a",
-            gaugeFace: "#1a130c", gaugeValue: "#f0a53a",
-            shades: shadesOf("#1a130c"),
+            gaugeValue: "#f0a53a",
             gaugeReadout: "#f3c895", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
             gaugeWarn: "#ff8a3a", gaugeDanger: "#ff4a38",
             // Warm, told apart by lightness and saturation as much as hue
@@ -293,8 +282,7 @@ QtObject {
             bg: "#080404", surface: "#130909", elevated: "#201010", elevatedLight: "#2b1616",
             outline: "#934a44", primary: "#7a241c", textOnPrimary: "#ff9484", text: "#ff9484", textDim: "#c46a5e",
             success: "#e8584a", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
-            gaugeFace: "#150909", gaugeValue: "#ff5a4a",
-            shades: shadesOf("#150909"),
+            gaugeValue: "#ff5a4a",
             gaugeReadout: "#ff9484", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
             gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
             series: ["#ee9a7c", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
@@ -326,20 +314,15 @@ QtObject {
     readonly property int radiusCard:       6
 
     // The gauges' roles (ADR-0057 section 9): no gauge draws a literal color.
-    // The face under the dial and the cards; value: the lit segments, the
-    // progress arc and the trace; readout: the value's text; needle; the
-    // ticks and their numerals; warn and danger: the zones and a readout
-    // past them
-    readonly property color gaugeFace:      colors.gaugeFace
+    // Value: the lit segments, the progress arc and the trace; readout: the
+    // value's text; needle; the ticks and their numerals; warn and danger:
+    // the zones and a readout past them
     readonly property color gaugeValue:     colors.gaugeValue
     readonly property color gaugeReadout:   colors.gaugeReadout
     readonly property color gaugeNeedle:    colors.gaugeNeedle
     readonly property color gaugeTick:      colors.gaugeTick
     readonly property color gaugeWarn:      colors.gaugeWarn
     readonly property color gaugeDanger:    colors.gaugeDanger
-    // The analog dial's own shades (bezelHi, bezelLo, faceHi, faceLo,
-    // needleBase, hubHi): Dark's are fixed colors
-    readonly property var gaugeShade:       colors.shades
 
     // A phone's density: Main.qml sets dense when the layout (after the
     // zoom) is narrower than 720 px or shorter than 480 px, a phone
