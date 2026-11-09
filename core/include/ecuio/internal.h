@@ -163,6 +163,15 @@ void ecuio_elm327_set_port_opener(ecuio_elm327_port_open_t open);
  * tests' open that never answers ends in a fraction of it. */
 void ecuio_elm327_set_stream_open_ms(uint32_t ms);
 
+/* TEST-ONLY: how long the worker waits with no line and no prompt, and
+ * how long a quiet monitor runs before its check (ms; ADR-0026 section 6);
+ * 0 restores 5 s, for each. The worker reads them on every pass, so a
+ * running session takes them at once. get gives the waits in force. */
+void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
+                                  uint32_t monitor_check_ms);
+void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
+                                  uint32_t* monitor_check_ms);
+
 /* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
  * vcan created after this call start with the rate unproven, as on a
  * real controller, and an error frame within quiet_us of the first echo

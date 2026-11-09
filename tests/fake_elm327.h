@@ -144,6 +144,9 @@ public:
     uint8_t last_stop = 0; /* the last of them */
     int64_t monitor_us = 0; /* when the last AT MA came, steady_us */
     int64_t stop_us = 0;    /* when the last stop came */
+    int64_t first_stop_us = 0;         /* when the first stop came */
+    int64_t monitor_after_stop_us = 0; /* the first AT MA after it */
+    int64_t second_stop_us = 0;        /* when the second stop came */
 
     /* Back to power-on: settings, output and the record. */
     void clear()
@@ -154,7 +157,8 @@ public:
         in_len_ = 0;
         commands = requests = packs = resets = bare_crs = stops = 0;
         last_stop = 0;
-        monitor_us = stop_us = 0;
+        monitor_us = stop_us = first_stop_us = monitor_after_stop_us = 0;
+        second_stop_us = 0;
         held_ = late_reset_ = false;
         k = knobs{};
     }
@@ -260,6 +264,11 @@ public:
                 ++stops;
                 last_stop = data[i];
                 stop_us = now_us;
+                if (first_stop_us == 0) {
+                    first_stop_us = now_us;
+                } else if (second_stop_us == 0) {
+                    second_stop_us = now_us;
+                }
                 if (!k.hung) {
                     monitoring_ = false;
                     reply("STOPPED", now_us);
@@ -542,6 +551,9 @@ private:
         if (is("MA")) {
             monitoring_ = true; /* no answer until it's stopped */
             monitor_us = now;
+            if (first_stop_us != 0 && monitor_after_stop_us == 0) {
+                monitor_after_stop_us = now;
+            }
         } else if (is("I")) {
             reply(k.version, now);
         } else if (is("RV")) {

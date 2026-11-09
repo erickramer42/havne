@@ -26,7 +26,14 @@
 #include "error_detail.h"
 #include "surrogate_log_names.h"
 
+namespace {
+constexpr DWORD kTransactTimeoutMs = 3000;
+}
+
 struct ecuio_j2534_sur_handle {
+    /* A transaction's deadline: kTransactTimeoutMs but under
+     * ecuio_j2534_sur_set_transact_ms */
+    DWORD transact_ms = kTransactTimeoutMs;
     bool    pipe_connected = false;
     HANDLE pipe = INVALID_HANDLE_VALUE;
     /* The manual-reset event every overlapped operation on the pipe
@@ -87,7 +94,6 @@ const SurrogateExe& surrogate_for(uint32_t dll_arch)
 {
     return dll_arch == ECUIO_DLL_ARCH_X86 ? kX86Surrogate : kX64Surrogate;
 }
-constexpr DWORD kTransactTimeoutMs   = 3000;
 /* The child's startup, from resuming it to its pipe connecting: fixed,
  * so a test that shrinks the open's window can't fail on a slow start */
 constexpr DWORD kStartupTimeoutMs = 8000;
@@ -678,7 +684,7 @@ void fetch_vendor_text(ecuio_j2534_sur_handle_t* h, char* out)
     req.request_id = h->next_request_id++;
     req.opcode = ECUIO_SUR_OP_GET_LAST_ERROR;
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
+    if (!transact(h, req, &resp, h->transact_ms) ||
         resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         return;
     }
@@ -1024,7 +1030,7 @@ ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t* h,
     req.u.connect.baud = baud;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         ecuio_detail_set("the surrogate stopped answering during "
                          "PassThruConnect");
         return ECUIO_ERR_SURROGATE_FAILED;
@@ -1053,7 +1059,9 @@ ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t* h,
     req.opcode = ECUIO_SUR_OP_DISCONNECT;
     req.u.disconnect.channel_id = channel;
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) return ECUIO_ERR_SURROGATE_FAILED;
+    if (!transact(h, req, &resp, h->transact_ms)) {
+        return ECUIO_ERR_SURROGATE_FAILED;
+    }
     return ECUIO_OK;
 }
 
@@ -1083,7 +1091,7 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* h,
     req.u.write.timeout_ms = timeout_ms;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
@@ -1122,7 +1130,7 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
     req.u.ioctl.input_len = input_len;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
@@ -1161,7 +1169,7 @@ ecuio_status_t ecuio_j2534_sur_read_version(ecuio_j2534_sur_handle_t* h,
     req.request_id = h->next_request_id++;
     req.opcode = ECUIO_SUR_OP_READ_VERSION;
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_NOT_SUPPORTED)) {
@@ -1227,7 +1235,7 @@ ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t* h,
     req.u.start_filter.fc_len = fc_len;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         ecuio_detail_set("the surrogate stopped answering during "
                          "PassThruStartMsgFilter");
         return ECUIO_ERR_SURROGATE_FAILED;
@@ -1257,7 +1265,7 @@ ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* h,
     req.u.stop_filter.filter_id = filter_id;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
@@ -1360,7 +1368,7 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
     req.u.inject.rx_flags = rx_flags;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+    if (!transact(h, req, &resp, h->transact_ms)) {
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
@@ -1423,6 +1431,16 @@ const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t* h)
     return (h != nullptr) ? h->log_path : "";
 }
 
+void ecuio_j2534_sur_set_transact_ms(ecuio_j2534_sur_handle_t* h, uint32_t ms)
+{
+    h->transact_ms = (ms != 0) ? ms : kTransactTimeoutMs;
+}
+
+uint32_t ecuio_j2534_sur_get_transact_ms(const ecuio_j2534_sur_handle_t* h)
+{
+    return h->transact_ms;
+}
+
 } // extern "C"
 
 #else
@@ -1468,6 +1486,11 @@ ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t*)
 { return ECUIO_ERR_NOT_IMPLEMENTED; }
 const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t*)
 { return ""; }
+void ecuio_j2534_sur_set_transact_ms(ecuio_j2534_sur_handle_t*, uint32_t) {}
+uint32_t ecuio_j2534_sur_get_transact_ms(const ecuio_j2534_sur_handle_t*)
+{
+    return 0;
+}
 
 } // extern "C"
 
