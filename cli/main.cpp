@@ -1929,6 +1929,9 @@ void usage(FILE* to)
         "                      [--from S] [--to S] [--raw]\n"
         "                      [--layout wide|long] [--rows sweep|<ms>]\n"
         "                      [--units metric|imperial] [--signal <name>]...\n"
+        "       havne-cli export <recording> --format csv --estimate\n"
+        "                      [--from S] [--to S] [--rows sweep|<ms>]\n"
+        "                      [--units metric|imperial] [--signal <name>]...\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
         "       havne-cli import csv <file> <folder> [--map <map.json> |\n"
         "                      --time-unit s|ms|us]\n"
@@ -2052,7 +2055,9 @@ void usage(FILE* to)
         "         markers' labels kept as typed. Scrubbed unless --raw:\n"
         "         identification replies and text signals left out, then\n"
         "         each file checked for the car's identity; a check that\n"
-        "         finds any writes nothing.\n"
+        "         finds any writes nothing. --estimate writes no file: the\n"
+        "         wide CSV's rows and bytes, exact, at --rows' interval, or\n"
+        "         for a row a sweep, every 100 ms and every 250 ms.\n"
         "health   writes a car's health as one scrubbed file, JSON or a\n"
         "         text for a person: the vehicle from its VIN (model year,\n"
         "         make, check digit; never the VIN), the inspection's\n"
@@ -4590,8 +4595,41 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
+        // A named column the recording has no values for stays empty
+        // (a focus pick that never answered is a column of a log): each is
+        // said on stderr, so a typo isn't silent, and counted
+        const auto say_missing = [&ex] {
+            std::vector<const char*> missing;
+            if (ex.options.format == ECUIO_EXPORT_CSV &&
+                ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty()) {
+                missing = missing_columns(ex);
+                for (const char* name : missing) {
+                    std::fprintf(stderr,
+                                 "havne-cli: the recording has no values for "
+                                 "'%s': its column is empty\n",
+                                 name);
+                }
+            }
+            return missing.size();
+        };
         Output out;
         write_start(out);
+        if (ex.estimate) {
+            const std::vector<uint32_t> rows = cli::estimate_intervals(ex);
+            std::vector<ecuio_export_estimate_t> sized(rows.size());
+            const ecuio_status_t sizing = ecuio_export_estimate(
+                &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
+                sized.data());
+            if (sizing != ECUIO_OK) {
+                write_error(out, sizing);
+                return ended(out, kExitConnect);
+            }
+            BigLine sizes(1024);
+            cli::estimate_line(sizes.line, rows.data(), sized.data(),
+                               sized.size(), say_missing());
+            write_line(out, sizes.line);
+            return ended(out, kExitOk);
+        }
         ecuio_export_report_t report{};
         const ecuio_status_t rc = ecuio_export(&ex.options, &report);
         BigLine b(cli::exported_line_bytes(ex));
@@ -4604,21 +4642,7 @@ int run(int argc, char** argv)
             write_error(out, rc);
             return ended(out, kExitConnect);
         }
-        // A named column the recording has no values for stays empty
-        // (a focus pick that never answered is a column of a log): each is
-        // said on stderr, so a typo isn't silent, and counted
-        std::vector<const char*> missing;
-        if (ex.options.format == ECUIO_EXPORT_CSV &&
-            ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty()) {
-            missing = missing_columns(ex);
-            for (const char* name : missing) {
-                std::fprintf(stderr,
-                             "havne-cli: the recording has no values for "
-                             "'%s': its column is empty\n",
-                             name);
-            }
-        }
-        cli::exported_line(l, ex, report, missing.size());
+        cli::exported_line(l, ex, report, say_missing());
         write_line(out, l);
         return ended(out, kExitOk);
     }

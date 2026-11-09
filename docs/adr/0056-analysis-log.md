@@ -479,3 +479,85 @@ carries a response-count digit, and the VX in ELM mode still prints its
 prompt about one `AT ST 19` timeout after a multi-frame reply, as the sheet's bus and prompt timings show. `&pack=0` helped at 4
 signals and cost at 8. J2534 and SocketCAN sending have no row: they
 have not run.
+
+## Appendix: the viewer's Export as built (2026-11-08)
+
+Step 6 ships in v0.7.1, not v0.7.0 as the appendix "the build" has it.
+
+**The whole log, in every format.** The Export writes the whole
+recording (`from_us` and `to_us` 0), the chart's zoom being a view, as
+Save report's. `--from` and `--to` are `havne-cli`'s alone
+([ADR-0054](0054-exports-and-imports.md)'s note of 2026-11-08).
+
+**The panel** (`RecordingExportPanel.qml`), opened by Export... beside
+Save report, takes the chart's place while it's open: a phone keeps the
+rest of the viewer on its first screen. Inline, since a Popup doesn't
+follow the zoom. Save as... and the last result come first, so they stay
+on a phone's first screen, then CSV, pcapng or Folder (CSV disabled, with the reason,
+for a folder with no `signals.csv`; pcapng hidden with no `frames.csv`);
+Wide or Long under CSV; under Wide the row interval and the columns.
+Every control is a touch's size on a phone.
+
+**The sizes.** One row a choice: every sweep, every 100 ms, every 250 ms
+and a custom interval (1 to 86400000 ms, `--rows`' range), each with its
+rows and the file's exact bytes, from one `ecuio_export_estimate` call
+over them all on a worker of its own. Asked at the open and 300 ms after
+a custom interval or a column change; the Export never waits for one.
+Core can't stop a call under way, so one runs at a time, a newer call
+waits behind it and replaces any already waiting, and only the newest's
+answer is shown. The long form, pcapng and the folder show no figure:
+core sizes the wide CSV alone. The last interval is kept between runs;
+format, layout, columns and Raw start over at each open.
+
+**The columns:** the log's own (core's rule: the focus line, else every
+number signal) or the viewer's ticks, by name in the recording's order.
+The ticks aren't offered while the viewer shows values decoded through a
+profile, whose names aren't the recording's columns. The panel says then
+that the CSV holds the values as recorded, since `signals.csv` is what
+core exports and no front end has a profile option.
+
+**Raw** is the named option ADR-0054 section 1 asks for: "Raw, not
+scrubbed", shown in Developer mode alone, off at each open, with a line
+saying the file can hold the VIN and calibration IDs.
+
+**Where it's written** (`app/recordingexport.{h,cpp}`, `RecordingExport`,
+QtCore, on a thread of its own; its destructor waits, core having no
+cancel). Core writes paths and refuses one that exists, and Android's
+picker hands back a `content://` URI, so a file is written in a
+`QTemporaryDir` and copied a chunk at a time to the place picked:
+`QSaveFile` for a local file, whole or not at all; the provider's own
+stream otherwise. A picker makes its document before the export runs, so
+a refused export or a failed copy removes a provider's document; a local
+file stays as it was. A folder copy on a local disk is core's own, made
+whole under its partial name; through a provider it is made in the
+temporary folder, then a new folder is made under the one picked and
+filled file by file, and removed if a file fails. The picker asks for a
+folder, a copy's name being the app's to choose. Android's picker
+offers neither the storage's root nor Download as that folder.
+
+Run on the test phone (Android 16) over a `mock://demo` recording,
+2026-11-08: through the document picker, the folder copy, a wide CSV and
+a pcapng each byte for byte what `havne-cli export` writes for the same
+recording and options, and a second copy named `<stamp>-2`.
+
+**The names** offered are the recording's stamp alone (`<yyyyMMdd-HHmmss>`
+with its `-n`, or "recording"), never the rest of its folder's name,
+which can hold the vehicle's label. A folder copy takes the first of
+`<stamp>`, `<stamp>-2` and on that is free.
+
+**The result** says what was written and what was left out, by class, in
+the panel and as one activity line, never a path.
+
+**`havne-cli export <recording> --format csv --estimate`** (no `<out>`)
+writes the same sizes, one `estimate` line {format, layout, columns,
+missing, sizes [{row_ms, rows, bytes}]}: at `--rows`' interval, else
+the three the panel offers. Exit codes as `export`'s; other formats, the
+long form and a file named are usage.
+
+**Tests:** `RecordingExportTest` (test_bridge: each format byte for byte
+against core's own call for the same options, a provider's path through
+`setThroughProviderForTesting`, the sizes against the files written, the
+newest estimate winning), `QmlTest.recordings`' Export cases,
+`QmlTest.phone`'s `test_theExportPanelFitsAPhone`, `CliTransferTest`,
+`CliUsageTest.ExportEstimate*`, `CliGoldenTest.ExportEstimateSizesTheWideCsv`
+and `CliTransferRunTest.csv` (each estimate's bytes the file's).

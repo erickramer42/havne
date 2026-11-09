@@ -95,6 +95,43 @@ TEST(CliTransferTest, ExportTakesARecordingAFileAFormatAndARange)
     EXPECT_EQ(tall.options.row_ms, 0u);
 }
 
+TEST(CliTransferTest, ExportEstimatesTheWideCsvAndNamesNoFile)
+{
+    Args a({"havne-cli", "export", "rec", "--format", "csv", "--estimate"});
+    cli::ExportArgs ex;
+    std::string why;
+    ASSERT_TRUE(cli::parse_export(a.argc(), a.argv.data(), ex, &why)) << why;
+    EXPECT_TRUE(ex.estimate);
+    EXPECT_STREQ(ex.options.folder_utf8, "rec");
+    EXPECT_EQ(ex.options.out_path_utf8, nullptr);
+    EXPECT_EQ(cli::estimate_intervals(ex),
+              (std::vector<uint32_t>{0u, 100u, 250u}));
+
+    Args b({"havne-cli", "export", "rec", "--format", "csv", "--rows", "40",
+            "--estimate"});
+    cli::ExportArgs one;
+    ASSERT_TRUE(cli::parse_export(b.argc(), b.argv.data(), one, &why)) << why;
+    EXPECT_EQ(cli::estimate_intervals(one), (std::vector<uint32_t>{40u}));
+
+    Args c({"havne-cli", "export", "rec", "--format", "csv", "--rows", "sweep",
+            "--estimate"});
+    cli::ExportArgs sweep;
+    ASSERT_TRUE(cli::parse_export(c.argc(), c.argv.data(), sweep, &why)) << why;
+    EXPECT_EQ(cli::estimate_intervals(sweep), (std::vector<uint32_t>{0u}));
+
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "csv", "--estimate"}),
+              "--estimate writes no file: give no file to write");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "--format", "pcapng",
+                          "--estimate"}),
+              "--estimate sizes the wide CSV: --format csv, no --layout long");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "--format", "csv",
+                          "--layout", "long", "--estimate"}),
+              "--estimate sizes the wide CSV: --format csv, no --layout long");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "--format", "csv"}),
+              "export needs a recording's folder and the file to write");
+}
+
 TEST(CliTransferTest, ExportsBadFormsAreUsage)
 {
     EXPECT_EQ(export_why({"havne-cli", "export", "rec"}),
@@ -217,6 +254,26 @@ TEST(CliTransferTest, TheNamedColumnsTheRecordingLacksAreListedInOrder)
     EXPECT_STREQ(missing[1], "rpm") << "names are matched whole";
     EXPECT_TRUE(cli::missing_names({}, recorded).empty());
     EXPECT_EQ(cli::missing_names({"RPM"}, {}).size(), 1u);
+}
+
+TEST(CliTransferTest, TheEstimateLineSaysWhatCoreSized)
+{
+    const uint32_t rows[] = {0u, 250u};
+    ecuio_export_estimate_t sized[2] = {};
+    sized[0].rows = 40;
+    sized[0].bytes = 1200;
+    sized[0].columns = 3;
+    sized[1].rows = 8;
+    sized[1].bytes = 260;
+    sized[1].columns = 3;
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::estimate_line(l, rows, sized, 2, 1);
+    EXPECT_EQ(text(l),
+              "{\"type\":\"estimate\",\"format\":\"csv\",\"layout\":\"wide\","
+              "\"columns\":3,\"missing\":1,\"sizes\":[{\"row_ms\":0,"
+              "\"rows\":40,\"bytes\":1200},{\"row_ms\":250,\"rows\":8,"
+              "\"bytes\":260}]}");
 }
 
 TEST(CliTransferTest, TheLinesSayWhatCoreReports)

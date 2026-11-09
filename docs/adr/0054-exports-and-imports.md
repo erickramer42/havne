@@ -1651,3 +1651,16 @@ otherwise run for minutes and write a file nothing opens). The long
 layout has no such limit. `ecuio_export_estimate` takes at most 64 row
 intervals in a call, each one keeping a rows engine, and refuses more
 with `ECUIO_ERR_INVALID_ARGUMENT` before it allocates.
+
+## Note of 2026-11-08: the viewer's Export and the range
+
+Section 2 has the viewer's Export take its range from the chart's view.
+It covers the whole recording in every format instead:
+[ADR-0056](0056-analysis-log.md) section 5 sets the rule for a log
+(its size comes from the row interval, and the steady state is as much
+the analyst's as any pull), and one rule for all the Export's formats
+keeps a zoom from silently cutting a file, as Save report's zoom doesn't.
+`--from` and `--to` stay `havne-cli`'s alone, for scripts. Markers stay
+out of the CSV: the section's "the viewer's Export can take them up"
+isn't taken. ADR-0056's appendix "the viewer's Export as built" has the
+rest.

@@ -385,6 +385,7 @@ Page {
     }
 
     function backToList() {
+        closeExport()
         recording.close()
         viewFrames.clear()
         detailView = "values"
@@ -810,6 +811,21 @@ Page {
     // The signal rows' filter: Live has its own
     SignalFilter {
         id: signalFilter
+    }
+
+    // The Export panel: it takes the chart's place while open
+    property bool exportOpen: false
+    readonly property bool exportShown: exportOpen && recording.state === RecordingView.Open
+                                        && !chartMaximized
+    readonly property var plottedNames: recording.signalList
+        .filter(s => !s.isText && root.plotted[s.index] === true).map(s => s.name)
+    function openExport() {
+        exportOpen = true
+        exportPanel.begin()
+    }
+    function closeExport() {
+        exportPanel.end()
+        exportOpen = false
     }
 
     // The last Save report's outcome in words, "" before one on this
@@ -1413,9 +1429,22 @@ Page {
             spacing: Theme.spacing
             ThemedButton {
                 objectName: "saveReport"
+                compact: Theme.compact
                 enabled: !recording.reporting
                 text: qsTr("Save report…")
                 onClicked: reportDialog.open()
+            }
+            ThemedButton {
+                objectName: "exportButton"
+                compact: Theme.compact
+                text: qsTr("Export...")
+                highlighted: root.exportOpen
+                onClicked: {
+                    if (root.exportOpen)
+                        root.closeExport()
+                    else
+                        root.openExport()
+                }
             }
             // The signal area's two views: the values at the cursor, or the
             // frames in view. Hidden for a recording with no frames.csv
@@ -1452,6 +1481,16 @@ Page {
                 text: root.reportNote
                 color: root.reportFailed ? Theme.danger : Theme.textDim
             }
+        }
+
+        RecordingExportPanel {
+            id: exportPanel
+            objectName: "exportPanel"
+            visible: root.exportShown
+            Layout.fillWidth: true
+            view: recording
+            plottedNames: root.plottedNames
+            onCloseRequested: root.closeExport()
         }
 
         // Where the values come from: offered once it opened, or failed
@@ -1873,7 +1912,7 @@ Page {
         Rectangle {
             id: chartFrame
             objectName: "chartFrame"
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.exportShown
             Layout.fillWidth: true
             // Tall enough to read on a phone; the page scrolls to it. The
             // splitter below sets it once dragged (not while maximized)
@@ -2102,11 +2141,18 @@ Page {
             }
         }
 
+        // With the chart gone for the Export panel, the rest stays at the top
+        Item {
+            visible: root.exportShown
+            Layout.fillHeight: true
+        }
+
         // The splitter: drag it to make the chart taller or shorter, kept
         // between runs; a double-tap gives the chart the page's own height
         Item {
             objectName: "chartSplitter"
             visible: recording.state === RecordingView.Open && !root.chartMaximized
+                     && !root.exportShown
             Layout.fillWidth: true
             implicitHeight: 12
             Rectangle {

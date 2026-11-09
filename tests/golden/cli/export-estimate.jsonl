@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"columns": 9, "format": "csv", "layout": "wide", "missing": 0, "sizes": [{"bytes": 32286, "row_ms": 0, "rows": 784}, {"bytes": 209, "row_ms": 100, "rows": 1}, {"bytes": 209, "row_ms": 250, "rows": 1}], "type": "estimate"}

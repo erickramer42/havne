@@ -333,6 +333,22 @@ def csv_export(cli, recording):
         recorded = list(csv.reader(f))[1:]
     want = [[f"{int(t) // 1000000}.{int(t) % 1000000:06d}", name, unit, value]
             for t, name, value, unit in recorded]
+    # --estimate's bytes are the wide file's, at a sweep and on a grid
+    with tempfile.TemporaryDirectory() as d:
+        sized = one(run(cli, ["export", recording, "--format", "csv",
+                              "--estimate"]), "estimate")
+        for size in sized["sizes"]:
+            out = os.path.join(d, f"wide-{size['row_ms']}.csv")
+            rows = "sweep" if size["row_ms"] == 0 else str(size["row_ms"])
+            wide = one(run(cli, ["export", recording, out, "--format", "csv",
+                                 "--rows", rows]), "exported")
+            if (os.path.getsize(out), wide["rows"]) != (size["bytes"], size["rows"]):
+                raise SystemExit(f"FAIL  estimate {size} of {wide}")
+        typo = one(run(cli, ["export", recording, "--format", "csv", "--estimate",
+                             "--rows", "100", "--signal", "No such signal"]),
+                   "estimate")
+        if (typo["missing"], [s["row_ms"] for s in typo["sizes"]]) != (1, [100]):
+            raise SystemExit(f"FAIL  estimate of a typo {typo}")
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, "values.csv")
         exported = one(run(cli, ["export", recording, out, "--format", "csv",
