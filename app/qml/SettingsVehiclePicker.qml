@@ -27,7 +27,8 @@ ColumnLayout {
         ThemedButton {
             objectName: "vehicle_none"
             text: qsTr("None")
-            highlighted: root.host.pickedVehicle === null
+            checkable: true
+            checked: root.host.pickedVehicle === null
             enabled: root.host.idle
             onClicked: root.host.pickVehicle("")
         }
@@ -45,7 +46,8 @@ ColumnLayout {
                 text: vehicle?.label ?? ""
                 // A long label wraps rather than run past a phone's edge
                 width: Math.min(implicitWidth, parent.width)
-                highlighted: vehicle !== undefined && root.host.vehicles.picked === vehicle.id
+                checkable: true
+                checked: vehicle !== undefined && root.host.vehicles.picked === vehicle.id
                 enabled: root.host.idle
                 onClicked: root.host.pickVehicle(vehicle.id)
             }
@@ -90,7 +92,8 @@ ColumnLayout {
             objectName: "vehicleMore"
             text: qsTr("More")
             enabled: root.host.idle
-            highlighted: root.moreShown
+            checkable: true
+            checked: root.moreShown
             onClicked: root.moreShown = !root.moreShown
         }
     }
@@ -119,6 +122,7 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleForgetVin"
+            flat: true
             text: qsTr("Forget the VIN")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
             onClicked: {
@@ -128,6 +132,7 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleForget"
+            flat: true
             text: qsTr("Forget")
             enabled: root.host.idle && root.host.pickedVehicle !== null
             onClicked: {
@@ -137,6 +142,7 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleForgetAll"
+            flat: true
             text: qsTr("Forget all vehicles")
             enabled: root.host.idle && root.host.vehicles.list.length > 0
             onClicked: {

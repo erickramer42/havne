@@ -387,6 +387,7 @@ Page {
                             spacing: Theme.spacing
                             ThemedButton {
                                 objectName: "clearConfirm"
+                                highlighted: true
                                 text: qsTr("Clear codes")
                                 baseColor: Theme.danger
                                 hoverColor: Qt.lighter(Theme.danger, 1.15)

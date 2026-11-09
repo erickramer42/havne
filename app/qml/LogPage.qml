@@ -208,7 +208,8 @@ Pane {
                 ThemedButton {
                     objectName: "pauseFrames"
                     text: Bridge.logPaused ? qsTr("Resume") : qsTr("Pause")
-                    highlighted: Bridge.logPaused
+                    checkable: true
+                    checked: Bridge.logPaused
                     enabled: Bridge.connected
                     onClicked: Bridge.logPaused = !Bridge.logPaused
                 }
@@ -312,7 +313,8 @@ Pane {
                     text: Bridge.model.filterTerms > 0
                           ? qsTr("Filter (%1)").arg(Bridge.model.filterTerms)
                           : qsTr("Filter")
-                    highlighted: page.filterOpen
+                    checkable: true
+                    checked: page.filterOpen
                     onClicked: page.filterOpen = !page.filterOpen
                 }
             }

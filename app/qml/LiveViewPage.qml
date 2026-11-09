@@ -397,7 +397,8 @@ Page {
                     horizontalPadding: Theme.dense ? 4 : 8
                     objectName: "chartWindow_" + modelData
                     text: qsTr("%1 s").arg(modelData)
-                    highlighted: root.chartWindowS === modelData
+                    checkable: true
+                    checked: root.chartWindowS === modelData
                     Accessible.name: qsTr("Show the last %1 seconds").arg(modelData)
                     onClicked: liveSettings.chartWindowS = modelData
                 }

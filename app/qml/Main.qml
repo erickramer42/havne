@@ -333,6 +333,7 @@ ApplicationWindow {
                     ThemedButton {
                         id: startLogButton
                         objectName: "startLogButton"
+                        highlighted: true
                         visible: Bridge.connected && !Bridge.recordingActive
                                  && !Bridge.currentUri.toLowerCase().startsWith("replay://")
                         enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
@@ -354,6 +355,7 @@ ApplicationWindow {
                     }
                     ThemedButton {
                         objectName: "stopLogButton"
+                        highlighted: true
                         visible: Bridge.logActive
                         enabled: !Bridge.disconnecting
                         text: qsTr("Stop log")
@@ -366,6 +368,9 @@ ApplicationWindow {
                     // A log's Stop log takes its place while the log runs
                     ThemedButton {
                         objectName: "disconnectButton"
+                        // Ending a session is quiet; Connect... is primary
+                        flat: Bridge.connected || Bridge.disconnecting
+                        highlighted: !flat
                         visible: !Bridge.logActive
                                  && (Bridge.connected || root.currentPage !== root.settingsPage)
                         // A teardown can take seconds with a wedged adapter; no

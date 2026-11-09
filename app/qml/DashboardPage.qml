@@ -1279,6 +1279,7 @@ Page {
             }
             ThemedButton {
                 objectName: "resetPeaks"
+                flat: true
                 compact: root.compact
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
@@ -1357,7 +1358,8 @@ Page {
             ThemedButton {
                 objectName: "dashMore"
                 compact: root.form === "phone"
-                highlighted: root.moreShown
+                checkable: true
+                checked: root.moreShown
                 text: qsTr("Pages")
                 onClicked: {
                     root.moreShown = !root.moreShown
@@ -1488,7 +1490,8 @@ Page {
                     required property int index
                     objectName: "dashPageButton_" + index
                     compact: true
-                    highlighted: index === root.pageIndex
+                    checkable: true
+                    checked: index === root.pageIndex
                     text: root.pages[index] && root.pages[index].name
                           ? root.pages[index].name : qsTr("Page %1").arg(index + 1)
                     onClicked: root.goTo(index)

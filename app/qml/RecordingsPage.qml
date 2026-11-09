@@ -1631,7 +1631,8 @@ Page {
                     text: viewFrames.frames.filterTerms > 0
                           ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
                           : qsTr("Filter")
-                    highlighted: root.framesFilterOpen
+                    checkable: true
+                    checked: root.framesFilterOpen
                     onClicked: root.framesFilterOpen = !root.framesFilterOpen
                 }
             }

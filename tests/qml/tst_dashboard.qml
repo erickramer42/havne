@@ -533,13 +533,13 @@ TestCase {
         compare(findChild(page, "dashPageButton_0").text, "Engine")
         compare(findChild(page, "dashPageButton_2").text, "Page 3")
         compare(page.pageIndex, 0)
-        verify(findChild(page, "dashPageButton_0").highlighted)
+        verify(findChild(page, "dashPageButton_0").checked)
 
         mouseClick(findChild(page, "dashPageButton_2"))
         compare(page.pageIndex, 2)
         tryCompare(swipe, "currentIndex", 2)
-        verify(findChild(page, "dashPageButton_2").highlighted)
-        verify(!findChild(page, "dashPageButton_0").highlighted)
+        verify(findChild(page, "dashPageButton_2").checked)
+        verify(!findChild(page, "dashPageButton_0").checked)
 
         keyClick(Qt.Key_Right)
         compare(page.pageIndex, 2, "Right on the last page stays")
@@ -1041,14 +1041,14 @@ TestCase {
         const sw = nightSwitchOf(page)
         verify(sw, "the switch is on the page")
         compare(sw.text, "Night")
-        compare(sw.highlighted, false, "off")
+        compare(sw.checked, false, "off")
         sw.clicked()
         compare(Theme.night, "on")
         compare(Theme.nightActive, true)
-        compare(sw.highlighted, true, "highlighted while night is on")
+        compare(sw.checked, true, "checked while night is on")
         sw.clicked()
         compare(Theme.night, "off")
-        compare(sw.highlighted, false)
+        compare(sw.checked, false)
     }
 
     function test_theSwitchHoldsAnOverrideUnderASchedule() {
@@ -1057,15 +1057,15 @@ TestCase {
         Theme.now = () => new Date(2026, 10, 10, 18, 0, 0, 0)
         Theme.night = "schedule"
         Theme.refreshNight()
-        compare(sw.highlighted, false, "the schedule says off at 18:00")
+        compare(sw.checked, false, "the schedule says off at 18:00")
         sw.clicked()
         compare(Theme.night, "schedule", "the mode is kept")
         compare(Theme.nightOverride, "on")
-        compare(sw.highlighted, true, "highlighted follows nightActive")
+        compare(sw.checked, true, "checked follows nightActive")
         compare(sw.Accessible.name, "Night is on until 07:00. Turn it off")
         sw.clicked()
         compare(Theme.nightOverride, "")
-        compare(sw.highlighted, false)
+        compare(sw.checked, false)
         compare(sw.Accessible.name, "Night is off until 19:00. Turn it on")
     }
 

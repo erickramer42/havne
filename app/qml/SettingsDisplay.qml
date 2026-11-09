@@ -81,7 +81,8 @@ ColumnLayout {
                 required property var modelData
                 objectName: "night_" + modelData.mode
                 text: modelData.label
-                highlighted: Theme.clampNight(Theme.night) === modelData.mode
+                checkable: true
+                checked: Theme.clampNight(Theme.night) === modelData.mode
                 onClicked: Theme.night = modelData.mode
             }
         }
@@ -98,7 +99,8 @@ ColumnLayout {
                 required property var modelData
                 objectName: "nightStyle_" + modelData.style
                 text: modelData.label
-                highlighted: Theme.clampStyle(Theme.nightStyle) === modelData.style
+                checkable: true
+                checked: Theme.clampStyle(Theme.nightStyle) === modelData.style
                 onClicked: Theme.nightStyle = modelData.style
             }
         }
@@ -186,7 +188,8 @@ ColumnLayout {
                 width: Math.min(implicitWidth, parent.width)
                 objectName: "units_" + modelData.name
                 text: modelData.label
-                highlighted: Bridge.unitSystem === modelData.system
+                checkable: true
+                checked: Bridge.unitSystem === modelData.system
                 onClicked: Bridge.unitSystem = modelData.system
             }
         }

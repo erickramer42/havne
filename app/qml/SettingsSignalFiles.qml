@@ -63,6 +63,7 @@ ColumnLayout {
                 }
                 ThemedButton {
                     objectName: "signalRemove_" + fileRow.index
+                    flat: true
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove")
                     enabled: root.host.idle && root.host.confirming === ""

@@ -26,7 +26,8 @@ ColumnLayout {
                 required property var modelData
                 objectName: "profile_" + modelData.name
                 text: modelData.label
-                highlighted: root.host.profileChoice === modelData.name
+                checkable: true
+                checked: root.host.profileChoice === modelData.name
                 enabled: root.host.idle
                 onClicked: root.host.chooseProfile(modelData.name)
             }

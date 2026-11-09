@@ -45,7 +45,8 @@ RowLayout {
         visible: bar.filterButtonShown
         text: qsTr("Filter")
         // Lit while the popup's choices narrow the list
-        highlighted: bar.filter.plottedOnly || bar.filter.groups.length > 0
+        checkable: true
+        checked: bar.filter.plottedOnly || bar.filter.groups.length > 0
         onClicked: options.opened ? options.close() : options.open()
         Accessible.name: qsTr("Filter the signals")
 

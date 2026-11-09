@@ -17,7 +17,8 @@ ThemedButton {
     readonly property real pillHeight: 32
 
     compact: true
-    highlighted: shown
+    checkable: true
+    checked: shown
     implicitHeight: Math.max(Theme.touchTarget, pillHeight)
     implicitWidth: Math.max(Theme.touchTarget, words.implicitWidth + crescent.width + 28)
     text: qsTr("Night")

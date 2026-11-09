@@ -136,7 +136,7 @@ TestCase {
         tryCompare(list, "count", 1)
         tryVerify(() => list.itemAtIndex(0) !== null && list.itemAtIndex(0).name === "Intake Air Temp",
                   2000, "the row left is the intake air's")
-        verify(findChild(bar, "filterButton").highlighted, "a group chosen lights the button")
+        verify(findChild(bar, "filterButton").checked, "a group chosen checks the button")
 
         findChild(boxes, "filterClear").clicked()
         tryCompare(list, "count", all)
@@ -218,7 +218,7 @@ TestCase {
     }
 
     // The chart's window: four choices, 30 s at first, the picked one
-    // highlighted and kept by the page
+    // checked and kept by the page
     function test_theWindowIsPickedAboveTheChart() {
         const page = createTemporaryObject(pageComponent, testCase)
         verify(page)
@@ -227,8 +227,8 @@ TestCase {
             verify(findChild(page, "chartWindow_" + s), "a button for " + s + " s")
         findChild(page, "chartWindow_60").clicked()
         compare(page.chartWindowS, 60)
-        verify(findChild(page, "chartWindow_60").highlighted)
-        verify(!findChild(page, "chartWindow_10").highlighted)
+        verify(findChild(page, "chartWindow_60").checked)
+        verify(!findChild(page, "chartWindow_10").checked)
         findChild(page, "chartWindow_" + before).clicked()
         compare(page.chartWindowS, before, "put back as it was")
     }
