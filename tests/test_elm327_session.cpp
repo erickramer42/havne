@@ -232,6 +232,20 @@ bool wait_for(const std::function<bool()>& pred, int timeout_ms)
     return pred();
 }
 
+/* The worker's 5 s waits shortened for a scope; a running worker takes
+ * them on its next pass */
+class ShortTimeouts
+{
+public:
+    ShortTimeouts(uint32_t prompt_ms, uint32_t monitor_check_ms)
+    {
+        ecuio_elm327_set_timeouts_ms(prompt_ms, monitor_check_ms);
+    }
+    ~ShortTimeouts() { ecuio_elm327_set_timeouts_ms(0, 0); }
+    ShortTimeouts(const ShortTimeouts&) = delete;
+    ShortTimeouts& operator=(const ShortTimeouts&) = delete;
+};
+
 std::string hex_of(const uint8_t* d, size_t n)
 {
     static const char digits[] = "0123456789ABCDEF";
@@ -1611,17 +1625,37 @@ TEST_F(Elm327SessionTest, APendingReplyIsFollowedByItsAnswer)
     EXPECT_EQ(s.state(), ECUIO_OK);
 }
 
-/* An ECU that keeps answering 7F 01 78 past 5 s: the adapter listens on,
- * and so does the worker, since its 5 s limit counts from the last line,
- * not the request; the answer at 5.5 s completes the request, with no
- * failure on the way */
-TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastFiveSeconds)
+/* The waits as shipped; the cases below shorten them */
+TEST_F(Elm327SessionTest, TheWorkersWaitsAreFiveSeconds)
 {
+    uint32_t prompt = 0;
+    uint32_t check = 0;
+    ecuio_elm327_get_timeouts_ms(&prompt, &check);
+    EXPECT_EQ(prompt, 5000u);
+    EXPECT_EQ(check, 5000u);
+    {
+        ShortTimeouts timeouts(2000, 1500);
+        ecuio_elm327_get_timeouts_ms(&prompt, &check);
+        EXPECT_EQ(prompt, 2000u);
+        EXPECT_EQ(check, 1500u);
+    }
+    ecuio_elm327_get_timeouts_ms(&prompt, &check);
+    EXPECT_EQ(prompt, 5000u);
+    EXPECT_EQ(check, 5000u);
+}
+
+/* An ECU that keeps answering 7F 01 78 past the worker's limit: the adapter
+ * listens on, and so does the worker, since its limit counts from the last
+ * line, not the request; the answer past it completes the request, with no
+ * failure on the way */
+TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastThePromptLimit)
+{
+    ShortTimeouts timeouts(2000, 0);
     set_knobs([](fake_elm327::knobs& k) {
         k.pending = true;
         k.pending_count = 2;
-        k.pending_gap_ms = 3000;
-        k.reply_delay_ms = 5500;
+        k.pending_gap_ms = 1200;
+        k.reply_delay_ms = 2200;
     });
     Session s;
     ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
@@ -1991,21 +2025,22 @@ TEST_F(Elm327SessionTest, AResetWhoseSetupFailsIsAHardFailure)
 }
 
 /* An adapter that stops answering, prompt and all: a hard failure once
- * 5 s pass with nothing */
-TEST_F(Elm327SessionTest, NoPromptWithinFiveSecondsIsAHardFailure)
+ * the worker's limit passes with nothing */
+TEST_F(Elm327SessionTest, NoPromptWithinThePromptLimitIsAHardFailure)
 {
     Session s;
     ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
     s.start();
     ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
-    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+    const ShortTimeouts timeouts(500, 0);
     const auto from = std::chrono::steady_clock::now();
+    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
     ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 9000));
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 4000));
     const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::steady_clock::now() - from)
                           .count();
-    EXPECT_GE(took, 4900);
+    EXPECT_GE(took, 400);
 }
 
 /* ---- Passive listening (ADR-0026's appendix "passive listening") ---- */
@@ -2139,52 +2174,66 @@ TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)
     EXPECT_EQ(episodes, 0u);
 }
 
-/* 5 s with no line: the monitor is stopped with a space, never a CR;
- * the adapter's STOPPED and prompt show it's there, and AT MA starts
- * again with no failure; both gaps on the fake's stamps */
-TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedEveryFiveSeconds)
+/* The check's interval with no line: the monitor is stopped with a space,
+ * never a CR; the adapter's STOPPED and prompt show it's there, and AT MA
+ * starts again with no failure; every gap and count on the fake's stamps of
+ * the first check, so a later check can't change them */
+TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedAtItsInterval)
 {
     Session s;
     listen_on(s);
     const int64_t first_monitor = monitor_started();
+    const ShortTimeouts timeouts(0, 2000);
     ASSERT_TRUE(wait_for(
         [] {
-            return on_fake<uint32_t>(
-                       [](fake_elm327::adapter& a) { return a.stops; }) >= 1;
+            return on_fake<int64_t>([](fake_elm327::adapter& a) {
+                       return a.monitor_after_stop_us;
+                   }) != 0;
         },
-        8000));
-    const int64_t stopped =
-        on_fake<int64_t>([](fake_elm327::adapter& a) { return a.stop_us; });
-    EXPECT_GE(stopped - first_monitor, 4900000);
-    ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 2000));
-    EXPECT_LT(monitor_started() - stopped, 90000)
+        4500));
+    const int64_t stopped = on_fake<int64_t>(
+        [](fake_elm327::adapter& a) { return a.first_stop_us; });
+    EXPECT_GE(stopped - first_monitor, 1900000);
+    const int64_t restarted = on_fake<int64_t>(
+        [](fake_elm327::adapter& a) { return a.monitor_after_stop_us; });
+    EXPECT_LT(restarted - stopped, 90000)
         << "AT MA again at once, not on the backoff";
-    EXPECT_EQ(
-        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.stops; }), 1u);
+    const auto second_stop = [] {
+        return on_fake<int64_t>(
+            [](fake_elm327::adapter& a) { return a.second_stop_us; });
+    };
+    (void)wait_for([&] { return second_stop() != 0; }, 300);
+    if (second_stop() != 0) {
+        EXPECT_GE(second_stop() - restarted, 1900000)
+            << "the next check waits its interval from the new AT MA";
+    }
     EXPECT_EQ(
         on_fake<uint8_t>([](fake_elm327::adapter& a) { return a.last_stop; }),
         ' ');
     EXPECT_EQ(
         on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.bare_crs; }),
         0u);
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 3000));
     uint32_t episodes = 99;
-    EXPECT_EQ(s.state(&episodes), ECUIO_ERR_VEHICLE_TIMEOUT);
+    (void)s.state(&episodes);
     EXPECT_EQ(episodes, 0u);
 }
 
-/* No prompt within 5 s of the check's stop: a hard failure; the adapter
- * back, the reset that stops its monitor and the setup bring the monitor
- * back with no reconnect */
+/* No prompt within the check's interval of its stop: a hard failure; the
+ * adapter back, the reset that stops its monitor and the setup bring the
+ * monitor back with no reconnect */
 TEST_F(Elm327SessionTest, AHungMonitorIsAHardFailureAndRecovers)
 {
     Session s;
     listen_on(s);
     set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
+    const ShortTimeouts timeouts(0, 500);
     const int64_t from = monitor_started();
     ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 12000));
-    EXPECT_GE(fake_elm327::steady_us() - from, 9800000)
-        << "5 s with no line, then 5 s with no prompt";
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 4000));
+    EXPECT_GE(fake_elm327::steady_us() - from, 800000)
+        << "the interval with no line, then the interval with no prompt";
     set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
     ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
     EXPECT_GE(fake_count("ATZ"), 2u) << "the setup ran again";
