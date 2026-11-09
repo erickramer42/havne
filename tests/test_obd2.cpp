@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <set>
 #include <vector>
 
 namespace {
@@ -6546,6 +6547,248 @@ TEST(RequestEngineTest, APackGathersKeptRequestsAlone)
         all_three = all_three || req.size() == 1 + picks.size();
     }
     EXPECT_TRUE(all_three) << "the three picks pack as one request";
+}
+
+namespace {
+
+/* One request out on channel 0: when, and what it asked */
+struct Asked {
+    int64_t at;
+    Bytes request;
+};
+
+/* Channel 0's rotation up to until_us on the engine's own clock, each
+ * request answered 4 ms later through respond, the clock stepped by
+ * ecuio_engine_next_event_us alone: a wait it doesn't report fails here,
+ * where a worker would spin */
+std::vector<Asked> paced_run(ecuio_request_engine* e, int64_t until_us,
+                             const Responder& respond)
+{
+    std::vector<Asked> out;
+    int64_t now = 0;
+    while (now < until_us) {
+        (void)ecuio_engine_expire(e, 0, now);
+        const int32_t r = ecuio_engine_due(e, 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            const int64_t next = ecuio_engine_next_event_us(e, now);
+            if (next <= 0 || next == INT64_MAX) {
+                ADD_FAILURE() << "nothing due, and next event " << next
+                              << " us, at " << now;
+                break;
+            }
+            now += next;
+            continue;
+        }
+        const ecuio_request& q = ecuio_engine_request_of(e, 0, r);
+        const Bytes req(q.bytes, q.bytes + q.len);
+        out.push_back({now, req});
+        ecuio_engine_sent(e, 0, r, true, now);
+        now += 4 * kMs;
+        const Bytes reply = respond(req);
+        if (!reply.empty()) {
+            (void)ecuio_engine_on_frame(e, 0, reply.data(),
+                                        static_cast<uint16_t>(reply.size()),
+                                        now, nullptr);
+        }
+    }
+    return out;
+}
+
+Bytes single_pid_reply(const Bytes& req)
+{
+    return Bytes{0x41, req[1], 0x12, 0x34};
+}
+
+/* Keeps every row of a table one_channel_of made */
+void focus_all(ecuio_request_engine* e, int64_t min_sweep_us)
+{
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    for (uint32_t i = 0; i < e->count; ++i) {
+        keep[i] = 1;
+    }
+    ecuio_engine_focus(e, keep, min_sweep_us);
+}
+
+} // namespace
+
+/* ADR-0056 section 4: a sweep starts no sooner than the floor after the
+ * last one started, the requests inside it at the engine's own 20 ms
+ * floor; the picks keep their order, and the wait is reported to the
+ * driver (paced_run steps by it) */
+TEST(RequestEngineTest, AMinimumTimeSpacesTheSweepsFromStartToStart)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    focus_all(&e, 200 * kMs);
+    const std::vector<Asked> sent = paced_run(&e, 1000 * kMs, single_pid_reply);
+    ASSERT_EQ(sent.size(), 15u) << "five sweeps of three in 1 s";
+    const uint8_t order[3] = {0x0C, 0x0D, 0x0F};
+    for (size_t k = 0; k < sent.size(); ++k) {
+        EXPECT_EQ(sent[k].request[1], order[k % 3]) << "request " << k;
+        EXPECT_EQ(sent[k].at, int64_t(k / 3) * 200 * kMs +
+                                  int64_t(k % 3) * ECUIO_ENGINE_GAP_US)
+            << "request " << k;
+    }
+}
+
+/* A sweep that takes longer than the floor waits for nothing: one
+ * after another at the engine's own pace, as with no floor at all */
+TEST(RequestEngineTest, ASweepLongerThanItsMinimumIsNotHeldBack)
+{
+    ecuio_request_engine floored;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&floored, {0x0C, 0x0D, 0x0F, 0x10}));
+    focus_all(&floored, 50 * kMs); /* a sweep takes 80 ms */
+    ecuio_request_engine plain;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&plain, {0x0C, 0x0D, 0x0F, 0x10}));
+    focus_all(&plain, 0);
+    const std::vector<Asked> a =
+        paced_run(&floored, 500 * kMs, single_pid_reply);
+    const std::vector<Asked> b = paced_run(&plain, 500 * kMs, single_pid_reply);
+    ASSERT_EQ(a.size(), b.size());
+    for (size_t k = 0; k < a.size(); ++k) {
+        EXPECT_EQ(a[k].at, b[k].at) << "request " << k;
+        EXPECT_EQ(a[k].request, b[k].request) << "request " << k;
+    }
+}
+
+/* Eight picks at six PIDs a pack: a sweep is two requests, whose rows
+ * run past the eight, and the count starts over, so every sweep asks
+ * every pick, sweeps start a floor apart and the wait falls only
+ * between requests */
+TEST(RequestEngineTest, AMinimumTimeCountsAPacksRowsAndEveryPickIsAsked)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    (void)packing_turns(&e, 200, packed_from(fake_reply));
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    std::set<uint8_t> picks;
+    for (uint32_t i = 0; i < e.count && picks.size() < 8; ++i) {
+        if (ecuio_engine_packable(&e, 0, i)) {
+            keep[i] = 1;
+            picks.insert(e.requests[i].bytes[1]);
+        }
+    }
+    ASSERT_EQ(picks.size(), 8u);
+    ecuio_engine_focus(&e, keep, 300 * kMs);
+    ASSERT_NO_FATAL_FAILURE(clock_over(&e));
+    const std::vector<Asked> sent =
+        paced_run(&e, 3000 * kMs, packed_from(fake_reply));
+    ASSERT_EQ(sent.size(), 20u) << "ten sweeps of two requests";
+    for (size_t k = 0; k < sent.size(); k += 2) {
+        EXPECT_EQ(sent[k].at, int64_t(k / 2) * 300 * kMs) << "sweep " << k / 2;
+        EXPECT_EQ(sent[k + 1].at - sent[k].at, ECUIO_ENGINE_GAP_US);
+        EXPECT_EQ(sent[k].request.size(), 7u) << "six PIDs in the pack";
+        std::set<uint8_t> asked;
+        for (size_t r = 0; r < 2; ++r) {
+            asked.insert(sent[k + r].request.begin() + 1,
+                         sent[k + r].request.end());
+        }
+        EXPECT_EQ(asked, picks) << "sweep " << k / 2;
+    }
+}
+
+/* Only the rotation waits: a scanned DID goes out in the gap, the next
+ * event says so, and the sweep after it starts on its own time */
+TEST(RequestEngineTest, AOneShotGoesOutInAMinimumTimesGap)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+    focus_all(&e, 1000 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    const uint8_t a[4] = {0x41, 0x0C, 0x12, 0x34};
+    (void)ecuio_engine_on_frame(&e, 0, a, sizeof a, 4 * kMs, nullptr);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 20 * kMs), 1);
+    ecuio_engine_sent(&e, 0, 1, true, 20 * kMs);
+    const uint8_t b[3] = {0x41, 0x0D, 0x20};
+    (void)ecuio_engine_on_frame(&e, 0, b, sizeof b, 24 * kMs, nullptr);
+
+    /* The gap, with only the rotation left to send */
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 40 * kMs), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 40 * kMs), 960 * kMs);
+
+    ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E1C));
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 40 * kMs), 0)
+        << "the scanned DID is due now";
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 40 * kMs), ECUIO_ENGINE_ONCE);
+    ecuio_engine_sent(&e, 0, ECUIO_ENGINE_ONCE, true, 40 * kMs);
+    const uint8_t refused[3] = {0x7F, 0x22, 0x31};
+    (void)ecuio_engine_on_frame(&e, 0, refused, sizeof refused, 44 * kMs,
+                                nullptr);
+
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 60 * kMs), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 60 * kMs), 940 * kMs)
+        << "the rotation waits on";
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 999 * kMs), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 1000 * kMs), 0);
+}
+
+/* The wait lasts as long as its focus: the same time again (a scanned
+ * DID joined) keeps a wait under way, another ends it, and the focus's
+ * end frees the rotation and sets the minimum back to none */
+TEST(RequestEngineTest, AMinimumTimeLastsAsLongAsItsFocus)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C}));
+    focus_all(&e, 5000 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    (void)ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), ECUIO_ENGINE_NONE);
+
+    focus_all(&e, 5000 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), ECUIO_ENGINE_NONE)
+        << "the same time keeps the wait";
+
+    focus_all(&e, 100 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), 0)
+        << "a new time ends it";
+    ecuio_engine_sent(&e, 0, 0, true, ECUIO_ENGINE_WAIT_US);
+    (void)ecuio_engine_expire(&e, 0, 2 * ECUIO_ENGINE_WAIT_US);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 2 * ECUIO_ENGINE_WAIT_US - 20 * kMs),
+              ECUIO_ENGINE_NONE)
+        << "the new time, from that sweep's start";
+
+    ecuio_engine_unfocus(&e);
+    EXPECT_EQ(e.min_sweep_us, 0);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 2 * ECUIO_ENGINE_WAIT_US), 0)
+        << "no focus, no minimum";
+}
+
+/* A focus taken in the middle of a sweep starts a new one: every row
+ * of it is asked before the next wait */
+TEST(RequestEngineTest, AFocusInTheMiddleOfASweepStartsANewOne)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    focus_all(&e, 500 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    (void)ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US);
+    focus_all(&e, 500 * kMs);
+    int64_t now = 100 * kMs;
+    for (int k = 0; k < 3; ++k) {
+        const int32_t r = ecuio_engine_due(&e, 0, now);
+        ASSERT_NE(r, ECUIO_ENGINE_NONE) << "row " << k << " of the new sweep";
+        ecuio_engine_sent(&e, 0, r, true, now);
+        now += ECUIO_ENGINE_WAIT_US;
+        (void)ecuio_engine_expire(&e, 0, now);
+    }
+    EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_NONE)
+        << "its three rows asked, the wait begins";
+}
+
+/* No focus, no minimum: the rotation runs at the engine's own pace */
+TEST(RequestEngineTest, ASessionWithNoFocusHasNoMinimumTime)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x05}));
+    EXPECT_EQ(e.min_sweep_us, 0);
+    const std::vector<Asked> sent = paced_run(&e, 400 * kMs, single_pid_reply);
+    ASSERT_EQ(sent.size(), 20u) << "a request every 20 ms";
+    for (size_t k = 0; k < sent.size(); ++k) {
+        EXPECT_EQ(sent[k].at, int64_t(k) * ECUIO_ENGINE_GAP_US);
+    }
 }
 
 /* A request out when a focus parks it is still answered: its reply

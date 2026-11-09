@@ -2276,6 +2276,32 @@ TestCase {
 
     // While a vendor's open blocks, nothing may rewrite the URI field or
     // start another connect: the device rows lock like every other control
+    // ADR-0056 section 4: the row lists Off and the bridge's choices,
+    // shows the bridge's and sets it, and says what it is for
+    function test_theMinimumTimeBetweenSweepsIsARowOfChoices() {
+        const page = createPage(true)
+        page.open("advanced")
+        const choice = find(page, "minSweepChoice")
+        verify(choice.visible)
+        verify(find(page, "minSweepNote").text.includes("file size"))
+        compare(choice.count, 5)
+        compare(choice.textAt(0), "Off")
+        compare(choice.textAt(2), "250 ms")
+        compare(Bridge.minSweepMs, 0)
+        compare(choice.currentIndex, 0)
+        Bridge.minSweepMs = 500
+        compare(choice.currentIndex, 3, "it shows the bridge's before any pick")
+        Bridge.minSweepMs = 0
+        choice.currentIndex = 2
+        choice.activated(2)
+        compare(Bridge.minSweepMs, 250)
+        Bridge.minSweepMs = 1000
+        compare(choice.currentIndex, 4, "it follows the bridge")
+        choice.activated(0)
+        compare(Bridge.minSweepMs, 0)
+        compare(choice.currentIndex, 0)
+    }
+
     function test_controlsLockWhileAConnectIsInFlight() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")

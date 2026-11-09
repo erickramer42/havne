@@ -595,13 +595,16 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
     if (asked == seen.generation && !e->focus_joined) {
         return;
     }
+    const bool asked_again = asked != seen.generation;
     seen.generation = asked;
     uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
     bool focused = false;
+    int64_t min_sweep_us = 0;
     {
         std::lock_guard<std::mutex> lock(session->focus_mutex);
         const ecuio_signal_set_t* set = session->active_signal_set;
         focused = !session->focus_ids.empty();
+        min_sweep_us = int64_t{session->focus_min_sweep_ms} * 1000;
         const size_t defs = session->focus_defs.size();
         for (uint32_t i = 0; focused && set != nullptr &&
                              set->defs != nullptr && i < set->count && i < defs;
@@ -624,8 +627,10 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
             }
         }
     }
-    if (focused) {
-        ecuio_engine_focus(e, keep);
+    if (focused && asked_again) {
+        ecuio_engine_focus(e, keep, min_sweep_us);
+    } else if (focused) {
+        ecuio_engine_focus_keep(e, keep); /* only a request joined */
     } else {
         ecuio_engine_unfocus(e);
     }

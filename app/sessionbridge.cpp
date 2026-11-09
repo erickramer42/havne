@@ -37,6 +37,7 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <chrono>
 #include <cstring>
@@ -2780,6 +2781,31 @@ void SessionBridge::setRecording(bool on)
     emit recordingChanged();
 }
 
+namespace {
+// Settings' choices for a log's minimum time between sweeps, ms; 0 is off
+constexpr int kMinSweepChoices[] = {0, 100, 250, 500, 1000};
+} // namespace
+
+QVariantList SessionBridge::minSweepChoices() const
+{
+    QVariantList choices;
+    for (int ms : kMinSweepChoices) {
+        choices.append(ms);
+    }
+    return choices;
+}
+
+void SessionBridge::setMinSweepMs(int ms)
+{
+    if (std::find(std::begin(kMinSweepChoices), std::end(kMinSweepChoices),
+                  ms) == std::end(kMinSweepChoices) ||
+        ms == m_minSweepMs) {
+        return;
+    }
+    m_minSweepMs = ms;
+    emit minSweepMsChanged();
+}
+
 void SessionBridge::setUnitSystem(int units)
 {
     if (units != static_cast<int>(ECUIO_UNITS_METRIC) &&
@@ -3047,8 +3073,9 @@ bool SessionBridge::startLog()
     }
     // The focus first, so one core refuses (it would leave nothing to
     // ask) opens no folder
-    const ecuio_status_t rc = ecuio_session_set_focus(
-        m_session, ids.data(), static_cast<uint32_t>(ids.size()));
+    const ecuio_status_t rc = ecuio_session_set_focus_with(
+        m_session, ids.data(), static_cast<uint32_t>(ids.size()),
+        static_cast<uint32_t>(m_minSweepMs), 0);
     if (rc != ECUIO_OK) {
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
         return refuse(detail.isEmpty() ? failureText(rc) : detail);
@@ -3071,9 +3098,18 @@ bool SessionBridge::startLog()
     m_logTimer->start();
     emit logStateChanged();
     emit logProgressChanged();
-    emit logMessage(QStringLiteral("Log started: %1 (%2)")
+    /* A session that asks nothing takes the minimum and changes nothing */
+    ecuio_session_info_t info{};
+    const bool asks = ecuio_session_get_info(m_session, &info) == ECUIO_OK &&
+                      (info.flags & ECUIO_SESSION_INFO_REQUESTS) != 0;
+    const QString pace = m_minSweepMs > 0 && asks
+                             ? QStringLiteral(", at least %1 ms between sweeps")
+                                   .arg(m_minSweepMs)
+                             : QString();
+    emit logMessage(QStringLiteral("Log started: %1 (%2%3)")
                         .arg(recordingFolder(),
-                             signalCountText(static_cast<int>(ids.size()))));
+                             signalCountText(static_cast<int>(ids.size())),
+                             pace));
     return true;
 }
 

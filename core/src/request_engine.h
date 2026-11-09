@@ -95,7 +95,15 @@
  * (ecuio_engine_rescan): an ECU that went quiet (the ignition off) left
  * its packs unanswered along with everything else, so packing is judged
  * again once it answers. An ECU that refuses packs answers the rest, so
- * its link never recovers and its channel stays unpacked. */
+ * its link never recovers and its channel stays unpacked.
+ *
+ * A focus can carry a minimum time between sweeps (ADR-0056 section 4,
+ * ecuio_engine_focus): a sweep ends once as many rows have been asked
+ * as the channel has in its rotation, a pack counting each of its rows,
+ * so every pick has been asked, and the next one starts no sooner than
+ * that long after this one started. A sweep that took longer waits for
+ * nothing. Only the rotation waits: the walk, identification, the
+ * diagnostics, a clear and the scan go out in the gap. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -308,6 +316,12 @@ struct ecuio_engine_channel {
     uint32_t pack_failures = 0; /* failed packs in a row */
     bool packed = false;        /* a pack was answered with several records */
     bool unpacked = false;      /* packing ended until a rescan */
+    /* A focus's minimum time between sweeps (ecuio_engine_count_sweep):
+     * the rows asked since this sweep started, when it started, and the
+     * time before which the next one doesn't */
+    uint32_t sweep_asked = 0;
+    int64_t sweep_start_us = 0;
+    int64_t next_sweep_us = 0;
 };
 
 struct ecuio_request_engine {
@@ -336,6 +350,9 @@ struct ecuio_request_engine {
      * driver resolves the picks again, and a pick that names it unparks
      * it (ecuio_take_focus). Cleared by the focus and its end. */
     bool focus_joined = false;
+    /* The focus's minimum time between sweeps, 0 for none (ADR-0056
+     * section 4); only a focus sets it */
+    int64_t min_sweep_us = 0;
     /* Reply timing (ADR-0042): the driver's, NULL for none. Before each
      * frame it hands over, a driver whose frames carry stamps of their
      * own sets stamp_us (session time on the frames' clock) and
@@ -997,13 +1014,33 @@ inline void ecuio_engine_recount(ecuio_request_engine* e)
     }
 }
 
+/* A focus was asked for: starts every channel's sweep over and sets its
+ * minimum time between sweeps. A wait under way stands while the time is
+ * the same, and ends with a new one, which judges only the sweeps after
+ * it. */
+inline void ecuio_engine_restart_sweeps(ecuio_request_engine* e,
+                                        int64_t min_sweep_us)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        ch.sweep_asked = 0;
+        if (e->min_sweep_us != min_sweep_us) {
+            ch.next_sweep_us = 0;
+        }
+    }
+    e->min_sweep_us = min_sweep_us;
+}
+
 /* ADR-0056 section 2: parks every request keep (one byte per table row,
  * nonzero kept) leaves out and runs the kept ones in the fast class, so
  * the rotation is as short as the picks allow. The walk, the scan,
  * identification, diagnostics, a clear and a request already out are
  * untouched: a parked request's reply still correlates by the table. A
- * dropped request stays dropped. */
-inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep)
+ * dropped request stays dropped. Alone, it is the driver's answer to
+ * focus_joined: the sweep under way and its wait stand, so DIDs found
+ * faster than a sweep runs can't keep it from ever ending. */
+inline void ecuio_engine_focus_keep(ecuio_request_engine* e,
+                                    const uint8_t* keep)
 {
     for (uint32_t i = 0; i < e->count; ++i) {
         ecuio_request& r = e->requests[i];
@@ -1015,6 +1052,15 @@ inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep)
     e->focused = true;
     e->focus_joined = false;
     ecuio_engine_recount(e);
+}
+
+/* A focus asked for: ecuio_engine_focus_keep, with a sweep of the picks
+ * starting at most once every min_sweep_us (section 4; 0: none) */
+inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep,
+                               int64_t min_sweep_us = 0)
+{
+    ecuio_engine_restart_sweeps(e, min_sweep_us);
+    ecuio_engine_focus_keep(e, keep);
 }
 
 /* The focus's end: every parked request back in the rotation, each in
@@ -1031,6 +1077,7 @@ inline void ecuio_engine_unfocus(ecuio_request_engine* e)
     }
     e->focused = false;
     e->focus_joined = false;
+    ecuio_engine_restart_sweeps(e, 0);
     ecuio_engine_recount(e);
 }
 
@@ -1533,6 +1580,29 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
     }
 }
 
+/* Rotation request r has just been chosen on channel c at now_us: counts
+ * its rows toward the sweep. The rows are consecutive in the rotation's
+ * one class (a focus runs its picks fast), so as many as the rotation
+ * holds have asked every pick; a pack that runs past that asks some
+ * twice, and its surplus counts for nothing, since the wait can only
+ * fall between two requests. */
+inline void ecuio_engine_count_sweep(ecuio_request_engine* e, uint32_t c,
+                                     int32_t r, int64_t now_us)
+{
+    if (e->min_sweep_us == 0) {
+        return;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.sweep_asked == 0) {
+        ch.sweep_start_us = now_us;
+    }
+    ch.sweep_asked += (r == ECUIO_ENGINE_PACK) ? ch.pack_count : 1u;
+    if (ch.sweep_asked >= ch.requests) {
+        ch.sweep_asked = 0;
+        ch.next_sweep_us = ch.sweep_start_us + e->min_sweep_us;
+    }
+}
+
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
  * item, a diagnostics item, a clear's request or a scanned DID already
  * in the one-shot (its write failed), then while its walk has a bitmap
@@ -1541,8 +1611,9 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
  * item, then the next scanned DID, else the next
  * request of its rotation, or ECUIO_ENGINE_NONE while
  * one is outstanding, before the floor, or when there is nothing to
- * send. A walk out of budget ends here. Moves the rotation past the
- * request it returns; ecuio_engine_sent records what became of it. */
+ * send; the rotation's own turn also waits for a focus's next sweep. A
+ * walk out of budget ends here. Moves the rotation past the request it
+ * returns; ecuio_engine_sent records what became of it. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -1641,6 +1712,9 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     if (ch.requests == 0) {
         return ECUIO_ENGINE_NONE;
     }
+    if (e->min_sweep_us > 0 && now_us < ch.next_sweep_us) {
+        return ECUIO_ENGINE_NONE;
+    }
     const bool slow_turn = ch.fast_run >= ECUIO_ENGINE_FAST_PER_SLOW;
     int32_t i = ecuio_engine_next_of(e, c, slow_turn);
     if (i < 0) {
@@ -1654,7 +1728,9 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     } else if (ch.fast_run < ECUIO_ENGINE_FAST_PER_SLOW) {
         ++ch.fast_run;
     }
-    return ecuio_engine_gather(e, c, i);
+    const int32_t asked = ecuio_engine_gather(e, c, i);
+    ecuio_engine_count_sweep(e, c, asked, now_us);
+    return asked;
 }
 
 /* A pack on channel c that failed: silence, a negative reply or one
@@ -1961,9 +2037,19 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     return ecuio_reply::negative;
 }
 
+/* Whether channel c has anything to send but its rotation: what a
+ * focus's wait between sweeps doesn't hold back. */
+inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
+{
+    return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
+           ch.diag_pending > 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.identifying || ch.diagnosing || ch.scanning || ch.clearing;
+}
+
 /* Microseconds until the engine next has something to do: a wait
- * ending, or a channel's floor passing while it has something to send;
- * 0 when something is due now, INT64_MAX when nothing is. */
+ * ending, or a channel's floor passing while it has something to send
+ * (with only its rotation left, a focus's next sweep, when that is
+ * later); 0 when something is due now, INT64_MAX when nothing is. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us)
 {
@@ -1975,8 +2061,12 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
             ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE) {
             continue;
         }
-        const int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE)
-                               ? ch.deadline_us : ch.next_send_us;
+        int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
+                                                           : ch.next_send_us;
+        if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
+            !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {
+            at = ch.next_sweep_us;
+        }
         const int64_t in = (at > now_us) ? at - now_us : 0;
         if (in < next) {
             next = in;

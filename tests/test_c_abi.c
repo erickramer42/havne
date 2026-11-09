@@ -279,6 +279,7 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
+        (ECUIO_SESSION_INFO_REQUESTS & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0u ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
@@ -332,9 +333,13 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_set_focus(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_session_clear_diagnostics_with(NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING |
-                                                 ECUIO_CLEAR_ALLOW_MOVING) !=
+        ecuio_session_set_focus_with(NULL, NULL, 0, 0, 0) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_FOCUS_MIN_SWEEP_MAX_MS != 60000u ||
+        ecuio_session_clear_diagnostics(NULL, 0, 0) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_clear_diagnostics_with(
+            NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         (ECUIO_DIAG_CLEAR_RPM & ECUIO_DIAG_CLEARING) != 0 ||
         (ECUIO_DIAG_CLEAR_KMH & ECUIO_DIAG_CLEAR_RPM) != 0 ||

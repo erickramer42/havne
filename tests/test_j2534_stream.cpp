@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <algorithm>
 #include <set>
 #include <string>
 #include <thread>
@@ -2613,6 +2614,60 @@ TEST_F(J2534AdoptionTest, AFocusAsksOnlyThePickedPids)
         pids.insert(wbuf[5]);
     }
     EXPECT_GT(pids.size(), 2u) << "the whole set is asked again";
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* ADR-0056 section 4 through the fake's write stamps: two picks with a
+ * minimum time of 200 ms, the sweeps at least that far apart at their
+ * median and each sweep's two requests together */
+TEST_F(J2534AdoptionTest, AMinimumTimeSpacesTheFocusSweeps)
+{
+    char uri[700];
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=obd2&filter=0x7E8&probe=0&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus_with(session, ids.data(), 2, 200, 0),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    const unsigned long want = 12;
+    wait_for_writes(get_write_count, want, 500);
+    unsigned long written = 0;
+    get_write_count(&written);
+    ASSERT_GE(written, want);
+    std::vector<int64_t> sweeps;
+    std::vector<int64_t> within;
+    for (uint32_t i = 0; i + 2 < want; i += 2) {
+        fake_control::Write a{};
+        fake_control::Write b{};
+        fake_control::Write c{};
+        fake_control::recorded_write(fake_page(), i, &a);
+        fake_control::recorded_write(fake_page(), i + 1, &b);
+        fake_control::recorded_write(fake_page(), i + 2, &c);
+        sweeps.push_back(static_cast<int64_t>(c.us - a.us));
+        within.push_back(static_cast<int64_t>(b.us - a.us));
+    }
+    std::sort(sweeps.begin(), sweeps.end());
+    std::sort(within.begin(), within.end());
+    EXPECT_GE(sweeps[sweeps.size() / 2], 190000)
+        << "sweeps came faster than the minimum";
+    EXPECT_LT(within[within.size() / 2], 100000)
+        << "a sweep's requests were spread over the gap";
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }

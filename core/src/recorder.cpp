@@ -1587,6 +1587,14 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             }
             if (!focus.empty()) {
                 header += "focus  " + focus + "\n";
+                /* Only a session that asks has one: the others take the
+                 * call and change nothing */
+                if (session->focus_requests &&
+                    session->focus_min_sweep_ms != 0) {
+                    header += "min sweep  " +
+                              std::to_string(session->focus_min_sweep_ms) +
+                              " ms\n";
+                }
             }
         }
         if (session->started) {

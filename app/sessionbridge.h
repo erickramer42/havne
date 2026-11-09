@@ -720,6 +720,11 @@ class SessionBridge : public QObject
     // Applies to what the UI shows at once, connected or not; recordings
     // keep the decoded values. Main.qml persists it.
     Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
+    // A log's minimum time between sweeps (ADR-0056 section 4), ms, 0 off;
+    // Settings' Advanced page and Main.qml, which keeps it
+    Q_PROPERTY(int minSweepMs READ minSweepMs WRITE setMinSweepMs NOTIFY
+                   minSweepMsChanged)
+    Q_PROPERTY(QVariantList minSweepChoices READ minSweepChoices CONSTANT)
     // What each channel's ECU has reported of its diagnostics (ADR-0037),
     // one map per ECU (diagnosticsEntry), for the Diagnostics page:
     // refreshed on the tick as a read settles each item, and when the
@@ -1070,6 +1075,9 @@ public:
     static QString folderLabel(const QString& label);
     int unitSystem() const { return static_cast<int>(m_signalModel->unitSystem()); }
     void setUnitSystem(int units);   // anything but 0 or 1 is ignored
+    int minSweepMs() const { return m_minSweepMs; }
+    void setMinSweepMs(int ms); // anything but a choice is ignored
+    QVariantList minSweepChoices() const;
     // A quantity in a decoded unit, as the current unit system shows it:
     // the Dashboard's scale ends and zones are written once, in decoded
     // units, and converted here rather than in QML (rule 2).
@@ -1224,6 +1232,7 @@ signals:
     // The folder is absolute, as recordingRow takes it
     void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
+    void minSweepMsChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
     void refusedUnnamedChanged();
@@ -1474,6 +1483,7 @@ private:
     qint64 m_logElapsedMs = 0;         // the last log's, once it ends
     qint64 m_logBytes = 0;             // countLogBytes' last sum
     QString m_logNotice;               // the header's line about the log
+    int m_minSweepMs = 0;              // read at each Start log
     QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder

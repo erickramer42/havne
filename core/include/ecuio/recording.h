@@ -535,7 +535,10 @@ void ecuio_recording_close(ecuio_recording_t* r);
 
 /* What the check looks for; zero fields take the defaults */
 typedef struct ecuio_check_options {
-    uint64_t gap_us;         /* 0 for the default */
+    uint64_t gap_us;         /* 0 for the default; a recording that names
+                                a focus's minimum time between sweeps
+                                (ADR-0056 section 4) has it added here,
+                                since a sweep can end in that long a wait */
     uint32_t rate_drop_x100; /* 0 for the default; else more than 100 */
     uint32_t flags;          /* zero */
     uint64_t settle_us;      /* 0 for the default */

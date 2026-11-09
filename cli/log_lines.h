@@ -3,8 +3,9 @@
 // Testing: UNIT: CliLogTest (test_cli); HARNESS: CliLogRunTest
 //          (tests/cli_log.py), CliUsageTest.Log*
 //
-// `log <uri> <folder> [--signal <name>]... [--label <name>] [--seconds S]
-// [--signals <file> | --plugin <pkg>]`: its arguments, the picked names
+// `log <uri> <folder> [--signal <name>]... [--min-sweep <ms>]
+// [--label <name>] [--seconds S] [--signals <file> | --plugin <pkg>]`:
+// its arguments, the picked names
 // resolved against the session's set (in the order given, which is the
 // focus's and the folder's `focus` line's), the `focus` line, a `log`
 // line each period of session time with the recording's size so far, and
@@ -39,6 +40,7 @@ struct LogArgs {
     const char* signals = nullptr;  /* --signals' file */
     const char* plugin = nullptr;   /* --plugin's package */
     std::vector<const char*> names; /* --signal, in order */
+    uint32_t min_sweep_ms = 0;      /* --min-sweep; 0 none */
 };
 
 // The longest --seconds any command takes: a year and a day, which no run
@@ -88,6 +90,15 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
                 *why = run_seconds_why();
                 return false;
             }
+        } else if (s == "--min-sweep" && has_value) {
+            uint64_t ms = 0;
+            if (!parse_whole(argv[++i], ms) ||
+                ms > ECUIO_FOCUS_MIN_SWEEP_MAX_MS) {
+                *why = "--min-sweep takes a whole number of ms from 1 to " +
+                       std::to_string(ECUIO_FOCUS_MIN_SWEEP_MAX_MS);
+                return false;
+            }
+            a.min_sweep_ms = static_cast<uint32_t>(ms);
         } else if (s == "--signals" && has_value) {
             a.signals = argv[++i];
         } else if (s == "--plugin" && has_value) {
@@ -110,6 +121,10 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
     }
     if (*a.folder == '\0') {
         *why = "log takes a folder";
+        return false;
+    }
+    if (a.min_sweep_ms != 0 && a.names.empty()) {
+        *why = "--min-sweep goes with --signal: it paces the picked signals";
         return false;
     }
     if (a.signals != nullptr && a.plugin != nullptr) {
@@ -154,16 +169,17 @@ inline bool resolve_focus(const ecuio_signal_set_t* set,
 }
 
 // Room for the focus line: a def's name is at most 31 bytes, 6 a byte
-// quoted, plus its id and the punctuation
+// quoted, plus its id and the punctuation, and the minimum's field
 inline size_t focus_line_bytes(size_t picks)
 {
-    return 64 + picks * 256;
+    return 96 + picks * 256;
 }
 
 // {"type":"focus","signals":[{id, name}...]}: the picks, in order; empty
-// for none (the whole set is read)
+// for none (the whole set is read); min_sweep_ms when one is set
 inline void focus_line(Line& l, const ecuio_signal_set_t* set,
-                       const std::vector<uint16_t>& ids)
+                       const std::vector<uint16_t>& ids,
+                       uint32_t min_sweep_ms = 0)
 {
     l.raw("{\"type\":\"focus\"");
     l.key("signals");
@@ -189,7 +205,12 @@ inline void focus_line(Line& l, const ecuio_signal_set_t* set,
             break;
         }
     }
-    l.raw("]}");
+    l.ch(']');
+    if (min_sweep_ms != 0) {
+        l.key("min_sweep_ms");
+        l.u64(min_sweep_ms);
+    }
+    l.ch('}');
 }
 
 // What a log line and the end line say of the recording so far
