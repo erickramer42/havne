@@ -524,7 +524,7 @@ Page {
                         spacing: 6
 
                         SectionLabel { text: qsTr("Look up a code") }
-                        TextField {
+                        ThemedTextField {
                             id: dtcLookupField
                             objectName: "dtcLookupField"
                             Layout.fillWidth: true

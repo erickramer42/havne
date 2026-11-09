@@ -37,7 +37,7 @@ ColumnLayout {
         spacing: Theme.spacing
         Captioned {
             caption: qsTr("Name")
-            TextField {
+            ThemedTextField {
                 id: formName
                 objectName: "formName"
                 placeholderText: qsTr("Name")
@@ -46,7 +46,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Reply ID")
-            TextField {
+            ThemedTextField {
                 id: formRx
                 objectName: "formRx"
                 text: "7E8"
@@ -56,7 +56,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Request ID")
-            TextField {
+            ThemedTextField {
                 id: formTx
                 objectName: "formTx"
                 placeholderText: qsTr("Request ID")
@@ -81,7 +81,7 @@ ColumnLayout {
         }
         Captioned {
             caption: root.host.formService === "22" ? qsTr("DID") : qsTr("PID")
-            TextField {
+            ThemedTextField {
                 id: formNumber
                 objectName: "formNumber"
                 placeholderText: root.host.formService === "22" ? qsTr("DID, 4 hex digits")
@@ -112,7 +112,7 @@ ColumnLayout {
         spacing: Theme.spacing
         Captioned {
             caption: qsTr("Byte")
-            TextField {
+            ThemedTextField {
                 id: formByte
                 objectName: "formByte"
                 text: "0"
@@ -123,7 +123,7 @@ ColumnLayout {
         Captioned {
             caption: qsTr("Bits")
             visible: root.host.formKind === "number" || root.host.formKind === "enum"
-            TextField {
+            ThemedTextField {
                 id: formBits
                 objectName: "formBits"
                 text: "8"
@@ -134,7 +134,7 @@ ColumnLayout {
         Captioned {
             caption: qsTr("Start bit")
             visible: root.host.formKind === "number" || root.host.formKind === "enum"
-            TextField {
+            ThemedTextField {
                 id: formBit
                 objectName: "formBit"
                 placeholderText: qsTr("Bit")
@@ -144,7 +144,7 @@ ColumnLayout {
         Captioned {
             caption: qsTr("Bytes")
             visible: !(root.host.formKind === "number" || root.host.formKind === "enum")
-            TextField {
+            ThemedTextField {
                 id: formBytes
                 objectName: "formBytes"
                 placeholderText: qsTr("Bytes (all)")
@@ -176,7 +176,7 @@ ColumnLayout {
         visible: root.host.formKind === "number"
         Captioned {
             caption: qsTr("Scale")
-            TextField {
+            ThemedTextField {
                 id: formScale
                 objectName: "formScale"
                 placeholderText: qsTr("Scale (1)")
@@ -185,7 +185,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Offset")
-            TextField {
+            ThemedTextField {
                 id: formOffset
                 objectName: "formOffset"
                 placeholderText: qsTr("Offset (0)")
@@ -194,7 +194,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Unit")
-            TextField {
+            ThemedTextField {
                 id: formUnit
                 objectName: "formUnit"
                 placeholderText: qsTr("Unit")
@@ -203,7 +203,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Decimals")
-            TextField {
+            ThemedTextField {
                 id: formDecimals
                 objectName: "formDecimals"
                 placeholderText: qsTr("Decimals")
@@ -212,7 +212,7 @@ ColumnLayout {
         }
     }
 
-    TextField {
+    ThemedTextField {
         id: formValues
         objectName: "formValues"
         visible: root.host.formKind === "enum"

@@ -54,7 +54,7 @@ GridLayout {
     }
 
     Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
-    TextField {
+    ThemedTextField {
         id: filterIds
         objectName: "filterIds"
         Layout.fillWidth: true
@@ -77,7 +77,7 @@ GridLayout {
     }
 
     Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
-    TextField {
+    ThemedTextField {
         id: filterData
         objectName: "filterData"
         Layout.fillWidth: true
@@ -105,7 +105,7 @@ GridLayout {
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
         spacing: Theme.spacing
-        TextField {
+        ThemedTextField {
             id: filterLengths
             objectName: "filterLengths"
             Layout.fillWidth: true
@@ -116,7 +116,7 @@ GridLayout {
             onTextEdited: panel.apply()
         }
         Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
-        TextField {
+        ThemedTextField {
             id: filterTimes
             objectName: "filterTimes"
             Layout.fillWidth: true

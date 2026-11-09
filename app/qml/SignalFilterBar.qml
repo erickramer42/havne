@@ -29,7 +29,7 @@ RowLayout {
 
     spacing: Theme.spacing
 
-    TextField {
+    ThemedTextField {
         objectName: "filterText"
         Layout.fillWidth: true
         Layout.minimumWidth: 80
@@ -73,7 +73,7 @@ RowLayout {
                 }
                 Repeater {
                     model: bar.choices.length > 1 ? bar.choices : []
-                    delegate: CheckBox {
+                    delegate: ThemedCheckBox {
                         required property var modelData
                         objectName: "group_" + modelData.code
                         text: modelData.name

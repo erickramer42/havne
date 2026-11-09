@@ -400,7 +400,7 @@ ColumnLayout {
             visible: panel.rowChoice === "custom"
             Layout.fillWidth: true
             spacing: Theme.spacing
-            TextField {
+            ThemedTextField {
                 objectName: "exportCustomMs"
                 Layout.preferredWidth: 120
                 Layout.preferredHeight: Theme.touchTarget

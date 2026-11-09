@@ -48,7 +48,7 @@ ColumnLayout {
         spacing: Theme.spacing
         visible: root.host.profileChoice === "uds-generic"
         Label { text: qsTr("DIDs:"); color: Theme.textDim }
-        TextField {
+        ThemedTextField {
             id: didField
             objectName: "didField"
             Layout.fillWidth: true
