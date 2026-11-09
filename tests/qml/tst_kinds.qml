@@ -93,6 +93,37 @@ TestCase {
         }
     }
 
+    // ---- SegmentReadout's shape
+
+    // A tall card stacks: the digits across its width, centered with the
+    // unit under them; a short one keeps the unit beside
+    function test_aTallReadoutPutsItsUnitUnderCenteredDigits() {
+        const g = make(readoutC, { width: 180, height: 200, digits: 4, unit: "mph" })
+        const row = find(g, "digits"), unit = find(g, "unitBox")
+        tryVerify(() => row.width > 0, 2000, "laid out")
+        verify(g.tall, "tall")
+        verify(unit.y >= row.y + row.height, "the unit is under the digits")
+        fuzzyCompare(row.x + row.width / 2, g.width / 2, 0.5, "the digits centered across")
+        fuzzyCompare(unit.x + unit.width / 2, g.width / 2, 0.5, "the unit centered across")
+        const above = row.y - find(g, "readoutTitle").height
+        fuzzyCompare(above, g.height - (unit.y + unit.height), 0.5, "centered down")
+        verify(row.digitH > (g.width - unit.width - 14) / (4 * 0.62), "larger than beside the unit")
+        verify(row.x + row.width <= g.width + 0.5, "inside the card")
+    }
+    function test_aShortReadoutKeepsItsUnitBeside_data() {
+        return [{ tag: "wide and short", width: 260, height: 90 },
+                { tag: "short and too narrow for the digits", width: 14, height: 40 }]
+    }
+    function test_aShortReadoutKeepsItsUnitBeside(data) {
+        const g = make(readoutC, { digits: 4, unit: "mph", width: data.width, height: data.height })
+        const row = find(g, "digits"), unit = find(g, "unitBox")
+        tryVerify(() => row.width > 0, 2000, "laid out")
+        verify(!g.tall, "not tall")
+        fuzzyCompare(unit.y + unit.height, row.y + row.height, 0.5, "the unit ends with the digits")
+        fuzzyCompare(row.x, 0, 0.5, "the digits at the left")
+        fuzzyCompare(unit.x + unit.width, g.width, 0.5, "the unit at the right")
+    }
+
     // ---- SegmentGauge
 
     function test_segmentsCountTheirCells_data() {

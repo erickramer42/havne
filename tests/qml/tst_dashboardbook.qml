@@ -92,10 +92,10 @@ TestCase {
                 ["Speed", "digital", "speed", "km/h", [2, 6]],
                 ["Coolant", "digital", "coolant", degC, [2, 6]],
                 ["Oil temp", "digital", "oil", degC, [2, 6]],
-                ["MAF", "digital", "maf", "g/s", [6, 8]],
-                ["IAT", "digital", "iat", degC, [2, 7]],
-                ["Load", "digital", "load", "%", [2, 7]],
-                ["Throttle", "digital", "throttle", "%", [2, 7]]
+                ["MAF", "digital", "maf", "g/s", [6, 9]],
+                ["IAT", "digital", "iat", degC, [2, 6]],
+                ["Load", "digital", "load", "%", [2, 6]],
+                ["Throttle", "digital", "throttle", "%", [2, 6]]
             ] },
             { tag: "desktop", form: "desktop", count: 15, want: [
                 ["Shift lights", "shift-light", "rpm", "RPM", [12, 1]],
@@ -619,10 +619,10 @@ TestCase {
         // trace across, three readouts across
         compare(spots(DashboardBook.place(phone, 6)), [
             [0, 0, 6, 3], [0, 3, 4, 18], [4, 3, 2, 6], [4, 9, 2, 6], [4, 15, 2, 6],
-            [0, 21, 6, 8], [0, 29, 2, 7], [2, 29, 2, 7], [4, 29, 2, 7]])
+            [0, 21, 6, 9], [0, 30, 2, 6], [2, 30, 2, 6], [4, 30, 2, 6]])
         compare(spots(DashboardBook.place(phone, 12)), [
             [0, 0, 12, 3], [0, 3, 4, 18], [4, 3, 2, 6], [6, 3, 2, 6], [8, 3, 2, 6],
-            [4, 9, 6, 8], [10, 3, 2, 7], [10, 10, 2, 7], [4, 17, 2, 7]])
+            [4, 9, 6, 9], [10, 3, 2, 6], [10, 9, 2, 6], [10, 15, 2, 6]])
         compare(spots(DashboardBook.place(desktop, 12)), [
             [0, 0, 12, 1], [0, 1, 2, 8], [2, 1, 2, 8], [4, 1, 1, 4], [5, 1, 1, 4],
             [6, 1, 1, 4], [7, 1, 1, 4], [8, 1, 2, 2], [10, 1, 2, 2]])
@@ -1082,5 +1082,65 @@ TestCase {
     function test_seams(data) {
         const boxes = DashboardBook.place(data.cells, 4)
         compare(DashboardBook.seams(data.cells, boxes, 4), data.lines)
+    }
+
+    // A built-in phone cell's height is one the Height control can reach
+    function test_thePhonesBuiltInHeightsAreOnTheScale() {
+        for (const c of DashboardBook.builtIn("phone").pages[0].cells)
+            compare(c.h % DashboardBook.phoneSpanScale, 0, c.label + " at " + c.h)
+    }
+
+    // Each cell's drawn height on four columns, placed in order
+    function test_stretched_data() {
+        const c = (w, h) => ({ w: w, h: h })
+        const blank = (w, h) => ({ kind: "blank", w: w, h: h, refs: [] })
+        return [
+            { tag: "a shorter cell beside a taller one", cells: [c(2, 2), c(2, 3)], heights: [3, 3] },
+            { tag: "equal heights stay", cells: [c(2, 2), c(2, 2)], heights: [2, 2] },
+            { tag: "one cell stays", cells: [c(4, 2)], heights: [2] },
+            { tag: "stops at the next cell", cells: [c(2, 1), c(2, 4), c(2, 1)], heights: [1, 4, 3] },
+            { tag: "beside a blank that runs longer", cells: [c(2, 1), blank(2, 3)], heights: [3, 3] },
+            { tag: "a blank doesn't stretch", cells: [blank(2, 1), c(2, 3)], heights: [1, 3] },
+            { tag: "never over a blank",
+              cells: [c(2, 1), c(2, 4), blank(2, 1), c(2, 1)], heights: [1, 4, 1, 2] },
+            { tag: "only as far as every column is empty",
+              cells: [c(4, 1), c(1, 3), c(3, 1), c(1, 1)], heights: [1, 3, 1, 2] },
+            { tag: "a cell with no kind is a gauge", cells: [{ w: 2, h: 1 }, c(2, 2)], heights: [2, 2] },
+            { tag: "a later column taken stops it", cells: [c(2, 1), c(1, 1)], heights: [1, 1],
+              boxes: [{ x: 0, y: 0, w: 2, h: 1 }, { x: 1, y: 1, w: 1, h: 1 }] }
+        ]
+    }
+    function test_stretched(data) {
+        const boxes = data.boxes || DashboardBook.place(data.cells, 4)
+        const before = JSON.stringify(boxes)
+        const out = DashboardBook.stretched(data.cells, boxes)
+        compare(JSON.stringify(boxes), before, "the input is left alone")
+        compare(out.map(b => b.h), data.heights)
+        boxes.forEach((b, i) => {
+            compare(out[i].x, b.x, "x stays")
+            compare(out[i].y, b.y, "y stays")
+            compare(out[i].w, b.w, "width stays")
+        })
+    }
+
+    function test_digitsFor_data() {
+        return [
+            { tag: "rpm", from: 0, to: 8000, d: 0, want: 4 },
+            { tag: "percent", from: 0, to: 100, d: 0, want: 3 },
+            { tag: "a decimal", from: 0, to: 100, d: 1, want: 4 },
+            { tag: "volts", from: 0, to: 16, d: 1, want: 3 },
+            { tag: "a minus takes a digit", from: -40, to: 9, d: 0, want: 3 },
+            { tag: "the minus's end is the longer", from: -400, to: 215, d: 1, want: 5 },
+            { tag: "under one", from: 0, to: 0.5, d: 2, want: 4 },
+            { tag: "an overshoot still draws", from: 0, to: 999, d: 0, want: 4 },
+            { tag: "a narrow range keeps three", from: 0, to: 10, d: 0, want: 3 },
+            { tag: "at most eight", from: 0, to: 1e12, d: 0, want: 8 },
+            { tag: "at least three", from: 0, to: 0, d: 0, want: 3 },
+            { tag: "no range", from: NaN, to: 100, d: 0, want: 4 },
+            { tag: "an infinite end", from: 0, to: Infinity, d: 0, want: 4 }
+        ]
+    }
+    function test_digitsFor(data) {
+        compare(DashboardBook.digitsFor(data.from, data.to, data.d), data.want)
     }
 }

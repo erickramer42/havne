@@ -85,6 +85,7 @@ Page {
 
     property bool editing: false
     property int selected: -1        // the cell edited, on the page shown
+    property int selectedDigits: 4   // the selected Digits card's count
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool moreShown: false
@@ -522,6 +523,14 @@ Page {
         readonly property bool chosen: pageNo === root.pageIndex && root.selected === cellIndex
                                        && (root.editing || root.panel !== "")
 
+        // What the panel's Digits shows with the option unset
+        Binding {
+            when: card.editable && root.selected === card.cellIndex
+            target: root
+            property: "selectedDigits"
+            value: card.digits
+        }
+
         // A press held still lifts the cell; these go to its page's grid
         signal holdStarted(point scene)
         signal holdMoved(point scene)
@@ -644,7 +653,7 @@ Page {
         // and its ticks
         readonly property int cells: opt("cells", 24)
         readonly property real rise: opt("rise", 1.6)
-        readonly property int digits: opt("digits", 4)
+        readonly property int digits: opt("digits", DashboardBook.digitsFor(from, to, decimals))
         readonly property int windowS: opt("window", 30)
         readonly property bool vertical: opt("vertical", false)
         readonly property bool marks: opt("marks", true)
@@ -1067,7 +1076,7 @@ Page {
                         to: 8
                         value: panelCard.cell && panelCard.cell.options
                                && panelCard.cell.options.digits !== undefined
-                               ? panelCard.cell.options.digits : 4
+                               ? panelCard.cell.options.digits : root.selectedDigits
                         onValueModified: root.setOptions({ digits: value })
                     }
                     Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
@@ -1795,7 +1804,12 @@ Page {
                     ? DashboardBook.reordered(cells, root.held, root.dropAt) : cells
                 readonly property var placed: addCell
                     ? ordered.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : ordered
-                readonly property var boxes: DashboardBook.place(placed, columns)
+                // Edit mode and a held cell show the true sizes
+                readonly property var boxes: {
+                    const b = DashboardBook.place(placed, columns)
+                    return root.joined && !root.editing && root.held < 0
+                        ? DashboardBook.stretched(placed, b) : b
+                }
                 readonly property var seams: root.joined
                     ? DashboardBook.seams(placed, boxes, columns) : []
                 readonly property int tallest: placed.reduce((m, c) => Math.max(m, c.h), 1)
@@ -1829,7 +1843,7 @@ Page {
                 function lift(i, scene) {
                     root.commitTyping()
                     const at = grid.mapFromItem(null, scene.x, scene.y)
-                    const b = boxes[i]
+                    const b = DashboardBook.place(placed, columns)[i]
                     grab = Qt.point(at.x - boxLeft(b), at.y - boxTop(b))
                     heldSize = Qt.size(boxWidth(b), boxHeight(b))
                     pressedAt = scene

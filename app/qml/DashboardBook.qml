@@ -271,7 +271,8 @@ QtObject {
     }
 
     // On 6 columns: the dial 4 wide with three readouts stacked beside it,
-    // a trace across, then three readouts across
+    // a trace across, then three readouts across. Every height is a multiple
+    // of phoneSpanScale, the step the Height control takes
     function phoneCells() {
         const rpm = ["id:1001", "id:7003"]
         const degC = "\u00B0C"
@@ -288,14 +289,14 @@ QtObject {
                       { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
             gaugeCell("digital", 2, 6, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
                       { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
-            gaugeCell("digital", 6, 8, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
+            gaugeCell("digital", 6, 9, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
                       { from: 0, to: 300, description: qsTr("Mass air flow"), accent: "info" }),
-            gaugeCell("digital", 2, 7, qsTr("IAT"), ["id:5001", "id:7005"], degC,
+            gaugeCell("digital", 2, 6, qsTr("IAT"), ["id:5001", "id:7005"], degC,
                       { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                         description: qsTr("Intake air temperature") }),
-            gaugeCell("digital", 2, 7, qsTr("Load"), ["id:6001", "id:7001"], "%",
+            gaugeCell("digital", 2, 6, qsTr("Load"), ["id:6001", "id:7001"], "%",
                       { from: 0, to: 100 }),
-            gaugeCell("digital", 2, 7, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
+            gaugeCell("digital", 2, 6, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
                       { from: 0, to: 100 })
         ]
     }
@@ -415,6 +416,49 @@ QtObject {
         for (let r = 1; r < rows; ++r)
             runs(false, r, cols, x => at(x, r - 1) !== at(x, r))
         return out
+    }
+
+    // A joined panel's boxes as drawn outside edit mode: each gauge runs
+    // down over the empty squares under it, as far as every column it spans
+    // stays empty, within the panel's rows. A blank cell doesn't stretch and
+    // nothing stretches over one. For display only: the layout is untouched
+    function stretched(placed, boxes) {
+        const taken = []   // taken[y][x]
+        let rows = 0
+        for (const b of boxes) {
+            rows = Math.max(rows, b.y + b.h)
+            for (let y = b.y; y < b.y + b.h; ++y) {
+                taken[y] = taken[y] || []
+                for (let x = b.x; x < b.x + b.w; ++x)
+                    taken[y][x] = true
+            }
+        }
+        const emptyRow = (b, y) => {
+            for (let x = b.x; x < b.x + b.w; ++x) {
+                if (taken[y] && taken[y][x])
+                    return false
+            }
+            return true
+        }
+        return boxes.map((b, i) => {
+            let h = b.h
+            if (placed[i].kind !== "blank") {
+                while (b.y + h < rows && emptyRow(b, b.y + h))
+                    ++h
+            }
+            return { x: b.x, y: b.y, w: b.w, h: h }
+        })
+    }
+
+    // A Digits card's count with its option unset: what a value 10 % past
+    // either end of the range takes at these decimals (a minus takes a
+    // digit), 3 to 8, so a brief overshoot still draws; 4 without a finite range
+    function digitsFor(from, to, decimals) {
+        if (!isFinite(from) || !isFinite(to))
+            return 4
+        const past = (to - from) * 0.1
+        const length = v => Number(v).toFixed(decimals).replace(".", "").length
+        return clamp(Math.max(length(from - past), length(to + past)), 3, 8)
     }
 
     // { from, to } for a new gauge: by the unit it decodes to, then the

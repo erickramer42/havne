@@ -399,7 +399,8 @@ TestCase {
     // switches, and the peak switch shows for the kinds that draw a peak
     function test_theNewKindsOwnOptionsAreEditable() {
         const narrow = (label, kind) => Object.assign(cellOf(label, kind), { w: 1 })
-        const page = pageOf({}, docOf([narrow("Cells", "segments"), narrow("Digits", "seven-segment"),
+        const digits = Object.assign(narrow("Digits", "seven-segment"), { options: { from: 0, to: 100 } })
+        const page = pageOf({}, docOf([narrow("Cells", "segments"), digits,
                                        narrow("Trace", "sparkline"), narrow("Level", "bar"),
                                        narrow("Temp", "ring"), narrow("Gear", "digital")]))
         page.startEditing()
@@ -418,6 +419,7 @@ TestCase {
         hidden(["panelDigits", "panelWindow", "panelVertical", "panelMarks", "panelMajorStep"])
 
         press(find(page, "dashCell_0_1"))
+        tryCompare(find(page, "panelDigits"), "value", 3, 1000, "Digits shows the range's count")
         spin(find(page, "panelDigits"), 6)
         compare(at(1).options.digits, 6)
         verify(!find(page, "panelPeak").visible, "the seven-segment readout has no peak")
@@ -1569,9 +1571,11 @@ TestCase {
     // A layout made on 2 and 4 columns keeps every cell's box on 6 and 12,
     // with the page's own gap, and the store is only written by an edit
     function test_aStoredPhoneLayoutKeepsItsBoxes_data() {
-        return [{ tag: "upright", w: 384, h: 832, before: 2, after: 6, capped: false },
+        // Drawn heights: a cell runs over the empty squares under it
+        return [{ tag: "upright", w: 384, h: 832, before: 2, after: 6, capped: false,
+                  heights: [1, 4, 8, 3, 4, 5, 4] },
                 { tag: "on its side, with the row's height capped", w: 832, h: 384,
-                  before: 4, after: 12, capped: true }]
+                  before: 4, after: 12, capped: true, heights: [1, 8, 8, 3, 5, 5, 10] }]
     }
     function test_aStoredPhoneLayoutKeepsItsBoxes(data) {
         const rows = (w, h, kind) => ({ kind: kind || "digital", w: w, h: h, label: "c",
@@ -1599,7 +1603,7 @@ TestCase {
             fuzzyCompare(c.x, b.x * (col + gap), 1e-6, "cell " + i + " x")
             fuzzyCompare(c.y, b.y * pitch, 1e-6, "cell " + i + " y")
             fuzzyCompare(c.width, b.w * col + (b.w - 1) * gap, 1e-6, "cell " + i + " width")
-            fuzzyCompare(c.height, b.h * pitch - gap, 1e-6, "cell " + i + " height")
+            fuzzyCompare(c.height, data.heights[i] * pitch - gap, 1e-6, "cell " + i + " height")
         }
         compare(page.problem, "", "it reads")
         compare(storedText(page), text, "a read writes nothing")
