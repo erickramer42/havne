@@ -1,5 +1,5 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.dashboard;
+// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.gauges, QmlTest.dashboard;
 //          manual smoke: DashboardPage under mock://demo
 
 import QtQuick
@@ -152,9 +152,6 @@ GaugeBase {
         preferredRendererType: Shape.CurveRenderer
 
         readonly property var points: gauge.tracePoints(width, height)
-        readonly property var area: points.length < 2 ? []
-            : [Qt.point(points[0].x, height)].concat(points,
-                                                      [Qt.point(width, height)])
 
         ShapePath {   // baseline
             strokeColor: Qt.alpha(Theme.gaugeTick, 0.06)
@@ -162,15 +159,6 @@ GaugeBase {
             fillColor: "transparent"
             startX: 0; startY: trace.height - 0.5
             PathLine { x: trace.width; y: trace.height - 0.5 }
-        }
-        ShapePath {
-            strokeColor: "transparent"
-            fillGradient: LinearGradient {
-                x1: 0; y1: 0; x2: 0; y2: trace.height
-                GradientStop { position: 0.0; color: Qt.alpha(gauge.accent, 0.30) }
-                GradientStop { position: 1.0; color: Qt.alpha(gauge.accent, 0.0) }
-            }
-            PathPolyline { path: trace.area }
         }
         ShapePath {
             strokeColor: gauge.stale ? Theme.textDim : gauge.accent

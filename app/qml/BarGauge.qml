@@ -121,10 +121,7 @@ GaugeBase {
                     anchors.fill: parent
                     radius: parent.radius
                     opacity: seg.fill
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.lighter(seg.lit, 1.25) }
-                        GradientStop { position: 1.0; color: seg.lit }
-                    }
+                    color: seg.lit
                 }
             }
         }

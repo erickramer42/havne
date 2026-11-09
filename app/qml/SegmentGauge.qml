@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
 
 import QtQuick
 
@@ -118,10 +118,7 @@ GaugeBase {
                     anchors.fill: parent
                     radius: parent.radius
                     opacity: cell.fill
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.lighter(cell.lit, 1.25) }
-                        GradientStop { position: 1.0; color: cell.lit }
-                    }
+                    color: cell.lit
                 }
             }
         }
