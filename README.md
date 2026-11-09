@@ -124,11 +124,10 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.6.0, sharing and scripting, is the latest release; v0.7.0, the dashboard and the UI, is built and in its release passes.
+v0.7.0, the dashboard and the UI, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.0 | Dashboards built by hand, an analysis log and wide CSV, import in the app, Low glare and Night themes |
 | v0.7.1-v0.10.0 | A more modern look; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
