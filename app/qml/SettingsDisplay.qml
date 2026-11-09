@@ -1,7 +1,9 @@
 // File/layer: app/qml/SettingsDisplay.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
-// Zoom and units: one part of SettingsPage, which holds the state
+// Zoom, units and the drive view's settings: one part of SettingsPage, which
+// holds the zoom's and the units' state; the drive view's is stored here
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -13,6 +15,18 @@ ColumnLayout {
     required property SettingsPage host
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
+
+    // The drive view's settings (ADR-0059 section 9): a phone's, and the
+    // orientation only where the phone can hold one
+    property bool driveShown: Theme.mobile
+    property bool orientationShown: PhoneWindow.orientationLockAvailable
+    Settings {
+        id: driveSettings
+        objectName: "driveSettings"
+        category: "ui"
+        property int driveHideMs: 4000
+        property string driveOrientation: "follow"
+    }
 
     // The whole UI's zoom; Main.qml applies and stores it
     // One row of four: a button never wraps alone onto a second line
@@ -191,6 +205,78 @@ ColumnLayout {
                 checkable: true
                 checked: Bridge.unitSystem === modelData.system
                 onClicked: Bridge.unitSystem = modelData.system
+            }
+        }
+    }
+
+    // A segment per value, each an equal share of the row and its words
+    // wrapped, so no word can widen the page
+    ColumnLayout {
+        objectName: "driveHideRow"
+        visible: root.driveShown
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Label {
+            text: qsTr("Hide the drive view's bars after:")
+            color: Theme.textDim
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 0
+            Repeater {
+                model: [
+                    { ms: 2000, label: qsTr("2 s") },
+                    { ms: 4000, label: qsTr("4 s") },
+                    { ms: 8000, label: qsTr("8 s") },
+                    { ms: 0, label: qsTr("Never") }
+                ]
+                SegmentButton {
+                    required property var modelData
+                    objectName: "driveHide_" + modelData.ms
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                    wrapMode: Text.Wrap
+                    text: modelData.label
+                    selected: driveSettings.driveHideMs === modelData.ms
+                    onClicked: driveSettings.driveHideMs = modelData.ms
+                }
+            }
+        }
+    }
+    ColumnLayout {
+        objectName: "driveOrientationRow"
+        visible: root.driveShown && root.orientationShown
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Label {
+            text: qsTr("Drive view orientation:")
+            color: Theme.textDim
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 0
+            Repeater {
+                model: [
+                    { mode: "follow", label: qsTr("Follow the phone") },
+                    { mode: "upright", label: qsTr("Upright") },
+                    { mode: "side", label: qsTr("On the side") }
+                ]
+                SegmentButton {
+                    required property var modelData
+                    objectName: "driveOrientation_" + modelData.mode
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                    wrapMode: Text.Wrap
+                    text: modelData.label
+                    selected: driveSettings.driveOrientation === modelData.mode
+                    onClicked: driveSettings.driveOrientation = modelData.mode
+                }
             }
         }
     }

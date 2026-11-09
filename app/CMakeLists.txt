@@ -58,12 +58,14 @@ qt_add_library(app_ui STATIC
     signalfilter.h
     latencystats.h
     urlwrite.h
+    phonewindow.cpp
+    phonewindow.h
     windowtheme.cpp
     windowtheme.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
-                            qml/DashboardBook.qml qml/SignalForm.qml PROPERTIES
+                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -74,6 +76,8 @@ qt_add_qml_module(app_ui
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/App
     QML_FILES
         qml/Main.qml
+        qml/Immersive.qml
+        qml/KeepAwake.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
         qml/ThemedCheckBox.qml
@@ -153,6 +157,12 @@ target_link_libraries(app_ui PUBLIC
     ecuio-core
 )
 app_enable_warnings(app_ui)
+# PhoneWindow's iOS half (UIKit), the one Objective-C++ source
+if(IOS)
+    target_sources(app_ui PRIVATE phonewindow_ios.mm)
+    target_link_libraries(app_ui PRIVATE "-framework UIKit")
+endif()
+
 # The phone's Bluetooth (ADR-0028 section 2): the links behind core's app-fed
 # streams, on Android only, so no desktop build ships it unverified.
 # Elsewhere the Bluetooth singleton lists nothing.

@@ -210,6 +210,53 @@ TestCase {
             find(page, "clearCancel").clicked()
     }
 
+    // The drive view's settings on the narrowest phone, also at the top
+    // zoom: a word longer than any row can't widen the page or leave its
+    // button. Only 100 % judges the whole page: other rows pass the edge at
+    // the top zoom.
+    function test_theDriveSettingsFitAPhone_data() {
+        return [{ tag: "100 %", zoom: 1.0 }, { tag: "the top zoom", zoom: 2.0 }]
+    }
+    function test_theDriveSettingsFitAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 800
+        main.font.pixelSize = 16
+        Theme.zoom = data.zoom
+        const page = find(main.contentItem, "settingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open("display")
+        const display = find(page, "driveHideRow").parent
+        wait(300)
+        const widthBefore = display.width
+        display.driveShown = true
+        display.orientationShown = true
+        find(page, "driveHide_0").text = "W".repeat(60)
+        find(page, "driveOrientation_follow").text = "W".repeat(60)
+        wait(300)
+        waitForRendering(main.contentItem)
+        compare(display.width, widthBefore, "the rows leave the page's width alone")
+        for (const row of ["driveHideRow", "driveOrientationRow"]) {
+            const past = pastTheEdge(find(page, row), display, [])
+            compare(past.length, 0, row + " past the page: " + past.join(", "))
+        }
+        if (data.zoom === 1.0) {
+            const out = pastTheEdge(page, main.contentItem, [])
+            compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        }
+        for (const name of ["driveHide_2000", "driveHide_4000", "driveHide_8000", "driveHide_0",
+                            "driveOrientation_follow", "driveOrientation_upright",
+                            "driveOrientation_side"]) {
+            const seg = find(page, name)
+            const label = seg.contentItem
+            verify(label.contentWidth <= label.width + 0.5,
+                   name + " is " + label.contentWidth + " wide in " + label.width)
+            verify(label.contentHeight <= seg.height + 0.5,
+                   name + " is " + label.contentHeight + " high in " + seg.height)
+        }
+    }
+
     // On a phone upright and on its side, the viewer's page scrolls to all
     // of it: the chart a readable height, the frames check's line inside
     // the page once scrolled to its end, and the filter's options inside
