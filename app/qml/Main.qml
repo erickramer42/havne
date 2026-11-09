@@ -175,6 +175,18 @@ ApplicationWindow {
         return s >= 3600 ? Math.floor(s / 3600) + ":" + two(Math.floor(s / 60) % 60) + ":" + two(s % 60)
                          : Math.floor(s / 60) + ":" + two(s % 60)
     }
+    // The header's readout of a running log: its time, then its size from
+    // 0.1 MB on (under that the size reads 0.0 and says nothing), beside
+    // the time on one line or under it
+    readonly property int logSizeShownBytes: 104858
+    readonly property bool logReadoutOneLine: headerRow.width >= 560
+    function logReadoutText(ms, bytes, oneLine) {
+        const time = logTimeText(ms)
+        if (!(bytes >= logSizeShownBytes))
+            return time
+        const size = qsTr("%1 MB").arg((bytes / (1024 * 1024)).toFixed(1))
+        return oneLine ? qsTr("%1 · %2").arg(time).arg(size) : time + "\n" + size
+    }
     // After Stop log the log opens in the viewer (ADR-0056 section 1); a
     // log the session's end or a failed write closed leaves the page as
     // it is, since the driver may be reading Live
@@ -337,9 +349,11 @@ ApplicationWindow {
                     topPadding: 0
                     background: Rectangle {
                         color: Theme.surface
-                        Rectangle { // 2px accent underline
+                        // The bar's rule: a hairline, as every other divider
+                        Rectangle {
+                            objectName: "headerRule"
                             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                            height: 2; color: Theme.primary
+                            height: 1; color: Theme.hairline
                         }
                     }
                     RowLayout {
@@ -426,7 +440,27 @@ ApplicationWindow {
                                     color: Theme.textDim
                                     text: qsTr("· %1").arg(pill.address)
                                 }
+                                // Record sessions on: the session is being recorded
+                                // already, which is why Mark stands where Start log
+                                // would; the address gives way to the word
+                                Label {
+                                    objectName: "linkPillRecording"
+                                    visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.textDim
+                                    text: qsTr("· recording")
+                                }
                             }
+                        }
+
+                        // Developer mode: the window's frames drawn a second, in
+                        // the bar so it covers no page (root.framesPerSecond)
+                        Label {
+                            objectName: "frameRate"
+                            visible: Theme.developerMode
+                            font.pixelSize: Theme.fontCaption
+                            color: Theme.textDim
+                            text: qsTr("%1 frames/s").arg(root.framesPerSecond)
                         }
 
                         Item { Layout.fillWidth: true }  // Spacer
@@ -459,16 +493,17 @@ ApplicationWindow {
                             Accessible.name: qsTr("Start a log of the ticked signals")
                             onClicked: Bridge.startLog()
                         }
-                        // While a log runs: its time over its folder's size, two
-                        // short lines, so a ten-hour log's readout fits beside
-                        // the name at 420 px
+                        // While a log runs: its time, and its folder's size once
+                        // there is one to read; one line where the row has room,
+                        // else the size under the time, so a ten-hour log's
+                        // readout fits beside the name at 420 px
                         Label {
                             objectName: "logReadout"
                             visible: Bridge.logActive
-                            text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
-                                                    .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                            text: root.logReadoutText(Bridge.logElapsedMs, Bridge.logBytes,
+                                                      root.logReadoutOneLine)
                             horizontalAlignment: Text.AlignRight
-                            font.pixelSize: Theme.fontCaption
+                            font.pixelSize: Theme.fontBody
                             color: Theme.text
                         }
                         HeaderButton {
@@ -660,11 +695,18 @@ ApplicationWindow {
                                     dashboardView.leaveDrive(true)
                                 root.gotoPage(modelData.page)
                             }
+                            // A narrow bar (a small window, or a phone zoomed far
+                            // in) gets smaller labels, and one that still doesn't
+                            // fit elides inside its tab: labels never run together
+                            leftPadding: 4
+                            rightPadding: 4
                             contentItem: Label {
+                                objectName: "tabLabel_" + btn.modelData.page
                                 text: btn.text
-                                font.pixelSize: Theme.fontBody
+                                font.pixelSize: btn.width < 64 ? Theme.fontCaption : Theme.fontBody
                                 font.weight: btn.checked ? Font.DemiBold : Font.Normal
                                 color: btn.checked ? Theme.text : Theme.textDim
+                                elide: Text.ElideRight
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                             }
@@ -732,12 +774,12 @@ ApplicationWindow {
         Timer { id: zoomBadgeTimer; interval: 1200; onTriggered: zoomBadge.opacity = 0 }
     }
 
-    // ---- Developer mode: the window's drawn frames per second, in a
-    // corner badge that takes no input. Qt draws only when something
-    // changed, so an idle page reads 0 (the badge's own change is a frame
-    // at most each second) and a chart being panned or pinched reads its
-    // rate: the phone run's measure of the charts and the gauges.
-    // frameSwapped comes from the render thread, queued to this one.
+    // ---- Developer mode: the window's drawn frames per second, read in
+    // the header (frameRate). Qt draws only when something changed, so an
+    // idle page reads 0 (the readout's own change is a frame at most each
+    // second) and a chart being panned or pinched reads its rate: the
+    // phone run's measure of the charts and the gauges. frameSwapped
+    // comes from the render thread, queued to this one.
     property int framesThisSecond: 0
     property int framesPerSecond: 0
     Connections {
@@ -756,29 +798,6 @@ ApplicationWindow {
         onRunningChanged: {
             root.framesThisSecond = 0
             root.framesPerSecond = 0
-        }
-    }
-    Rectangle {
-        objectName: "frameRate"
-        visible: Theme.developerMode
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.rightMargin: 8
-        // Above the tab bar on a phone, so it covers none of the tabs: the
-        // bar's part under the navigation bar lies outside this item's parent
-        anchors.bottomMargin: 8 + (tabBar.visible ? tabBar.height * Theme.zoom - root.windowSafe.bottom : 0)
-        width: frameRateLabel.implicitWidth + 12
-        height: frameRateLabel.implicitHeight + 6
-        radius: 4
-        color: Theme.elevatedLight
-        border.color: Theme.outline
-        opacity: 0.85
-        Label {
-            id: frameRateLabel
-            anchors.centerIn: parent
-            text: qsTr("%1 frames/s").arg(root.framesPerSecond)
-            font.pixelSize: Theme.fontCaption
-            color: Theme.textDim
         }
     }
 }

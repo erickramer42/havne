@@ -1128,8 +1128,9 @@ TestCase {
             live.stepWindow(1)
     }
 
-    // Developer mode's corner badge: hidden otherwise, and counting the
-    // frames the window draws while a session moves the page
+    // Developer mode's frame-rate readout: in the header, so it covers no
+    // page; hidden otherwise, and counting the frames the window draws
+    // while a session moves the page
     function test_theFrameRateBadgeCountsInDeveloperMode() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -1140,12 +1141,8 @@ TestCase {
         compare(main.framesPerSecond, 0)
         Theme.developerMode = true
         verify(badge.visible, "shown in developer mode")
-        // Above a phone's tab bar, covering none of its tabs
-        const tabs = find(main.contentItem, "tabBar")
-        tryVerify(() => tabs.visible && tabs.height > 0, 2000, "the tab bar shows")
-        const badgeBottom = badge.mapToItem(main.contentItem, 0, badge.height).y
-        const tabsTop = tabs.mapToItem(main.contentItem, 0, 0).y
-        verify(badgeBottom <= tabsTop, "the badge ends at " + badgeBottom + ", the tabs start at " + tabsTop)
+        compare(badge.parent, find(main.contentItem, "headerRow"), "in the header's row")
+        compare(badge.text, "0 frames/s")
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const live = find(main.contentItem, "livePage")
         main.gotoPage(Array.from(live.parent.children).indexOf(live))
@@ -1165,13 +1162,17 @@ TestCase {
         main.font.pixelSize = 16
         const button = find(main.contentItem, "markButton")
         const title = find(main.contentItem, "headerTitle")
+        const recording = find(main.contentItem, "linkPillRecording")
         verify(!button.visible, "nothing to mark yet")
+        verify(!recording.visible, "nothing recorded yet")
         verify(title.visible)
         Bridge.recording = true
         compare(Bridge.connectSession("mock://marked"), "", "mock://marked connects")
         verify(Bridge.recordingActive)
         verify(button.visible)
         compare(button.text, "Mark")
+        verify(recording.visible, "the pill says why Mark is there")
+        compare(recording.text, "· recording")
         button.clicked()
         compare(Bridge.markCount, 1)
         compare(button.text, "Mark (1)")
@@ -1182,6 +1183,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         verify(!button.visible, "the recording ended")
+        verify(!recording.visible)
         verify(title.visible)
     }
 
@@ -1221,7 +1223,9 @@ TestCase {
                "Start log, Mark and Disconnect step aside")
         tryVerify(() => Bridge.logBytes > 0 && Bridge.logElapsedMs >= 1000, 10000,
                   "the readout's second")
-        tryVerify(() => /^\d+:\d\d\n\d+\.\d MB$/.test(readout.text), 2000, readout.text)
+        // A second's log is well under the 0.1 MB the size shows from
+        tryVerify(() => /^\d+:\d\d$/.test(readout.text), 2000, readout.text)
+        verify(!find(main.contentItem, "linkPillRecording").visible, "a log is no recording")
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way on a phone")
         out = pastTheEdge(row, main.contentItem, [])
@@ -1259,6 +1263,94 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting && !Bridge.logActive, 5000,
                   "the disconnect ends the log")
         compare(main.currentPage, livePage, "still on Live")
+    }
+
+    // The log readout's text: the time alone under 0.1 MB, then the size
+    // beside it where the row has room, else under it
+    function test_theLogReadoutShowsASizeOnceThereIsOne_data() {
+        return [
+            { tag: "aSecond", ms: 2000, bytes: 1000, oneLine: false, text: "0:02" },
+            { tag: "aSecondWide", ms: 2000, bytes: 1000, oneLine: true, text: "0:02" },
+            { tag: "justUnder", ms: 12000, bytes: 104857, oneLine: true, text: "0:12" },
+            { tag: "twoLines", ms: 12000, bytes: 104858, oneLine: false, text: "0:12\n0.1 MB" },
+            { tag: "oneLine", ms: 12000, bytes: 104858, oneLine: true, text: "0:12 · 0.1 MB" },
+            { tag: "tenHours", ms: 36307000, bytes: 129395916, oneLine: false,
+              text: "10:05:07\n123.4 MB" },
+        ]
+    }
+    function test_theLogReadoutShowsASizeOnceThereIsOne(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        compare(main.logReadoutText(data.ms, data.bytes, data.oneLine), data.text)
+    }
+
+    // A running log's readout takes one line where the header row has
+    // room (a tablet, a desktop window) and two on a phone
+    function test_theLogReadoutTakesOneLineWhereTheRowHasRoom() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        const readout = find(main.contentItem, "logReadout")
+        const row = find(main.contentItem, "headerRow")
+        compare(Bridge.connectSession("mock://readout"), "", "mock://readout connects")
+        const start = find(main.contentItem, "startLogButton")
+        tryVerify(() => start.visible && start.enabled, 5000, "Start log once connected")
+        start.clicked()
+        verify(Bridge.logActive, "the log runs")
+        // The log's own size is a second's worth: what the row would show
+        // of a 0.1 MB one is read from the function with the row's choice
+        verify(row.width < 560, "a phone's row is under 560 px: " + row.width)
+        verify(!main.logReadoutOneLine, "two lines on a phone")
+        compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01\n0.1 MB")
+        main.width = 700
+        waitForRendering(main.contentItem)
+        verify(row.width >= 560, "a wide row: " + row.width)
+        verify(main.logReadoutOneLine, "one line where the row has room")
+        compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01 · 0.1 MB")
+        compare(readout.font.pixelSize, Theme.fontBody, "the readout is body text")
+        main.width = 559 + (main.width - row.width)
+        waitForRendering(main.contentItem)
+        verify(!main.logReadoutOneLine, "two lines again at " + row.width)
+    }
+
+    // The header ends in the one divider the look has, a hairline
+    function test_theHeaderEndsInAHairline() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const rule = find(main.contentItem, "headerRule")
+        compare(rule.height, 1)
+        compare(rule.color, Theme.hairline)
+        verify(rule.visible)
+    }
+
+    // The tab bar's labels at a narrow bar (a phone zoomed far in): each
+    // stays inside its tab, smaller and elided before it runs into the
+    // next
+    function test_theTabLabelsStayInsideTheirTabs() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 700
+        const tabs = find(main.contentItem, "tabBar")
+        tryVerify(() => tabs.visible && tabs.height > 0, 2000, "the tab bar shows")
+        const pages = [main.dashboardPage, 2, 3, main.recordingsPage, main.settingsPage]
+        for (const page of pages)
+            compare(find(main.contentItem, "tabLabel_" + page).font.pixelSize, Theme.fontBody,
+                    "body text at 64 px a tab")
+        Theme.zoom = 2
+        waitForRendering(main.contentItem)
+        for (const page of pages) {
+            const tab = find(main.contentItem, "tab_" + page)
+            const label = find(main.contentItem, "tabLabel_" + page)
+            verify(tab.width < 64, "a tab at zoom 2: " + tab.width)
+            compare(label.font.pixelSize, Theme.fontCaption, "caption text in a narrow tab")
+            verify(label.width <= tab.width, label.text + " is " + label.width + " in " + tab.width)
+            verify(label.contentWidth <= label.width + 0.5,
+                   label.text + " paints " + label.contentWidth + " in " + label.width)
+        }
+        const settings = find(main.contentItem, "tabLabel_" + main.settingsPage)
+        verify(settings.truncated, "Settings elides in a tab of " + settings.width)
     }
 
     // A Main on a phone's form at 384 x 832, laid out, with Android's text
