@@ -91,8 +91,9 @@ int main(int argc, char *argv[])
     for (const char *file : {"Barlow-Regular", "Barlow-Medium", "Barlow-SemiBold", "Barlow-Bold"}) {
         const QString path = QStringLiteral(":/qt/qml/App/fonts/%1.ttf").arg(QLatin1String(file));
         const bool loaded = QFontDatabase::addApplicationFont(path) >= 0;
-        if (QLatin1String(file) == QLatin1String("Barlow-Regular"))
+        if (QLatin1String(file) == QLatin1String("Barlow-Regular")) {
             barlow = loaded;
+        }
     }
     if (barlow) {
         QFont font = QGuiApplication::font();
