@@ -57,7 +57,7 @@ ThemedButton {
             id: words
             anchors.verticalCenter: parent.verticalCenter
             text: control.text
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontCaption
             color: control.shown ? Theme.text : Theme.textDim
         }
     }

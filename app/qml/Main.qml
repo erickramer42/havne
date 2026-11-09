@@ -260,7 +260,7 @@ ApplicationWindow {
                         visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
                                  || headerRow.width >= 420
                         text: qsTr("Havne")
-                        font.pixelSize: 16
+                        font.pixelSize: Theme.fontEmphasis
                         font.weight: Font.DemiBold
                         color: Theme.text
                     }
@@ -298,7 +298,7 @@ ApplicationWindow {
                                 objectName: "linkPillText"
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
-                                font.pixelSize: 13
+                                font.pixelSize: Theme.fontCaption
                                 color: pill.tone
                                 text: Bridge.connecting ? qsTr("Connecting…")
                                     : Bridge.disconnecting ? qsTr("Disconnecting…")
@@ -350,7 +350,7 @@ ApplicationWindow {
                         text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
                                                 .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
                         horizontalAlignment: Text.AlignRight
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                         color: Theme.text
                     }
                     ThemedButton {
@@ -497,7 +497,7 @@ ApplicationWindow {
                     contentItem: Label {
                         text: btn.text
                         // 13px keeps "Settings" inside a fifth of a 375pt phone
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontCaption
                         font.weight: btn.checked ? Font.DemiBold : Font.Normal
                         color: btn.checked ? Theme.text : Theme.textDim
                         horizontalAlignment: Text.AlignHCenter
@@ -610,7 +610,7 @@ ApplicationWindow {
             id: frameRateLabel
             anchors.centerIn: parent
             text: qsTr("%1 frames/s").arg(root.framesPerSecond)
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontCaption
             color: Theme.textDim
         }
     }

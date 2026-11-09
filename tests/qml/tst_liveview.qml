@@ -154,6 +154,32 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
+    // On a phone the field says "Find" and the status line drops the 10 Hz
+    // clause, since the long forms are cut at 384 dp; the field's
+    // accessible name keeps the whole phrase
+    function test_aPhoneGetsTheShortStrings() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        const all = list.count
+        const bar = findChild(page, "liveFilter")
+        const field = findChild(bar, "filterText")
+        compare(field.placeholderText, "Find a signal")
+        verify(page.statusText().indexOf("Plotting " + all + " of " + all + " signals") === 0,
+               page.statusText())
+        Theme.compact = true
+        try {
+            compare(field.placeholderText, "Find")
+            compare(field.Accessible.name, "Find a signal by its name or unit")
+            compare(page.statusText(), all + " of " + all + " plotted")
+            field.insert(0, "temp")
+            field.textEdited()
+            tryCompare(list, "count", 3)
+            compare(page.statusText(), "3 of " + all + " shown · " + all + " plotted")
+        } finally {
+            Theme.compact = false
+        }
+    }
+
     // On a short page (a small window, a large zoom) the list gives up
     // rows, down to one, so the chart stays whole on the page at its
     // minimum height or more; a tall page shows every row

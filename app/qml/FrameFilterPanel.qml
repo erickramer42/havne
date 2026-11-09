@@ -53,7 +53,7 @@ GridLayout {
         apply()
     }
 
-    Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 13 }
+    Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     TextField {
         id: filterIds
         objectName: "filterIds"
@@ -70,13 +70,13 @@ GridLayout {
         objectName: "filterIdsProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
     }
 
-    Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: 13 }
+    Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     TextField {
         id: filterData
         objectName: "filterData"
@@ -93,14 +93,14 @@ GridLayout {
         objectName: "filterDataProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
     }
 
     // The data length in bytes, and a span of the table's seconds
-    Label { text: qsTr("Length"); color: Theme.textDim; font.pixelSize: 13 }
+    Label { text: qsTr("Length"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     RowLayout {
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
@@ -115,7 +115,7 @@ GridLayout {
             inputMethodHints: Qt.ImhPreferNumbers | Qt.ImhNoPredictiveText
             onTextEdited: panel.apply()
         }
-        Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: 13 }
+        Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         TextField {
             id: filterTimes
             objectName: "filterTimes"
@@ -133,7 +133,7 @@ GridLayout {
         objectName: "filterLengthsProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
@@ -144,7 +144,7 @@ GridLayout {
         objectName: "filterTimesProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
@@ -212,7 +212,7 @@ GridLayout {
         Layout.preferredWidth: 0   // the panel's width, not its text's
         text: qsTr("No adapter reports the frames the session sends yet, so Sent shows none")
         color: Theme.textDim
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
     }
 }

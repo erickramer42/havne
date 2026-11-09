@@ -350,6 +350,15 @@ QtObject {
     readonly property int rowHeight:        dense ? 36 : 44
     readonly property int toolBarHeight:    dense ? 40 : 48
     readonly property int sidebarWidth:     dense ? 150 : 220
+    // The type scale: five sizes, in px. Secondary words, a bar's labels
+    // and monospace payloads are fontCaption; a body Label that sets no
+    // size keeps the platform's. The gauges' own sizes scale with the
+    // gauge and are not steps.
+    readonly property int fontCaption:      12
+    readonly property int fontBody:         14
+    readonly property int fontEmphasis:     16
+    readonly property int fontTitle:        20
+    readonly property int fontHero:         28
     // The least a tap target measures each way on a phone (Material's
     // 48 dp), on the glass: in the layout's units, which the zoom scales,
     // a zoom under 1 asks for more, so a target never shrinks below it;

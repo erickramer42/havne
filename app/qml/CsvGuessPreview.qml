@@ -130,7 +130,7 @@ ColumnLayout {
         maximumLineCount: 2
         elide: Text.ElideRight
         color: Theme.textDim
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         text: preview.timeColumn === null ? "" : preview.timeColumn.samples.join("  ")
     }
     RowLayout {
@@ -140,7 +140,7 @@ ColumnLayout {
         Label {
             text: qsTr("Unit")
             color: Theme.textDim
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontCaption
         }
         Rectangle {
             implicitWidth: unitSwitch.implicitWidth + 4
@@ -172,7 +172,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: preview.guess === null ? ""
               : preview.guess.timeUnit === "iso8601" ? qsTr("Its times are dates with a UTC offset")
               : preview.guess.unitKnown ? qsTr("Its unit: %1").arg(preview.guess.timeUnit)
@@ -184,7 +184,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.danger
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: preview.waiting
     }
 
@@ -245,7 +245,7 @@ ColumnLayout {
                     maximumLineCount: 2
                     elide: Text.ElideRight
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     text: row.col.canPutBack ? qsTr("Left out: %1. Check it to put it back.").arg(row.col.why)
                                              : qsTr("Left out: %1").arg(row.col.why)
                 }
@@ -292,7 +292,7 @@ ColumnLayout {
                     maximumLineCount: 2
                     elide: Text.ElideRight
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     font.family: Theme.monoFamily
                     text: row.col.samples.join("  ")
                 }
@@ -315,7 +315,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         text: preview.guess === null ? "" : preview.guess.notes.join("\n")
     }
 
@@ -348,7 +348,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: preview.saveFailed ? Theme.danger : Theme.success
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: preview.saveNote
     }
 }

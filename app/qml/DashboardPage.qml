@@ -671,7 +671,7 @@ Page {
             wrapMode: Text.WordWrap
             text: qsTr("a gauge this version of Havne doesn't have")
             color: Theme.textDim
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontCaption
         }
     }
 
@@ -711,7 +711,7 @@ Page {
 
     component Caption: Label {
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
     }
 
     Component {
@@ -740,7 +740,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         text: (root.kindNames[panelCard.kind] ?? panelCard.kind) + ": "
@@ -1049,7 +1049,7 @@ Page {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         text: qsTr("Add a gauge: its kind")
@@ -1150,7 +1150,7 @@ Page {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         elide: Text.ElideRight
@@ -1231,7 +1231,7 @@ Page {
                 text: Bridge.linkState === "ok"
                       ? qsTr("Live · %1").arg(Bridge.uriLabel)
                       : Theme.linkLabel(Bridge.linkState)
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)
             }
             NightSwitch {}
@@ -1321,7 +1321,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.text
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: Bridge.logNotice
             }
             ThemedButton {
@@ -1434,7 +1434,7 @@ Page {
                 Layout.minimumWidth: 0
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: qsTr("Remove the page \"%1\" and its gauges?")
                       .arg(root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : "")
             }
@@ -1462,7 +1462,7 @@ Page {
                 Layout.minimumWidth: 0
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: qsTr("Replace this form's pages with the built-in layout?")
             }
             ThemedButton {
@@ -1509,7 +1509,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: root.problem === "newer"
                       ? qsTr("The saved dashboard was made by a newer version of Havne. "
                              + "This shows the built-in one; the saved one is kept.")
@@ -1661,7 +1661,7 @@ Page {
                         width: box ? pageView.columnWidth : 0
                         height: box ? Math.max(Theme.touchTarget, box.h * pageView.pitch - root.gap) : 0
                         text: "+"
-                        font.pixelSize: 28
+                        font.pixelSize: Theme.fontHero
                         Accessible.name: qsTr("Add a gauge")
                         onClicked: root.startAdd()
                     }

@@ -8,7 +8,7 @@ import QtQuick.Layouts
 
 Label {
     color: Theme.text
-    font.pixelSize: 16
+    font.pixelSize: Theme.fontEmphasis
     font.weight: Font.DemiBold
     Layout.topMargin: Theme.spacing
 }

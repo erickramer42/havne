@@ -648,6 +648,27 @@ TestCase {
         compare(list.itemAtIndex(0).model.timestampUs, 5000000)
     }
 
+    // On a phone the strings that were cut at 384 dp are short forms, and
+    // the recording's name takes a line of its own
+    function test_aPhoneGetsTheShortStrings() {
+        const page = openFindings()
+        const title = find(page, "openedTitle")
+        const compactTitle = find(page, "openedTitleCompact")
+        verify(title.visible && !compactTitle.visible, "the desktop's name sits in the row")
+        Theme.compact = true
+        try {
+            compare(find(page, "cursorTime").text, "Tap for values")
+            verify(!title.visible && compactTitle.visible, "a phone's name has its own line")
+            compare(compactTitle.text, findingsRow.title)
+            compare(compactTitle.elide, Text.ElideMiddle)
+            page.setCursor(5000)
+            compare(find(page, "cursorTime").text, "At 5.0 s", "a cursor reads the same")
+        } finally {
+            Theme.compact = false
+        }
+        verify(title.visible && !compactTitle.visible, "and back")
+    }
+
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)
@@ -744,7 +765,7 @@ TestCase {
     // The cursor reads each signal's value in force at its time
     function test_theCursorReadsTheValuesAtItsTime() {
         const page = openFindings()
-        compare(find(page, "cursorTime").text, "Tap the chart to read the values at a time")
+        compare(find(page, "cursorTime").text, "Tap the chart for values")
         const row = find(page, "signalRows").itemAtIndex(0)
         compare(find(row, "cursorValue").text, "—")
         page.setCursor(5000)

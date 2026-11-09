@@ -78,7 +78,7 @@ Button {
     // grows taller
     contentItem: Text {
         text: control.text
-        font.pixelSize: 14
+        font.pixelSize: Theme.fontBody
         color: control.textColor
         wrapMode: Text.Wrap
         horizontalAlignment: Text.AlignHCenter

@@ -33,7 +33,9 @@ RowLayout {
         objectName: "filterText"
         Layout.fillWidth: true
         Layout.minimumWidth: 80
-        placeholderText: qsTr("Find a signal")
+        // The short word on a phone, where the field is squeezed between the
+        // title and Filter; Accessible.name keeps the whole phrase
+        placeholderText: Theme.compact ? qsTr("Find") : qsTr("Find a signal")
         text: bar.filter.text
         onTextEdited: bar.filter.text = text
         Accessible.name: qsTr("Find a signal by its name or unit")

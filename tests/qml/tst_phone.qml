@@ -650,6 +650,9 @@ TestCase {
         page.chartHeight = 300
         const chartSplitter = find(page, "chartSplitter")
         tryVerify(() => chartSplitter.visible, 2000, "the viewer's splitter shows")
+        // The name's own line on a phone pushes the splitter down: scroll to it
+        const scroll = find(page, "recordingsScroll")
+        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
         verify(waitForPolish(main), "laid out")
         tap(chartSplitter, chartSplitter.width / 2 - 15, chartSplitter.height / 2)
         tap(chartSplitter, chartSplitter.width / 2 + 15, chartSplitter.height / 2)
@@ -836,7 +839,7 @@ TestCase {
         verify(night.height >= Theme.touchTarget - 0.5, "the switch is " + night.height + " px tall")
         verify(line.height <= Math.max(words.implicitHeight, night.height) + 0.5,
                "the line is " + line.height + " px for a " + night.height + " px switch")
-        verify(words.font.pixelSize <= 13, "the small font")
+        verify(words.font.pixelSize <= 12, "the small font")
     }
 
     // The title is whole at 384 px with the Night switch in the link line

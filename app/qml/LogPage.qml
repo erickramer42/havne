@@ -174,7 +174,7 @@ Pane {
                 readOnly: true
                 wrapMode: TextArea.WrapAnywhere
                 font.family: Theme.monoFamily
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
                 color: Theme.text
                 background: Rectangle {
                     radius: Theme.radius
@@ -238,7 +238,7 @@ Pane {
                       ? page.exportNote
                       : qsTr("Export CSV leaves identification replies out; Copy copies the rows as they are.")
                 color: page.exportFailed ? Theme.danger : Theme.textDim
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
             }
             FileDialog {
                 id: exportDialog
@@ -261,7 +261,7 @@ Pane {
                     verticalAlignment: Text.AlignVCenter
                     text: qsTr("%1 selected").arg(Bridge.model.selectedCount)
                     color: Theme.info
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontCaption
                 }
                 // The selected rows to the clipboard, as they are: the
                 // user's own pick
@@ -349,7 +349,7 @@ Pane {
                     color: !Bridge.connected ? Theme.textDim
                          : Bridge.logPaused ? Theme.warning
                          : Theme.success
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontCaption
                 }
 
                 // What the filter leaves of the table
@@ -360,7 +360,7 @@ Pane {
                     wrapMode: Text.Wrap
                     text: qsTr("Showing %1 of %2").arg(Bridge.model.count).arg(Bridge.model.heldCount)
                     color: Theme.info
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontCaption
                 }
 
                 Label {
@@ -368,7 +368,7 @@ Pane {
                     wrapMode: Text.Wrap
                     text: qsTr("%1 dropped").arg(Bridge.droppedFrames)
                     color: Theme.danger
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontCaption
                     visible: Bridge.droppedFrames > 0
                 }
 
@@ -381,7 +381,7 @@ Pane {
                     text: qsTr("%1 after a loss at the adapter")
                         .arg(Bridge.overflowFrames)
                     color: Theme.warning
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontCaption
                     visible: Bridge.overflowFrames > 0
                 }
 
@@ -393,7 +393,7 @@ Pane {
                         .arg(Bridge.guiNotifyCount)
                         .arg(Bridge.signalBatchCount)
                     color: Theme.textDim
-                    font.pixelSize: 13
+                    font.pixelSize: Theme.fontCaption
                     visible: Bridge.frameCount > 0 && page.width >= 600
                 }
 

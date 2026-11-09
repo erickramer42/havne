@@ -34,7 +34,7 @@ ColumnLayout {
                 Label {
                     text: row.modelData.title
                     color: Theme.text
-                    font.pixelSize: 16
+                    font.pixelSize: Theme.fontEmphasis
                     font.weight: Font.DemiBold
                 }
                 Label {
