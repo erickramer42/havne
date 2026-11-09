@@ -911,10 +911,13 @@ TestCase {
 
     // ---- The gesture (ADR-0057's appendix, section 4)
 
-    // The finger down on a cell until the page lifts it
-    function hold(page, cell) {
+    // The finger down on a cell until the page lifts it, after a short
+    // hold unless the case asks for the platform's
+    function hold(page, cell, platformHold) {
         tryVerify(() => cell.width > 0, 3000, "laid out")
         verify(waitForPolish(page.Window.window), "laid out")
+        if (!platformHold)
+            shortHold(cell)
         mousePress(cell)
         tryVerify(() => page.held >= 0, 10000, "the hold completes")
     }
@@ -923,6 +926,12 @@ TestCase {
         return item.mapToItem(page, item.width / 2, item.height / 2)
     }
     readonly property int holdMs: Application.styleHints.mousePressAndHoldInterval
+    // Set on the held cell alone, just before its press (a reflow can replace
+    // the delegate); other cells' taps keep the platform's interval
+    readonly property int shortHoldMs: 200
+    function shortHold(cell) {
+        find(cell, "cellTap").pressAndHoldInterval = shortHoldMs
+    }
 
     // A release after the hold opens the cell's menu, on both forms and
     // in or out of edit mode, and leaves the mode as it was
@@ -987,9 +996,10 @@ TestCase {
         tryVerify(() => cell.width > 0, 3000, "laid out")
         verify(waitForPolish(page.Window.window), "laid out")
         const at = centerOf(page, cell)
+        shortHold(cell)
         mousePress(page, at.x, at.y)
         mouseMove(page, at.x + data.dx, at.y + data.dy, -1, Qt.LeftButton)
-        wait(holdMs + 300)
+        wait(shortHoldMs + 300)
         compare(page.held, -1, "the hold was canceled")
         mouseRelease(page, at.x + data.dx, at.y + data.dy)
         compare(page.panel, "", "and it isn't a tap either")
@@ -1237,7 +1247,8 @@ TestCase {
         tryVerify(() => loader.item !== null, 3000, "it loads")
         const dial = loader.item
         dial.peakValue = 1000
-        hold(page, cell)
+        // The one hold at the platform's interval, then a tap on the same cell
+        hold(page, cell, true)
         mouseRelease(cell)
         compare(dial.peakValue, 1000, "a hold leaves the peak")
         page.closePanel()
@@ -1373,7 +1384,7 @@ TestCase {
         tryVerify(() => cell.width > 0, 3000, "laid out")
         verify(waitForPolish(page.Window.window), "laid out")
         mousePress(cell)
-        wait(holdMs + 300)
+        wait(holdMs + 300)   // the platform's interval, as a user's finger meets it
         compare(page.held, -1, "not held outside edit mode")
         mouseRelease(cell)
         compare(page.panel, "")
