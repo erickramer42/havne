@@ -625,6 +625,9 @@ TEST(SignalsTest, DisplayConvertMapsEachMetricUnitToImperial)
         {"\xC2\xB0" "C", 0, 100.0, "\xC2\xB0" "F", 212.0, 0},
         {"\xC2\xB0" "C", 0, -40.0, "\xC2\xB0" "F", -40.0, 0},
         {"kPa", 0, 101.325, "psi", 14.6959487755134, 1},
+        {"kPa", 0, 100.0, "psi", 14.5037737730209, 1},   /* the same pressure as 1 bar */
+        {"bar", 0, 1.0, "psi", 14.5037737730209, 0},   /* psi is finer than bar: no extra place */
+        {"bar", 2, 2.4, "psi", 34.80905705525016, 2},
         {"g/s", 1, 100.0, "lb/min", 13.2277357312033, 2},
         {"g/s", 3, 1.0, "lb/min", 0.132277357312033, 3},   /* capped at 3 */
         {"km", 1, 402.336 / 1000.0, "mi", 0.25, 1},

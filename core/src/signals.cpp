@@ -537,6 +537,8 @@ static const display_conversion kImperial[] = {
     {"km/h",              "mph",               0.621371192237334, 0.0,  0},
     {"\xC2\xB0" "C",      "\xC2\xB0" "F",      1.8,               32.0, 0},
     {"kPa",               "psi",               0.145037737730209, 0.0,  1},
+    /* 100 kPa; psi is finer than bar, so no extra place */
+    {"bar",               "psi",               14.5037737730209,  0.0,  0},
     {"g/s",               "lb/min",            0.132277357312033, 0.0,  1},
     {"km",                "mi",                0.621371192237334, 0.0,  0},
     /* Conventional inches of water: 25.4 mm at 1000 kg/m3, standard g */

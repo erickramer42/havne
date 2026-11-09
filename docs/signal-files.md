@@ -355,6 +355,7 @@ when written exactly so:
 | `km/h` | `mph` |
 | `°C` | `°F` |
 | `kPa` | `psi` |
+| `bar` | `psi` |
 | `g/s` | `lb/min` |
 | `km` | `mi` |
 | `Pa` | `inH2O` |
