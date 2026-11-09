@@ -92,11 +92,20 @@ ApplicationWindow {
     }
     readonly property int currentPage: stack.currentIndex
 
-    // Page indices, in the order of the sidebar, stack and tab bar
+    // Page indices, in the order of the sidebar and the stack
+    readonly property int dashboardPage: 1
+    readonly property int logPage: 4
     readonly property int recordingsPage: 5
     readonly property int settingsPage: 6
 
     function gotoPage(index) { stack.currentIndex = index }
+    // The tab bar lists no Home: a phone opens on Dash, and a window
+    // narrowed past the sidebar's width leaves Home for it
+    function leaveHomeForTheTabs() {
+        if (isCompact && stack.currentIndex === 0)
+            gotoPage(dashboardPage)
+    }
+    onIsCompactChanged: leaveHomeForTheTabs()
     // Connect... from any page: Settings, with what to connect to open
     function openConnect() {
         settingsView.showAdapters()
@@ -152,6 +161,7 @@ ApplicationWindow {
         Bridge.unitSystem = uiSettings.unitSystem   // anything but 0 or 1 is ignored
         Theme.developerMode = uiSettings.developerMode
         Bridge.minSweepMs = uiSettings.minSweepMs   // anything but a choice is ignored
+        leaveHomeForTheTabs()
     }
     Connections {
         target: Bridge
@@ -203,6 +213,15 @@ ApplicationWindow {
         onTriggered: Bridge.logEvent(root.displayLine)
     }
 
+    // On a phone a header button is a touch's size each way (headerRow's
+    // touchMin) and draws smaller, so the bar's rule shows under it
+    component HeaderButton: ThemedButton {
+        compact: Theme.compact
+        Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
+        topInset: Theme.compact ? 6 : 0
+        bottomInset: Theme.compact ? 6 : 0
+    }
+
     // The whole UI, laid out at the window's size divided by the zoom and
     // scaled by it, so pages reflow as if the window were that size.
     // Shapes and text are vector-drawn, so they stay sharp at any zoom.
@@ -249,6 +268,7 @@ ApplicationWindow {
                 RowLayout {
                     id: headerRow
                     objectName: "headerRow"
+                    readonly property real touchMin: root.isCompact ? Theme.touchTarget : 0
                     anchors.fill: parent
                     anchors.topMargin: zoomRoot.insetTop
                     anchors.leftMargin: 16
@@ -268,28 +288,44 @@ ApplicationWindow {
                         color: Theme.text
                     }
 
-                    // Connection pill: link state and URI, from Theme like every
-                    // other surface. It shrinks and elides before anything else
-                    // moves, so the header fits a phone.
-                    Rectangle {
+                    // The link state and URI: the address elides first, the
+                    // word never. With the tab bar a tap opens the Log it omits
+                    AbstractButton {
                         id: pill
                         objectName: "linkPill"
                         readonly property color tone: (Bridge.connecting || Bridge.disconnecting)
                                                     ? Theme.textDim
                                                     : Theme.linkColor(Bridge.linkState)
+                        readonly property string stateWord:
+                            Bridge.connecting ? qsTr("Connecting…")
+                          : Bridge.disconnecting ? qsTr("Disconnecting…")
+                          : root.isCompact || !headerTitle.visible
+                            ? Theme.linkShortLabel(Bridge.linkState)
+                            : Theme.linkLabel(Bridge.linkState)
+                        readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
                         Layout.fillWidth: true
-                        Layout.preferredWidth: pillRow.implicitWidth + 24
-                        Layout.maximumWidth: pillRow.implicitWidth + 24
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: implicitWidth
+                        Layout.maximumWidth: implicitWidth
                         Layout.minimumWidth: 32
-                        implicitHeight: 28
-                        // A dot and a word, no capsule
-                        color: "transparent"
-
-                        RowLayout {
-                            id: pillRow
-                            anchors.fill: parent
-                            anchors.leftMargin: 12
-                            anchors.rightMargin: 12
+                        implicitWidth: implicitContentWidth + leftPadding + rightPadding
+                        implicitHeight: implicitContentHeight
+                        leftPadding: root.isCompact ? 0 : 12
+                        rightPadding: root.isCompact ? 0 : 12
+                        topPadding: 0
+                        bottomPadding: 0
+                        enabled: tabBar.visible
+                        text: address !== "" ? qsTr("%1 · %2").arg(stateWord).arg(address) : stateWord
+                        Accessible.name: enabled ? qsTr("%1: show the log").arg(text) : text
+                        onClicked: root.gotoPage(root.logPage)
+                        // A dot and a word at rest, no capsule
+                        background: Rectangle {
+                            color: pill.down ? Theme.elevated : "transparent"
+                            radius: Theme.radius
+                            border.width: pill.visualFocus ? 2 : 0
+                            border.color: Theme.text
+                        }
+                        contentItem: RowLayout {
                             spacing: 8
 
                             Rectangle {
@@ -299,17 +335,19 @@ ApplicationWindow {
                             }
                             Label {
                                 objectName: "linkPillText"
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
                                 font.pixelSize: Theme.fontCaption
                                 color: Theme.text
-                                text: Bridge.connecting ? qsTr("Connecting…")
-                                    : Bridge.disconnecting ? qsTr("Disconnecting…")
-                                    : !headerTitle.visible ? Theme.linkShortLabel(Bridge.linkState)
-                                    : Bridge.connected
-                                      ? qsTr("%1 · %2").arg(Theme.linkLabel(Bridge.linkState))
-                                                        .arg(Bridge.uriLabel)
-                                      : Theme.linkLabel(Bridge.linkState)
+                                text: pill.stateWord
+                            }
+                            Label {
+                                objectName: "linkPillAddress"
+                                visible: pill.address !== ""
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                elide: Text.ElideRight
+                                font.pixelSize: Theme.fontCaption
+                                color: Theme.textDim
+                                text: qsTr("· %1").arg(pill.address)
                             }
                         }
                     }
@@ -319,7 +357,7 @@ ApplicationWindow {
                     // A marker in the recording under way, from any page
                     // (ADR-0049 section 4): "Mark N" at the tap, which the
                     // Recordings page aligns two runs on
-                    ThemedButton {
+                    HeaderButton {
                         id: markButton
                         objectName: "markButton"
                         visible: Bridge.recordingActive && !Bridge.logActive
@@ -333,7 +371,7 @@ ApplicationWindow {
                     // recorded from now on and asked alone until Stop log. A
                     // replay plays a recording already; Record sessions' own
                     // recorder is the session's one
-                    ThemedButton {
+                    HeaderButton {
                         id: startLogButton
                         objectName: "startLogButton"
                         highlighted: true
@@ -356,7 +394,7 @@ ApplicationWindow {
                         font.pixelSize: Theme.fontCaption
                         color: Theme.text
                     }
-                    ThemedButton {
+                    HeaderButton {
                         objectName: "stopLogButton"
                         highlighted: true
                         visible: Bridge.logActive
@@ -369,7 +407,7 @@ ApplicationWindow {
                     // session from any page. On Settings itself, its Connect
                     // button is the one to use.
                     // A log's Stop log takes its place while the log runs
-                    ThemedButton {
+                    HeaderButton {
                         objectName: "disconnectButton"
                         // Ending a session is quiet; Connect... is primary
                         flat: Bridge.connected || Bridge.disconnecting
@@ -447,6 +485,10 @@ ApplicationWindow {
                     DashboardPage {
                         objectName: "dashboardPage"
                         offlineUri: settingsView.offlineUri
+                        connectUris: settingsView.connectUris
+                        connectVehicleUri: settingsView.vehicleUri
+                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        onOtherAddressRequested: root.openConnect()
                     }
                     LiveViewPage {
                         objectName: "livePage"
@@ -491,50 +533,62 @@ ApplicationWindow {
                 bottomPadding: 0
                 leftPadding: 0
                 rightPadding: 0
-                currentIndex: stack.currentIndex
-                onCurrentIndexChanged: stack.currentIndex = currentIndex
 
-                background: Rectangle { objectName: "tabBarBackground"; color: Theme.surface }
-
-                // per-button styling since TabBar doesn't propagate backgrounds
-                component ThemedTabButton: TabButton {
-                    id: btn
-                    implicitHeight: Theme.touchTarget
-                    contentItem: Label {
-                        text: btn.text
-                        // 13px keeps "Settings" inside a fifth of a 375pt phone
-                        font.pixelSize: Theme.fontCaption
-                        font.weight: btn.checked ? Font.DemiBold : Font.Normal
-                        color: btn.checked ? Theme.text : Theme.textDim
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    // The selected tab is underlined, so selection doesn't rest
-                    // on color alone
-                    background: Rectangle {
-                        color: Theme.surface
-                        border.width: btn.visualFocus ? 2 : 0
-                        border.color: Theme.text
-                        Rectangle {
-                            visible: btn.checked
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 6
-                            width: Math.min(parent.width - 16, btn.contentItem.implicitWidth + 8)
-                            height: 3
-                            radius: 1.5
-                            color: Theme.primary
-                        }
+                background: Rectangle {
+                    objectName: "tabBarBackground"
+                    color: Theme.surface
+                    Rectangle {
+                        objectName: "tabBarHairline"
+                        anchors { left: parent.left; right: parent.right; top: parent.top }
+                        height: 1
+                        color: Theme.hairline
                     }
                 }
 
-                ThemedTabButton { text: qsTr("Home") }
-                ThemedTabButton { text: qsTr("Dash") }
-                ThemedTabButton { text: qsTr("Live") }
-                ThemedTabButton { text: qsTr("Codes") }
-                ThemedTabButton { text: qsTr("Log") }
-                ThemedTabButton { text: qsTr("Recs") }
-                ThemedTabButton { text: qsTr("Settings") }
+                // The page decides the mark: on the Log no tab is marked, and
+                // TabBar's index at -1 leaves the last checked and deaf to a tap
+                Repeater {
+                    model: [
+                        { label: qsTr("Dash"), page: root.dashboardPage },
+                        { label: qsTr("Live"), page: 2 },
+                        { label: qsTr("Codes"), page: 3 },
+                        { label: qsTr("Recs"), page: root.recordingsPage },
+                        { label: qsTr("Settings"), page: root.settingsPage }
+                    ]
+                    delegate: TabButton {
+                        id: btn
+                        required property var modelData
+                        objectName: "tab_" + modelData.page
+                        text: modelData.label
+                        implicitHeight: Theme.touchTarget
+                        checked: stack.currentIndex === modelData.page
+                        onClicked: root.gotoPage(modelData.page)
+                        contentItem: Label {
+                            text: btn.text
+                            font.pixelSize: Theme.fontBody
+                            font.weight: btn.checked ? Font.DemiBold : Font.Normal
+                            color: btn.checked ? Theme.text : Theme.textDim
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        // The active tab is marked, so selection doesn't rest
+                        // on color alone
+                        background: Rectangle {
+                            color: "transparent"
+                            border.width: btn.visualFocus ? 2 : 0
+                            border.color: Theme.text
+                            Rectangle {
+                                objectName: "tabMark_" + btn.modelData.page
+                                visible: btn.checked
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.top: parent.top
+                                width: 32
+                                height: 3
+                                color: Theme.nightActive ? Theme.text : Theme.primary
+                            }
+                        }
+                    }
+                }
             }
             // With no tab bar (the sidebar's width), the pages keep off
             // the bottom inset

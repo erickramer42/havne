@@ -357,7 +357,7 @@ QtObject {
     readonly property int pageMargin:       dense ? 10 : 16
     readonly property int controlHeight:    dense ? 32 : 36
     readonly property int rowHeight:        dense ? 36 : 44
-    readonly property int toolBarHeight:    dense ? 40 : 48
+    readonly property real toolBarHeight:   mobile || compact ? touchTarget : dense ? 40 : 48
     readonly property int sidebarWidth:     dense ? 150 : 220
     // The fonts: Barlow for text and captions, Barlow Semi Condensed Bold
     // for values at 17 sp and above, both bundled as Qt resources (SIL OFL

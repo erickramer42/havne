@@ -81,11 +81,16 @@ TestCase {
             compare(shown, uri, "label is the URI")
 
         sameColor(find(main.contentItem, "linkPill").tone, tone, "header pill")
-        // With no room for the name (Start log is up) the pill is one word
+        // The state word, short with no room for the name (Start log is
+        // up) or on a phone's form, then the address while connected
         const roomy = find(main.contentItem, "headerTitle").visible
         compare(find(main.contentItem, "linkPillText").text,
-                !roomy ? Theme.linkShortLabel(Bridge.linkState)
-                       : Bridge.connected ? label + " · " + shown : label, "header pill")
+                !roomy || main.isCompact ? Theme.linkShortLabel(Bridge.linkState) : label,
+                "header pill")
+        const address = find(main.contentItem, "linkPillAddress")
+        compare(address.visible, Bridge.connected, "header pill's address")
+        if (Bridge.connected)
+            compare(address.text, "· " + shown, "header pill's address")
 
         const home = showPage(main, "homePage")
         sameColor(find(home, "linkDot").color, tone, "Home dot")

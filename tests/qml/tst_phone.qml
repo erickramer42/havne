@@ -21,6 +21,7 @@ TestCase {
     function cleanup() {
         Relay.stop()
         Theme.developerMode = false
+        Theme.night = "off"
         Theme.zoom = 1.0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -451,7 +452,7 @@ TestCase {
         tryVerify(() => bar.visible, 2000, "the tab bar shows upright")
         const glass = main.contentItem.height
         const floor = glass - data.insets.bottom - 8
-        compare(bar.count, 7, "today's tabs")
+        compare(bar.count, 5, "the five tabs")
         for (let i = 0; i < bar.count; ++i) {
             const tab = bar.itemAt(i)
             const r = onGlass(tab, main)
@@ -517,7 +518,7 @@ TestCase {
         const bar = find(main.contentItem, "tabBar")
         tryVerify(() => bar.visible, 2000, "a phone's tab bar shows")
         const head = find(main.contentItem, "headerBar")
-        compare(head.height - data.insets.top, 40, "the header's own height")
+        compare(head.height - data.insets.top, Theme.touchTarget, "the header's own height")
         compare(bar.height - data.insets.bottom, Theme.touchTarget + Theme.barGap,
                 "the tab row and its gap")
         compare(Theme.touchTarget + Theme.barGap, 56)
@@ -1171,8 +1172,9 @@ TestCase {
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way to Start log on a phone")
         const pillText = find(main.contentItem, "linkPillText")
-        tryCompare(pillText, "text", "Live", 5000, "the pill is a word, not 'Ses...'")
+        tryCompare(pillText, "text", "Live", 5000, "the state is a word, not 'Ses...'")
         verify(!pillText.truncated, "and it fits")
+        compare(find(main.contentItem, "linkPillAddress").text, "· mock://logged")
         let out = pastTheEdge(row, main.contentItem, [])
         compare(out.length, 0, "before the log, past " + main.contentItem.width + " px: "
                                + out.join(", "))
@@ -1221,6 +1223,445 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting && !Bridge.logActive, 5000,
                   "the disconnect ends the log")
         compare(main.currentPage, livePage, "still on Live")
+    }
+
+    // A Main on a phone's form at 384 x 832, laid out, with Android's text
+    function phoneMain() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.testMobile = true
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        verify(waitForPolish(main), "laid out")
+        return main
+    }
+
+    function checkedTabs(bar) {
+        const on = []
+        for (let i = 0; i < bar.count; ++i) {
+            if (bar.itemAt(i).checked)
+                on.push(bar.itemAt(i).text)
+        }
+        return on.join()
+    }
+
+    // The bar lists five pages and each tab marks its own; the phone opens
+    // on Dash. The Log, reached from the status, marks none, and a tap on
+    // the tab that was marked still goes there
+    function test_theTabBarHasFivePagesAndThePhoneOpensOnDash() {
+        const main = phoneMain()
+        const bar = find(main.contentItem, "tabBar")
+        tryVerify(() => bar.visible, 2000, "the tab bar shows")
+        compare(main.currentPage, main.dashboardPage, "a phone opens on Dash")
+        const pages = [main.dashboardPage, 2, 3, main.recordingsPage, main.settingsPage]
+        const names = ["Dash", "Live", "Codes", "Recs", "Settings"]
+        compare(bar.count, names.length)
+        for (let i = names.length - 1; i >= 0; --i) {
+            const tab = bar.itemAt(i)
+            compare(tab.text, names[i])
+            mouseClick(tab)
+            tryCompare(main, "currentPage", pages[i], 2000, names[i] + "'s page")
+            compare(checkedTabs(bar), names[i], "only its own tab is marked")
+            verify(find(tab, "tabMark_" + pages[i]).visible, names[i] + "'s mark")
+        }
+        const pill = find(main.contentItem, "linkPill")
+        mouseClick(pill)
+        tryCompare(main, "currentPage", main.logPage, 2000, "the status opens the Log")
+        compare(checkedTabs(bar), "", "no tab is the Log's")
+        mouseClick(bar.itemAt(0))
+        tryCompare(main, "currentPage", main.dashboardPage, 2000, "the last tab still answers")
+        compare(checkedTabs(bar), "Dash")
+    }
+
+    // The mark is the primary fill in Dark and the text at night, where the
+    // primary is a dim fill
+    function test_theTabMarkIsTheTextAtNight() {
+        const main = phoneMain()
+        const mark = find(find(main.contentItem, "tabBar"), "tabMark_" + main.dashboardPage)
+        verify(Qt.colorEqual(mark.color, Theme.primary), "Dark")
+        Theme.night = "on"
+        verify(Theme.nightActive)
+        verify(Qt.colorEqual(mark.color, Theme.text), "night")
+        verify(!Qt.colorEqual(mark.color, Theme.primary), "not the dim fill")
+    }
+
+    // Every header button is a touch's size on the glass and draws inside
+    // the bar, in each state the header can be in, the address keeping its
+    // width beside them at 100 %
+    function checkHeaderButtons(main, names) {
+        for (const name of names) {
+            const button = find(main.contentItem, name)
+            verify(button.visible, name + " shows")
+            const r = onGlass(button, main)
+            verify(r.height >= 48 - 0.5, name + " is " + r.height + " tall on the glass")
+            verify(r.width >= 48 - 0.5, name + " is " + r.width + " wide on the glass")
+            verify(button.background.height < button.height, name + " draws inside its target")
+        }
+    }
+
+    function test_theHeadersButtonsAreATouchsSize_data() {
+        return [{ tag: "100 %", zoom: 1.0 }, { tag: "67 %", zoom: 0.67 }]
+    }
+
+    function test_theHeadersButtonsAreATouchsSize(data) {
+        const main = phoneMain()
+        Theme.zoom = data.zoom
+        verify(waitForPolish(main), "laid out")
+        checkHeaderButtons(main, ["disconnectButton"])    // Connect...
+
+        compare(Bridge.connectSession("mock://demo"), "", "connects")
+        const start = find(main.contentItem, "startLogButton")
+        tryVerify(() => start.visible && start.enabled, 5000, "Start log")
+        waitForRendering(main.contentItem)
+        checkHeaderButtons(main, ["startLogButton", "disconnectButton"])
+        if (data.zoom === 1.0)
+            verify(!find(main.contentItem, "linkPillAddress").truncated, "the address keeps its width")
+
+        start.clicked()
+        verify(Bridge.logActive, "the log runs")
+        waitForRendering(main.contentItem)
+        checkHeaderButtons(main, ["stopLogButton"])
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+
+        Bridge.recording = true
+        compare(Bridge.connectSession("mock://marked"), "", "a recorded session connects")
+        const mark = find(main.contentItem, "markButton")
+        tryVerify(() => mark.visible, 5000, "Mark")
+        waitForRendering(main.contentItem)
+        checkHeaderButtons(main, ["markButton", "disconnectButton"])
+    }
+
+    // On the phone Settings' list is where the core's version is shown
+    function test_thePhonesSettingsShowTheCoresVersion() {
+        const main = phoneMain()
+        main.gotoPage(main.settingsPage)
+        const label = find(find(main.contentItem, "settingsPage"), "settingsCoreVersion")
+        tryVerify(() => label.visible, 2000, "on Settings' list")
+        compare(label.text, "core " + Bridge.coreVersion)
+        verify(Bridge.coreVersion !== "", "a version to show")
+    }
+
+    // A window narrowed past the sidebar's width leaves Home, which the bar
+    // doesn't list; the sidebar's own pages stay
+    function test_aNarrowedWindowLeavesHomeForDash() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        compare(main.currentPage, 0, "the desktop opens on Home")
+        main.width = 500
+        tryCompare(main, "currentPage", main.dashboardPage, 2000)
+        main.width = 1400
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar again")
+        compare(main.currentPage, main.dashboardPage, "and the page stays")
+    }
+
+    // The status reads the state and the address, the address eliding from
+    // its end and the state word never; with the sidebar it is no button
+    function test_theStatusReadsTheStateAndTheAddress_data() {
+        return [{ tag: "100 %", zoom: 1.0 }, { tag: "67 %", zoom: 0.67 }]
+    }
+
+    function test_theStatusReadsTheStateAndTheAddress(data) {
+        const main = phoneMain()
+        Theme.zoom = data.zoom
+        verify(waitForPolish(main), "laid out")
+        const state = find(main.contentItem, "linkPillText")
+        const address = find(main.contentItem, "linkPillAddress")
+        const pill = find(main.contentItem, "linkPill")
+        const row = find(main.contentItem, "headerRow")
+        compare(state.text, "Offline")
+        verify(!address.visible, "no address without a session")
+        verify(onGlass(pill, main).height >= 48 - 0.5,
+               "a touch's size: " + onGlass(pill, main).height)
+
+        compare(Bridge.connectSession("mock://demo"), "", "connects")
+        tryCompare(state, "text", "Live", 5000)
+        compare(address.text, "· mock://demo")
+        waitForRendering(main.contentItem)
+        verify(address.visible && !address.truncated, "a short address fits")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        const long = "mock://a-long-name-for-an-adapter-that-cannot-fit-beside-the-buttons"
+        compare(Bridge.connectSession(long), "", "the long one connects")
+        tryCompare(state, "text", "Live", 5000)
+        waitForRendering(main.contentItem)
+        verify(address.truncated, "the address elides")
+        verify(!state.truncated && state.width >= state.implicitWidth - 0.5, "the word doesn't")
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "the row fits")
+    }
+
+    function test_theStatusIsNoButtonBesideTheSidebar() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        const pill = find(main.contentItem, "linkPill")
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar shows")
+        verify(!pill.enabled, "the sidebar lists the Log")
+        const before = main.currentPage
+        mouseClick(pill)
+        wait(0)
+        compare(main.currentPage, before, "a tap stays put")
+    }
+
+    // Dash with no session on the phone: the recent addresses, the newest
+    // chosen, and one Connect; the list goes once a session runs
+    function connectListOn(main, uris) {
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        find(main.contentItem, "settingsPage").recentUris = uris
+        tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list loads")
+        const list = findChild(dash, "dashConnectList")
+        verify(waitForPolish(main), "laid out")
+        return list
+    }
+
+    function test_dashsConnectListConnectsTheChosenAddress() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["mock://newest", "elm327://bt:00:11:22:33:44:55",
+                                          "mock://older"])
+        const first = find(list, "connectRow_0")
+        const second = find(list, "connectRow_1")
+        verify(first.checked, "the newest is chosen")
+        verify(find(first, "connectRowMark").visible, "and marked")
+        verify(!find(second, "connectRowMark").visible)
+        compare(find(first, "connectRowAddress").text, "mock://newest")
+        compare(find(first, "connectRowKind").text, "Demo data")
+        compare(find(second, "connectRowAddress").text, "elm327://bt:…:44:55", "the short form")
+        compare(find(list, "connectGo").text, "Connect")
+
+        const third = find(list, "connectRow_2")
+        mouseClick(third)
+        tryVerify(() => third.checked && !first.checked, 2000, "a tap chooses the row")
+        mouseClick(third)
+        wait(0)
+        verify(third.checked, "a second tap keeps it chosen")
+
+        mouseClick(find(list, "connectGo"))
+        tryVerify(() => Bridge.connected, 5000, "the chosen address connects")
+        compare(Bridge.currentUri, "mock://older")
+        compare(JSON.stringify(settings.recentUris), JSON.stringify(
+                    ["mock://older", "mock://newest", "elm327://bt:00:11:22:33:44:55"]),
+                "what connected goes first")
+        compare(find(settings, "uriField").text, "mock://older", "Settings shows it")
+        const dash = find(main.contentItem, "dashboardPage")
+        tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "a session ends the list")
+
+        // The list comes back with what just connected chosen
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list returns")
+        const again = findChild(dash, "dashConnectList")
+        tryVerify(() => findChild(again, "connectRow_0") !== null, 2000, "its rows")
+        verify(find(again, "connectRow_0").checked, "the newest is chosen again")
+        compare(find(find(again, "connectRow_0"), "connectRowAddress").text, "mock://older")
+    }
+
+    // Nothing in the list takes a tap while a session starts or ends
+    function test_theConnectListWaitsWhileASessionStartsOrEnds() {
+        const main = phoneMain()
+        const dash = find(main.contentItem, "dashboardPage")
+        const list = connectListOn(main, ["mock://demo"])
+        const go = find(list, "connectGo")
+        verify(go.enabled, "ready")
+        go.clicked()
+        verify(Bridge.connecting, "the connect is under way")
+        verify(!go.enabled, "Connect waits")
+        verify(!find(list, "connectRow_0").enabled, "a row waits")
+        verify(!find(list, "connectOther").enabled, "Other address waits")
+        compare(go.text, "Connecting…")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+
+        Bridge.disconnectSession()
+        verify(Bridge.disconnecting, "the teardown is under way")
+        const back = findChild(dash, "dashConnectList")
+        verify(back !== null, "the list is back at once")
+        verify(!find(back, "connectGo").enabled, "Connect waits")
+        verify(!find(back, "connectRow_0").enabled, "a row waits")
+        compare(find(back, "connectGo").text, "Disconnecting…")
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => find(back, "connectGo").enabled, 2000, "and it's ready again")
+    }
+
+    // A relay holds the adapter: the list can't connect, as Settings can't
+    function test_aRelayStopsTheListsConnect() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["mock://demo"])
+        const go = find(list, "connectGo")
+        verify(go.enabled)
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        tryVerify(() => !go.enabled, 2000, "no connect while it runs")
+        Relay.stop()
+        tryVerify(() => go.enabled, 2000, "and again after")
+    }
+
+    function test_aRelayLeavesTheLoneConnectToSettings() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        const go = find(list, "connectGo")
+        wait(0)
+        verify(go.enabled, "it only opens Settings")
+    }
+
+    function vehicleWith(label, uri) {
+        const doc = VehicleBook.add(VehicleBook.empty(), label)
+        return uri === "" ? doc : VehicleBook.rememberUri(doc, uri)
+    }
+
+    function rowIs(list, index, uri) {
+        const row = findChild(list, "connectRow_" + index)
+        return row !== null && row.checked && find(row, "connectRowAddress").text === uri
+    }
+
+    // Picking a vehicle fills Settings' field, so the row Dash has chosen
+    // is that vehicle's address, or a connect would save another into it
+    function test_theChosenRowIsThePickedVehiclesAddress() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["elm327://COM1", "elm327://COM2"])
+        verify(rowIs(list, 0, "elm327://COM1"), "no vehicle: the newest")
+
+        settings.vehicles = vehicleWith("Daily driver", "elm327://COM2")
+        tryVerify(() => rowIs(list, 1, "elm327://COM2"), 2000, "its address, not the newest")
+        compare(list.chosen, "elm327://COM2")
+
+        settings.vehicles = vehicleWith("Weekend car", "elm327://COM9")
+        tryVerify(() => rowIs(list, 0, "elm327://COM9"), 2000, "listed first when it isn't recent")
+        tryCompare(list, "chosen", "elm327://COM9")
+        compare(JSON.stringify(settings.recentUris),
+                JSON.stringify(["elm327://COM1", "elm327://COM2"]),
+                "listing it writes nothing to the recent addresses")
+
+        settings.vehicles = vehicleWith("New car", "")
+        tryVerify(() => rowIs(list, 0, "elm327://COM1"), 2000, "none saved: the newest")
+    }
+
+    // A tapped row is a choice, as a typed URI is in Settings, until
+    // another vehicle is picked
+    function test_aTappedRowOutranksTheVehiclesAddress() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["elm327://COM1", "elm327://COM2", "elm327://COM3"])
+        settings.vehicles = vehicleWith("Daily driver", "elm327://COM2")
+        tryVerify(() => rowIs(list, 1, "elm327://COM2"), 2000, "its address")
+        mouseClick(find(list, "connectRow_0"))
+        tryVerify(() => rowIs(list, 0, "elm327://COM1"), 2000, "the tap stands")
+        compare(list.chosen, "elm327://COM1")
+        settings.vehicles = vehicleWith("Weekend car", "elm327://COM2")
+        wait(0)
+        verify(rowIs(list, 0, "elm327://COM1"), "the same address changes nothing")
+        settings.vehicles = vehicleWith("Other car", "elm327://COM3")
+        tryVerify(() => rowIs(list, 2, "elm327://COM3"), 2000, "another vehicle's address replaces the tap")
+    }
+
+    // A list that changed under a tap, as a connect from Settings changes
+    // it, goes back to the newest
+    function test_aNewListDropsTheTappedRow() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["mock://first", "mock://second"])
+        mouseClick(find(list, "connectRow_1"))
+        tryVerify(() => rowIs(list, 1, "mock://second"), 2000, "the tap")
+        settings.recentUris = ["mock://third", "mock://first", "mock://second"]
+        tryVerify(() => rowIs(list, 0, "mock://third"), 2000, "the newest again")
+        compare(list.chosen, "mock://third")
+    }
+
+    function test_aFailedConnectFromTheListSaysWhyAndChangesNothing() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const refused = "mock://demo?profile=no-such-profile"
+        const list = connectListOn(main, [refused, "mock://demo"])
+        const error = find(list, "connectError")
+        verify(!error.visible, "nothing to say yet")
+        mouseClick(find(list, "connectGo"))
+        tryVerify(() => error.visible && error.text !== "", 5000, "the bridge's words")
+        verify(!Bridge.connected)
+        compare(JSON.stringify(settings.recentUris), JSON.stringify([refused, "mock://demo"]),
+                "a failed connect writes nothing")
+        const second = find(list, "connectRow_1")
+        mouseClick(second)
+        tryVerify(() => second.checked, 2000)
+        mouseClick(find(list, "connectGo"))
+        tryVerify(() => Bridge.connected, 5000, "the other connects")
+    }
+
+    function test_otherAddressOpensSettingsConnectField() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["mock://demo"])
+        mouseClick(find(list, "connectOther"))
+        tryCompare(main, "currentPage", main.settingsPage, 2000)
+        tryCompare(settings, "shownKey", "connection", 2000)
+    }
+
+    function test_withNoRecentAddressConnectGoesToSettings() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, [])
+        verify(!find(list, "connectOther").visible, "one way to Settings")
+        verify(findChild(list, "connectRow_0") === null, "no rows")
+        const go = find(list, "connectGo")
+        compare(go.text, "Connect…")
+        mouseClick(go)
+        tryCompare(main, "currentPage", main.settingsPage, 2000)
+        tryCompare(settings, "shownKey", "connection", 2000)
+        verify(!Bridge.connecting && !Bridge.connected, "nothing to connect to")
+    }
+
+    function test_theConnectListGoesInEditModeAndOnTheDesktopForm() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["mock://demo"])
+        const dash = find(main.contentItem, "dashboardPage")
+        verify(list.visible)
+        dash.startEditing()
+        tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "edit mode's own panels")
+        dash.stopEditing()
+        tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "back after Done")
+        dash.form = "desktop"
+        tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "the desktop keeps Home")
+    }
+
+    // Five rows of long addresses fit a phone's width, every target a
+    // touch's size on the glass, and the page scrolls to the gauges
+    function test_theConnectListFitsAPhone_data() {
+        return [{ tag: "384 upright", w: 384, h: 832 }, { tag: "320 upright", w: 320, h: 640 },
+                { tag: "on its side", w: 832, h: 384 }]
+    }
+
+    function test_theConnectListFitsAPhone(data) {
+        const main = phoneMain()
+        main.width = data.w
+        main.height = data.h
+        verify(waitForPolish(main), "laid out")
+        const uris = []
+        for (let i = 0; i < 5; ++i)
+            uris.push("mock://a-long-name-for-an-adapter-that-cannot-fit-in-its-row-" + i)
+        const list = connectListOn(main, uris)
+        tryVerify(() => list.width > 0 && find(list, "connectRow_4").width > 0, 2000)
+        waitForRendering(main.contentItem)
+        const out = pastTheEdge(list, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        const targets = [find(list, "connectGo"), find(list, "connectOther")]
+        for (let i = 0; i < 5; ++i)
+            targets.push(find(list, "connectRow_" + i))
+        for (const t of targets) {
+            const r = onGlass(t, main)
+            verify(r.height >= 48 - 0.5, t.objectName + " is " + r.height + " tall")
+            verify(r.width >= 48 - 0.5, t.objectName + " is " + r.width + " wide")
+        }
+        if (data.w < 500)
+            verify(find(find(list, "connectRow_0"), "connectRowAddress").truncated, "the address elides")
+        const view = find(main.contentItem, "dashPage_0")
+        verify(view.contentHeight > list.height, "the gauges follow the list in the page")
     }
 
     // The readout's time: m:ss, then h:mm:ss past an hour
