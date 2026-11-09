@@ -298,11 +298,13 @@ TestCase {
 
     // ---- The filter and By ID (framefilter.h) ----
 
-    // The frames a mock session puts in the table, held still
+    // The frames a mock session puts in the table, held still. The mock
+    // sends its extended ID every 16th frame and 0x0C0 otherwise, so any
+    // 17 in a row hold both
     function heldFrames(page) {
         find(page, "view_frames").clicked()
         compare(Bridge.connectSession("mock://demo"), "")
-        tryVerify(() => Bridge.model.heldCount >= 40, 10000, "frames arrive")
+        tryVerify(() => Bridge.model.heldCount >= 17, 10000, "frames arrive")
         Bridge.logPaused = true
     }
 
