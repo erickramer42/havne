@@ -25,7 +25,7 @@ GaugeBase {
     property real startAngle: 135       // degrees; 0 = 3 o'clock, clockwise
     property real sweepAngle: 270
     property string caption: ""         // above the hub, e.g. "×1000 r/min"
-    property string peakLabel: qsTr("PEAK")
+    property string peakLabel: qsTr("Peak")
     property bool showProgress: false   // lit arc from `from` to the needle
     property color needleColor: Theme.gaugeNeedle
 
@@ -209,7 +209,7 @@ GaugeBase {
             y: gauge.py(a, gauge.numRadius) - height / 2
             font.pixelSize: gauge.numSize
             font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: gauge.zoneColor(v, Theme.gaugeTick)
         }
     }
@@ -242,7 +242,6 @@ GaugeBase {
         y: gauge.cy - gauge.r * 0.36 - height / 2
         text: gauge.caption
         font.pixelSize: Math.max(10, gauge.size * 0.038)
-        font.letterSpacing: 1
         color: Theme.textDim
     }
     Column {
@@ -260,8 +259,9 @@ GaugeBase {
                 text: gauge.valueText
                 // Sized to clear the end numerals beside it at full scale
                 font.pixelSize: Math.max(16, gauge.size * 0.1)
-                font.weight: Font.DemiBold
-                font.features: ({ "tnum": 1 })
+                font.weight: Font.Bold
+                font.family: Theme.valueFamily
+                font.features: Theme.valueFeatures
                 color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
             }
             // Past dangerFrom, beside the value
@@ -278,7 +278,6 @@ GaugeBase {
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.unit
             font.pixelSize: Math.max(10, gauge.size * 0.036)
-            font.letterSpacing: 1.5
             color: Theme.textDim
         }
         Text {
@@ -289,8 +288,7 @@ GaugeBase {
                    ? "%1 %2".arg(gauge.peakLabel).arg(gauge.format(gauge.peakValue))
                    : ""
             font.pixelSize: Math.max(9, gauge.size * 0.032)
-            font.letterSpacing: 1
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: gauge.hasValue ? Theme.gaugeWarn : Theme.textDim
         }
     }

@@ -387,6 +387,7 @@ Page {
                             spacing: Theme.spacing
                             ThemedButton {
                                 objectName: "clearConfirm"
+                                highlighted: true
                                 text: qsTr("Clear codes")
                                 baseColor: Theme.danger
                                 hoverColor: Qt.lighter(Theme.danger, 1.15)
@@ -498,7 +499,7 @@ Page {
                             wrapMode: Text.Wrap
                             text: inspectionCard.entry.rule
                             color: Theme.textDim
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontCaption
                         }
                     }
                 }
@@ -570,7 +571,7 @@ Page {
                 spacing: Theme.spacing
                 Label {
                     text: qsTr("ECU %1").arg(card.ecu.ecu)
-                    font.pixelSize: 16
+                    font.pixelSize: Theme.fontEmphasis
                     font.weight: Font.DemiBold
                     color: Theme.text
                 }
@@ -631,7 +632,7 @@ Page {
                             text: root.listTitle(listRow.modelData.key) + "  ·  " +
                                   root.listHint(listRow.modelData.key)
                             color: Theme.textDim
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontCaption
                         }
                         Label {
                             objectName: "codes_" + listRow.modelData.key
@@ -641,7 +642,7 @@ Page {
                             // An empty family is a bitmap face on Windows
                             font.family: listRow.modelData.codes.length > 0 ? Theme.monoFamily
                                                                             : root.font.family
-                            font.pixelSize: listRow.modelData.codes.length > 0 ? 16 : 14
+                            font.pixelSize: listRow.modelData.codes.length > 0 ? Theme.fontEmphasis : Theme.fontBody
                             color: listRow.modelData.codes.length > 0 ? Theme.text : Theme.textDim
                         }
                         Label {
@@ -651,7 +652,7 @@ Page {
                             wrapMode: Text.Wrap
                             text: root.titlesText(listRow.modelData)
                             color: Theme.textDim
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.fontCaption
                         }
                     }
                 }
@@ -689,13 +690,13 @@ Page {
                         visible: monitorGrid.cycleShown
                         text: qsTr("This drive")
                         color: Theme.textDim
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                     }
                     Label {
                         visible: monitorGrid.cycleShown
                         text: qsTr("Since clear")
                         color: Theme.textDim
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                     }
                     Repeater {
                         // three cells a monitor: name, this drive, since the clear
@@ -766,7 +767,7 @@ Page {
     component SectionLabel: Label {
         Layout.fillWidth: true
         Layout.topMargin: 4
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         font.weight: Font.DemiBold
         color: Theme.textDim
     }

@@ -157,7 +157,6 @@ Rectangle {
                     y: logo.cy + logo.r * 0.42
                     text: qsTr("RPM")
                     font.pixelSize: 8
-                    font.letterSpacing: 1
                     color: Theme.textDim
                 }
 
@@ -198,7 +197,7 @@ Rectangle {
             // Branding text
             Text {
                 text: qsTr("Havne")
-                font.pixelSize: 32
+                font.pixelSize: Theme.fontHero
                 font.bold: true
                 color: Theme.text
                 Layout.alignment: Qt.AlignHCenter
@@ -206,7 +205,7 @@ Rectangle {
             // description text
             Text {
                 text: qsTr("ECU reader / logger")
-                font.pixelSize: 16
+                font.pixelSize: Theme.fontEmphasis
                 color: Theme.textDim
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -234,13 +233,13 @@ Rectangle {
                         objectName: "linkLabel"
                         text: Theme.linkLabel(Bridge.linkState)
                         color: Theme.textDim
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontCaption
                     }
                     Item { Layout.fillWidth: true }
                     Text {
                         text: qsTr("core %1").arg(Bridge.coreVersion)
                         color: Theme.textDim
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontCaption
                     }
                 }
             }
@@ -263,7 +262,7 @@ Rectangle {
                 text: Theme.developerMode
                       ? qsTr("Choose a J2534 interface or a serial port, or the mock://demo preset, in Settings")
                       : qsTr("Choose a J2534 interface or a serial port in Settings")
-                font.pixelSize: 12
+                font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
                 Layout.alignment: Qt.AlignHCenter
                 // Wraps on a page narrower than the line

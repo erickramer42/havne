@@ -55,6 +55,7 @@ ColumnLayout {
             }
             ThemedButton {
                 objectName: "ownRemove_" + ownRow.index
+                flat: true
                 text: qsTr("Remove")
                 enabled: root.host.idle && root.host.confirming === ""
                 onClicked: root.host.removeOwnSignal(ownRow.modelData.key)

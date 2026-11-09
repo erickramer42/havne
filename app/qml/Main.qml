@@ -38,7 +38,7 @@ ApplicationWindow {
     palette.buttonText: Theme.text
     palette.brightText: Theme.text
     palette.highlight: Theme.primary
-    palette.highlightedText: Theme.text
+    palette.highlightedText: Theme.textOnPrimary
     palette.placeholderText: Theme.textDim
     palette.toolTipBase: Theme.elevatedLight
     palette.toolTipText: Theme.text
@@ -260,7 +260,7 @@ ApplicationWindow {
                         visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
                                  || headerRow.width >= 420
                         text: qsTr("Havne")
-                        font.pixelSize: 16
+                        font.pixelSize: Theme.fontEmphasis
                         font.weight: Font.DemiBold
                         color: Theme.text
                     }
@@ -279,8 +279,8 @@ ApplicationWindow {
                         Layout.maximumWidth: pillRow.implicitWidth + 24
                         Layout.minimumWidth: 32
                         implicitHeight: 28
-                        radius: height / 2
-                        color: Qt.alpha(pill.tone, 0.14)
+                        // A dot and a word, no capsule
+                        color: "transparent"
 
                         RowLayout {
                             id: pillRow
@@ -298,8 +298,8 @@ ApplicationWindow {
                                 objectName: "linkPillText"
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
-                                font.pixelSize: 13
-                                color: pill.tone
+                                font.pixelSize: Theme.fontCaption
+                                color: Theme.text
                                 text: Bridge.connecting ? qsTr("Connecting…")
                                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                                     : !headerTitle.visible ? Theme.linkShortLabel(Bridge.linkState)
@@ -333,6 +333,7 @@ ApplicationWindow {
                     ThemedButton {
                         id: startLogButton
                         objectName: "startLogButton"
+                        highlighted: true
                         visible: Bridge.connected && !Bridge.recordingActive
                                  && !Bridge.currentUri.toLowerCase().startsWith("replay://")
                         enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
@@ -349,11 +350,12 @@ ApplicationWindow {
                         text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
                                                 .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
                         horizontalAlignment: Text.AlignRight
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                         color: Theme.text
                     }
                     ThemedButton {
                         objectName: "stopLogButton"
+                        highlighted: true
                         visible: Bridge.logActive
                         enabled: !Bridge.disconnecting
                         text: qsTr("Stop log")
@@ -366,6 +368,9 @@ ApplicationWindow {
                     // A log's Stop log takes its place while the log runs
                     ThemedButton {
                         objectName: "disconnectButton"
+                        // Ending a session is quiet; Connect... is primary
+                        flat: Bridge.connected || Bridge.disconnecting
+                        highlighted: !flat
                         visible: !Bridge.logActive
                                  && (Bridge.connected || root.currentPage !== root.settingsPage)
                         // A teardown can take seconds with a wedged adapter; no
@@ -492,7 +497,7 @@ ApplicationWindow {
                     contentItem: Label {
                         text: btn.text
                         // 13px keeps "Settings" inside a fifth of a 375pt phone
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontCaption
                         font.weight: btn.checked ? Font.DemiBold : Font.Normal
                         color: btn.checked ? Theme.text : Theme.textDim
                         horizontalAlignment: Text.AlignHCenter
@@ -605,7 +610,7 @@ ApplicationWindow {
             id: frameRateLabel
             anchors.centerIn: parent
             text: qsTr("%1 frames/s").arg(root.framesPerSecond)
-            font.pixelSize: 11
+            font.pixelSize: Theme.fontCaption
             color: Theme.textDim
         }
     }

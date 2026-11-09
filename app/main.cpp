@@ -3,6 +3,8 @@
 //          (compiles it)
 
 #include <QColor>
+#include <QFont>
+#include <QFontDatabase>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlExtensionPlugin>
@@ -80,6 +82,23 @@ int main(int argc, char *argv[])
     // app rather than over a white strip
     // (docs/bench-sessions/2026-10-28-android-2.md)
     QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
+
+    // The text face is Barlow (bundled; Theme loads the same files for its
+    // family names). It is the application's font so every Text, which
+    // takes no family from a window, uses it too; if the Regular file
+    // fails to load the platform's font stays, as in Theme.fontFamily
+    bool barlow = false;
+    for (const char *file : {"Barlow-Regular", "Barlow-Medium", "Barlow-SemiBold", "Barlow-Bold"}) {
+        const QString path = QStringLiteral(":/qt/qml/App/fonts/%1.ttf").arg(QLatin1String(file));
+        const bool loaded = QFontDatabase::addApplicationFont(path) >= 0;
+        if (QLatin1String(file) == QLatin1String("Barlow-Regular"))
+            barlow = loaded;
+    }
+    if (barlow) {
+        QFont font = QGuiApplication::font();
+        font.setFamily(QStringLiteral("Barlow"));
+        QGuiApplication::setFont(font);
+    }
 
     // HAVNE_SETTINGS_DIR keeps this instance's preferences in an ini file
     // there instead of the user's (the registry on Windows), so a scripted

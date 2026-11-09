@@ -49,6 +49,10 @@ TestCase {
     function cleanup() {
         Theme.compact = false
         Theme.dense = false
+        Theme.night = "off"
+        Theme.nightStyle = "amber"
+        Theme.nightFrom = "19:00"
+        Theme.nightUntil = "07:00"
         Bridge.unitSystem = 0
         Bridge.recording = false
         tryVerify(() => !Bridge.connecting, 10000, "a connect in flight ends")
@@ -172,7 +176,7 @@ TestCase {
               parts: ["pluginsNone"] },
             { tag: "recording", title: "Recording", summary: "off",
               parts: ["recordBox", "recordStatus"] },
-            { tag: "display", title: "Display", summary: "100 % · metric",
+            { tag: "display", title: "Display", summary: "100 % · metric · Night off",
               parts: ["units_metric"] },
             { tag: "advanced", title: "Advanced", summary: "off", parts: ["developerBox"] },
         ]
@@ -522,32 +526,107 @@ TestCase {
         compare(uri.text, "elm327://192.168.0.10:35000?profile=raw")
     }
 
-    // The Display page's theme buttons set Theme.theme at once and the
-    // chosen one is highlighted (Theme.qml stores it: tst_phone's case)
-    function test_theThemeButtonsSetTheTheme() {
+    // The Display page's Night buttons set Theme.night at once and the
+    // chosen one is chosen (Theme.qml stores it: tst_theme's case)
+    function test_theNightButtonsSetNight() {
         const page = createPage()
         page.open("display")
-        for (const name of ["night", "lowGlare", "dark"]) {
-            const b = find(page, "theme_" + name)
+        for (const name of ["on", "schedule", "off"]) {
+            const b = find(page, "night_" + name)
             verify(b.visible, name + " is offered")
             b.clicked()
-            compare(Theme.theme, name)
-            verify(b.highlighted, name + " is highlighted")
-            for (const other of Theme.themeNames.filter(n => n !== name))
-                verify(!find(page, "theme_" + other).highlighted, other + " is not")
+            compare(Theme.night, name)
+            verify(b.checked, name + " is chosen")
+            for (const other of Theme.nightModes.filter(n => n !== name))
+                verify(!find(page, "night_" + other).checked, other + " is not")
         }
-        compare(find(page, "theme_lowGlare").text, "Low glare")
+        compare(find(page, "night_off").text, "Off")
+        compare(find(page, "night_on").text, "On")
+        compare(find(page, "night_schedule").text, "Scheduled")
     }
 
-    // An unknown stored name reads as dark, and the buttons agree
-    function test_anUnknownThemeNameHighlightsDark() {
+    // The style is chosen with Night off too, and shows when Night is on
+    function test_theNightStyleButtonsSetTheStyle() {
         const page = createPage()
         page.open("display")
-        Theme.theme = "nonsense"
-        verify(find(page, "theme_dark").highlighted, "dark is shown as the theme in use")
-        verify(!find(page, "theme_night").highlighted)
-        verify(!find(page, "theme_lowGlare").highlighted)
-        Theme.theme = "dark"
+        compare(Theme.night, "off")
+        for (const name of ["red", "amber"]) {
+            const b = find(page, "nightStyle_" + name)
+            verify(b.visible && b.enabled, name + " is offered")
+            b.clicked()
+            compare(Theme.nightStyle, name)
+            verify(b.checked, name + " is chosen")
+            verify(!find(page, "nightStyle_" + (name === "red" ? "amber" : "red")).checked)
+        }
+        compare(find(page, "nightStyle_amber").text, "Amber")
+        compare(find(page, "nightStyle_red").text, "Red")
+        find(page, "night_on").clicked()
+        find(page, "nightStyle_red").clicked()
+        compare(Theme.active, "nightRed")
+    }
+
+    // A stored mode or style outside the lists reads as the default, and
+    // the buttons agree
+    function test_anUnknownNightValueHighlightsTheDefault() {
+        const page = createPage()
+        page.open("display")
+        Theme.night = "nonsense"
+        Theme.nightStyle = "nonsense"
+        verify(find(page, "night_off").checked, "off is shown as the mode in use")
+        verify(!find(page, "night_on").checked)
+        verify(!find(page, "night_schedule").checked)
+        verify(find(page, "nightStyle_amber").checked)
+        verify(!find(page, "nightStyle_red").checked)
+    }
+
+    // From and Until show under Scheduled and nowhere else; a valid time is
+    // stored, a bad one or an equal pair refused with the words
+    function test_theScheduleFieldsStoreATimeAndRefuseABadOne() {
+        const page = createPage()
+        page.open("display")
+        const sched = find(page, "nightSchedule")
+        compare(sched.visible, false, "hidden while Night is off")
+        find(page, "night_schedule").clicked()
+        compare(sched.visible, true, "shown under Scheduled")
+        const from = find(page, "nightFrom"), until = find(page, "nightUntil")
+        const problem = find(page, "nightProblem")
+        compare(from.text, "19:00")
+        compare(until.text, "07:00")
+        compare(problem.visible, false)
+        from.text = "20:30"
+        from.editingFinished()
+        compare(Theme.nightFrom, "20:30", "a valid time is stored")
+        compare(problem.visible, false)
+        until.text = "25:00"
+        until.editingFinished()
+        compare(Theme.nightUntil, "07:00", "a bad time is refused")
+        compare(problem.text, "Not a time")
+        verify(problem.visible)
+        until.text = "20:30"
+        until.editingFinished()
+        compare(Theme.nightUntil, "07:00", "an equal pair is refused")
+        compare(problem.text, "From and Until are the same time")
+        until.text = "06:15"
+        until.editingFinished()
+        compare(Theme.nightUntil, "06:15")
+        compare(problem.visible, false, "the words go with a good time")
+        compare(find(page, "nightWords").text, "Scheduled 20:30 to 06:15")
+        find(page, "night_off").clicked()
+        compare(sched.visible, false, "hidden again")
+    }
+
+    // The list's row says the night state
+    function test_theDisplayRowSaysTheNightState() {
+        const page = createPage()
+        const summary = () => page.pageList.find(p => p.key === "display").summary
+        compare(summary(), "100 % · metric · Night off")
+        Theme.night = "on"
+        Theme.nightStyle = "red"
+        compare(summary(), "100 % · metric · Night on, red")
+        Theme.nightStyle = "amber"
+        compare(summary(), "100 % · metric · Night on, amber")
+        Theme.night = "schedule"
+        compare(summary(), "100 % · metric · Night scheduled 19:00 to 07:00")
     }
 
     // A preset or row of another scheme keeps the query's keys that
@@ -560,7 +639,7 @@ TestCase {
         type(uri, "replay://C:/rec/x?profile=mock&speed=10&loop=1")
         press(page, "preset_wifi_obdx")
         compare(uri.text, "elm327://192.168.4.1:23", "a replay's keys and the mock profile go")
-        verify(find(page, "profile_default").highlighted)
+        verify(find(page, "profile_default").checked)
 
         type(uri, "replay://C:/rec/x?profile=uds-generic&did=1E1C:u16&speed=max")
         press(page, "preset_j2534")
@@ -587,16 +666,16 @@ TestCase {
         const metric = find(page, "units_metric")
         const imperial = find(page, "units_imperial")
         compare(Bridge.unitSystem, 0)
-        verify(metric.highlighted && !imperial.highlighted)
+        verify(metric.checked && !imperial.checked)
         press(page, "units_imperial")
         compare(Bridge.unitSystem, 1)
-        verify(imperial.highlighted && !metric.highlighted)
+        verify(imperial.checked && !metric.checked)
 
         compare(Bridge.connectSession("mock://demo"), "", "connects")
         verify(metric.enabled, "units change while connected")
         press(page, "units_metric")
         compare(Bridge.unitSystem, 0)
-        verify(metric.highlighted)
+        verify(metric.checked)
     }
 
     function test_presetsProfilesAndDidsComposeTheUri() {
@@ -857,7 +936,7 @@ TestCase {
         page.pickRecording(row.uri)
         verify(uri.text.startsWith("replay://")
                && uri.text.endsWith("?profile=uds-generic&did=F190:text"), uri.text)
-        verify(find(page, "profile_uds-generic").highlighted, "the row reads its profile back")
+        verify(find(page, "profile_uds-generic").checked, "the row reads its profile back")
         compare(find(page, "didField").text, "F190:text")
 
         Bridge.recording = false
@@ -885,8 +964,8 @@ TestCase {
         type(uri, "mock://demo?profile=uds-generic&did=1E1C:u16")
         compare(uri.text, "mock://demo?profile=uds-generic&did=1E1C:u16", "left as typed")
         compare(page.profileChoice, "uds-generic")
-        verify(find(page, "profile_uds-generic").highlighted)
-        verify(!find(page, "profile_default").highlighted)
+        verify(find(page, "profile_uds-generic").checked)
+        verify(!find(page, "profile_default").checked)
         verify(didRow.visible)
         compare(did.text, "1E1C:u16")
         verify(hint.text.indexOf("Service 0x22") >= 0, "the hint is uds-generic's: " + hint.text)
@@ -898,7 +977,7 @@ TestCase {
 
         type(uri, "j2534://Vendor?profile=raw&filter=0x7E9")
         compare(page.profileChoice, "raw")
-        verify(find(page, "profile_raw").highlighted)
+        verify(find(page, "profile_raw").checked)
         verify(!didRow.visible)
         compare(uri.text, "j2534://Vendor?profile=raw&filter=0x7E9", "left as typed")
         press(page, "profile_default")
@@ -907,12 +986,12 @@ TestCase {
         // A profile the row doesn't offer: no button lit, the hint says so
         type(uri, "j2534://Vendor?profile=obd2")
         compare(page.profileChoice, "obd2")
-        verify(!find(page, "profile_default").highlighted)
-        verify(!find(page, "profile_raw").highlighted)
+        verify(!find(page, "profile_default").checked)
+        verify(!find(page, "profile_raw").checked)
         verify(hint.text.indexOf("obd2") >= 0, "the hint names it: " + hint.text)
         type(uri, "j2534://Vendor")
         compare(page.profileChoice, "default")
-        verify(find(page, "profile_default").highlighted)
+        verify(find(page, "profile_default").checked)
     }
 
     // A DID edit changes did= only; keys typed by hand stay where they were
@@ -1065,7 +1144,7 @@ TestCase {
         page = createPage()
         compare(find(page, "uriField").text, "mock://demo?profile=raw",
                 "the URI that connected, not the refused one")
-        verify(find(page, "profile_raw").highlighted, "read back into the row")
+        verify(find(page, "profile_raw").checked, "read back into the row")
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
     }
@@ -1178,14 +1257,14 @@ TestCase {
         let page = createPage()
         page.open("vehicle")
         const field = find(page, "vehicleLabelField")
-        verify(find(page, "vehicle_none").highlighted, "no vehicle to start")
+        verify(find(page, "vehicle_none").checked, "no vehicle to start")
         verify(!find(page, "vehicleDuplicate").enabled, "nothing to copy")
         compare(find(page, "vehicleLabelHint").text, "Left empty, New makes “Vehicle 1”")
 
         press(page, "vehicleNew")
         compare(labels(page), ["Vehicle 1"], "the default, with the field empty")
         compare(Bridge.vehicleLabel, "Vehicle 1", "the recording's label follows the pick")
-        verify(find(page, "vehicle_v1").highlighted)
+        verify(find(page, "vehicle_v1").checked)
 
         field.text = "Daily driver"
         press(page, "vehicleRename")
@@ -1222,7 +1301,7 @@ TestCase {
         press(page, "vehicleForget")
         press(page, "vehicleConfirm")
         compare(labels(page), ["Daily driver (copy)"])
-        verify(find(page, "vehicle_none").highlighted)
+        verify(find(page, "vehicle_none").checked)
 
         // The store writes as it changes, and a new page (a restart) reads it
         page.destroy()
@@ -1598,7 +1677,7 @@ TestCase {
                 "Plus: obd2 and 1 of your own, profile user.plus")
         const plus = find(page, "profile_user.plus")
         compare(plus.text, "obd2 + Plus")
-        verify(plus.highlighted)
+        verify(plus.checked)
         compare(page.profiles.filter(p => p.name === "user.plus").length, 1,
                 "one button for the file: the stand-in")
         tryVerify(() => findChild(page, "profile_default") === null, 1000,
@@ -1608,8 +1687,8 @@ TestCase {
 
         // Typed back to Default, both show, so the row is the URI's
         field.text = "elm327://COM9"
-        verify(find(page, "profile_default").highlighted)
-        verify(!find(page, "profile_user.plus").highlighted)
+        verify(find(page, "profile_default").checked)
+        verify(!find(page, "profile_user.plus").checked)
 
         // A second such file keeps its own button; Default stays read
         verify(importExtending(page, "more.json", "More"))
@@ -1675,10 +1754,10 @@ TestCase {
         press(page, "pluginMatch_1")
         compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
         compare(field.text, "mock://demo?profile=plugin.example-sim.my2019")
-        verify(find(page, "pluginMatch_1").highlighted)
+        verify(find(page, "pluginMatch_1").checked)
         const choice = find(page, "profile_plugin.example-sim.my2019")
         compare(choice.text, "Example: the simulated car: my2019")
-        verify(choice.highlighted)
+        verify(choice.checked)
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
         compare(find(page, "errorLabel").text, "")
@@ -2112,7 +2191,7 @@ TestCase {
         find(page, "uriField").text = "mock://demo"
         tap(find(page, "vehicle_v1"))
         compare(find(page, "uriField").text, "elm327://COM6?profile=uds-generic&did=F190")
-        verify(find(page, "profile_uds-generic").highlighted, "read back into the row")
+        verify(find(page, "profile_uds-generic").checked, "read back into the row")
         compare(find(page, "didField").text, "F190")
     }
 

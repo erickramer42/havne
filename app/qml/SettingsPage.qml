@@ -833,7 +833,8 @@ Pane {
           summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off") },
         { key: "display", title: qsTr("Display"),
           summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
-                   + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric")) },
+                   + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric"))
+                   + " · " + Theme.nightSummary() },
         { key: "advanced", title: qsTr("Advanced"),
           summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
     ]

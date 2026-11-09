@@ -1060,7 +1060,7 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     text: qsTr("Guessed from its first line")
                 }
             }
@@ -1138,7 +1138,7 @@ Page {
                 visible: root.importKind === RecordingImport.Candump && root.importAsksInterface
                 Layout.fillWidth: true
                 spacing: Theme.spacing
-                Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: 13 }
+                Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
                 TextField {
                     id: importInterface
                     objectName: "importInterface"
@@ -1342,6 +1342,8 @@ Page {
             }
             Label {
                 objectName: "openedTitle"
+                // On a phone the name takes a line of its own below
+                visible: !Theme.compact
                 text: root.openedTitle
                 color: Theme.text
                 elide: Text.ElideRight
@@ -1359,6 +1361,16 @@ Page {
                 Accessible.name: qsTr("Put the part in view in Settings, to replay it as a session")
                 onClicked: root.replayRequested(root.stretchUri())
             }
+        }
+
+        Label {
+            objectName: "openedTitleCompact"
+            visible: Theme.compact && root.viewing && !root.chartMaximized
+            text: root.openedTitle
+            color: Theme.text
+            // The folder's date is at the end
+            elide: Text.ElideMiddle
+            Layout.fillWidth: true
         }
 
         RowLayout {
@@ -1631,7 +1643,8 @@ Page {
                     text: viewFrames.frames.filterTerms > 0
                           ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
                           : qsTr("Filter")
-                    highlighted: root.framesFilterOpen
+                    checkable: true
+                    checked: root.framesFilterOpen
                     onClicked: root.framesFilterOpen = !root.framesFilterOpen
                 }
             }
@@ -1650,7 +1663,7 @@ Page {
                 Layout.preferredWidth: 0
                 wrapMode: Text.WordWrap
                 color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: viewFrames.error !== "" ? viewFrames.error
                       : viewFrames.loading ? qsTr("Reading the frames…")
                       : viewFrames.note !== "" ? viewFrames.note
@@ -1791,7 +1804,8 @@ Page {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
-            text: qsTr("Showing %1 of %2 signals · plotting %3")
+            text: (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
+                                 : qsTr("Showing %1 of %2 signals · plotting %3"))
                   .arg(root.shownSignals.length).arg(recording.signalList.length)
                   .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
         }
@@ -1840,7 +1854,8 @@ Page {
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
                 color: Theme.textDim
-                text: !root.hasCursor ? qsTr("Tap the chart to read the values at a time")
+                text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
+                                                       : qsTr("Tap the chart for values"))
                                       : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
             }
             ThemedButton {
@@ -2066,7 +2081,7 @@ Page {
                         width: parent.width - 12
                         text: stripRow.modelData.name
                         color: Theme.textDim
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                     }
                     Label {

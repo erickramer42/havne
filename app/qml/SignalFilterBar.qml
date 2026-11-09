@@ -33,7 +33,9 @@ RowLayout {
         objectName: "filterText"
         Layout.fillWidth: true
         Layout.minimumWidth: 80
-        placeholderText: qsTr("Find a signal")
+        // The short word on a phone, where the field is squeezed between the
+        // title and Filter; Accessible.name keeps the whole phrase
+        placeholderText: Theme.compact ? qsTr("Find") : qsTr("Find a signal")
         text: bar.filter.text
         onTextEdited: bar.filter.text = text
         Accessible.name: qsTr("Find a signal by its name or unit")
@@ -45,7 +47,8 @@ RowLayout {
         visible: bar.filterButtonShown
         text: qsTr("Filter")
         // Lit while the popup's choices narrow the list
-        highlighted: bar.filter.plottedOnly || bar.filter.groups.length > 0
+        checkable: true
+        checked: bar.filter.plottedOnly || bar.filter.groups.length > 0
         onClicked: options.opened ? options.close() : options.open()
         Accessible.name: qsTr("Filter the signals")
 

@@ -25,7 +25,8 @@ ColumnLayout {
             objectName: "settingsRow_" + modelData.key
             Layout.fillWidth: true
             Layout.preferredHeight: Theme.touchTarget
-            highlighted: list.current === modelData.key
+            checkable: true
+            checked: list.current === modelData.key
             Accessible.name: modelData.title
             onClicked: list.chosen(modelData.key)
             contentItem: RowLayout {
@@ -33,7 +34,7 @@ ColumnLayout {
                 Label {
                     text: row.modelData.title
                     color: Theme.text
-                    font.pixelSize: 16
+                    font.pixelSize: Theme.fontEmphasis
                     font.weight: Font.DemiBold
                 }
                 Label {

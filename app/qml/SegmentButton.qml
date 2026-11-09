@@ -27,7 +27,7 @@ AbstractButton {
     contentItem: Text {
         id: segLabel
         text: seg.text
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         color: seg.selected ? Theme.text : Theme.textDim
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

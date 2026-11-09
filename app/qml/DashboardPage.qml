@@ -554,7 +554,7 @@ Page {
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
         readonly property string caption: opt("caption", unit)
-        readonly property string peakLabel: opt("peakLabel", qsTr("PEAK"))
+        readonly property string peakLabel: opt("peakLabel", qsTr("Peak"))
         readonly property bool showPeak: opt("peak", false)
         // The new kinds' own options (ADR-0057 section 1): the cells' count
         // and curve, the digits, the sparkline's window, the bar standing up
@@ -671,7 +671,7 @@ Page {
             wrapMode: Text.WordWrap
             text: qsTr("a gauge this version of Havne doesn't have")
             color: Theme.textDim
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontCaption
         }
     }
 
@@ -711,7 +711,7 @@ Page {
 
     component Caption: Label {
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
     }
 
     Component {
@@ -740,7 +740,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         text: (root.kindNames[panelCard.kind] ?? panelCard.kind) + ": "
@@ -1049,7 +1049,7 @@ Page {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         text: qsTr("Add a gauge: its kind")
@@ -1150,7 +1150,7 @@ Page {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         elide: Text.ElideRight
@@ -1209,7 +1209,8 @@ Page {
     Component { id: readoutKind; SegmentReadout {} }
     Component { id: sparkKind; SparkGauge {} }
 
-    // The link's dot and words
+    // The link's dot and words, and the Night switch at their end (ADR-0058
+    // section 6: a status with a tap), wherever the state is shown
     Component {
         id: linkState
         RowLayout {
@@ -1230,9 +1231,10 @@ Page {
                 text: Bridge.linkState === "ok"
                       ? qsTr("Live · %1").arg(Bridge.uriLabel)
                       : Theme.linkLabel(Bridge.linkState)
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)
             }
+            NightSwitch {}
         }
     }
 
@@ -1277,6 +1279,7 @@ Page {
             }
             ThemedButton {
                 objectName: "resetPeaks"
+                flat: true
                 compact: root.compact
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
@@ -1318,7 +1321,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.text
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: Bridge.logNotice
             }
             ThemedButton {
@@ -1355,7 +1358,8 @@ Page {
             ThemedButton {
                 objectName: "dashMore"
                 compact: root.form === "phone"
-                highlighted: root.moreShown
+                checkable: true
+                checked: root.moreShown
                 text: qsTr("Pages")
                 onClicked: {
                     root.moreShown = !root.moreShown
@@ -1430,7 +1434,7 @@ Page {
                 Layout.minimumWidth: 0
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: qsTr("Remove the page \"%1\" and its gauges?")
                       .arg(root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : "")
             }
@@ -1458,7 +1462,7 @@ Page {
                 Layout.minimumWidth: 0
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: qsTr("Replace this form's pages with the built-in layout?")
             }
             ThemedButton {
@@ -1486,7 +1490,8 @@ Page {
                     required property int index
                     objectName: "dashPageButton_" + index
                     compact: true
-                    highlighted: index === root.pageIndex
+                    checkable: true
+                    checked: index === root.pageIndex
                     text: root.pages[index] && root.pages[index].name
                           ? root.pages[index].name : qsTr("Page %1").arg(index + 1)
                     onClicked: root.goTo(index)
@@ -1504,7 +1509,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: root.problem === "newer"
                       ? qsTr("The saved dashboard was made by a newer version of Havne. "
                              + "This shows the built-in one; the saved one is kept.")
@@ -1656,7 +1661,7 @@ Page {
                         width: box ? pageView.columnWidth : 0
                         height: box ? Math.max(Theme.touchTarget, box.h * pageView.pitch - root.gap) : 0
                         text: "+"
-                        font.pixelSize: 28
+                        font.pixelSize: Theme.fontHero
                         Accessible.name: qsTr("Add a gauge")
                         onClicked: root.startAdd()
                     }

@@ -27,7 +27,7 @@ RowLayout {
                                                  : Number.POSITIVE_INFINITY
         elide: header.titleShrinks ? Text.ElideRight : Text.ElideNone
         text: header.title
-        font.pixelSize: 20
+        font.pixelSize: Theme.fontTitle
         font.weight: Font.DemiBold
         color: Theme.text
     }

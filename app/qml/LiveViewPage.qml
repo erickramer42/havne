@@ -100,9 +100,14 @@ Page {
         // how many, since the rows can't
         const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
         if (Bridge.liveSignalModel.filter.active)
-            return qsTr("Showing %1 of %2 signals · plotting %3")
+            return (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
+                                  : qsTr("Showing %1 of %2 signals · plotting %3"))
                        .arg(signalList.count).arg(Bridge.liveSignalModel.shownCount)
                        .arg(Bridge.signalModel.subscribedCount) + unnamed
+        // The 10 Hz clause is a desktop fact; a phone's line keeps the count
+        if (Theme.compact)
+            return qsTr("%1 of %2 plotted")
+                       .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
         return qsTr("Plotting %1 of %2 signals · values update at 10 Hz")
                    .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
     }
@@ -139,6 +144,8 @@ Page {
         PageHeader {
             visible: !root.chartMaximized
             title: qsTr("Live signals")
+            // On a phone the title gives way first, so the field keeps its words
+            titleShrinks: Theme.compact
 
             // Finding a signal among many (ADR-0050): the list's own
             // filter, in the title's row so a short page loses no height
@@ -168,7 +175,7 @@ Page {
                 anchors.centerIn: parent
                 text: root.bannerText(Bridge.linkState, Bridge.errorEpisodes, Bridge.linkErrorCode)
                 color: Theme.linkColor(Bridge.linkState)
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
             }
         }
 
@@ -347,7 +354,7 @@ Page {
                         Layout.maximumWidth: Math.round(signalDelegate.width * 0.6)
                         elide: Text.ElideRight
                         color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
-                        font.pixelSize: 16
+                        font.pixelSize: Theme.fontEmphasis
                         font.family: Theme.monoFamily   // fixed-width digits, no jitter
                         opacity: signalDelegate.hasValue
                                  && signalDelegate.ageMs > root.staleMs
@@ -397,7 +404,8 @@ Page {
                     horizontalPadding: Theme.dense ? 4 : 8
                     objectName: "chartWindow_" + modelData
                     text: qsTr("%1 s").arg(modelData)
-                    highlighted: root.chartWindowS === modelData
+                    checkable: true
+                    checked: root.chartWindowS === modelData
                     Accessible.name: qsTr("Show the last %1 seconds").arg(modelData)
                     onClicked: liveSettings.chartWindowS = modelData
                 }

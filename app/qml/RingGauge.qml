@@ -130,7 +130,7 @@ GaugeBase {
         x: gauge.px(gauge.startAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.startAngle, gauge.rr) + gauge.ringWidth * 0.75
         font.pixelSize: Math.max(9, gauge.rr * 0.14)
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
         color: Theme.textDim
     }
     Text {
@@ -138,7 +138,7 @@ GaugeBase {
         x: gauge.px(gauge.endAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.endAngle, gauge.rr) + gauge.ringWidth * 0.75
         font.pixelSize: Math.max(9, gauge.rr * 0.14)
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
         color: Theme.textDim
     }
 
@@ -155,8 +155,9 @@ GaugeBase {
                 objectName: "readout"
                 text: gauge.valueText
                 font.pixelSize: Math.max(16, gauge.rr * 0.5)
-                font.weight: Font.DemiBold
-                font.features: ({ "tnum": 1 })
+                font.weight: Font.Bold
+                font.family: Theme.valueFamily
+                font.features: Theme.valueFeatures
                 color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
             }
             // Past dangerFrom, beside the value
@@ -181,8 +182,6 @@ GaugeBase {
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.label
             font.pixelSize: Math.max(9, gauge.rr * 0.13)
-            font.letterSpacing: 1.5
-            font.capitalization: Font.AllUppercase
             color: Theme.textDim
         }
         Text {

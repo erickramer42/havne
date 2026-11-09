@@ -1048,3 +1048,12 @@ a kind, this is the present state; the earlier text is kept as written.
   color is the theme's red or orange, so a danger is told by more than
   hue: a mark beside the readout and a heavier zone stroke, in every
   theme.
+
+## Appendix: section 9 amended (2026-11-08)
+
+Amended 2026-11-08: the themes section's "low-glare and night themes" are
+the night styles of [ADR-0058](0058-night-mode.md): Night is a mode (off,
+on, or on a schedule) beside the look, and its style is amber or red. The
+palettes are `dark`, `nightAmber` and `nightRed`, and in the two night
+palettes `gaugeReadout` is the text color and no chart trace is brighter
+than the text. The gauge roles of section 9 are unchanged.

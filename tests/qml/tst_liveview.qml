@@ -8,6 +8,13 @@ import AppTest
 TestCase {
     id: testCase
     name: "LiveView"
+
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
     when: windowShown
 
     Component {
@@ -60,13 +67,13 @@ TestCase {
         verify(chart, "the chart is there")
         tryVerify(() => chart.available, 2000, "the canvas is ready")
         const spy = createTemporaryObject(spyComponent, testCase, { target: chart })
-        Theme.theme = "night"
+        usePalette("nightRed")
         spy.wait(2000)
         verify(spy.count >= 1, "painted again for the night theme")
         const before = spy.count
-        Theme.theme = "lowGlare"
+        usePalette("nightAmber")
         tryVerify(() => spy.count > before, 2000, "and again for low glare")
-        Theme.theme = "dark"
+        usePalette("dark")
     }
 
     Component {
@@ -129,7 +136,7 @@ TestCase {
         tryCompare(list, "count", 1)
         tryVerify(() => list.itemAtIndex(0) !== null && list.itemAtIndex(0).name === "Intake Air Temp",
                   2000, "the row left is the intake air's")
-        verify(findChild(bar, "filterButton").highlighted, "a group chosen lights the button")
+        verify(findChild(bar, "filterButton").checked, "a group chosen checks the button")
 
         findChild(boxes, "filterClear").clicked()
         tryCompare(list, "count", all)
@@ -145,6 +152,32 @@ TestCase {
         verify(page.statusText().indexOf("Showing " + (all - 1) + " of " + all) === 0,
                page.statusText())
         Bridge.signalModel.toggleSubscribed(0)
+    }
+
+    // On a phone the field says "Find" and the status line drops the 10 Hz
+    // clause, since the long forms are cut at 384 dp; the field's
+    // accessible name keeps the whole phrase
+    function test_aPhoneGetsTheShortStrings() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        const all = list.count
+        const bar = findChild(page, "liveFilter")
+        const field = findChild(bar, "filterText")
+        compare(field.placeholderText, "Find a signal")
+        verify(page.statusText().indexOf("Plotting " + all + " of " + all + " signals") === 0,
+               page.statusText())
+        Theme.compact = true
+        try {
+            compare(field.placeholderText, "Find")
+            compare(field.Accessible.name, "Find a signal by its name or unit")
+            compare(page.statusText(), all + " of " + all + " plotted")
+            field.insert(0, "temp")
+            field.textEdited()
+            tryCompare(list, "count", 3)
+            compare(page.statusText(), "3 of " + all + " shown · " + all + " plotted")
+        } finally {
+            Theme.compact = false
+        }
     }
 
     // On a short page (a small window, a large zoom) the list gives up
@@ -211,7 +244,7 @@ TestCase {
     }
 
     // The chart's window: four choices, 30 s at first, the picked one
-    // highlighted and kept by the page
+    // checked and kept by the page
     function test_theWindowIsPickedAboveTheChart() {
         const page = createTemporaryObject(pageComponent, testCase)
         verify(page)
@@ -220,8 +253,8 @@ TestCase {
             verify(findChild(page, "chartWindow_" + s), "a button for " + s + " s")
         findChild(page, "chartWindow_60").clicked()
         compare(page.chartWindowS, 60)
-        verify(findChild(page, "chartWindow_60").highlighted)
-        verify(!findChild(page, "chartWindow_10").highlighted)
+        verify(findChild(page, "chartWindow_60").checked)
+        verify(!findChild(page, "chartWindow_10").checked)
         findChild(page, "chartWindow_" + before).clicked()
         compare(page.chartWindowS, before, "put back as it was")
     }

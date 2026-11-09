@@ -74,7 +74,8 @@ ColumnLayout {
                 required property var modelData
                 objectName: "formService_" + modelData.name
                 text: modelData.label
-                highlighted: root.host.formService === modelData.name
+                checkable: true
+                checked: root.host.formService === modelData.name
                 onClicked: root.host.formService = modelData.name
             }
         }
@@ -99,7 +100,8 @@ ColumnLayout {
                 required property string modelData
                 objectName: "formKind_" + modelData
                 text: modelData
-                highlighted: root.host.formKind === modelData
+                checkable: true
+                checked: root.host.formKind === modelData
                 onClicked: root.host.formKind = modelData
             }
         }
@@ -155,7 +157,8 @@ ColumnLayout {
                 required property string modelData
                 objectName: "formOrder_" + modelData
                 text: modelData
-                highlighted: root.host.formOrder === modelData
+                checkable: true
+                checked: root.host.formOrder === modelData
                 onClicked: root.host.formOrder = modelData
             }
         }
@@ -225,7 +228,8 @@ ColumnLayout {
                 required property string modelData
                 objectName: "formGroup_" + (modelData === "" ? "other" : modelData)
                 text: modelData === "" ? qsTr("other") : modelData
-                highlighted: root.host.formGroup === modelData
+                checkable: true
+                checked: root.host.formGroup === modelData
                 onClicked: root.host.formGroup = modelData
             }
         }
@@ -256,6 +260,7 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "formClear"
+            flat: true
             text: qsTr("Clear")
             onClicked: root.host.clearForm()
         }

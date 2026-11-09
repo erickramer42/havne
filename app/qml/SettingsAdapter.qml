@@ -277,7 +277,7 @@ ColumnLayout {
                         id: nameText
                         width: parent.width
                         text: preset.text
-                        font.pixelSize: 14
+                        font.pixelSize: Theme.fontBody
                         color: Theme.text
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter
@@ -288,7 +288,7 @@ ColumnLayout {
                         width: parent.width
                         visible: preset.modelData.hint !== ""
                         text: preset.modelData.hint
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontCaption
                         color: Theme.textDim
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter

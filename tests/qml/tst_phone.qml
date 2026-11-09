@@ -650,6 +650,9 @@ TestCase {
         page.chartHeight = 300
         const chartSplitter = find(page, "chartSplitter")
         tryVerify(() => chartSplitter.visible, 2000, "the viewer's splitter shows")
+        // The name's own line on a phone pushes the splitter down: scroll to it
+        const scroll = find(page, "recordingsScroll")
+        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
         verify(waitForPolish(main), "laid out")
         tap(chartSplitter, chartSplitter.width / 2 - 15, chartSplitter.height / 2)
         tap(chartSplitter, chartSplitter.width / 2 + 15, chartSplitter.height / 2)
@@ -830,9 +833,32 @@ TestCase {
                   "below the title row: " + words.mapToItem(header, 0, 0).y + " in " + header.height)
         compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
         compare(words.truncated, false, "whole at 384 px")
-        verify(line.height <= words.implicitHeight + 0.5,
-               "the line is " + line.height + " px for " + words.implicitHeight + " px of words")
-        verify(words.font.pixelSize <= 13, "the small font")
+        // as tall as the Night switch's hit area at its end, no taller
+        const night = find(dash, "nightSwitch")
+        verify(night.parent === line.item, "the switch ends the line")
+        verify(night.height >= Theme.touchTarget - 0.5, "the switch is " + night.height + " px tall")
+        verify(line.height <= Math.max(words.implicitHeight, night.height) + 0.5,
+               "the line is " + line.height + " px for a " + night.height + " px switch")
+        verify(words.font.pixelSize <= 12, "the small font")
+    }
+
+    // The title is whole at 384 px with the Night switch in the link line
+    function test_theTitleIsWholeWithTheNightSwitch() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        verify(find(dash, "nightSwitch"), "the switch is there")
+        const title = find(dash, "resetPeaks").parent.children[0]
+        compare(title.truncated, false, "the title is whole")
+        verify(title.width >= title.implicitWidth - 0.5, "no narrower than its words")
+        Bridge.disconnectSession()
     }
 
     // A phone on its side has the link state in the title row, so the line

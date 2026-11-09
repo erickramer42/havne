@@ -62,7 +62,7 @@ Rectangle {
                     text: (table.frames.newestFirst ? qsTr("Time ↓") : qsTr("Time ↑"))
                           + (table.narrowTable ? "" : qsTr(" (s)"))
                     color: Theme.text
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
                 }
@@ -76,17 +76,17 @@ Rectangle {
                     Qt.callLater(table.live ? frameList.jumpToLatest : frameList.positionViewAtBeginning)
                 }
             }
-            Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: 36 }
-            Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 20 : 36 }
             // Fits a 29-bit ID ("0x18FF0C00") in the mono face
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 80 : 96 }
-            Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true }
-            Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: table.flagsWidth }
         }
@@ -183,7 +183,7 @@ Rectangle {
                     // Session-relative us, shown as s.mmm
                     text: (frameRow.model.timestampUs / 1e6).toFixed(3)
                     color: Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 64 : 96
                     elide: Text.ElideRight
                 }
@@ -191,13 +191,13 @@ Rectangle {
                     text: frameRow.model.dlc
                     visible: !frameRow.narrow
                     color: Theme.text
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: 36
                 }
                 Label {
                     text: frameRow.model.extended ? "E" : "-"
                     color: frameRow.model.extended ? Theme.success : Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 20 : 36
                 }
                 Label {
@@ -205,7 +205,7 @@ Rectangle {
                     // it for display.
                     text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
                     color: Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 80 : 96
                     elide: Text.ElideRight
                 }
@@ -217,7 +217,7 @@ Rectangle {
                         width: parent.width
                         text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
                         color: Theme.text
-                        font.family: Theme.monoFamily; font.pixelSize: 12
+                        font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                         wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
                         elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
                     }
@@ -228,7 +228,7 @@ Rectangle {
                         visible: frameRow.narrow && text !== ""
                         text: frameRow.model.flagsText
                         color: Theme.textDim
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                     }
                 }
@@ -237,7 +237,7 @@ Rectangle {
                     visible: !frameRow.narrow
                     text: frameRow.model.flagsText
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: table.flagsWidth
                     elide: Text.ElideRight
                 }

@@ -99,8 +99,6 @@ GaugeBase {
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        font.letterSpacing: 1.2
-        font.capitalization: Font.AllUppercase
         color: Theme.textDim
     }
     Text {
@@ -122,8 +120,9 @@ GaugeBase {
             objectName: "readout"
             text: gauge.valueText
             font.pixelSize: 22
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.weight: Font.Bold
+            font.family: Theme.valueFamily
+            font.features: Theme.valueFeatures
             color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
         }
         DangerMark {
@@ -156,7 +155,7 @@ GaugeBase {
             objectName: "scaleHigh"
             text: gauge.history.length > 0 ? gauge.format(gauge.extent.hi) : ""
             font.pixelSize: 10
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
         }
         Item { width: 1; height: Math.max(0, scaleBox.height - highText.height - lowText.height) }
@@ -165,7 +164,7 @@ GaugeBase {
             objectName: "scaleLow"
             text: gauge.history.length > 0 ? gauge.format(gauge.extent.lo) : ""
             font.pixelSize: 10
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
         }
     }
@@ -175,14 +174,14 @@ GaugeBase {
         visible: false
         text: gauge.format(gauge.from) + "0"
         font.pixelSize: 10
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
     }
     Text {
         id: sampleHigh
         visible: false
         text: gauge.format(gauge.to) + "0"
         font.pixelSize: 10
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
     }
 
     Shape {
