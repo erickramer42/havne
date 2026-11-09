@@ -486,14 +486,14 @@ TestCase {
         compare(view.columns, data.columns)
         const cells = page.pages[0].cells
         const boxes = DashboardBook.place(cells, data.columns)
-        const pitchX = view.columnWidth + page.gap
+        const pitchX = view.columnWidth + page.cellGap
         const shown = []
         for (let i = 0; i < cells.length; ++i) {
             const cell = findChild(page, "dashCell_0_" + i)
             verify(cell, "cell " + i)
             fuzzyCompare(cell.x, boxes[i].x * pitchX, 1e-6, "cell " + i + " x")
             fuzzyCompare(cell.y, boxes[i].y * view.pitch, 1e-6, "cell " + i + " y")
-            fuzzyCompare(cell.width, boxes[i].w * view.columnWidth + (boxes[i].w - 1) * page.gap,
+            fuzzyCompare(cell.width, boxes[i].w * view.columnWidth + (boxes[i].w - 1) * page.cellGap,
                          1e-6, "cell " + i + " width")
             verify(cell.x + cell.width <= view.gridWidth + 1e-6, "cell " + i + " in the grid")
             shown.push(cell)
@@ -508,7 +508,7 @@ TestCase {
         }
         const tach = findChild(page, "dashCell_0_1")
         const tallest = cells.reduce((m, c) => Math.max(m, c.h), 1)
-        const cap = (Math.max(160, view.height - 2 * page.margin) + page.gap) / tallest
+        const cap = (Math.max(160, view.height - page.topGap - page.margin) + page.cellGap) / tallest
         fuzzyCompare(view.pitch, Math.min(pitchX / 4, cap), 1e-6,
                      "a row is a quarter of a column, unless the tallest cell wouldn't fit")
         if (data.form === "desktop")
@@ -1035,8 +1035,8 @@ TestCase {
 
     // ---- The Night switch (ADR-0058 section 6)
 
-    // The switch: one per page, at the end of the link state, wherever that
-    // is shown (the desktop's title row, a phone on its side, the phone's line)
+    // The switch: one per page, at the end of the desktop's link state or
+    // of the phone's tool row
     function nightSwitchOf(page) {
         return findChild(page, "nightSwitch")
     }
@@ -1074,28 +1074,204 @@ TestCase {
         compare(sw.Accessible.name, "Night is off until 19:00. Turn it on")
     }
 
-    // Both places the link state shows: the desktop's title row and the
-    // phone's line, and a phone on its side moves it to the row
-    function test_theSwitchSitsWithTheLinkState_data() {
+    // The desktop's switch ends its link state; the phone's the tool row
+    function test_theSwitchSitsAtTheEndOfItsRow_data() {
         return [
-            { tag: "desktop", form: "desktop", short: false, loader: "linkInRow" },
-            { tag: "phone upright", form: "phone", short: false, loader: "linkLine" },
-            { tag: "phone on its side", form: "phone", short: true, loader: "linkInRow" }
+            { tag: "desktop", form: "desktop", short: false, shown: "linkInRow",
+              empty: "toolRowNight" },
+            { tag: "phone upright", form: "phone", short: false, shown: "toolRowNight",
+              empty: "linkInRow" },
+            { tag: "phone on its side", form: "phone", short: true, shown: "toolRowNight",
+              empty: "linkInRow" }
         ]
     }
-    function test_theSwitchSitsWithTheLinkState(data) {
+    function test_theSwitchSitsAtTheEndOfItsRow(data) {
         Theme.shortLayout = data.short
         const page = pageOf({ form: data.form }, null, true)
         connect("mock://demo")
-        const loader = findChild(page, data.loader)
-        tryVerify(() => loader.active && loader.item, 3000, data.loader + " is shown")
+        const loader = findChild(page, data.shown)
+        tryVerify(() => loader.active && loader.item, 3000, data.shown + " is shown")
         const sw = nightSwitchOf(page)
         verify(sw, "the switch exists")
-        compare(sw.parent, loader.item, "in the link state's row")
-        compare(Array.from(loader.item.children).indexOf(sw), loader.item.children.length - 1,
-                "at its end")
-        // the other loader holds none
-        const other = findChild(page, data.loader === "linkLine" ? "linkInRow" : "linkLine")
-        verify(!other.active, "the other place is empty")
+        if (data.shown === "linkInRow") {
+            compare(sw.parent, loader.item, "in the link state's row")
+            compare(Array.from(loader.item.children).indexOf(sw), loader.item.children.length - 1,
+                    "at the link state's end")
+        } else {
+            compare(loader.item, sw, "the tool row's own")
+            const row = loader.parent
+            const shown = Array.from(row.children).filter(c => c.visible)
+            compare(shown[shown.length - 1], loader, "at the row's end")
+        }
+        verify(!findChild(page, data.empty).active, "the other place is empty")
+    }
+
+    // ---- The phone's tool row and joined panel (ADR-0057's appendix,
+    // section 3)
+
+    function test_thePhonesToolRow_data() {
+        return [{ tag: "upright", short: false }, { tag: "on its side", short: true }]
+    }
+    function test_thePhonesToolRow(data) {
+        Theme.shortLayout = data.short
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, null, true)
+        connect("mock://demo")
+        tryVerify(() => findChild(page, "toolRowNight").item, 3000, "the row is laid out")
+        verify(waitForPolish(page), "laid out")
+        const reset = findChild(page, "resetPeaks"), edit = findChild(page, "dashEdit")
+        const night = nightSwitchOf(page), start = findChild(page, "toolRowStart")
+        const row = reset.parent
+        verify(!row.children[0].visible, "no title: the tab bar names the page")
+        verify(!findChild(page, "linkLabel"), "no link state: the top bar has it")
+        verify(!findChild(page, "linkInRow").active, "no link state in the row")
+        verify(start.x + start.width <= reset.x + 0.5, "the start of the row is free")
+        const end = night.mapToItem(row, 0, 0).x + night.width
+        fuzzyCompare(row.x + end, row.parent.width, 0.5, "the tools sit at the page's right")
+        fuzzyCompare(edit.x - (reset.x + reset.width), 8, 0.5, "8 between the tools")
+        verify(reset.x + reset.width <= edit.x + 0.5, "Reset peaks, then Edit")
+        verify(edit.x + edit.width <= night.mapToItem(row, 0, 0).x + 0.5, "Edit, then Night")
+        verify(reset.flat, "Reset peaks is quiet")
+        verify(!edit.flat && !edit.highlighted, "Edit is secondary")
+        verify(night.checkable, "Night is a state")
+        fuzzyCompare(row.height, Theme.touchTarget, 0.5, "one touch target tall")
+        // Editing replaces Edit with its bar; the rest of the row stays
+        page.startEditing()
+        verify(!edit.visible, "Edit hides while editing")
+        verify(reset.visible && night.visible, "the rest stay")
+        page.stopEditing()
+    }
+
+    function test_theDesktopKeepsItsTitleAndLinkState() {
+        const page = pageOf({ form: "desktop" }, null, true)
+        connect("mock://demo")
+        const row = findChild(page, "resetPeaks").parent
+        verify(row.children[0].visible, "the title")
+        compare(row.children[0].text, qsTr("Dashboard"))
+        tryVerify(() => findChild(page, "linkInRow").item, 3000, "the link state")
+        verify(!findChild(page, "toolRowStart").visible, "no empty start")
+    }
+
+    function jointDoc() {
+        const cell = (w, h, kind, label) => ({
+            kind: kind || "digital", w: w, h: h, label: label, refs: ["id:1001"], unit: "RPM",
+            options: { from: 0, to: 8000 }
+        })
+        return { format: 2, pages: [{ name: "P", cells: [
+            cell(3, 12, "digital", "A"), cell(3, 12, "digital", "B"),
+            cell(6, 6, "digital", "C"), cell(3, 12, "blank", "")
+        ] }] }
+    }
+    function seamsOf(page) {
+        const grid = findChild(page, "dashPanelSurface").parent
+        return Array.from(grid.children).filter(c => c.objectName === "dashSeam")
+    }
+
+    function test_thePhoneIsOnePanel() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        compare(page.cellGap, 0, "the cells meet")
+        const surface = findChild(page, "dashPanelSurface")
+        verify(surface.visible, "one surface")
+        compare(surface.radius, Theme.radiusCard)
+        compare(surface.border.width, page.hairlineWidth, "a hairline edge")
+        compare(surface.border.color, Theme.hairline)
+        compare(surface.color, Theme.surface)
+        verify(!surface.gradient, "no gradient")
+        for (const i of [0, 1, 2]) {
+            const c = findChild(page, "dashCell_0_" + i)
+            compare(c.radius, 0, "cell " + i + " has no radius of its own")
+            compare(c.border.width, 0, "cell " + i + " has no border of its own")
+            compare(Qt.colorEqual(c.color, "transparent"), true, "cell " + i + " has no fill")
+            verify(!c.gradient, "cell " + i + " has no gradient")
+        }
+        const a = findChild(page, "dashCell_0_0"), b = findChild(page, "dashCell_0_1")
+        fuzzyCompare(a.x + a.width, b.x, 1e-6, "neighbors meet across")
+        const c2 = findChild(page, "dashCell_0_2")
+        fuzzyCompare(a.y + a.height, c2.y, 1e-6, "neighbors meet down")
+        // One line per seam, the book's, on the boundary between the cells
+        const lines = seamsOf(page)
+        const seams = DashboardBook.seams(view.placed, view.boxes, view.columns)
+        compare(lines.length, seams.length, "a line for each seam")
+        verify(lines.length > 0, "there are lines")
+        for (let i = 0; i < lines.length; ++i) {
+            const s = seams[i], l = lines[i]
+            compare(Qt.colorEqual(l.color, Theme.hairline), true, "hairline color")
+            const at = (s.vertical ? s.x * view.columnWidth : s.y * view.pitch)
+            const center = (s.vertical ? l.x + l.width / 2 : l.y + l.height / 2)
+            verify(Math.abs(center - at) <= page.hairlineWidth, "line " + i + " on its boundary")
+            const run = s.length * (s.vertical ? view.pitch : view.columnWidth)
+            fuzzyCompare(s.vertical ? l.height : l.width, run, 1e-6, "line " + i + " spans its run")
+        }
+    }
+
+    // A blank cell draws nothing, so the panel's surface shows there; the
+    // panel ends at the last row used
+    function test_aJointPanelEndsWithItsLastRow() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        const surface = findChild(page, "dashPanelSurface")
+        fuzzyCompare(surface.height, view.rows * view.pitch, 1e-6, "the height of its rows")
+    }
+
+    // The cell held up covers what it crosses; a blank has no fill to show
+    function test_aLiftedCellIsOpaqueOnThePanel() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        const c = findChild(page, "dashCell_0_0"), blank = findChild(page, "dashCell_0_3")
+        page.held = 0
+        tryVerify(() => c.lifted, 1000, "lifted")
+        compare(c.color, Theme.surface, "the held cell is opaque")
+        compare(c.radius, Theme.radiusCard, "a card while held")
+        page.held = 3
+        tryVerify(() => blank.lifted, 1000, "lifted")
+        compare(Qt.colorEqual(blank.color, "transparent"), true, "a blank stays empty")
+        page.cancelHold()
+        compare(Qt.colorEqual(c.color, "transparent"), true, "put back")
+    }
+
+    // The desktop keeps a card per gauge, with the gap between them
+    function test_theDesktopKeepsItsCards() {
+        const page = pageOf({ form: "desktop", width: 1280, height: 800 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        verify(page.cellGap > 0, "the gap")
+        compare(page.cellGap, page.gap)
+        verify(!findChild(page, "dashPanelSurface").visible, "no panel surface")
+        compare(seamsOf(page).length, 0, "no seams")
+        const c = findChild(page, "dashCell_0_0")
+        compare(c.radius, Theme.radiusCard, "a card's radius")
+        compare(c.border.width, 1, "a card's edge")
+        compare(c.color, Theme.surface, "a card's surface")
+        const edit = findChild(page, "dashEdit")
+        verify(!edit.compact, "a wide window's Edit isn't compact")
+        compare(edit.horizontalPadding, 8, "Edit keeps a button's padding")
+    }
+
+    // Each hairline is a whole number of the display's pixels, and sits on them
+    function test_aHairlineIsWholePixels_data() {
+        return [{ tag: "100 %", zoom: 1 }, { tag: "125 %", zoom: 1.25 }, { tag: "75 %", zoom: 0.75 },
+                { tag: "110 %", zoom: 1.1 }, { tag: "67 %", zoom: 0.67 }]
+    }
+    function test_aHairlineIsWholePixels(data) {
+        Theme.zoom = data.zoom
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        const ratio = (Screen.devicePixelRatio || 1) * Theme.zoom
+        const onGlass = page.hairlineWidth * ratio
+        fuzzyCompare(onGlass, Math.round(onGlass), 1e-9, "whole pixels on the glass: " + onGlass)
+        verify(onGlass >= 1, "at least one")
+        compare(findChild(page, "dashPanelSurface").border.width, page.hairlineWidth, "the edge matches")
+        const lines = seamsOf(page)
+        verify(lines.length > 0, "there are lines")
+        for (const l of lines) {
+            const p = l.mapToItem(null, 0, 0)
+            const at = (l.width < l.height ? p.x : p.y) * ratio
+            fuzzyCompare(at, Math.round(at), 1e-6, "a line on a whole pixel: " + at)
+        }
+        Theme.zoom = 1
     }
 }

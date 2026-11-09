@@ -56,6 +56,43 @@ TestCase {
         return g
     }
 
+    // ---- A status note
+
+    // Whole on a wide card, cut inside a narrow one, gone when the title
+    // leaves it no room, and clear of the value on a tile too short for a trace
+    function test_aNoteStaysInItsCard_data() {
+        return [{ tag: "digits", c: readoutC, narrow: 125, titled: true },
+                { tag: "bar", c: barC, narrow: 190, titled: true },
+                { tag: "cells", c: segmentsC, narrow: 190, titled: true },
+                { tag: "sparkline", c: sparkC, narrow: 190, titled: true },
+                { tag: "number", c: digitalC, narrow: 70, titled: false },
+                { tag: "number, short", c: digitalC, narrow: 70, titled: false, height: 60 }]
+    }
+    function test_aNoteStaysInItsCard(data) {
+        const words = { label: "Battery Voltage", note: "waiting for data" }
+        if (data.height !== undefined)
+            words.height = data.height
+        const wide = find(make(data.c, Object.assign({ width: 400 }, words)), "gaugeNote")
+        verify(wide.visible, "shown when there's room")
+        verify(!wide.truncated, "whole when there's room")
+
+        const g = make(data.c, Object.assign({ width: data.narrow }, words))
+        const n = find(g, "gaugeNote")
+        const left = n.mapToItem(g, 0, 0).x
+        verify(n.visible, "there's room for part of it: " + n.width)
+        verify(n.truncated, "cut to fit")
+        verify(left + n.width <= g.width + 0.5, "ends at " + (left + n.width) + " in " + g.width)
+        verify(n.contentWidth <= n.width + 0.5, n.contentWidth + " drawn in " + n.width)
+        if (data.titled)
+            verify(!find(make(data.c, Object.assign({ width: 60 }, words)), "gaugeNote").visible,
+                   "no room past the title")
+        if (data.height !== undefined) {
+            const value = find(g, "readout")
+            verify(g.brief, "a short tile")
+            verify(left >= value.mapToItem(g, 0, 0).x + value.width, "beside the value")
+        }
+    }
+
     // ---- SegmentGauge
 
     function test_segmentsCountTheirCells_data() {

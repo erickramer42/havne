@@ -375,6 +375,48 @@ QtObject {
         return out
     }
 
+    // The lines of a joined panel (ADR-0057's appendix, section 3), as
+    // { vertical, x, y, length } in grid squares: wherever two neighboring
+    // squares belong to different cells and at least one of them is drawn.
+    // A blank cell and an empty square draw nothing, so no line runs
+    // between two of those. `placed` holds the cells in `boxes`' order;
+    // lines that continue along a boundary are one
+    function seams(placed, boxes, columns) {
+        const cols = isFinite(columns) ? Math.max(1, Math.floor(columns)) : 1
+        const owner = []   // owner[y][x], the box drawn there
+        let rows = 0
+        boxes.forEach((b, i) => {
+            rows = Math.max(rows, b.y + b.h)
+            if (placed[i].kind === "blank")
+                return
+            for (let y = b.y; y < b.y + b.h; ++y) {
+                owner[y] = owner[y] || []
+                for (let x = b.x; x < b.x + b.w; ++x)
+                    owner[y][x] = i
+            }
+        })
+        const at = (x, y) => owner[y] && owner[y][x] !== undefined ? owner[y][x] : -1
+        const out = []
+        const runs = (vertical, line, span, differs) => {
+            let start = -1
+            for (let i = 0; i <= span; ++i) {
+                if (i < span && differs(i)) {
+                    if (start < 0)
+                        start = i
+                } else if (start >= 0) {
+                    out.push({ vertical: vertical, x: vertical ? line : start,
+                               y: vertical ? start : line, length: i - start })
+                    start = -1
+                }
+            }
+        }
+        for (let c = 1; c < cols; ++c)
+            runs(true, c, rows, y => at(c - 1, y) !== at(c, y))
+        for (let r = 1; r < rows; ++r)
+            runs(false, r, cols, x => at(x, r - 1) !== at(x, r))
+        return out
+    }
+
     // { from, to } for a new gauge: by the unit it decodes to, then the
     // field's range (finite, lo below hi), then 0 to 100. Never NaN, so a
     // layout never stores one

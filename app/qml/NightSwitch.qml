@@ -4,7 +4,7 @@
 import QtQuick
 
 // The one-tap Night switch (ADR-0058 section 6): a dot and the word
-// "Night", at the end of the Dashboard's link state, no capsule: the dot
+// "Night", in the Dashboard's header, no capsule: the dot
 // is filled and the word full text while Night shows, a ring and dim words
 // when it doesn't. A tap is Theme.toggleNight(): in On and Off it flips
 // the mode, under a schedule it holds the opposite until the next boundary

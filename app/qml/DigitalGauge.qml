@@ -104,6 +104,7 @@ GaugeBase {
     }
 
     Row {
+        id: valueRow
         anchors.left: parent.left
         anchors.verticalCenter: valueBand.verticalCenter
         spacing: 4
@@ -169,8 +170,15 @@ GaugeBase {
             PathPolyline { path: trace.points }
         }
     }
+    // In the trace's place, or beside the value on a card too short for one
     Text {
-        anchors.centerIn: trace
+        objectName: "gaugeNote"
+        anchors.left: gauge.brief ? valueRow.right : parent.left
+        anchors.leftMargin: gauge.brief ? 8 : 0
+        anchors.right: parent.right
+        anchors.verticalCenter: gauge.brief ? valueBand.verticalCenter : trace.verticalCenter
+        horizontalAlignment: gauge.brief ? Text.AlignLeft : Text.AlignHCenter
+        elide: Text.ElideRight
         visible: !gauge.hasValue && text !== ""
         text: gauge.note
         font.pixelSize: 11
