@@ -38,7 +38,7 @@ ApplicationWindow {
     palette.buttonText: Theme.text
     palette.brightText: Theme.text
     palette.highlight: Theme.primary
-    palette.highlightedText: Theme.text
+    palette.highlightedText: Theme.textOnPrimary
     palette.placeholderText: Theme.textDim
     palette.toolTipBase: Theme.elevatedLight
     palette.toolTipText: Theme.text
@@ -279,8 +279,8 @@ ApplicationWindow {
                         Layout.maximumWidth: pillRow.implicitWidth + 24
                         Layout.minimumWidth: 32
                         implicitHeight: 28
-                        radius: height / 2
-                        color: Qt.alpha(pill.tone, 0.14)
+                        // A dot and a word, no capsule
+                        color: "transparent"
 
                         RowLayout {
                             id: pillRow
@@ -299,7 +299,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                                 font.pixelSize: Theme.fontCaption
-                                color: pill.tone
+                                color: Theme.text
                                 text: Bridge.connecting ? qsTr("Connecting…")
                                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                                     : !headerTitle.visible ? Theme.linkShortLabel(Bridge.linkState)

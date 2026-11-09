@@ -157,7 +157,6 @@ Rectangle {
                     y: logo.cy + logo.r * 0.42
                     text: qsTr("RPM")
                     font.pixelSize: 8
-                    font.letterSpacing: 1
                     color: Theme.textDim
                 }
 

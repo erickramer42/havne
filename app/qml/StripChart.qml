@@ -183,7 +183,7 @@ Canvas {
             chart.drawn = null
             setTraces([])
             ctx.fillStyle = Theme.textDim
-            ctx.font = "12px sans-serif"
+            ctx.font = Theme.fontCaption + "px " + (Theme.fontFamily || "sans-serif")
             ctx.textAlign = "center"
             ctx.fillText(chart.emptyText, shownW / 2, shownH / 2)
             return

@@ -34,8 +34,6 @@ GaugeBase {
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        font.letterSpacing: 1.2
-        font.capitalization: Font.AllUppercase
         color: Theme.textDim
     }
     Text {
@@ -55,8 +53,9 @@ GaugeBase {
             objectName: "readout"
             text: gauge.valueText
             font.pixelSize: 22
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.weight: Font.Bold
+            font.family: Theme.valueFamily
+            font.features: Theme.valueFeatures
             color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
         }
         // Past dangerFrom, beside the value
@@ -165,7 +164,7 @@ GaugeBase {
                                     : f >= 1 ? 0 : (1 - f) * parent.height - height / 2) : 0
                 text: gauge.formatScale(modelData)
                 font.pixelSize: 10
-                font.features: ({ "tnum": 1 })
+                font.features: Theme.valueFeatures
                 color: Qt.alpha(Theme.textDim, 0.8)
             }
         }

@@ -255,14 +255,15 @@ QtObject {
 
     readonly property var palettes: ({
         dark: {
-            bg: "#14141c", surface: "#1e1e2e", elevated: "#2a2a3e", elevatedLight: "#33334a",
-            outline: "#64647e",   // control borders; 3:1 on bg
-            primary: "#6d4aff", text: "#e8e8f0", textDim: "#8888a0",
+            // Near-neutral graphite; the accent is the text color as a fill
+            bg: "#141416", surface: "#1b1b1e", elevated: "#26262b", elevatedLight: "#323238",
+            outline: "#65656f",   // control borders; 3:1 on bg
+            primary: "#ebebee", textOnPrimary: "#141416", text: "#ebebee", textDim: "#9a9aa3",
             success: "#4ade80", warning: "#ffd166", danger: "#f87171", info: "#60a5fa",
-            gaugeFace: "#1b1b28", gaugeValue: Qt.lighter("#6d4aff", 1.3),
-            shades: { bezelHi: "#3a3a52", bezelLo: "#2c2c42", faceHi: "#25253a", faceLo: "#0e0e15",
-                      needleBase: "#2a2a38", hubHi: "#4b4b63" },
-            gaugeReadout: "#e8e8f0", gaugeNeedle: "#ff5a5f", gaugeTick: "#e8e8f0",
+            gaugeFace: "#1b1b1e", gaugeValue: "#ebebee",
+            shades: { bezelHi: "#3a3a3f", bezelLo: "#2c2c31", faceHi: "#252529", faceLo: "#0e0e10",
+                      needleBase: "#2a2a2e", hubHi: "#4b4b52" },
+            gaugeReadout: "#ebebee", gaugeNeedle: "#ff5a5f", gaugeTick: "#ebebee",
             gaugeWarn: "#ffd166", gaugeDanger: "#f87171",
             // One per hue family, so traces stay distinct on the dark surface
             series: ["#4aa3ff",   // blue
@@ -278,7 +279,7 @@ QtObject {
         },
         nightAmber: {
             bg: "#0d0a07", surface: "#18120c", elevated: "#261c12", elevatedLight: "#31241a",
-            outline: "#85694a", primary: "#7f440d", text: "#f3c895", textDim: "#b58f64",
+            outline: "#85694a", primary: "#7f440d", textOnPrimary: "#f3c895", text: "#f3c895", textDim: "#b58f64",
             success: "#f0a53a", warning: "#ff8a3a", danger: "#ff4a38", info: "#d2a86a",
             gaugeFace: "#1a130c", gaugeValue: "#f0a53a",
             shades: shadesOf("#1a130c"),
@@ -290,7 +291,7 @@ QtObject {
         },
         nightRed: {
             bg: "#080404", surface: "#130909", elevated: "#201010", elevatedLight: "#2b1616",
-            outline: "#934a44", primary: "#7a241c", text: "#ff9484", textDim: "#c46a5e",
+            outline: "#934a44", primary: "#7a241c", textOnPrimary: "#ff9484", text: "#ff9484", textDim: "#c46a5e",
             success: "#e8584a", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
             gaugeFace: "#150909", gaugeValue: "#ff5a4a",
             shades: shadesOf("#150909"),
@@ -308,13 +309,21 @@ QtObject {
     readonly property color elevatedLight:  colors.elevatedLight
     readonly property color outline:        colors.outline
     readonly property color primary:        colors.primary
+    // The label on a primary fill: the page color in Dark (primary is the
+    // text color there), the text color at night (the fill stays dim)
+    readonly property color textOnPrimary:      colors.textOnPrimary
     readonly property color text:           colors.text
     readonly property color textDim:        colors.textDim
     readonly property color success:        colors.success
     readonly property color warning:        colors.warning
     readonly property color danger:         colors.danger
     readonly property color info:           colors.info
-    readonly property int radius:           8
+    // A hairline: the outline at 55 % over the surface, the rule between
+    // cells of a panel and a panel's edge
+    readonly property color hairline:       Qt.tint(surface, Qt.alpha(outline, 0.55))
+    // Corner radii: controls, and cards and panels
+    readonly property int radius:           4
+    readonly property int radiusCard:       6
 
     // The gauges' roles (ADR-0057 section 9): no gauge draws a literal color.
     // The face under the dial and the cards; value: the lit segments, the
@@ -350,6 +359,26 @@ QtObject {
     readonly property int rowHeight:        dense ? 36 : 44
     readonly property int toolBarHeight:    dense ? 40 : 48
     readonly property int sidebarWidth:     dense ? 150 : 220
+    // The fonts: Barlow for text and captions, Barlow Semi Condensed Bold
+    // for values at 17 sp and above, both bundled as Qt resources (SIL OFL
+    // 1.1, THIRD_PARTY_NOTICES). Digits in a value use tabular figures
+    // (`font.features: { "tnum": 1 }`, `valueFeatures`) so a reading's
+    // width doesn't jump as its digits change. The family names are
+    // literals, not `FontLoader.name`: a backend that reports a file's
+    // style-qualified name (FreeType: "Barlow Semi Condensed Bold") would
+    // otherwise make the family match only that one file. Until a file
+    // loads, or if it can't, the platform's own font stands in; main.cpp
+    // sets the application font on the same condition (Regular loaded)
+    property FontLoader barlowRegular: FontLoader { source: "../fonts/Barlow-Regular.ttf" }
+    property FontLoader barlowMedium: FontLoader { source: "../fonts/Barlow-Medium.ttf" }
+    property FontLoader barlowSemiBold: FontLoader { source: "../fonts/Barlow-SemiBold.ttf" }
+    property FontLoader barlowBold: FontLoader { source: "../fonts/Barlow-Bold.ttf" }
+    property FontLoader barlowCondensedBold: FontLoader { source: "../fonts/BarlowSemiCondensed-Bold.ttf" }
+    readonly property string fontFamily: barlowRegular.status === FontLoader.Ready ? "Barlow" : ""
+    readonly property string valueFamily: barlowCondensedBold.status === FontLoader.Ready
+                                          ? "Barlow Semi Condensed" : fontFamily
+    readonly property var valueFeatures: ({ "tnum": 1 })
+
     // The type scale: five sizes, in px. Secondary words, a bar's labels
     // and monospace payloads are fontCaption; a body Label that sets no
     // size keeps the platform's. The gauges' own sizes scale with the

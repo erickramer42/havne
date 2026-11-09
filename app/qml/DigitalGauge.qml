@@ -78,8 +78,6 @@ GaugeBase {
             elide: Text.ElideRight
             font.pixelSize: 12
             font.weight: Font.DemiBold
-            font.letterSpacing: 1.2
-            font.capitalization: Font.AllUppercase
             color: Theme.textDim
         }
         Text {
@@ -114,8 +112,9 @@ GaugeBase {
             objectName: "readout"
             text: gauge.valueText
             font.pixelSize: Math.max(18, Math.min(valueBand.height * 0.9, gauge.width * 0.24))
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.weight: Font.Bold
+            font.family: Theme.valueFamily
+            font.features: Theme.valueFeatures
             color: gauge.levelColor
         }
         // Past dangerFrom, beside the value
@@ -200,8 +199,7 @@ GaugeBase {
                 text: "%1  %2".arg(modelData.tag)
                               .arg(isNaN(modelData.v) ? qsTr("—") : gauge.format(modelData.v))
                 font.pixelSize: 11
-                font.letterSpacing: 0.8
-                font.features: ({ "tnum": 1 })
+                font.features: Theme.valueFeatures
                 color: Theme.textDim
             }
         }

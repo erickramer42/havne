@@ -9,12 +9,15 @@ Button {
 
     // The ranks (Qt's own properties): `highlighted` is the one action a
     // page or bar is for (primary), the default is every other action
-    // (secondary), `flat` a frequent-but-minor or destructive one (quiet),
+    // (secondary), `flat` a frequent-but-minor or destructive one (quiet: no
+    // fill or outline at rest, its label in `text` like any other),
     // and `checkable` with `checked` a choice among a few or an open panel
     // (selected, which wins over the others). `checked` is the page's
-    // state: bind it. A click that toggled it is undone here, so the
-    // binding stays the truth (a click on the chosen one leaves it chosen),
-    // and the page's onClicked changes what the binding reads.
+    // state: bind it. A click that toggled it is undone here (onToggled
+    // calls toggle() again), so the binding stays the truth (a click on
+    // the chosen one leaves it chosen) and the page's onClicked changes
+    // what the binding reads. A checkable button whose `checked` is not
+    // bound un-toggles itself on every click.
     readonly property bool quiet: control.flat && !control.checked
     readonly property bool primary: control.highlighted
 
@@ -24,14 +27,18 @@ Button {
                             : control.quiet ? "transparent"
                             : Theme.elevated
     property color hoverColor: control.checked ? Qt.lighter(Theme.elevatedLight, 1.15)
-                             : control.primary ? Qt.lighter(Theme.primary, 1.15)
+                             : control.primary ? (Theme.primary.hslLightness > 0.5
+                                                  ? Qt.darker(Theme.primary, 1.08)
+                                                  : Qt.lighter(Theme.primary, 1.15))
                              : control.quiet ? Theme.elevated
                              : Theme.elevatedLight
     property color pressedColor: control.checked ? Qt.darker(Theme.elevatedLight, 1.2)
                                : control.primary ? Qt.darker(Theme.primary, 1.2)
                                : control.quiet ? Theme.elevated
                                : Theme.surface
-    property color textColor: control.quiet ? Theme.textDim : Theme.text
+    property color textColor: control.checked ? Theme.text
+                            : control.primary ? Theme.textOnPrimary
+                            : Theme.text
 
     onToggled: control.toggle()
 
@@ -70,8 +77,9 @@ Button {
              : control.hovered ? control.hoverColor
              :                   control.baseColor
         // Keyboard focus ring; visualFocus stays false for mouse clicks
-        border.width: control.visualFocus ? 2 : 0
-        border.color: Theme.text
+        // The selected state also takes the outline
+        border.width: control.visualFocus ? 2 : control.checked ? 1 : 0
+        border.color: control.visualFocus ? Theme.text : Theme.outline
     }
 
     // Given less than its text's width, the text wraps and the button

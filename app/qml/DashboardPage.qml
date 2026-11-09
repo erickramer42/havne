@@ -554,7 +554,7 @@ Page {
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
         readonly property string caption: opt("caption", unit)
-        readonly property string peakLabel: opt("peakLabel", qsTr("PEAK"))
+        readonly property string peakLabel: opt("peakLabel", qsTr("Peak"))
         readonly property bool showPeak: opt("peak", false)
         // The new kinds' own options (ADR-0057 section 1): the cells' count
         // and curve, the digits, the sparkline's window, the bar standing up

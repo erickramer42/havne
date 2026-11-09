@@ -106,8 +106,8 @@ TestCase {
     }
 
     readonly property var roles: [
-        "bg", "surface", "elevated", "elevatedLight", "outline", "primary",
-        "text", "textDim", "success", "warning", "danger", "info",
+        "bg", "surface", "elevated", "elevatedLight", "outline", "primary", "textOnPrimary",
+        "hairline", "text", "textDim", "success", "warning", "danger", "info",
         "gaugeFace", "gaugeValue", "gaugeReadout", "gaugeNeedle",
         "gaugeTick", "gaugeWarn", "gaugeDanger"]
 
@@ -115,15 +115,15 @@ TestCase {
     // derive from their face)
     function test_darkKeepsTheDialsShades() {
         const s = Theme.gaugeShade
-        sameColor(s.bezelHi, "#3a3a52", "bezelHi")
-        sameColor(s.bezelLo, "#2c2c42", "bezelLo")
-        sameColor(s.faceHi, "#25253a", "faceHi")
-        sameColor(s.faceLo, "#0e0e15", "faceLo")
-        sameColor(s.needleBase, "#2a2a38", "needleBase")
-        sameColor(s.hubHi, "#4b4b63", "hubHi")
-        sameColor(Theme.gaugeFace, "#1b1b28", "the face")
+        sameColor(s.bezelHi, "#3a3a3f", "bezelHi")
+        sameColor(s.bezelLo, "#2c2c31", "bezelLo")
+        sameColor(s.faceHi, "#252529", "faceHi")
+        sameColor(s.faceLo, "#0e0e10", "faceLo")
+        sameColor(s.needleBase, "#2a2a2e", "needleBase")
+        sameColor(s.hubHi, "#4b4b52", "hubHi")
+        sameColor(Theme.gaugeFace, "#1b1b1e", "the face")
         usePalette("nightRed")
-        verify(!Qt.colorEqual(Theme.gaugeShade.bezelHi, "#3a3a52"), "night has its own")
+        verify(!Qt.colorEqual(Theme.gaugeShade.bezelHi, "#3a3a3f"), "night has its own")
     }
 
     function test_paletteNamesAndClamps() {
@@ -140,15 +140,41 @@ TestCase {
         compare(Theme.clampLook("nonsense"), "dark", "an unknown look reads as dark")
     }
 
-    // The default theme is today's palette, unchanged
-    function test_darkIsTodaysPalette() {
-        sameColor(Theme.bg, "#14141c", "bg")
-        sameColor(Theme.surface, "#1e1e2e", "surface")
-        sameColor(Theme.text, "#e8e8f0", "text")
-        sameColor(Theme.primary, "#6d4aff", "primary")
+    // The default theme is the near-neutral graphite: the accent is the text
+    // color as a fill, and the label on it is the page color
+    function test_darkIsTheGraphitePalette() {
+        sameColor(Theme.bg, "#141416", "bg")
+        sameColor(Theme.surface, "#1b1b1e", "surface")
+        sameColor(Theme.elevated, "#26262b", "elevated")
+        sameColor(Theme.elevatedLight, "#323238", "elevatedLight")
+        sameColor(Theme.outline, "#65656f", "outline")
+        sameColor(Theme.text, "#ebebee", "text")
+        sameColor(Theme.textDim, "#9a9aa3", "textDim")
+        sameColor(Theme.primary, Theme.text, "primary")
+        sameColor(Theme.textOnPrimary, Theme.bg, "textOnPrimary")
+        sameColor(Theme.gaugeValue, Theme.text, "gaugeValue")
         sameColor(Theme.warning, "#ffd166", "warning")
         sameColor(Theme.danger, "#f87171", "danger")
         sameColor(Theme.gaugeNeedle, "#ff5a5f", "the analog needle")
+    }
+
+    // The label on a primary fill: the page color in Dark, the text color at
+    // night; a hairline is the outline at 55 % over the surface; two radii
+    function test_textOnPrimaryAndTheHairlinePerPalette_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_textOnPrimaryAndTheHairlinePerPalette(data) {
+        usePalette(data.name)
+        sameColor(Theme.textOnPrimary, data.name === "dark" ? Theme.bg : Theme.text, "textOnPrimary")
+        const o = Qt.color(Theme.outline), s = Qt.color(Theme.surface)
+        const mix = (a, b) => 0.55 * a + 0.45 * b
+        const h = Qt.color(Theme.hairline)
+        verify(Math.abs(h.r - mix(o.r, s.r)) < 0.01 && Math.abs(h.g - mix(o.g, s.g)) < 0.01
+               && Math.abs(h.b - mix(o.b, s.b)) < 0.01, "hairline is " + Theme.hairline)
+    }
+    function test_theRadiiAreFourAndSix() {
+        compare(Theme.radius, 4)
+        compare(Theme.radiusCard, 6)
     }
 
     function test_everyThemeDefinesEveryRole_data() {
@@ -188,7 +214,7 @@ TestCase {
     }
     function test_theNightThemesAreWarm(data) {
         usePalette(data.name)
-        for (const r of ["primary", "text", "textDim", "success", "warning", "danger", "info",
+        for (const r of ["primary", "textOnPrimary", "hairline", "text", "textDim", "success", "warning", "danger", "info",
                          "gaugeValue", "gaugeReadout", "gaugeNeedle", "gaugeTick", "gaugeWarn",
                          "gaugeDanger"]) {
             const h = Qt.color(Theme[r]).hsvHue * 360
@@ -225,10 +251,10 @@ TestCase {
             const c = contrast(Theme[fg], Theme[bgName])
             verify(c >= 4.5, fg + " on " + bgName + " is " + c.toFixed(2) + ":1 in " + data.name)
         }
-        // The text on a selected row or a highlighted button (primary): the
-        // default theme's own 4.2:1 at least
-        const onPrimary = contrast(Theme.text, Theme.primary)
-        verify(onPrimary >= 4.2, "text on primary is " + onPrimary.toFixed(2) + ":1 in " + data.name)
+        // The label on a primary fill (a highlighted button): 4.2:1 at least,
+        // a night palette's dim fill being no brighter than it was
+        const textOnPrimary = contrast(Theme.textOnPrimary, Theme.primary)
+        verify(textOnPrimary >= 4.2, "textOnPrimary on primary is " + textOnPrimary.toFixed(2) + ":1 in " + data.name)
         // Control borders and the lit color against what they sit on: 3:1
         for (const [fg, bgName] of [["outline", "bg"], ["gaugeValue", "gaugeFace"],
                                     ["gaugeNeedle", "gaugeFace"]]) {
@@ -284,8 +310,8 @@ TestCase {
     function test_anUnknownValueReadsAsTheDefault() {
         Theme.night = "nonsense"
         compare(Theme.active, "dark")
-        sameColor(Theme.bg, "#14141c", "bg")
-        sameColor(Theme.gaugeValue, Qt.lighter("#6d4aff", 1.3), "gaugeValue")
+        sameColor(Theme.bg, "#141416", "bg")
+        sameColor(Theme.gaugeValue, "#ebebee", "gaugeValue")
         Theme.night = "on"
         Theme.nightStyle = "nonsense"
         compare(Theme.active, "nightAmber", "an unknown style is amber")
@@ -633,5 +659,46 @@ TestCase {
         compare(Theme.nightActive, false)
         loaded({ night: "schedule", nightOverride: "sideways", nightOverrideUntil: at(19, 0).getTime() })
         compare(Theme.nightOverride, "", "an unknown one is dropped")
+    }
+
+    // The type choice leans on tabular figures: the bundled fonts load, and
+    // `tnum` makes every digit the same width in the value family
+    Component {
+        id: metricsComponent
+        TextMetrics {}
+    }
+    function widthOf(text, family, features) {
+        const m = createTemporaryObject(metricsComponent, testCase)
+        m.font.family = family
+        m.font.pixelSize = 28
+        m.font.features = features
+        m.text = text
+        return m.advanceWidth
+    }
+    function test_theBundledFontsLoad() {
+        tryCompare(Theme.barlowRegular, "status", FontLoader.Ready)
+        tryCompare(Theme.barlowCondensedBold, "status", FontLoader.Ready)
+        // literal names, whatever name a backend reports for the file
+        compare(Theme.fontFamily, "Barlow")
+        compare(Theme.valueFamily, "Barlow Semi Condensed")
+        verify(Theme.valueFeatures.tnum === 1)
+        // the platform's font database knows both literals, which is what
+        // a backend that names a file by its style would break
+        const fams = Qt.fontFamilies()
+        verify(fams.indexOf("Barlow") >= 0, "Barlow is a family")
+        verify(fams.indexOf("Barlow Semi Condensed") >= 0, "Barlow Semi Condensed is a family")
+    }
+    function test_tabularFiguresGiveEveryDigitTheSameWidth() {
+        const fam = Theme.valueFamily
+        const digits = "0123456789"
+        const w = []
+        for (const d of digits)
+            w.push(widthOf(d + d + d + d, fam, Theme.valueFeatures))
+        for (let i = 1; i < w.length; ++i)
+            compare(w[i], w[0], "digit " + i + " with tnum")
+        // without the feature the figures are proportional, so the
+        // comparison above measures the feature and not the font alone
+        verify(widthOf("1111", fam, {}) !== widthOf("0000", fam, {}),
+               "without tnum a 1 and a 0 differ in width")
     }
 }

@@ -151,15 +151,15 @@ TestCase {
         fuzzyCompare(after.u, before.u, 0.5, "the unit's x")
     }
 
-    // Dark renders as it did: the colors the gauges had as literals
+    // Dark renders the graphite look: the zone colors and the needle are the ones the gauges had, the lit color and readout the text color
     function test_darkRendersAsItDid() {
         usePalette("dark")
         const analog = gaugeOf(kinds[0], 30)
         same(analog.needleColor, "#ff5a5f", "the needle")
-        same(analog.accent, Qt.lighter("#6d4aff", 1.3), "the lit color")
+        same(analog.accent, "#ebebee", "the lit color")
         same(analog.zoneColor(70, "red"), "#ffd166", "the warning zone")
         same(analog.zoneColor(90, "red"), "#f87171", "the danger zone")
-        same(find(analog, "readout").color, "#e8e8f0", "the readout")
+        same(find(analog, "readout").color, "#ebebee", "the readout")
         // The status dot, the low shift lights and Home's logo keep the
         // green
         same(Theme.success, "#4ade80", "success")

@@ -63,13 +63,43 @@ TestCase {
         sameColor(h.secondary.background.color, Theme.elevated, "secondary fill")
         sameColor(h.secondary.contentItem.color, Theme.text, "secondary text")
         sameColor(h.primary.background.color, Theme.primary, "primary fill")
-        sameColor(h.primary.contentItem.color, Theme.text, "primary text")
+        sameColor(h.primary.contentItem.color, Theme.textOnPrimary, "primary text")
         compare(h.quiet.background.color.a, 0, "a quiet button has no fill")
-        sameColor(h.quiet.contentItem.color, Theme.textDim, "quiet text")
+        sameColor(h.quiet.contentItem.color, Theme.text, "quiet text is the text color, not dim")
         sameColor(h.chosen.background.color, Theme.elevated, "an unchosen choice is secondary")
         h.state = true
         sameColor(h.chosen.background.color, Theme.elevatedLight, "a chosen choice's fill")
         sameColor(h.chosen.contentItem.color, Theme.text, "a chosen choice's text")
+    }
+
+    // The ranks' fills follow the palette: Dark's light primary and the
+    // night palettes' dark ones
+    function test_theRanksDrawTheirFillsInEveryPalette_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_theRanksDrawTheirFillsInEveryPalette(data) {
+        Theme.night = data.name === "dark" ? "off" : "on"
+        if (data.name !== "dark")
+            Theme.nightStyle = data.name === "nightRed" ? "red" : "amber"
+        const h = host(0)
+        sameColor(h.secondary.background.color, Theme.elevated, "secondary fill")
+        sameColor(h.primary.background.color, Theme.primary, "primary fill")
+        sameColor(h.primary.contentItem.color, Theme.textOnPrimary, "primary text")
+        sameColor(h.quiet.contentItem.color, Theme.text, "quiet text")
+        compare(h.quiet.background.color.a, 0, "quiet has no fill at rest")
+        h.state = true
+        sameColor(h.chosen.background.color, Theme.elevatedLight, "a chosen choice's fill")
+        // a hover moves the primary fill away from its rest color, toward
+        // darker on a light primary (a lighter one clamps) and lighter on
+        // a dark one
+        verify(!Qt.colorEqual(h.primary.hoverColor, Theme.primary), "primary hover differs")
+        const lighter = h.primary.hoverColor.hslLightness > Theme.primary.hslLightness
+        compare(lighter, Theme.primary.hslLightness <= 0.5, "hover direction")
+    }
+
+    function cleanup() {
+        Theme.night = "off"
+        Theme.nightStyle = "amber"
     }
 
     function test_aQuietButtonFillsOnHover() {

@@ -3,55 +3,47 @@
 
 import QtQuick
 
-// The one-tap Night switch (ADR-0058 section 6): a pill with a crescent
-// and the word "Night", at the end of the Dashboard's link state. A tap is
-// Theme.toggleNight(): in On and Off it flips the mode, under a schedule
-// it holds the opposite until the next boundary and a second tap hands
-// back to the schedule. Its hit area is a phone's touch target each way;
-// the pill draws inside it.
+// The one-tap Night switch (ADR-0058 section 6): a dot and the word
+// "Night", at the end of the Dashboard's link state, no capsule: the dot
+// is filled and the word full text while Night shows, a ring and dim words
+// when it doesn't. A tap is Theme.toggleNight(): in On and Off it flips
+// the mode, under a schedule it holds the opposite until the next boundary
+// and a second tap hands back to the schedule. Its hit area is a phone's
+// touch target each way; the dot and word draw inside it.
 ThemedButton {
     id: control
     objectName: "nightSwitch"
 
     readonly property bool shown: Theme.nightActive
-    readonly property real pillHeight: 32
+    readonly property real rowHeight: 32
+    readonly property real dotSize: 10
 
     compact: true
     checkable: true
     checked: shown
-    implicitHeight: Math.max(Theme.touchTarget, pillHeight)
-    implicitWidth: Math.max(Theme.touchTarget, words.implicitWidth + crescent.width + 28)
+    implicitHeight: Math.max(Theme.touchTarget, rowHeight)
+    implicitWidth: Math.max(Theme.touchTarget, words.implicitWidth + dotSize + 18)
     text: qsTr("Night")
     Accessible.name: Theme.nightSwitchName()
     onClicked: Theme.toggleNight()
 
     background: Rectangle {
-        anchors.verticalCenter: parent.verticalCenter
-        height: control.pillHeight
-        radius: height / 2
-        color: control.shown ? Theme.primary : Theme.elevated
-        border.width: control.shown ? 0 : 1
-        border.color: Theme.outline
+        color: "transparent"
+        border.width: control.visualFocus ? 2 : 0
+        border.color: Theme.text
     }
 
     contentItem: Row {
         spacing: 6
-        // Two circles, no font glyph: a filled one with another in the
-        // pill's color cut out of it
-        Item {
-            id: crescent
-            width: 14
-            height: 14
+        Rectangle {
+            id: dot
+            width: control.dotSize
+            height: control.dotSize
+            radius: width / 2
             anchors.verticalCenter: parent.verticalCenter
-            Rectangle {
-                width: 14; height: 14; radius: 7
-                color: control.shown ? Theme.text : Theme.textDim
-            }
-            Rectangle {
-                x: 5; y: -2
-                width: 11; height: 11; radius: 5.5
-                color: control.shown ? Theme.primary : Theme.elevated
-            }
+            color: control.shown ? Theme.text : "transparent"
+            border.width: 1.5
+            border.color: control.shown ? Theme.text : Theme.textDim
         }
         Text {
             id: words

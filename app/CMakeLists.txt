@@ -127,6 +127,14 @@ qt_add_qml_module(app_ui
         qml/ShiftLightBar.qml
         qml/SignalFilterBar.qml
         qml/DoubleTapHandler.qml
+    # Barlow (text) and Barlow Semi Condensed (values), SIL OFL 1.1: the
+    # notices carry the license. Theme loads them with FontLoader
+    RESOURCES
+        fonts/Barlow-Regular.ttf
+        fonts/Barlow-Medium.ttf
+        fonts/Barlow-SemiBold.ttf
+        fonts/Barlow-Bold.ttf
+        fonts/BarlowSemiCondensed-Bold.ttf
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
