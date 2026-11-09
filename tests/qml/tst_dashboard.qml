@@ -1250,6 +1250,70 @@ TestCase {
         compare(edit.horizontalPadding, 8, "Edit keeps a button's padding")
     }
 
+    // Unequal heights in a row: outside edit mode the shorter cell fills
+    // the empty squares under it, and the stored layout stays
+    function fitDoc(columns, blankUnder) {
+        const cell = (w, h, kind, label) => ({
+            kind: kind, w: w, h: h, label: label, refs: ["id:1001"], unit: "RPM",
+            options: { from: 0, to: 8000 }
+        })
+        const head = [cell(2, 6, "digital", "short"), cell(columns - 2, 7, "digital", "tall")]
+        const under = cell(columns, 3, "digital", "under")
+        return { format: 2, pages: [{ name: "P", cells: blankUnder
+            ? head.concat([cell(2, 1, "blank", ""), under])
+            : head.concat([under, cell(2, 3, "blank", "")]) }] }
+    }
+    function test_aShortCellFillsTheEmptySquaresUnderIt_data() {
+        return [{ tag: "6 columns", w: 384, h: 832, columns: 6, blankUnder: false },
+                { tag: "12 columns", w: 832, h: 384, columns: 12, blankUnder: false },
+                { tag: "6 columns, a blank under it", w: 384, h: 832, columns: 6, blankUnder: true },
+                { tag: "12 columns, a blank under it", w: 832, h: 384, columns: 12, blankUnder: true }]
+    }
+    function test_aShortCellFillsTheEmptySquaresUnderIt(data) {
+        const page = pageOf({ form: "phone", width: data.w, height: data.h },
+                            fitDoc(data.columns, data.blankUnder), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        compare(view.columns, data.columns)
+        const short = findChild(page, "dashCell_0_0")
+        const blank = findChild(page, data.blankUnder ? "dashCell_0_2" : "dashCell_0_3")
+        const drawn = data.blankUnder ? 6 : 7
+        fuzzyCompare(short.height, drawn * view.pitch, 1e-6, "down to the next cell, never a blank")
+        fuzzyCompare(blank.height, (data.blankUnder ? 1 : 3) * view.pitch, 1e-6, "a blank stays its size")
+        compare(DashboardBook.seams(view.placed, view.boxes, view.columns).length, seamsOf(page).length)
+        if (!data.blankUnder)
+            verify(!seamsOf(page).some(l => l.width > l.height && Math.abs(l.y - 6 * view.pitch) < 1
+                                            && l.x < view.columnWidth),
+                   "no line closes off a strip under it")
+        page.held = 0
+        tryVerify(() => Math.abs(short.height - 6 * view.pitch) < 1e-6, 1000, "a held cell's true size")
+        page.cancelHold()
+        fuzzyCompare(short.height, drawn * view.pitch, 1e-6, "back after the hold")
+        page.startEditing()
+        fuzzyCompare(short.height, 6 * view.pitch, 1e-6, "edit mode's true size")
+        compare(page.doc.pages[0].cells[0].h, 6, "the layout is unchanged")
+    }
+    function test_theDesktopDoesNotStretchItsCards() {
+        const page = pageOf({ form: "desktop", width: 1280, height: 800 }, fitDoc(6, false), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        fuzzyCompare(findChild(page, "dashCell_0_0").height, 6 * view.pitch - page.cellGap, 1e-6)
+    }
+
+    // A Digits card counts from its range; its own option wins
+    function test_aDigitsCardsCountComesFromItsRange_data() {
+        return [{ tag: "from the range", options: { from: 0, to: 100 }, count: 3 },
+                { tag: "the option wins", options: { from: 0, to: 100, digits: 6 }, count: 6 }]
+    }
+    function test_aDigitsCardsCountComesFromItsRange(data) {
+        const doc = { format: 2, pages: [{ name: "P", cells: [
+            { kind: "seven-segment", w: 3, h: 6, label: "D", refs: ["id:1001"], unit: "RPM",
+              options: data.options }] }] }
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, doc, true)
+        tryVerify(() => allLoaded(page) && loaders(page)[0].item, 3000, "its gauge loads")
+        compare(loaders(page)[0].item.count, data.count)
+    }
+
     // Each hairline is a whole number of the display's pixels, and sits on them
     function test_aHairlineIsWholePixels_data() {
         return [{ tag: "100 %", zoom: 1 }, { tag: "125 %", zoom: 1.25 }, { tag: "75 %", zoom: 0.75 },
