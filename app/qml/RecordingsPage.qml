@@ -151,7 +151,12 @@ Page {
     readonly property real minSpanMs: 200
     // The dot marking the cursor's sample on each trace
     readonly property real cursorDotR: 3.5
-    readonly property int rowHeight: Theme.dense ? 36 : 40
+    // A phone's targets are Theme.touchTarget; the desktop keeps its sizes
+    readonly property bool phoneShape: Theme.mobile || Theme.compact
+    // The buttons, boxes and fields below take it, as under Settings' pages
+    readonly property real touchMin: phoneShape ? Theme.touchTarget : 0
+    readonly property real rowHeight: phoneShape ? Theme.touchTarget : Theme.dense ? 36 : 40
+    readonly property real segmentHeight: phoneShape ? Theme.touchTarget : 30
     // A column narrower than a second reads the recording's raw rows of
     // every signal in it (ADR-0049 section 5); a second or wider, the
     // reader's per-second summaries. Past this many rows in view, columns
@@ -1050,6 +1055,7 @@ Page {
                         anchors.centerIn: parent
                         spacing: 2
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "importKind_csv"
                             text: qsTr("CSV")
                             selected: root.importKind === RecordingImport.Csv
@@ -1061,6 +1067,7 @@ Page {
                             }
                         }
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "importKind_candump"
                             text: qsTr("candump")
                             selected: root.importKind === RecordingImport.Candump
@@ -1108,6 +1115,9 @@ Page {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ComboBox {
+                    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                             implicitContentHeight + topPadding + bottomPadding,
+                                             implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                     id: savedMapChoice
                     objectName: "savedMaps"
                     visible: root.savedMaps.length > 0
@@ -1422,11 +1432,15 @@ Page {
             text: recording.state === RecordingView.Open ? root.infoText() : ""
         }
 
-        // The whole recording's health as one scrubbed file to share
-        RowLayout {
+        // The whole recording's health as one scrubbed file to share. A
+        // phone has two columns, so the views' switch has the second row
+        GridLayout {
             visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
-            spacing: Theme.spacing
+            Layout.preferredWidth: 100000   // the page's width, not its buttons'
+            columns: root.phoneShape ? 2 : 4
+            columnSpacing: Theme.spacing
+            rowSpacing: Theme.spacing
             ThemedButton {
                 objectName: "saveReport"
                 compact: Theme.compact
@@ -1461,12 +1475,14 @@ Page {
                     anchors.centerIn: parent
                     spacing: 2
                     SegmentButton {
+                        tapHeight: root.segmentHeight
                         objectName: "detailView_values"
                         text: qsTr("Values")
                         selected: !root.framesShown
                         onClicked: root.detailView = "values"
                     }
                     SegmentButton {
+                        tapHeight: root.segmentHeight
                         objectName: "detailView_frames"
                         text: qsTr("Frames")
                         selected: root.framesShown
@@ -1476,7 +1492,9 @@ Page {
             }
             Label {
                 objectName: "reportNote"
+                visible: text !== ""
                 Layout.fillWidth: true
+                Layout.columnSpan: root.phoneShape ? 2 : 1
                 wrapMode: Text.WordWrap
                 text: root.reportNote
                 color: root.reportFailed ? Theme.danger : Theme.textDim
@@ -1496,6 +1514,9 @@ Page {
         // Where the values come from: offered once it opened, or failed
         // (a profile that can't decode it, a folder with frames alone)
         ComboBox {
+            implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                     implicitContentHeight + topPadding + bottomPadding,
+                                     implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
             id: decodeChoice
             objectName: "decodeChoice"
             // Values alone have no frames to decode through a profile
@@ -1532,7 +1553,7 @@ Page {
                 objectName: "isBaseline"
                 visible: root.isBaseline
                 width: Math.min(implicitWidth, baselineFlow.width)
-                height: Theme.controlHeight
+                height: root.phoneShape ? Theme.touchTarget : Theme.controlHeight
                 verticalAlignment: Text.AlignVCenter
                 wrapMode: Text.WordWrap
                 color: Theme.textDim
@@ -1556,6 +1577,9 @@ Page {
             Layout.fillWidth: true
             spacing: Theme.spacing
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 id: compareChoice
                 objectName: "compareChoice"
                 readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
@@ -1583,6 +1607,9 @@ Page {
             Layout.fillWidth: true
             spacing: 6
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 id: alignChoice
                 objectName: "alignChoice"
                 width: 170
@@ -1597,6 +1624,9 @@ Page {
                 onActivated: root.setAlignOn(currentValue)
             }
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 objectName: "alignMarker"
                 visible: root.alignOn === "marker"
                 width: 150
@@ -1604,6 +1634,9 @@ Page {
                 onActivated: root.alignLabel = currentText
             }
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 objectName: "alignSignal"
                 visible: root.alignOn === "rise" || root.alignOn === "fall"
                 width: 150
@@ -1661,12 +1694,14 @@ Page {
                         anchors.centerIn: parent
                         spacing: 2
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "framesTable_frames"
                             text: qsTr("Frames")
                             selected: !root.framesById
                             onClicked: root.framesById = false
                         }
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "framesTable_byId"
                             text: qsTr("By ID")
                             selected: root.framesById
@@ -2202,7 +2237,7 @@ Page {
             objectName: "findingList"
             visible: recording.state === RecordingView.Open && count > 0 && !root.chartMaximized
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(count, 3) * 32
+            Layout.preferredHeight: Math.min(count, 3) * Math.max(32, root.touchMin)
             clip: true
             currentIndex: -1
             highlightFollowsCurrentItem: false
@@ -2214,7 +2249,7 @@ Page {
                 id: findingRow
                 required property var modelData
                 width: findingList.width
-                height: 32
+                height: Math.max(32, root.touchMin)
                 color: findingArea.hovered ? Theme.elevatedLight : "transparent"
                 AbstractButton {
                     id: findingArea

@@ -18,6 +18,17 @@ Rectangle {
     property bool live: true
     // Shown while the table has no rows
     property string emptyText: ""
+    // The nearest ancestor's touchMin (the recordings page asks for a phone's
+    // touch size; the Log page has none), as ThemedButton takes it
+    // qmllint disable missing-property
+    readonly property real touchMin: {
+        for (let p = table.parent; p; p = p.parent) {
+            if (p.touchMin !== undefined)
+                return p.touchMin
+        }
+        return 0
+    }
+    // qmllint enable missing-property
     // A phone's width: the table leaves out DLC, narrows its columns and
     // wraps the payload under itself rather than cut it off
     readonly property bool narrowTable: frameList.width < 480   // the rows' narrow too
@@ -37,7 +48,7 @@ Rectangle {
     Rectangle {
         id: columnHeader
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 32
+        height: Math.max(32, table.touchMin)
         z: 2
         color: Theme.elevated
 

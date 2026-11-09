@@ -872,6 +872,190 @@ TestCase {
         verify(title.visible && !compactTitle.visible, "and back")
     }
 
+    // On a phone every button, box, choice and field the page shows, its
+    // list rows and the viewer's signal rows are a touch's size (48), and
+    // nothing runs past the page's right edge; the desktop keeps its own sizes
+    // The frame table's rows and the By ID list's are data rows, as dense
+    // as Live's signal rows; the UI review judges them with those
+    readonly property var dataRows: ["frameRowArea", "idRowArea"]
+    function walkTargets(page) {
+        const seen = []
+        const small = []
+        const wide = []
+        const walk = item => {
+            for (const child of item.children) {
+                if (child.visible && child.width > 0
+                        && (child.pressed !== undefined || child.placeholderText !== undefined)) {
+                    const name = child.objectName || String(child)
+                    const h = child.mapToItem(page, 0, child.height).y
+                              - child.mapToItem(page, 0, 0).y
+                    seen.push(name)
+                    if (h < Theme.touchTarget - 0.5 && dataRows.indexOf(name) < 0)
+                        small.push(name + " " + Math.round(h))
+                    if (child.mapToItem(page, child.width, 0).x > page.width + 0.5)
+                        wide.push(name + "@" + Math.round(child.mapToItem(page, child.width, 0).x) + " w" + Math.round(child.width))
+                }
+                // A label too: its box ends inside the page
+                if (child.visible && child.width > 0 && child.contentWidth !== undefined
+                        && child.pressed === undefined && child.placeholderText === undefined
+                        && child.mapToItem(page, child.width, 0).x > page.width + 0.5)
+                    wide.push((child.objectName || String(child)) + "@"
+                              + Math.round(child.mapToItem(page, child.width, 0).x))
+                walk(child)
+            }
+        }
+        walk(page)
+        return { seen: seen, small: small, wide: wide }
+    }
+
+    function test_aPhonesRecordingListRowsAreATouchsSize() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        const desk = list.itemAtIndex(0).height
+        Theme.compact = true
+        try {
+            page.width = 384
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(list.itemAtIndex(0).height >= Theme.touchTarget - 0.5,
+                   "a list row is " + list.itemAtIndex(0).height)
+            const b = walkTargets(page)
+            verify(b.seen.length >= 1, "buttons found")
+            compare(b.small.join(", "), "", "under " + Theme.touchTarget)
+        } finally {
+            Theme.compact = false
+        }
+        tryCompare(list.itemAtIndex(0), "height", desk, 2000, "the desktop's row is as it was")
+        verify(desk >= 56)
+    }
+
+    // Each panel the page opens: the import's guessed map, the Export panel,
+    // the Frames table with its filter and By ID list, the compare and align
+    // rows, at the narrowest phone widths
+    function test_aPhonesImportPanelIsATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesImportPanelIsATouchsSize(data) {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("phone-guess-plain.csv",
+            "time,rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        Theme.compact = true
+        try {
+            page.width = data.w
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(find(preview, "guessWaiting").visible, "the unit is asked for")
+            const b = walkTargets(page)
+            for (const name of ["importKind_csv", "guessTimeUnit_ms"])
+                verify(b.seen.indexOf(name) >= 0, name + " is seen: " + b.seen.join(", "))
+            compare(b.small.join(", "), "", "under " + Theme.touchTarget)
+            compare(b.wide.join(", "), "", "past the right edge at " + data.w)
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    // The walk of an open viewer: every control a touch's size, every label
+    // and control inside the page, and the names it must have reached
+    function walkPanel(page, data, seen, what) {
+        verify(waitForPolish(page.Window.window), "laid out")
+        const b = walkTargets(page)
+        for (const n of b.seen)
+            seen.push(n)
+        const out = []
+        if (b.small.length > 0)
+            out.push(what + ": under " + Theme.touchTarget + ": " + b.small.join(", "))
+        if (b.wide.length > 0)
+            out.push(what + ": past the right edge at " + data.w + ": " + b.wide.join(", "))
+        return out
+    }
+    function wasWalked(seen, names) {
+        for (const n of names)
+            verify(seen.indexOf(n) >= 0, n + " was walked: " + seen.join(", "))
+    }
+
+    function test_aPhonesViewerPanelsAreATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesViewerPanelsAreATouchsSize(data) {
+        const page = openFindings()
+        Theme.compact = true
+        try {
+            page.width = data.w
+            verify(!find(page, "reportNote").visible, "no note, no row for it")
+            page.reportNote = "Saved to a-recording-with-a-rather-long-file-name-for-a-phone.zip"
+            verify(waitForPolish(page.Window.window), "laid out")
+            const note = find(page, "reportNote")
+            tryVerify(() => note.width > 0.6 * data.w, 2000,
+                      "the note has the row: " + note.width + " of " + note.parent.width)
+            const seen = []
+            const problems = []
+            problems.push(...walkPanel(page, data, seen, "the viewer"))
+            openExport(page)
+            problems.push(...walkPanel(page, data, seen, "the Export panel"))
+            find(page, "exportButton").clicked()
+
+            mouseClick(find(page, "detailView_frames"))
+            tryVerify(() => /^\d+ frames? in view$/.test(find(page, "framesWords").text), 10000)
+            find(page, "framesFilterToggle").clicked()
+            problems.push(...walkPanel(page, data, seen, "the Frames table and its filter"))
+            mouseClick(find(page, "framesTable_byId"))
+            problems.push(...walkPanel(page, data, seen, "the By ID list"))
+            mouseClick(find(page, "detailView_values"))
+            problems.push(...walkPanel(page, data, seen, "the values again"))
+            compare(problems.join("; "), "")
+            wasWalked(seen, ["exportFormat_csv", "exportRows_sweep", "direction_0",
+                             "framesTable_byId", "detailView_values", "decodeChoice"])
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    function test_aPhonesCompareAndAlignRowsAreATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesCompareAndAlignRowsAreATouchsSize(data) {
+        const page = openEarly()
+        Theme.compact = true
+        try {
+            page.width = data.w
+            find(page, "compareChoice").activated(1)
+            tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+            const seen = []
+            const problems = []
+            problems.push(...walkPanel(page, data, seen, "the compare and align rows"))
+            compare(problems.join("; "), "")
+            wasWalked(seen, ["compareChoice", "alignChoice"])
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    function test_aPhonesViewerTargetsAreATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesViewerTargetsAreATouchsSize(data) {
+        const page = openFindings()
+        const rows = find(page, "signalRows")
+        compare(rows.itemAtIndex(0).height, page.rowHeight)
+        const desk = rows.itemAtIndex(0).height
+        verify(desk < 48, "a desktop's signal row is " + desk)
+        Theme.compact = true
+        try {
+            page.width = data.w
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(rows.itemAtIndex(0).height >= Theme.touchTarget - 0.5,
+                   "a signal row is " + rows.itemAtIndex(0).height)
+            const b = walkTargets(page)
+            compare(b.wide.join(", "), "", "past the right edge at " + data.w)
+            verify(b.seen.indexOf("detailView_values") >= 0, "the view switch is seen: " + b.seen.join(", "))
+            compare(b.small.join(", "), "", "under " + Theme.touchTarget)
+        } finally {
+            Theme.compact = false
+        }
+    }
+
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)
@@ -1461,6 +1645,24 @@ TestCase {
         page.vehicles = VehicleBook.pick(page.vehicles, "")
         verify(!find(page, "baselineRow").visible, "no vehicle picked")
         compare(vehiclesSpy.count, 1)
+    }
+
+    // The baseline's name is as tall as the buttons beside it: a touch's size on a phone
+    function test_theBaselineLabelIsATouchsSizeOnAPhone() {
+        const page = createBookPage("")
+        page.recordings = [startLateRow, startEarlyRow]
+        openRow(page, startEarlyRow)
+        mouseClick(find(page, "useAsBaseline"))
+        const mine = find(page, "isBaseline")
+        verify(mine.visible)
+        compare(mine.height, Theme.controlHeight, "the desktop's")
+        Theme.compact = true
+        try {
+            tryCompare(mine, "height", 48)
+        } finally {
+            Theme.compact = false
+        }
+        tryCompare(mine, "height", Theme.controlHeight)
     }
 
     // A baseline whose folder is gone says so on the list and in the

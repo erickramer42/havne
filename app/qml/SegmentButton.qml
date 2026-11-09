@@ -9,10 +9,12 @@ import QtQuick.Controls
 AbstractButton {
     id: seg
     property bool selected: false
+    // A page on a phone sets Theme.touchTarget
+    property real tapHeight: 30
     property alias wrapMode: segLabel.wrapMode
 
     implicitWidth: segLabel.implicitWidth + 24
-    implicitHeight: 30
+    implicitHeight: seg.tapHeight
     hoverEnabled: true
     Accessible.checkable: true
     Accessible.checked: seg.selected

@@ -21,6 +21,17 @@ GridLayout {
     required property var frames
     // FrameFilter::Direction's order: All, Received, Sent
     property int direction: 0
+    // The nearest ancestor's touchMin (the recordings page asks for a phone's
+    // touch size; the Log page has none), as ThemedButton takes it
+    // qmllint disable missing-property
+    readonly property real touchMin: {
+        for (let p = panel.parent; p; p = p.parent) {
+            if (p.touchMin !== undefined)
+                return p.touchMin
+        }
+        return 0
+    }
+    // qmllint enable missing-property
 
     // The fields to the model, which keeps the last good part of a field
     // that doesn't parse and says why
@@ -172,6 +183,7 @@ GridLayout {
                         required property string modelData
                         required property int index
                         objectName: "direction_" + index
+                        tapHeight: Math.max(30, panel.touchMin)
                         text: modelData
                         selected: panel.direction === index
                         onClicked: {
@@ -190,7 +202,7 @@ GridLayout {
                     qsTr("Standard (11-bit)"), qsTr("CAN FD"),
                     qsTr("Reassembled"), qsTr("Truncated"),
                     qsTr("After a loss"), qsTr("Error")]
-            implicitHeight: Theme.controlHeight
+            implicitHeight: Math.max(Theme.controlHeight, panel.touchMin)
             onActivated: panel.apply()
         }
         ThemedButton {
