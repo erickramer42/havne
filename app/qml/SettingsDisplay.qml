@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsDisplay.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone, QmlTest.driveview (test_qml)
 // Zoom, units and the drive view's settings: one part of SettingsPage, which
 // holds the zoom's and the units' state; the drive view's is stored here
 
@@ -27,6 +27,8 @@ ColumnLayout {
         property int driveHideMs: 4000
         property string driveOrientation: "follow"
     }
+    readonly property int driveHideMs: driveSettings.driveHideMs
+    readonly property string driveOrientation: driveSettings.driveOrientation
 
     // The whole UI's zoom; Main.qml applies and stores it
     // One row of four: a button never wraps alone onto a second line

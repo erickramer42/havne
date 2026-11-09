@@ -1,6 +1,6 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.linkhealth (test_qml); BENCH, Manual
-//          smoke
+// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview (test_qml);
+//          BENCH, Manual smoke
 
 import QtCore
 import QtQuick
@@ -92,6 +92,11 @@ ApplicationWindow {
     }
     readonly property int currentPage: stack.currentIndex
 
+    // The drive view (ADR-0059) is the Dash page's state; the bars here
+    // follow it, and in the view they slide in over the gauges
+    readonly property bool driving: dashboardView.driving
+    readonly property real barsShown: dashboardView.barsShown
+
     // Page indices, in the order of the sidebar and the stack
     readonly property int dashboardPage: 1
     readonly property int logPage: 4
@@ -106,10 +111,56 @@ ApplicationWindow {
             gotoPage(dashboardPage)
     }
     onIsCompactChanged: leaveHomeForTheTabs()
+    // The page the one shown was reached from, for Back
+    property int cameFrom: -1
+    property int lastPage: 0
+    onCurrentPageChanged: {
+        cameFrom = lastPage
+        lastPage = currentPage
+        // A hidden page can keep the key focus, and then Back reaches nothing
+        if (Theme.mobile || testMobile)
+            zoomRoot.forceActiveFocus()
+    }
+    // Android's Back: true when it did something here. False leaves it to the
+    // system, which goes to the launcher and keeps the session
+    function goBack() {
+        if (currentPage === dashboardPage)
+            return dashboardView.driveBack()
+        if (currentPage === settingsPage) {
+            if (!settingsView.backLeaves)
+                return settingsView.closeShown()
+            settingsView.closeShown()
+            gotoPage(cameFrom)
+            return true
+        }
+        if (currentPage === logPage && cameFrom >= 0) {
+            gotoPage(cameFrom)
+            return true
+        }
+        if (currentPage === recordingsPage && recordingsView.viewing) {
+            recordingsView.backToList()
+            return true
+        }
+        return false
+    }
+    // A page shown again, or a control that hid, leaves no item with the key
+    // focus and Back would never arrive. A window losing the front loses it
+    // too, and a field gets it back only if nothing took it meanwhile
+    onActiveFocusItemChanged: {
+        const f = activeFocusItem
+        if (active && (Theme.mobile || testMobile)
+                && (f === null || f === contentItem || f.parent === null))
+            zoomRoot.forceActiveFocus()
+    }
     // Connect... from any page: Settings, with what to connect to open
     function openConnect() {
         settingsView.showAdapters()
         gotoPage(settingsPage)
+    }
+    // Dash's "Other address...": Back returns to Dash, not to Settings' list
+    function openConnectFromDash() {
+        openConnect()
+        settingsView.backLeaves = true
     }
     // A recording's Replay: its URI in Settings' field, ready to connect
     function replayRecording(uri) {
@@ -130,7 +181,7 @@ ApplicationWindow {
     Connections {
         target: Bridge
         function onLogStopped(folder, byUser) {
-            if (!byUser)
+            if (!byUser || root.driving)
                 return
             root.gotoPage(root.recordingsPage)
             recordingsView.openFolder(folder)
@@ -222,6 +273,16 @@ ApplicationWindow {
         bottomInset: Theme.compact ? 6 : 0
     }
 
+    // Over a bar in the drive view: a press restarts its hide delay and goes on
+    // to what's under it
+    component BarTouch: MouseArea {
+        enabled: root.driving
+        onPressed: mouse => {
+            dashboardView.barTouched()
+            mouse.accepted = false
+        }
+    }
+
     // The whole UI, laid out at the window's size divided by the zoom and
     // scaled by it, so pages reflow as if the window were that size.
     // Shapes and text are vector-drawn, so they stay sharp at any zoom.
@@ -233,6 +294,13 @@ ApplicationWindow {
         id: zoomRoot
         objectName: "zoomRoot"
         readonly property var safe: root.insets
+        // The back key, from anything that holds the focus in here; the
+        // window's focus is kept on this item when nothing else holds it
+        focus: true
+        Keys.onBackPressed: event => {
+            // A held key repeats, and one press is one Back
+            event.accepted = event.isAutoRepeat || root.goBack()
+        }
         // The top and bottom insets in the layout's units
         readonly property real insetTop: safe.top / Theme.zoom
         readonly property real insetBottom: safe.bottom / Theme.zoom
@@ -252,178 +320,189 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: 0
 
-            ToolBar {
-                objectName: "headerBar"
+            // The bar's place in the column: the drive view gives it to the
+            // page, and the bar slides in over the gauges
+            Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: Theme.toolBarHeight + zoomRoot.insetTop
-                // The row below pads the inset itself; the style would pad it too
-                topPadding: 0
-                background: Rectangle {
-                    color: Theme.surface
-                    Rectangle { // 2px accent underline
-                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                        height: 2; color: Theme.primary
-                    }
-                }
-                RowLayout {
-                    id: headerRow
-                    objectName: "headerRow"
-                    readonly property real touchMin: root.isCompact ? Theme.touchTarget : 0
-                    anchors.fill: parent
-                    anchors.topMargin: zoomRoot.insetTop
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    spacing: 12
-
-                    // The name gives way to Mark or the log's controls on a
-                    // phone's width
-                    Label {
-                        id: headerTitle
-                        objectName: "headerTitle"
-                        visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
-                                 || headerRow.width >= 420
-                        text: qsTr("Havne")
-                        font.pixelSize: Theme.fontEmphasis
-                        font.weight: Font.DemiBold
-                        color: Theme.text
-                    }
-
-                    // The link state and URI: the address elides first, the
-                    // word never. With the tab bar a tap opens the Log it omits
-                    AbstractButton {
-                        id: pill
-                        objectName: "linkPill"
-                        readonly property color tone: (Bridge.connecting || Bridge.disconnecting)
-                                                    ? Theme.textDim
-                                                    : Theme.linkColor(Bridge.linkState)
-                        readonly property string stateWord:
-                            Bridge.connecting ? qsTr("Connecting…")
-                          : Bridge.disconnecting ? qsTr("Disconnecting…")
-                          : root.isCompact || !headerTitle.visible
-                            ? Theme.linkShortLabel(Bridge.linkState)
-                            : Theme.linkLabel(Bridge.linkState)
-                        readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredWidth: implicitWidth
-                        Layout.maximumWidth: implicitWidth
-                        Layout.minimumWidth: 32
-                        implicitWidth: implicitContentWidth + leftPadding + rightPadding
-                        implicitHeight: implicitContentHeight
-                        leftPadding: root.isCompact ? 0 : 12
-                        rightPadding: root.isCompact ? 0 : 12
-                        topPadding: 0
-                        bottomPadding: 0
-                        enabled: tabBar.visible
-                        text: address !== "" ? qsTr("%1 · %2").arg(stateWord).arg(address) : stateWord
-                        Accessible.name: enabled ? qsTr("%1: show the log").arg(text) : text
-                        onClicked: root.gotoPage(root.logPage)
-                        // A dot and a word at rest, no capsule
-                        background: Rectangle {
-                            color: pill.down ? Theme.elevated : "transparent"
-                            radius: Theme.radius
-                            border.width: pill.visualFocus ? 2 : 0
-                            border.color: Theme.text
-                        }
-                        contentItem: RowLayout {
-                            spacing: 8
-
-                            Rectangle {
-                                implicitWidth: 8; implicitHeight: 8   // layout-managed
-                                radius: 4
-                                color: pill.tone
-                            }
-                            Label {
-                                objectName: "linkPillText"
-                                font.pixelSize: Theme.fontCaption
-                                color: Theme.text
-                                text: pill.stateWord
-                            }
-                            Label {
-                                objectName: "linkPillAddress"
-                                visible: pill.address !== ""
-                                Layout.fillWidth: true
-                                Layout.minimumWidth: 0
-                                elide: Text.ElideRight
-                                font.pixelSize: Theme.fontCaption
-                                color: Theme.textDim
-                                text: qsTr("· %1").arg(pill.address)
-                            }
+                Layout.preferredHeight: root.driving ? 0 : headerBar.height
+                z: 1
+                ToolBar {
+                    id: headerBar
+                    objectName: "headerBar"
+                    width: parent.width
+                    height: Theme.toolBarHeight + zoomRoot.insetTop
+                    y: root.driving ? -height * (1 - root.barsShown) : 0
+                    visible: !root.driving || root.barsShown > 0
+                    // The row below pads the inset itself; the style would pad it too
+                    topPadding: 0
+                    background: Rectangle {
+                        color: Theme.surface
+                        Rectangle { // 2px accent underline
+                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                            height: 2; color: Theme.primary
                         }
                     }
+                    RowLayout {
+                        id: headerRow
+                        objectName: "headerRow"
+                        readonly property real touchMin: root.isCompact ? Theme.touchTarget : 0
+                        anchors.fill: parent
+                        anchors.topMargin: zoomRoot.insetTop
+                        anchors.leftMargin: 16
+                        anchors.rightMargin: 16
+                        spacing: 12
 
-                    Item { Layout.fillWidth: true }  // Spacer
+                        // The name gives way to Mark or the log's controls on a
+                        // phone's width
+                        Label {
+                            id: headerTitle
+                            objectName: "headerTitle"
+                            visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
+                                     || headerRow.width >= 420
+                            text: qsTr("Havne")
+                            font.pixelSize: Theme.fontEmphasis
+                            font.weight: Font.DemiBold
+                            color: Theme.text
+                        }
 
-                    // A marker in the recording under way, from any page
-                    // (ADR-0049 section 4): "Mark N" at the tap, which the
-                    // Recordings page aligns two runs on
-                    HeaderButton {
-                        id: markButton
-                        objectName: "markButton"
-                        visible: Bridge.recordingActive && !Bridge.logActive
-                        text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
-                                                   : qsTr("Mark")
-                        Accessible.name: qsTr("Mark the recording")
-                        onClicked: Bridge.mark()
-                    }
+                        // The link state and URI: the address elides first, the
+                        // word never. With the tab bar a tap opens the Log it omits
+                        AbstractButton {
+                            id: pill
+                            objectName: "linkPill"
+                            readonly property color tone: (Bridge.connecting || Bridge.disconnecting)
+                                                        ? Theme.textDim
+                                                        : Theme.linkColor(Bridge.linkState)
+                            readonly property string stateWord:
+                                Bridge.connecting ? qsTr("Connecting…")
+                              : Bridge.disconnecting ? qsTr("Disconnecting…")
+                              : root.isCompact || !headerTitle.visible
+                                ? Theme.linkShortLabel(Bridge.linkState)
+                                : Theme.linkLabel(Bridge.linkState)
+                            readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: implicitWidth
+                            Layout.maximumWidth: implicitWidth
+                            Layout.minimumWidth: 32
+                            implicitWidth: implicitContentWidth + leftPadding + rightPadding
+                            implicitHeight: implicitContentHeight
+                            leftPadding: root.isCompact ? 0 : 12
+                            rightPadding: root.isCompact ? 0 : 12
+                            topPadding: 0
+                            bottomPadding: 0
+                            enabled: root.isCompact
+                            text: address !== "" ? qsTr("%1 · %2").arg(stateWord).arg(address) : stateWord
+                            Accessible.name: enabled ? qsTr("%1: show the log").arg(text) : text
+                            onClicked: root.gotoPage(root.logPage)
+                            // A dot and a word at rest, no capsule
+                            background: Rectangle {
+                                color: pill.down ? Theme.elevated : "transparent"
+                                radius: Theme.radius
+                                border.width: pill.visualFocus ? 2 : 0
+                                border.color: Theme.text
+                            }
+                            contentItem: RowLayout {
+                                spacing: 8
 
-                    // The analysis log (ADR-0056 section 1): Live's ticked rows,
-                    // recorded from now on and asked alone until Stop log. A
-                    // replay plays a recording already; Record sessions' own
-                    // recorder is the session's one
-                    HeaderButton {
-                        id: startLogButton
-                        objectName: "startLogButton"
-                        highlighted: true
-                        visible: Bridge.connected && !Bridge.recordingActive
-                                 && !Bridge.currentUri.toLowerCase().startsWith("replay://")
-                        enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
-                        text: qsTr("Start log")
-                        Accessible.name: qsTr("Start a log of the ticked signals")
-                        onClicked: Bridge.startLog()
-                    }
-                    // While a log runs: its time over its folder's size, two
-                    // short lines, so a ten-hour log's readout fits beside
-                    // the name at 420 px
-                    Label {
-                        objectName: "logReadout"
-                        visible: Bridge.logActive
-                        text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
-                                                .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
-                        horizontalAlignment: Text.AlignRight
-                        font.pixelSize: Theme.fontCaption
-                        color: Theme.text
-                    }
-                    HeaderButton {
-                        objectName: "stopLogButton"
-                        highlighted: true
-                        visible: Bridge.logActive
-                        enabled: !Bridge.disconnecting
-                        text: qsTr("Stop log")
-                        onClicked: Bridge.stopLog()
-                    }
+                                Rectangle {
+                                    implicitWidth: 8; implicitHeight: 8   // layout-managed
+                                    radius: 4
+                                    color: pill.tone
+                                }
+                                Label {
+                                    objectName: "linkPillText"
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.text
+                                    text: pill.stateWord
+                                }
+                                Label {
+                                    objectName: "linkPillAddress"
+                                    visible: pill.address !== ""
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    elide: Text.ElideRight
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.textDim
+                                    text: qsTr("· %1").arg(pill.address)
+                                }
+                            }
+                        }
 
-                    // Settings owns connecting: this button opens it, or ends the
-                    // session from any page. On Settings itself, its Connect
-                    // button is the one to use.
-                    // A log's Stop log takes its place while the log runs
-                    HeaderButton {
-                        objectName: "disconnectButton"
-                        // Ending a session is quiet; Connect... is primary
-                        flat: Bridge.connected || Bridge.disconnecting
-                        highlighted: !flat
-                        visible: !Bridge.logActive
-                                 && (Bridge.connected || root.currentPage !== root.settingsPage)
-                        // A teardown can take seconds with a wedged adapter; no
-                        // connect starts until it ends
-                        enabled: !Bridge.connecting && !Bridge.disconnecting
-                        text: Bridge.connected ? qsTr("Disconnect")
-                            : Bridge.disconnecting ? qsTr("Disconnecting…")
-                            : qsTr("Connect…")
-                        onClicked: Bridge.connected ? Bridge.disconnectSession()
-                                                    : root.openConnect()
+                        Item { Layout.fillWidth: true }  // Spacer
+
+                        // A marker in the recording under way, from any page
+                        // (ADR-0049 section 4): "Mark N" at the tap, which the
+                        // Recordings page aligns two runs on
+                        HeaderButton {
+                            id: markButton
+                            objectName: "markButton"
+                            visible: Bridge.recordingActive && !Bridge.logActive
+                            text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
+                                                       : qsTr("Mark")
+                            Accessible.name: qsTr("Mark the recording")
+                            onClicked: Bridge.mark()
+                        }
+
+                        // The analysis log (ADR-0056 section 1): Live's ticked rows,
+                        // recorded from now on and asked alone until Stop log. A
+                        // replay plays a recording already; Record sessions' own
+                        // recorder is the session's one
+                        HeaderButton {
+                            id: startLogButton
+                            objectName: "startLogButton"
+                            highlighted: true
+                            visible: Bridge.connected && !Bridge.recordingActive
+                                     && !Bridge.currentUri.toLowerCase().startsWith("replay://")
+                            enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                            text: qsTr("Start log")
+                            Accessible.name: qsTr("Start a log of the ticked signals")
+                            onClicked: Bridge.startLog()
+                        }
+                        // While a log runs: its time over its folder's size, two
+                        // short lines, so a ten-hour log's readout fits beside
+                        // the name at 420 px
+                        Label {
+                            objectName: "logReadout"
+                            visible: Bridge.logActive
+                            text: qsTr("%1\n%2 MB").arg(root.logTimeText(Bridge.logElapsedMs))
+                                                    .arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                            horizontalAlignment: Text.AlignRight
+                            font.pixelSize: Theme.fontCaption
+                            color: Theme.text
+                        }
+                        HeaderButton {
+                            objectName: "stopLogButton"
+                            highlighted: true
+                            visible: Bridge.logActive
+                            enabled: !Bridge.disconnecting
+                            text: qsTr("Stop log")
+                            onClicked: Bridge.stopLog()
+                        }
+
+                        // Settings owns connecting: this button opens it, or ends the
+                        // session from any page. On Settings itself, its Connect
+                        // button is the one to use.
+                        // A log's Stop log takes its place while the log runs
+                        HeaderButton {
+                            objectName: "disconnectButton"
+                            // Ending a session is quiet; Connect... is primary
+                            flat: Bridge.connected || Bridge.disconnecting
+                            highlighted: !flat
+                            visible: !Bridge.logActive
+                                     && (Bridge.connected || root.currentPage !== root.settingsPage)
+                            // A teardown can take seconds with a wedged adapter; no
+                            // connect starts until it ends
+                            enabled: !Bridge.connecting && !Bridge.disconnecting
+                            text: Bridge.connected ? qsTr("Disconnect")
+                                : Bridge.disconnecting ? qsTr("Disconnecting…")
+                                : qsTr("Connect…")
+                            onClicked: Bridge.connected ? Bridge.disconnectSession()
+                                                        : root.openConnect()
+                        }
                     }
                 }
+                BarTouch { y: headerBar.y; width: headerBar.width; height: headerBar.height; visible: headerBar.visible }
             }
 
             RowLayout {
@@ -433,7 +512,7 @@ ApplicationWindow {
 
                 // ---- Sidebar (>= 720px): one full-height panel ----
                 Rectangle {
-                    visible: !root.isCompact
+                    visible: !root.isCompact && !root.driving
                     Layout.fillHeight: true
                     Layout.preferredWidth: Theme.sidebarWidth
                     color: Theme.surface
@@ -483,12 +562,19 @@ ApplicationWindow {
                         onConnectRequested: root.openConnect()
                     }
                     DashboardPage {
+                        id: dashboardView
                         objectName: "dashboardPage"
                         offlineUri: settingsView.offlineUri
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
                         onConnectToUri: uri => settingsView.connectFromList(uri)
-                        onOtherAddressRequested: root.openConnect()
+                        onOtherAddressRequested: root.openConnectFromDash()
+                        driveHideMs: settingsView.driveHideMs
+                        driveOrientation: settingsView.driveOrientation
+                        driveHeaderHeight: headerBar.height
+                        driveInsetTop: zoomRoot.insetTop
+                        driveInsetBottom: zoomRoot.insetBottom
+                        driveLogTime: root.logTimeText(Bridge.logElapsedMs)
                     }
                     LiveViewPage {
                         objectName: "livePage"
@@ -520,84 +606,105 @@ ApplicationWindow {
             // keeps its own height), then a gap and the system's bottom
             // inset, all in the bar's color, so a tap low on a tab never
             // reaches Back or Home beside it
-            TabBar {
-                id: tabBar
-                objectName: "tabBar"
+            Item {
                 visible: root.isCompact
                 Layout.fillWidth: true
-                Layout.preferredHeight: Theme.touchTarget + Theme.barGap + zoomRoot.insetBottom
-                spacing: 0
-                // The bar's height already holds the bottom inset, painted in
-                // its color: the style pads none of it again
-                topPadding: 0
-                bottomPadding: 0
-                leftPadding: 0
-                rightPadding: 0
+                Layout.preferredHeight: root.driving ? 0 : tabBar.height
+                z: 1
+                TabBar {
+                    id: tabBar
+                    objectName: "tabBar"
+                    visible: !root.driving || root.barsShown > 0
+                    width: parent.width
+                    height: Theme.touchTarget + Theme.barGap + zoomRoot.insetBottom
+                    y: root.driving ? -height * root.barsShown : 0
+                    spacing: 0
+                    // The bar's height already holds the bottom inset, painted in
+                    // its color: the style pads none of it again
+                    topPadding: 0
+                    bottomPadding: 0
+                    leftPadding: 0
+                    rightPadding: 0
 
-                background: Rectangle {
-                    objectName: "tabBarBackground"
-                    color: Theme.surface
-                    Rectangle {
-                        objectName: "tabBarHairline"
-                        anchors { left: parent.left; right: parent.right; top: parent.top }
-                        height: 1
-                        color: Theme.hairline
-                    }
-                }
-
-                // The page decides the mark: on the Log no tab is marked, and
-                // TabBar's index at -1 leaves the last checked and deaf to a tap
-                Repeater {
-                    model: [
-                        { label: qsTr("Dash"), page: root.dashboardPage },
-                        { label: qsTr("Live"), page: 2 },
-                        { label: qsTr("Codes"), page: 3 },
-                        { label: qsTr("Recs"), page: root.recordingsPage },
-                        { label: qsTr("Settings"), page: root.settingsPage }
-                    ]
-                    delegate: TabButton {
-                        id: btn
-                        required property var modelData
-                        objectName: "tab_" + modelData.page
-                        text: modelData.label
-                        implicitHeight: Theme.touchTarget
-                        checked: stack.currentIndex === modelData.page
-                        onClicked: root.gotoPage(modelData.page)
-                        contentItem: Label {
-                            text: btn.text
-                            font.pixelSize: Theme.fontBody
-                            font.weight: btn.checked ? Font.DemiBold : Font.Normal
-                            color: btn.checked ? Theme.text : Theme.textDim
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                    background: Rectangle {
+                        objectName: "tabBarBackground"
+                        color: Theme.surface
+                        Rectangle {
+                            objectName: "tabBarHairline"
+                            anchors { left: parent.left; right: parent.right; top: parent.top }
+                            height: 1
+                            color: Theme.hairline
                         }
-                        // The active tab is marked, so selection doesn't rest
-                        // on color alone
-                        background: Rectangle {
-                            color: "transparent"
-                            border.width: btn.visualFocus ? 2 : 0
-                            border.color: Theme.text
-                            Rectangle {
-                                objectName: "tabMark_" + btn.modelData.page
-                                visible: btn.checked
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.top: parent.top
-                                width: 32
-                                height: 3
-                                color: Theme.nightActive ? Theme.text : Theme.primary
+                    }
+
+                    // The page decides the mark: on the Log no tab is marked, and
+                    // TabBar's index at -1 leaves the last checked and deaf to a tap
+                    Repeater {
+                        model: [
+                            { label: qsTr("Dash"), page: root.dashboardPage },
+                            { label: qsTr("Live"), page: 2 },
+                            { label: qsTr("Codes"), page: 3 },
+                            { label: qsTr("Recs"), page: root.recordingsPage },
+                            { label: qsTr("Settings"), page: root.settingsPage }
+                        ]
+                        delegate: TabButton {
+                            id: btn
+                            required property var modelData
+                            objectName: "tab_" + modelData.page
+                            text: modelData.label
+                            implicitHeight: Theme.touchTarget
+                            checked: stack.currentIndex === modelData.page
+                            onClicked: {
+                                // A tab in the drive view's revealed bar is Exit drive
+                                if (root.driving)
+                                    dashboardView.leaveDrive(true)
+                                root.gotoPage(modelData.page)
+                            }
+                            contentItem: Label {
+                                text: btn.text
+                                font.pixelSize: Theme.fontBody
+                                font.weight: btn.checked ? Font.DemiBold : Font.Normal
+                                color: btn.checked ? Theme.text : Theme.textDim
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            // The active tab is marked, so selection doesn't rest
+                            // on color alone
+                            background: Rectangle {
+                                color: "transparent"
+                                border.width: btn.visualFocus ? 2 : 0
+                                border.color: Theme.text
+                                Rectangle {
+                                    objectName: "tabMark_" + btn.modelData.page
+                                    visible: btn.checked
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    width: 32
+                                    height: 3
+                                    color: Theme.nightActive ? Theme.text : Theme.primary
+                                }
                             }
                         }
                     }
                 }
+                BarTouch { y: tabBar.y; width: tabBar.width; height: tabBar.height; visible: tabBar.visible }
             }
             // With no tab bar (the sidebar's width), the pages keep off
             // the bottom inset
             Item {
-                visible: !tabBar.visible
+                visible: !root.isCompact
                 Layout.fillWidth: true
                 Layout.preferredHeight: zoomRoot.insetBottom
             }
         }
+    }
+
+    // The phone's screen stays on by ADR-0059 section 6's rule, on the
+    // phone form and in the drive view, which a tablet has too
+    KeepAwake {
+        mobile: root.phoneForm || root.driving
+        connected: Bridge.connected
+        dashShown: root.currentPage === root.dashboardPage
     }
 
     // The zoom level, for a moment after it changes

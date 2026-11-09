@@ -1,6 +1,6 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth (test_qml); Manual smoke
+//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
 
 import QtCore
 import QtQuick
@@ -28,7 +28,9 @@ Page {
     readonly property bool joined: phoneForm
     readonly property real cellGap: joined ? 0 : gap
     // The space above the header and above the panel
-    readonly property real topGap: joined ? 12 : margin
+    readonly property real topGap: driving ? 0 : joined ? 12 : margin
+    // The panel's distance from the page's sides; none in the drive view
+    readonly property real panelMargin: driving ? 0 : margin
     // One pixel of the display in the layout's units, and a hairline
     // that many whole pixels wide, so every line draws the same width
     readonly property real pixel: 1 / ((Screen.devicePixelRatio || 1) * Theme.zoom)
@@ -52,6 +54,10 @@ Page {
         // A stored text that couldn't be read, kept by the first edit
         property string phoneUnread: ""
         property string desktopUnread: ""
+        // The drive view: left on when the last one ended (section 7), and
+        // how many times its hint has shown
+        property bool phoneDrive: false
+        property int driveHints: 0
     }
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
@@ -229,6 +235,150 @@ Page {
         panel = ""
         if (!editing)
             selected = -1
+    }
+
+    // ---- The drive view (ADR-0059): this page with every bar hidden
+
+    property bool driving: false
+    property bool barsUp: false          // the reveal
+    property bool barsHeld: false        // a fault or a log's notice keeps them up
+    // What Main hands over: Settings' two values, the header's height and
+    // the system's insets
+    property int driveHideMs: 4000
+    property string driveOrientation: "follow"
+    property real driveHeaderHeight: 0
+    property real driveInsetTop: 0
+    property real driveInsetBottom: 0
+    property string driveLogTime: ""
+    // The window made full screen; a test's stand-in keeps it off the desktop
+    property var driveWindow: Window.window
+
+    // How far the bars are in: 0 hidden, 1 revealed. Main's bars follow it
+    property real barsShown: driving && barsUp ? 1 : 0
+    Behavior on barsShown { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
+    property bool driveHintUp: false
+    function isReplay(uri) { return uri.toLowerCase().startsWith("replay://") }
+
+    function enterDrive() {
+        if (driving || !phoneForm || !Bridge.connected || editing)
+            return
+        closePanel()
+        cancelHold()
+        barsUp = false
+        barsHeld = false
+        // A fault or a notice already up raises the bars through their handlers
+        driving = true
+        store.phoneDrive = true
+        Immersive.enter(driveWindow, form)
+        PhoneWindow.lockOrientation(driveOrientation)
+        if (store.driveHints < 3) {
+            ++store.driveHints
+            driveHintUp = true
+        }
+    }
+    // Exit drive and a tab are for good; a session's end comes back at the next connect
+    function leaveDrive(forGood) {
+        if (!driving)
+            return
+        driving = false
+        barsUp = false
+        barsHeld = false
+        driveHintUp = false
+        driveLogEnded = false
+        if (forGood)
+            store.phoneDrive = false
+        Immersive.leave()
+        PhoneWindow.lockOrientation("follow")
+    }
+    Component.onDestruction: leaveDrive(false)
+
+    // Above the revealed tool row: a press restarts the hide delay and goes
+    // on to the buttons
+    MouseArea {
+        objectName: "driveToolsTouch"
+        enabled: root.driving
+        visible: topBar.visible && root.driving
+        z: 3
+        x: topBar.x
+        y: topBar.y
+        width: topBar.width
+        height: topBar.height
+        onPressed: mouse => {
+            root.barTouched()
+            mouse.accepted = false
+        }
+    }
+
+    // A tap on the gauges: the bars in or out, and a held reveal is over
+    function driveTap() {
+        barsUp = !barsUp
+        barsHeld = false
+        driveHintUp = false
+    }
+    // Android's Back in the view: the bars first, then out for good
+    function driveBack() {
+        if (!driving)
+            return false
+        if (barsUp)
+            leaveDrive(true)
+        else
+            barsUp = true
+        return true
+    }
+    function raiseBars(attention) {
+        if (!driving)
+            return
+        if (attention) {
+            barsUp = true
+            barsHeld = true
+        } else if (!driveFault && !driveNotice) {
+            barsHeld = false
+        }
+    }
+    // A fault may need Retry or Disconnect; the other states are for the status line
+    function raisesBars(state) { return state === "fault" }
+    readonly property bool driveFault: driving && raisesBars(Bridge.linkState)
+    readonly property bool driveNotice: driving && Bridge.logNotice !== ""
+    onDriveFaultChanged: raiseBars(driveFault)
+    onDriveNoticeChanged: raiseBars(driveNotice)
+
+    Timer {
+        id: driveHideTimer
+        objectName: "driveHideTimer"
+        interval: root.driveHideMs
+        running: root.driving && root.barsUp && !root.barsHeld && root.driveHideMs > 0
+        onTriggered: root.barsUp = false
+    }
+    // A touch on a bar starts its delay again
+    function barTouched() {
+        ++barTouches
+        if (driveHideTimer.running)
+            driveHideTimer.restart()
+    }
+    property int barTouches: 0    // counted for the tests
+    Timer {
+        objectName: "driveHintTimer"
+        interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
+        running: root.driveHintUp
+        onTriggered: root.driveHintUp = false
+    }
+    // Stop log stays in the view, so the status line says it ended; the bars
+    // stay as they are, since the driver asked for it
+    property bool driveLogEnded: false
+    Connections {
+        target: Bridge
+        function onLogStopped(folder, byUser) {
+            if (root.driving && byUser)
+                root.driveLogEnded = true
+        }
+    }
+    Timer {
+        objectName: "driveLogEndedTimer"
+        interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
+        // The header covers the status line while the bars are up
+        running: root.driveLogEnded && !root.barsUp
+        onTriggered: root.driveLogEnded = false
     }
 
     // ---- Copy and paste (section 5)
@@ -452,7 +602,12 @@ Page {
         sweepRequested()
     }
     function resetPeaks() { peaksResetRequested() }
-    onVisibleChanged: maybeSweep()
+    onVisibleChanged: {
+        maybeSweep()
+        // Any page but Dash ends the view for good: a tab, the status's Log
+        if (!visible)
+            leaveDrive(true)
+    }
     Component.onCompleted: {
         goTo(form === "phone" ? store.phonePage : store.desktopPage)
         restored = true
@@ -463,6 +618,11 @@ Page {
         function onConnectedChanged() {
             if (Bridge.connected) root.resetPeaks()
             root.maybeSweep()
+            // The view comes back with a session only with Dash showing
+            if (!Bridge.connected)
+                root.leaveDrive(false)
+            else if (store.phoneDrive && root.visible && !root.isReplay(Bridge.currentUri))
+                root.enterDrive()
         }
         // A peak held in the old units would read wrong in the new ones
         function onUnitSystemChanged() { root.resetPeaks() }
@@ -730,12 +890,18 @@ Page {
             onClicked: {
                 if (strayed)
                     return
+                if (root.driving) {
+                    root.driveTap()
+                    return
+                }
                 if (card.kind === "analog" && card.showPeak && gauge.item)
                     (gauge.item as GaugeBase).resetPeaks()
                 if (card.editable)
                     root.select(card.cellIndex)
             }
             onPressAndHold: (mouse) => {
+                if (root.driving)
+                    return
                 if (strayed)
                     mouse.accepted = false
                 else
@@ -1442,6 +1608,97 @@ Page {
     }
     Component { id: toolNight; NightSwitch {} }
 
+    // The drive view's one line of chrome: the link state and the address,
+    // and a log's or recording's progress (section 2). It takes no taps
+    Item {
+        id: driveStatus
+        objectName: "driveStatusLine"
+        visible: root.driving
+        x: 0
+        y: root.driveInsetTop
+        width: root.width
+        height: 28
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: root.margin
+            anchors.rightMargin: root.margin
+            spacing: 6
+            Rectangle {
+                objectName: "driveStatusDot"
+                implicitWidth: 8; implicitHeight: 8   // layout-managed
+                radius: 4
+                color: Theme.linkColor(Bridge.linkState)
+            }
+            Label {
+                objectName: "driveStatusWord"
+                font.pixelSize: Theme.fontCaption
+                color: Theme.text
+                text: Theme.linkShortLabel(Bridge.linkState)
+            }
+            Label {
+                objectName: "driveStatusAddress"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                elide: Text.ElideRight
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textDim
+                text: qsTr("· %1").arg(Bridge.uriLabel)
+            }
+            Label {
+                objectName: "driveStatusRun"
+                visible: Bridge.logActive || Bridge.recordingActive || root.driveLogEnded
+                font.pixelSize: Theme.fontCaption
+                color: Theme.text
+                text: Bridge.logActive ? qsTr("Log")
+                    : root.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
+            }
+            Label {
+                objectName: "driveStatusTime"
+                visible: Bridge.logActive
+                font.family: Theme.valueFamily
+                font.features: { "tnum": 1 }
+                font.pixelSize: Theme.fontCaption
+                color: Theme.text
+                text: root.driveLogTime
+            }
+            Label {
+                objectName: "driveStatusDetail"
+                readonly property string detail:
+                    Bridge.logActive ? qsTr("%1 MB").arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                  : !Bridge.recordingActive || Bridge.markCount === 0 ? ""
+                  : Bridge.markCount === 1 ? qsTr("1 mark")
+                  : qsTr("%1 marks").arg(Bridge.markCount)
+                visible: detail !== ""
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textDim
+                text: qsTr("· %1").arg(detail)
+            }
+        }
+    }
+
+    // Behind the revealed tool row, so the gauges don't show through it.
+    // A touch on it counts as a touch on the bars
+    Rectangle {
+        objectName: "driveToolsBackdrop"
+        visible: topBar.visible && root.driving
+        z: 1
+        x: 0
+        y: topBar.y - root.gap / 2
+        width: root.width
+        height: topBar.height + root.gap
+        color: Theme.bg
+        MouseArea {
+            anchors.fill: parent
+            enabled: root.driving
+            onPressed: root.barTouched()
+        }
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: root.hairlineWidth
+            color: Theme.hairline
+        }
+    }
+
     // ---- The header: on the desktop the title, the link state and the
     // tools, on the phone the tools alone (the tab bar names the page and
     // the top bar has the link state); the desktop's page buttons; why
@@ -1449,8 +1706,12 @@ Page {
 
     ColumnLayout {
         id: topBar
+        readonly property real revealedY: root.driveHeaderHeight + root.gap / 2
+        visible: !root.driving || root.barsShown > 0
+        z: root.driving ? 2 : 0
         x: (root.width - width) / 2
-        y: root.topGap
+        // In the drive view it comes down from under the header's edge
+        y: root.driving ? revealedY - (1 - root.barsShown) * (revealedY + height + root.gap) : root.topGap
         width: Math.max(0, root.width - 2 * root.margin)
         spacing: root.gap / 2
 
@@ -1476,7 +1737,19 @@ Page {
                 visible: active
                 sourceComponent: linkState
             }
-            // The phone's row starts empty; its tools sit at the right
+            // Drive, at the start of the phone's row. Its tools sit at the right
+            ThemedButton {
+                objectName: "dashDrive"
+                flat: true
+                compact: true
+                Layout.minimumWidth: Theme.touchTarget
+                visible: root.phoneForm
+                enabled: Bridge.connected && !root.editing
+                text: root.driving ? qsTr("Exit drive") : qsTr("Drive")
+                Accessible.name: root.driving ? qsTr("Leave the drive view")
+                                              : qsTr("Show the gauges full screen")
+                onClicked: root.driving ? root.leaveDrive(true) : root.enterDrive()
+            }
             Item {
                 objectName: "toolRowStart"
                 Layout.fillWidth: true
@@ -1493,7 +1766,7 @@ Page {
                 objectName: "dashEdit"
                 compact: root.compact || root.phoneForm
                 horizontalPadding: root.phoneForm ? 18 : (compact ? 6 : 8)
-                visible: !root.editing
+                visible: !root.editing && !root.driving
                 text: qsTr("Edit")
                 onClicked: root.startEditing()
             }
@@ -1748,8 +2021,9 @@ Page {
         objectName: "dashPages"
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: topBar.bottom
+        anchors.top: root.driving ? driveStatus.bottom : topBar.bottom
         anchors.bottom: indicator.visible ? indicator.top : parent.bottom
+        anchors.bottomMargin: root.driving ? root.driveInsetBottom : 0
         clip: true
         interactive: root.form === "phone" && root.held < 0
         // The page shown goes in once every page is in: the first page
@@ -1777,7 +2051,7 @@ Page {
                 objectName: "dashPage_" + index
                 clip: true
                 contentWidth: width
-                contentHeight: grid.y + grid.height + root.margin
+                contentHeight: grid.y + grid.height + root.panelMargin
                 interactive: root.held < 0
                 // Shown whenever there's more below, not only while
                 // scrolling, so a short window says it scrolls
@@ -1788,7 +2062,7 @@ Page {
 
                 // The grid (section 4): the phone's 6 columns upright and
                 // 12 on its side, the desktop's one per 220 px from 2 to 12
-                readonly property real gridWidth: Math.max(0, width - 2 * root.margin)
+                readonly property real gridWidth: Math.max(0, width - 2 * root.panelMargin)
                 readonly property int columns: root.form === "phone"
                     ? (root.width > root.height ? 12 : 6)
                     : Math.max(2, Math.min(12, Math.round(gridWidth / 220)))
@@ -1819,7 +2093,7 @@ Page {
                 // which the page scrolls instead
                 readonly property real pitch: Math.max(1, Math.min(
                     (columnWidth + root.cellGap) / 4,
-                    (Math.max(160, height - root.topGap - root.margin) + root.cellGap) / tallest))
+                    (Math.max(160, height - root.topGap - root.panelMargin) + root.cellGap) / tallest))
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
                 // The drop's places are measured on this grid
                 onColumnsChanged: root.cancelHold()
@@ -1894,6 +2168,15 @@ Page {
                     onTriggered: pageView.scrollAtTheEdge()
                 }
 
+                // A tap between the cells reveals the drive view's bars too
+                MouseArea {
+                    objectName: "driveTapArea"
+                    enabled: root.driving
+                    width: pageView.width
+                    height: Math.max(pageView.height, pageView.contentHeight)
+                    onClicked: root.driveTap()
+                }
+
                 // The edit panel, in the page above its grid (never a Popup)
                 Loader {
                     id: panelHost
@@ -1935,9 +2218,9 @@ Page {
                         anchors.fill: parent
                         visible: root.joined && pageView.rows > 0
                         color: Theme.surface
-                        radius: Theme.radiusCard
+                        radius: root.driving ? 0 : Theme.radiusCard
                         border.color: Theme.hairline
-                        border.width: root.hairlineWidth
+                        border.width: root.driving ? 0 : root.hairlineWidth
                     }
                     Repeater {
                         model: pageView.seams
@@ -2022,8 +2305,26 @@ Page {
         objectName: "dashIndicator"
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
-        visible: root.form === "phone" && root.pages.length > 1
+        visible: root.form === "phone" && root.pages.length > 1 && !root.driving
         count: swipe.count
         currentIndex: swipe.currentIndex
+    }
+
+    // The first entries' hint: over the gauges, and it takes no touch
+    Rectangle {
+        objectName: "driveHint"
+        visible: root.driving && root.driveHintUp
+        z: 1
+        anchors.centerIn: swipe
+        width: driveHintText.implicitWidth + 24
+        height: driveHintText.implicitHeight + 12
+        radius: Theme.radius
+        color: Theme.bg
+        Label {
+            id: driveHintText
+            anchors.centerIn: parent
+            text: qsTr("Tap for the controls")
+            color: Theme.textDim
+        }
     }
 }

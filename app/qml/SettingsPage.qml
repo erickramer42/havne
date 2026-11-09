@@ -1,6 +1,6 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.linkhealth, QmlTest.log,
-//          QmlTest.phone (test_qml)
+//          QmlTest.phone, QmlTest.driveview (test_qml)
 
 import QtCore
 import QtQuick
@@ -14,6 +14,8 @@ Pane {
     padding: 0
     background: Rectangle { color: Theme.bg }
 
+    readonly property int driveHideMs: settingsDisplay.driveHideMs
+    readonly property string driveOrientation: settingsDisplay.driveOrientation
     property alias uriField: settingsConnect.uriField
     property alias errorLabel: settingsConnect.errorLabel
     property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
@@ -882,16 +884,26 @@ Pane {
     }
     // qmllint enable missing-property
     onShownKeyChanged: askBluetoothIfSeen()
-    onVisibleChanged: askBluetoothIfSeen()
+    onVisibleChanged: {
+        askBluetoothIfSeen()
+        if (!visible)
+            backLeaves = false
+    }
 
-    // A best-effort back key: where Qt delivers it, it repeats the back
-    // arrow. Nothing relies on it
+    // Back from Connection opened through Dash's "Other address...": Main
+    // goes back to that page instead of this list
+    property bool backLeaves: false
+    onPageKeyChanged: if (pageKey !== "connection") backLeaves = false
+    // The back key repeats the back arrow, and answers whether it had a page to close
+    function closeShown() {
+        if (twoPane || pageKey === "")
+            return false
+        back()
+        return true
+    }
     focus: true
     Keys.onBackPressed: event => {
-        if (!twoPane && pageKey !== "") {
-            back()
-            event.accepted = true
-        }
+        event.accepted = !backLeaves && closeShown()
     }
 
     // Connect... on Home, Live or the header lands here: what to connect to
