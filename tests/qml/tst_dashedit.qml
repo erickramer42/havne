@@ -95,6 +95,14 @@ TestCase {
     }
     function press(item) {
         verify(waitForPolish(item.Window.window), item.objectName + " is laid out")
+        // A slide's first frame can come after both samples below, with the target still past the window's edge
+        for (let up = item.parent; up; up = up.parent) {
+            if (up.objectName === "dashPages") {
+                const view = up.contentItem
+                tryVerify(() => view.currentItem && Math.abs(view.contentX - view.currentItem.x) < 0.5,
+                          3000, item.objectName + "'s page has slid in")
+            }
+        }
         let last = null
         tryVerify(() => {
             const at = item.mapToItem(null, 0, 0)
