@@ -1343,10 +1343,17 @@ TestCase {
     function test_thePartsOfAPickedVehicleAreAbsentWithNone() {
         const page = createPage()
         page.open("signals")
-        verify(!find(page, "settingsSignalFilesPart").visible, "no files with no vehicle")
+        verify(!find(page, "signalFilesTitle").visible, "no files with no vehicle")
+        verify(!find(page, "signalImport").visible, "no import with no vehicle")
+        verify(!find(page, "obdbImport").visible, "no OBDb import with no vehicle")
+        const need = find(page, "signalFilesNeedVehicle")
+        verify(need.visible, "the line says a vehicle is needed")
+        verify(need.text.indexOf("vehicle") >= 0, need.text)
         verify(!find(page, "settingsOwnSignalsPart").visible, "no own signals with no vehicle")
         page.changeVehicles(VehicleBook.add(page.vehicles, "A"))
-        verify(find(page, "settingsSignalFilesPart").visible, "files with a vehicle")
+        verify(find(page, "signalFilesTitle").visible, "files with a vehicle")
+        verify(find(page, "signalImport").visible, "import with a vehicle")
+        verify(!find(page, "signalFilesNeedVehicle").visible, "and no line then")
         verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
     }
 

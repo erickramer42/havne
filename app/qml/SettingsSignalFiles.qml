@@ -13,13 +13,23 @@ pragma ComponentBehavior: Bound
 ColumnLayout {
     id: root
     objectName: "settingsSignalFilesPart"
-    visible: root.host.pickedVehicle !== null
     required property SettingsPage host
+    readonly property bool vehicle: root.host.pickedVehicle !== null
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
     property alias obdbYearField: obdbYearField
     property alias saveDialog: saveDialog
+
+    // With none picked the part holds only this line
+    Label {
+        objectName: "signalFilesNeedVehicle"
+        visible: !root.vehicle
+        text: qsTr("Signal files and the OBDb import need a vehicle. Pick or add one under Vehicle.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
 
     // ---- The picked vehicle's signal files (ADR-0051) ----
     Label {
@@ -124,7 +134,7 @@ ColumnLayout {
 
     Label {
         objectName: "signalProblem"
-        visible: text !== ""
+        visible: root.vehicle && text !== ""
         text: root.host.signalProblem
         color: Theme.warning
         wrapMode: Text.Wrap
@@ -132,7 +142,7 @@ ColumnLayout {
     }
     Label {
         objectName: "signalNote"
-        visible: text !== ""
+        visible: root.vehicle && text !== ""
         text: root.host.signalNote
         color: Theme.textDim
         wrapMode: Text.Wrap
@@ -143,7 +153,7 @@ ColumnLayout {
     // converted, each field that differs, each signal left out
     ColumnLayout {
         objectName: "obdbReport"
-        visible: root.host.obdbShown
+        visible: root.vehicle && root.host.obdbShown
         spacing: Theme.spacing / 2
         Layout.fillWidth: true
 
