@@ -10,8 +10,17 @@
 #     bundles, for the release's SBOM (packaging/sbom.py, ADR-0035 section 5)
 # linuxdeploy and its Qt plugin (pinned releases, the build machine's
 # architecture's, checked against their SHA-256) gather the app, the Qt libraries, plugins and QML modules it
-# loads, and the desktop entry and icon. The checks:
+# loads, and the desktop entry and icon; the notices go in
+# usr/share/doc/havne/ (packaging/notices/, and the common licenses the
+# bundled packages' copyright files name). The AppImage starts with
+# type2-runtime's runtime from a pinned release, checked the same way:
+# with no runtime named, linuxdeploy's appimagetool downloads the newest
+# one at every pack. The checks:
 #   - no QML debugging ships (qmltooling plugins: a Debug build's);
+#   - the AppImage's runtime names the pinned commit;
+#   - every notice is there (linuxdeploy's usr/share/doc/<package>/copyright
+#     for each bundled package too), and the notice names the Qt and ICU
+#     packed;
 #   - the AppImage starts and is still running after SMOKE_SECONDS (10)
 #     on the offscreen platform, which a missing Qt plugin or QML module
 #     would stop at once.
@@ -59,20 +68,37 @@ arch=$(uname -m)
 case $arch in
     x86_64)  multiarch=x86_64-linux-gnu debarch=amd64
              linuxdeploy_sum=c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
-             plugin_sum=15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724 ;;
+             plugin_sum=15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724
+             runtime_sum=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d ;;
     aarch64) multiarch=aarch64-linux-gnu debarch=arm64
              linuxdeploy_sum=620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff
-             plugin_sum=bf1c24aff6d749b5cf423afad6f15abd4440f81dec1aab95706b25f6667cdcf1 ;;
+             plugin_sum=bf1c24aff6d749b5cf423afad6f15abd4440f81dec1aab95706b25f6667cdcf1
+             runtime_sum=00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444 ;;
     *) die "no AppImage for $arch: x86_64 and aarch64 only" ;;
 esac
 
 # The tools: pinned releases, checked before they run
 tools=${LINUXDEPLOY_DIR:-$HOME/.cache/havne-linuxdeploy}
 mkdir -p "$tools"
+# Downloads $2 to $1: curl with retries, then, for a GitHub release asset
+# URL, the API through gh (the asset URLs redirect to a host that answers
+# 504 for long stretches while the API path keeps working). The caller
+# checks the SHA-256 either way.
+download() {
+    local dest=$1 url=$2 owner repo tag name
+    curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors -o "$dest" "$url" && return 0
+    if command -v gh >/dev/null 2>&1 \
+        && [[ $url =~ ^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)$ ]]; then
+        owner=${BASH_REMATCH[1]} repo=${BASH_REMATCH[2]} tag=${BASH_REMATCH[3]} name=${BASH_REMATCH[4]}
+        echo "$0: curl failed for $url; trying gh release download" >&2
+        gh release download "$tag" -R "$owner/$repo" -p "$name" -O "$dest" --clobber && return 0
+    fi
+    die "couldn't download $url"
+}
 fetch() {
     local name=$1 url=$2 sum=$3
     if [ ! -f "$tools/$name" ] || ! echo "$sum  $tools/$name" | sha256sum -c --status; then
-        curl -fsSL -o "$tools/$name.part" "$url" || die "couldn't download $url"
+        download "$tools/$name.part" "$url"
         echo "$sum  $tools/$name.part" | sha256sum -c --status \
             || { rm -f "$tools/$name.part"; die "$name's SHA-256 isn't the pinned one"; }
         mv "$tools/$name.part" "$tools/$name"
@@ -85,6 +111,20 @@ fetch "linuxdeploy-$arch.AppImage" \
 fetch "linuxdeploy-plugin-qt-$arch.AppImage" \
     "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-$arch.AppImage" \
     "$plugin_sum"
+# The runtime: type2-runtime's release, whose commit the AppImage reports
+# (--appimage-version). A new pin changes the release, both SHA-256s and
+# the commit together, and THIRD_PARTY_NOTICES.txt's runtime section with
+# the versions of what it links statically (its build scripts at that
+# commit; docs/development.md, "Linux: the AppImage")
+runtime_release=20251108 runtime_commit=dd6cebe
+# The release attaches this runtime's source (runtime-sources.sh)
+grep -qx "runtime_release=$runtime_release" packaging/linux/runtime-sources.sh \
+    && grep -q "^runtime_full=$runtime_commit" packaging/linux/runtime-sources.sh \
+    || die "packaging/linux/runtime-sources.sh doesn't fetch type2-runtime $runtime_release ($runtime_commit)'s source"
+fetch "type2-runtime-$runtime_release-$arch" \
+    "https://github.com/AppImage/type2-runtime/releases/download/$runtime_release/runtime-$arch" \
+    "$runtime_sum"
+export LDAI_RUNTIME_FILE=$tools/type2-runtime-$runtime_release-$arch
 export PATH="$tools:$PATH"
 # The tools are AppImages themselves: run them extracted, so the build
 # machine needs no FUSE
@@ -105,13 +145,14 @@ name="havne-$version-linux-$arch.AppImage"
 export QML_SOURCES_PATHS=$PWD/app/qml
 export EXTRA_PLATFORM_PLUGINS=libqoffscreen.so
 export OUTPUT=$out/$name
+# Two runs: the first fills the AppDir, so the notices below can name
+# the libraries it took; the second packs it
 "linuxdeploy-$arch.AppImage" --appdir "$appdir" \
     --executable "$app" \
     --desktop-file packaging/linux/havne.desktop \
     --icon-file packaging/icons/app.svg --icon-filename havne \
-    --plugin qt --output appimage > "$build/appimage.log" 2>&1 \
+    --plugin qt > "$build/appimage.log" 2>&1 \
     || { tail -n 30 "$build/appimage.log"; die "linuxdeploy failed (log: $build/appimage.log)"; }
-[ -f "$out/$name" ] || die "linuxdeploy wrote no $out/$name (log: $build/appimage.log)"
 
 # ---- Check: no QML debugging
 # -quit: find stops at the first, so grep -q never cuts a pipe short (a
@@ -144,6 +185,7 @@ for lib in "$appdir"/usr/lib/*.so*; do
 done > "$build/appimage-system-libs.tsv"
 QT_VERSION=$("$QMAKE" -query QT_VERSION) APPDIR=$appdir NAME=$name \
 SYSTEM_LIBS=$build/appimage-system-libs.tsv LINUXDEPLOY=1-alpha-20251107-1 DEBARCH=$debarch \
+RUNTIME_RELEASE=$runtime_release RUNTIME_COMMIT=$runtime_commit \
 python3 - > "$out/$name.components.json" <<'EOF'
 import json, os, re
 from collections import defaultdict
@@ -165,8 +207,21 @@ for sub in ("plugins", "qml"):
 components = [{"name": "Qt", "version": qt, "supplier": "Organization: The Qt Company",
                "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
                "purl": f"pkg:generic/qt@{qt}", "files": qt_files},
-              {"name": "AppImage type 2 runtime", "license": "MIT",
-               "comment": "embedded by linuxdeploy " + os.environ["LINUXDEPLOY"]}]
+              {"name": "AppImage type 2 runtime", "version": os.environ["RUNTIME_RELEASE"],
+               "supplier": "Organization: AppImage", "license": "MIT",
+               "purl": "pkg:github/AppImage/type2-runtime@" + os.environ["RUNTIME_RELEASE"],
+               "comment": "the AppImage's first part, commit " + os.environ["RUNTIME_COMMIT"]
+                          + ", packed by linuxdeploy " + os.environ["LINUXDEPLOY"]}]
+# Linked statically into the runtime: its build scripts at that commit
+# pin libfuse and squashfuse, and take the rest from Alpine 3.21
+for name, ver, lic in (("libfuse", "3.15.0", "LGPL-2.1-only"),
+                       ("squashfuse", "0.5.2", "BSD-2-Clause"),
+                       ("musl", "1.2.5", "MIT"),
+                       ("mimalloc", "2.1.7", "MIT"),
+                       ("zstd", "1.5.6", "BSD-3-Clause OR GPL-2.0-or-later"),
+                       ("zlib", "1.3.1", "Zlib")):
+    components.append({"name": name, "version": ver, "license": lic,
+                       "comment": "linked statically into the AppImage runtime"})
 if icu:
     major = sorted({m.group(1) for f in icu if (m := re.search(r"\.so\.(\d+)", f))})
     components.append({"name": "ICU", "version": ",".join(major), "files": icu,
@@ -177,6 +232,72 @@ for (pkg, ver), v in sorted(system.items()):
 print(json.dumps({"download": os.environ["NAME"], "components": components}, indent=1, sort_keys=True))
 EOF
 echo "components: $(grep -c '"name"' "$out/$name.components.json") listed"
+
+# ---- The notices (LGPL-3.0 section 4 wants Qt's with each copy, and the
+# other licenses their own): Havne's license, the third-party notice and
+# the license texts it names, and the common licenses that the system
+# packages' copyright files point to. linuxdeploy puts each bundled
+# package's copyright file in usr/share/doc/<package>/ itself
+doc=$appdir/usr/share/doc/havne
+notice=packaging/notices/THIRD_PARTY_NOTICES.txt
+mkdir -p "$doc/licenses" "$doc/common-licenses"
+cp LICENSE "$doc/LICENSE.txt"
+cp "$notice" "$doc/THIRD_PARTY_NOTICES.txt"
+cp packaging/windows/licenses/LGPL-3.0.txt packaging/windows/licenses/GPL-3.0.txt \
+   packaging/windows/licenses/Qt-third-party.txt \
+   packaging/notices/licenses/ICU.txt "$doc/licenses/"
+# The runtime's license, and those of what it links statically
+runtime_licenses="AppImage-runtime.txt LGPL-2.1.txt musl.txt mimalloc.txt squashfuse.txt zstd.txt zlib.txt"
+for f in $runtime_licenses; do cp "packaging/notices/licenses/$f" "$doc/licenses/"; done
+packages=$(cut -f1 "$build/appimage-system-libs.tsv" | sort -u)
+named() {   # the common licenses a copyright file points to
+    grep -o '/usr/share/common-licenses/[A-Za-z0-9.+_-]*' "$1" | sed 's/\.*$//' | sort -u
+}
+for pkg in $packages; do
+    shipped=$appdir/usr/share/doc/$pkg/copyright
+    [ -f "$shipped" ] || continue   # the check below names it
+    for lic in $(named "$shipped"); do
+        [ -s "$lic" ] || die "$pkg's copyright names $lic, which isn't there"
+        cp -L "$lic" "$doc/common-licenses/"
+    done
+done
+
+# ---- Check: the notices are there and name what was packed
+for f in LICENSE.txt THIRD_PARTY_NOTICES.txt licenses/LGPL-3.0.txt licenses/GPL-3.0.txt \
+         licenses/Qt-third-party.txt licenses/ICU.txt \
+         $(printf 'licenses/%s ' $runtime_licenses); do
+    [ -s "$doc/$f" ] || die "the AppDir has no usr/share/doc/havne/$f"
+done
+for pkg in $packages; do
+    shipped=$appdir/usr/share/doc/$pkg/copyright
+    [ -s "$shipped" ] || die "the AppDir has no usr/share/doc/$pkg/copyright, $pkg's license"
+    for lic in $(named "$shipped"); do
+        [ -s "$doc/common-licenses/${lic##*/}" ] \
+            || die "the AppDir has no usr/share/doc/havne/common-licenses/${lic##*/}, which $pkg's copyright names"
+    done
+done
+qt_version=$("$QMAKE" -query QT_VERSION)
+grep -qx "Qt $qt_version" "$notice" || die "$notice doesn't name Qt $qt_version: update it"
+icu=$(find "$appdir/usr/lib" -maxdepth 1 -name 'libicuuc.so.*' -printf '%f\n' \
+      | sed -n 's/^libicuuc\.so\.\([0-9]*\)$/\1/p' | head -n 1)
+[ -n "$icu" ] || die "the AppDir has no libicuuc.so.<major>, which $notice names"
+grep -q "^ICU $icu\." "$notice" || die "$notice doesn't name ICU $icu: update it and licenses/ICU.txt"
+grep -q "type2-runtime release $runtime_release (commit $runtime_commit)" "$notice" \
+    || die "$notice doesn't name type2-runtime $runtime_release ($runtime_commit): update its runtime section"
+echo "notices: $(find "$doc" -type f | wc -l) files, $(echo "$packages" | wc -w) system packages' copyrights in usr/share/doc"
+
+# ---- The AppImage, packed from the AppDir as it stands
+"linuxdeploy-$arch.AppImage" --appdir "$appdir" --output appimage >> "$build/appimage.log" 2>&1 \
+    || { tail -n 30 "$build/appimage.log"; die "linuxdeploy's packing failed (log: $build/appimage.log)"; }
+[ -f "$out/$name" ] || die "linuxdeploy wrote no $out/$name (log: $build/appimage.log)"
+
+# ---- Check: the runtime is the pinned one (a linuxdeploy that ignored
+# LDAI_RUNTIME_FILE would have downloaded another); it prints its
+# version and exits, with no FUSE
+got=$("$out/$name" --appimage-version 2>&1 | tr -d '\r') || true
+grep -q "type2-runtime/commit/$runtime_commit\b" <<< "$got" \
+    || die "the AppImage's runtime isn't type2-runtime $runtime_commit: $got"
+echo "runtime: type2-runtime $runtime_release ($runtime_commit)"
 
 # ---- Check: the AppImage starts and stays up
 smoke=${SMOKE_SECONDS:-10}

@@ -27,6 +27,11 @@ import android.util.Log;
 // notification says what is connected; a tap opens the app.
 // androidsession.cpp starts, updates and stops it through JNI.
 //
+// Its static openAppSettings is not part of that: bluetoothdevices.cpp
+// calls it through JNI to open Havne's page in Android's settings, where
+// the Nearby devices permission is switched on after Android stopped
+// asking. It needs no service running.
+//
 // It also holds a partial wake lock while it runs: the service keeps
 // Android from freezing the app, not the CPU from sleeping, and with the
 // screen off the CPU slept about 100 s of a session, no request going out
@@ -58,6 +63,22 @@ public class SessionService extends Service
     public static void stop(Context context)
     {
         context.stopService(new Intent(context, SessionService.class));
+    }
+
+    // Havne's own page in Android's settings (Apps > Havne), where the
+    // Nearby devices permission is switched on once Android no longer
+    // shows its dialog
+    public static void openAppSettings(Context context)
+    {
+        try {
+            Intent intent = new Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", context.getPackageName(), null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Android's settings didn't open: " + e);
+        }
     }
 
     // Android 13+ asks before an app shows notifications: once, at the

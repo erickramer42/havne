@@ -3,7 +3,7 @@
 # script again. ADR-0053 section 1.
 # pylint: skip-file
 # flake8: noqa
-from ctypes import (CFUNCTYPE, POINTER, Structure, c_bool, c_char, c_char_p,
+from ctypes import (CFUNCTYPE, POINTER, Structure, Union, c_bool, c_char, c_char_p,
                     c_double, c_float, c_int, c_int8, c_int16, c_int32, c_int64,
                     c_size_t, c_uint, c_uint8, c_uint16, c_uint32, c_uint64,
                     c_void_p)
@@ -79,6 +79,12 @@ ECUIO_COMPUTED_MULTIPLY = 34
 ECUIO_COMPUTED_PUSH_CONSTANT = 16
 ECUIO_COMPUTED_PUSH_INPUT = 0
 ECUIO_COMPUTED_SUBTRACT = 33
+ECUIO_CSV_GUESS_DECIMAL_COMMA = 2
+ECUIO_CSV_GUESS_PREAMBLE = 4
+ECUIO_CSV_GUESS_TIME_NUMBERS = 8
+ECUIO_CSV_GUESS_TIME_UNIT_KNOWN = 1
+ECUIO_CSV_LONG = 1
+ECUIO_CSV_WIDE = 0
 ECUIO_DECODE_ERR_BAD_PARAMS = 3
 ECUIO_DECODE_ERR_MUX_MISMATCH = 5
 ECUIO_DECODE_ERR_NULL = 1
@@ -144,6 +150,7 @@ ECUIO_FRAME_FLAG_REASSEMBLED = 0x100
 ECUIO_FRAME_FLAG_REMOTE = 2
 ECUIO_FRAME_FLAG_TRUNCATED = 64
 ECUIO_FRAME_FLAG_TX_ECHO = 32
+ECUIO_HEALTH_BASELINE_READ = 2
 ECUIO_HEALTH_JSON = 1
 ECUIO_HEALTH_TEXT = 2
 ECUIO_HEALTH_VIN_DECODED = 1
@@ -370,6 +377,9 @@ class ecuio_check_summary_t(Structure):
 class ecuio_computed_t(Structure):
     pass
 
+class ecuio_csv_guess_t(Structure):
+    pass
+
 class ecuio_display_value_t(Structure):
     pass
 
@@ -382,6 +392,9 @@ class ecuio_dtc_list_t(Structure):
 class ecuio_enum_entry_t(Structure):
     pass
 
+class ecuio_export_estimate_t(Structure):
+    pass
+
 class ecuio_export_options_t(Structure):
     pass
 
@@ -389,6 +402,9 @@ class ecuio_export_report_t(Structure):
     pass
 
 class ecuio_frame_t(Structure):
+    pass
+
+class ecuio_frames_read_t(Structure):
     pass
 
 class ecuio_freeze_value_t(Structure):
@@ -532,6 +548,7 @@ class ecuio_vin_info_t(Structure):
 # --- callbacks ---------------------------------------------------------
 ecuio_check_finding_callback_t = CFUNCTYPE(c_int, POINTER(ecuio_check_finding_t), c_void_p)
 ecuio_frame_callback_t = CFUNCTYPE(None, POINTER(ecuio_frame_t), c_void_p)
+ecuio_frame_row_callback_t = CFUNCTYPE(c_int, c_void_p, POINTER(ecuio_frame_t), c_uint64)
 ecuio_obdb_note_fn = CFUNCTYPE(c_int, POINTER(ecuio_obdb_note_t), c_void_p)
 ecuio_open_progress_t = CFUNCTYPE(c_int, c_uint64, c_uint64, c_void_p)
 ecuio_plugin_read_t = CFUNCTYPE(c_int, c_void_p, c_char_p, POINTER(c_char_p), POINTER(c_size_t))
@@ -673,6 +690,15 @@ ecuio_computed_t._fields_ = [
     ('constants', (c_double * 16)),
     ('reserved', (c_uint32 * 4)),
 ]
+ecuio_csv_guess_t._fields_ = [
+    ('flags', c_uint32),
+    ('columns', c_uint32),
+    ('left_out', c_uint32),
+    ('rows_read', c_uint32),
+    ('map_offset', c_uint32),
+    ('map_length', c_uint32),
+    ('reserved', (c_uint64 * 3)),
+]
 ecuio_display_value_t._fields_ = [
     ('value', c_double),
     ('unit', (c_char * 16)),
@@ -684,6 +710,13 @@ ecuio_enum_entry_t._fields_ = [
     ('raw', c_uint32),
     ('label', (c_char * 28)),
 ]
+ecuio_export_estimate_t._fields_ = [
+    ('rows', c_uint64),
+    ('bytes', c_uint64),
+    ('columns', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', (c_uint64 * 2)),
+]
 ecuio_export_options_t._fields_ = [
     ('format', c_uint32),
     ('flags', c_uint32),
@@ -691,7 +724,12 @@ ecuio_export_options_t._fields_ = [
     ('to_us', c_uint64),
     ('folder_utf8', c_char_p),
     ('out_path_utf8', c_char_p),
-    ('reserved', (c_uint64 * 4)),
+    ('layout', c_uint32),
+    ('row_ms', c_uint32),
+    ('units', c_uint32),
+    ('column_count', c_uint32),
+    ('columns_utf8', POINTER(c_char_p)),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_export_report_t._fields_ = [
     ('frames', c_uint64),
@@ -703,7 +741,7 @@ ecuio_export_report_t._fields_ = [
     ('signal_count', c_uint64),
     ('files', c_uint32),
     ('files_left_out', c_uint32),
-    ('reserved', (c_uint64 * 1)),
+    ('rows', c_uint64),
 ]
 ecuio_frame_t._fields_ = [
     ('timestamp_us', c_uint64),
@@ -714,6 +752,19 @@ ecuio_frame_t._fields_ = [
     ('flags', c_uint32),
     ('reserved', c_uint32),
 ]
+ecuio_frames_read_t._fields_ = [
+    ('rows', c_uint64),
+    ('torn_rows', c_uint32),
+    ('reserved0', c_uint32),
+    ('reserved', (c_uint64 * 2)),
+]
+class ecuio_health_options_t_u0(Union):
+    _fields_ = [
+        ('baseline_folder_utf8', c_char_p),
+        ('baseline_room', c_uint64),
+    ]
+
+ecuio_health_options_t._anonymous_ = ('_u0',)
 ecuio_health_options_t._fields_ = [
     ('format', c_uint32),
     ('flags', c_uint32),
@@ -724,7 +775,8 @@ ecuio_health_options_t._fields_ = [
     ('utc_us', c_uint64),
     ('value_count', c_uint32),
     ('reserved0', c_uint32),
-    ('reserved', (c_uint64 * 4)),
+    ('_u0', ecuio_health_options_t_u0),
+    ('reserved', (c_uint64 * 3)),
     ('session', POINTER(ecuio_session_t)),
     ('folder_utf8', c_char_p),
     ('values', POINTER(ecuio_health_value_t)),
@@ -1087,6 +1139,7 @@ FUNCTIONS = {
     'ecuio_decode_signal': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, POINTER(c_double)]),  # signals.h
     'ecuio_decode_text': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, c_char_p, c_uint32]),  # signals.h
     'ecuio_def_applies_to_frame': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_frame_t)]),  # signals.h
+    'ecuio_def_range': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_double), POINTER(c_double)]),  # signals.h
     'ecuio_diag_inspect': (c_int, [POINTER(ecuio_channel_diagnostics_t), c_uint32, c_uint32, POINTER(ecuio_inspection_t)]),  # core.h
     'ecuio_display_convert': (c_int, [c_char_p, c_uint8, c_double, c_uint32, POINTER(ecuio_display_value_t)]),  # signals.h
     'ecuio_dtc_format': (c_int, [c_uint16, c_char_p, c_uint32]),  # core.h
@@ -1096,10 +1149,12 @@ FUNCTIONS = {
     'ecuio_dtc_title_source': (c_char_p, []),  # core.h
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h
+    'ecuio_export_estimate': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, POINTER(ecuio_export_estimate_t)]),  # recording.h
     'ecuio_health_export': (c_int, [POINTER(ecuio_health_options_t), POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h
     'ecuio_identity_vin': (c_int, [POINTER(ecuio_channel_identity_t), c_char_p, c_uint32]),  # core.h
     'ecuio_import': (c_int, [POINTER(ecuio_import_options_t), POINTER(ecuio_import_report_t)]),  # recording.h
+    'ecuio_import_csv_guess': (c_int, [c_char_p, c_char_p, c_char_p, c_size_t, POINTER(c_size_t), POINTER(ecuio_csv_guess_t)]),  # recording.h
     'ecuio_init': (c_int, []),  # core.h
     'ecuio_j2534_close': (c_int, [POINTER(ecuio_j2534_handle_t)]),  # j2534.h
     'ecuio_j2534_discover_devices': (c_int, [POINTER(POINTER(ecuio_j2534_device_t)), POINTER(c_uint32)]),  # j2534.h
@@ -1149,6 +1204,7 @@ FUNCTIONS = {
     'ecuio_recording_open': (c_int, [c_char_p, ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_open_frames': (c_int, [c_char_p, POINTER(ecuio_signal_set_t), ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_query': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_column_t), c_uint32]),  # recording.h
+    'ecuio_recording_read_frames': (c_int, [c_char_p, c_uint64, c_uint64, ecuio_frame_row_callback_t, c_void_p, POINTER(ecuio_frames_read_t)]),  # recording.h
     'ecuio_recording_text_at': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_char_p, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_register_frame_callback': (c_int, [POINTER(ecuio_session_t), ecuio_frame_callback_t, c_void_p]),  # core.h
     'ecuio_register_values_callback': (c_int, [POINTER(ecuio_session_t), ecuio_values_callback_t, c_void_p]),  # profile.h
@@ -1173,12 +1229,14 @@ FUNCTIONS = {
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h
     'ecuio_session_send': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t)]),  # core.h
+    'ecuio_session_set_focus': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32]),  # core.h
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h
     'ecuio_signal_file_free': (None, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h

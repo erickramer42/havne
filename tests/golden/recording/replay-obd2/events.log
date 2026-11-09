@@ -13,7 +13,7 @@ signal  Intake Air Temp,number,°C,0,3,2
 signal  Throttle Position,number,%,1,0,2
 signal  Fuel Level,number,%,1,0,3
 signal  Battery Voltage,number,V,2,12,7
-signal  MAF,number,g/s,1,4,2
+signal  MAF,number,g/s,2,4,2
 signal  Engine Oil Temp,number,°C,0,5,1
 signal  Short Term Fuel Trim B1,number,%,1,9,3
 signal  Long Term Fuel Trim B1,number,%,1,10,3

@@ -376,6 +376,8 @@ jobs:
           key: linuxdeploy-${{ runner.arch }}-${{ hashFiles('packaging/linux/make-appimage.sh') }}
 
       - name: Build and pack the AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
@@ -504,6 +506,9 @@ jobs:
             echo "TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64.tar.gz"
             echo "DEBUG_TARBALL_ARM=dist/havne-core-$VERSION-linux-aarch64-debug.tar.gz"
             echo "SBOM=dist/havne-$VERSION.spdx.json"
+            # the AppImage runtime's sources (packaging/linux/runtime-sources.sh)
+            echo "FUSE_SOURCE=dist/fuse-3.15.0.tar.xz"
+            echo "RUNTIME_SOURCE=dist/type2-runtime-20251108.tar.gz"
             # the wheels carry the version as PEP 440 spells it: 0.6.0rc1
             wheel="dist/havne-${VERSION/-rc/rc}-py3-none"
             echo "WHEEL_WIN=$wheel-win_amd64.whl"
@@ -511,6 +516,15 @@ jobs:
             echo "WHEEL_LINUX_ARM=$wheel-manylinux_2_39_aarch64.whl"
             echo "WHEEL_MACOS=$wheel-macosx_13_0_arm64.whl"
           } >> "$GITHUB_ENV"
+
+      # The AppImage runtime links libfuse statically: LGPL-2.1 section 6
+      # wants libfuse's source and the runtime's beside it, each checked
+      # against its pinned SHA-256 (THIRD_PARTY_NOTICES.txt names them)
+      - name: The AppImage runtime's sources
+        run: |
+          bash packaging/linux/runtime-sources.sh dist
+          [ -s "$FUSE_SOURCE" ] && [ -s "$RUNTIME_SOURCE" ] \
+            || { echo "::error::runtime-sources.sh wrote other names than $FUSE_SOURCE and $RUNTIME_SOURCE"; exit 1; }
 
       # One document over every download but the debug files, which carry
       # no component of their own; validated before anything is published.
@@ -531,6 +545,7 @@ jobs:
             "${APPIMAGE_ARM#dist/}" "${DEB_ARM#dist/}" "${DBGSYM_ARM#dist/}" "${TARBALL_ARM#dist/}" \
             "${DEBUG_TARBALL_ARM#dist/}" "${WHEEL_WIN#dist/}" "${WHEEL_LINUX#dist/}" \
             "${WHEEL_LINUX_ARM#dist/}" "${WHEEL_MACOS#dist/}" "${SBOM#dist/}" \
+            "${FUSE_SOURCE#dist/}" "${RUNTIME_SOURCE#dist/}" \
             > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 
@@ -557,6 +572,8 @@ jobs:
             ${{ env.WHEEL_LINUX }}
             ${{ env.WHEEL_LINUX_ARM }}
             ${{ env.WHEEL_MACOS }}
+            ${{ env.FUSE_SOURCE }}
+            ${{ env.RUNTIME_SOURCE }}
 
       # Checked with gh attestation verify <download> -R erickramer42/havne
       # --predicate-type https://spdx.dev/Document/v2.3
@@ -593,7 +610,7 @@ jobs:
           files=("$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"
             "$APPIMAGE_ARM" "$DEB_ARM" "$DBGSYM_ARM" "$TARBALL_ARM" "$DEBUG_TARBALL_ARM"
             "$WHEEL_WIN" "$WHEEL_LINUX" "$WHEEL_LINUX_ARM" "$WHEEL_MACOS"
-            "$SBOM" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
+            "$SBOM" "$FUSE_SOURCE" "$RUNTIME_SOURCE" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else

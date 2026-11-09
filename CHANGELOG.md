@@ -11,6 +11,179 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-08
+
+### Added
+
+- The Dashboard can be built by hand: Edit (or, on a phone, a long press
+  on a gauge) adds dials, rings, bars, cells, digits, numbers, sparklines
+  and shift lights for any of the profile's numeric signals, with or
+  without a connected vehicle, and sets each gauge's label, range,
+  warning zones, decimals, size and place. Pages can be added, renamed,
+  moved and removed, and Reset brings back the built-in layout. Each
+  change is saved as it is made, separately for the phone and the
+  desktop, and the layout is the same for every vehicle
+  ([ADR-0057](docs/adr/0057-dashboards.md)).
+- Three more Dashboard gauges: Cells (a tachometer-style bar of cells
+  along a rising curve), Digits (a seven-segment readout) and Sparkline
+  (10 to 120 seconds, with its low and high). A bar can stand up and
+  leave its ticks out, and any gauge with a scale can mark its held peak.
+- Low glare and Night themes: amber and red on near black, for a cabin
+  after dark. Choose one under Settings, Display; it is kept between
+  runs. The gauges, the charts' traces, Home's logo and the Windows title
+  bar (and Android's window background) follow it.
+- Start log in the header records the signals ticked on Live from the
+  press on, asking the ECU for those alone, and shows the log's time and
+  size while it runs. Stop log opens it on Recordings, and a disconnect
+  ends it where you are. It is refused while Record sessions records.
+  The Dashboard's header says when a log wasn't started or ended without
+  Stop log, and why, until Dismiss or the next log
+  ([ADR-0056](docs/adr/0056-analysis-log.md)).
+- `havne-cli log <uri> <folder> [--signal <name>]...` is the same log
+  from the command line: the session asks only the signals named,
+  records to a folder of its own, writes a `log` line every 10 s with
+  the recording's size, and ends at Ctrl+C or `--seconds`. `export` then
+  takes the picked columns by itself.
+- `havne-cli export` takes `--rows sweep|<ms>` (a grid instead of a row
+  a sweep), `--units metric|imperial` and `--signal <name>` (the columns,
+  repeated, in order), beside `--layout`.
+- The recording viewer shows a recording's frames: a Values | Frames
+  switch beside Save report opens the Log page's table, filter and By ID
+  list over the part in view (the first 10,000 frames when more lie in
+  it), and a tap on a row puts the chart's cursor there.
+- `havne-cli frames <recording> [--from S] [--to S]` and Python's
+  `havne.read_frames` read a recording's frames between two times
+  (`ecuio_recording_read_frames`).
+- The Recordings page imports a CSV or candump log as a recording, on
+  every platform (Android's document picker too): Import guesses the
+  file's kind from its first line and asks for a candump log's bus when
+  it holds several.
+- Importing a CSV in the app needs no column map file: the Import panel
+  reads the file's header and shows what it guessed (the time column and
+  its unit, then each column with its name, unit and kind and the first
+  rows of its cells). Each column can be left out or put back, renamed,
+  given another unit or kind, and a time of plain numbers takes its unit
+  from a choice of s, ms and us. **Save as map** keeps the edited map
+  under the settings folder's `maps/`, and a **Saved maps** list offers
+  it for the next file; **Column map...** still picks a file and skips
+  the guess.
+- A CSV with no column map is read by its header from the command line
+  too: `havne-cli import csv <file> <folder>` guesses the time column and
+  its unit, the delimiter, a preamble, decimal commas, each signal's
+  name, unit and kind, and the placeholders that mean no value, then
+  imports with that map, writing the guess and its notes first.
+  `--time-unit s|ms|us` gives a time of plain numbers its unit when the
+  header names none, and `--print-map` prints the guessed map alone, to
+  edit and pass with `--map`. Python's `havne.guess_csv_map(path)`
+  returns the same guess, and `havne.import_csv(path, folder)` imports
+  with it.
+- The Log page filters by an ID mask (candump's `ID:mask`, beside IDs
+  and ranges), a length (byte counts and ranges) and a time (a range of
+  the table's seconds, either end open), and By ID draws the bytes that
+  changed from an ID's frame before in the warning color.
+- The health report names the vehicle's baseline recording: its start,
+  length, profile and backend, and whether the report's own recording is
+  it, never its folder (whose name holds the vehicle's label). The app's
+  Save report on Diagnostics and in the log viewer names the picked
+  vehicle's; `havne-cli health` takes `--baseline <recording>`. A
+  baseline that's gone or can't be read is said so, and the report is
+  still written ([ADR-0054](docs/adr/0054-exports-and-imports.md)'s
+  appendix "the health report as built").
+- A running session's requests can be narrowed to picked signals
+  (`ecuio_session_set_focus`; Python `Session.set_focus`): the picked
+  requests run in the fast class and the rest wait, until a count of 0
+  asks the whole set again. A focus that would leave a requesting
+  session nothing to ask is refused
+  ([ADR-0056](docs/adr/0056-analysis-log.md) section 2).
+- A recorder attaches to a session that is already running
+  (`ecuio_session_record` after start; Python `Session.record` after
+  `start()`): the recording holds the frames from then on, its header
+  says what the link's state and the focus were at the attach, and once
+  it closes another can attach. One recorder at a time
+  ([ADR-0056](docs/adr/0056-analysis-log.md) section 3).
+- `ecuio_export_estimate` gives the rows and exact size a wide CSV export
+  would write, for up to 64 row intervals in one pass, before anything
+  is written. A count above 64 is `ECUIO_ERR_INVALID_ARGUMENT`.
+- The C ABI names a signal file's key for one of its signals
+  (`ecuio_signal_file_key`) and the span a signal's field decodes to
+  (`ecuio_def_range`), which the Dashboard's gauges start from.
+
+### Changed
+
+- **Breaking for scripts that read the CSV export, and for C callers of
+  `ecuio_export`:** the CSV export's default is the wide layout
+  ([ADR-0056](docs/adr/0056-analysis-log.md) section 5): `Time (ms)` then
+  a column a signal, a row each sweep (or on a grid, `--rows <ms>`), each
+  cell in the signal's decimal places and units, the columns the
+  recording's focus or the ones named (`--signal`), CRLF and no comment
+  line. The long form as before, a row a value under a comment line, is
+  `havne-cli export --layout long` (C: `layout = ECUIO_CSV_LONG`; an
+  `ecuio_export_options_t` with its reserved words zeroed, which v0.6.0
+  callers pass, writes wide). A `--signal` name the recording has no
+  values for is an empty column, said on stderr and counted in the
+  `exported` line's `missing`. A wide export of more than 16,384 columns,
+  picked ones too, is refused.
+- Python's `Recording(folder, profile=..., signals=...)` raises
+  `ValueError` when given both, since a recording decodes through one
+  set. Before, `signals` won without a word.
+- A recording's `latency.csv` writes each row's `t_s` on the recording's
+  clock, as `host_us` in its other files, so reply timing plots against
+  the frames of a recording begun mid-session. A recording made before
+  this holds the session's time there.
+- Settings is a list of pages (Connection, Vehicle, Signals, Recording,
+  Display, Advanced) instead of folding sections. Add a signal is a page
+  of its own, and the buttons on a phone are a finger's size.
+- A gauge past its danger value shows a mark beside its reading, and the
+  danger zones are drawn heavier (in every theme), so danger doesn't rest
+  on color alone.
+- The shift lights flash at 3 Hz at most, down from about 7 Hz.
+- The Connection page's presets start collapsed, `j2534://` shows on
+  Windows only, and the WiFi labels carry the address in smaller text.
+- The mock's MAF shows two decimals.
+
+### Fixed
+
+- A session kept connected while one request's answers paused for 36
+  minutes or more and then resumed (the key turned off with the app,
+  `havne-cli stream` or `havne-cli health` connected over J2534, ELM327
+  or SocketCAN, and on again later) hung the session's worker for good.
+  Since v0.3.5, which brought reply timing
+  ([ADR-0042](docs/adr/0042-reply-timing.md)).
+- `havne-cli stream --record` crashed when its output went away (the
+  reader of its pipe gone, a full disk under stdout) instead of ending
+  quietly. It ends quietly with the recording closed whole, its end
+  line's why `output-failed`. Since v0.4.0, which brought `--record`.
+- A `--seconds` above 366 days is a usage error for `stream`, `play` and
+  `sim`, instead of wrapping and ending at once.
+- A phone's tab bar: each tab is at least 48 dp at any zoom, with a gap
+  above the window's edge so a low tap doesn't land on Back or Home, and
+  a phone keeps its tab bar in both orientations. The header and tab bar
+  no longer count the system's bars twice.
+- On Android, a tap on Refresh or Scan asks for Nearby devices again
+  after a refusal, a refusal Android answers at once names the way to
+  the permission with an Open settings button, and the page reads the
+  permission again when the app returns.
+- The Linux AppImage and the Android APK carry Qt's notice and the
+  LGPL-3.0 and GPL-3.0 texts, as the Windows zip does, with Havne's
+  license and those of the other libraries they bundle:
+  `usr/share/doc/havne/` in the AppImage, `assets/havne/` in the APK.
+- The Windows zip, the AppImage and the APK carry the credits and license
+  texts for the third-party code inside Qt
+  (`licenses/Qt-third-party.txt`), rather than a link to them. The
+  Windows zip carries the license texts for its software OpenGL renderer.
+- The Windows download no longer includes Microsoft's shader compiler
+  DLLs (`D3Dcompiler_47.dll`, `dxcompiler.dll`, `dxil.dll`). Havne runs
+  the same without them, and the download is smaller.
+- The Linux AppImage starts with a pinned AppImage runtime (type2-runtime
+  20251108), checked against its SHA-256, instead of the newest build
+  downloaded at packing time. Its notice names the runtime and what it
+  contains (libfuse, squashfuse, musl, mimalloc, zstd, zlib), with their
+  license texts, and each release attaches the sources of libfuse and the
+  runtime.
+- The Android APK no longer carries Qt's QML debugger plugins (about
+  1.3 MB). They were never usable: the release app is built without QML
+  debugging.
+
 ## [0.6.0] - 2026-11-07
 
 ### Added
@@ -903,7 +1076,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/erickramer42/havne/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/erickramer42/havne/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/erickramer42/havne/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/erickramer42/havne/compare/v0.4.1...v0.5.0

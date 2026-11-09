@@ -534,3 +534,54 @@ TEST(SignalFileTest, AFieldEndingPastTheReplyIsRefused)
             << why;
     }
 }
+
+// A def's key is the file's own name for it, the inverse of find: each
+// own def names its key, and a base set's def (extends), another set's
+// def with the same ID, a copy, and NULLs give ""
+TEST(SignalFileTest, EachOwnDefNamesItsKeyAndNoOtherDefDoes)
+{
+    File f = load(kExample);
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    ASSERT_EQ(set->count, obd2->count + 4);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t* def = &set->defs[i];
+        const char* key = ecuio_signal_file_key(f.get(), def);
+        ASSERT_NE(key, nullptr) << def->name;
+        if (i < obd2->count) {
+            EXPECT_STREQ(key, "") << "the base's " << def->name;
+            EXPECT_STREQ(ecuio_signal_file_key(f.get(), &obd2->defs[i]), "")
+                << "obd2's own " << def->name;
+        } else {
+            EXPECT_NE(std::string(key), "") << def->name;
+            EXPECT_EQ(ecuio_signal_file_find(f.get(), key), def) << key;
+        }
+    }
+    EXPECT_STREQ(
+        ecuio_signal_file_key(f.get(), ecuio_signal_file_find(f.get(), "tft")),
+        "tft");
+    EXPECT_STREQ(ecuio_signal_file_key(
+                     f.get(), ecuio_signal_file_find(f.get(), "boost")),
+                 "boost")
+        << "a computed def has its key too";
+
+    /* By address, never by ID: a copy and another file's def aren't it */
+    const ecuio_signal_def_t copy = *ecuio_signal_file_find(f.get(), "tft");
+    EXPECT_STREQ(ecuio_signal_file_key(f.get(), &copy), "");
+    File other = load(kExample);
+    ASSERT_NE(other, nullptr);
+    EXPECT_STREQ(ecuio_signal_file_key(
+                     f.get(), ecuio_signal_file_find(other.get(), "tft")),
+                 "");
+
+    EXPECT_STREQ(ecuio_signal_file_key(nullptr, &copy), "");
+    EXPECT_STREQ(ecuio_signal_file_key(f.get(), nullptr), "");
+
+    /* A file that extends nothing: every def is its own, each keyed */
+    File alone = load(one(kNumber));
+    ASSERT_NE(alone, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* s = ecuio_signal_file_set(alone.get());
+    ASSERT_EQ(s->count, 1u);
+    EXPECT_STREQ(ecuio_signal_file_key(alone.get(), &s->defs[0]), "a");
+}

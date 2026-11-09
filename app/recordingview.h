@@ -110,8 +110,12 @@ public:
     // thread of its own, since core reads all of frames.csv; reportSaved
     // with writeHealthReport's map when it ends, unless the viewer closed
     // or opened another recording meanwhile. False, nothing started, when
-    // no recording is open or a report is being written already
-    Q_INVOKABLE bool saveHealthReport(const QUrl& url, int filterIndex);
+    // no recording is open or a report is being written already.
+    // baselineFolder, the picked vehicle's baseline recording ("" none),
+    // which the report names by its start, never its folder
+    Q_INVOKABLE bool
+    saveHealthReport(const QUrl& url, int filterIndex,
+                     const QString& baselineFolder = QString());
 
     // Opens the recording in folder (the one holding signals.csv), closing
     // any open or opening one first. The state goes to Opening at once,

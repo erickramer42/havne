@@ -1,6 +1,6 @@
 // File/layer: core/src/import.cpp | C++17, Qt-free; a log from another tool
 //             as a recording (ADR-0054 sections 4 and 5)
-// Testing: UNIT: ImportTest, CsvImportTest (test_core)
+// Testing: UNIT: ImportTest, CsvImportTest, CsvGuessTest (test_core)
 //
 // ecuio_import: a candump log read twice, first to check every line and
 // list the interfaces (so a refusal comes before anything is written),
@@ -8,10 +8,13 @@
 // frames.csv as they arrived, and an events.log header naming the import.
 // A CSV the same way through its column map (csv_import.h's pass, run to
 // check and then to write): signals.csv and a format 3 header, no frames.
+// ecuio_import_csv_guess reads a CSV's start and hands csv_guess.h's map
+// back as JSON, importing nothing.
 // The folder is written under a name of its own beside <folder>
 // (folder_files.h's partial_name) and renamed once whole.
 
 #include "candump.h"
+#include "csv_guess.h"
 #include "csv_import.h"
 #include "error_detail.h"
 #include "folder_files.h"
@@ -728,6 +731,97 @@ extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
     }
     if (report != nullptr) {
         *report = r;
+    }
+    return ECUIO_OK;
+}
+
+/* ---- the guess (ADR-0054's appendix "a column map guessed from the
+ * header") ---- */
+
+namespace guess = ecuio_map_guess;
+
+static_assert(guess::kTimeUnitKnown == ECUIO_CSV_GUESS_TIME_UNIT_KNOWN &&
+                  guess::kDecimalComma == ECUIO_CSV_GUESS_DECIMAL_COMMA &&
+                  guess::kPreamble == ECUIO_CSV_GUESS_PREAMBLE &&
+                  guess::kTimeNumbers == ECUIO_CSV_GUESS_TIME_NUMBERS,
+              "the guess's flags are recording.h's");
+
+extern "C" ecuio_status_t ecuio_import_csv_guess(const char* path_utf8,
+                                                 const char* time_unit,
+                                                 char* map_out, size_t cap,
+                                                 size_t* needed,
+                                                 ecuio_csv_guess_t* report)
+{
+    if (report != nullptr) {
+        *report = ecuio_csv_guess_t{};
+    }
+    if (needed != nullptr) {
+        *needed = 0;
+    }
+    /* Blank before any refusal, the arguments' too (recording.h) */
+    if (map_out != nullptr && cap > 0) {
+        map_out[0] = '\0';
+    }
+    if (path_utf8 == nullptr || needed == nullptr ||
+        (map_out == nullptr && cap > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (time_unit != nullptr && std::strcmp(time_unit, "s") != 0 &&
+        std::strcmp(time_unit, "ms") != 0 &&
+        std::strcmp(time_unit, "us") != 0) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    ecuio_detail_clear();
+    try {
+        std::string why;
+        std::unique_ptr<FILE, file_closer> in(
+            files::open_file(path_utf8, false, &why));
+        if (!in) {
+            fail("the file can't be opened: %s", why);
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        /* The file's start, one byte past what the guess reads to know
+         * whether it goes on; then cut at its last line feed */
+        std::vector<unsigned char> bytes(guess::kReadMax + 1);
+        const size_t got = std::fread(bytes.data(), 1, bytes.size(), in.get());
+        if (std::ferror(in.get()) != 0) {
+            fail("the file can't be read");
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        size_t n = got;
+        const bool cut = got > guess::kReadMax;
+        if (cut) {
+            n = guess::kReadMax;
+            while (n > 0 && bytes[n - 1] != '\n') {
+                --n;
+            }
+            if (n == 0) {
+                /* Not an empty file: rows too long for any reader */
+                fail("%s", "the file's first " +
+                               std::to_string(guess::kReadMax >> 10) +
+                               " KiB hold no line end");
+                return ECUIO_ERR_LOAD_FAILED;
+            }
+        }
+        guess::result r;
+        if (!guess::guess(bytes.data(), n, cut, time_unit, r, &why)) {
+            fail("%s", why);
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        *needed = r.text.size() + 1;
+        if (cap >= *needed) {
+            std::memcpy(map_out, r.text.c_str(), *needed);
+        }
+        if (report != nullptr) {
+            report->flags = r.flags;
+            report->columns = r.columns;
+            report->left_out = r.left_out;
+            report->rows_read = r.rows_read;
+            report->map_offset = static_cast<uint32_t>(r.map_offset);
+            report->map_length = static_cast<uint32_t>(r.map_length);
+        }
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     return ECUIO_OK;
 }

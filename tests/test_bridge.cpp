@@ -47,11 +47,13 @@
 #include "carryover.h"
 #include "healthreport.h"
 #include "fake_bt_socket.h"
+#include "fake_theme.h"
 #include "obdbimport.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
+#include "windowtheme.h"
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 #include <ecuio/version.h>
@@ -977,6 +979,405 @@ TEST(BridgeTest, AMarkGoesIntoTheRecording)
     EXPECT_TRUE(bridge.mark());
     EXPECT_EQ(log.count(QStringLiteral("Marked: Mark 1")), 2);
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+/* Live's plot: the rows with these ids ticked and every other numeric
+ * row unticked, as a vehicle's choices set them */
+void plotOnly(SignalListModel* model, const std::vector<uint16_t>& ids)
+{
+    QStringList plotted;
+    QStringList unplotted;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r);
+        if (model->data(i, SignalListModel::IsTextRole).toBool()) {
+            continue;
+        }
+        const auto id = static_cast<uint16_t>(
+            model->data(i, SignalListModel::IdRole).toUInt());
+        const QString name =
+            model->data(i, SignalListModel::NameRole).toString();
+        (std::find(ids.begin(), ids.end(), id) != ids.end() ? plotted
+                                                            : unplotted)
+            << name;
+    }
+    model->setPlotChoices(plotted, unplotted);
+}
+
+/* The names of the model's rows with these ids, in the model's order */
+QStringList namesOf(SignalListModel* model, const std::vector<uint16_t>& ids)
+{
+    QStringList names;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r);
+        const auto id = static_cast<uint16_t>(
+            model->data(i, SignalListModel::IdRole).toUInt());
+        if (std::find(ids.begin(), ids.end(), id) != ids.end()) {
+            names << model->data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    return names;
+}
+
+/* A folder's files' sizes summed */
+qint64 folderBytes(const QString& folder)
+{
+    qint64 bytes = 0;
+    for (const QFileInfo& f :
+         QDir(folder).entryInfoList(QDir::Files | QDir::Hidden)) {
+        bytes += f.size();
+    }
+    return bytes;
+}
+
+} // namespace
+
+/* Start log is refused, with its reason in the activity log and no
+ * folder made: while not connected, while Record sessions' recorder is
+ * live (one recorder a session), with no row plotted, and on a replay,
+ * which plays a recording already. */
+TEST(BridgeTest, StartLogIsRefusedWithItsReason)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(QStringLiteral("Log not started: not connected")))
+        << log.join('\n').toStdString();
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://recorded").isEmpty());
+    ASSERT_TRUE(bridge.recordingActive());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: Recording this session already")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.setRecording(false);
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1)
+        << "Record sessions' alone";
+
+    ASSERT_TRUE(bridge.connectSession("mock://unticked").isEmpty());
+    plotOnly(bridge.signalModel(), {});
+    ASSERT_EQ(bridge.signalModel()->subscribedCount(), 0);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: no signal is ticked on Live")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1);
+
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("replay://%1/2026-10-25-engine-start"
+                                           "?profile=obd2&speed=100")
+                                .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES)))
+            .isEmpty());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: a replay plays a recording already")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1);
+}
+
+/* A start the session refuses after its focus took (a recorder of the
+ * test's own holds the session's one slot): the whole set is asked
+ * again, and the folder the start made, holding no frame, is gone. */
+TEST(BridgeTest, AStartLogTheSessionRefusesLeavesNoFolderAndNoFocus)
+{
+    QTemporaryDir root;
+    QTemporaryDir own;
+    ASSERT_TRUE(root.isValid() && own.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession("mock://refused").isEmpty());
+    ASSERT_GT(bridge.signalModel()->subscribedCount(), 0);
+
+    const QByteArray own8 = own.path().toUtf8();
+    const auto attach = [&bridge, &own8]() {
+        ecuio_record_options_t o{};
+        o.root_utf8 = own8.constData();
+        ecuio_recorder_t* r = nullptr;
+        EXPECT_EQ(ecuio_recorder_open(&o, &r), ECUIO_OK);
+        EXPECT_EQ(ecuio_session_record(bridge.sessionForTesting(), r),
+                  ECUIO_OK);
+        return r;
+    };
+    ecuio_recorder_t* holder = attach();
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(QStringLiteral("Log not started: %1")
+                                 .arg(QString::fromUtf8(ecuio_status_string(
+                                     ECUIO_ERR_INVALID_ARGUMENT)))))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty())
+        << recordingFolders(root.path()).join(',').toStdString();
+    (void)ecuio_recorder_close(holder, "the test's");
+
+    // A recorder attached now writes the focus it finds: none
+    ecuio_recorder_t* probe = attach();
+    char folder[4096];
+    uint32_t length = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(probe, folder, sizeof folder, &length),
+              ECUIO_OK);
+    (void)ecuio_recorder_close(probe, "the test's");
+    const QByteArray events =
+        readFile(QString::fromUtf8(folder) + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.contains("\nuri  mock://refused"))
+        << events.toStdString();
+    EXPECT_FALSE(events.contains("\nfocus  ")) << events.toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A write that fails during a log ends it as it ends a Record sessions
+ * recording: "Recording stopped: ..." in the activity log, logStopped
+ * not the user's, the session running on. */
+TEST(BridgeTest, AFailedWriteEndsALogNotAsTheUsers)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    QList<bool> byUser;
+    QObject::connect(&bridge, &SessionBridge::logStopped,
+                     [&byUser](const QString&, bool user) { byUser << user; });
+    ASSERT_TRUE(bridge.connectSession("mock://failing").isEmpty());
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    ASSERT_NE(bridge.recorderForTesting(), nullptr);
+    ecuio_recorder_test_fail_writes(bridge.recorderForTesting());
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    EXPECT_EQ(byUser, QList<bool>{false});
+    EXPECT_TRUE(
+        log.contains(QStringLiteral("Recording stopped: the disk is full")))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(bridge.connected());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(byUser, QList<bool>{false}) << "once";
+}
+
+/* The Dashboard header's notice: a refusal's "Log not started: <why>"
+ * (startLog's own reasons and the recorder's), an end the user didn't
+ * ask for as "Log ended: <why>", nothing for Stop log's, a log that
+ * starts clearing it, Dismiss clearing it, and a change signal for
+ * each change alone. */
+TEST(BridgeTest, TheLogNoticeTellsRefusalsAndUnaskedEnds)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    int changes = 0;
+    QObject::connect(&bridge, &SessionBridge::logNoticeChanged,
+                     [&changes]() { ++changes; });
+
+    EXPECT_EQ(bridge.logNotice(), QString());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_EQ(bridge.logNotice(),
+              QStringLiteral("Log not started: not connected"));
+    EXPECT_EQ(changes, 1);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_EQ(changes, 1) << "the same text again is no change";
+    bridge.clearLogNotice();
+    EXPECT_EQ(bridge.logNotice(), QString());
+    EXPECT_EQ(changes, 2);
+    bridge.clearLogNotice();
+    EXPECT_EQ(changes, 2) << "clearing nothing is no change";
+
+    // The recorder's refusal, the root a file: openRecorder's reason
+    const QString file = root.path() + QStringLiteral("/not-a-folder");
+    {
+        QFile f(file);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    bridge.setRecordingsRootForTesting(file);
+    ASSERT_TRUE(bridge.connectSession("mock://failing").isEmpty());
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(bridge.logNotice().startsWith(
+        QStringLiteral("Log not started: can't create ")))
+        << bridge.logNotice().toStdString();
+    EXPECT_TRUE(log.contains(bridge.logNotice()))
+        << "the activity log's own line: " << log.join('\n').toStdString();
+    EXPECT_EQ(
+        log.filter(QStringLiteral("Log not started: can't create ")).size(), 1)
+        << "once, not twice";
+    bridge.setRecordingsRootForTesting(root.path());
+
+    // A log that starts clears it; a failed write ends it, told
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.logNotice(), QString());
+    ASSERT_NE(bridge.recorderForTesting(), nullptr);
+    ecuio_recorder_test_fail_writes(bridge.recorderForTesting());
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.logActive(); }, 5000));
+    EXPECT_EQ(bridge.logNotice(), QStringLiteral("Log ended: the disk is full"))
+        << "the recorder's own words, not the end note's";
+
+    // Stop log's end says nothing: the viewer opens on it
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.logNotice(), QString());
+    const int before = changes;
+    bridge.stopLog();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_EQ(bridge.logNotice(), QString());
+    EXPECT_EQ(changes, before);
+
+    // The session's end closes a running log, told as "disconnected"
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(bridge.logNotice(), QStringLiteral("Log ended: disconnected"));
+}
+
+/* A connect started from disconnectingChanged's end (as a QML handler
+ * may) finds the last session's recording closed: that one ends with
+ * the teardown, and the new session's runs on. */
+TEST(BridgeTest, AConnectAtTheTeardownsEndFindsTheRecordingClosed)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://first").isEmpty());
+    const QString first = bridge.recordingFolderUrl().toLocalFile();
+    ASSERT_FALSE(first.isEmpty());
+    bool again = false;
+    QObject::connect(
+        &bridge, &SessionBridge::disconnectingChanged, &bridge,
+        [&bridge, &again]() {
+            if (!bridge.disconnecting() && !again) {
+                again = true;
+                EXPECT_TRUE(bridge.connectSession("mock://second").isEmpty());
+            }
+        });
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(again);
+    EXPECT_TRUE(bridge.connected());
+    EXPECT_TRUE(bridge.recordingActive());
+    const QString second = bridge.recordingFolderUrl().toLocalFile();
+    EXPECT_NE(second, first);
+    EXPECT_TRUE(readFile(first + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
+    EXPECT_FALSE(
+        readFile(second + QStringLiteral("/events.log")).contains("  end  "));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(readFile(second + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
+}
+
+/* A log on a running session (ADR-0056 section 1): its own folder, the
+ * plotted rows its focus line, a readout that counts the folder's bytes
+ * and its time, Stop log's folder in logStopped as the user's; a second
+ * log in the same session, which the session's end closes and reports
+ * with its folder, not as the user's. */
+TEST(BridgeTest, ALogRecordsTheRunningSessionUntilStopped)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    QStringList stopped;
+    QList<bool> byUser;
+    QObject::connect(&bridge, &SessionBridge::logStopped,
+                     [&stopped, &byUser](const QString& folder, bool user) {
+                         stopped << folder;
+                         byUser << user;
+                     });
+
+    ASSERT_TRUE(bridge.connectSession("mock://logged").isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    SignalListModel* model = bridge.signalModel();
+    std::vector<uint16_t> picks;
+    for (int r = 0; r < model->rowCount() && picks.size() < 2; ++r) {
+        const QModelIndex i = model->index(r);
+        if (!model->data(i, SignalListModel::IsTextRole).toBool()) {
+            picks.push_back(static_cast<uint16_t>(
+                model->data(i, SignalListModel::IdRole).toUInt()));
+        }
+    }
+    ASSERT_EQ(picks.size(), 2u);
+    plotOnly(model, picks);
+    ASSERT_EQ(model->subscribedCount(), 2);
+
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    EXPECT_TRUE(bridge.logActive());
+    EXPECT_TRUE(bridge.recordingActive());
+    const QString first = bridge.recordingFolderUrl().toLocalFile();
+    EXPECT_TRUE(log.contains(QStringLiteral("Log started: %1 (2 signals)")
+                                 .arg(bridge.recordingFolder())))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Log not started: a log is running already")));
+
+    // The readout's second: the folder's bytes and the time so far
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() {
+            return bridge.logBytes() > 0 && bridge.logElapsedMs() >= 1000;
+        },
+        10000))
+        << bridge.logBytes() << " bytes at " << bridge.logElapsedMs();
+    EXPECT_LE(bridge.logBytes(), folderBytes(first));
+
+    bridge.stopLog();
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    ASSERT_EQ(stopped, QStringList{first});
+    EXPECT_EQ(byUser, QList<bool>{true}) << "Stop log's own";
+    EXPECT_EQ(bridge.logBytes(), folderBytes(first))
+        << "the closed folder's size";
+    const qint64 elapsed = bridge.logElapsedMs();
+    EXPECT_GE(elapsed, 1000);
+    spinLoop(50);
+    EXPECT_EQ(bridge.logElapsedMs(), elapsed) << "the last log's, held";
+    const QByteArray events =
+        readFile(first + QStringLiteral("/events.log")).replace("\r\n", "\n");
+    for (const QString& expected :
+         {QStringLiteral("\nfocus  ") + namesOf(model, picks).join(',') +
+              QStringLiteral("\n"),
+          QStringLiteral("  note  Log stopped: "),
+          QStringLiteral("  end  Stop log: ")}) {
+        EXPECT_TRUE(events.contains(expected.toUtf8()))
+            << expected.toStdString() << "\n"
+            << events.toStdString();
+    }
+
+    // The slot is free again, and the session's end closes the next
+    ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    const QString second = bridge.recordingFolderUrl().toLocalFile();
+    EXPECT_NE(second, first);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_FALSE(bridge.logActive());
+    ASSERT_EQ(stopped, (QStringList{first, second}));
+    EXPECT_EQ(byUser, (QList<bool>{true, false}))
+        << "the session's end isn't the user's";
+    EXPECT_TRUE(readFile(second + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 2);
 }
 
 /* An app closed while connected: the bridge's destructor destroys the
@@ -2345,6 +2746,12 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::RefusedRole), QByteArray("refused"));
     EXPECT_EQ(roles.value(SignalListModel::RefusedCodeRole),
               QByteArray("refusedCode"));
+    EXPECT_EQ(roles.value(SignalListModel::RefRole), QByteArray("ref"));
+    EXPECT_EQ(roles.value(SignalListModel::RangeLowRole),
+              QByteArray("rangeLow"));
+    EXPECT_EQ(roles.value(SignalListModel::RangeHighRole),
+              QByteArray("rangeHigh"));
+    EXPECT_EQ(roles.value(SignalListModel::IsEnumRole), QByteArray("isEnum"));
 
     // A row answers only its roles, and only rows that exist answer
     ecuio_signal_def_t defs[2];
@@ -3486,6 +3893,166 @@ TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
                                    QStringLiteral("Fuel Pressure")}));
     EXPECT_EQ(bridge.liveSignalModel()->rowCount(), model->rowCount() - 2);
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+/* The obd2 set's id for Service 01 PID pid */
+uint16_t obd2IdOf(uint8_t pid)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            d.mux_key == (0x4100u | pid)) {
+            return d.id;
+        }
+    }
+    ADD_FAILURE() << "no def reads PID " << int(pid);
+    return 0;
+}
+
+/* The next 16 writes after a reset of the fake's page, as the Service 01
+ * PIDs they ask; empty when they don't come or one isn't a Service 01
+ * request */
+std::vector<uint8_t> nextPids()
+{
+    fake_control::reset(fakePage());
+    if (!spinUntil([]() { return fake_control::writes(fakePage()) >= 16; },
+                   5000, 10)) {
+        return {};
+    }
+    std::vector<uint8_t> pids;
+    for (uint32_t i = 0; i < 16; ++i) {
+        fake_control::Write w{};
+        if (!fake_control::recorded_write(fakePage(), i, &w) || w.size < 6 ||
+            w.data[4] != 0x01) {
+            return {};
+        }
+        pids.push_back(w.data[5]);
+    }
+    return pids;
+}
+
+bool onlyThese(const std::vector<uint8_t>& pids,
+               std::initializer_list<uint8_t> picks)
+{
+    return !pids.empty() &&
+           std::all_of(pids.begin(), pids.end(), [&picks](uint8_t pid) {
+               return std::find(picks.begin(), picks.end(), pid) != picks.end();
+           });
+}
+
+} // namespace
+
+/* Start log over the fake ECU (ADR-0056 sections 2 and 3): the session
+ * asks the plotted PIDs alone, ticks on Live meanwhile leave that so,
+ * the recording's time starts at Start (not at the connect), and Stop
+ * asks the whole set again. */
+TEST(BridgeTest, ALogAsksThePlottedPidsAlone)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList stopped;
+    QObject::connect(
+        &bridge, &SessionBridge::logStopped,
+        [&stopped](const QString& folder, bool) { stopped << folder; });
+    const QString uri =
+        QStringLiteral("j2534://%1?profile=obd2&filter=0x7E8&probe=0&"
+                       "identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    QElapsedTimer age;
+    age.start();
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    const std::vector<uint16_t> picks = {obd2IdOf(0x0C), obd2IdOf(0x0D)};
+    plotOnly(model, picks);
+    ASSERT_EQ(model->subscribedCount(), 2);
+    // A session old enough that a recording timed from its start shows it
+    ASSERT_TRUE(spinUntil([&]() { return age.elapsed() >= 2000; }, 10000));
+    const std::vector<uint8_t> before = nextPids();
+    ASSERT_FALSE(before.empty());
+    ASSERT_FALSE(onlyThese(before, {0x0C, 0x0D}))
+        << "the whole set is asked before the log";
+
+    const qint64 ageAtStartMs = age.elapsed();
+    ASSERT_TRUE(bridge.startLog());
+    const QString folder = bridge.recordingFolderUrl().toLocalFile();
+    ASSERT_TRUE(spinUntil([]() { return onlyThese(nextPids(), {0x0C, 0x0D}); },
+                          15000, 10))
+        << "the rotation never narrowed to 0C and 0D";
+
+    // A tick meanwhile plots the row and leaves the focus as it was
+    plotOnly(model, {picks[0], picks[1], obd2IdOf(0x05)});
+    ASSERT_EQ(model->subscribedCount(), 3);
+    for (int round = 0; round < 2; ++round) {
+        const std::vector<uint8_t> pids = nextPids();
+        EXPECT_TRUE(onlyThese(pids, {0x0C, 0x0D})) << "round " << round;
+    }
+
+    bridge.stopLog();
+    ASSERT_EQ(stopped, QStringList{folder});
+    ASSERT_TRUE(spinUntil(
+        []() {
+            const std::vector<uint8_t> pids = nextPids();
+            return !pids.empty() && !onlyThese(pids, {0x0C, 0x0D, 0x05});
+        },
+        15000, 10))
+        << "the whole set never came back";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QList<QByteArray> rows =
+        fileLines(folder + QStringLiteral("/frames.csv"));
+    ASSERT_GE(rows.size(), 2) << "no frame in the log";
+    const qint64 firstHostUs = rows[1].split(',')[0].toLongLong();
+    EXPECT_LT(firstHostUs, ageAtStartMs * 1000 / 2)
+        << "timed from the connect, " << ageAtStartMs << " ms before Start";
+    const QByteArray events = readFile(folder + QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains(
+        (QStringLiteral("focus  ") + namesOf(model, picks).join(',')).toUtf8()))
+        << events.toStdString();
+}
+
+/* A focus core refuses (under ?poll=0x0C, 0D alone leaves nothing to
+ * ask) refuses Start log with core's words and opens no folder; the
+ * polled PID's is taken. */
+TEST(BridgeTest, AFocusCoreRefusesStartsNoLog)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral(
+            "j2534://%1?profile=obd2&poll=0x0C&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+
+    plotOnly(bridge.signalModel(), {obd2IdOf(0x0D)});
+    ASSERT_EQ(bridge.signalModel()->subscribedCount(), 1);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_FALSE(bridge.logActive());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "Log not started: the focus leaves nothing to request: none of the "
+        "picked signals is asked on this session")))
+        << log.join('\n').toStdString();
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty());
+
+    plotOnly(bridge.signalModel(), {obd2IdOf(0x0C)});
+    EXPECT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    bridge.stopLog();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1);
 }
 
 /* ADR-0051 section 3: a DID the fake ECU holds no reply for (it answers
@@ -7994,6 +8561,532 @@ TEST(BridgeTest, ReplayOfAChangedSignalFileCopyDecodesAsLoaded)
         << log.join(QLatin1Char('\n')).toStdString();
 }
 
+// ---- ADR-0057's refs and ranges: the model's rows and profileSignals ----
+
+namespace {
+
+// The rows of the bridge's signal model, each a map of its role names
+QVariantList modelRows(SessionBridge& bridge)
+{
+    SignalListModel* model = bridge.signalModel();
+    const QHash<int, QByteArray> roles = model->roleNames();
+    QVariantList rows;
+    for (int i = 0; i < model->rowCount(); ++i) {
+        QVariantMap row;
+        for (auto it = roles.begin(); it != roles.end(); ++it) {
+            row.insert(QString::fromUtf8(it.value()),
+                       model->data(model->index(i, 0), it.key()));
+        }
+        rows.append(row);
+    }
+    return rows;
+}
+
+// The row named name, an empty map if none
+QVariantMap rowNamed(const QVariantList& rows, const QString& name)
+{
+    for (const QVariant& r : rows) {
+        if (r.toMap().value(QStringLiteral("name")).toString() == name) {
+            return r.toMap();
+        }
+    }
+    return {};
+}
+
+QStringList refsOf(const QVariantList& rows)
+{
+    QStringList refs;
+    for (const QVariant& r : rows) {
+        refs << r.toMap().value(QStringLiteral("ref")).toString();
+    }
+    return refs;
+}
+
+// Imports bytes into the store and uses it alone; its profile
+QString useFile(SessionBridge& bridge, const QString& folder,
+                const QByteArray& bytes)
+{
+    const QVariantMap r =
+        bridge.importSignalFile(writeScratch(folder, "f.json", bytes));
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(bridge.useSignalFiles({sha256Of(bytes)}).size(), 1);
+    return r.value(QStringLiteral("profile")).toString();
+}
+
+// A signal file extending obd2: an 8-bit temperature at -40 and one at
+// -50 (whose low end differs between the unit systems), an enum, a
+// text, and a computed signal over the temperature
+QByteArray rangesFile()
+{
+    return QByteArray(
+        R"({"havne_signals":1,"name":"Ranges","source":{"name":"t"},)"
+        R"("extends":"obd2","ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"temp","name":"Temp","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0,"bits":8},"offset":-40,"unit":"\u00b0C"},)"
+        R"({"key":"gear","name":"Gear","read":{"service":"22","number":"D101"},)"
+        R"("field":{"byte":0,"bits":8},"kind":"enum","values":{"0":"Park"}},)"
+        R"({"key":"part","name":"Part","read":{"service":"22","number":"D102"},)"
+        R"("field":{"byte":0},"kind":"text"},)"
+        R"({"key":"cold","name":"Cold","read":{"service":"22","number":"D103"},)"
+        R"("field":{"byte":0,"bits":8},"offset":-50,"unit":"\u00b0C"},)"
+        R"({"key":"twice","name":"Twice","kind":"computed","expr":"temp * 2"}]})");
+}
+
+} // namespace
+
+/* The mock's and obd2's rows are theirs by core's def ID; a row's ref
+ * is the same in the model and in profileSignals */
+TEST(BridgeTest, ABuiltInSetsRowsAreReferencedByTheirIds)
+{
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    const QVariantList rows = modelRows(bridge);
+    ASSERT_GT(rows.size(), 0);
+    for (const QVariant& r : rows) {
+        const QVariantMap m = r.toMap();
+        EXPECT_EQ(
+            m.value(QStringLiteral("ref")).toString(),
+            QStringLiteral("id:%1").arg(m.value(QStringLiteral("id")).toInt()))
+            << m.value(QStringLiteral("name")).toString().toStdString();
+    }
+    EXPECT_EQ(
+        rowNamed(rows, QStringLiteral("RPM")).value(QStringLiteral("ref")),
+        QStringLiteral("id:1001"));
+    EXPECT_EQ(refsOf(bridge.profileSignals(QStringLiteral("mock://demo"))),
+              refsOf(rows));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QString obd2 =
+        QStringLiteral(
+            "replay://%1/2026-10-25-engine-start?profile=obd2&speed=max")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    ASSERT_TRUE(bridge.connectSession(obd2).isEmpty());
+    const QVariantList obd2Rows = modelRows(bridge);
+    EXPECT_TRUE(refsOf(obd2Rows).contains(QStringLiteral("id:7003")));
+    for (const QString& ref : refsOf(obd2Rows)) {
+        EXPECT_TRUE(ref.startsWith(QStringLiteral("id:"))) << ref.toStdString();
+    }
+    EXPECT_EQ(refsOf(bridge.profileSignals(obd2)), refsOf(obd2Rows));
+    EXPECT_EQ(refsOf(bridge.profileSignals(QStringLiteral("elm327://COM9"))),
+              refsOf(obd2Rows))
+        << "an adapter's default, obd2";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* uds-generic's rows and a set registered with no signal file (the
+ * mock's, copied) have no ref, though they carry IDs */
+TEST(BridgeTest, ASetWithNoFileHasNoRefs)
+{
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://demo?profile=uds-generic&did=1E1C:u16"))
+                    .isEmpty());
+    QVariantList rows = modelRows(bridge);
+    ASSERT_GT(rows.size(), 0);
+    for (const QString& ref : refsOf(rows)) {
+        EXPECT_EQ(ref, QString());
+    }
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    // The registry keeps the set's pointer until it's unregistered
+    static std::vector<ecuio_signal_def_t> defs;
+    static ecuio_signal_set_t copy{};
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    defs.assign(mock->defs, mock->defs + mock->count);
+    copy = *mock;
+    copy.defs = defs.data();
+    ASSERT_EQ(ecuio_profile_register("copied-mock", &copy, nullptr), ECUIO_OK);
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://demo?profile=copied-mock"))
+            .isEmpty());
+    rows = modelRows(bridge);
+    ASSERT_EQ(rows.size(), static_cast<int>(mock->count));
+    EXPECT_EQ(rowNamed(rows, QStringLiteral("RPM"))
+                  .value(QStringLiteral("id"))
+                  .toInt(),
+              1001);
+    for (const QString& ref : refsOf(rows)) {
+        EXPECT_EQ(ref, QString());
+    }
+    const QVariantList copied = bridge.profileSignals(
+        QStringLiteral("mock://demo?profile=copied-mock"));
+    ASSERT_EQ(copied.size(), static_cast<int>(mock->count));
+    for (const QString& ref : refsOf(copied)) {
+        EXPECT_EQ(ref, QString());
+    }
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(ecuio_profile_unregister("copied-mock"), ECUIO_OK);
+}
+
+/* A signal file's own defs are theirs by key, its extends base's by
+ * the base's ID; a file extending nothing has keys alone */
+TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QByteArray extending = signalFile(QStringLiteral("Extending"));
+    extending.replace(R"("source":{"name":"t"},)",
+                      R"("source":{"name":"t"},"extends":"obd2",)");
+    const QString profile = useFile(bridge, from.path(), extending);
+    ASSERT_FALSE(profile.isEmpty());
+    const QString uri = QStringLiteral("mock://demo?profile=") + profile;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QVariantList rows = modelRows(bridge);
+    EXPECT_EQ(rowNamed(rows, QStringLiteral("A")).value(QStringLiteral("ref")),
+              QStringLiteral("key:a"));
+    const QStringList refs = refsOf(rows);
+    EXPECT_TRUE(refs.contains(QStringLiteral("id:7003"))) << "obd2's RPM";
+    EXPECT_EQ(refs.filter(QStringLiteral("key:")).size(), 1);
+    EXPECT_FALSE(refs.contains(QString()));
+    EXPECT_EQ(refsOf(bridge.profileSignals(uri)), refs);
+
+    // A store change under a session leaves its rows' refs; the file's
+    // profile is gone from the registry, so profileSignals gives []
+    bridge.useSignalFiles({});
+    EXPECT_EQ(refsOf(modelRows(bridge)), refs);
+    EXPECT_TRUE(bridge.profileSignals(uri).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QString alone =
+        useFile(bridge, from.path(), signalFile(QStringLiteral("Alone")));
+    ASSERT_FALSE(alone.isEmpty());
+    EXPECT_EQ(refsOf(bridge.profileSignals(
+                  QStringLiteral("mock://demo?profile=") + alone)),
+              QStringList{QStringLiteral("key:a")});
+    bridge.useSignalFiles({});
+}
+
+/* A plugin variant's rows have refs, its file being the plugin
+ * store's, in profileSignals and in a session's model alike */
+TEST(BridgeTest, APluginVariantsRowsHaveRefs)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray bytes = packed_plugin::example();
+    ASSERT_FALSE(bytes.isEmpty());
+    ASSERT_TRUE(bridge
+                    .importPlugin(
+                        writeScratch(from.path(), "p.havne-plugin.json", bytes))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QString uri =
+        QStringLiteral("mock://demo?profile=plugin.example-sim.base");
+    const QVariantList rows = bridge.profileSignals(uri);
+    ASSERT_GT(rows.size(), 0);
+    const QStringList refs = refsOf(rows);
+    EXPECT_FALSE(refs.contains(QString())) << refs.join(' ').toStdString();
+    EXPECT_FALSE(refs.filter(QStringLiteral("key:")).isEmpty());
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_EQ(refsOf(modelRows(bridge)), refs);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A def's range follows the unit system in the model and in
+ * profileSignals; an enum's is scaled as the decoder scales it, and a
+ * text or computed def has none (NaN) */
+TEST(BridgeTest, ARowsRangeIsShownInTheUnitSystem)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QString profile = useFile(bridge, from.path(), rangesFile());
+    ASSERT_FALSE(profile.isEmpty());
+    const QString uri = QStringLiteral("mock://demo?profile=") + profile;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+
+    for (int units : {0, 1}) {
+        bridge.setUnitSystem(units);
+        const bool metric = units == 0;
+        for (const QVariantList& rows :
+             {modelRows(bridge), bridge.profileSignals(uri)}) {
+            const QVariantMap temp = rowNamed(rows, QStringLiteral("Temp"));
+            ASSERT_FALSE(temp.isEmpty());
+            EXPECT_EQ(temp.value(QStringLiteral("unit")).toString(),
+                      metric ? QStringLiteral("°C") : QStringLiteral("°F"));
+            EXPECT_NEAR(temp.value(QStringLiteral("rangeLow")).toDouble(),
+                        -40.0, 1e-9);
+            EXPECT_NEAR(temp.value(QStringLiteral("rangeHigh")).toDouble(),
+                        metric ? 215.0 : 419.0, 1e-9);
+            EXPECT_FALSE(temp.value(QStringLiteral("isEnum")).toBool());
+            const QVariantMap cold = rowNamed(rows, QStringLiteral("Cold"));
+            ASSERT_FALSE(cold.isEmpty());
+            EXPECT_NEAR(cold.value(QStringLiteral("rangeLow")).toDouble(),
+                        metric ? -50.0 : -58.0, 1e-9);
+            EXPECT_NEAR(cold.value(QStringLiteral("rangeHigh")).toDouble(),
+                        metric ? 205.0 : 401.0, 1e-9);
+
+            const QVariantMap gear = rowNamed(rows, QStringLiteral("Gear"));
+            EXPECT_TRUE(gear.value(QStringLiteral("isEnum")).toBool());
+            EXPECT_EQ(gear.value(QStringLiteral("rangeLow")).toDouble(), 0.0);
+            EXPECT_EQ(gear.value(QStringLiteral("rangeHigh")).toDouble(),
+                      255.0);
+
+            for (const char* none : {"Part", "Twice"}) {
+                const QVariantMap row =
+                    rowNamed(rows, QString::fromLatin1(none));
+                ASSERT_FALSE(row.isEmpty()) << none;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeLow")).toDouble()))
+                    << none;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeHigh")).toDouble()))
+                    << none;
+                EXPECT_FALSE(row.value(QStringLiteral("isEnum")).toBool())
+                    << none;
+            }
+            const QVariantMap speed =
+                rowNamed(rows, QStringLiteral("Vehicle Speed"));
+            ASSERT_FALSE(speed.isEmpty()) << "obd2's, the base";
+            EXPECT_EQ(speed.value(QStringLiteral("unit")).toString(),
+                      metric ? QStringLiteral("km/h") : QStringLiteral("mph"));
+            EXPECT_NEAR(speed.value(QStringLiteral("rangeHigh")).toDouble(),
+                        metric ? 255.0 : 255.0 / 1.609344, 1e-3);
+        }
+
+        // profileSignals also gives the def's own unit and range, the
+        // same in every unit system
+        const QVariantList rows = bridge.profileSignals(uri);
+        const QVariantMap temp = rowNamed(rows, QStringLiteral("Temp"));
+        EXPECT_EQ(temp.value(QStringLiteral("decodedUnit")).toString(),
+                  QStringLiteral("°C"));
+        EXPECT_NEAR(temp.value(QStringLiteral("decodedLow")).toDouble(), -40.0,
+                    1e-9);
+        EXPECT_NEAR(temp.value(QStringLiteral("decodedHigh")).toDouble(), 215.0,
+                    1e-9);
+        const QVariantMap speed =
+            rowNamed(rows, QStringLiteral("Vehicle Speed"));
+        EXPECT_EQ(speed.value(QStringLiteral("decodedUnit")).toString(),
+                  QStringLiteral("km/h"));
+        EXPECT_NEAR(speed.value(QStringLiteral("decodedHigh")).toDouble(),
+                    255.0, 1e-9);
+        const QVariantMap part = rowNamed(rows, QStringLiteral("Part"));
+        EXPECT_TRUE(
+            std::isnan(part.value(QStringLiteral("decodedLow")).toDouble()));
+        EXPECT_TRUE(
+            std::isnan(part.value(QStringLiteral("decodedHigh")).toDouble()));
+    }
+    bridge.setUnitSystem(0);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.useSignalFiles({});
+}
+
+/* A range whose end isn't a finite number (a 32-bit field at scale
+ * 1e300), whose ends are one number (a byte at offset 1e300, past the
+ * double's precision), whose end converts past a double (deg C near
+ * DBL_MAX, times 1.8 in deg F), or whose ends meet once converted (a bit
+ * at 1.75 km/h and one ulp more, one number in mph) is no range, NaN, in
+ * the model and in profileSignals */
+TEST(BridgeTest, ARangeOfAnEndPastADoubleIsNoRange)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const QByteArray bytes(
+        R"({"havne_signals":1,"name":"Huge","source":{"name":"t"},)"
+        R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"huge","name":"Huge","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0,"bits":32},"scale":1e300},)"
+        R"({"key":"flat","name":"Flat","read":{"service":"22","number":"D101"},)"
+        R"("field":{"byte":0,"bits":8},"offset":1e300},)"
+        R"({"key":"edge","name":"Edge","read":{"service":"22","number":"D102"},)"
+        R"("field":{"byte":0,"bits":32},"scale":3.49e298,"unit":"\u00b0C"},)"
+        R"({"key":"meet","name":"Meet","read":{"service":"22","number":"D103"},)"
+        R"("field":{"byte":0,"bits":1,"order":"le"},"offset":1.75,)"
+        R"("scale":2.220446049250313e-16,"unit":"km/h"}]})");
+    const QString profile = useFile(bridge, from.path(), bytes);
+    ASSERT_FALSE(profile.isEmpty());
+    const QString uri = QStringLiteral("mock://demo?profile=") + profile;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    for (int units : {0, 1}) {
+        bridge.setUnitSystem(units);
+        for (const QVariantList& rows :
+             {modelRows(bridge), bridge.profileSignals(uri)}) {
+            for (const char* name : {"Huge", "Flat"}) {
+                const QVariantMap row =
+                    rowNamed(rows, QString::fromLatin1(name));
+                ASSERT_FALSE(row.isEmpty()) << name;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeLow")).toDouble()))
+                    << name;
+                EXPECT_TRUE(std::isnan(
+                    row.value(QStringLiteral("rangeHigh")).toDouble()))
+                    << name;
+            }
+            // About 1.499e308 in deg C; deg F's 2.698e308 is inf
+            const QVariantMap edge = rowNamed(rows, QStringLiteral("Edge"));
+            ASSERT_FALSE(edge.isEmpty());
+            const double lo = edge.value(QStringLiteral("rangeLow")).toDouble();
+            const double hi =
+                edge.value(QStringLiteral("rangeHigh")).toDouble();
+            if (units == 0) {
+                EXPECT_EQ(lo, 0.0);
+                EXPECT_GT(hi, 1.4e308);
+                EXPECT_TRUE(std::isfinite(hi));
+            } else {
+                EXPECT_TRUE(std::isnan(lo)) << lo;
+                EXPECT_TRUE(std::isnan(hi)) << hi;
+            }
+            // 1.75 and 1.75 + 2^-52 km/h are both 1.0873995864153345 mph
+            const QVariantMap meet = rowNamed(rows, QStringLiteral("Meet"));
+            ASSERT_FALSE(meet.isEmpty());
+            const double mlo =
+                meet.value(QStringLiteral("rangeLow")).toDouble();
+            const double mhi =
+                meet.value(QStringLiteral("rangeHigh")).toDouble();
+            if (units == 0) {
+                EXPECT_EQ(mlo, 1.75);
+                EXPECT_EQ(mhi, std::nextafter(1.75, 2.0));
+            } else {
+                EXPECT_TRUE(std::isnan(mlo)) << mlo;
+                EXPECT_TRUE(std::isnan(mhi)) << mhi;
+            }
+        }
+    }
+    bridge.setUnitSystem(0);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.useSignalFiles({});
+}
+
+/* profileSignals gives the rows of the profile a URI selects, and []
+ * for one with no rows to bind or none registered */
+TEST(BridgeTest, ProfileSignalsGivesTheProfilesRows)
+{
+    SessionBridge bridge;
+    const QVariantList mock =
+        bridge.profileSignals(QStringLiteral("mock://demo"));
+    ASSERT_EQ(mock.size(), static_cast<int>(ecuio_mock_signal_set()->count));
+    const QVariantMap rpm = rowNamed(mock, QStringLiteral("RPM"));
+    EXPECT_EQ(rpm.value(QStringLiteral("id")).toInt(), 1001);
+    EXPECT_EQ(rpm.value(QStringLiteral("ref")).toString(),
+              QStringLiteral("id:1001"));
+    EXPECT_EQ(rpm.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("RPM"));
+    EXPECT_FALSE(rpm.value(QStringLiteral("isText")).toBool());
+    EXPECT_FALSE(rpm.value(QStringLiteral("isEnum")).toBool());
+    EXPECT_EQ(rpm.value(QStringLiteral("group")).toInt(),
+              static_cast<int>(ECUIO_SIGNAL_GROUP_ENGINE));
+    EXPECT_EQ(rpm.value(QStringLiteral("decimals")).toInt(), 0);
+    EXPECT_NEAR(rpm.value(QStringLiteral("rangeHigh")).toDouble(), 65535 * 0.25,
+                1e-9);
+
+    for (const char* none :
+         {"mock://demo?profile=uds-generic", "mock://demo?profile=no-such",
+          "mock://demo?profile=raw", "replay://somewhere", "bogus://x",
+          "mock://demo?profile="}) {
+        EXPECT_TRUE(bridge.profileSignals(QString::fromLatin1(none)).isEmpty())
+            << none;
+    }
+}
+
+/* A replay's own signals.json is registered when it connects, so its
+ * profile has no rows before and the file's after */
+TEST(BridgeTest, ProfileSignalsOfAReplaysOwnFileFollowTheConnect)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString own = QStringLiteral("rec.") + sha256Of(v1).left(16);
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    const QString uri = QStringLiteral("replay://") +
+                        QDir::fromNativeSeparators(folder) +
+                        QStringLiteral("?profile=") + own;
+    EXPECT_TRUE(bridge.profileSignals(uri).isEmpty()) << "before the connect";
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(own))
+        << bridge.currentUri().toStdString();
+    EXPECT_EQ(refsOf(bridge.profileSignals(uri)),
+              QStringList{QStringLiteral("key:a")});
+    EXPECT_EQ(refsOf(modelRows(bridge)), QStringList{QStringLiteral("key:a")});
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* profileOfUri is core's choice of profile: each URI core takes gives
+ * the profile its session reports, and one core refuses for its scheme
+ * or its query gives "" */
+TEST(BridgeTest, ProfileOfUriIsTheProfileCoreChooses)
+{
+    const QString fixture =
+        QStringLiteral("replay://%1/2026-10-25-engine-start")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    const QStringList taken = {
+        QStringLiteral("mock://demo"),
+        QStringLiteral("mock://demo?profile=obd2"),
+        QStringLiteral("mock://demo?profile=raw&profile=mock"),
+        QStringLiteral("mock://demo?profile=uds-generic&did=1E1C:u16"),
+        fixture,
+        fixture + QStringLiteral("?profile=obd2&speed=max"),
+    };
+    for (const QString& uri : taken) {
+        ecuio_session_t* s = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri.toUtf8().constData(), &s), ECUIO_OK)
+            << uri.toStdString();
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+        EXPECT_EQ(SessionBridge::profileOfUri(uri).toStdString(),
+                  std::string(info.profile))
+            << uri.toStdString();
+        ecuio_session_destroy(s);
+    }
+
+    const QString tooLong =
+        QStringLiteral("mock://demo?profile=") +
+        QString(ECUIO_PROFILE_NAME_MAX + 1, QLatin1Char('x'));
+    const QStringList refused = {
+        QStringLiteral("Mock://demo"),
+        QStringLiteral("bogus://x"),
+        QStringLiteral("mock://demo?profile"),
+        QStringLiteral("mock://demo?profile="),
+        QStringLiteral("mock://demo?&profile=obd2"),
+        tooLong,
+    };
+    for (const QString& uri : refused) {
+        ecuio_session_t* s = nullptr;
+        EXPECT_NE(ecuio_session_create(uri.toUtf8().constData(), &s), ECUIO_OK)
+            << uri.toStdString();
+        ecuio_session_destroy(s);
+        EXPECT_EQ(SessionBridge::profileOfUri(uri), QString())
+            << uri.toStdString();
+    }
+
+    // The longest name core takes, and the transports this test can't open
+    const QString longest(ECUIO_PROFILE_NAME_MAX, QLatin1Char('x'));
+    EXPECT_EQ(SessionBridge::profileOfUri(
+                  QStringLiteral("mock://demo?profile=") + longest),
+              longest);
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("elm327://COM9")),
+              QStringLiteral("obd2"));
+    EXPECT_EQ(SessionBridge::profileOfUri(
+                  QStringLiteral("elm327://COM9?profile=mock")),
+              QStringLiteral("mock"));
+#ifdef _WIN32
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("j2534://dev0")),
+              QStringLiteral("obd2"));
+#else
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("j2534://dev0")),
+              QString());
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("socketcan://vcan0")),
+              QStringLiteral("raw"));
+#else
+    EXPECT_EQ(SessionBridge::profileOfUri(QStringLiteral("socketcan://vcan0")),
+              QString());
+#endif
+}
+
 // ---- The app's plugins (ADR-0052, PluginStore): the example plugin
 // packed, as a phone imports it ----
 
@@ -9001,7 +10094,8 @@ bool passes(const QString& ids, const QString& data, uint32_t id,
     EXPECT_EQ(FrameFilter::parseIds(ids, &f.ids).toStdString(), "");
     EXPECT_EQ(FrameFilter::parseData(data, &f.data, &f.anchored).toStdString(), "");
     std::vector<uint8_t> payload(bytes);
-    return f.matches(id, flags, payload.data(), static_cast<int>(payload.size()));
+    return f.matches(id, flags, 0, payload.data(),
+                     static_cast<int>(payload.size()));
 }
 
 } // namespace
@@ -9085,11 +10179,11 @@ TEST(FrameFilterTest, AFrameMatchesEveryFieldInForce)
     FrameFilter f;
     f.direction = FrameFilter::Sent;
     const uint8_t b[] = {0x01};
-    EXPECT_FALSE(f.matches(0x7E0, 0, b, 1));
-    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, 0, 0, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, 0, b, 1));
     f.direction = FrameFilter::Received;
-    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
-    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, 0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_TX_ECHO, 0, b, 1));
     f.direction = FrameFilter::AnyDirection;
     const std::pair<int, uint32_t> flags[] = {
         {FrameFilter::Extended, ECUIO_FRAME_FLAG_EXTENDED},
@@ -9100,16 +10194,192 @@ TEST(FrameFilterTest, AFrameMatchesEveryFieldInForce)
         {FrameFilter::Error, ECUIO_FRAME_FLAG_ERROR}};
     for (const auto& [flag, bit] : flags) {
         f.flag = flag;
-        EXPECT_TRUE(f.matches(0x7E0, bit, b, 1)) << flag;
-        EXPECT_FALSE(f.matches(0x7E0, 0, b, 1)) << flag;
+        EXPECT_TRUE(f.matches(0x7E0, bit, 0, b, 1)) << flag;
+        EXPECT_FALSE(f.matches(0x7E0, 0, 0, b, 1)) << flag;
     }
     f.flag = FrameFilter::Standard;
-    EXPECT_TRUE(f.matches(0x7E0, 0, b, 1));
-    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_EXTENDED, b, 1));
+    EXPECT_TRUE(f.matches(0x7E0, 0, 0, b, 1));
+    EXPECT_FALSE(f.matches(0x7E0, ECUIO_FRAME_FLAG_EXTENDED, 0, b, 1));
     EXPECT_EQ(f.terms(), 1);
     f.flag = FrameFilter::AnyFlag;
     EXPECT_EQ(f.terms(), 0);
-    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_ERROR, b, 1)) << "no filter";
+    EXPECT_TRUE(f.matches(0x7E0, ECUIO_FRAME_FLAG_ERROR, 0, b, 1))
+        << "no filter";
+}
+
+/* An ID under a mask, candump's can_id:can_mask: the ID's bits where
+ * the mask has ones. A value or mask past 0x7FF is an extended frame's;
+ * "/" is refused with the ":" form named */
+TEST(FrameFilterTest, TheIdFieldTakesAMaskAsCandumpWritesIt)
+{
+    std::vector<FrameFilter::IdRange> r;
+    EXPECT_EQ(FrameFilter::parseIds(
+                  QStringLiteral("7E0:7F8, 7DF, 0x18DAF100:0x1FFFFF00"), &r)
+                  .toStdString(),
+              "");
+    ASSERT_EQ(r.size(), 3u);
+    EXPECT_TRUE(r[0].masked);
+    EXPECT_EQ(r[0].first, 0x7E0u);
+    EXPECT_EQ(r[0].last, 0x7E0u);
+    EXPECT_EQ(r[0].mask, 0x7F8u);
+    EXPECT_FALSE(r[1].masked);
+    EXPECT_EQ(r[1].first, 0x7DFu);
+    EXPECT_EQ(r[2].mask, 0x1FFFFF00u);
+
+    EXPECT_EQ(
+        FrameFilter::parseIds(QStringLiteral("7E8, 7E0/7F8"), &r).toStdString(),
+        "\"7E0/7F8\": an ID and its mask take \":\", as in 7E0:7F8");
+    for (const char* bad :
+         {"7E0:", ":7F8", "7E0-7EF:7F8", "7E0:7F8:1", "7E0:20000000"}) {
+        EXPECT_EQ(
+            FrameFilter::parseIds(QString::fromLatin1(bad), &r).toStdString(),
+            "\"" + std::string(bad) +
+                "\" isn't a hex ID and mask like 7E0:7F8");
+    }
+    EXPECT_TRUE(r.empty());
+
+    for (uint32_t id = 0x7E0; id <= 0x7E7; ++id) {
+        EXPECT_TRUE(passes(QStringLiteral("7E0:7F8"), QString(), id, {0x01}))
+            << id;
+    }
+    EXPECT_FALSE(passes(QStringLiteral("7E0:7F8"), QString(), 0x7E8, {0x01}));
+    EXPECT_FALSE(passes(QStringLiteral("7E0:7F8"), QString(), 0x7D8, {0x01}));
+    EXPECT_TRUE(passes(QStringLiteral("7E5:7F8"), QString(), 0x7E2, {0x01}))
+        << "the value's bits outside the mask don't count";
+    EXPECT_TRUE(passes(QStringLiteral("7E0:7F8"), QString(), 0x7E3, {0x01},
+                       ECUIO_FRAME_FLAG_EXTENDED))
+        << "a 29-bit 0x7E3 is still 0x7E3";
+    EXPECT_TRUE(passes(QStringLiteral("18DAF100:1FFFFF00"), QString(),
+                       0x18DAF1E8, {0x01}, ECUIO_FRAME_FLAG_EXTENDED));
+    EXPECT_FALSE(passes(QStringLiteral("18DAF100:1FFFFF00"), QString(),
+                        0x18DAF2E8, {0x01}, ECUIO_FRAME_FLAG_EXTENDED));
+    // Past 0x7FF, the value or the mask: an extended frame's alone
+    EXPECT_FALSE(
+        passes(QStringLiteral("7E0:1FFFFFF8"), QString(), 0x7E0, {0x01}));
+    EXPECT_TRUE(passes(QStringLiteral("7E0:1FFFFFF8"), QString(), 0x7E0, {0x01},
+                       ECUIO_FRAME_FLAG_EXTENDED));
+    EXPECT_FALSE(
+        passes(QStringLiteral("18DA0000:0"), QString(), 0x7E0, {0x01}));
+    EXPECT_TRUE(passes(QStringLiteral("18DA0000:0"), QString(), 0x7E0, {0x01},
+                       ECUIO_FRAME_FLAG_EXTENDED))
+        << "mask 0 passes every ID";
+    EXPECT_TRUE(passes(QStringLiteral("7FF:0"), QString(), 0x123, {0x01}));
+}
+
+/* The length field: decimal lengths in bytes and ranges, commas between,
+ * against the frame's data length */
+TEST(FrameFilterTest, TheLengthFieldTakesCountsAndRanges)
+{
+    std::vector<FrameFilter::LengthRange> r;
+    EXPECT_EQ(FrameFilter::parseLengths(QStringLiteral(" 8, 1-3 ,0, 4096"), &r)
+                  .toStdString(),
+              "");
+    ASSERT_EQ(r.size(), 4u);
+    EXPECT_EQ(r[0].first, 8);
+    EXPECT_EQ(r[0].last, 8);
+    EXPECT_EQ(r[1].first, 1);
+    EXPECT_EQ(r[1].last, 3);
+    EXPECT_EQ(r[2].last, 0);
+    EXPECT_EQ(r[3].first, 4096);
+    EXPECT_EQ(FrameFilter::parseLengths(QStringLiteral("  "), &r).toStdString(),
+              "");
+    EXPECT_TRUE(r.empty());
+
+    EXPECT_EQ(
+        FrameFilter::parseLengths(QStringLiteral("8,,9"), &r).toStdString(),
+        "an empty item between commas");
+    for (const char* bad :
+         {"x", "4097", "-3", "3-", "1.5", "+8", "0x8", "8 9"}) {
+        EXPECT_EQ(
+            FrameFilter::parseLengths(QString::fromLatin1(bad), &r)
+                .toStdString(),
+            "\"" + std::string(bad) +
+                "\" isn't a length in bytes (up to 4096) or a range like 1-7");
+    }
+    EXPECT_EQ(
+        FrameFilter::parseLengths(QStringLiteral("8-1"), &r).toStdString(),
+        "\"8-1\" runs backward");
+    EXPECT_TRUE(r.empty());
+
+    FrameFilter f;
+    ASSERT_EQ(FrameFilter::parseLengths(QStringLiteral("2-3, 8"), &f.lengths)
+                  .toStdString(),
+              "");
+    const uint8_t b[8] = {};
+    EXPECT_FALSE(f.matches(0x7E8, 0, 0, b, 1));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 2));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 3));
+    EXPECT_FALSE(f.matches(0x7E8, 0, 0, b, 4));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 8));
+    EXPECT_FALSE(f.matches(0x7E8, 0, 0, b, 0));
+    EXPECT_EQ(f.terms(), 1);
+}
+
+/* The time field: one range of the table's seconds, both ends in it,
+ * either end left open */
+TEST(FrameFilterTest, TheTimeFieldTakesARangeOfSeconds)
+{
+    FrameFilter::TimeRange r;
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral(" 12.5 - 30 "), &r)
+                  .toStdString(),
+              "");
+    EXPECT_TRUE(r.set);
+    EXPECT_EQ(r.first, 12500000u);
+    EXPECT_EQ(r.last, 30000000u);
+    EXPECT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("12.5-"), &r).toStdString(), "");
+    EXPECT_EQ(r.first, 12500000u);
+    EXPECT_EQ(r.last, UINT64_MAX);
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral("-.25"), &r).toStdString(),
+              "");
+    EXPECT_EQ(r.first, 0u);
+    EXPECT_EQ(r.last, 250000u);
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral("1.000001-2."), &r)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(r.first, 1000001u);
+    EXPECT_EQ(r.last, 2000000u);
+    EXPECT_EQ(FrameFilter::parseTimes(QStringLiteral("  "), &r).toStdString(),
+              "");
+    EXPECT_FALSE(r.set);
+
+    for (const char* bad : {"-", "12", "1-2-3", "a-3", "+1-3", "1e3-", "1,2-3",
+                            "1-2,3", "3600000001-"}) {
+        EXPECT_EQ(
+            FrameFilter::parseTimes(QString::fromLatin1(bad), &r).toStdString(),
+            "\"" + std::string(bad) +
+                "\" isn't a range of seconds like 12.5-30, 12.5- (from then "
+                "on) "
+                "or -30 (up to then)");
+        EXPECT_FALSE(r.set) << bad;
+    }
+    EXPECT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("30-12.5"), &r).toStdString(),
+        "\"30-12.5\" runs backward");
+    EXPECT_FALSE(r.set);
+
+    FrameFilter f;
+    ASSERT_EQ(FrameFilter::parseTimes(QStringLiteral("12.5-30"), &f.time)
+                  .toStdString(),
+              "");
+    const uint8_t b[] = {0x01};
+    EXPECT_FALSE(f.matches(0x7E8, 0, 12499999, b, 1));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 12500000, b, 1));
+    EXPECT_TRUE(f.matches(0x7E8, 0, 30000000, b, 1));
+    EXPECT_FALSE(f.matches(0x7E8, 0, 30000001, b, 1));
+    EXPECT_EQ(f.terms(), 1);
+    ASSERT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("-30"), &f.time).toStdString(),
+        "");
+    EXPECT_TRUE(f.matches(0x7E8, 0, 0, b, 1));
+    ASSERT_EQ(
+        FrameFilter::parseTimes(QStringLiteral("12.5-"), &f.time).toStdString(),
+        "");
+    EXPECT_TRUE(f.matches(0x7E8, 0, UINT64_MAX, b, 1));
+    ASSERT_EQ(FrameFilter::parseLengths(QStringLiteral("1"), &f.lengths)
+                  .toStdString(),
+              "");
+    EXPECT_EQ(f.terms(), 2) << "the length and the time, a term each";
 }
 
 /* The table shows what the filter passes, in either order, as frames
@@ -9157,6 +10427,72 @@ TEST(BridgeTest, FrameFilterShowsWhatItPasses)
     EXPECT_EQ(model.filterTerms(), 0);
     EXPECT_EQ(model.count(), 8);
     EXPECT_EQ(mirror.rows, 8);
+}
+
+/* The length and time fields through the model: their answer's words,
+ * a field that doesn't parse keeping its part, and the four-argument
+ * call leaving both out */
+TEST(BridgeTest, FrameFilterTakesALengthAndATime)
+{
+    FrameListModel model;
+    RowMirror mirror(model);
+    FrameMaker m;
+    // A frame a second for 10 s, its length 1 + i % 3
+    for (int i = 0; i < 10; ++i) {
+        const quint64 t = static_cast<quint64>(i) * 1000000;
+        if (i % 3 == 0) {
+            m.add(model, 0x7E8, {0x41}, t);
+        } else if (i % 3 == 1) {
+            m.add(model, 0x7E8, {0x41, 0x0C}, t);
+        } else {
+            m.add(model, 0x7E8, {0x41, 0x0C, 0x1A}, t);
+        }
+    }
+    QVariantMap words = model.setFilter(QString(), QString(), 0, 0,
+                                        QStringLiteral("2-3"), QString());
+    EXPECT_EQ(words.value(QStringLiteral("lengths")).toString().toStdString(),
+              "");
+    EXPECT_EQ(words.value(QStringLiteral("times")).toString().toStdString(),
+              "");
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 6);
+    EXPECT_EQ(mirror.rows, 6);
+
+    words = model.setFilter(QString(), QString(), 0, 0, QStringLiteral("2-3"),
+                            QStringLiteral("2-5"));
+    EXPECT_EQ(model.filterTerms(), 2);
+    EXPECT_EQ(model.count(), 3) << "2, 4 and 5 s; 3 s is one byte long";
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::TimestampRole)
+                  .toULongLong(),
+              5000000u)
+        << "both ends in the range";
+
+    // A field that doesn't parse keeps its part in force and says why
+    words = model.setFilter(QString(), QString(), 0, 0, QStringLiteral("2-"),
+                            QStringLiteral("5"));
+    EXPECT_EQ(
+        words.value(QStringLiteral("lengths")).toString().toStdString(),
+        "\"2-\" isn't a length in bytes (up to 4096) or a range like 1-7");
+    EXPECT_EQ(words.value(QStringLiteral("times")).toString().toStdString(),
+              "\"5\" isn't a range of seconds like 12.5-30, 12.5- (from then "
+              "on) or -30 "
+              "(up to then)");
+    EXPECT_EQ(words.value(QStringLiteral("ids")).toString().toStdString(), "");
+    EXPECT_EQ(model.filterTerms(), 2);
+    EXPECT_EQ(model.count(), 3);
+
+    // Only the time: from 7 s on
+    model.setFilter(QString(), QString(), 0, 0, QString(),
+                    QStringLiteral("7-"));
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 3);
+    EXPECT_EQ(mirror.rows, 3);
+
+    // The four-argument call: no length and no time
+    model.setFilter(QStringLiteral("7E8"), QString(), 0, 0);
+    EXPECT_EQ(model.filterTerms(), 1);
+    EXPECT_EQ(model.count(), 10);
+    EXPECT_EQ(mirror.rows, 10);
 }
 
 /* At the cap, the oldest frame leaves the view only when the view shows
@@ -9287,6 +10623,65 @@ TEST(BridgeTest, FrameIdsCountRateAndNewestPayload)
     ids.refresh();
     EXPECT_EQ(ids.count(), 0);
     EXPECT_EQ(mirror.rows, 0);
+}
+
+/* By ID marks the newest payload's bytes that differ from the frame
+ * before it among those shown; a length change marks every byte past
+ * the shorter payload; a lone frame marks none */
+TEST(BridgeTest, FrameIdsMarkTheBytesThatChanged)
+{
+    FrameListModel frames;
+    FrameIdModel ids(&frames);
+    FrameMaker m;
+    auto changed = [&](int row) {
+        QList<int> out;
+        for (const QVariant& v :
+             ids.data(ids.index(row, 0), FrameIdModel::ChangedRole).toList()) {
+            out.append(v.toInt());
+        }
+        return out;
+    };
+    m.add(frames, 0x100, {0x01, 0x02, 0x03}, 1);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>()) << "one frame: nothing before it";
+
+    int changes = 0;
+    QObject::connect(&ids, &QAbstractItemModel::dataChanged,
+                     [&changes](const QModelIndex&, const QModelIndex&,
+                                const QList<int>& roles) {
+                         if (roles.contains(FrameIdModel::ChangedRole)) {
+                             ++changes;
+                         }
+                     });
+    m.add(frames, 0x100, {0x01, 0x22, 0x03}, 2);
+    m.add(frames, 0x200, {0xAA}, 3);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>{1});
+    EXPECT_EQ(changed(1), QList<int>()) << "each ID its own";
+    EXPECT_EQ(changes, 1);
+
+    m.add(frames, 0x100, {0x01, 0x22, 0x03}, 4);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>()) << "the same payload again";
+
+    m.add(frames, 0x100, {0x01, 0x22, 0x33, 0x04, 0x05}, 5);
+    ids.refresh();
+    EXPECT_EQ(changed(0), (QList<int>{2, 3, 4}))
+        << "longer: the bytes past the old length";
+
+    m.add(frames, 0x100, {0x01, 0x23}, 6);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>{1})
+        << "shorter: its own bytes that differ";
+
+    // The frame before among those shown: one the filter hides doesn't count
+    m.add(frames, 0x100, {0xFF, 0x23}, 7);
+    m.add(frames, 0x100, {0x01, 0x24}, 8);
+    frames.setFilter(QString(), QStringLiteral("^01"), 0, 0);
+    ids.refresh();
+    EXPECT_EQ(changed(0), QList<int>{1}) << "from 01 23, past the hidden FF 23";
+    EXPECT_EQ(ids.roleNames().value(FrameIdModel::ChangedRole),
+              QByteArray("changedBytes"));
 }
 
 // A log shorter than the window: each ID's frames less one over its own
@@ -9534,6 +10929,56 @@ TEST(BridgeTest, HealthReportWordsEachCount)
               "identification items left out)");
 }
 
+/* A live session's report names the picked vehicle's baseline it's
+ * given, by its start and never its folder: read, gone (the report still
+ * saved, baselineRead false) and none ("") */
+TEST(BridgeTest, HealthReportNamesTheBaselineItIsGiven)
+{
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://Daily driver")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    const struct {
+        QString folder;
+        bool read;
+    } cases[] = {
+        {QStringLiteral(ECUIO_RECORDING_FIXTURES "/findings"), true},
+        {out.path() + QStringLiteral("/vanished-folder"), false},
+        {QString(), false},
+    };
+    int n = 0;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.folder.toStdString());
+        const QString target =
+            out.path() + QStringLiteral("/report-%1.json").arg(++n);
+        const QVariantMap r =
+            bridge.saveHealthReport(QUrl::fromLocalFile(target), 1, c.folder);
+        ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+            << r.value(QStringLiteral("words")).toString().toStdString();
+        EXPECT_EQ(r.value(QStringLiteral("baselineRead")).toBool(), c.read);
+        const QByteArray bytes = readFile(target);
+        EXPECT_FALSE(bytes.contains("vanished"));
+        EXPECT_FALSE(bytes.contains(ECUIO_RECORDING_FIXTURES));
+        const QJsonValue b = QJsonDocument::fromJson(bytes).object().value(
+            QStringLiteral("baseline"));
+        if (c.folder.isEmpty()) {
+            EXPECT_TRUE(b.isNull()) << bytes.toStdString();
+            continue;
+        }
+        EXPECT_EQ(b.toObject().value(QStringLiteral("read")).toBool(), c.read);
+        if (c.read) {
+            EXPECT_EQ(b.toObject().value(QStringLiteral("started")).toString(),
+                      QStringLiteral("2026-11-03T16:00:00Z"));
+            EXPECT_FALSE(
+                b.toObject().value(QStringLiteral("is_source")).toBool());
+        }
+    }
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* The mock's report written where the user chose: text, then JSON by
  * the filter or the name, over a file that exists; its label never in
  * the file or the lines; core's temporary folder gone each time */
@@ -9684,4 +11129,61 @@ TEST(BridgeTest, HealthReportCarriesLivesValuesInTheAppsUnits)
                                                  "F")))
         << units.join(' ').toStdString();
     EXPECT_FALSE(units.contains(QStringLiteral("km/h")));
+}
+
+namespace {
+
+QStringList g_themeWarnings;
+
+void collectWarnings(QtMsgType type, const QMessageLogContext&,
+                     const QString& message)
+{
+    if (type == QtWarningMsg) {
+        g_themeWarnings << message;
+    }
+}
+
+} // namespace
+
+// Each of bg, surface and text, changed, applies the theme once, with no
+// window to color
+TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
+{
+    FakeTheme theme;
+    WindowTheme follower(&theme, nullptr);
+    int applied = 0;
+    QObject::connect(&follower, &WindowTheme::applied, &follower,
+                     [&] { ++applied; });
+    theme.setBg(Qt::red);
+    EXPECT_EQ(applied, 1);
+    theme.setSurface(Qt::green);
+    EXPECT_EQ(applied, 2);
+    theme.setText(Qt::blue);
+    EXPECT_EQ(applied, 3);
+}
+
+// A property the theme lacks, or does not notify, is a warning: a rename
+// would otherwise leave the window not following the theme
+TEST(BridgeTest, WindowThemeWarnsOfAColorItCannotFollow)
+{
+    g_themeWarnings.clear();
+    const QtMessageHandler previous = qInstallMessageHandler(collectWarnings);
+    {
+        FakeTheme whole;
+        WindowTheme follower(&whole, nullptr);
+    }
+    EXPECT_TRUE(g_themeWarnings.isEmpty()) << "a whole theme says nothing";
+    {
+        FakeThemeWithoutSurface partial;
+        WindowTheme follower(&partial, nullptr);
+        int applied = 0;
+        QObject::connect(&follower, &WindowTheme::applied, &follower,
+                         [&] { ++applied; });
+        partial.setBg(Qt::red);
+        EXPECT_EQ(applied, 1) << "the colors it has still follow";
+    }
+    qInstallMessageHandler(previous);
+    ASSERT_EQ(g_themeWarnings.size(), 1);
+    EXPECT_TRUE(g_themeWarnings[0].contains(QStringLiteral("'surface'")))
+        << g_themeWarnings[0].toStdString();
 }

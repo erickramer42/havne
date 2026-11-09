@@ -28,6 +28,20 @@ class values;
 
 namespace ecuio_health {
 
+/* The vehicle's baseline recording as its events.log names it
+ * (ecuio_health_export reads it): never its folder, whose name can hold
+ * the vehicle's label */
+struct baseline_facts {
+    bool named = false;      /* a folder was given */
+    bool read = false;       /* its events.log is a recording's */
+    std::string why;         /* why it wasn't read, when named */
+    uint64_t started_us = 0; /* its start, microseconds since 1970 UTC */
+    uint64_t length_us = 0;  /* its last timed line's time */
+    bool has_length = false; /* a timed line was there */
+    std::string profile;
+    std::string uri; /* its backend is the URI's scheme */
+};
+
 /* What a report is made from, every pointer the caller's */
 struct inputs {
     const ecuio_session_info_t* info = nullptr;
@@ -50,6 +64,8 @@ struct inputs {
     uint64_t started_us = 0; /* its start, microseconds since 1970 UTC */
     uint64_t from_us = 0;    /* the range read, host_us */
     uint64_t to_us = 0;
+
+    baseline_facts baseline;
 };
 
 /* The report in one format, its counts in *report, and each identity
@@ -64,6 +80,10 @@ std::string write(const inputs& in, uint32_t format,
  * detail set */
 bool put(const std::string& out, const std::string& bytes,
          const ecuio_scrub::values& identity, ecuio_health_report_t& r);
+
+/* Test seam: called by put with <out> once its own file is written and
+ * before the rename, so a test can take the name then (nullptr in use) */
+inline void (*put_test_before_rename)(const std::string& out) = nullptr;
 
 /* microseconds since 1970 UTC as "YYYY-MM-DDTHH:MM:SSZ" */
 std::string utc_text(uint64_t utc_us);

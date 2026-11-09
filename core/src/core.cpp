@@ -450,6 +450,72 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(ecuio_session_t* session,
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_set_focus(ecuio_session_t* session,
+                                       const uint16_t* signal_ids,
+                                       uint32_t count)
+{
+    ecuio_detail_clear();
+    if (session == nullptr || (signal_ids == nullptr && count > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    const uint32_t defs =
+        (set != nullptr && set->defs != nullptr) ? set->count : 0;
+    std::vector<uint16_t> ids;
+    std::vector<uint8_t> picked;
+    try {
+        if (count > 0) {
+            ids.assign(signal_ids, signal_ids + count);
+        }
+        picked.assign(defs, 0);
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    for (uint32_t k = 0; k < count; ++k) {
+        bool found = false;
+        for (uint32_t i = 0; i < defs; ++i) {
+            if (set->defs[i].id == signal_ids[k]) {
+                picked[i] = 1;
+                found = true;
+            }
+        }
+        if (!found) {
+            ecuio_detail_set("no signal with id %u in profile %s",
+                             static_cast<unsigned>(signal_ids[k]),
+                             session->info.profile);
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        /* A session that asks requests refuses a focus that would leave
+         * it nothing to ask: none of the picks is a request it can make
+         * (askable, kept by its worker). One that asks nothing (the mock,
+         * a replay, listening) takes any focus. */
+        if (count > 0 && session->focus_requests) {
+            bool asks = false;
+            for (uint32_t i = 0;
+                 i < defs && i < session->focus_askable.size() && !asks; ++i) {
+                asks = picked[i] != 0 && session->focus_askable[i] != 0;
+            }
+            if (!asks) {
+                ecuio_detail_set("the focus leaves nothing to request: none "
+                                 "of the picked signals is asked on this "
+                                 "session");
+                return ECUIO_ERR_INVALID_ARGUMENT;
+            }
+        }
+        session->focus_ids.swap(ids);
+        session->focus_defs.swap(picked);
+    }
+    /* The picks first: a worker that sees the count moved reads them */
+    session->focus_generation.fetch_add(1);
+    return ECUIO_OK;
+}
+
 const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
 {
     if (request == nullptr) {
@@ -675,6 +741,7 @@ ecuio_status_t ecuio_session_create(
     std::unique_ptr<ecuio_session> s;
     try {
         s = std::make_unique<ecuio_session>();
+        s->record_link = std::make_shared<ecuio_record_link>();
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -902,9 +969,7 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
     }
     /* The worker has stopped: the recorder takes no more frames, and its
      * notes go on until the caller closes it (ADR-0049 section 1) */
-    if (session->record_link != nullptr) {
-        ecuio_record_detach(*session->record_link);
-    }
+    ecuio_record_detach(*session->record_link);
     /* So do the pull queues: what's waiting is still read, then their
      * reads end (ecuio/queue.h) */
     for (uint32_t i = 0; i < session->queue_count; ++i) {
@@ -1032,16 +1097,16 @@ void ecuio_session_dispatch_callbacks(
     ECUIO_PROBE5(frame, session, frame->arbitration_id, frame->flags,
                  frame->data_length, frame->timestamp_us);
 
-    /* A recording's host_us, stamped before any callback (ADR-0049
-     * section 1); the link is set before start and kept until the
-     * session is freed */
+    /* A recording's time, read before any callback (ADR-0049 section 1)
+     * when a recorder looks attached; the link is the session's from
+     * create, its recorder attached at any time (ADR-0056 section 3),
+     * so the zero it counts from is read once the recorder is pinned
+     * below: one that comes or goes meanwhile lends its zero to no
+     * other's frame */
     ecuio_record_link* link = session->record_link.get();
-    uint64_t host_us = 0;
-    if (link != nullptr &&
-        link->active.load(std::memory_order_relaxed) != nullptr) {
-        const uint64_t now = ecuio_clock_us();
-        host_us = now > link->zero_us ? now - link->zero_us : 0;
-    }
+    uint64_t now = link->active.load(std::memory_order_relaxed) != nullptr
+                       ? ecuio_clock_us()
+                       : 0;
 
     /* Both lists as they stand when the frame arrives */
     snapshot_of<ecuio_frame_callback_t> frames;
@@ -1076,13 +1141,17 @@ void ecuio_session_dispatch_callbacks(
      * its values as one record */
     const bool want_values =
         (values_taken && values.size() > 0) || session->value_queues > 0;
-    ecuio_recorder_t* recorder =
-        link != nullptr ? ecuio_record_pin(*link) : nullptr;
+    ecuio_recorder_t* recorder = ecuio_record_pin(*link);
     if (!want_values && recorder == nullptr) {
         return;
     }
     const uint32_t count = session->decoder.decode(frame);
     if (recorder != nullptr) {
+        if (now == 0) {
+            now = ecuio_clock_us(); /* attached since the first look */
+        }
+        const uint64_t zero = link->zero_us.load(std::memory_order_relaxed);
+        const uint64_t host_us = now > zero ? now - zero : 0;
         ecuio_recorder_put_frame(recorder, host_us, frame,
                                  session->decoder.values.data(), count);
         ecuio_record_unpin(*link);

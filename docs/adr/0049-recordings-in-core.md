@@ -1461,3 +1461,169 @@ is a baseline.
 export isn't built: ADR-0054's CSV export, with its formula rule, is
 how a recording opens in a spreadsheet, and step 6 waits for a release
 to name it.
+
+**Note of 2026-11-07: the health report names it.** The report takes the
+baseline's folder from its caller, as "Later." above says: the app's
+Save report passes the picked vehicle's, `havne-cli health` takes
+`--baseline <recording>`. Core reads only its `events.log`, for its
+start, length, profile and backend, and never writes the folder's name
+([ADR-0054](0054-exports-and-imports.md)'s appendix "the health report
+as built", its note of 2026-11-07).
+
+## Appendix: frames read back (2026-11-07)
+
+The reader answers with values; replay plays frames at the recording's
+pace with new session times; the exports write files. None of them
+hands a caller a recording's frames as recorded, a stretch at a time.
+The viewer needs that for its frames (the Log page's filter over a
+recording), and so does a program that looks at the bytes itself.
+
+**The call.** `ecuio_recording_read_frames(folder, from_us, to_us,
+callback, user, &summary)`, appended to `recording.h`, hands the
+callback each `frames.csv` row whose `host_us` is `from_us` to `to_us`,
+both included (`to_us` 0 is the end, as the exports take it), in the
+file's order, on the caller's thread before the call returns: the row
+as a frame (its session time in `timestamp_us`, the bytes past its
+length zero) and its `host_us`, the time the reader's queries and the
+exports' ranges count on. A whole message's row (`REASSEMBLED`) is one
+frame. Nothing is decoded and nothing is scrubbed: the call reads the
+caller's own recording on the caller's machine, as replay does, and the
+scrub is for what leaves it (ADR-0054). A nonzero return stops the read
+with `ECUIO_ERR_CANCELED`. `ecuio_frames_read_t` (32 bytes, room to
+grow) counts the rows handed on, whatever the outcome, and a last row
+cut short (section 7), which is left out. `folder` names the recording's
+folder or its `frames.csv`, as replay's URI does. The ABI only grows.
+
+**The search.** `host_us` never goes back in a `frames.csv`: the
+recorder stamps it on one worker, the candump import gives an early row
+the previous row's time, and every reader refuses a backward row. So the
+stretch's first row is found by a binary search on the file's offsets:
+a probe seeks to the middle, skips the rest of the row it lands in and
+reads the next, until the first row at or after `from_us` lies within
+64 KiB, which a forward scan then reads. The search is exact, with no
+margin: every row at `from_us` comes, however many share that time, and
+so does every row at `to_us`. A stretch costs its own rows, the probes
+(one for each halving of the file down to 64 KiB) and that last 64 KiB,
+not the rows before it. A backward row the read meets is refused, in
+`frame_rows`' words; one among the rows the search skips is never read.
+
+**Its words.** A refused row is `frames.csv, the row at byte N: <why>`,
+the why the other readers' (`host_us is earlier than the row before`,
+`the row is longer than a frame's`, `id isn't 0x-prefixed hex`): the
+byte, not the line, since the search counts no lines. Never a path. No
+`frames.csv` is "the folder has no frames.csv", as the reader says.
+
+**Not `view --frames`.** `havne-cli view --frames` decodes a
+recording's frames through a profile into the values' columns, as the
+reader's open does; this hands the rows on undecoded, with no profile
+and no columns. So it is a command of its own, `havne-cli frames
+<recording> [--from S] [--to S]` (seconds as view's and export's, both
+edges included, so `--to` may equal `--from`): `start`, a `frame` line
+for each row {`host_us`, `t_us`, `id`, `flags`, `data`}, the stream's
+frame line with `host_us` added and without `ch` (`frames.csv` keeps no
+channel), then `end` {`reason` read or interrupted, `rows`,
+`torn_rows`}. Ctrl+C stops the read; a refused row is an `error` line,
+exit 3, after the rows before it. Python's `havne.read_frames(folder,
+from_us, to_us, limit)` gives the rows as `RecordedFrame`s.
+
+**Later.** The viewer's frames read the stretch in view through it on
+a worker, at most 10,000 rows at a time, and read again when the
+view settles.
+
+Tests: `FramesReadTest` (test_core: the fixture's stretches against a
+plain scan of the file, both edges with every duplicate, a backward row
+at each edge refused with its byte, a large file whose rows before the
+stretch hold a backward pair the search never reads, an empty stretch,
+a torn last row, a stop, the refusals' words), `test_c_abi`, the
+`fuzz_recording` folder's frames read whole and in a stretch, compared,
+`CliFramesTest`, `CliUsageTest.Frames*`, goldens `frames-stretch.jsonl`
+and `frames-missing-folder.jsonl`, `PythonTest.test_frames_read`.
+
+## Appendix: the viewer's Frames view (2026-11-07)
+
+The recordings page has a Values | Frames switch for a recording with a
+`frames.csv`; the values each time a recording opens, and the switch is
+absent for one that holds values alone. Frames shows the Log page's
+table, filter and By ID list (the same components, over models of their
+own) for the part of the recording in view, read through
+`ecuio_recording_read_frames` on a thread of its own.
+
+**Time.** The viewer's axis is `host_us`, so the view's edges go to the
+call as they are, and a row is placed by the `host_us` the call hands
+on, never by the frame's own session time. The table's times and the
+filter's Time span read on the same axis.
+
+**The cap.** At most 10,000 rows, the first from the view's left edge:
+the callback stops the read on the row after them, and the page says
+"the first 10,000 frames from 12.3 s: zoom in for the rest". Both a stop
+of its own and a stop for a newer read end as `ECUIO_ERR_CANCELED`, so
+the reader keeps its own flag to tell them apart. A row is kept as its
+ID, flags, `host_us` and the bytes it has, never as a 4,120-byte
+`ecuio_frame_t`.
+
+**Refilling.** The view moving asks for a new read 150 ms after its last
+change, as the chart's settle does. A read under way is stopped through
+the callback and a generation number keeps its rows, and any read's
+that was stopped, from the models. A tap on a row puts the chart's
+cursor at the row's time, whether or not a signal has a sample there.
+
+Tests: `ViewerFramesTest` (test_bridge: the part in view with its times,
+a read to the end, the cap's edge and its note, a folder with no
+frames, a refill during a read, a stopped read that ends last, clear),
+`QmlTest.recordings` (the switch, the rows following the view, a tap's
+cursor, a recording with no frames, the note), `QmlTest.phone` (the
+Frames view at a phone's width).
+
+## Appendix: a recorder attached after start (2026-11-07)
+
+[ADR-0056](0056-analysis-log.md) section 3 amends the attach rule
+above: `ecuio_session_record` takes a session before or after
+`ecuio_session_start`. Before start is Record sessions, the recording
+holding the session's every frame; after start is the analysis log, the
+recording holding the frames from the attach on. What changes with it:
+
+- The session makes its `ecuio_record_link` at create and keeps it; the
+  attach puts the recorder in it under the link's mutex, the zero
+  stored before the recorder, so a worker that sees the recorder sees
+  its zero. One recorder at a time: a second while one is attached is
+  `ECUIO_ERR_INVALID_ARGUMENT`; once that one has closed, another
+  attaches and counts from its own attach. A recorder's close lets go
+  of the link only while the link holds that recorder, so a close that
+  comes after a successor's attach leaves the successor taking frames.
+- The header of a recording begun after start gains two lines between
+  `frame flags` and the `signal` lines: `focus  <name>,...`, the
+  session's focus at the attach in the order it was picked (none: no
+  line, and a session that hasn't started can have one too), and
+  `link  <words> (state N, M episodes)`, the link's state and episode
+  count at the attach in the words of the link lines, except that OK
+  with no episode reads `healthy` where an event line would say
+  `recovered` (a session that hasn't started writes none). The readers
+  pass header keys they don't know by, and the folder export keeps both
+  lines.
+- `host_us` counts from the attach in every file, `latency.csv`'s `t_s`
+  included: a snapshot's row carries the recording's time of the call
+  that published it, to the ms, not the snapshot's session time, so
+  `latency.csv` plots against the other files on one axis. The
+  snapshot's cadence (every 10 s of session time) is unchanged. A
+  recording made before this writes `t_s` as session time, which
+  differs from the recording's time by the delay between the attach
+  and start alone: nothing in the format says which, no version
+  changes, and the one reader that takes `t_s` (the folder export's
+  range) reads it as the recording's time, as it did.
+- `ecuio_recording_check`'s late-ID rule judges from the recording's
+  first frame, which for an analysis log is the attach: an ECU first
+  seen late in such a recording may have been speaking since the
+  session's start.
+
+Tests: `RecorderTest.ARecorderAttachedAfterStartCountsFromItsAttach`,
+`.TheHeaderHoldsTheFocusAndTheLinkAtTheAttach`,
+`.ASecondRecorderAttachesOnceTheFirstHasClosed`,
+`.AClosedRecorderNeverDetachesItsSuccessor`,
+`.ARecordingBegunMidSessionOpensInTheReader`,
+`.ReplyTimingGoesToLatencyCsvEveryTenSeconds` (each `t_s` between the
+test's own clock reads around its call, never a fixed bound),
+`.TheFinalTimingWaitsASecondForRoom` (the time of the call, not of the
+room that came), `.OpenAndAttachRefuseWhatTheyMust`,
+`.RecordersComeAndGoWhileTheSessionStreams` (attach and close in a loop
+under the mock's frames, for the sanitizers);
+`PythonTest.test_session`'s recorder opened after `start()`.

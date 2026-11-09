@@ -5,7 +5,8 @@
 #     clean (contributors without a win32 tree). Check CI invariant: this
 #     file is app-side only, core stays Qt-free/untouched. Release builds
 #     carry no QML debugging: stage.ps1 fails a package whose exe imports
-#     QQmlDebuggingEnabler or that holds qmltooling.
+#     QQmlDebuggingEnabler or that holds qmltooling, and sign-apk.sh an APK
+#     whose libhavne names it or that holds qmltooling.
 
 # 6.12 is the version CI and local builds use (macOS needs it), and
 # REQUIRES sets every Qt policy up to it to NEW, QTP0004 among them.
@@ -43,6 +44,10 @@ qt_add_library(app_ui STATIC
     pluginstore.h
     signalstore.cpp
     signalstore.h
+    recordingimport.cpp
+    recordingimport.h
+    recordingframes.cpp
+    recordingframes.h
     recordingview.cpp
     recordingview.h
     sessionbridge.cpp
@@ -51,10 +56,12 @@ qt_add_library(app_ui STATIC
     signalfilter.h
     latencystats.h
     urlwrite.h
+    windowtheme.cpp
+    windowtheme.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
-                            qml/SignalForm.qml PROPERTIES
+                            qml/DashboardBook.qml qml/SignalForm.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -67,11 +74,34 @@ qt_add_qml_module(app_ui
         qml/Main.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
+        qml/ThemedCheckBox.qml
+        qml/SegmentButton.qml
+        qml/CsvGuessPreview.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml
+        qml/FrameFilterPanel.qml
+        qml/FrameTable.qml
+        qml/FrameIdList.qml
         qml/RecordingsPage.qml
         qml/SettingsPage.qml
+        qml/Captioned.qml
+        qml/Heading.qml
+        qml/LabeledFlow.qml
+        qml/SettingsAdapter.qml
+        qml/SettingsAdvanced.qml
+        qml/SettingsList.qml
+        qml/SettingsOwnForm.qml
+        qml/SettingsSubpage.qml
+        qml/SettingsConnect.qml
+        qml/SettingsDisplay.qml
+        qml/SettingsOwnSignals.qml
+        qml/SettingsPlugins.qml
+        qml/SettingsProfile.qml
+        qml/SettingsRecording.qml
+        qml/SettingsSignalFiles.qml
+        qml/SettingsVehiclePicker.qml
+        qml/SettingsVinLookup.qml
         qml/NavButton.qml
         qml/Theme.qml
         qml/LiveViewPage.qml
@@ -79,9 +109,14 @@ qt_add_qml_module(app_ui
         qml/ChartLayout.qml
         qml/StripChart.qml
         qml/VehicleBook.qml
+        qml/DashboardBook.qml
         qml/SignalForm.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml
+        qml/DangerMark.qml
+        qml/SegmentGauge.qml
+        qml/SegmentReadout.qml
+        qml/SparkGauge.qml
         qml/GaugeArc.qml
         qml/GaugeCard.qml
         qml/AnalogGauge.qml
@@ -118,6 +153,10 @@ if(ANDROID)
     # (ADR-0029 section 2; its Java half is in android/src)
     target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
 endif()
+# The title bar's color (windowtheme.cpp, DwmSetWindowAttribute)
+if(WIN32)
+    target_link_libraries(app_ui PUBLIC dwmapi)
+endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
 # the generated QML registration code instantiates them; none of it is
 # this project's code.
@@ -140,8 +179,6 @@ app_add_version_resource(havne havne "Havne ECU reader and logger"
 
 if(WIN32)
     set_target_properties(havne PROPERTIES WIN32_EXECUTABLE TRUE)
-    # The title bar's color (main.cpp, DwmSetWindowAttribute)
-    target_link_libraries(havne PRIVATE dwmapi)
 endif()
 # The name people see is capitalized: Apple's bundle, which Finder and
 # the home screen show (iOS's display name is Xcode's PRODUCT_NAME, the
@@ -223,6 +260,13 @@ endif()
 if(QT_FEATURE_qml_debug)
     target_compile_definitions(havne PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
 endif()
+# Outside Debug, the APK carries no qmltooling plugins (the debug
+# server's half): androiddeployqt deploys the plugin list Qt's CMake
+# writes, which honors this exclusion. packaging/android/sign-apk.sh
+# checks the release APK
+if(ANDROID AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    qt_import_plugins(havne EXCLUDE_BY_TYPE qmltooling)
+endif()
 
 # --- Deploy Qt runtime DLLs next to the exe (Windows only) ---
 if(WIN32)
@@ -231,9 +275,13 @@ if(WIN32)
     if(QT_WINDEPLOYQT_LOCATION)
         add_custom_command(TARGET havne POST_BUILD
             # Outside Debug, no qmltooling plugins: the debug server's
-            # half, which nothing but a QT_QML_DEBUG build loads
+            # half, which nothing but a QT_QML_DEBUG build loads.
+            # Microsoft's shader compilers stay out: Qt Quick runs without
+            # them, and each brings the Windows SDK's distribution terms
             COMMAND ${QT_WINDEPLOYQT_LOCATION}
                     --no-compiler-runtime
+                    --no-system-d3d-compiler
+                    --no-system-dxc-compiler
                     "$<$<NOT:$<CONFIG:Debug>>:--skip-plugin-types;qmltooling>"
                     --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml
                     $<TARGET_FILE:havne>

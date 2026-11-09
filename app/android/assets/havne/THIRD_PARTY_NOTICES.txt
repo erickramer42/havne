@@ -1,0 +1,169 @@
+Third-party software in this package
+====================================
+
+Havne itself is licensed under the MIT license (LICENSE.txt, beside
+this file). This package also contains the software below, each under
+its own terms. The same text ships in Havne's Linux AppImage
+(usr/share/doc/havne/) and in its Android APK (assets/havne/); a
+section that names one of them applies to that one alone.
+
+
+Qt 6.12.0
+---------
+
+Copyright (C) The Qt Company Ltd. and other contributors.
+
+Havne uses Qt under the GNU Lesser General Public License, version 3
+(licenses/LGPL-3.0.txt, which builds on licenses/GPL-3.0.txt). Qt is
+linked dynamically: Qt's libraries, plugins and QML modules here are
+Qt's unmodified binaries, and you may replace them with your own build
+of the same Qt version. In the AppImage they are the libQt6*.so files
+in usr/lib and the plugins and QML modules under usr/plugins and
+usr/qml; in the APK, the libQt6*, libplugins_* and libqml_* files
+under lib/<abi>/, with Qt's Java classes in classes.dex.
+
+The source code for this Qt version is available from
+https://download.qt.io/official_releases/qt/6.12/6.12.0/ and from
+https://code.qt.io. Qt's own third-party components, with the copyright
+lines, credits and license texts they ask for, are in
+licenses/Qt-third-party.txt.
+
+Havne is an independent project, not affiliated with or endorsed by
+The Qt Company.
+
+
+ICU 73.2, in the AppImage
+-------------------------
+
+The AppImage's libicudata, libicui18n and libicuuc files come with the
+Qt kit Havne is built with: ICU 73.2, copyright Unicode, Inc. and
+others, under the Unicode license in licenses/ICU.txt, which also
+lists the third-party data and code ICU includes. Its source is at
+https://github.com/unicode-org/icu/releases/tag/release-73-2.
+
+
+System libraries, in the AppImage
+---------------------------------
+
+The AppImage also carries libraries from the Ubuntu release it is
+built on, each under its own license; the release's SBOM
+(havne-<version>.spdx.json) names each one and its package's version.
+Each package's copyright file, as Ubuntu ships it, is
+usr/share/doc/<package>/copyright in the AppImage, and the license
+texts those files point to in /usr/share/common-licenses are in
+common-licenses/ beside this file.
+
+
+The AppImage runtime, in the AppImage
+-------------------------------------
+
+The AppImage begins with the AppImage type 2 runtime, which mounts or
+unpacks the rest when it starts:
+type2-runtime release 20251108 (commit dd6cebe)
+from https://github.com/AppImage/type2-runtime, copyright probonopd and
+contributors, under the MIT license in licenses/AppImage-runtime.txt.
+The runtime is one static program that also contains:
+
+    libfuse 3.15.0, with the runtime's patch to lib/mount.c, under the
+      GNU Lesser General Public License, version 2.1
+      (licenses/LGPL-2.1.txt)
+    squashfuse 0.5.2, under its BSD license (licenses/squashfuse.txt)
+    musl libc 1.2.5, under the MIT license (licenses/musl.txt)
+    mimalloc 2.1.7, under the MIT license (licenses/mimalloc.txt)
+    zstd 1.5.6, under the BSD license of its two (licenses/zstd.txt)
+    zlib 1.3.1, under the zlib license (licenses/zlib.txt)
+
+libfuse and squashfuse are built from those releases by the runtime's
+build scripts; musl, mimalloc, zstd and zlib come from Alpine Linux
+3.21's packages. As LGPL-2.1 section 6 asks, the source of libfuse and
+of the runtime it is linked into is attached to each Havne release
+that carries an AppImage, beside the AppImage itself:
+fuse-3.15.0.tar.xz (libfuse's own release) and
+type2-runtime-20251108.tar.gz (the runtime at that commit, with its
+libfuse patch and build scripts). With them you can rebuild the runtime
+against your own libfuse and put it in place of the AppImage's first
+part. They are also at https://github.com/libfuse/libfuse/releases/tag/fuse-3.15.0
+and https://github.com/AppImage/type2-runtime/releases/tag/20251108.
+
+
+Android libraries, in the APK
+-----------------------------
+
+The APK carries the Java and Kotlin libraries below, which Qt's
+Android build takes in through Gradle, each under the Apache License,
+version 2.0 (licenses/Apache-2.0.txt), as each one's Maven POM
+declares:
+
+    androidx.annotation:annotation
+    androidx.annotation:annotation-experimental
+    androidx.annotation:annotation-jvm
+    androidx.arch.core:core-common
+    androidx.arch.core:core-runtime
+    androidx.collection:collection
+    androidx.collection:collection-jvm
+    androidx.concurrent:concurrent-futures
+    androidx.core:core
+    androidx.core:core-viewtree
+    androidx.interpolator:interpolator
+    androidx.lifecycle:lifecycle-common
+    androidx.lifecycle:lifecycle-runtime
+    androidx.profileinstaller:profileinstaller
+    androidx.startup:startup-runtime
+    androidx.tracing:tracing
+    androidx.versionedparcelable:versionedparcelable
+    com.google.guava:listenablefuture
+    org.jetbrains.kotlin:kotlin-stdlib
+    org.jetbrains.kotlinx:kotlinx-coroutines-android
+    org.jetbrains.kotlinx:kotlinx-coroutines-core
+    org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm
+    org.jetbrains:annotations
+    org.jspecify:jspecify
+
+The release's SBOM names each one's version.
+
+The APK's libc++_shared.so is LLVM's C++ standard library from the
+Android NDK, under the Apache License, version 2.0 with LLVM
+Exceptions, which ask for no notice in a library's binary form.
+
+
+Wal33D/dtc-database: trouble-code titles
+----------------------------------------
+
+The titles Havne shows for SAE J2012's generic powertrain and network
+trouble codes come from Wal33D's dtc-database,
+https://github.com/Wal33D/dtc-database (the commit is named in Havne's
+source, core/src/dtc_titles_table.h), under its MIT license:
+
+    MIT License
+
+    Copyright (c) 2024 Wal33D (Waleed Judah)
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+
+NHTSA vPIC manufacturer codes
+-----------------------------
+
+The makes Havne shows for a VIN's manufacturer code come from the
+standalone database of NHTSA's Product Information Catalog and Vehicle
+Listing (vPIC), https://vpic.nhtsa.dot.gov/downloads/, a work of the
+US government, whose terms of use call it public information that may
+be distributed or copied. The release used is named in Havne's source
+(core/src/vin_wmi_table.h). NHTSA gives no warranty of its accuracy,
+and Havne is not affiliated with or endorsed by NHTSA.

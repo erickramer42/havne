@@ -12,7 +12,17 @@
 set(ENV{HAVNE_CLI_CONNECT_MS} 500)
 set(ENV{ECUIO_FAKE_OPEN_DELAY_MS} 4000)
 string(TIMESTAMP started "%s")
-execute_process(COMMAND ${CLI} stream "j2534://${DLL}" --seconds 1
+# VERB: stream (the default) or log, which writes nothing before its
+# connect and so gets its start line before the error line
+if(NOT DEFINED VERB)
+    set(VERB stream)
+endif()
+if(VERB STREQUAL "log")
+    set(args log "j2534://${DLL}" "${CMAKE_CURRENT_BINARY_DIR}/deadline-log" --seconds 1)
+else()
+    set(args stream "j2534://${DLL}" --seconds 1)
+endif()
+execute_process(COMMAND ${CLI} ${args}
     RESULT_VARIABLE code
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err
@@ -25,6 +35,10 @@ endif()
 if(NOT out MATCHES "\"type\":\"error\"" OR
    NOT out MATCHES "the connect didn't finish within 1 s")
     message(FATAL_ERROR "no deadline error line:\n${out}")
+endif()
+string(FIND "${out}" "{\"type\":\"start\"" at_start)
+if(NOT at_start EQUAL 0)
+    message(FATAL_ERROR "the start line isn't first:\n${out}")
 endif()
 if(took GREATER 3)
     message(FATAL_ERROR "havne-cli took ${took} s: it waited for the open")

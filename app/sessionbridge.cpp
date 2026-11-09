@@ -285,11 +285,16 @@ void FrameListModel::clear()
 }
 
 QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
-                                      int direction, int flag)
+                                      int direction, int flag,
+                                      const QString& lengths,
+                                      const QString& times)
 {
     FrameFilter next;
     const QString idWords = FrameFilter::parseIds(ids, &next.ids);
     const QString dataWords = FrameFilter::parseData(data, &next.data, &next.anchored);
+    const QString lengthWords =
+        FrameFilter::parseLengths(lengths, &next.lengths);
+    const QString timeWords = FrameFilter::parseTimes(times, &next.time);
     next.direction = direction >= FrameFilter::AnyDirection &&
                              direction <= FrameFilter::Sent
                          ? direction
@@ -305,14 +310,17 @@ QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
         next.data = m_filter.data;
         next.anchored = m_filter.anchored;
     }
-    const bool same = next.ids.size() == m_filter.ids.size() &&
-                      std::equal(next.ids.begin(), next.ids.end(), m_filter.ids.begin(),
-                                 [](const FrameFilter::IdRange& a,
-                                    const FrameFilter::IdRange& b) {
-                                     return a.first == b.first && a.last == b.last;
-                                 }) &&
-                      next.data == m_filter.data && next.anchored == m_filter.anchored &&
-                      next.direction == m_filter.direction && next.flag == m_filter.flag;
+    if (!lengthWords.isEmpty()) {
+        next.lengths = m_filter.lengths;
+    }
+    if (!timeWords.isEmpty()) {
+        next.time = m_filter.time;
+    }
+    const bool same =
+        next.ids == m_filter.ids && next.data == m_filter.data &&
+        next.anchored == m_filter.anchored &&
+        next.direction == m_filter.direction && next.flag == m_filter.flag &&
+        next.lengths == m_filter.lengths && next.time == m_filter.time;
     if (!same) {
         beginResetModel();
         m_filter = std::move(next);
@@ -335,7 +343,10 @@ QVariantMap FrameListModel::setFilter(const QString& ids, const QString& data,
             emit selectionChanged();
         }
     }
-    return {{QStringLiteral("ids"), idWords}, {QStringLiteral("data"), dataWords}};
+    return {{QStringLiteral("ids"), idWords},
+            {QStringLiteral("data"), dataWords},
+            {QStringLiteral("lengths"), lengthWords},
+            {QStringLiteral("times"), timeWords}};
 }
 
 quint64 FrameListModel::newestTimestampUs() const
@@ -581,6 +592,7 @@ QVariant FrameIdModel::data(const QModelIndex& index, int role) const
         case CountRole:    return r.count;
         case RateRole:     return r.rate;
         case PayloadRole:  return QString::fromLatin1(r.payload.toHex(' ').toUpper());
+        case ChangedRole:  return r.changed;
         default:           return QVariant();
     }
 }
@@ -592,7 +604,8 @@ QHash<int, QByteArray> FrameIdModel::roleNames() const
         {ExtendedRole, "extended"},
         {CountRole,    "frames"},
         {RateRole,     "rate"},
-        {PayloadRole,  "payloadHex"}
+        {PayloadRole,  "payloadHex"},
+        {ChangedRole,  "changedBytes"}
     };
 }
 
@@ -609,6 +622,7 @@ void FrameIdModel::refresh()
         quint64 first = std::numeric_limits<quint64>::max();
         quint64 last = 0;
         int recent = 0;
+        QByteArray before; // the payload of the frame before the newest
     };
     std::map<quint64, IdRow> byKey;
     std::map<quint64, Seen> seen;
@@ -617,10 +631,11 @@ void FrameIdModel::refresh()
             ((f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0 ? (quint64{1} << 32) : 0) | f.id;
         IdRow& row = byKey[key];
         row.key = key;
+        Seen& s = seen[key];
+        s.before = std::move(row.payload);
         ++row.count;
         row.payload = QByteArray(reinterpret_cast<const char*>(f.data), f.length);
         oldest = std::min(oldest, f.timestampUs);
-        Seen& s = seen[key];
         s.first = std::min(s.first, f.timestampUs);
         s.last = std::max(s.last, f.timestampUs);
         if (f.timestampUs > from) {
@@ -632,6 +647,15 @@ void FrameIdModel::refresh()
     next.reserve(byKey.size());
     for (auto& [key, row] : byKey) {
         const Seen& s = seen[key];
+        if (row.count > 1) {
+            const qsizetype common =
+                std::min(s.before.size(), row.payload.size());
+            for (qsizetype b = 0; b < row.payload.size(); ++b) {
+                if (b >= common || s.before[b] != row.payload[b]) {
+                    row.changed.append(static_cast<int>(b));
+                }
+            }
+        }
         if (!shortLog) {
             row.rate = static_cast<double>(s.recent) * 1e6 /
                        static_cast<double>(RateWindowUs);
@@ -662,10 +686,13 @@ void FrameIdModel::refresh()
         } else {
             IdRow& old = m_rows[i];
             if (old.count != next[j].count || old.rate != next[j].rate ||
-                old.payload != next[j].payload) {
+                old.payload != next[j].payload ||
+                old.changed != next[j].changed) {
                 old = next[j];
-                emit dataChanged(index(static_cast<int>(i), 0), index(static_cast<int>(i), 0),
-                                 {CountRole, RateRole, PayloadRole});
+                emit dataChanged(
+                    index(static_cast<int>(i), 0),
+                    index(static_cast<int>(i), 0),
+                    {CountRole, RateRole, PayloadRole, ChangedRole});
             }
             ++i;
             ++j;
@@ -674,6 +701,44 @@ void FrameIdModel::refresh()
     if (count() != before) {
         emit countChanged();
     }
+}
+
+// A value, its unit and its decimals in a unit system (ADR-0022)
+static ecuio_display_value_t displayed(const char* unit, uint8_t decimals,
+                                       double value, uint32_t units)
+{
+    ecuio_display_value_t out;
+    if (ecuio_display_convert(unit, decimals, value, units, &out) !=
+        ECUIO_DISPLAY_OK) {
+        // units is only ever metric or imperial, so this is unreachable;
+        // show the decoded value rather than nothing
+        out = {};
+        out.value = value;
+        qstrncpy(out.unit, unit, sizeof(out.unit));
+        out.decimal_places = decimals;
+    }
+    return out;
+}
+
+// A def's range as displayed in a unit system: NaN for both ends when
+// either is NaN (core gives none), converts past a double (a finite end
+// near DBL_MAX times 1.8 is inf, and inf isn't a range), or the converted
+// ends meet (ends one ulp apart can round to one number, and lo == hi
+// isn't a range, as core's refusal of a == b says)
+static std::pair<double, double> displayedRange(const char* unit,
+                                                uint8_t decimals, double lo,
+                                                double hi, uint32_t units)
+{
+    const double none = std::numeric_limits<double>::quiet_NaN();
+    if (std::isnan(lo) || std::isnan(hi)) {
+        return {none, none};
+    }
+    const double l = displayed(unit, decimals, lo, units).value;
+    const double h = displayed(unit, decimals, hi, units).value;
+    if (!std::isfinite(l) || !std::isfinite(h) || !(l < h)) {
+        return {none, none};
+    }
+    return {l, h};
 }
 
 // ---------------- SignalListModel ----------------
@@ -718,6 +783,14 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return e.refused;
         case RefusedCodeRole:
             return e.refusedCode;
+        case RefRole:
+            return e.facts.ref;
+        case RangeLowRole:
+            return shownRange(e).first;
+        case RangeHighRole:
+            return shownRange(e).second;
+        case IsEnumRole:
+            return e.facts.isEnum;
         default: return QVariant();
     }
 }
@@ -741,10 +814,53 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {GroupRole, "group"},
             {LabelRole, "label"},
             {RefusedRole, "refused"},
-            {RefusedCodeRole, "refusedCode"}};
+            {RefusedCodeRole, "refusedCode"},
+            {RefRole, "ref"},
+            {RangeLowRole, "rangeLow"},
+            {RangeHighRole, "rangeHigh"},
+            {IsEnumRole, "isEnum"}};
 }
 
-void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
+bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
+{
+    // The registry's sets, so the rule is the profile's whatever binds it
+    const ecuio_signal_set_t* mock = nullptr;
+    const ecuio_signal_set_t* obd2 = nullptr;
+    (void)ecuio_profile_lookup("mock", &mock);
+    (void)ecuio_profile_lookup("obd2", &obd2);
+    return set != nullptr && (set == mock || set == obd2);
+}
+
+SignalListModel::DefFacts
+SignalListModel::factsOf(const ecuio_signal_file_t* file, bool builtIn,
+                         const ecuio_signal_def_t& def)
+{
+    DefFacts f;
+    f.isEnum = def.kind == ECUIO_VALUE_ENUM;
+    double lo = 0.0;
+    double hi = 0.0;
+    if (ecuio_def_range(&def, &lo, &hi) == ECUIO_DECODE_OK) {
+        f.rangeLow = lo;
+        f.rangeHigh = hi;
+    } else {
+        f.rangeLow = f.rangeHigh = std::numeric_limits<double>::quiet_NaN();
+    }
+    // ADR-0057's refs: a file's own def by its key (a def of its extends
+    // base has none, and keeps the base's ID); a built-in set's by ID
+    const QString byId = QStringLiteral("id:%1").arg(def.id);
+    if (file != nullptr) {
+        const char* key = ecuio_signal_file_key(file, &def);
+        f.ref = (key != nullptr && key[0] != '\0')
+                    ? QStringLiteral("key:") + QString::fromUtf8(key)
+                    : byId;
+    } else if (builtIn) {
+        f.ref = byId;
+    }
+    return f;
+}
+
+void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
+                                   const ecuio_signal_file_t* file)
 {
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
@@ -771,6 +887,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     // Each entry holds its history ring (tens of KB): built in place,
     // never on the stack or moved by a reallocation
     m_entries.reserve(set->count);
+    const bool builtIn = isBuiltIn(set);
 
     for (uint32_t i = 0; i < set->count; ++i) {
         // value-init zeroes the history ring, head, and count
@@ -782,6 +899,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
+        e.facts = factsOf(file, builtIn, set->defs[i]);
         if (set->defs[i].kind == ECUIO_VALUE_ENUM && set->enums != nullptr) {
             const uint32_t first = set->defs[i].table_first;
             const uint32_t end = first + set->defs[i].table_count;
@@ -925,16 +1043,13 @@ QString SignalListModel::labelOf(const Entry& e)
 
 ecuio_display_value_t SignalListModel::shown(const Entry& e, double value) const
 {
-    ecuio_display_value_t out;
-    if (ecuio_display_convert(e.unit, e.decimals, value, m_units, &out) != ECUIO_DISPLAY_OK) {
-        // m_units is only ever metric or imperial, so this is unreachable;
-        // show the decoded value rather than nothing
-        out = {};
-        out.value = value;
-        qstrncpy(out.unit, e.unit, sizeof(out.unit));
-        out.decimal_places = e.decimals;
-    }
-    return out;
+    return displayed(e.unit, e.decimals, value, m_units);
+}
+
+std::pair<double, double> SignalListModel::shownRange(const Entry& e) const
+{
+    return displayedRange(e.unit, e.decimals, e.facts.rangeLow,
+                          e.facts.rangeHigh, m_units);
 }
 
 void SignalListModel::setUnitSystem(uint32_t units)
@@ -943,7 +1058,8 @@ void SignalListModel::setUnitSystem(uint32_t units)
     m_units = units;
     if (m_entries.empty()) return;
     emit dataChanged(index(0), index(static_cast<int>(m_entries.size()) - 1),
-                     {ValueRole, WindowHighRole, WindowLowRole, UnitRole, DecimalsRole});
+                     {ValueRole, WindowHighRole, WindowLowRole, UnitRole,
+                      DecimalsRole, RangeLowRole, RangeHighRole});
     emit valuesUpdated();   // the chart redraws its history in the new units
 }
 
@@ -1094,6 +1210,17 @@ QStringList SignalListModel::plottedNames() const
         }
     }
     return names;
+}
+
+std::vector<uint16_t> SignalListModel::plottedIds() const
+{
+    std::vector<uint16_t> ids;
+    for (const Entry& e : m_entries) {
+        if (e.subscribed && !e.hidden) {
+            ids.push_back(e.id);
+        }
+    }
+    return ids;
 }
 
 QStringList SignalListModel::unplottedNames() const
@@ -1318,6 +1445,8 @@ SessionBridge::SessionBridge(QObject* parent)
     : QObject(parent)
     , m_frameLog(new FrameListModel(this))
     , m_frameIds(new FrameIdModel(m_frameLog, this))
+    , m_recordingImport(
+          new RecordingImport([this] { return recordingsRoot(); }, this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
     , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))
@@ -1343,6 +1472,14 @@ SessionBridge::SessionBridge(QObject* parent)
         notifyDropped();
         flushValues();
         pollRecording();
+    });
+
+    // The log's readout: its time and its folder's size, once a second
+    m_logTimer = new QTimer(this);
+    m_logTimer->setInterval(1000);
+    connect(m_logTimer, &QTimer::timeout, this, [this]() {
+        countLogBytes();
+        emit logProgressChanged();
     });
 
     // The activity lines go into the recording's events.log as notes,
@@ -1512,7 +1649,8 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
             {QStringLiteral("unattributed"), qulonglong{csv.unattributed}}};
 }
 
-QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex)
+QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
+                                            const QString& baselineFolder)
 {
     if (m_session == nullptr || !connected()) {
         const QString words = QStringLiteral("Not connected");
@@ -1530,6 +1668,9 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex)
     o.session = m_session;
     o.value_count = static_cast<uint32_t>(held.size());
     o.values = held.empty() ? nullptr : held.data();
+    const QByteArray baseline = healthBaselineArgument(baselineFolder);
+    o.baseline_folder_utf8 =
+        baseline.isEmpty() ? nullptr : baseline.constData();
     const QVariantMap r = writeHealthReport(o, url);
     emit logMessage(r.value(QStringLiteral("line")).toString());
     return r;
@@ -1800,7 +1941,8 @@ QString SessionBridge::coreVersion() const
 QVariantMap SessionBridge::gaugeSignals() const
 {
     const auto ids = [](int mock, int obd2) {
-        return QVariantList{mock, obd2};
+        return QVariantList{QStringLiteral("id:%1").arg(mock),
+                            QStringLiteral("id:%1").arg(obd2)};
     };
     return {
         {QStringLiteral("rpm"),
@@ -1820,6 +1962,125 @@ QVariantMap SessionBridge::gaugeSignals() const
         {QStringLiteral("load"),
          ids(ECUIO_MOCK_SIG_LOAD_ID, ECUIO_OBD2_SIG_ENGINE_LOAD_ID)},
     };
+}
+
+const ecuio_signal_file_t*
+SessionBridge::fileOfSet(const ecuio_signal_set_t* set) const
+{
+    if (set == nullptr) {
+        return nullptr;
+    }
+    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
+    if (file == nullptr) {
+        file = m_pluginStore.fileFor(set);
+    }
+    for (auto it = m_replayFiles.begin();
+         file == nullptr && it != m_replayFiles.end(); ++it) {
+        if (ecuio_signal_file_set(it->second.file) == set) {
+            file = it->second.file;
+        }
+    }
+    return file;
+}
+
+QString SessionBridge::profileOfUri(const QString& uri)
+{
+    // Core's scheme routing and defaults (core.cpp, ecuio_session_create):
+    // case-sensitive prefixes; j2534:// on Windows alone, socketcan:// on
+    // Linux but not Android (internal.h's ECUIO_HAVE_SOCKETCAN); mock://
+    // decodes through mock, an adapter through obd2, a replay and a bus
+    // through raw. replayUriFor has its own rule for a recorded URI
+    static const struct {
+        const char* scheme;
+        const char* profile;
+    } kSchemes[] = {
+        {"mock://", "mock"},   // the mock's own set
+        {"replay://", "raw"},  // a recording's frames
+        {"elm327://", "obd2"}, // an adapter
+#ifdef _WIN32
+        {"j2534://", "obd2"}, // an adapter
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+        {"socketcan://", "raw"}, // a bus
+#endif
+    };
+    const QByteArray u = uri.toUtf8();
+    QString profile;
+    for (const auto& s : kSchemes) {
+        if (u.startsWith(s.scheme)) {
+            profile = QString::fromLatin1(s.profile);
+            break;
+        }
+    }
+    if (profile.isEmpty()) {
+        return {};
+    }
+    const qsizetype q = u.indexOf('?');
+    if (q < 0) {
+        return profile;
+    }
+    // The query's grammar (core/src/uri_query.h): key=value segments
+    // joined by '&', none empty, each with an '='; every profile= value
+    // 1 to ECUIO_PROFILE_NAME_MAX bytes, the last one winning. Other keys
+    // and the segment count are core's to judge at the connect
+    const QList<QByteArray> segments = u.mid(q + 1).split('&');
+    for (const QByteArray& segment : segments) {
+        const qsizetype eq = segment.indexOf('=');
+        if (eq < 0) {
+            return {};
+        }
+        if (segment.left(eq) == "profile") {
+            const QByteArray value = segment.mid(eq + 1);
+            if (value.isEmpty() || value.size() > ECUIO_PROFILE_NAME_MAX) {
+                return {};
+            }
+            profile = QString::fromUtf8(value);
+        }
+    }
+    return profile;
+}
+
+QVariantList SessionBridge::profileSignals(const QString& uri) const
+{
+    const QString profile = profileOfUri(uri);
+    const ecuio_signal_set_t* set = nullptr;
+    if (profile.isEmpty() ||
+        ecuio_profile_lookup(profile.toUtf8().constData(), &set) != ECUIO_OK ||
+        set == nullptr || set->defs == nullptr) {
+        return {};
+    }
+    const ecuio_signal_file_t* file = fileOfSet(set);
+    const bool builtIn = SignalListModel::isBuiltIn(set);
+    const uint32_t units = m_signalModel->unitSystem();
+    QVariantList rows;
+    rows.reserve(static_cast<qsizetype>(set->count));
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& def = set->defs[i];
+        const SignalListModel::DefFacts f =
+            SignalListModel::factsOf(file, builtIn, def);
+        const ecuio_display_value_t shown =
+            displayed(def.unit, def.decimal_places, 0.0, units);
+        const std::pair<double, double> range = displayedRange(
+            def.unit, def.decimal_places, f.rangeLow, f.rangeHigh, units);
+        rows.append(QVariantMap{
+            {QStringLiteral("id"), static_cast<int>(def.id)},
+            {QStringLiteral("ref"), f.ref},
+            {QStringLiteral("name"), QString::fromUtf8(def.name)},
+            {QStringLiteral("unit"), QString::fromUtf8(shown.unit)},
+            {QStringLiteral("decimals"),
+             static_cast<int>(shown.decimal_places)},
+            {QStringLiteral("isText"),
+             def.kind == ECUIO_VALUE_TEXT || def.kind == ECUIO_VALUE_HEX},
+            {QStringLiteral("isEnum"), f.isEnum},
+            {QStringLiteral("group"), static_cast<int>(def.group)},
+            {QStringLiteral("rangeLow"), range.first},
+            {QStringLiteral("rangeHigh"), range.second},
+            {QStringLiteral("decodedUnit"), QString::fromUtf8(def.unit)},
+            {QStringLiteral("decodedLow"), f.rangeLow},
+            {QStringLiteral("decodedHigh"), f.rangeHigh},
+        });
+    }
+    return rows;
 }
 
 QString SessionBridge::statusString(int statusCode) const
@@ -1945,7 +2206,9 @@ QString SessionBridge::replayUriFor(const QString& folder,
     }
     if (profile.isEmpty()) {
         // Core's defaults by scheme (ADR-0013); a replay's is raw, which
-        // can't decode a recording wrongly, and so is an unknown source's
+        // can't decode a recording wrongly, and so is an unknown source's.
+        // Not profileOfUri's table: a recording made on another platform
+        // names j2534:// or another case, and its frames still decode
         profile = recordedUri.startsWith(QLatin1String("mock://"),
                                          Qt::CaseInsensitive)
                       ? QStringLiteral("mock")
@@ -2258,7 +2521,8 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_frameLog->clear();
     m_currentFrameCount = 0;
     notifyFrameCounts();
-    m_signalModel->setSignalSet(ecuio_session_signal_set(session));
+    m_signalModel->setSignalSet(ecuio_session_signal_set(session),
+                                fileOfSet(ecuio_session_signal_set(session)));
     m_stagingBuffer.clear();   // previous session's batch must never
     m_stagingTexts.clear();    // bleed into this one's first
     m_linkErrorCode = ECUIO_OK;
@@ -2484,14 +2748,13 @@ void SessionBridge::disconnectSession()
         QMetaObject::invokeMethod(
             this,
             [this, uri, timing, rows]() {
-                // JOIN FIRST, then clear the flag, then emit, as the
-                // connect completion does: a QML handler inside
-                // disconnectingChanged may start the next connect.
+                // JOIN FIRST, then close the recording, then clear the
+                // flag and emit, as the connect completion does: a QML
+                // handler inside disconnectingChanged may start the next
+                // connect, which must find this session's recorder gone.
                 if (m_disconnectThread.joinable()) {
                     m_disconnectThread.join();
                 }
-                m_disconnecting = false;
-                emit disconnectingChanged();
                 const QString timingLine = timingText(timing, rows);
                 if (!timingLine.isEmpty()) {
                     emit logMessage(timingLine);
@@ -2499,6 +2762,8 @@ void SessionBridge::disconnectSession()
                 emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
                 // Kept open until here, so it brackets the whole teardown
                 stopRecording(QStringLiteral("disconnected"));
+                m_disconnecting = false;
+                emit disconnectingChanged();
             },
             Qt::QueuedConnection);
     });
@@ -2622,12 +2887,59 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
             "Not recording: a replay plays a recording already"));
         return;
     }
+    ecuio_recorder_t* recorder =
+        openRecorder(session, uri, QStringLiteral("Recording failed"));
+    if (recorder == nullptr) {
+        return;
+    }
+    adoptRecorder(recorder);
+    emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
+}
 
+namespace {
+
+// A recorder's folder, absolute; empty if core couldn't give it whole, so
+// a caller never acts on a cut path
+QString folderOf(ecuio_recorder_t* recorder)
+{
+    char folder[4096] = {};
+    uint32_t length = 0;
+    if (ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length) !=
+            ECUIO_OK ||
+        length >= sizeof folder) {
+        return QString();
+    }
+    return QString::fromUtf8(folder);
+}
+
+// Whether frames.csv holds a row past its header
+bool holdsFrames(const QString& folder)
+{
+    QFile frames(QDir(folder).filePath(QStringLiteral("frames.csv")));
+    if (!frames.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    (void)frames.readLine();
+    return !frames.readLine().trimmed().isEmpty();
+}
+
+} // namespace
+
+ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
+                                              const QString& uri,
+                                              const QString& failed,
+                                              QString* reason)
+{
+    const auto fail = [this, &failed, reason](const QString& why) {
+        if (reason != nullptr) {
+            *reason = why;
+        }
+        emit logMessage(QStringLiteral("%1: %2").arg(failed, why));
+        return nullptr;
+    };
     const QString root = recordingsRoot();
     if (root.isEmpty()) {
-        emit logMessage(
-            QStringLiteral("Recording failed: no Documents folder"));
-        return;
+        return fail(QStringLiteral("no Documents folder"));
     }
 
     // The picked vehicle names an adapter's session only (ADR-0027 section 1):
@@ -2667,25 +2979,14 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
     ecuio_recorder_t* recorder = nullptr;
     ecuio_status_t rc = ecuio_recorder_open(&o, &recorder);
     if (rc != ECUIO_OK) {
-        emit logMessage(QStringLiteral("Recording failed: %1")
-                            .arg(QString::fromUtf8(ecuio_last_error_detail())));
-        return;
+        return fail(QString::fromUtf8(ecuio_last_error_detail()));
     }
     // The signal file decoding the session goes in as signals.json
     // (ADR-0051 section 4): a vehicle's, its hash the store copy's name,
     // or a plugin variant's files merged, with the plugin's line
     // (ADR-0052 section 4), as havne-cli stream --plugin --record does
-    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
-    if (file == nullptr) {
-        file = m_pluginStore.fileFor(set);
-    }
-    for (auto it = m_replayFiles.begin();
-         file == nullptr && set != nullptr && it != m_replayFiles.end(); ++it) {
-        if (ecuio_signal_file_set(it->second.file) == set) {
-            file = it->second.file;
-        }
-    }
+    const ecuio_signal_file_t* file =
+        fileOfSet(ecuio_session_signal_set(session));
     if (file != nullptr) {
         rc = ecuio_recorder_signal_file(recorder, file);
     }
@@ -2693,26 +2994,121 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
         rc = ecuio_session_record(session, recorder);
     }
     if (rc != ECUIO_OK) {
+        // The folder is this call's own, made by the open above; a
+        // session never attached wrote it no frame, so nothing is lost
+        const QString folder = folderOf(recorder);
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");
-        emit logMessage(QStringLiteral("Recording failed: %1")
-                            .arg(QString::fromUtf8(ecuio_status_string(rc))));
-        return;
+        if (!folder.isEmpty() && !holdsFrames(folder)) {
+            (void)QDir(folder).removeRecursively();
+        }
+        return fail(QString::fromUtf8(ecuio_status_string(rc)));
     }
-    char folder[4096];
-    uint32_t length = 0;
-    (void)ecuio_recorder_get_folder(recorder, folder, sizeof folder, &length);
+    return recorder;
+}
+
+void SessionBridge::adoptRecorder(ecuio_recorder_t* recorder)
+{
     m_recorder = recorder;
-    m_recordingFolder = QString::fromUtf8(folder);
+    m_recordingFolder = folderOf(recorder);
     if (m_markCount != 0) {
         m_markCount = 0;
         emit markCountChanged();
     }
     emit recordingStateChanged();
-    emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
 }
 
-void SessionBridge::stopRecording(const QString& why)
+bool SessionBridge::startLog()
+{
+    // The activity log's line, and the Dashboard header's notice
+    const auto refuse = [this](const QString& why) {
+        const QString line = QStringLiteral("Log not started: %1").arg(why);
+        setLogNotice(line);
+        emit logMessage(line);
+        return false;
+    };
+    if (m_logActive) {
+        return refuse(QStringLiteral("a log is running already"));
+    }
+    if (m_session == nullptr || !m_connected.load(std::memory_order_acquire)) {
+        return refuse(QStringLiteral("not connected"));
+    }
+    // One recorder a session: Record sessions' is attached from the start
+    if (m_recorder != nullptr) {
+        return refuse(QStringLiteral("Recording this session already"));
+    }
+    if (!m_recordReplays && m_currentUri.startsWith(QLatin1String("replay://"),
+                                                    Qt::CaseInsensitive)) {
+        return refuse(QStringLiteral("a replay plays a recording already"));
+    }
+    const std::vector<uint16_t> ids = m_signalModel->plottedIds();
+    if (ids.empty()) {
+        return refuse(QStringLiteral("no signal is ticked on Live"));
+    }
+    // The focus first, so one core refuses (it would leave nothing to
+    // ask) opens no folder
+    const ecuio_status_t rc = ecuio_session_set_focus(
+        m_session, ids.data(), static_cast<uint32_t>(ids.size()));
+    if (rc != ECUIO_OK) {
+        const QString detail = QString::fromUtf8(ecuio_last_error_detail());
+        return refuse(detail.isEmpty() ? failureText(rc) : detail);
+    }
+    QString why;
+    ecuio_recorder_t* recorder = openRecorder(
+        m_session, m_currentUri, QStringLiteral("Log not started"), &why);
+    if (recorder == nullptr) {
+        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        // openRecorder wrote the activity log's line
+        setLogNotice(QStringLiteral("Log not started: %1").arg(why));
+        return false;
+    }
+    setLogNotice(QString());
+    m_logActive = true;
+    m_logClock.restart();
+    m_logElapsedMs = 0;
+    m_logBytes = 0;
+    adoptRecorder(recorder);
+    m_logTimer->start();
+    emit logStateChanged();
+    emit logProgressChanged();
+    emit logMessage(QStringLiteral("Log started: %1 (%2)")
+                        .arg(recordingFolder(),
+                             signalCountText(static_cast<int>(ids.size()))));
+    return true;
+}
+
+void SessionBridge::stopLog()
+{
+    // A teardown under way ends the log itself, once the session is gone
+    if (!m_logActive || m_disconnecting) {
+        return;
+    }
+    emit logMessage(QStringLiteral("Log stopped: %1").arg(recordingFolder()));
+    stopRecording(QStringLiteral("Stop log"), true);
+}
+
+qint64 SessionBridge::logElapsedMs() const
+{
+    return m_logActive ? m_logClock.elapsed() : m_logElapsedMs;
+}
+
+void SessionBridge::countLogBytes()
+{
+    // QDir("") would list the working directory
+    if (m_recordingFolder.isEmpty()) {
+        m_logBytes = 0;
+        return;
+    }
+    qint64 bytes = 0;
+    const QFileInfoList files =
+        QDir(m_recordingFolder).entryInfoList(QDir::Files | QDir::Hidden);
+    for (const QFileInfo& f : files) {
+        bytes += f.size();
+    }
+    m_logBytes = bytes;
+}
+
+void SessionBridge::stopRecording(const QString& why, bool byUser)
 {
     if (m_recorder == nullptr) {
         return;
@@ -2732,6 +3128,35 @@ void SessionBridge::stopRecording(const QString& why)
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+    if (!m_logActive) {
+        return;
+    }
+    // A session still running asks its whole set again; one torn down
+    // took its focus with it
+    if (m_session != nullptr) {
+        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+    }
+    m_logTimer->stop();
+    m_logElapsedMs = m_logClock.elapsed();
+    m_logActive = false;
+    countLogBytes(); // closed: the folder's final size
+    // An end the user didn't ask for is told on the Dashboard; Stop
+    // log's isn't, the viewer opens on it
+    if (!byUser) {
+        setLogNotice(QStringLiteral("Log ended: %1").arg(why));
+    }
+    emit logStateChanged();
+    emit logProgressChanged();
+    emit logStopped(m_recordingFolder, byUser);
+}
+
+void SessionBridge::setLogNotice(const QString& text)
+{
+    if (m_logNotice == text) {
+        return;
+    }
+    m_logNotice = text;
+    emit logNoticeChanged();
 }
 
 bool SessionBridge::mark(const QString& label)
@@ -2762,8 +3187,14 @@ void SessionBridge::pollRecording()
         return;
     }
     const QString reason = QString::fromUtf8(st.reason);
+    const bool log = m_logActive;
     stopRecording(QStringLiteral("a write failed"));
     emit logMessage(QStringLiteral("Recording stopped: %1").arg(reason));
+    // The Dashboard's notice gets the recorder's own words (the disk is
+    // full), not the recording's end note
+    if (log) {
+        setLogNotice(QStringLiteral("Log ended: %1").arg(reason));
+    }
 }
 
 void SessionBridge::logUnnoted(const QString& line)

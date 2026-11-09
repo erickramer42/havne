@@ -25,7 +25,8 @@ endif()
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
-    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp)
+    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
+    test_frames_read.cpp test_csv_guess.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -58,6 +59,17 @@ gtest_discover_tests(test_core DISCOVERY_TIMEOUT 60)
 add_test(NAME DiscoveryTimeoutTest.EveryDiscoveryWaits
     COMMAND ${CMAKE_COMMAND} -DFILE=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
             -P ${CMAKE_CURRENT_SOURCE_DIR}/discovery_timeout.cmake)
+
+# The notices each download carries (LGPL-3.0 section 4): the APK's are
+# committed copies of their sources, and every notice holds core's data
+# notices (tests/notices_match.cmake); make-appimage.sh checks the
+# AppImage's as it packs
+add_test(NAME NoticesTest.TheApkCarriesEachNoticeAsItsSource
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=apk
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachNoticeCarriesCoresData
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=core
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
@@ -234,7 +246,8 @@ endif()
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
-        test_cli_health.cpp test_cli_partial.cpp)
+        test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
+        test_cli_log.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -370,9 +383,17 @@ if(TARGET havne-cli)
                     csv-import $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
+        # The same CSVs with no map: guessed, printed as committed, imported;
+        # a time with no unit and a file with no header refused
+        add_test(NAME CliTransferRunTest.csv-guess
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    csv-guess $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
+        set_tests_properties(CliTransferRunTest.csv-guess PROPERTIES TIMEOUT 60)
         # The health report (ADR-0054): the mock's, a session whose
         # reports are never asked, the simulated car as an ELM327 adapter
-        # on loopback; a recording of values alone and a range past its end
+        # on loopback; a recording of values alone, a range past its end
+        # and its baseline named
         add_test(NAME CliHealthRunTest.session
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     session $<TARGET_FILE:havne-cli>)
@@ -390,7 +411,8 @@ if(TARGET havne-cli)
                     $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
-                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         set_tests_properties(CliExitTest.AFailedWriteIsExit1 PROPERTIES TIMEOUT 120)
         # A candump -L log of the simulated car on vcan0 imported and read
         # through obd2: its values the direct session's (Linux; skipped
@@ -513,6 +535,41 @@ if(TARGET havne-cli)
             CliRecordTest.ARecordingHoldsItsSignalFile
             CliRecordTest.APluginsRecordingHoldsItsVariantsFile
             PROPERTIES TIMEOUT 60)
+        # log (ADR-0056 section 7): the mock logged for 2 s with two picks,
+        # the log line's period shortened by the test knob; the folder's
+        # focus line, and an export with no --signal taking those columns
+        set(_cli_log ${CMAKE_CURRENT_SOURCE_DIR}/cli_log.py)
+        add_test(NAME CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} demo $<TARGET_FILE:havne-cli>)
+        # Its ends: a folder that can't be made, a replay's last frame, an
+        # interrupt (skip 77 without a console on Windows), the output
+        # closed under it and under stream --record (the recording whole
+        # either way)
+        add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} replay $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        add_test(NAME CliLogRunTest.AnInterruptEndsTheLogWhole
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} interrupt $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} closed-pipe $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
+            CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
+            CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
+            PROPERTIES TIMEOUT 60)
+        set_tests_properties(CliLogRunTest.AnInterruptEndsTheLogWhole
+            PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+        if(WIN32)
+            # A focus the session can't ask (a ?poll= session, a pick that
+            # isn't the polled PID) against the fake DLL
+            add_test(NAME CliLogRunTest.AFocusTheSessionCantAskIsAnError
+                COMMAND ${Python3_EXECUTABLE} ${_cli_log} focus-refused
+                        $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliLogRunTest.AFocusTheSessionCantAskIsAnError
+                PROPERTIES TIMEOUT 60)
+        endif()
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later
         # into it, its UTC start 90 s later, a marker 0.5 s before each):
@@ -723,6 +780,15 @@ if(TARGET havne-cli)
                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         app_cli_golden(InfoRefusesAFolderWithNoFrames info-no-frames.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/pull-early)
+        # A stretch of the replay fixture's frames as recorded (ADR-0049's
+        # appendix "frames read back"), and a folder that isn't there
+        app_cli_golden(FramesReadsAStretchAsRecorded frames-stretch.jsonl
+            -- $<TARGET_FILE:havne-cli> frames
+               ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
+               --from 100 --to 101)
+        app_cli_golden(FramesRefusesAMissingFolder frames-missing-folder.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> frames
+               ${CMAKE_CURRENT_BINARY_DIR}/never-there)
         # Ctrl+Break while the fake DLL's disconnect hangs: the recording
         # ends whole without waiting for it (skipped where there's no
         # console, as CliSignalTest is)
@@ -747,6 +813,25 @@ if(TARGET havne-cli)
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
+    app_cli_usage(LogWithoutAUriIsUsage "log")
+    app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
+    app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
+    app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
+    app_cli_usage(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|")
+    # The names are checked against the session's set after the connect,
+    # before any line: a typo and a repeat are usage with nothing written
+    app_cli_usage(LogAnUnknownSignalIsUsage "log|mock://x|f|--signal|Nothing")
+    app_cli_usage(LogASignalTwiceIsUsage "log|mock://x|f|--signal|RPM|--signal|RPM")
+    app_cli_usage(LogAnExportOptionIsUsage "log|mock://x|f|--layout|wide")
+    app_cli_usage(LogSecondsOfZeroIsUsage "log|mock://x|f|--seconds|0")
+    # The cap is 366 days of seconds: one more is usage, for every command
+    # that counts --seconds out
+    app_cli_usage(LogSecondsPastTheCapIsUsage "log|mock://x|f|--seconds|31622401")
+    app_cli_usage(StreamSecondsPastTheCapIsUsage "stream|mock://x|--seconds|31622401")
+    app_cli_usage(StreamSecondsThatWrapAreUsage "stream|mock://x|--seconds|18446744073710")
+    app_cli_usage(SimSecondsPastTheCapIsUsage "sim|mock://x|--elm327|tcp:0|--seconds|31622401")
+    app_cli_usage(PlaySecondsPastTheCapIsUsage "play|mock://x|--to|vcan0|--seconds|31622401")
+    app_cli_usage(LogSignalsAndAPluginIsUsage "log|mock://x|f|--signals|a.json|--plugin|p")
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
         "stream|mock://x?profile=obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
@@ -848,6 +933,13 @@ if(TARGET havne-cli)
     app_cli_usage(InfoARateDropOfOneIsUsage "info|x|--rate-drop|1")
     app_cli_usage(InfoSettleThatIsntSecondsIsUsage "info|x|--settle|soon")
     app_cli_usage(InfoAnUnknownOptionIsUsage "info|x|--fast")
+    app_cli_usage(FramesWithoutARecordingIsUsage "frames")
+    app_cli_usage(FramesTwoRecordingsIsUsage "frames|x|y")
+    app_cli_usage(FramesToBeforeFromIsUsage "frames|x|--from|2|--to|1")
+    app_cli_usage(FramesToZeroIsUsage "frames|x|--to|0")
+    app_cli_usage(FramesFromThatIsntSecondsIsUsage "frames|x|--from|soon")
+    app_cli_usage(FramesANegativeFromIsUsage "frames|x|--from|-1")
+    app_cli_usage(FramesAnUnknownOptionIsUsage "frames|x|--raw")
     # export and import (ADR-0054): refused before any file is read
     app_cli_usage(ExportWithoutAFileIsUsage "export|rec")
     app_cli_usage(ExportWithoutAFormatIsUsage "export|rec|out")
@@ -869,7 +961,16 @@ if(TARGET havne-cli)
         "health|mock://x|out|--format|json|--signals|a.json|--plugin|p")
     app_cli_usage(ImportWithoutAFolderIsUsage "import|candump|bus.log")
     app_cli_usage(ImportAnUnknownOptionIsUsage "import|candump|bus.log|rec|--map|m.json")
-    app_cli_usage(ImportCsvWithoutAMapIsUsage "import|csv|log.csv|rec")
+    app_cli_usage(ImportCsvMapAndATimeUnitIsUsage
+        "import|csv|log.csv|rec|--map|m.json|--time-unit|s")
+    app_cli_usage(ImportCsvATimeUnitThatIsntOneIsUsage
+        "import|csv|log.csv|rec|--time-unit|h")
+    app_cli_usage(ImportCsvPrintMapWithAFolderIsUsage
+        "import|csv|log.csv|rec|--print-map")
+    app_cli_usage(ImportCsvPrintMapAndAMapIsUsage
+        "import|csv|log.csv|--print-map|--map|m.json")
+    app_cli_usage(ImportCandumpATimeUnitIsUsage
+        "import|candump|bus.log|rec|--time-unit|s")
     app_cli_usage(ImportCsvWithAnInterfaceIsUsage
         "import|csv|log.csv|rec|--map|m.json|--interface|can0")
     app_cli_usage(ImportCsvWithoutAFolderIsUsage "import|csv|log.csv|--map|m.json")
@@ -882,6 +983,14 @@ if(TARGET havne-cli)
                     -DDLL=$<TARGET_FILE:fake_j2534>
                     -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_connect_deadline.cmake)
         set_tests_properties(CliConnectTest.AConnectPastItsDeadlineEnds
+            PROPERTIES TIMEOUT 30)
+        # log writes nothing before its connect: the deadline's error line
+        # comes after a start line of its own
+        add_test(NAME CliConnectTest.ALogsConnectPastItsDeadlineEndsAfterAStartLine
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli>
+                    -DDLL=$<TARGET_FILE:fake_j2534> -DVERB=log
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_connect_deadline.cmake)
+        set_tests_properties(CliConnectTest.ALogsConnectPastItsDeadlineEndsAfterAStartLine
             PROPERTIES TIMEOUT 30)
     endif()
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
@@ -1117,13 +1226,17 @@ endif()
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT HAVNE_BUILD_CORE_ONLY)
 
-    find_package(Qt6 6.12 COMPONENTS Core Network REQUIRED)   # app/CMakeLists.txt's minimum
+    find_package(Qt6 6.12 COMPONENTS Core Gui Network REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
         test_recording_view.cpp
+        test_viewer_frames.cpp
+        test_recording_import.cpp
         ../app/recordingview.cpp
+        ../app/recordingframes.cpp
         ../app/sessionbridge.cpp
+        ../app/recordingimport.cpp
         ../app/healthreport.cpp
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
@@ -1135,7 +1248,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/btconnect.cpp
         ../app/carryover.cpp
         ../app/adapterrelay.cpp
+        ../app/windowtheme.cpp
         fake_bt_socket.h
+        fake_theme.h
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
@@ -1163,9 +1278,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_link_libraries(test_bridge PRIVATE
         ecuio-core
         Qt6::Core
+        Qt6::Gui
         Qt6::Network
         GTest::gtest
     )
+    # windowtheme.cpp colors the title bar through dwmapi
+    if(WIN32)
+        target_link_libraries(test_bridge PRIVATE dwmapi)
+    endif()
 
     # Copy Qt DLLs at build time
     if(WIN32)
@@ -1188,6 +1308,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     add_executable(bench_bridge
         bench_bridge.cpp
         ../app/sessionbridge.cpp
+        ../app/recordingimport.cpp
         ../app/healthreport.cpp
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
@@ -1276,10 +1397,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
         string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
+        # A file's bound is a hang guard, not a measurement: each case
+        # waits for what it checks with tryVerify, and tst_recordings
+        # alone opens a 10,200-frame recording, which a machine building
+        # beside the suite took past 60 s in all
         add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
         set_tests_properties(QmlTest.${_qml_name} PROPERTIES
             ENVIRONMENT "${_qml_test_env}"
-            TIMEOUT 60
+            TIMEOUT 180
         )
     endforeach()
 endif()

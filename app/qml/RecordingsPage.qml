@@ -46,6 +46,28 @@ Page {
     onBaselineFolderChanged: checkBaseline()
 
     readonly property int recordingsListed: 20
+
+    // Import: another logger's file made a recording. The file picked, its
+    // kind (RecordingImport.Kind: guessed from its first line, switched
+    // here), a CSV's column map, and the last import's words: what it
+    // made, or why not
+    property url importFile: ""
+    property int importKind: RecordingImport.Csv
+    property url importMap: ""
+    property bool importOpen: false
+    // A CSV with no column map file is imported through the map guessed
+    // from its header (CsvGuessPreview); picking a map file skips the guess
+    property bool importGuessing: false
+    readonly property bool importUsesGuess: importKind === RecordingImport.Csv
+                                            && importMap.toString() === ""
+                                            && guessPreview.guess !== null
+    // [{ name, url }]: the maps kept under the settings folder's maps/
+    property var savedMaps: []
+    // After a candump import is refused, the interface field shows: core
+    // names a log's interfaces when it has several
+    property bool importAsksInterface: false
+    property string importNote: ""
+    property bool importFailed: false
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
     property string openedTitle: ""
@@ -90,6 +112,24 @@ Page {
     // the cursor's time (NaN for none)
     property real viewT0: 0
     property real viewT1: 1000
+    // What the signal area shows: the values at the cursor, or the frames
+    // of the part in view (a recording with a frames.csv). The values each
+    // time a recording opens
+    property string detailView: "values"
+    readonly property bool framesShown: detailView === "frames"
+                                        && recording.state === RecordingView.Open
+                                        && recording.hasFrames
+    // The Frames view's By ID table and filter panel
+    property bool framesById: false
+    property bool framesFilterOpen: false
+    onViewT0Changed: refillFramesSoon()
+    onViewT1Changed: refillFramesSoon()
+    onFramesShownChanged: {
+        if (framesShown)
+            refillFrames()
+        else
+            viewFrames.clear()
+    }
     property real cursorMs: NaN
     readonly property bool hasCursor: !isNaN(cursorMs)
     // Signal index -> plotted, from the recording's default at the open
@@ -210,6 +250,78 @@ Page {
         checkBaseline()
     }
 
+    // A URL's last part, as the picker named it (a content:// URI's too)
+    function fileNameOf(url) {
+        const text = decodeURIComponent(url.toString())
+        return text.substring(text.lastIndexOf("/") + 1)
+    }
+
+    // A file picked to import: its kind guessed, the rest asked for
+    function chooseImportFile(url) {
+        importFile = url
+        importKind = Bridge.recordingImport.guessKind(url)
+        importMap = ""
+        importAsksInterface = false
+        importInterface.text = ""
+        importNote = ""
+        importFailed = false
+        importOpen = true
+        savedMaps = Bridge.recordingImport.savedMaps()
+        guessImportFile()
+    }
+
+    // A CSV's map guessed from its header, unless a map file is chosen
+    function guessImportFile() {
+        guessPreview.clear()
+        if (importKind !== RecordingImport.Csv || importMap.toString() !== "")
+            return
+        importGuessing = Bridge.recordingImport.guess(importFile, "")
+    }
+
+    // A map file chosen (the dialog, or one saved earlier) instead of the
+    // guess
+    function chooseImportMap(url) {
+        importMap = url
+        importNote = ""
+        importFailed = false
+        guessPreview.clear()
+    }
+
+    // Back to the guess after a map file was chosen
+    function useTheGuess() {
+        importMap = ""
+        importNote = ""
+        importFailed = false
+        guessImportFile()
+    }
+
+    readonly property bool importReady: importKind === RecordingImport.Candump
+                                        || importMap.toString() !== ""
+                                        || (importUsesGuess && guessPreview.ready)
+
+    function startImport() {
+        importNote = ""
+        importFailed = false
+        if (importUsesGuess) {
+            Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
+            return
+        }
+        Bridge.recordingImport.start(importFile, importKind, importMap,
+                                     importKind === RecordingImport.Candump
+                                     ? importInterface.text : "")
+    }
+
+    // What an import made, in words
+    function importedWords(result) {
+        if (importKind === RecordingImport.Candump)
+            return qsTr("Imported %1 frames over %2 s")
+                       .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
+        return result.columnsIgnored > 0
+               ? qsTr("Imported %1 values; columns ignored: %2")
+                     .arg(result.values).arg(result.columnsIgnored)
+               : qsTr("Imported %1 values").arg(result.values)
+    }
+
     function checkBaseline() {
         // Not a ternary of the map and ({}): qmlcachegen 6.12.0 crashes on it
         if (baselineFolder === "") {
@@ -243,6 +355,18 @@ Page {
         recording.open(row.folder)
     }
 
+    // A folder just recorded (a stopped log), opened from the list as a
+    // tap on its row would; one the list can't show stays on the list
+    function openFolder(folder) {
+        if (viewing)
+            backToList()
+        else
+            refresh()
+        const row = Bridge.recordingRow(folder)
+        if (row.folder !== undefined)
+            open(row)
+    }
+
     // Seconds to the ms with no trailing zeros, as core's replay takes them
     function secondsText(ms) {
         return String(Number((ms / 1000).toFixed(3)))
@@ -262,6 +386,8 @@ Page {
 
     function backToList() {
         recording.close()
+        viewFrames.clear()
+        detailView = "values"
         stopComparing()
         alignChoice.currentIndex = 0
         alignOn = "start"
@@ -286,6 +412,18 @@ Page {
     function axisEnd() {
         return compareAligned ? Math.max(durationMs(), compareOffsetMs + compare.durationMs)
                               : durationMs()
+    }
+
+    // The Frames view's rows again for the part in view, once it has rested
+    // for settleMs: a drag or a pinch asks for none until it stops
+    function refillFramesSoon() {
+        if (framesShown)
+            framesRefill.restart()
+    }
+    function refillFrames() {
+        framesRefill.stop()
+        if (framesShown)
+            viewFrames.load(recording.folder, viewT0, viewT1)
     }
 
     // The view, kept inside the axis and no narrower than minSpanMs.
@@ -639,6 +777,24 @@ Page {
                                  : qsTr("Frames check: %1 findings").arg(n)
     }
 
+    // Import's file and a CSV's column map
+    FileDialog {
+        id: importDialog
+        title: qsTr("Import a log")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: root.chooseImportFile(importDialog.selectedFile)
+    }
+    FileDialog {
+        id: mapDialog
+        title: qsTr("The logger's column map")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Column maps (*.json)"), qsTr("All files (*)")]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: root.chooseImportMap(mapDialog.selectedFile)
+    }
+
     // Save report's file: text first, the one a shop or a buyer reads
     FileDialog {
         id: reportDialog
@@ -663,10 +819,11 @@ Page {
 
     // The whole recording's health report to url, its format by the
     // dialog's filter or the file's name (ADR-0054's appendix "the health
-    // report as built"); the view's zoom never narrows it. The result
-    // comes back in onReportSaved; false when none started
+    // report as built"), naming the picked vehicle's baseline; the view's
+    // zoom never narrows it. The result comes back in onReportSaved; false
+    // when none started
     function saveReportTo(url, filterIndex) {
-        const started = recording.saveHealthReport(url, filterIndex)
+        const started = recording.saveHealthReport(url, filterIndex, baselineFolder)
         if (started) {
             reportFailed = false
             reportNote = qsTr("Saving the report…")
@@ -700,6 +857,10 @@ Page {
                 rows += s.samples
             root.rowsPerSecond = rows / (root.durationMs() / 1000)
             root.cursorMs = NaN
+            root.detailView = "values"
+            root.framesById = false
+            root.framesFilterOpen = false
+            framesFilterPanel.clear()
             root.showAll()
         }
         onSignalListChanged: {
@@ -733,6 +894,35 @@ Page {
     }
 
     Connections {
+        target: Bridge.recordingImport
+        function onGuessFinished(result) {
+            root.importGuessing = false
+            // The panel was closed, or a map file chosen, meanwhile
+            if (!root.importOpen || root.importMap.toString() !== ""
+                    || root.importKind !== RecordingImport.Csv)
+                return
+            if (result.ok) {
+                guessPreview.load(result)
+            } else {
+                root.importFailed = true
+                root.importNote = qsTr("%1. Column map... picks a map instead.").arg(result.words)
+            }
+        }
+        function onFinished(result) {
+            root.importFailed = !result.ok
+            if (result.ok) {
+                root.importNote = root.importedWords(result)
+                root.importOpen = false
+                root.refresh()
+            } else {
+                root.importNote = result.words
+                if (root.importKind === RecordingImport.Candump)
+                    root.importAsksInterface = true
+            }
+        }
+    }
+
+    Connections {
         target: Bridge
         // A recording that ended joins the list
         function onRecordingStateChanged() {
@@ -747,6 +937,14 @@ Page {
         id: settle
         interval: root.settleMs
         onTriggered: chart.moving = false
+    }
+
+    // The part in view's frames (ADR-0049's appendix "frames read back")
+    RecordingFrames { id: viewFrames }
+    Timer {
+        id: framesRefill
+        interval: root.settleMs
+        onTriggered: root.refillFrames()
     }
 
     FrameAnimation {
@@ -796,7 +994,202 @@ Page {
         height: scroller.contentHeight - 2 * Theme.pageMargin
         spacing: 10
 
-        PageHeader { title: qsTr("Recordings"); visible: !root.chartMaximized }
+        PageHeader {
+            title: qsTr("Recordings")
+            visible: !root.chartMaximized
+            Item { Layout.fillWidth: true }
+            ThemedButton {
+                objectName: "importButton"
+                visible: !root.viewing
+                text: qsTr("Import")
+                enabled: !Bridge.recordingImport.busy
+                onClicked: importDialog.open()
+            }
+        }
+
+        // ---- Import: the file picked, its kind, a CSV's column map ----
+        ColumnLayout {
+            objectName: "importPanel"
+            visible: root.importOpen && !root.viewing
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+
+            Label {
+                objectName: "importFileName"
+                Layout.fillWidth: true
+                wrapMode: Text.WrapAnywhere
+                color: Theme.text
+                text: qsTr("Import %1").arg(root.fileNameOf(root.importFile))
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Rectangle {
+                    implicitWidth: kindSwitch.implicitWidth + 4
+                    implicitHeight: kindSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
+                    Row {
+                        id: kindSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            objectName: "importKind_csv"
+                            text: qsTr("CSV")
+                            selected: root.importKind === RecordingImport.Csv
+                            enabled: !Bridge.recordingImport.busy
+                            onClicked: {
+                                root.importKind = RecordingImport.Csv
+                                if (guessPreview.guess === null && !root.importGuessing)
+                                    root.guessImportFile()
+                            }
+                        }
+                        SegmentButton {
+                            objectName: "importKind_candump"
+                            text: qsTr("candump")
+                            selected: root.importKind === RecordingImport.Candump
+                            enabled: !Bridge.recordingImport.busy
+                            onClicked: {
+                                root.importKind = RecordingImport.Candump
+                                root.importNote = ""
+                            }
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    text: qsTr("Guessed from its first line")
+                }
+            }
+
+            // A CSV's columns come through the logger's column map
+            RowLayout {
+                visible: root.importKind === RecordingImport.Csv
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importMapButton"
+                    text: qsTr("Column map...")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: mapDialog.open()
+                }
+                Label {
+                    objectName: "importMapName"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WrapAnywhere
+                    color: root.importMap.toString() !== "" ? Theme.text : Theme.textDim
+                    text: root.importMap.toString() !== "" ? root.fileNameOf(root.importMap)
+                                                         : qsTr("Guessed from the header")
+                }
+            }
+            // A map kept earlier, or back to the guess
+            RowLayout {
+                visible: root.importKind === RecordingImport.Csv
+                         && (root.savedMaps.length > 0 || root.importMap.toString() !== "")
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ComboBox {
+                    id: savedMapChoice
+                    objectName: "savedMaps"
+                    visible: root.savedMaps.length > 0
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.preferredHeight: Theme.touchTarget
+                    enabled: !Bridge.recordingImport.busy
+                    model: [qsTr("Saved maps...")].concat(root.savedMaps.map(m => m.name))
+                    currentIndex: 0
+                    onActivated: index => {
+                        if (index > 0)
+                            root.chooseImportMap(root.savedMaps[index - 1].url)
+                        currentIndex = 0
+                    }
+                }
+                ThemedButton {
+                    objectName: "useTheGuess"
+                    visible: root.importMap.toString() !== ""
+                    compact: true
+                    Layout.preferredHeight: Theme.touchTarget
+                    text: qsTr("Use the guess")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: root.useTheGuess()
+                }
+            }
+            Label {
+                objectName: "importGuessing"
+                visible: root.importGuessing
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.textDim
+                text: qsTr("Reading the file's header...")
+            }
+            CsvGuessPreview {
+                id: guessPreview
+                objectName: "guessPreview"
+                visible: root.importKind === RecordingImport.Csv && root.importMap.toString() === ""
+                Layout.fillWidth: true
+                onMapSaved: root.savedMaps = Bridge.recordingImport.savedMaps()
+            }
+
+            // A candump log's bus, once core has said the log holds several
+            RowLayout {
+                visible: root.importKind === RecordingImport.Candump && root.importAsksInterface
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: 13 }
+                TextField {
+                    id: importInterface
+                    objectName: "importInterface"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the row's width, not its text's
+                    placeholderText: qsTr("can0")
+                    font.family: Theme.monoFamily
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+                    enabled: !Bridge.recordingImport.busy
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importStart"
+                    text: qsTr("Import")
+                    highlighted: true
+                    enabled: !Bridge.recordingImport.busy && root.importReady
+                    onClicked: root.startImport()
+                }
+                ThemedButton {
+                    objectName: "importCancel"
+                    text: qsTr("Cancel")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: {
+                        root.importOpen = false
+                        root.importNote = ""
+                    }
+                }
+                Label {
+                    objectName: "importBusy"
+                    visible: Bridge.recordingImport.busy
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
+                }
+            }
+        }
+
+        // The last import's words: what it made, or why not
+        Label {
+            objectName: "importNote"
+            visible: root.importNote !== "" && !root.viewing
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: root.importFailed ? Theme.danger : Theme.success
+            text: root.importNote
+        }
 
         // ---- The list ----
         Label {
@@ -1012,6 +1405,34 @@ Page {
                 text: qsTr("Save report…")
                 onClicked: reportDialog.open()
             }
+            // The signal area's two views: the values at the cursor, or the
+            // frames in view. Hidden for a recording with no frames.csv
+            Rectangle {
+                visible: recording.state === RecordingView.Open && recording.hasFrames
+                         && !root.chartMaximized
+                implicitWidth: detailSwitch.implicitWidth + 4
+                implicitHeight: detailSwitch.implicitHeight + 4
+                radius: Theme.radius
+                color: Theme.surface
+
+                Row {
+                    id: detailSwitch
+                    anchors.centerIn: parent
+                    spacing: 2
+                    SegmentButton {
+                        objectName: "detailView_values"
+                        text: qsTr("Values")
+                        selected: !root.framesShown
+                        onClicked: root.detailView = "values"
+                    }
+                    SegmentButton {
+                        objectName: "detailView_frames"
+                        text: qsTr("Frames")
+                        selected: root.framesShown
+                        onClicked: root.detailView = "frames"
+                    }
+                }
+            }
             Label {
                 objectName: "reportNote"
                 Layout.fillWidth: true
@@ -1167,9 +1588,112 @@ Page {
             text: root.compareStatus
         }
 
+        // ---- The frames of the part in view, read from frames.csv ----
+        ColumnLayout {
+            objectName: "viewerFrames"
+            visible: root.framesShown && !root.chartMaximized
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
+                Rectangle {
+                    implicitWidth: framesTableSwitch.implicitWidth + 4
+                    implicitHeight: framesTableSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    Row {
+                        id: framesTableSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            objectName: "framesTable_frames"
+                            text: qsTr("Frames")
+                            selected: !root.framesById
+                            onClicked: root.framesById = false
+                        }
+                        SegmentButton {
+                            objectName: "framesTable_byId"
+                            text: qsTr("By ID")
+                            selected: root.framesById
+                            onClicked: {
+                                root.framesById = true
+                                viewFrames.ids.refresh()
+                            }
+                        }
+                    }
+                }
+                ThemedButton {
+                    objectName: "framesFilterToggle"
+                    text: viewFrames.frames.filterTerms > 0
+                          ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
+                          : qsTr("Filter")
+                    highlighted: root.framesFilterOpen
+                    onClicked: root.framesFilterOpen = !root.framesFilterOpen
+                }
+            }
+
+            FrameFilterPanel {
+                id: framesFilterPanel
+                visible: root.framesFilterOpen
+                frames: viewFrames.frames
+            }
+
+            // How many rows the part in view has, and when it has more than
+            // the table holds, where the table begins
+            Label {
+                objectName: "framesWords"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                wrapMode: Text.WordWrap
+                color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
+                font.pixelSize: 13
+                text: viewFrames.error !== "" ? viewFrames.error
+                      : viewFrames.loading ? qsTr("Reading the frames…")
+                      : viewFrames.note !== "" ? viewFrames.note
+                      : viewFrames.frames.filterTerms > 0
+                        ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
+                                                         .arg(viewFrames.frames.heldCount)
+                        : viewFrames.rows === 1 ? qsTr("1 frame in view")
+                                               : qsTr("%1 frames in view").arg(viewFrames.rows)
+            }
+
+            // A fixed height: the page scrolls and the table scrolls inside
+            FrameTable {
+                objectName: "viewerFrameTable"
+                visible: !root.framesById
+                Layout.preferredHeight: 280
+                live: false
+                frames: viewFrames.frames
+                emptyText: viewFrames.loading ? qsTr("Reading the frames…")
+                         : viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
+                         : qsTr("No frame in view")
+                // A tap puts the chart's cursor at the frame's time, whether
+                // or not a signal has a sample there
+                onRowClicked: (index, modifiers, timestampUs) => root.setCursor(timestampUs / 1000)
+            }
+            FrameIdList {
+                objectName: "viewerFrameIds"
+                visible: root.framesById
+                Layout.preferredHeight: 280
+                ids: viewFrames.ids
+                refreshing: root.framesById && root.framesShown
+                emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
+                                                           : qsTr("No frame in view")
+                onIdTapped: (id, extended) => {
+                    framesFilterPanel.showId(id, extended)
+                    root.framesFilterOpen = true
+                    root.framesById = false
+                }
+            }
+        }
+
         SignalFilterBar {
             objectName: "recordingFilter"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             filter: signalFilter
             codes: recording.signalList.map(s => s.group)
@@ -1180,7 +1704,7 @@ Page {
         ListView {
             id: signalRows
             objectName: "signalRows"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             Layout.preferredHeight: count * root.rowHeight
             Layout.maximumHeight: Math.max(root.rowHeight, column.height * 0.3)
@@ -1263,7 +1787,7 @@ Page {
         // the chart draws: the chart keeps every ticked signal (ADR-0050)
         Label {
             objectName: "filterCount"
-            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim

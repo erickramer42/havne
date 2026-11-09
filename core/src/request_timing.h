@@ -38,8 +38,9 @@ struct timing_hist {
             return static_cast<int>(v);
         }
         int b = 0;
-        while ((v >> (b + 1)) != 0) {
-            ++b; /* floor(log2 v), at least 4 */
+        while (b < 31 && (v >> (b + 1)) != 0) {
+            ++b; /* floor(log2 v), at least 4; 31 at most (a shift by the
+                    width is undefined, and on x86 shifts by nothing) */
         }
         const int i =
             (b - 2) * kSub + static_cast<int>((v >> (b - 3)) & (kSub - 1));

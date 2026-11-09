@@ -122,8 +122,9 @@ class Stream:
 
 
 class Recorder:
-    """A recording of a session (ADR-0049), opened before its start; it
-    outlives the session, so notes and marks go on until close()"""
+    """A recording of a session (ADR-0049), opened before or after its
+    start (ADR-0056 section 3) and counting from then; it outlives the
+    session, so notes and marks go on until close()"""
 
     def __init__(self, session, root, label=None):
         opts = e.ecuio_record_options_t()
@@ -171,7 +172,8 @@ class Session:
     """A session on uri (core.h): mock://, replay://, elm327://,
     socketcan:// (Linux), j2534:// (Windows). signals: a SignalFile whose
     profile decodes it; plugin and variant: a Plugin's variant to decode
-    with. Open streams and a recorder before start()."""
+    with. Open streams before start(); a recorder at any time, one at a
+    time; set_focus() at any time."""
 
     def __init__(self, uri, signals=None, plugin=None, variant=None):
         if signals is not None and plugin is not None:
@@ -235,10 +237,42 @@ class Session:
         return s
 
     def record(self, root, label=None):
-        """A recording of the session into a new folder under root, before start()"""
+        """A recording of the session into a new folder under root, from
+        now on: before start() it holds the whole session, after it the
+        analysis log of a run under way (ADR-0056 section 3), its times
+        counted from this call. One recorder at a time: a second while
+        one is open is core's INVALID_ARGUMENT; after close() another can
+        open."""
         r = Recorder(self, root, label)
         self._recorders.append(r)
         return r
+
+    def set_focus(self, signals):
+        """Asks only the requests that carry these signals, until called
+        again (ADR-0056 section 2): ids or names of the session's set, in
+        any order; an empty list asks the whole set again. The picks run
+        in the fast class, the rest wait, parked. Before or after
+        start(); on mock:// and replay:// it changes nothing. A name the
+        set lacks is a KeyError; an id that isn't an int (a bool isn't) or
+        is outside 0-65535 a ValueError; an id the set lacks, or a focus
+        that leaves a requesting session nothing to ask, core's
+        INVALID_ARGUMENT."""
+        by_name = {name: sid for sid, (name, unit) in self._names.items()}
+        ids = []
+        for s in signals:
+            if isinstance(s, str):
+                if s not in by_name:
+                    raise KeyError(f"no signal named {s!r} in the session's set")
+                ids.append(by_name[s])
+            elif isinstance(s, bool) or not isinstance(s, int):
+                raise ValueError(f"a signal id is an int, not {s!r}")
+            elif not 0 <= s <= 0xFFFF:
+                raise ValueError(f"a signal id is 0-65535, not {s}")
+            else:
+                ids.append(s)
+        picks = (ctypes.c_uint16 * len(ids))(*ids) if ids else None
+        check(lib.ecuio_session_set_focus(self._handle(), picks, len(ids)),
+              "ecuio_session_set_focus")
 
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")

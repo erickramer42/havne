@@ -22,7 +22,7 @@ GaugeBase {
     property bool flashOn: false
     Timer {
         id: flasher
-        interval: 70
+        interval: 167   // a flash of 3 Hz at most
         repeat: true
         running: gauge.shiftNow
         onTriggered: gauge.flashOn = !gauge.flashOn
@@ -40,11 +40,12 @@ GaugeBase {
             model: gauge.count
             delegate: Item {
                 id: slot
+                objectName: "slot"
                 required property int index
                 readonly property real pos: (index + 1) / gauge.count
                 readonly property color hue: pos <= 0.4 ? Theme.success
-                                           : pos <= 0.74 ? Theme.warning
-                                           : Theme.danger
+                                           : pos <= 0.74 ? Theme.gaugeWarn
+                                           : Theme.gaugeDanger
                 readonly property bool lit: gauge.shiftNow ? gauge.flashOn
                                                            : gauge.fraction >= pos - 1e-6
                 readonly property color glow: gauge.shiftNow ? Theme.info : hue
@@ -67,7 +68,7 @@ GaugeBase {
                 Rectangle {   // specular highlight
                     x: parent.width * 0.24; y: parent.height * 0.14
                     width: parent.width * 0.42; height: width * 0.55; radius: height / 2
-                    color: Qt.alpha("white", slot.lit ? 0.45 : 0.07)
+                    color: Qt.alpha(Theme.gaugeTick, slot.lit ? 0.45 : 0.07)
                 }
             }
         }

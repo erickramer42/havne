@@ -605,8 +605,10 @@ struct ecuio_recorder {
     std::string signals_sha;
     std::string signals_plugin; /* "<id>,<version>,<variant>" or "" */
 
-    /* Fixed at attach */
+    /* Fixed at attach; zero_us is this recording's, which the link's
+     * stops being once a later recorder attaches */
     std::shared_ptr<ecuio_record_link> link;
+    uint64_t zero_us = 0;
     std::vector<def_entry> defs; /* sorted by id */
     uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     uint32_t channels = 0;
@@ -767,8 +769,10 @@ struct ecuio_recorder {
         }
         timing_body tb;
         std::memcpy(&tb, body, sizeof tb);
-        const ecuio_session_timing_t& t = tb.timing;
-        const uint64_t ms = (t.snapshot_us + 500) / 1000;
+        /* t_s on the recording's clock, as every other file's time: the
+         * snapshot's session time is the session's, older than the
+         * recording when the recorder attached after start */
+        const uint64_t ms = (tb.host_us + 500) / 1000;
         char at[32];
         std::snprintf(at, sizeof at, "%llu.%03llu",
                       static_cast<unsigned long long>(ms / 1000),
@@ -831,7 +835,7 @@ struct ecuio_recorder {
             latency_out += ',';
             append_quantile(latency_out, r.interval_max_us, interval_has);
             latency_out += ',';
-            latency_out += clock_name(t.interval_clock);
+            latency_out += clock_name(tb.timing.interval_clock);
             latency_out += '\n';
         }
         if (!latency_out.empty() && latency == nullptr && !failed()) {
@@ -1059,7 +1063,7 @@ struct ecuio_recorder {
 
     uint64_t host_us_of(uint64_t clock_us) const
     {
-        return clock_us > link->zero_us ? clock_us - link->zero_us : 0;
+        return clock_us > zero_us ? clock_us - zero_us : 0;
     }
 
     void run()
@@ -1132,9 +1136,15 @@ struct ecuio_recorder {
     }
 };
 
-void ecuio_record_detach(ecuio_record_link& link)
+void ecuio_record_detach(ecuio_record_link& link, ecuio_recorder_t* only)
 {
     std::lock_guard<std::mutex> g(link.m);
+    if (only != nullptr) {
+        ecuio_recorder_t* now = link.active.load(std::memory_order_seq_cst);
+        if (now != nullptr && now != only) {
+            return;
+        }
+    }
     ecuio_recorder_t* r =
         link.active.exchange(nullptr, std::memory_order_seq_cst);
     while (link.pins.load(std::memory_order_acquire) != 0) {
@@ -1179,7 +1189,8 @@ bool put_pending_link(ecuio_recorder_t* r)
 uint64_t host_us_now(const ecuio_record_link& link)
 {
     const uint64_t now = ecuio_clock_us();
-    return now > link.zero_us ? now - link.zero_us : 0;
+    const uint64_t zero = link.zero_us.load(std::memory_order_relaxed);
+    return now > zero ? now - zero : 0;
 }
 
 } // namespace
@@ -1214,6 +1225,10 @@ void ecuio_record_timing(ecuio_record_link* link,
     const uint64_t size = sizeof(record_head) + sizeof(timing_body) +
                           uint64_t{n} * sizeof(ecuio_request_timing_t);
     const auto give_up = std::chrono::steady_clock::now() + kFinalTimingWait;
+    /* The record's time is the call's, read once a recorder is found: a
+     * final snapshot that waits for room keeps the time of its figures */
+    uint64_t at = 0;
+    bool stamped = false;
     for (;;) {
         ecuio_recorder_t* r = ecuio_record_pin(*link);
         if (r == nullptr) {
@@ -1223,12 +1238,16 @@ void ecuio_record_timing(ecuio_record_link* link,
             ecuio_record_unpin(*link);
             return;
         }
+        if (!stamped) {
+            at = host_us_now(*link);
+            stamped = true;
+        }
         if (put_pending_link(r) && ring_has_room(r, size)) {
             const uint64_t h = r->head.load(std::memory_order_relaxed);
             const record_head rh{static_cast<uint32_t>(size), kRecordTiming,
                                  r->pending_dropped};
             r->pending_dropped = 0;
-            const timing_body tb{host_us_now(*link), timing, n, 0};
+            const timing_body tb{at, timing, n, 0};
             r->copy_in(h, &rh, sizeof rh);
             r->copy_in(h + sizeof rh, &tb, sizeof tb);
             r->copy_in(h + sizeof rh + sizeof tb, rows,
@@ -1462,8 +1481,9 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     if (session->closed.load()) {
         return ECUIO_ERR_SESSION_CLOSED;
     }
-    if (session->started || session->record_link != nullptr ||
-        recorder->attached.load()) {
+    /* A recorder has one session ever; a session one recorder at a time
+     * (ADR-0056 section 3), judged under the link's mutex below */
+    if (recorder->attached.load()) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (recorder->signals_set != nullptr &&
@@ -1474,11 +1494,16 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
 
-    std::shared_ptr<ecuio_record_link> link;
+    /* Everything the attach makes goes into locals first: the recorder
+     * changes only once the link is taken, so a refused attach (another
+     * recorder is live) leaves it as it was, ready for the next try */
+    const std::shared_ptr<ecuio_record_link> link = session->record_link;
     std::vector<def_entry> defs;
     std::string header;
+    uint64_t zero_us = 0;
+    uint64_t slept_at_attach = 0;
+    std::chrono::system_clock::time_point start_wall{};
     try {
-        link = std::make_shared<ecuio_record_link>();
         const ecuio_signal_set_t* set = session->active_signal_set;
         header = std::string(ecuio_recording_rows::kFormat3) + "\n";
         for (uint32_t i = 0;
@@ -1495,16 +1520,14 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             [](const def_entry& a, const def_entry& b) { return a.id < b.id; });
 
         /* The zero and the wall clock read back to back */
-        link->zero_us = ecuio_clock_us();
-        recorder->slept_at_attach =
-            ecuio_clock_slept_us() + recorder->slept_added.load();
-        recorder->start_wall = std::chrono::system_clock::now();
+        zero_us = ecuio_clock_us();
+        slept_at_attach = ecuio_clock_slept_us() + recorder->slept_added.load();
+        start_wall = std::chrono::system_clock::now();
 
-        const std::time_t t =
-            std::chrono::system_clock::to_time_t(recorder->start_wall);
+        const std::time_t t = std::chrono::system_clock::to_time_t(start_wall);
         const long long ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(
-                recorder->start_wall.time_since_epoch())
+                start_wall.time_since_epoch())
                 .count() %
             1000;
         const std::tm lt = local_tm(t);
@@ -1541,6 +1564,43 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       ? "from an older recording"
                       : session->source_frame_flags.c_str();
         header += "\n";
+        /* A session attached to after start (ADR-0056 section 3) says
+         * what it had come to: the signals its focus holds at this
+         * moment, in the order they were picked (none: no line), and,
+         * once started, the link's state and episode count in the words
+         * of the link lines, so a reader needn't wait for a transition */
+        {
+            std::lock_guard<std::mutex> f(session->focus_mutex);
+            std::string focus;
+            for (uint16_t id : session->focus_ids) {
+                for (uint32_t i = 0;
+                     set != nullptr && set->defs != nullptr && i < set->count;
+                     ++i) {
+                    const ecuio_signal_def_t& d = set->defs[i];
+                    if (d.id == id) {
+                        focus += focus.empty() ? "" : ",";
+                        focus +=
+                            csv_quoted(d.name, strnlen(d.name, sizeof d.name));
+                        break;
+                    }
+                }
+            }
+            if (!focus.empty()) {
+                header += "focus  " + focus + "\n";
+            }
+        }
+        if (session->started) {
+            int32_t state = ECUIO_OK;
+            uint32_t episodes = 0;
+            ecuio_session_get_error_state(session, &state, &episodes);
+            /* A link that is OK with no episode is healthy here, where the
+             * event lines' "recovered" would say a fault had passed */
+            header += "link  ";
+            header += state == ECUIO_OK && episodes == 0
+                          ? "healthy (state 0, 0 episodes)"
+                          : link_text(state, episodes);
+            header += "\n";
+        }
         std::vector<std::string> named; /* the names signal lines wrote */
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
@@ -1564,24 +1624,44 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
+    /* The recorder takes what was made, under the link's mutex */
+    const auto commit = [&] {
+        {
+            std::lock_guard<std::mutex> n(recorder->note_m);
+            /* The caller's lines open() queued, then the columns */
+            item& begin = recorder->items.front();
+            begin.bytes = std::move(recorder->signals_json);
+            begin.text =
+                header + begin.text +
+                "columns  local time, seconds since the recording started "
+                "(host_us / 1e6 in the CSV files), kind, text\n\n";
+        }
+        recorder->defs = std::move(defs);
+        recorder->channels =
+            (std::min)(session->info.channel_count,
+                       uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
+        for (uint32_t i = 0; i < recorder->channels; ++i) {
+            recorder->rx_ids[i] = session->info.rx_ids[i];
+        }
+        recorder->link = link;
+        recorder->zero_us = zero_us;
+        recorder->slept_at_attach = slept_at_attach;
+        recorder->start_wall = start_wall;
+    };
     {
-        std::lock_guard<std::mutex> g(recorder->note_m);
-        /* The caller's lines open() queued, then the columns */
-        item& begin = recorder->items.front();
-        begin.bytes = std::move(recorder->signals_json);
-        begin.text = header + begin.text +
-                     "columns  local time, seconds since the recording started "
-                     "(host_us / 1e6 in the CSV files), kind, text\n\n";
+        /* Under the mutex that orders detaches: a recorder closing or a
+         * second attach meanwhile sees one state of the link, and the
+         * refusal is judged here alone. The zero goes in before active,
+         * whose release publishes it to the worker (dispatch pins the
+         * recorder, then reads the zero). */
+        std::lock_guard<std::mutex> g(link->m);
+        if (link->active.load(std::memory_order_seq_cst) != nullptr) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        commit();
+        link->zero_us.store(zero_us, std::memory_order_relaxed);
+        link->active.store(recorder, std::memory_order_release);
     }
-    recorder->defs = std::move(defs);
-    recorder->channels = (std::min)(session->info.channel_count,
-                                    uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
-    for (uint32_t i = 0; i < recorder->channels; ++i) {
-        recorder->rx_ids[i] = session->info.rx_ids[i];
-    }
-    recorder->link = link;
-    session->record_link = link;
-    link->active.store(recorder, std::memory_order_release);
     recorder->attached.store(true, std::memory_order_release);
     return ECUIO_OK;
 }
@@ -1600,7 +1680,7 @@ ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
     }
     const uint64_t now = ecuio_clock_us();
     const uint64_t host_us =
-        now > recorder->link->zero_us ? now - recorder->link->zero_us : 0;
+        now > recorder->zero_us ? now - recorder->zero_us : 0;
     try {
         std::string line = one_line(utf8_line);
         std::lock_guard<std::mutex> g(recorder->note_m);
@@ -1630,7 +1710,7 @@ ecuio_status_t ecuio_recorder_mark(ecuio_recorder_t* recorder,
     }
     const uint64_t now = ecuio_clock_us();
     const uint64_t host_us =
-        now > recorder->link->zero_us ? now - recorder->link->zero_us : 0;
+        now > recorder->zero_us ? now - recorder->zero_us : 0;
     try {
         std::string label = one_line(utf8_label);
         std::lock_guard<std::mutex> g(recorder->note_m);
@@ -1700,7 +1780,7 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
     }
     std::unique_ptr<ecuio_recorder> r(recorder);
     if (r->link != nullptr) {
-        ecuio_record_detach(*r->link);
+        ecuio_record_detach(*r->link, r.get());
     }
     {
         std::lock_guard<std::mutex> g(r->wake_m);
@@ -1714,8 +1794,7 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
     if (r->attached.load()) {
         std::string why = one_line(utf8_why != nullptr ? utf8_why : "closed");
         const uint64_t now = ecuio_clock_us();
-        const uint64_t host_us =
-            now > r->link->zero_us ? now - r->link->zero_us : 0;
+        const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
         /* What the worker couldn't queue before it let go: the detach
          * waited for it, so its fields are this thread's now */
         if (r->link_pending) {

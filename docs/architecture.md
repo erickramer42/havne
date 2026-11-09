@@ -11,7 +11,7 @@ threads onto the GUI thread.
 
 ```
  QML pages: Home · Dashboard · Live · Diagnostics · Log · Recordings · Settings
-   │  Theme (colors, link-state labels) · SignalHub (signals by name)
+   │  Theme (colors, link-state labels) · SignalHub (signals by ref)
    ▼  properties and list models, GUI thread only
  SessionBridge (app/)          the app's caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
@@ -444,8 +444,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   frames the Log page drops are recorded too. The bridge opens the
   recorder, attaches it before the session starts, notes its activity
   lines and closes it after the teardown; `havne-cli stream --record`
-  does the same. Reading one back is core's too: `ecuio_recording_open`
-  reads the folder once into each signal's per-second summaries and
+  does the same, and `havne-cli log` records a session narrowed to the
+  signals named, the analysis log from the command line
+  ([ADR-0056](adr/0056-analysis-log.md)). Reading one back is core's
+  too: `ecuio_recording_open` reads the folder once into each signal's
+  per-second summaries and
   an index of where each second starts, so its memory follows the
   recording's seconds, not its size, and a query answers each column's
   lowest and highest from the summaries, or from the raw rows when
@@ -454,9 +457,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   starts. `havne-cli export` writes a recording for another tool,
   scrubbed of the car's identity unless `--raw`
   ([ADR-0054](adr/0054-exports-and-imports.md)): pcapng (its frames,
-  for Wireshark), CSV (its values, one row per sample, after a
-  comment line; pandas reads it with `skiprows=1`, since `comment="#"`
-  would cut a value holding a `#`) or a folder (a copy of the
+  for Wireshark), CSV (its number values, by default a column a signal
+  and a row a sweep with `Time (ms)` first, sized by `--rows` and
+  priced by `ecuio_export_estimate` before it is written, ADR-0056
+  section 5; the long form, a row a value after a comment line that
+  pandas skips with `skiprows=1`, is `--layout long`) or a folder (a copy of the
   recording to send, which reads and replays as the original; the
   caller names it by its time, since the original's name can hold the
   vehicle's label). `ecuio_recording_check` reads `frames.csv` in one pass for
@@ -475,13 +480,18 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   older one (the viewer's decode choice, `havne-cli view --frames`).
   `havne-cli import` makes a recording's folder from another tool's
   log: a `candump -L` log's frames, or a logger's CSV of values through
-  a column map ([ADR-0054](adr/0054-exports-and-imports.md)). A health
+  a column map ([ADR-0054](adr/0054-exports-and-imports.md)), which core
+  guesses from the file's header when none is given
+  (`ecuio_import_csv_guess`, `havne-cli import csv --print-map`,
+  `havne.guess_csv_map`; the app's Import panel shows the guess for
+  editing before it imports). A health
   report (`ecuio_health_export`, `havne-cli health`, Save report on the
   Diagnostics and Recordings pages) writes a car's readiness, trouble
   codes, freeze frame and key values from a session or a recording as
   one JSON or text file, checked for the car's identity like an export.
   A vehicle keeps a baseline recording, which the viewer overlays on
-  another, the two lined up on their engine starts.
+  another, the two lined up on their engine starts, and which the health
+  report names by its start and length, never its folder.
 - **Display strings come from core:** each def's name, and the unit
   and decimal places `ecuio_display_convert` gives for the chosen unit
   system, metric or imperial
@@ -489,15 +499,19 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   alike, so neither page formats a unit, converts a value or picks a
   precision of its own. The bridge converts on the way out; its
   history and recordings keep the decoded values.
-- **Pages:** **Home** (status), **Dashboard** (gauges and shift
-  lights), **Live** (value table and strip chart), **Diagnostics**
+- **Pages:** **Home** (status), **Dashboard** (pages of gauges and
+  shift lights that the user builds in its edit mode,
+  [ADR-0057](adr/0057-dashboards.md); the header's Start log and Stop
+  log write an analysis log, [ADR-0056](adr/0056-analysis-log.md)),
+  **Live** (value table and strip chart), **Diagnostics**
   (trouble codes, readiness, the freeze frame, clearing the codes, a
   health report), **Log** (the activity log; in developer mode, the raw
-  frames, filtered, by ID, and exported as CSV with the car's identity
-  left out), **Recordings** (the recordings list and the viewer, with a
-  vehicle's baseline and a health report), **Settings**
-  (vehicles with their own signals and plugins, device picker, URI,
-  developer mode). Live and the
+  frames, filtered by ID, mask, length and time, by ID, and exported as
+  CSV with the car's identity left out), **Recordings** (the recordings
+  list with its Import, and the viewer, with a vehicle's baseline, a
+  health report and a Values | Frames switch), **Settings**
+  (a list of pages: Connection, Vehicle, Signals, Recording, Display
+  with the theme, and Advanced with developer mode). Live and the
   Recordings page share one signal filter (`SignalFilterBar.qml`, its
   rule in `app/signalfilter.h`, [ADR-0050](adr/0050-finding-a-signal.md)):
   words over the name and unit, plotted only, and the groups core
@@ -512,10 +526,13 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   other key kept. Core judges the result at connect and Settings shows
   its words.
   Navigation is a sidebar at 720 px and wider, a tab bar below that.
-- **`Theme`** holds the palette, the chart's series colors, the
+- **`Theme`** holds the three palettes (Dark, Low glare and Night, the
+  chosen one kept between runs), the gauges' color roles, the chart's series colors, the
   monospace family and page margin, and the link-state color and
   label functions, so every page shows a state the same way.
-  `PageHeader` gives every page but Home the same title row.
+  `PageHeader` gives every page but Home the same title row; where
+  the row is crowded (the Dashboard's), its title can give way,
+  eliding, so the row fits whatever the font.
 - **Live** keys each chart trace's color to its list row, so the
   row's swatch is the legend and a trace keeps its color when
   another signal is unsubscribed. The ticks choose what's plotted and
@@ -527,10 +544,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   synthetic series; the Canvas only strokes what it returns. A Canvas
   paints an image at its own size, so this one is sized up by the
   zoom and scaled back down, which keeps it as sharp as the rest.
-- **`SignalHub`** gives the Dashboard signals by *name*, because gauges
-  want "RPM" whichever profile provides it. The mock and `obd2` sets
-  share names; a profile that names a signal differently adds the
-  name to the gauge's `Tap`.
+- **`SignalHub`** gives the Dashboard signals by reference, because a
+  gauge wants "the RPM signal" whichever profile provides it: `id:<n>`
+  for a built-in def and `key:<k>` for a signal file's own. The pages
+  themselves are one JSON document per form (phone, desktop) in the
+  app's settings, which `DashboardBook` reads and edits as pure rules
+  ([ADR-0057](adr/0057-dashboards.md)).
 - **Freshness:** a value never received shows "—", never a fabricated
   0. A value older than 3 s dims; the model refreshes ages every tick,
   so a signal that stops arriving dims even when nothing else changes.

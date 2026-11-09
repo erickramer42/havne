@@ -448,7 +448,7 @@ written, and `signals check` says it won't convert.
 - **`havne-cli sim <uri> --on <vcan> --signals <file>`** does the same
   for the simulated ECU, which then answers the file's Service 22 DIDs
   ("Checking one with no car").
-- **The app:** in Settings' Vehicle section, **Import a signal file**
+- **The app:** on Settings' Signals page, **Import a signal file**
   adds a file to the picked vehicle. A file the loader refuses shows its
   words, and so does one whose profile another file makes already, in
   any vehicle: one profile names one file. Each file the vehicle has is
@@ -557,7 +557,7 @@ field that differs from OBDb's reading, and each signal left out and
 why; then a count of each (`imported`) and `signals check`'s lines for
 the file written. A set that isn't OBDb's is an `error` line and exit 3.
 
-In the app, **Import an OBDb set** in Settings' Vehicle section converts
+In the app, **Import an OBDb set** on Settings' Signals page converts
 a set for the picked vehicle, with no session connected (on Android
 through the document picker). The **OBDb model year** beside it is the
 year to convert for: typed, or filled in from a VIN, the one typed under

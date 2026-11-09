@@ -426,13 +426,23 @@ jobs:
 
       # From its GitHub release, checked against its SHA-256 (winget's
       # manifest for 0.9.9.0 gives the same), rather than Chocolatey's
-      # community feed, whose outages fail the job. An Inno Setup
-      # installer, into Program Files, where coverage.sh looks for it.
+      # community feed, whose outages fail the job. The asset URL's host
+      # can answer 504 for long stretches, so a failed download falls
+      # back to the API through gh. An Inno Setup installer, into
+      # Program Files, where coverage.sh looks for it.
       - name: Install OpenCppCoverage
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $exe = "$env:RUNNER_TEMP\OpenCppCoverageSetup-x64-0.9.9.0.exe"
-          Invoke-WebRequest -Uri 'https://github.com/OpenCppCoverage/OpenCppCoverage/releases/download/release-0.9.9.0/OpenCppCoverageSetup-x64-0.9.9.0.exe' `
-            -OutFile $exe -MaximumRetryCount 3 -RetryIntervalSec 10
+          try {
+            Invoke-WebRequest -Uri 'https://github.com/OpenCppCoverage/OpenCppCoverage/releases/download/release-0.9.9.0/OpenCppCoverageSetup-x64-0.9.9.0.exe' `
+              -OutFile $exe -MaximumRetryCount 3 -RetryIntervalSec 10
+          } catch {
+            Write-Warning "Invoke-WebRequest failed ($_); trying gh release download"
+            gh release download release-0.9.9.0 -R OpenCppCoverage/OpenCppCoverage -p OpenCppCoverageSetup-x64-0.9.9.0.exe -O $exe --clobber
+            if ($LASTEXITCODE -ne 0) { Write-Error 'could not download OpenCppCoverage'; exit 1 }
+          }
           $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash
           if ($sha -ne '2295a733da39412c61e4f478677519dd0bb1893d88313ce56b468c9e50517888') {
             Write-Error "unexpected SHA-256 $sha"; exit 1
@@ -676,9 +686,10 @@ jobs:
           cmake --build build
 
       # linuxdeploy and its Qt plugin, which make-appimage.sh downloads
-      # from GitHub's releases (a 504 there has failed the job) and checks
-      # by SHA-256 either way. Keyed on the script, which pins them; one
-      # copy an arch, saved on main's pushes only.
+      # from GitHub's releases (curl with retries, then the API through
+      # gh, since the asset URLs' host can answer 504 for long stretches)
+      # and checks by SHA-256 either way. Keyed on the script, which pins
+      # them; one copy an arch, saved on main's pushes only.
       - name: Restore linuxdeploy from the cache
         id: linuxdeploy-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -687,6 +698,8 @@ jobs:
           key: linuxdeploy-${{ runner.arch }}-${{ hashFiles('packaging/linux/make-appimage.sh') }}
 
       - name: Pack and check the AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           QMAKE="$QT_ROOT_DIR/bin/qmake" bash packaging/linux/make-appimage.sh "$VERSION-ci" build dist

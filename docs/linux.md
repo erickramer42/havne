@@ -25,8 +25,10 @@ chmod +x havne-X.Y.Z-linux-x86_64.AppImage
 ./havne-X.Y.Z-linux-x86_64.AppImage
 ```
 
-It carries Qt, its QML modules and the X11 libraries Qt needs. It takes
-the rest from the system:
+It carries Qt, its QML modules and the X11 libraries Qt needs, with
+their licenses in `usr/share/doc/havne/` inside it
+(`./havne-X.Y.Z-linux-x86_64.AppImage --appimage-extract` unpacks it to
+`squashfs-root/`). It takes the rest from the system:
 
 - **OpenGL and fonts:** `libGL`, `libEGL` and `libGLX` belong to the
   machine's graphics driver, and fontconfig and freetype to the
@@ -108,6 +110,31 @@ port". Add yourself once, then log out and back in:
 ```sh
 sudo usermod -aG dialout "$USER"     # Arch: uucp
 ```
+
+**ModemManager probes serial ports.** On a stock Ubuntu desktop,
+ModemManager probes an `rfcomm` port for several seconds
+after each open, which breaks an adapter's session (stalls of 5 s,
+"the port is in use by another program", a hard failure), and
+`systemctl stop` doesn't hold, since D-Bus starts it again. A udev rule
+that tells it to ignore the adapters fixes that with ModemManager
+running, here for an OBDX Pro VX (USB `0483:5740`) and every `rfcomm`
+port:
+
+```
+KERNEL=="rfcomm*", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", ENV{ID_MM_DEVICE_IGNORE}="1"
+```
+
+Eight sessions ran this way on Ubuntu 26.04 with ModemManager
+active and no ModemManager line naming either port
+([2026-11-08-linux-car](bench-sessions/2026-11-08-linux-car.md)). The
+alternative is `sudo systemctl mask --now ModemManager`, which turns off
+modem support for the whole machine.
+
+**Leave about a second between sessions on an `rfcomm` port.** A connect
+made within a few hundred milliseconds of a close can fail with "the
+port failed (reading the reply to ATZ)"; on one OBDLink MX+, connects
+500 ms and more after a close succeeded every time (the same sheet).
 
 The Bluetooth adapter picker and BLE adapters are Android's; on the
 Linux desktop a Classic adapter goes through `rfcomm` as above.
@@ -287,9 +314,17 @@ counts the frames per CAN ID.
   x86_64, and on GitHub's ARM runner builds and checks the aarch64
   AppImage and core packages only. The release's own arm64 files run
   there too: the deb's `havne-cli` streams the mock at the release's
-  version, and the AppImage stays up 10 s offscreen (v0.5.0,
-  2026-11-06).
-- **Not yet:** an ELM327 adapter
-  on a Linux machine (the serial code is tested against a fake adapter
-  on a pseudo-terminal), and a requesting session sending through a
-  real CAN controller (one with one-shot mode). [testing.md](testing.md) keeps the details.
+  version, the AppImage stays up 10 s offscreen, and the aarch64 wheel
+  installs into a fresh venv with `pip --no-index` and reads `mock://`
+  through `python/examples/read_pids.py` (v0.6.0, 2026-11-07).
+- **A laptop on native Ubuntu 26.04** (no WSL), on the test car's OBD
+  port through a Y-splitter, `dev` at bbc9050, built with GCC 15.2 and
+  Qt 6.12.0: the OBDLink MX+ over Bluetooth through `rfcomm`, the OBDX
+  Pro VX in ELM mode on USB and over its WiFi, and the Innomaker USB2CAN
+  listening on `can0`; `havne-cli log` at 1, 4 and 8 signals on each
+  adapter, and the VX's monitor hearing multi-frame replies while the
+  MX+ asked
+  ([2026-11-08-linux-car](bench-sessions/2026-11-08-linux-car.md)).
+- **Not yet:** a requesting session sending through a real CAN
+  controller (one with one-shot mode). [testing.md](testing.md) keeps
+  the details.

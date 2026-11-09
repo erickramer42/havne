@@ -1,7 +1,5 @@
 // File/layer: app/qml/GaugeBase.qml | Qt6 Quick, UI layer
-// Testing: manual smoke via DashboardPage under mock://demo, needles
-//          ease between batches, sweep once per session, peaks reset;
-//          test_qml (tst_dashboard.qml) the held peak of a replay
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
 
 import QtQuick
 
@@ -29,7 +27,11 @@ Item {
     property real coldBelow: NaN
     property real warnFrom: NaN
     property real dangerFrom: NaN
-    property color accent: Qt.lighter(Theme.primary, 1.3)   // normal-zone color
+    property color accent: Theme.gaugeValue   // normal-zone color
+    // The hold shown: a kind with a scale marks its peak on it (the dial's
+    // tell-tale, the bar's and the ring's mark, the cells' notch); off by
+    // default. Reset peaks clears it
+    property bool showPeak: false
 
     // A little over one batch interval, so motion never stalls between
     // samples. Shift lights want less.
@@ -38,7 +40,13 @@ Item {
     // Drawn position 0..1: the eased value, or the sweep while it plays
     readonly property real fraction: Math.max(sweepPos, fractionOf(smoothed))
     readonly property bool sweeping: sweepAnim.running
-    readonly property string valueText: hasValue ? format(value) : qsTr("—")
+    // Past dangerFrom: the readout gains a DangerMark and the zone's stroke
+    // is heavier, so danger is more than a hue
+    readonly property bool inDanger: hasValue && !isNaN(dangerFrom) && value >= dangerFrom
+    // An enumeration's label, shown in place of the number
+    property string valueLabel: ""
+    readonly property string valueText: hasValue ? (valueLabel !== "" ? valueLabel : format(value))
+                                                 : qsTr("—")
 
     property real peakValue: NaN
     property real lowValue: NaN
@@ -47,11 +55,19 @@ Item {
 
     function fractionOf(v) { return Math.max(0, Math.min(1, (v - from) / (to - from))) }
     function format(v) { return Number(v).toLocaleString(Qt.locale(), 'f', decimals) }
-    // Scale labels are whole numbers, whatever the readout's decimals
-    function formatScale(v) { return Number(v).toLocaleString(Qt.locale(), 'f', 0) }
+    // Scale labels carry only the decimals the value needs: none for a
+    // whole number, up to two under 10 and one under 100, whatever the
+    // readout's decimals
+    function formatScale(v) {
+        const n = Number(v)
+        const most = Math.abs(n) < 10 ? 2 : Math.abs(n) < 100 ? 1 : 0
+        let d = 0
+        while (d < most && Math.abs(n - Number(n.toFixed(d))) > 1e-9) ++d
+        return n.toLocaleString(Qt.locale(), 'f', d)
+    }
     function zoneColor(v, normal) {
-        if (!isNaN(dangerFrom) && v >= dangerFrom) return Theme.danger
-        if (!isNaN(warnFrom) && v >= warnFrom) return Theme.warning
+        if (!isNaN(dangerFrom) && v >= dangerFrom) return Theme.gaugeDanger
+        if (!isNaN(warnFrom) && v >= warnFrom) return Theme.gaugeWarn
         if (!isNaN(coldBelow) && v < coldBelow) return Theme.info
         return normal
     }

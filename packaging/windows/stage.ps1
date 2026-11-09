@@ -95,6 +95,11 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 # The deployed app as windeployqt left it, minus the link-time leftovers
 Copy-Item -Recurse (Join-Path $appDir '*') $stage
 Get-ChildItem $stage -Recurse -Include *.pdb, *.lib, *.exp, *.ilk | Remove-Item -Force
+# Microsoft's shader compilers never ship: windeployqt leaves them out, but
+# a build folder keeps whatever an earlier deployment put there
+Get-ChildItem $stage -Recurse -File |
+    Where-Object { $_.Name -match '^(d3dcompiler_\d+|dxcompiler|dxil)\.dll$' } |
+    Remove-Item -Force
 # The app-local CRT: windeployqt runs with --no-compiler-runtime
 Copy-Item (Join-Path $crt.FullName '*.dll') $stage
 Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $stage 'LICENSE.txt')
@@ -219,8 +224,6 @@ function DllVersion([string] $path) {
 $groups = [ordered]@{
     'Qt'                                 = @{ match = '^Qt6.*\.dll$'; supplier = 'Organization: The Qt Company'; license = 'LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only'; versionOf = 'Qt6Core.dll' }
     'Microsoft Visual C++ runtime'       = @{ match = '^(vcruntime|msvcp|concrt|vccorlib)\d+.*\.dll$'; supplier = 'Organization: Microsoft'; versionOf = 'vcruntime140.dll'; comment = 'app-local' }
-    'Microsoft D3DCompiler'              = @{ match = '^D3Dcompiler_47\.dll$'; supplier = 'Organization: Microsoft'; versionOf = 'D3Dcompiler_47.dll' }
-    'Microsoft DirectX Shader Compiler'  = @{ match = '^(dxcompiler|dxil)\.dll$'; supplier = 'Organization: Microsoft'; versionOf = 'dxcompiler.dll' }
     'Mesa llvmpipe'                      = @{ match = '^opengl32sw\.dll$'; versionOf = 'opengl32sw.dll'; comment = 'opengl32sw.dll, the software OpenGL fallback windeployqt deploys' }
 }
 $files = @{}

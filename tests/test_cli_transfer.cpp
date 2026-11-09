@@ -63,6 +63,36 @@ TEST(CliTransferTest, ExportTakesARecordingAFileAFormatAndARange)
     EXPECT_EQ(plain.options.flags, 0u);
     EXPECT_EQ(plain.options.from_us, 0u);
     EXPECT_EQ(plain.options.to_us, 0u);
+    EXPECT_EQ(plain.options.layout, 0u);
+    EXPECT_EQ(plain.options.columns_utf8, nullptr);
+
+    /* The CSV's shape (ADR-0056 section 5): wide by default, its rows,
+     * units and columns; long with none of them */
+    Args c({"havne-cli", "export", "rec", "out.csv", "--format", "csv",
+            "--rows", "250", "--units", "imperial", "--signal", "RPM",
+            "--signal", "Speed"});
+    cli::ExportArgs wide;
+    ASSERT_TRUE(cli::parse_export(c.argc(), c.argv.data(), wide, &why)) << why;
+    EXPECT_EQ(wide.options.layout, ECUIO_CSV_WIDE);
+    EXPECT_EQ(wide.options.row_ms, 250u);
+    EXPECT_EQ(wide.options.units, ECUIO_UNITS_IMPERIAL);
+    ASSERT_EQ(wide.options.column_count, 2u);
+    EXPECT_STREQ(wide.options.columns_utf8[0], "RPM");
+    EXPECT_STREQ(wide.options.columns_utf8[1], "Speed");
+    Args d({"havne-cli", "export", "rec", "out.csv", "--format", "csv",
+            "--layout", "wide", "--rows", "sweep", "--units", "metric"});
+    cli::ExportArgs sweep;
+    ASSERT_TRUE(cli::parse_export(d.argc(), d.argv.data(), sweep, &why)) << why;
+    EXPECT_EQ(sweep.options.layout, ECUIO_CSV_WIDE);
+    EXPECT_EQ(sweep.options.row_ms, 0u);
+    EXPECT_EQ(sweep.options.units, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(sweep.options.column_count, 0u);
+    Args e({"havne-cli", "export", "rec", "out.csv", "--layout", "long",
+            "--format", "csv"});
+    cli::ExportArgs tall;
+    ASSERT_TRUE(cli::parse_export(e.argc(), e.argv.data(), tall, &why)) << why;
+    EXPECT_EQ(tall.options.layout, ECUIO_CSV_LONG);
+    EXPECT_EQ(tall.options.row_ms, 0u);
 }
 
 TEST(CliTransferTest, ExportsBadFormsAreUsage)
@@ -89,6 +119,34 @@ TEST(CliTransferTest, ExportsBadFormsAreUsage)
     EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
                           "csv", "--scrub"}),
               "unexpected '--scrub'");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "csv", "--layout", "tall"}),
+              "--layout takes wide or long");
+    for (const char* bad : {"0", "1.5", "86400001", "ms", ""}) {
+        EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                              "csv", "--rows", bad}),
+                  "--rows takes sweep or a number of milliseconds, 1 to "
+                  "86400000")
+            << bad;
+    }
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "csv", "--units", "si"}),
+              "--units takes metric or imperial");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "csv", "--signal", ""}),
+              "--signal takes a signal's name");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "pcapng", "--rows", "100"}),
+              "--layout, --rows, --units and --signal go with --format csv");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--layout",
+                          "wide", "--format", "folder"}),
+              "--layout, --rows, --units and --signal go with --format csv");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "csv", "--layout", "long", "--signal", "RPM"}),
+              "--rows, --units and --signal go with the wide layout");
+    EXPECT_EQ(export_why({"havne-cli", "export", "rec", "out", "--format",
+                          "csv", "--layout", "long", "--units", "metric"}),
+              "--rows, --units and --signal go with the wide layout");
 }
 
 TEST(CliTransferTest, ImportTakesACandumpLogAFolderAndAnInterface)
@@ -129,8 +187,6 @@ TEST(CliTransferTest, ImportTakesACsvAFolderAndItsMap)
     EXPECT_STREQ(im.map_path, "map.json");
     EXPECT_EQ(im.options.interface_utf8, nullptr);
     EXPECT_EQ(im.options.column_map_utf8, nullptr); // main reads the file
-    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec"}),
-              "import csv needs --map <map.json>, the file's column map");
     EXPECT_EQ(import_why(
                   {"havne-cli", "import", "csv", "log.csv", "--map", "m.json"}),
               "import needs the file and the folder to make");
@@ -147,6 +203,20 @@ TEST(CliTransferTest, ImportTakesACsvAFolderAndItsMap)
 std::string text(const cli::Line& l)
 {
     return std::string(l.data(), l.size());
+}
+
+TEST(CliTransferTest, TheNamedColumnsTheRecordingLacksAreListedInOrder)
+{
+    const std::vector<std::string> recorded = {"RPM", "Speed", "Boost, abs"};
+    const std::vector<const char*> named = {"Nothing", "Speed", "rpm",
+                                            "Boost, abs", "RPM"};
+    const std::vector<const char*> missing =
+        cli::missing_names(named, recorded);
+    ASSERT_EQ(missing.size(), 2u);
+    EXPECT_STREQ(missing[0], "Nothing");
+    EXPECT_STREQ(missing[1], "rpm") << "names are matched whole";
+    EXPECT_TRUE(cli::missing_names({}, recorded).empty());
+    EXPECT_EQ(cli::missing_names({"RPM"}, {}).size(), 1u);
 }
 
 TEST(CliTransferTest, TheLinesSayWhatCoreReports)
@@ -175,14 +245,38 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
     ecuio_export_report_t v{};
     v.values = 40;
     v.signal_count = 3;
+    v.rows = 14;
     v.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES] = 2;
     cli::Line cl(buf, sizeof buf);
     cli::exported_line(cl, csv, v);
     EXPECT_EQ(text(cl),
               "{\"type\":\"exported\",\"format\":\"csv\",\"file\":"
               "\"out.csv\",\"scrubbed\":true,\"frames\":0,\"made_up\":0,"
-              "\"values\":40,\"signals\":3,\"left_out\":{\"identification\":0,"
+              "\"values\":40,\"signals\":3,\"layout\":\"wide\",\"rows\":14,"
+              "\"row_ms\":0,\"missing\":0,\"left_out\":{\"identification\":0,"
               "\"unattributable\":0,\"text_values\":2,\"activity\":0}}");
+    cli::Line ml(buf, sizeof buf);
+    cli::exported_line(ml, csv, v, 2);
+    EXPECT_NE(text(ml).find("\"row_ms\":0,\"missing\":2,"), std::string::npos)
+        << text(ml);
+    Args g({"havne-cli", "export", "rec", "grid.csv", "--format", "csv",
+            "--rows", "100"});
+    cli::ExportArgs grid;
+    ASSERT_TRUE(cli::parse_export(g.argc(), g.argv.data(), grid, &why));
+    cli::Line gl(buf, sizeof buf);
+    cli::exported_line(gl, grid, v);
+    EXPECT_NE(text(gl).find("\"layout\":\"wide\",\"rows\":14,\"row_ms\":100,"),
+              std::string::npos)
+        << text(gl);
+    Args t({"havne-cli", "export", "rec", "long.csv", "--format", "csv",
+            "--layout", "long"});
+    cli::ExportArgs tall;
+    ASSERT_TRUE(cli::parse_export(t.argc(), t.argv.data(), tall, &why));
+    cli::Line tl(buf, sizeof buf);
+    cli::exported_line(tl, tall, v);
+    EXPECT_NE(text(tl).find("\"layout\":\"long\",\"rows\":14,\"row_ms\":0,"),
+              std::string::npos)
+        << text(tl);
 
     Args d({"havne-cli", "export", "rec", "copy", "--format", "folder"});
     cli::ExportArgs folder;
@@ -248,6 +342,89 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "{\"type\":\"imported\",\"format\":\"csv\",\"folder\":\"rec\","
               "\"lines\":11,\"values\":22,\"columns_ignored\":1,"
               "\"utc_start_us\":1793883802250000,\"duration_us\":3500000}");
+}
+
+// With no --map the map is guessed: --time-unit gives a plain time its
+// unit, --print-map prints the guess and takes no folder
+TEST(CliTransferTest, ImportGuessesACsvsMapWithoutOne)
+{
+    Args a(
+        {"havne-cli", "import", "csv", "log.csv", "rec", "--time-unit", "ms"});
+    cli::ImportArgs im;
+    std::string why;
+    ASSERT_TRUE(cli::parse_import(a.argc(), a.argv.data(), im, &why)) << why;
+    EXPECT_EQ(im.map_path, nullptr);
+    EXPECT_STREQ(im.time_unit, "ms");
+    EXPECT_FALSE(im.print_map);
+    EXPECT_STREQ(im.options.out_folder_utf8, "rec");
+    Args b({"havne-cli", "import", "csv", "--print-map", "log.csv"});
+    cli::ImportArgs printed;
+    ASSERT_TRUE(cli::parse_import(b.argc(), b.argv.data(), printed, &why))
+        << why;
+    EXPECT_TRUE(printed.print_map);
+    EXPECT_EQ(printed.time_unit, nullptr);
+    EXPECT_STREQ(printed.options.in_path_utf8, "log.csv");
+    EXPECT_EQ(printed.folder, nullptr);
+    for (const char* unit : {"s", "ms", "us"}) {
+        Args c({"havne-cli", "import", "csv", "log.csv", "rec", "--time-unit",
+                unit});
+        cli::ImportArgs each;
+        ASSERT_TRUE(cli::parse_import(c.argc(), c.argv.data(), each, &why))
+            << unit;
+        EXPECT_STREQ(each.time_unit, unit);
+    }
+    for (const char* bad : {"S", "sec", "h", ""}) {
+        EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec",
+                              "--time-unit", bad}),
+                  "--time-unit takes s, ms or us")
+            << bad;
+    }
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec",
+                          "--print-map"}),
+              "import csv --print-map takes one file and no folder");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv",
+                          "--print-map", "rec"}),
+              "import csv --print-map takes one file and no folder");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv", "rec",
+                          "--map", "m.json", "--time-unit", "s"}),
+              "--time-unit is a guessed map's: a map given with --map names "
+              "its own");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "log.csv",
+                          "--print-map", "--map", "m.json"}),
+              "--print-map prints a guessed map: give no --map");
+    EXPECT_EQ(import_why({"havne-cli", "import", "csv", "--print-map"}),
+              "import needs the file and the folder to make");
+    EXPECT_EQ(import_why({"havne-cli", "import", "candump", "bus.log", "rec",
+                          "--time-unit", "s"}),
+              "unexpected '--time-unit'");
+    EXPECT_EQ(import_why(
+                  {"havne-cli", "import", "candump", "bus.log", "--print-map"}),
+              "unexpected '--print-map'");
+}
+
+// The guess's text on one line, its keys the line's own: every line
+// break and the indent after it go, a string's spaces stay
+TEST(CliTransferTest, AGuessIsOneLine)
+{
+    /* Spaces inside a string stay, an escaped quote doesn't end one */
+    const std::string guess_text =
+        "{\n\"map\": {\n  \"havne_column_map\": 1,\n"
+        "  \"signals\": [\n    {\"column\": \"Load  [%]\""
+        ", \"name\": \"a\\nb, \\\"c d\\\": e\"}\n  ]\n},\n"
+        "\"columns\": [\n  {\"column\": \"x\", "
+        "\"used\": true}\n],\n\"notes\": [\"a, b: c\"]\n}\n";
+    EXPECT_EQ(cli::one_line(guess_text),
+              "{\"map\":{\"havne_column_map\":1,\"signals\":[{\"column\":"
+              "\"Load  [%]\",\"name\":\"a\\nb, \\\"c d\\\": e\"}]},"
+              "\"columns\":[{\"column\":\"x\",\"used\":true}],"
+              "\"notes\":[\"a, b: c\"]}");
+    std::vector<char> buf(cli::guessed_line_bytes(guess_text));
+    cli::Line l(buf.data(), buf.size());
+    cli::guessed_line(l, guess_text);
+    ASSERT_TRUE(l.finish());
+    EXPECT_EQ(text(l).rfind("{\"type\":\"guessed\",\"map\":{", 0), 0u)
+        << text(l);
+    EXPECT_EQ(text(l).find('\n'), text(l).size() - 1);
 }
 
 // Paths at their longest escape (every byte a control character's six)

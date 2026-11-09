@@ -131,6 +131,309 @@ TestCase {
         compare(page.series(400).length, 3, "its numbers are plotted")
     }
 
+    // Import: a picked file's kind guessed from its first line; a CSV
+    // given a column map file imports through it and joins the list (the
+    // guess is skipped); a candump
+    // log of two buses is refused in core's words, the interface field
+    // shows, and the bus named imports; the kind switches; Cancel closes
+    function test_importMakesARecordingOfALoggersFile() {
+        const page = createPage()
+        verify(find(page, "importButton").visible)
+        const panel = find(page, "importPanel")
+        const note = find(page, "importNote")
+        verify(!panel.visible, "closed until a file is picked")
+
+        const csv = Harness.writeScratchFile("import-log.csv",
+                                             "time,rpm,note\n0,800,a\n0.5,900,b\n")
+        const map = Harness.writeScratchFile("import-map.json",
+            '{"havne_column_map": 1, "time": {"column": "time", "unit": "s"}, '
+            + '"signals": [{"column": "rpm", "name": "RPM", "unit": "rpm"}]}')
+        page.chooseImportFile(csv)
+        verify(panel.visible)
+        compare(find(page, "importFileName").text, "Import import-log.csv")
+        verify(find(page, "importKind_csv").selected, "guessed from its first line")
+        compare(find(page, "importMapName").text, "Guessed from the header")
+        verify(!find(page, "importInterface").visible)
+        tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
+        verify(!find(page, "importStart").enabled, "its time has no unit yet")
+        page.chooseImportMap(map)
+        verify(!find(page, "guessPreview").visible, "a map file skips the guess")
+        compare(find(page, "importMapName").text, "import-map.json")
+        verify(find(page, "importStart").enabled)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "Imported 2 values; columns ignored: 1")
+        verify(note.visible)
+        verify(Qt.colorEqual(note.color, Theme.success))
+        verify(!panel.visible, "done with the file")
+        verify(page.recordings.some(r => r.title.endsWith(" · CSV import")),
+               "it joins the list")
+
+        const log = Harness.writeScratchFile("import-two.log",
+            "(1.000000) can0 7E8#01\n(1.100000) can1 123#02\n(1.600000) can1 123#03\n")
+        page.chooseImportFile(log)
+        verify(!note.visible, "a new file, no old words")
+        verify(find(page, "importKind_candump").selected, "guessed from its first line")
+        verify(!find(page, "importMapName").visible, "a candump log has no column map")
+        verify(!find(page, "importInterface").visible, "until core asks for it")
+        verify(find(page, "importStart").enabled)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "the log has several interfaces: name one of can0 and can1")
+        verify(Qt.colorEqual(note.color, Theme.danger))
+        verify(panel.visible, "the file kept")
+        verify(find(page, "importInterface").visible)
+        find(page, "importInterface").text = "can1"
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "Imported 2 frames over 0.5 s")
+        verify(!panel.visible)
+        verify(page.recordings.some(r => r.title.endsWith(" · candump import")))
+
+        // The next log needs no interface: the one typed for the last is gone
+        const one = Harness.writeScratchFile("import-one.log", "(1.000000) can0 7E8#01\n")
+        page.chooseImportFile(one)
+        compare(find(page, "importInterface").text, "")
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(note.text, "Imported 1 frames over 0.0 s")
+
+        page.chooseImportFile(log)
+        find(page, "importKind_csv").clicked()
+        compare(page.importKind, RecordingImport.Csv)
+        tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
+        verify(!find(page, "importStart").enabled, "a candump log guesses no map")
+        find(page, "importCancel").clicked()
+        verify(!panel.visible)
+        verify(!note.visible)
+    }
+
+    // Waits for a picked CSV's guess to show
+    function guessed(page) {
+        tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
+                  "the guess ends")
+        return find(page, "guessPreview")
+    }
+    function guessRow(preview, i) {
+        return find(preview, "guessRow_" + i)
+    }
+
+    // A CSV with no column map: its guess is shown (the time column and
+    // its unit from the header, each other column with its name, unit and
+    // kind and the first rows of its cells); an edit changes the map the
+    // import gets, and the recording holds what the edits left
+    function test_aCsvIsImportedThroughItsGuessedMapWithEdits() {
+        const page = createPage()
+        const csv = Harness.writeScratchFile("guess-log.csv",
+            "Time (ms),RPM [rpm],Note,Load [%]\n0,800,a,12\n500,900,b,30\n1000,950,c,55\n")
+        page.chooseImportFile(csv)
+        const preview = guessed(page)
+        verify(preview.visible)
+        compare(find(page, "importMapName").text, "Guessed from the header")
+        compare(find(preview, "guessTime").text, "Time: Time (ms)")
+        compare(find(preview, "guessTimeFixed").text, "Its unit: ms")
+        compare(find(preview, "guessTimeSamples").text, "0  500  1000")
+        verify(!find(preview, "guessWaiting").visible)
+        compare(preview.columns.length, 3, "the header columns but the time's")
+        const rpm = guessRow(preview, 0)
+        compare(find(rpm, "name").text, "RPM")
+        compare(find(rpm, "unit").text, "rpm")
+        compare(find(rpm, "kind").text, "number")
+        compare(find(rpm, "samples").text, "800  900  950")
+        compare(find(guessRow(preview, 1), "kind").text, "text")
+        verify(find(page, "importStart").enabled, "its unit is known")
+
+        // Edits: a name, Note out, Load's kind text
+        find(rpm, "name").text = "Engine speed"
+        const note = find(guessRow(preview, 1), "include")
+        note.toggle()
+        note.toggled()
+        compare(preview.included, 2)
+        find(guessRow(preview, 2), "kind").clicked()
+        compare(find(guessRow(preview, 2), "kind").text, "text")
+        const map = JSON.parse(preview.mapText())
+        compare(map.signals.length, 2)
+        compare(map.signals[0].name, "Engine speed")
+        compare(map.signals[1].column, "Load [%]")
+        compare(map.signals[1].kind, "text")
+
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(find(page, "importNote").text, "Imported 6 values; columns ignored: 1")
+        verify(!find(page, "importPanel").visible, "done with the file")
+    }
+
+    // A time of plain numbers has no unit to guess: Import waits for the
+    // choice and says so
+    function test_aTimeWithoutAUnitWaitsForOne() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-plain.csv",
+            "time,rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        verify(find(preview, "guessWaiting").visible)
+        compare(find(preview, "guessWaiting").text, "Choose the time column's unit to import")
+        verify(!find(page, "importStart").enabled)
+        find(preview, "guessTimeUnit_ms").clicked()
+        verify(!find(preview, "guessWaiting").visible)
+        verify(find(page, "importStart").enabled)
+        compare(JSON.parse(preview.mapText()).time.unit, "ms")
+        find(preview, "guessTimeUnit_us").clicked()
+        compare(JSON.parse(preview.mapText()).time.unit, "us")
+    }
+
+    // Save as map is enabled exactly when Import would be: a map with no
+    // time unit is one every later import refuses
+    function test_saveWaitsForATimeUnitToo() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-save-unit.csv",
+            "time,rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        verify(!preview.ready)
+        verify(preview.included > 0)
+        verify(!find(preview, "saveMapButton").enabled, "no unit chosen")
+        find(preview, "guessTimeUnit_ms").clicked()
+        verify(find(preview, "saveMapButton").enabled, "unit chosen")
+    }
+
+    // A column whose header the file has twice is left out for good
+    function test_aDuplicatedHeaderColumnCantBePutBack() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-dup.csv",
+            "time (s),rpm,dup,dup\n0,800,1,2\n1,900,3,4\n2,950,5,6\n"))
+        const preview = guessed(page)
+        compare(preview.columns.length, 3)
+        verify(!find(guessRow(preview, 1), "include").enabled, "the header names it twice")
+        verify(!find(guessRow(preview, 2), "include").enabled)
+        verify(find(guessRow(preview, 1), "why").text.indexOf("put it back") < 0)
+    }
+
+    // A time with a zone to give, not a unit, can't be fixed here
+    function test_aTimeThatNeedsAZoneAsksForAMap() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-zone.csv",
+            "time,rpm\n2026-11-05T22:03:22,800\n2026-11-05T22:03:23,900\n2026-11-05T22:03:24,950\n"))
+        const preview = guessed(page)
+        verify(find(preview, "guessWaiting").visible)
+        verify(find(preview, "guessWaiting").text.indexOf("column map that says its zone") >= 0)
+        verify(!find(preview, "guessTimeUnit_ms").visible, "no unit to choose")
+        verify(!find(page, "importStart").enabled)
+    }
+
+    // A file core can't guess a map for is refused in core's words, with
+    // the way out
+    function test_aFileWithNoHeaderIsRefusedInCoresWords() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-none.csv",
+                                                       "just,words\nmore,words\n"))
+        guessed(page)
+        const note = find(page, "importNote")
+        verify(note.visible)
+        verify(Qt.colorEqual(note.color, Theme.danger))
+        verify(note.text.startsWith("no row within the file's first 1000"), note.text)
+        verify(note.text.endsWith("Column map... picks a map instead."), note.text)
+        verify(!find(page, "importStart").enabled)
+        verify(find(page, "importMapButton").enabled)
+    }
+
+    // A column the guess left out can be put back, as text named by its
+    // header; one with no header can't
+    function test_aLeftOutColumnCanBePutBack() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-back.csv",
+            "time (s),rpm,empty,\n0,800,,\n1,900,,\n2,950,,\n"))
+        const preview = guessed(page)
+        compare(preview.columns.length, 3)
+        compare(preview.included, 1)
+        const empty = guessRow(preview, 1)
+        verify(find(empty, "why").visible)
+        verify(find(empty, "why").text.indexOf("Check it to put it back") >= 0, find(empty, "why").text)
+        verify(find(empty, "include").enabled)
+        const unnamed = guessRow(preview, 2)
+        verify(!find(unnamed, "include").enabled, "no header to name it by")
+        verify(find(unnamed, "why").text.indexOf("put it back") < 0)
+        const box = find(empty, "include")
+        box.toggle()
+        box.toggled()
+        compare(preview.included, 2)
+        compare(find(empty, "name").text, "empty")
+        compare(find(empty, "kind").text, "text")
+        const map = JSON.parse(preview.mapText())
+        compare(map.signals.map(s => s.column).join(), "rpm,empty")
+    }
+
+    // A refused import keeps the panel and the edits; core's words say why
+    function test_aRefusedGuessImportKeepsItsEdits() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
+            "time (s),rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        const longName = "n".repeat(40)
+        find(guessRow(preview, 0), "name").text = longName
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        verify(page.importFailed)
+        verify(Qt.colorEqual(find(page, "importNote").color, Theme.danger))
+        verify(find(page, "importPanel").visible, "the panel stays")
+        compare(find(guessRow(preview, 0), "name").text, longName, "the edit stays")
+        find(guessRow(preview, 0), "name").text = "RPM"
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && !page.importFailed, 10000,
+                  "the corrected import ends")
+        verify(!find(page, "importPanel").visible)
+    }
+
+    // Save as map keeps the edited map under a safe name, never over
+    // another; it is offered next time, and picking it skips the guess
+    function test_aGuessedMapIsSavedAndOfferedNextTime() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-save.csv",
+            "time (s),rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        const stamp = String(Date.now())
+        const safe = "my-map-" + stamp
+        find(preview, "saveMapName").text = "my map " + stamp
+        find(preview, "saveMapButton").clicked()
+        compare(find(preview, "saveMapNote").text, "Saved as " + safe)
+        verify(!preview.saveFailed)
+        verify(page.savedMaps.some(m => m.name === safe), "listed")
+        find(preview, "saveMapButton").clicked()
+        verify(preview.saveFailed, "never over another")
+        compare(find(preview, "saveMapNote").text, "a map named " + safe + " is saved already")
+        find(preview, "saveMapName").text = ""
+        find(preview, "saveMapButton").clicked()
+        compare(find(preview, "saveMapNote").text, "give the map a name")
+        find(preview, "saveMapName").text = "left over"
+
+        // Next file: the saved map is offered; picking it skips the guess
+        page.chooseImportFile(Harness.writeScratchFile("guess-next.csv",
+            "time (s),rpm\n0,800\n1,900\n"))
+        verify(page.importGuessing, "reading the second file")
+        compare(find(preview, "saveMapNote").text, "", "the last file's note is gone while reading")
+        verify(!find(preview, "saveMapNote").visible)
+        const second = guessed(page)
+        compare(second, preview, "one preview serves each file")
+        compare(find(second, "saveMapNote").text, "", "the last file's note is gone")
+        verify(!find(second, "saveMapNote").visible)
+        compare(find(second, "saveMapName").text, "")
+        compare(second.columns.length, 1, "the second file's columns")
+        verify(find(page, "savedMaps").visible)
+        const at = page.savedMaps.findIndex(m => m.name === safe)
+        page.chooseImportMap(page.savedMaps[at].url)
+        compare(find(page, "importMapName").text, safe + ".json")
+        verify(!preview.visible)
+        verify(find(page, "importStart").enabled)
+        find(page, "useTheGuess").clicked()
+        guessed(page)
+        verify(preview.visible)
+        compare(find(page, "importMapName").text, "Guessed from the header")
+    }
+
     // Replay hands the row's replay:// URI on, for Main to put in
     // Settings' field
     function test_replayHandsItsUriOn() {
@@ -178,7 +481,8 @@ TestCase {
     // Open shows the recording: its signal plotted by default, the chart's
     // series over the whole recording, the check's findings listed
     // Save report: the whole recording's (the zoom never narrows it), on
-    // the view's thread, the note and one log line when it ends
+    // the view's thread, the picked vehicle's baseline named, the note and
+    // one log line when it ends
     function test_saveReportWritesTheWholeRecording() {
         const page = openFindings()
         const button = find(page, "saveReport")
@@ -188,6 +492,7 @@ TestCase {
         verify(page.viewT1 - page.viewT0 < 20000, "zoomed in")
         const url = Harness.writeScratchFile("findings.json", "")
         verify(url.toString() !== "")
+        page.vehicles = vehicleBook(startEarlyRow.folder)
         verify(page.saveReportTo(url, 1))
         const note = find(page, "reportNote")
         tryVerify(() => note.text.indexOf("Report saved: ") === 0, 10000, note.text)
@@ -197,12 +502,154 @@ TestCase {
         const report = JSON.parse(Harness.readScratchFile(url))
         compare(report.source.kind, "recording")
         compare(report.source.from_s, 0)
+        verify(report.baseline.read, "the baseline's start-early recording")
+        compare(report.baseline.started, "2026-11-06T15:00:00Z")
+        verify(!report.baseline.is_source, "another recording")
         verify(report.key_values.length > 0, "RPM's value at the end")
 
         // Another recording opened: the note is the old one's no more
         page.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the next opens")
         compare(note.text, "")
+    }
+
+    // The viewer's Frames view (ADR-0049's appendix "frames read back"):
+    // the switch is there for a recording with frames, the table holds the
+    // rows of the part in view, times on the viewer's axis, and a tap puts
+    // the cursor at the row's time
+    function test_theFramesViewShowsThePartInView() {
+        const page = openFindings()
+        const values = find(page, "detailView_values")
+        const frames = find(page, "detailView_frames")
+        verify(values.visible && frames.visible, "a recording with frames has the switch")
+        compare(page.detailView, "values", "the values each time it opens")
+        verify(find(page, "signalRows").visible)
+        verify(!find(page, "viewerFrames").visible)
+
+        mouseClick(frames)
+        verify(page.framesShown)
+        verify(find(page, "viewerFrames").visible)
+        verify(!find(page, "signalRows").visible, "the values give way")
+        verify(!find(page, "recordingFilter").visible)
+        const words = find(page, "framesWords")
+        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000,
+                  "the part in view is read: " + words.text)
+        const total = parseInt(words.text)
+        verify(total > 0, words.text)
+        const list = find(find(page, "viewerFrameTable"), "frameList")
+        compare(list.count, total)
+
+        // The part in view alone: zoomed to the first second there are
+        // fewer rows, once the view has rested
+        page.setView(0, 1000)
+        tryVerify(() => parseInt(words.text) < total, 10000,
+                  "the rows follow the view: " + words.text)
+
+        // The rows run oldest first in the viewer, each at its host_us:
+        // the first at 0.100 s, the frame's own 0.101 s not shown
+        tryVerify(() => list.itemAtIndex(0) !== null)
+        const first = list.itemAtIndex(0)
+        compare(first.model.timestampUs, 100000)
+
+        // A tap puts the cursor at the row's time
+        verify(!page.hasCursor)
+        mouseClick(find(first, "frameRowArea"))
+        verify(page.hasCursor)
+        compare(page.cursorMs, 100)
+
+        // A filter on the frames carries to nothing else: the next
+        // recording opened has none
+        mouseClick(find(page, "framesFilterToggle"))
+        const ids = find(page, "filterIds")
+        ids.text = "7E8"
+        find(page, "filterPanel").apply()
+        compare(find(page, "framesFilterToggle").text, "Filter (1)")
+
+        // Back to the values; the frames are let go
+        mouseClick(values)
+        verify(!page.framesShown)
+        verify(find(page, "signalRows").visible)
+        compare(page.detailView, "values")
+
+        page.backToList()
+        page.open(findingsRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens again")
+        compare(find(page, "filterIds").text, "")
+        compare(find(page, "framesFilterToggle").text, "Filter")
+    }
+
+    // The viewer's By ID list: one row per ID in view, and a tap on one
+    // puts its ID in the filter and returns to the table
+    function test_theViewersByIdListTakesATapAsAFilter() {
+        const page = openFindings()
+        mouseClick(find(page, "detailView_frames"))
+        const words = find(page, "framesWords")
+        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000, words.text)
+        verify(!find(page, "viewerFrameIds").visible, "the table first")
+
+        mouseClick(find(page, "framesTable_byId"))
+        verify(page.framesById)
+        const idsView = find(page, "viewerFrameIds")
+        verify(idsView.visible)
+        verify(!find(find(page, "viewerFrameTable"), "frameList").visible)
+        const ids = find(idsView, "idList")
+        tryVerify(() => ids.count >= 1 && ids.itemAtIndex(0) !== null && ids.height > 0
+                  && ids.itemAtIndex(0).width > 0, 10000, "the IDs show, laid out")
+        verify(idsView.refreshing, "read again while it shows")
+
+        const row = ids.itemAtIndex(0)
+        const id = row.model.arbId
+        mouseClick(find(row, "idRowArea"))
+        verify(!page.framesById, "back to the table")
+        verify(page.framesFilterOpen, "the filter opens")
+        compare(find(page, "filterIds").text, id.toString(16).toUpperCase())
+        compare(find(page, "framesFilterToggle").text, "Filter (2)", "the ID and its width")
+        verify(!idsView.refreshing, "not read while hidden")
+    }
+
+    function test_aRecordingWithNoFramesHasNoFramesSwitch() {
+        const page = createPage()
+        const folder = Harness.importCsvFixture("logger-a", "viewer-frames-import")
+        verify(folder !== "", "the import is made")
+        page.open({ title: "Imported", folder: folder })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        verify(!find(page, "detailView_frames").visible)
+        verify(!find(page, "detailView_values").visible)
+        compare(find(page, "viewerFrames").visible, false)
+    }
+
+    // A part with more rows than the table holds says where the table
+    // begins; a zoom into fewer drops the note
+    function test_aLongPartSaysWhereTheTableBegins() {
+        const folder = Harness.writeFramesRecording("viewer-frames-long", 10200, 1000)
+        verify(folder !== "")
+        const page = createPage()
+        page.open({ title: "Long", folder: folder })
+        // Each wait covers a read of 10,200 rows and a 10,000-row table
+        // on whatever else the machine is doing (a build beside the
+        // suite took the open past 10 s); the case measures the cap and
+        // the words, nothing about time, so the waits are long
+        const longWait = 60000
+        tryVerify(() => page.viewing && find(page, "detailView_frames").visible, longWait)
+        // The switch reaches its place at the layout's next polish: a press
+        // before that lands where it isn't
+        verify(waitForPolish(page.Window.window), "the viewer laid out")
+        mouseClick(find(page, "detailView_frames"))
+        verify(page.framesShown, "the press reached the switch")
+        const words = find(page, "framesWords")
+        tryVerify(() => words.text === "the first 10,000 frames from 0.0 s: zoom in for the rest",
+                  longWait, "the table's cap is said")
+        compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
+        page.setView(0, 2000)
+        tryVerify(() => words.text === "2000 frames in view", longWait, "the rows of 2 s")
+
+        // A view that does not start at the recording's start: the rows
+        // are those from its left edge
+        page.setView(5000, 6000)
+        tryVerify(() => words.text === "1001 frames in view", longWait, "the rows from 5 s")
+        const list = find(find(page, "viewerFrameTable"), "frameList")
+        tryVerify(() => list.itemAtIndex(0) !== null, longWait)
+        compare(list.itemAtIndex(0).model.timestampUs, 5000000)
     }
 
     function test_openShowsTheViewer() {

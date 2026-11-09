@@ -14,6 +14,7 @@
 #include "pluginstore.h"
 #include "signalstore.h"
 #include "framefilter.h"
+#include "recordingimport.h"
 #include "signalfilter.h"
 #include <QTimer>
 #include <QHash>
@@ -100,12 +101,15 @@ public:
     void setNewestFirst(bool newestFirst);
 
     // The filter (framefilter.h's syntax): the ID and data fields' text,
-    // FrameFilter::Direction and FrameFilter::Flag. A field that doesn't
-    // parse keeps the filter in force as it was; the answer is { ids,
-    // data }, each "" or the words for its field. A change shows the
+    // FrameFilter::Direction, FrameFilter::Flag, and the length and time
+    // fields' text. A field that doesn't parse keeps its part of the
+    // filter in force as it was; the answer is { ids, data, lengths,
+    // times }, each "" or the words for its field. A change shows the
     // rows anew and lets the selection go
     Q_INVOKABLE QVariantMap setFilter(const QString& ids, const QString& data,
-                                      int direction, int flag);
+                                      int direction, int flag,
+                                      const QString& lengths = QString(),
+                                      const QString& times = QString());
     int filterTerms() const { return m_filter.terms(); }
     // The flags a row shows, in words, the ID's width left to its column:
     // "FD BRS", "reassembled", "truncated", "after a loss", "error",
@@ -204,7 +208,8 @@ private:
     void notifySelected(int first, int last);
     bool shows(const Row& r) const
     {
-        return m_filter.matches(r.arbId, r.flags, r.data(), r.length);
+        return m_filter.matches(r.arbId, r.flags, r.timestampUs, r.data(),
+                                r.length);
     }
     // The ring's row for an arrival number it holds
     const Row& rowOfArrival(quint64 seq) const
@@ -253,8 +258,11 @@ public:
         ArbIdRole = Qt::UserRole + 1,
         ExtendedRole,
         CountRole,
-        RateRole,       // frames a second, a double
-        PayloadRole     // the newest payload, spaced hex
+        RateRole,    // frames a second, a double
+        PayloadRole, // the newest payload, spaced hex
+        ChangedRole  // the newest payload's byte positions that differ from
+                     // the frame before it (a list of ints; past the
+                     // shorter payload, every byte); none with one frame
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -272,6 +280,7 @@ private:
         int count = 0;
         double rate = 0.0;
         QByteArray payload; // the newest
+        QVariantList changed;
     };
     const FrameListModel* m_frames;
     std::vector<IdRow> m_rows;
@@ -354,32 +363,64 @@ public:
                          * a window's newest value still counts.
                          * Notified with ValueRole. */
         WindowLowRole,
-        RowRole,    /* the row in this model, which toggleSubscribed
+        RowRole,         /* the row in this model, which toggleSubscribed
                          * takes and chartData's `row` names, whatever
                          * row a filtered view shows it at */
-        HiddenRole, /* core reports it unsupported or absent
+        HiddenRole,      /* core reports it unsupported or absent
                          * (applyUnsupported, applyAbsent): Live
                          * leaves the row out */
-        GroupRole,  /* the def's group (ECUIO_SIGNAL_GROUP_*,
+        GroupRole,       /* the def's group (ECUIO_SIGNAL_GROUP_*,
                          * ADR-0050), for Live's filter. Fixed per
                          * signal set. */
-        LabelRole,  /* an enum row's label for its newest raw value
+        LabelRole,       /* an enum row's label for its newest raw value
                          * (ADR-0051), from the set's enums; "" for a
                          * value with none, which shows its number, and
                          * for any other kind. Notified with ValueRole. */
-        RefusedRole, /* the words of its ECU's negative reply to the
+        RefusedRole,     /* the words of its ECU's negative reply to the
                          * request that reads it ("Refused:
                          * requestOutOfRange (7F 22 31)", applyRefused,
                          * ADR-0051 section 3); "" while none refused it */
-        RefusedCodeRole /* that reply's bytes alone ("7F 22 31"), for a
+        RefusedCodeRole, /* that reply's bytes alone ("7F 22 31"), for a
                          * row too narrow for the words; notified with
                          * RefusedRole */
+        RefRole,         /* the def's reference across sets (ADR-0057):
+                         * "id:<n>" for a def of the mock or obd2 set
+                         * or of a file's extends base, "key:<k>" for a
+                         * file's own def, "" for any other set's
+                         * (uds-generic's). Fixed per signal set. */
+        RangeLowRole,    /* the lowest and highest value the def's field
+                         * decodes to (ecuio_def_range), displayed like
+                         * ValueRole. NaN means no range (core gives none:
+                         * a float, text or computed def, a range of no
+                         * width or a non-finite end); QML tests it with
+                         * isNaN. NaN isn't JSON (QJsonValue writes null,
+                         * which reads back as 0), so a layout file never
+                         * stores an end as is. Notified with UnitRole. */
+        RangeHighRole,
+        IsEnumRole /* the def's kind is ENUM. Fixed per signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
-    void setSignalSet(const ecuio_signal_set_t* set);
+    // file: the signal file whose set it is (SessionBridge::fileOfSet),
+    // for the rows' refs; nullptr for a built-in set or none
+    void setSignalSet(const ecuio_signal_set_t* set,
+                      const ecuio_signal_file_t* file = nullptr);
+    // A def's fixed facts beyond the def itself, the same for a row and
+    // for SessionBridge::profileSignals: its ref (RefRole), whether it
+    // is an ENUM, and its decoded range in the def's unit, NaN for none
+    struct DefFacts {
+        QString ref;
+        double rangeLow = 0.0;
+        double rangeHigh = 0.0;
+        bool isEnum = false;
+    };
+    // builtIn: set is the registered mock or obd2 set (isBuiltIn),
+    // found once per set by the caller
+    static DefFacts factsOf(const ecuio_signal_file_t* file, bool builtIn,
+                            const ecuio_signal_def_t& def);
+    static bool isBuiltIn(const ecuio_signal_set_t* set);
     // The bridge's form: each signal's window. The row shows the newest
     // value, and the window's highest and lowest beside it; the history
     // takes the distinct points among the three, in time order, so a
@@ -398,6 +439,9 @@ public:
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int hiddenCount() const { return m_hiddenCount; }
+    // The ids of the rows the chart plots and Live shows, in the model's
+    // order: subscribedCount of them, the focus Start log asks
+    std::vector<uint16_t> plottedIds() const;
     // Each number's and enumeration's newest value as core decoded it
     // (the def's unit, an enumeration's raw number; never the display's
     // conversion), aged by the model's clock from the window that brought
@@ -497,6 +541,7 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
+        DefFacts facts;           // ref, range and enum-ness (factsOf)
         // An ENUM def's labels by raw value, copied from the set when it
         // loads, so a row keeps them whatever happens to the set later
         std::vector<std::pair<uint32_t, QString>> labels;
@@ -541,6 +586,8 @@ private:
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
+    // A row's range as displayed (displayedRange)
+    std::pair<double, double> shownRange(const Entry& e) const;
 
     std::vector<Entry> m_entries;
     // Each signal id's row, so a batch finds its rows without a search.
@@ -600,9 +647,9 @@ class SessionBridge : public QObject
     // A Read once is running (readOnce); no session connects meanwhile
     Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
-    // "speed", ...) to the def IDs core's sets give it (signal_sets.h),
-    // the first one the session's set has wins. By ID, so a def core
-    // names otherwise keeps its gauge
+    // "speed", ...) to the refs (RefRole) of the defs core's sets give
+    // it ("id:<n>", signal_sets.h), the first one the session's set has
+    // winning. By ID, so a def core names otherwise keeps its gauge
     Q_PROPERTY(QVariantMap gaugeSignals READ gaugeSignals CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
@@ -615,6 +662,9 @@ class SessionBridge : public QObject
     Q_PROPERTY(FrameListModel* model READ model CONSTANT)
     // The Log page's By ID view over model's frames
     Q_PROPERTY(FrameIdModel* frameIds READ frameIds CONSTANT)
+    // The Recordings page's Import: another logger's file made a recording
+    // in recordingsRoot()
+    Q_PROPERTY(RecordingImport* recordingImport READ recordingImport CONSTANT)
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
@@ -645,6 +695,23 @@ class SessionBridge : public QObject
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
     // The marks put in the recording under way, or the last one
     Q_PROPERTY(int markCount READ markCount NOTIFY markCountChanged)
+    // The analysis log (ADR-0056 section 1): Start log records the running
+    // session from that moment, its requests narrowed to the rows Live
+    // plots then (the focus), and Stop log closes it. It takes the
+    // recorder slot Record sessions uses (recordingActive holds while it
+    // runs): one recorder a session.
+    Q_PROPERTY(bool logActive READ logActive NOTIFY logStateChanged)
+    // The log's time so far and its folder's size in bytes, counted once
+    // a second; the last log's once it ends
+    Q_PROPERTY(qint64 logElapsedMs READ logElapsedMs NOTIFY logProgressChanged)
+    Q_PROPERTY(qint64 logBytes READ logBytes NOTIFY logProgressChanged)
+    // What the Dashboard's header says about the log: "Log not started:
+    // <why>" after a refusal, "Log ended: <why>" after an end the user
+    // didn't ask for (a failed write, the session's end), "" otherwise. A
+    // log that starts clears it, as does clearLogNotice (Dismiss). A
+    // property, not a signal: Start log sits in Main's header, on every
+    // page, so the Dashboard may not exist when the refusal lands
+    Q_PROPERTY(QString logNotice READ logNotice NOTIFY logNoticeChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
@@ -732,10 +799,14 @@ public:
     // built"): the session's health to the file at url (a local file, or
     // Android's content:// through QFile), in the format healthFormatFor
     // picks from it and the dialog's filterIndex, with the values Live's
-    // rows hold. No wait: a report still being read says so itself. The
-    // map writeHealthReport gives (healthreport.h), its words never
-    // naming a path. Logs one line
-    Q_INVOKABLE QVariantMap saveHealthReport(const QUrl& url, int filterIndex);
+    // rows hold. No wait: a report still being read says so itself.
+    // baselineFolder, the picked vehicle's baseline recording ("" none),
+    // which the report names by its start, never its folder. The map
+    // writeHealthReport gives (healthreport.h), its words never naming a
+    // path. Logs one line
+    Q_INVOKABLE QVariantMap
+    saveHealthReport(const QUrl& url, int filterIndex,
+                     const QString& baselineFolder = QString());
     Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
     // Removes every copy keep doesn't name, each profile unregistered
     // first; the files themselves stay loaded until the bridge closes,
@@ -784,12 +855,41 @@ public:
     // each, name the file's or "<plugin> <variant>", "" for a built-in
     Q_INVOKABLE QVariantList decodeProfiles();
     QVariantMap gaugeSignals() const;
+    // The signals a session on uri would show, without connecting: the
+    // profile the URI selects (profileOfUri), its registered set, and
+    // one map per def as the model's rows give it: { id, ref, name,
+    // unit, decimals, isText, isEnum, group, rangeLow, rangeHigh }, unit,
+    // decimals and range in the current unit system, rangeLow and
+    // rangeHigh NaN for no range (RangeLowRole); and decodedUnit,
+    // decodedLow, decodedHigh, the def's own unit and range as core
+    // decodes them in any unit system (what a dashboard cell stores,
+    // ADR-0057 section 6), NaN for no range. [] when profileOfUri
+    // gives "" (a scheme or profile= core refuses), for an unknown
+    // profile, and for a profile whose set is a session's own
+    // (uds-generic) or none (raw); a URI core refuses for another
+    // reason (an unknown key, too many segments) still gives its
+    // profile's rows. A replay's own
+    // signals.json is registered only when it connects, so its profile
+    // gives [] before then and its rows after. A snapshot: call it
+    // again on unitSystemChanged, a signal file's change and a connect.
+    Q_INVOKABLE QVariantList profileSignals(const QString& uri) const;
+    // The profile a session on uri decodes through, as core picks it at
+    // ecuio_session_create: the last profile= (1 to
+    // ECUIO_PROFILE_NAME_MAX bytes), else the scheme's default. "" for
+    // a scheme this platform's core doesn't take, a malformed query or
+    // a bad profile= value. Static, so tests need no session.
+    static QString profileOfUri(const QString& uri);
+    // The signal file whose set set is: a vehicle's (the signal store),
+    // a plugin variant's or a replay's own signals.json; nullptr for
+    // any other set
+    const ecuio_signal_file_t* fileOfSet(const ecuio_signal_set_t* set) const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
     int overflowFrames() const { return m_reportedOverflow; }
     FrameListModel* model() const { return m_frameLog; }
     FrameIdModel* frameIds() const { return m_frameIds; }
+    RecordingImport* recordingImport() const { return m_recordingImport; }
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
@@ -923,6 +1023,23 @@ public:
     // "Mark N" for an empty one, N counting this recording's marks. False
     // with no recording, or one core refused it (a write failed).
     Q_INVOKABLE bool mark(const QString& label = QString());
+    bool logActive() const { return m_logActive; }
+    qint64 logElapsedMs() const;
+    qint64 logBytes() const { return m_logBytes; }
+    QString logNotice() const { return m_logNotice; }
+    Q_INVOKABLE void clearLogNotice() { setLogNotice(QString()); }
+    // Start log: the plotted rows' ids (SignalListModel::plottedIds) as
+    // the session's focus, then a recorder opened as Record sessions'
+    // (the same root, label and caller lines) and attached to the running
+    // session. False, with the reason in the activity log and nothing
+    // opened, while not connected, on a replay, while a recorder is live,
+    // with no row plotted, or when core refuses the focus. Ticks on Live
+    // while it runs change the chart, never the focus.
+    Q_INVOKABLE bool startLog();
+    // Stop log: the recording closed, the whole set asked again, then
+    // logStopped; nothing with no log running, or while disconnecting
+    // (the teardown's end closes it)
+    Q_INVOKABLE void stopLog();
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
     // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
@@ -1049,6 +1166,9 @@ public:
     // Test seam: the session's recorder, for core's internal.h seams
     // (a failed write); nullptr with none
     ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
+    // Test seam: the running session, for a recorder of the test's own
+    // (an attach the session refuses); nullptr with none
+    ecuio_session_t* sessionForTesting() const { return m_session; }
     // Test seam: how long Read once waits for its reply once the
     // session starts (3 s)
     void setReadOnceWaitForTesting(int ms) { m_readOnceWaitMs = ms; }
@@ -1096,6 +1216,13 @@ signals:
     void recordingChanged();
     void recordingStateChanged();
     void markCountChanged();
+    void logStateChanged();
+    void logProgressChanged();
+    void logNoticeChanged();
+    // A log ended: byUser for Stop log, false for the session's end or a
+    // failed write (reported as a Record sessions recording's end is).
+    // The folder is absolute, as recordingRow takes it
+    void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
@@ -1130,8 +1257,24 @@ private:
     // Before the session starts: the recorder opened on recordingsRoot()
     // and attached, when the switch is on and the URI isn't a replay's
     void startRecording(ecuio_session_t* session, const QString& uri);
-    // Its last notes, then closed with why; "" with nothing open
-    void stopRecording(const QString& why);
+    // A recorder opened on recordingsRoot() with the app's caller lines
+    // and the session's signal file, and attached to it; nullptr, with
+    // the reason logged after `failed` ("Recording failed"), and given
+    // to `reason` when the caller wants it, when it can't be
+    ecuio_recorder_t* openRecorder(ecuio_session_t* session, const QString& uri,
+                                   const QString& failed,
+                                   QString* reason = nullptr);
+    // logNotice, with its change signal when it changes
+    void setLogNotice(const QString& text);
+    // m_recorder from here, its folder shown and its marks from 0
+    void adoptRecorder(ecuio_recorder_t* recorder);
+    // Its last notes, then closed with why; "" with nothing open. A log
+    // ends with it: the whole set asked again while the session runs,
+    // its readout's last count, logStopped (byUser: Stop log's)
+    void stopRecording(const QString& why, bool byUser = false);
+    // The log's folder size, its files' sum (a handful, stat'd once a
+    // second on the GUI thread)
+    void countLogBytes();
     // The tick: a write that failed stops the recording, once
     void pollRecording();
     // An activity line core's recording writes in its own form (a link
@@ -1178,6 +1321,7 @@ private:
 
     FrameListModel* m_frameLog = nullptr;
     FrameIdModel* m_frameIds = nullptr;
+    RecordingImport* m_recordingImport = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
     // The model's batch for one tick: each signal's window
@@ -1325,6 +1469,12 @@ private:
     QString m_recordingFolder;         // the current or last one, absolute
     bool m_noting = true;              // logUnnoted clears it for its line
     int m_markCount = 0;               // the recording's marks, from 0
+    bool m_logActive = false;          // m_recorder is Start log's
+    HostElapsedTimer m_logClock;       // from Start log, sleeps counted
+    qint64 m_logElapsedMs = 0;         // the last log's, once it ends
+    qint64 m_logBytes = 0;             // countLogBytes' last sum
+    QString m_logNotice;               // the header's line about the log
+    QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only

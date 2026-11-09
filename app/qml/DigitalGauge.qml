@@ -17,6 +17,9 @@ GaugeBase {
     property string description: ""   // second line under the label
     property int historyLength: 80     // samples at the 10 Hz clock below
     property var history: []
+    // Whether the page holding this tile is on screen: a tile on another
+    // page takes no samples (its trace picks up where it stopped)
+    property bool shown: true
 
     // Clear with the peaks, so a new session draws a fresh trace
     onPeaksReset: history = []
@@ -26,7 +29,8 @@ GaugeBase {
     Timer {
         interval: 100
         repeat: true
-        running: gauge.hasValue && gauge.visible
+        objectName: "sampler"
+        running: gauge.hasValue && gauge.visible && gauge.shown
         onTriggered: {
             const h = gauge.history.slice(1 - gauge.historyLength)
             h.push(gauge.value)
@@ -36,7 +40,7 @@ GaugeBase {
 
     readonly property bool roomy: height >= 160
     readonly property color levelColor: gauge.hasValue
-                                        ? gauge.zoneColor(gauge.value, Theme.text)
+                                        ? gauge.zoneColor(gauge.value, Theme.gaugeReadout)
                                         : Theme.textDim
 
     // Polyline for the sparkline, newest sample on the right edge.
@@ -91,6 +95,7 @@ GaugeBase {
     // Live dot: zone color while fresh, hollow without data
     Rectangle {
         id: status
+        objectName: "statusDot"
         anchors { right: parent.right; top: parent.top; topMargin: 3 }
         width: 8; height: 8; radius: 4
         color: gauge.hasValue && !gauge.stale ? gauge.zoneColor(gauge.value, Theme.success)
@@ -106,13 +111,24 @@ GaugeBase {
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
             id: readout
+            objectName: "readout"
             text: gauge.valueText
             font.pixelSize: Math.max(18, Math.min(valueBand.height * 0.9, gauge.width * 0.24))
             font.weight: Font.DemiBold
             font.features: ({ "tnum": 1 })
             color: gauge.levelColor
         }
+        // Past dangerFrom, beside the value
+        DangerMark {
+            // The slot stays once a gauge has a danger zone, so the readout
+            // never moves as the mark appears
+            visible: !isNaN(gauge.dangerFrom)
+            opacity: gauge.inDanger ? 1 : 0
+            size: Math.max(14, readout.font.pixelSize * 0.55)
+            anchors.verticalCenter: readout.verticalCenter
+        }
         Text {
+            objectName: "unit"
             visible: gauge.hasValue
             anchors.baseline: readout.baseline
             text: gauge.unit
@@ -138,7 +154,7 @@ GaugeBase {
                                                       [Qt.point(width, height)])
 
         ShapePath {   // baseline
-            strokeColor: Qt.alpha(Theme.text, 0.06)
+            strokeColor: Qt.alpha(Theme.gaugeTick, 0.06)
             strokeWidth: 1
             fillColor: "transparent"
             startX: 0; startY: trace.height - 0.5

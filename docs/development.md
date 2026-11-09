@@ -505,7 +505,7 @@ havne-cli import candump <log> <folder>                   # another tool's log a
 ```
 
 An adapter only the phone reaches: the app relays it to a computer on
-its USB cable ([ADR-0047](adr/0047-adapter-relay.md); Settings, Adapter,
+its USB cable ([ADR-0047](adr/0047-adapter-relay.md); Settings, Connection,
 the adapter's row, then **Relay**, in developer mode), and havne-cli
 connects as to a WiFi adapter:
 
@@ -893,9 +893,50 @@ checked against their SHA-256 and kept in `~/.cache/havne-linuxdeploy`,
 gather the app, the
 Qt libraries, plugins and QML modules it loads (the plugin scans
 `app/qml`), the xcb platform plugin and the offscreen one, and
-`packaging/linux/havne.desktop` with the icon. It then fails a package
-that holds `qmltooling` (a Debug build's QML debugger), or one that
-isn't still running 10 s after it starts on the offscreen platform.
+`packaging/linux/havne.desktop` with the icon. The AppImage starts
+with type2-runtime's runtime from a pinned release (20251108, commit
+`dd6cebe`), checked against its SHA-256 and handed to linuxdeploy as
+`LDAI_RUNTIME_FILE`: with none named, linuxdeploy's appimagetool
+downloads type2-runtime's newest `continuous` build at every pack.
+Before a second
+linuxdeploy run packs the AppDir, the script puts the notices in
+`usr/share/doc/havne/`: `LICENSE`, `packaging/notices/`'s
+`THIRD_PARTY_NOTICES.txt`, the LGPL-3.0, GPL-3.0 and ICU texts
+(LGPL-3.0 section 4 wants Qt's notice and both texts with each copy)
+and `Qt-third-party.txt` (the credits and license texts of the code
+Qt's own libraries contain, from Qt's SBOM for the modules shipped),
+the runtime's MIT text and those of what it links statically
+(libfuse's LGPL-2.1, squashfuse, musl, mimalloc, zstd, zlib),
+and under `common-licenses/` the `/usr/share/common-licenses` texts
+that the bundled Ubuntu packages' copyright files name (linuxdeploy
+puts each in `usr/share/doc/<package>/`). It then fails a package that
+holds `qmltooling` (a Debug build's QML debugger), one missing a notice
+or a bundled package's copyright file, one whose notice names another
+Qt, ICU or runtime than it packed, one whose runtime reports another
+commit (`--appimage-version`), or one that isn't still running 10 s
+after it starts on the offscreen platform.
+
+- **The runtime's sources:** it links libfuse statically, so LGPL-2.1
+  section 6 wants libfuse's source and the runtime's offered beside the
+  AppImage. `packaging/linux/runtime-sources.sh [out dir]` fetches
+  `fuse-3.15.0.tar.xz` and `type2-runtime-20251108.tar.gz` (GitHub's
+  archive of the commit), each checked against its SHA-256, and
+  `release.yml`'s `publish` attaches both to each release.
+- **A new runtime pin** changes, together: `make-appimage.sh`'s
+  release, commit and both SHA-256s (GitHub's digests of
+  `runtime-x86_64` and `runtime-aarch64`); `runtime-sources.sh`'s
+  release, commit and the runtime tarball's SHA-256, and libfuse's
+  version and SHA-256 when the runtime's
+  `scripts/common/install-dependencies.sh` names another; the notice's
+  runtime section and the component list's versions in
+  `make-appimage.sh` (libfuse and squashfuse from that script, musl,
+  mimalloc, zstd and zlib from Alpine's packages for the release its
+  `scripts/chroot/chroot_build.sh` names, as of the runtime's build
+  date); and the license texts under `packaging/notices/licenses/`.
+  Release 20251108 lacks one later change, commit `8f39b89`, which
+  makes the folder `--appimage-extract-and-run` unpacks into private
+  (0700, not 0755); the AppImage's files are public, so that discloses
+  nothing.
 
 - **The build machine** needs Qt's xcb plugin libraries for linuxdeploy
   to bundle: `libxcb-cursor0 libxcb-icccm4 libxcb-image0
@@ -1100,7 +1141,8 @@ provenance over every file.
   on the runner for the signing step only.
   `packaging/android/sign-apk.sh` checks the unsigned APK (package
   `io.github.erickramer42.havne`, the version name and code, not
-  debuggable, arm64-v8a only), aligns it, signs it with APK Signature
+  debuggable, arm64-v8a only, no `qmltooling` plugins, an app built
+  without `QT_QML_DEBUG`), aligns it, signs it with APK Signature
   Scheme v3, and fails unless the signer's certificate SHA-256 is the
   one pinned in `packaging/android/release-cert.sha256`. Locally,
   `HAVNE_CERT_SHA256` overrides the pin, so a throwaway key runs the

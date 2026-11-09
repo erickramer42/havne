@@ -182,16 +182,16 @@ TestCase {
 
     function test_settingsDeveloperBoxSetsTheModeAndTheMockPreset() {
         const page = create(settingsComponent)
-        find(page, "adapterSection").open = true
-        find(page, "displaySection").open = true
         const box = find(page, "developerBox")
         const mock = find(page, "preset_mock")
         verify(!box.checked)
         verify(!mock.visible, "only real devices are offered")
-        verify(find(page, "preset_j2534").visible)
+        find(page, "presetsToggle").clicked()   // the presets start closed
+        verify(find(page, "preset_j2534").visible === (Qt.platform.os === "windows"),
+               "j2534:// where there is a J2534 driver")
         verify(find(page, "preset_elm327").visible)
 
-        box.click()   // below the test page's fold once the sections open
+        box.click()   // on the Advanced page, which is not shown
         verify(Theme.developerMode, "the box sets the mode")
         verify(mock.visible, "the mock:// preset in developer mode")
 
@@ -434,6 +434,86 @@ TestCase {
             find(page, "filterClear").clicked()
             compare(Bridge.model.count, 10)
         }
+    }
+
+    // Length and Time: lengths in bytes and a span of the table's seconds.
+    // By ID marks the bytes that changed from an ID's frame before; a field
+    // that doesn't parse says why and keeps its part; a By ID tap leaves
+    // both fields as they are, and Clear the filter empties them
+    function test_theLengthAndTimeFieldsNarrowTheTable() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        // A frame a second from 0 s, five bytes long, then three
+        let rows = "host_us,timestamp_us,id,flags,data\n"
+        for (let i = 0; i < 6; ++i) {
+            const t = 1000 + i * 1000000
+            rows += t + "," + t + ",0x7E8,0x0," + (i % 2 === 0 ? "04 41 0C 1A F8" : "02 41 0C") + "\n"
+        }
+        const url = Harness.writeScratchFile("lengths-and-times.csv", rows).toString()
+        const path = decodeURIComponent(url.replace(/^file:\/\//, "")).replace(/^\/([A-Za-z]:)/, "$1")
+        compare(Bridge.connectSession("replay://" + path + "?speed=max"), "")
+        tryVerify(() => Bridge.model.heldCount === 6, 5000, "the six frames arrive")
+
+        // The newest, 02 41 0C, after 04 41 0C 1A F8: its first byte marked
+        find(page, "table_byId").clicked()
+        const ids = find(page, "idList")
+        tryVerify(() => ids.count === 1 && ids.itemAtIndex(0) !== null && ids.height > 0
+                  && ids.itemAtIndex(0).width > 0, 3000, "the row, laid out")
+        compare(Bridge.frameIds.data(Bridge.frameIds.index(0, 0), 262), [0])   // ChangedRole
+        compare(findChild(ids.itemAtIndex(0), "idPayload").text,
+                "<font color=\"" + Theme.warning + "\"><b>02</b></font> 41 0C")
+        find(page, "table_frames").clicked()
+
+        const toggle = find(page, "filterToggle")
+        toggle.clicked()
+        const lengths = find(page, "filterLengths")
+        const times = find(page, "filterTimes")
+        lengths.text = "5"
+        page.applyFilter()
+        compare(Bridge.model.count, 3)
+        compare(toggle.text, "Filter (1)")
+        times.text = "2-"
+        page.applyFilter()
+        compare(Bridge.model.count, 2, "2 and 4 s")
+        compare(toggle.text, "Filter (2)")
+        verify(find(page, "filterClear").enabled)
+
+        const lengthsProblem = find(page, "filterLengthsProblem")
+        const timesProblem = find(page, "filterTimesProblem")
+        verify(!lengthsProblem.visible && !timesProblem.visible)
+        lengths.text = "5-"
+        times.text = "2"
+        page.applyFilter()
+        compare(lengthsProblem.text,
+                "\"5-\" isn't a length in bytes (up to 4096) or a range like 1-7")
+        compare(timesProblem.text,
+                "\"2\" isn't a range of seconds like 12.5-30, 12.5- (from then on) or -30 (up to then)")
+        verify(lengthsProblem.visible && timesProblem.visible)
+        compare(Bridge.model.count, 2, "both keep their part")
+        lengths.text = "5"
+        times.text = "2-"
+        page.applyFilter()
+        verify(!lengthsProblem.visible && !timesProblem.visible)
+
+        // A By ID tap narrows the ID and leaves the length and the time
+        find(page, "table_byId").clicked()
+        tryVerify(() => ids.count === 1 && ids.itemAtIndex(0) !== null && ids.height > 0
+                  && ids.itemAtIndex(0).width > 0, 3000, "the row, laid out")
+        compare(Bridge.frameIds.data(Bridge.frameIds.index(0, 0), 262), [],
+                "the frames shown are alike")
+        const row = ids.itemAtIndex(0)
+        mouseClick(row, row.width / 2, row.height / 2)
+        verify(!page.byId, "back to the frames")
+        compare(lengths.text, "5")
+        compare(times.text, "2-")
+        compare(Bridge.model.count, 2)
+
+        find(page, "filterClear").clicked()
+        compare(lengths.text, "")
+        compare(times.text, "")
+        compare(Bridge.model.filterTerms, 0)
+        compare(Bridge.model.count, 6)
     }
 
     // Export CSV says what it leaves out and that Copy doesn't, then what

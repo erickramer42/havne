@@ -1160,6 +1160,7 @@ void elm327_worker(transport* t)
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
     uint32_t next_chan = 0;
     const bool passive = asks_nothing(t);
     /* A requesting worker's waits to the engine's next event end on
@@ -1170,6 +1171,8 @@ void elm327_worker(transport* t)
     if (t->probe) {
         ecuio_engine_probe(&e, now_us(t));
     }
+    /* A focus set before start applies from the first request */
+    ecuio_take_focus(t->session, &e, focus_seen);
 
     while (!t->stop_requested.load()) {
         const int64_t now = now_us(t);
@@ -1292,6 +1295,7 @@ void elm327_worker(transport* t)
         }
         ecuio_take_diag_request(t->session, &e, diag_seen);
         ecuio_take_clear_requests(t->session, &e, clear_seen);
+        ecuio_take_focus(t->session, &e, focus_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);
             ecuio_publish_identity(t->session, e, c, t->rx_ids[c],

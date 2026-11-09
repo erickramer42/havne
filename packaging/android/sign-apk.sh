@@ -11,6 +11,8 @@
 #   - it isn't debuggable: a debuggable build lets any app on a computer
 #     with adb read the app's private files through run-as;
 #   - arm64-v8a is the only native code;
+#   - no QML debugging: no qmltooling plugins, and an app built without
+#     QT_QML_DEBUG;
 #   - after signing: APK Signature Scheme v3 verifies (apksigner adds no
 #     v1 or v2 for a minimum SDK of 31, which v3 covers), with one signer,
 #     whose certificate SHA-256 is the pinned one in
@@ -84,6 +86,40 @@ grep -qx "minSdkVersion:'31'" <<< "$badging" || die "$in's minimum SDK isn't 31"
 abis=$(sed -n "s/^native-code: //p" <<< "$badging")
 [ "$abis" = "'$ABI'" ] || die "$in's native code is $abis, not '$ABI'"
 echo "ok    $in: $PACKAGE $name ($code), not debuggable, $ABI"
+# No QML debugging: no qmltooling plugins (app/CMakeLists.txt leaves
+# them out outside Debug), and an app built without QT_QML_DEBUG, which
+# would otherwise open a debug server when started with -qmljsdebugger
+entries=$(unzip -Z1 "$in") || die "unzip can't list $in"
+tooling=$(grep -c '^lib/[^/]*/libplugins_qmltooling_' <<< "$entries" || true)
+# Neither androiddeployqt nor Gradle removes a library an earlier deploy
+# in the same tree copied, so a tree that once deployed them keeps them
+[ "$tooling" -eq 0 ] \
+    || die "$in carries $tooling qmltooling plugins (the QML debugger's): if app/CMakeLists.txt leaves them out, an earlier deploy left them in the tree's app/android-build; delete that folder and build again"
+lib="lib/$ABI/libhavne_$ABI.so"
+grep -qx "$lib" <<< "$entries" || die "$in has no $lib"
+enabler=$(unzip -p "$in" "$lib" | grep -a -c QQmlDebuggingEnabler || true)
+[ "$enabler" -eq 0 ] || die "$in's $lib was built with QT_QML_DEBUG (app/CMakeLists.txt: Debug builds only)"
+echo "ok    $in: no QML debugging"
+
+# The notices the source tree ships (app/android/assets/havne) are entries
+# of the APK as assets/havne/...: a packaging change that drops them would
+# ship the licenses' texts nowhere. The list is read into variables and
+# counted (a grep -q on a pipe can pass on an empty read under pipefail),
+# and an empty source list or entry list is itself a failure.
+notice_src=app/android/assets/havne
+[ -d "$notice_src" ] || die "$notice_src isn't here: run from the repository root"
+notices=$(cd "$notice_src" && find . -type f | sed 's|^\./||' | sort)     || die "can't list $notice_src"
+[ -n "$notices" ] || die "$notice_src holds no notice files"
+[ -n "$entries" ] || die "unzip listed no entries of $in"
+missing=0
+while IFS= read -r notice; do
+    if ! grep -qxF "assets/havne/$notice" <<< "$entries"; then
+        echo "sign-apk: $in has no assets/havne/$notice" >&2
+        missing=$((missing + 1))
+    fi
+done <<< "$notices"
+[ "$missing" -eq 0 ] || die "$in lacks $missing of the notices in $notice_src"
+echo "ok    $in: $(grep -c . <<< "$notices") notice files"
 
 # Aligned, signed, verified
 mkdir -p "$outdir"

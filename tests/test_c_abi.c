@@ -212,10 +212,15 @@ int main(void)
     ecuio_check_summary_t check_summary;
     ecuio_export_options_t export_options;
     ecuio_export_report_t export_report;
+    ecuio_export_estimate_t estimate;
+    uint32_t estimate_ms = 0;
     ecuio_import_options_t import_options;
     ecuio_import_report_t import_report;
+    ecuio_csv_guess_t csv_guess;
+    size_t csv_guess_needed = 1;
     ecuio_health_options_t health_options;
     ecuio_health_report_t health_report;
+    ecuio_frames_read_t frames_read;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     uint32_t version_major = 0, version_minor = 0, version_patch = 0;
@@ -280,6 +285,23 @@ int main(void)
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
         return 1;
     }
+    {
+        /* ADR-0057's two: a field's span, and a def's key */
+        ecuio_signal_def_t byte_def;
+        double lo = 0.0;
+        double hi = 0.0;
+        memset(&byte_def, 0, sizeof byte_def);
+        byte_def.kind = ECUIO_VALUE_UINT;
+        byte_def.bit_length = 8;
+        byte_def.scale = 1.0;
+        byte_def.offset = -40.0;
+        if (ecuio_def_range(&byte_def, &lo, &hi) != ECUIO_DECODE_OK ||
+            lo != -40.0 || hi != 215.0 ||
+            ecuio_def_range(NULL, &lo, &hi) != ECUIO_DECODE_ERR_NULL ||
+            strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0) {
+            return 1;
+        }
+    }
     if (strcmp(ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_DIAGNOSTICS),
                "Diagnostics") != 0) {
         return 1;
@@ -309,6 +331,7 @@ int main(void)
     if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_set_focus(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_clear_diagnostics_with(NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING |
                                                  ECUIO_CLEAR_ALLOW_MOVING) !=
@@ -451,6 +474,7 @@ int main(void)
     memset(&export_options, 0, sizeof export_options);
     memset(&import_options, 0, sizeof import_options);
     export_options.format = ECUIO_EXPORT_PCAPNG;
+    export_options.folder_utf8 = "."; /* the estimate judges the format */
     import_options.format = ECUIO_IMPORT_CANDUMP;
     if (sizeof(ecuio_export_report_t) != 120 ||
         offsetof(ecuio_export_report_t, failed_class) != 80 ||
@@ -458,7 +482,13 @@ int main(void)
         offsetof(ecuio_export_report_t, files) != 104 ||
         offsetof(ecuio_export_report_t, files_left_out) != 108 ||
         offsetof(ecuio_export_options_t, folder_utf8) != 24 ||
-        sizeof(ecuio_import_report_t) != 80 ||
+        offsetof(ecuio_export_options_t, layout) != 24 + 2 * sizeof(void*) ||
+        offsetof(ecuio_export_options_t, columns_utf8) !=
+            40 + 2 * sizeof(void*) ||
+        sizeof(ecuio_export_options_t) != 56 + 2 * sizeof(void*) ||
+        offsetof(ecuio_export_report_t, rows) != 112 ||
+        sizeof(ecuio_export_estimate_t) != 40 || ECUIO_CSV_WIDE != 0u ||
+        ECUIO_CSV_LONG != 1u || sizeof(ecuio_import_report_t) != 80 ||
         offsetof(ecuio_import_report_t, duration_us) != 40 ||
         offsetof(ecuio_import_report_t, values) != 48 ||
         offsetof(ecuio_import_report_t, columns_ignored) != 56 ||
@@ -469,10 +499,44 @@ int main(void)
         ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
         ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_estimate(NULL, &estimate_ms, 1, &estimate) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_estimate(&export_options, &estimate_ms, 1, &estimate) !=
+            ECUIO_ERR_INVALID_ARGUMENT ||
         ecuio_scrub_frames(0, NULL, NULL, NULL, 0, NULL, &export_report) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    /* Frames read back (ADR-0049's appendix): the summary's layout, zeroed
+     * by a refused call */
+    memset(&frames_read, 0xFF, sizeof frames_read);
+    if (sizeof(ecuio_frames_read_t) != 32 ||
+        offsetof(ecuio_frames_read_t, torn_rows) != 8 ||
+        offsetof(ecuio_frames_read_t, reserved0) != 12 ||
+        offsetof(ecuio_frames_read_t, reserved) != 16 ||
+        ecuio_recording_read_frames(NULL, 0, 0, NULL, NULL, &frames_read) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        frames_read.rows != 0 || frames_read.torn_rows != 0 ||
+        frames_read.reserved[1] != 0) {
+        return 1;
+    }
+    /* The CSV map guess (ADR-0054's appendix): its layout and refusals */
+    if (sizeof(ecuio_csv_guess_t) != 48 ||
+        offsetof(ecuio_csv_guess_t, rows_read) != 12 ||
+        offsetof(ecuio_csv_guess_t, map_offset) != 16 ||
+        offsetof(ecuio_csv_guess_t, map_length) != 20 ||
+        offsetof(ecuio_csv_guess_t, reserved) != 24 ||
+        ECUIO_CSV_GUESS_TIME_UNIT_KNOWN != 0x1u ||
+        ECUIO_CSV_GUESS_DECIMAL_COMMA != 0x2u ||
+        ECUIO_CSV_GUESS_PREAMBLE != 0x4u ||
+        ECUIO_CSV_GUESS_TIME_NUMBERS != 0x8u ||
+        ecuio_import_csv_guess(NULL, NULL, NULL, 0, &csv_guess_needed,
+                               &csv_guess) != ECUIO_ERR_NULL_ARGUMENT ||
+        csv_guess_needed != 0 ||
+        ecuio_import_csv_guess("log.csv", "h", NULL, 0, &csv_guess_needed,
+                               NULL) != ECUIO_ERR_INVALID_ARGUMENT) {
         return 1;
     }
     /* The health report (ADR-0054's appendix): its layouts and refusals */
@@ -481,10 +545,14 @@ int main(void)
     if (sizeof(ecuio_health_value_t) != 32 ||
         offsetof(ecuio_health_value_t, age_us) != 16 ||
         offsetof(ecuio_health_options_t, utc_us) != 32 ||
+        offsetof(ecuio_health_options_t, baseline_folder_utf8) != 48 ||
+        offsetof(ecuio_health_options_t, baseline_room) != 48 ||
+        offsetof(ecuio_health_options_t, reserved) != 56 ||
         offsetof(ecuio_health_options_t, session) != 80 ||
         sizeof(ecuio_health_report_t) != 120 ||
         offsetof(ecuio_health_report_t, failed_class) != 80 ||
         ECUIO_HEALTH_TEXT != 2u || ECUIO_HEALTH_VIN_DECODED != 1u ||
+        ECUIO_HEALTH_BASELINE_READ != 2u ||
         ecuio_health_export(NULL, &health_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;

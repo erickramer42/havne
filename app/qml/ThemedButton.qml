@@ -1,3 +1,6 @@
+// File/layer: app/qml/ThemedButton.qml | Qt6 Quick, UI layer
+// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+
 import QtQuick
 import QtQuick.Controls
 
@@ -20,6 +23,20 @@ Button {
     implicitWidth: compact ? Math.max(40, implicitContentWidth + leftPadding + rightPadding)
                            : Math.max(implicitBackgroundWidth + leftInset + rightInset,
                                       implicitContentWidth + leftPadding + rightPadding)
+
+    // A page that needs its buttons a phone's touch size (Settings) has a
+    // touchMin property; the button takes the nearest one up its parents
+    // qmllint disable missing-property
+    readonly property real touchMin: {
+        for (let p = control.parent; p; p = p.parent) {
+            if (p.touchMin !== undefined)
+                return p.touchMin
+        }
+        return 0
+    }
+    // qmllint enable missing-property
+    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                             implicitContentHeight + topPadding + bottomPadding, touchMin)
 
     opacity: enabled ? 1.0 : 0.45
 

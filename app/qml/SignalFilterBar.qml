@@ -1,6 +1,6 @@
 // File/layer: app/qml/SignalFilterBar.qml | Qt6 Quick, UI layer
 // Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview,
-//          QmlTest.recordings, QmlTest.phone (test_qml)
+//          QmlTest.recordings, QmlTest.dashedit, QmlTest.phone (test_qml)
 
 pragma ComponentBehavior: Bound
 
@@ -19,6 +19,9 @@ RowLayout {
     required property SignalFilter filter
     // The groups' codes among the list's rows
     property var codes: []
+    // False leaves the text field alone, with no Filter button and so no
+    // popup (a list the groups and Plotted only don't apply to)
+    property bool filterButtonShown: true
 
     readonly property var choices: bar.filter.groupChoices(bar.codes)
     // The popup's content, which lives in the window's overlay
@@ -39,6 +42,7 @@ RowLayout {
     ThemedButton {
         id: filterButton
         objectName: "filterButton"
+        visible: bar.filterButtonShown
         text: qsTr("Filter")
         // Lit while the popup's choices narrow the list
         highlighted: bar.filter.plottedOnly || bar.filter.groups.length > 0

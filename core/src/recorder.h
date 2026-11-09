@@ -5,12 +5,14 @@
 //
 // A session and its recorder each outlive the other in some teardowns,
 // so neither reaches into the other's memory: both hold a link, and the
-// worker reaches the recorder only through it. `active` is the
-// recorder while it takes frames; every use of it is pinned (`pins`
-// raised before the load and lowered after the use), and detaching
-// clears it and waits for `pins` to reach zero, so the recorder is never
-// freed under a worker still writing to it. `m` orders the two sides'
-// detaches.
+// worker reaches the recorder only through it. The session makes its
+// link at create and keeps it; a recorder attaches before or after
+// start (ADR-0056 section 3), and another once it has gone. `active`
+// is the recorder while it takes frames; every use of it is pinned
+// (`pins` raised before the load and lowered after the use), and
+// detaching clears it and waits for `pins` to reach zero, so the
+// recorder is never freed under a worker still writing to it. `m`
+// orders attaches and the two sides' detaches.
 #ifndef ECUIO_RECORDER_H
 #define ECUIO_RECORDER_H
 
@@ -26,9 +28,11 @@
 struct ecuio_record_link {
     std::atomic<ecuio_recorder_t*> active{nullptr};
     std::atomic<uint32_t> pins{0};
-    /* ecuio_clock_us at attach: host_us counts from it. Written before
-     * the session starts, read-only afterwards. */
-    uint64_t zero_us = 0;
+    /* ecuio_clock_us at attach: host_us counts from it. Set at each
+     * attach before active is stored (release), read after active is
+     * loaded (acquire), so a worker that finds a recorder finds its
+     * zero. */
+    std::atomic<uint64_t> zero_us{0};
     std::mutex m;
 };
 
@@ -49,8 +53,11 @@ inline void ecuio_record_unpin(ecuio_record_link& link)
 }
 
 /* Either side: the recorder stops taking frames, once no worker holds
- * it. Safe from any thread, any number of times. */
-void ecuio_record_detach(ecuio_record_link& link);
+ * it. Safe from any thread, any number of times. With only, nothing
+ * happens unless only is the recorder attached (or none is): a
+ * recorder's own close never detaches the one that attached after it. */
+void ecuio_record_detach(ecuio_record_link& link,
+                         ecuio_recorder_t* only = nullptr);
 
 /* On the worker, pinned: one frame and the values it decoded to, as one
  * record or none. Never blocks, never allocates. */

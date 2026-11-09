@@ -726,6 +726,13 @@ scrub leaves out; `tests/golden/recording/replay-obd2`'s copy viewed as
 the source; a mock's recording made with a label, its copy's URI
 `mock://<label>`, its `info` and replay the source's).
 
+Amended 2026-11-07: `latency.csv`'s `t_s` is the recording's time to the
+ms ([ADR-0017](0017-session-recording.md)'s appendix of 2026-11-07), so
+the range reads it as it reads `host_us`; a recording from before that
+wrote the session time there, and its rows land by that. The export
+keeps the header's `focus` and `link` lines ([ADR-0049](0049-recordings-in-core.md)'s
+appendix of 2026-11-07).
+
 ## Appendix: the health report as built (2026-11-06)
 
 Section 2's health report: a car's health as one scrubbed file, in core
@@ -1020,6 +1027,65 @@ report still the whole recording's).
   read with a row's room, so a long one is never cut into another
   number.
 
+**Note of 2026-11-07: the vehicle's baseline named.** A report names the
+vehicle's baseline recording (ADR-0049's appendix "a vehicle's
+baseline") when its caller gives the folder; nothing in core knows which
+recording is a baseline.
+
+- **The option.** The options' first reserved word is an anonymous
+  union of `baseline_folder_utf8` and `baseline_room` (`uint64_t`), so
+  the pointer sits at 48 on either width and the struct keeps its size;
+  `reserved` is three words. NULL or "" names none.
+- **What's read of it:** its `events.log` alone. Its first line must be
+  a recording's (the reader's test: format 2 or 3 by the whole line,
+  format 1 by its ending, a byte order mark skipped); then the header's
+  `utc`, `profile` and `uri` lines (`recording_set.h`'s `read_header`),
+  and its length, the last timed line's time. A line past the reader's
+  room is one line, its rest never a timed line of its own. Nothing else
+  of the folder is opened, so a long baseline adds little to a live
+  report, which the app writes on the GUI thread.
+- **What's written,** after the source: the JSON's `baseline`, null for
+  none; `read` true with `started` (UTC; null without a `utc` line),
+  `length_s` (null with no timed line), `profile`, `backend` (the URI's
+  scheme, `unknown` without one) and `is_source`, whether the report's
+  own recording is it (the same start, so a folder export's copy of it
+  is it too; a session's report never is); or `read` false with `why`:
+  "its folder is gone: it was moved or deleted", "its folder holds no
+  events.log" or "its events.log isn't a recording's". The text's line,
+  after the source's: "Baseline: the vehicle's baseline recording,
+  started <UTC>, <S> s (<backend>), profile <profile>", with ": this
+  recording" at its end when it is, or "Baseline: the vehicle's baseline
+  recording can't be read: <why>"; none, no line. The report is written
+  either way, and `ECUIO_HEALTH_BASELINE_READ` (0x2) in the report's
+  flags says whether it was read.
+- **Never its folder:** the app names a recording's folder by its stamp
+  and the vehicle's label, so neither the folder's name nor its path is
+  written. The name isn't added to the check's values: a label can be
+  any word (a profile's, a unit's), and the report never reads it.
+- **`havne-cli health`** takes `--baseline <recording>` for a session
+  and a recording alike: the CLI has no vehicle book, so the caller
+  names it, as `view`'s overlay does. An empty one is usage. The
+  `health` line gains `baseline`: "none", "read" or "unread".
+- **The app's Save report,** on Diagnostics and in the viewer, passes
+  the picked vehicle's baseline, the one the Recordings page badges and
+  compares with; a folder that's gone is passed too, so the report says
+  so. Its result map gains `baselineRead`.
+- **Python:** `scripts/ctypes_gen.py` writes an anonymous union as a
+  `Union` of its own (`ecuio_health_options_t_u0`) in the struct's
+  `_anonymous_`, so `baseline_folder_utf8` reads as the struct's; a
+  named union fails the script.
+
+Tests: `HealthTest.AReportNamesTheBaselineByItsStartNeverItsFolder`,
+`.TheReportsOwnRecordingAsItsBaselineIsSaidToBeIt`,
+`.ABaselineThatCantBeReadSaysWhyAndTheReportIsWritten`,
+`.ABaselinesEventsLogIsReadAsTheReadersIs` (test_core);
+`CliHealthTest.ABaselineIsNamedForEitherSourceAndTheLineSaysIfRead`,
+`CliHealthRunTest.recording`; `BridgeTest.HealthReportNamesTheBaselineItIsGiven`,
+`RecordingViewTest.HealthReportNamesTheBaselineItIsGiven`;
+`QmlTest.diagnostics`, `QmlTest.recordings` and `QmlTest.phone`'s
+`test_theReportsPagesTakeSettingsVehicles`; `test_c_abi`;
+`PythonTest.test_declarations` on either width.
+
 ## Appendix: the CSV import as built (2026-11-07)
 
 `ECUIO_IMPORT_CSV` makes a recording's folder from another logger's CSV
@@ -1216,3 +1282,372 @@ handed to core, Python's None start a 0), and the app's 6 (the list
 taking frames alone, a row without frames still replaying, a decode
 of no frames going ahead, the check run on no frames, the decode
 choice and Replay in Settings shown without frames).
+
+## Appendix: a column map guessed from the header (2026-11-07)
+
+Accepted 2026-11-07; step 1 built 2026-11-07, as the note "settled
+while building" at the end of this appendix says.
+
+The CSV import (the appendix "the CSV import as built") takes a column
+map and refuses a file without one. Writing JSON for an ordinary file
+is more than a user should have to do, and the files people import
+mostly say what they are in their header row: a time column first, then
+`Name (unit)` or `Name [unit]` columns. Havne's own wide CSV
+(ADR-0056) is one of them. So core guesses the map from the file, and
+every front end shows or prints the guess before it imports. The map
+stays: a guess is a map, in the same format, through the same strict
+`parse_map`, and a map file still overrides it.
+
+### 1. The call
+
+```c
+/* Reads the start of a CSV file and writes a column map (JSON text,
+ * havne_column_map 1) to map_out. Imports nothing, writes no file.
+ * ECUIO_ERR_BUFFER_TOO_SMALL with *needed set when cap is short. */
+ecuio_status_t ecuio_import_csv_guess(const char* path_utf8,
+                                      char* map_out, size_t cap,
+                                      size_t* needed,
+                                      ecuio_csv_guess_t* report);
+
+typedef struct ecuio_csv_guess {
+    uint32_t flags;          /* ECUIO_CSV_GUESS_* below */
+    uint32_t columns;        /* signal columns in the map */
+    uint32_t left_out;       /* header columns left out (notes say why) */
+    uint32_t rows_read;      /* rows the guess looked at */
+    char     notes_utf8[1024]; /* one line per choice worth saying, column
+                                * names as the header has them, never a
+                                * cell's value or the file's path */
+    uint64_t reserved[4];
+} ecuio_csv_guess_t;
+
+#define ECUIO_CSV_GUESS_TIME_UNIT_KNOWN  0x1u /* the map's time unit is set */
+#define ECUIO_CSV_GUESS_DECIMAL_COMMA    0x2u
+#define ECUIO_CSV_GUESS_PREAMBLE         0x4u /* header_row above 1 */
+```
+
+Append-only, as every addition is: a new function, a new struct with
+`flags` and `reserved`, no change to `ecuio_import`. The file's
+contents never reach a log; a refusal names the line, as the reader's
+do.
+
+### 2. What it reads
+
+The first 64 KiB or 200 rows after the header, whichever ends first,
+through the import's own RFC 4180 reader (quotes, the BOM, CRLF or LF).
+The same file always gives the same map.
+
+- **The delimiter:** `,`, `;` or a tab, whichever splits the candidate
+  header and the rows below it into the same number of cells (at least
+  two); a tie goes in that order.
+- **The header row:** the first row, within the map's 1000, whose cells
+  are mostly not numbers while the rows below have its cell count and
+  are mostly numbers. The rows above are a preamble: `header_row` says
+  so and the flag is set.
+- **The decimal comma:** only with a `;` or tab delimiter, when number
+  cells hold a comma and none a point.
+- **The time column:** a header named like time (`time`, `timestamp`,
+  `t`, `elapsed`, `time stamp`, any case, before its unit), else the
+  first column when its cells only rise. Its unit:
+  - from the name's unit: `(s)`, `[s]`, `sec`; `(ms)`, `[ms]`; `(us)`,
+    `[us]` and the micro sign's spelling;
+  - from the cells: ISO 8601 times give `iso8601`, which needs no unit;
+  - otherwise **unknown**: the map has no `unit`, the flag is clear, and
+    the import refuses it until one is given (section 3). A number
+    column of times without a unit could be seconds, ms or us, and a
+    wrong pick scales the whole log by 1000 without a word, so it is
+    never guessed. A time of day (`hh:mm:ss`) needs a date and a UTC
+    offset the file doesn't hold: unknown too.
+  - `start` is never guessed: a made-up start lines a recording up
+    wrong (the appendix's rule).
+- **Each other column** becomes a signal, in the header's order:
+  - `name`: the header text before a trailing `(unit)` or `[unit]`,
+    trimmed; cut to 31 bytes on a character boundary, and a name that
+    then repeats another gets ` 2`, ` 3`; each cut or rename is a note.
+  - `unit`: the bracketed text, up to 15 bytes; a longer one is
+    dropped with a note.
+  - `kind`: `number` when every cell in the sample that isn't empty or
+    a placeholder reads as a number, else `text`.
+  - `decimals`: the most fraction digits seen, at most 3.
+  - `rank` the map's order, `group` 0, as the map's defaults.
+- **Placeholders** (`missing`): any of `---`, `--`, `NaN`, `nan`, `N/A`,
+  `n/a` seen in a column that is otherwise numbers.
+- **Left out, each with a note:** a header cell that is empty (a
+  trailing delimiter gives one), a column empty in every sampled row,
+  and a column the map would refuse (a name starting as a spreadsheet
+  formula). The preview can put each back.
+
+The guess is checked by `parse_map` before it is returned: a guess core
+would refuse is never handed out.
+
+### 3. The front ends
+
+- **The app:** the Recordings page's Import panel shows the guess
+  before anything is imported: the time column and its unit (a choice
+  of s, ms and us when unknown, Import waiting on it), each column with
+  a checkbox, its name, unit and kind, and the first rows. An edit
+  changes the map the import gets. **Save as map** writes it to the
+  settings folder's `maps/`, offered next time; **Column map...** still
+  picks a file, which skips the guess.
+- **`havne-cli import csv <file> <folder>`:** without `--map` it
+  guesses; `--time-unit s|ms|us` gives the unit when the header
+  doesn't, and with none known it refuses, naming the option.
+  `--print-map` prints the guessed map and imports nothing, so it can
+  be saved and edited. `--map` behaves as today.
+- **Python:** `havne.guess_csv_map(path)` returns the map as a dict
+  (with the report's notes); `havne.import_csv(path, folder,
+  column_map=None, time_unit=None)` guesses when no map is given.
+
+### 4. Tests
+
+- One case per rule above, each refusal and note in its words, in
+  `CsvImportTest`'s style; a guess that `parse_map` would refuse never
+  returned.
+- Round trips: synthetic files shaped like common loggers (a preamble,
+  `;` with decimal commas, ISO times, a trailing delimiter, an always
+  empty column), each guessed, imported and viewed; Havne's wide CSV
+  once ADR-0056's export exists.
+- `fuzz_csv_import` grows to run the guess, and the import with each
+  guess it makes.
+- The app's preview at 384 px, the CLI's `--print-map` and refusal,
+  Python's two calls.
+
+### 5. Steps
+
+1. Core's call and its tests, the CLI and Python (one branch).
+2. The preview on the Import panel (after step 1).
+
+### Settled while building (2026-11-07)
+
+Step 1 settled these, and the call as built is `recording.h`'s, not
+section 1's sketch:
+
+- **The text and its room:** the call writes one JSON text,
+  `{"map": {...}, "columns": [{"column", "used", "why"}], "notes":
+  [...]}`, so the notes are in the text and the struct has no notes
+  buffer. `map_out` and `cap` follow `ecuio_serial_ports`' contract (cap
+  0 with a NULL `map_out` asks the size, `*needed` always set, no
+  status of its own): on `ECUIO_OK` `*needed` is the text's length and
+  its NUL, and the text is written only when `cap` holds it; on any
+  failure, the arguments' refusals too, `*needed` is 0, the report zero
+  and a `map_out` with room `""`. `ecuio_csv_guess_t` keeps `flags` and
+  the counts and is 48 bytes on both widths.
+- **The flags:** `TIME_UNIT_KNOWN` (the map's time has a unit),
+  `DECIMAL_COMMA`, `PREAMBLE` (lines above the header left out) and
+  `TIME_NUMBERS`: the time column holds plain numbers, the one time a
+  unit given can fix. A front end names `--time-unit` (`time_unit`) only
+  then; for any other time it names a map with the zone (or the date and
+  offset).
+- **The map's slice:** `map_offset` and `map_length` in the report give
+  the map's byte range in the text this call wrote. That slice alone is
+  complete JSON, with two-space indents, which `ecuio_import` takes as
+  it is: the CLI prints and passes it with no JSON reader of its own.
+  `CsvGuessTest.TheMadeUpLoggersAreGuessedAndImported` pins each made-up
+  logger's slice to its `guessed-map.json`, and
+  `CliTransferRunTest.csv-guess` pins `--print-map` to the same bytes.
+- **The time unit:** an argument, `time_unit`: NULL, `"s"`, `"ms"` or
+  `"us"`, anything else `ECUIO_ERR_INVALID_ARGUMENT`. A time of plain
+  numbers takes it when given, else the unit its header names. ISO 8601
+  times with their offset stay `iso8601`, with a note that the unit
+  given isn't used. A map with no unit is checked with one in its place
+  and handed out without it.
+- **Times without a zone:** ISO 8601 cells with no UTC offset, and
+  times of day, leave the unit unknown with a note that a map with the
+  zone (or the date and offset) is needed. A UTC offset given to the
+  guess waits for a later step.
+- **The bounds:** the header search covers the file's first 1000 lines
+  within 1 MiB; the sample's 64 KiB and 200 rows count from the header.
+  A read past what the guess needs stops at a line feed, and a quoted
+  field that read cuts short ends the sample; a read with no line feed
+  at all is refused as one ("the file's first 1152 KiB hold no line
+  end"). The header's check reads 64 KiB from the candidate: a row that
+  window ends inside ends the check as the file's end would, so wide
+  rows keep their header, and a candidate needs one whole row below it.
+  A preamble line the import refuses (past 64 KiB, a NUL) refuses the
+  guess in the import's words, as a map with that `header_row` would.
+- **The header and the time:** a header has two or more cells, more
+  than half of its non-empty ones not numbers or times, and up to five
+  rows below it of its cell count, each with more than half of its
+  non-empty cells numbers or times (a row of empty cells skipped). Each
+  row on its own, not the rows together, so a preamble line with the
+  data's field count is never taken for the header. A time column that
+  isn't named so must be non-decreasing with at least two distinct
+  values. Majority is more than half of the non-empty cells.
+- **Units in the header:** `sec`, `secs`, `seconds`, `msec` and `usec`
+  inside the brackets too, and both micro signs (U+00B5 and U+03BC)
+  read as data.
+- **Names and notes:** a cut name leaves room for its ` 2`; past 64
+  notes the rest are counted in one `...and N more`; columns past the
+  map's 256 signals are left out and counted in one note.
+- **The front ends:** `havne-cli import csv <file> <folder>` without
+  `--map` writes a `guessed` line (the text's three keys) before the
+  import's own, as compact JSON like the CLI's other lines, and refuses
+  a map with no unit with an `error` line naming `--time-unit` for a time
+  of plain numbers, a map with the zone (or the date and offset) for any
+  other. `havne-cli import csv <file> --print-map
+  [--time-unit ...]` prints the slice alone and a line end, no JSON
+  lines; a map with no unit is printed with a stderr line saying so.
+  Python's `havne.guess_csv_map(path, time_unit=None)` returns a
+  `GuessedMap` (`map` a dict, `notes`, `flags`, `columns` the text's
+  list); `havne.import_csv(path, folder, column_map=None,
+  time_unit=None)` takes the slice when no map is given.
+
+### The preview as built (2026-11-07)
+
+Step 2 settled these:
+
+- **The call:** the app's `RecordingImport` runs `ecuio_import_csv_guess`
+  on its worker (a file that isn't local is copied to 1280 KiB first,
+  past core's read, so core cuts it as it cuts the file) and hands the
+  panel the map's slice, each header column's use and why, and the notes.
+  The edits are composed in the app from the slice (`composeMap`) and
+  imported from their text, with no map file written; core's strict
+  `parse_map` still judges them, so a name past 31 bytes or one a
+  spreadsheet would run as a formula is refused in core's words and the
+  panel keeps the edits.
+- **The first rows** are not in core's text, which never carries a cell's
+  value: the app splits the file's first 64 KiB itself for display (at
+  most five rows below the header row, a cell cut at 32 characters) and
+  never decides anything from them.
+- **Editing:** a checkbox, name, unit and a number/text toggle a column.
+  A column the guess left out can be put back as text named by its
+  header (the name cut to 31 bytes on a character); a column with an
+  empty header, or a header the file has twice, can't be named in a map
+  and stays out. The time column is the map's time and never also a
+  signal, whatever the edits say. Decimals and the other keys are the
+  guess's. A time of plain numbers takes its unit from a choice of s, ms
+  and us; any other time without a unit needs a map with its zone, and
+  **Column map...** picks one.
+- **Saved maps:** **Save as map** writes `<settings folder>/maps/<name>.json`
+  (the name made of ASCII letters, digits, `-` and `_`, never over a name
+  taken) once Import would be enabled, so a map with no time unit is
+  never saved; a **Saved maps** list offers them, and choosing one, like
+  **Column map...**, skips the guess until **Use the guess**.
+
+## Appendix: the wide CSV as built (2026-11-07)
+
+[ADR-0056](0056-analysis-log.md) sections 4 and 5 make the wide layout
+the CSV export's default; the long form of the appendix "the CSV export
+as built" stays behind `ECUIO_CSV_LONG` (`havne-cli export --layout
+long`), byte for byte.
+
+**The options grow within `reserved`** (the C API appendix's
+`reserved[4]` is now `layout`, `row_ms`, `units`, `column_count`,
+`columns_utf8` and `reserved[1]`): `layout` at 24 plus two pointers (40
+on 64-bit, 32 on 32-bit), `columns_utf8` at 40 plus two pointers, the
+size 56 plus two pointers, each pinned in `test_c_abi`. A caller that
+zeroed `reserved` gets the wide CSV. The report's `reserved[1]` is
+`rows` (at 112), the last reserved word it had: the report can't grow
+again within its size, so a later figure needs a struct of its own (a
+known limit). The fields are the wide CSV's alone: set for another
+format or for the long layout, `ECUIO_ERR_INVALID_ARGUMENT`.
+
+**The file:**
+
+```
+Time (ms),RPM (rpm),Speed (km/h),Throttle (%)
+160,812,0,10.5
+260,815,0,10.0
+```
+
+- `Time (ms)` first, then each column as `Name (unit)` (the name alone
+  with no unit), RFC 4180 quotes only where a cell needs them, CRLF, no
+  comment line: the analyst's tools want the header first.
+- **The columns:** `columns_utf8`'s names in order (`--signal <name>`
+  repeated); with none, the header's `focus` line's names in its order
+  (a log begun with a focus exports its picks by itself); with neither,
+  every number signal that has a sample in range, the header's signal
+  lines first in their order, then any the header lacks as first met.
+  A named column the recording lacks is an empty column (a focus pick
+  the session never answered is a column of a log; `havne-cli export`
+  says so on stderr for each, the exit code unchanged); one that names
+  a text or identification signal, or a name twice, is
+  `ECUIO_ERR_INVALID_ARGUMENT` with the reason in the detail (the same
+  pick in the header's focus line is a bad recording,
+  `ECUIO_ERR_LOAD_FAILED`). Text and identification signals are never
+  columns and their values are counted left out as the long form counts them.
+- **The rows** (section 4's rule): a row once every column in the rule
+  has a sample newer than the last row, at the completing sample's
+  time in whole ms (rounded) from the recording's zero, each cell the
+  column's newest value, held. A column with samples in range starts
+  in the rule (its first sample is due with the first sweep's); one
+  with none, a named pick the recording never answered, starts outside
+  it and holds no row up. A column with no sample for 1 s, or 3x its
+  usual interval when that is longer (the median of the gaps between
+  its samples, from a log-linear histogram as reply timing keeps),
+  leaves the rule when the next sample of any column finds it quiet,
+  and its cells stay empty until its next sample, which puts it back.
+- **A grid** (`row_ms`, `--rows <ms>`): rows at the multiples of the
+  interval from the recording's zero (so two exports of one log align,
+  `--from` or not), each the newest values at its time under the same
+  silence rule, a step with no new cell since the last written row
+  skipped (a stretch of them in one move: nothing is new until the
+  next sample, so a gap of hours at `--rows 1` costs no loop, and the
+  silence is judged at the step that writes), and a last row at the
+  step at or after the last sample so the newest values are in.
+- **Cells:** each in its signal's decimal places from the header's
+  signal line (an older recording's: the most its values show, at most
+  3), converted to `units` (`ECUIO_UNITS_*`, `--units metric|imperial`)
+  through `ecuio_display_convert`, which adds a place where the
+  conversion needs it (kPa to psi); the head cell carries the unit
+  shown. Formatted by core's own digits, a `.` whatever the locale, no
+  `-0.0`; a value past the fixed digits' reach (9e15 once scaled) is
+  written as `signals.csv` writes it (`%.12g`), never an empty cell.
+- **The report:** `rows`, `values` the filled cells, `signal_count` the
+  columns; the file goes through the same check as the long form and
+  the same formula refusal for a name or unit.
+
+**The estimate** (`ecuio_export_estimate(options, row_ms, count, out)`):
+one pass over the recording answers each interval in `row_ms` with its
+rows, the file's exact bytes (every cell formatted, nothing written,
+the check not run) and the columns, for the app's choices beside each
+other and for scripts; the wide CSV's alone, `out_path_utf8` may be
+NULL.
+
+**`havne-cli export`:** `--layout wide|long` (wide the default),
+`--rows sweep|<ms>` (1 to 86400000), `--units metric|imperial`,
+`--signal <name>` repeated; the four go with `--format csv`, the last
+three with the wide layout, else usage. The `exported` line adds
+`layout`, `rows`, `row_ms` and `missing` for CSV (schema 1 growth):
+`missing` counts the named columns the recording has no values for
+(the reader's signal list, `ecuio_recording_open`, which lists the
+signals with a sample), each also a stderr line
+`havne-cli: the recording has no values for '<name>': its column is
+empty`.
+
+**Tests:** `CsvExportTest.Wide*` (test_core: a row a sweep over every
+number signal, a range and an empty one; a column that stops leaving
+the rule at 1 s and rejoining; a slow column's 3x; a 100 ms grid
+holding values, skipping an empty step and ending on the step after
+the last sample, aligned to the zero under `--from`; decimals and
+units from the header, metric and imperial; named columns in order
+with an empty one, a text, an identification and a repeated name
+refused; the focus line's columns; text and identification signals
+never columns; a quoted head and a formula refused),
+`ExportTest.TheEstimateMatchesTheFileForEachInterval` and
+`.ArgumentsAreCheckedBeforeAnythingIsRead` (the shape fields and the
+estimate's refusals; the estimate also over named columns, one quoted
+and one the recording lacks, a range and imperial units),
+`FolderExportTest.EachFileIsCopiedThroughItsClasses` (a copy exported
+wide through its focus line), `test_c_abi` (the offsets),
+`CliTransferTest` (the flags, their bad forms, the line, the missing
+names), `CliTransferRunTest.csv` (the replay fixture's recording
+exported long as before and wide: the header, every cell a number or
+empty, the times whole ms ascending, a 1 s grid, named columns in
+order, a named column the recording lacks warned and counted). The
+sweep row's time to the nearest ms, the silence judged at a grid's
+writing step, a gap jumped in one move and a value past the fixed
+digits have a case each (`CsvExportTest.WideA*`), and
+`RequestTimingTest.ASamplePastThirtyOneBitsLandsInTheLastBucket` pins
+the histogram's bound, which the survey's gaps reach.
+
+**The column limit (2026-11-08):** a wide CSV has at most 16384 columns,
+the width a spreadsheet opens. The survey counts the columns as it adds
+them, named or found (the header's number signals and every new name in
+signals.csv), and the first one past the limit ends the export with
+`ECUIO_ERR_LOAD_FAILED` and "the wide CSV is limited to 16384 columns:
+pick the columns to keep", before any row is costed (each sample touches
+every column, so a recording naming tens of thousands of signals would
+otherwise run for minutes and write a file nothing opens). The long
+layout has no such limit. `ecuio_export_estimate` takes at most 64 row
+intervals in a call, each one keeping a rows engine, and refuses more
+with `ECUIO_ERR_INVALID_ARGUMENT` before it allocates.

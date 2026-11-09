@@ -2,25 +2,131 @@
 // Testing: QML: QmlTest.theme, QmlTest.liveview, QmlTest.log, QmlTest.phone
 //          (test_qml); Manual smoke
 pragma Singleton
+import QtCore
 import QtQuick
 
-// Central palette - dark mode. main.cpp repeats three of these for the
-// platform's own window: bg behind Android's, surface and text in
-// Windows' title bar; change them there too
+// Central palette: three themes, the one in `theme` read through the roles
+// below. main.cpp colors the platform's own window (Android's background,
+// Windows' title bar) from bg, surface and text when the theme changes.
+// Dark is the default. Low glare (amber and orange on near black) and Night
+// (red on near black) keep the light low for a car's cabin after dark; red
+// is the danger color there too, so danger is told from the rest by more
+// than hue (GaugeBase: a mark beside the readout and a heavier zone stroke).
+// Text holds 4.5:1 or more against the surfaces it sits on in each theme,
+// except text on the selected-row color (primary), held to Dark's own 4.2:1
+// (a lighter primary would be a bright row in a dark cabin); the readouts,
+// the zone colors and the trace colors have their floors too
+// (tests/qml/tst_theme.qml measures each).
 QtObject {
-    readonly property color bg:             "#14141c"
-    readonly property color surface:        "#1e1e2e"
-    readonly property color elevated:       "#2a2a3e"
-    readonly property color elevatedLight:  "#33334a"
-    readonly property color outline:        "#64647e"   // control borders; 3:1 on bg
-    readonly property color primary:        "#6d4aff"
-    readonly property color text:           "#e8e8f0"
-    readonly property color textDim:        "#8888a0"
-    readonly property color success:        "#4ade80"
-    readonly property color warning:        "#ffd166"
-    readonly property color danger:         "#f87171"
-    readonly property color info:           "#60a5fa"
+    // The chosen theme, kept between runs under the `ui` settings. It is
+    // read here, when the singleton is made, so the first frame already has
+    // it. A name that is not a theme reads as dark (`active`)
+    property string theme: "dark"
+    readonly property string active: clampTheme(theme)
+    property Settings store: Settings {
+        category: "ui"
+        property string theme: "dark"
+    }
+    // qmllint disable missing-property
+    Component.onCompleted: theme = clampTheme(store.theme)
+    onThemeChanged: store.theme = theme
+    // qmllint enable missing-property
+    readonly property var themeNames: ["dark", "lowGlare", "night"]
+    function clampTheme(name) { return themeNames.indexOf(name) >= 0 ? name : "dark" }
+    function themeLabel(name) {
+        switch (name) {
+        case "lowGlare": return qsTr("Low glare")
+        case "night":    return qsTr("Night")
+        default:         return qsTr("Dark")
+        }
+    }
+
+    // The analog dial's bezel, face, needle and hub shades from its face
+    // color, for a theme with no hand-picked ones
+    function shadesOf(face) {
+        return { bezelHi: Qt.lighter(face, 2.1), bezelLo: Qt.lighter(face, 1.6),
+                 faceHi: Qt.lighter(face, 1.45), faceLo: Qt.darker(face, 1.9),
+                 needleBase: Qt.lighter(face, 1.7), hubHi: Qt.lighter(face, 2.5) }
+    }
+
+    readonly property var palettes: ({
+        dark: {
+            bg: "#14141c", surface: "#1e1e2e", elevated: "#2a2a3e", elevatedLight: "#33334a",
+            outline: "#64647e",   // control borders; 3:1 on bg
+            primary: "#6d4aff", text: "#e8e8f0", textDim: "#8888a0",
+            success: "#4ade80", warning: "#ffd166", danger: "#f87171", info: "#60a5fa",
+            gaugeFace: "#1b1b28", gaugeValue: Qt.lighter("#6d4aff", 1.3),
+            shades: { bezelHi: "#3a3a52", bezelLo: "#2c2c42", faceHi: "#25253a", faceLo: "#0e0e15",
+                      needleBase: "#2a2a38", hubHi: "#4b4b63" },
+            gaugeReadout: "#e8e8f0", gaugeNeedle: "#ff5a5f", gaugeTick: "#e8e8f0",
+            gaugeWarn: "#ffd166", gaugeDanger: "#f87171",
+            // One per hue family, so traces stay distinct on the dark surface
+            series: ["#4aa3ff",   // blue
+                     "#31d08c",   // green
+                     "#5dd9d0",   // aqua
+                     "#f0e442",   // yellow
+                     "#e39ac9",   // reddish purple
+                     "#ffa94d",   // orange
+                     "#f2f2f2",   // near-white
+                     "#b08cff",   // violet
+                     "#a3e635",   // lime
+                     "#e879f9"]   // fuchsia
+        },
+        lowGlare: {
+            bg: "#0d0a07", surface: "#18120c", elevated: "#261c12", elevatedLight: "#31241a",
+            outline: "#85694a", primary: "#7f440d", text: "#f3c895", textDim: "#b58f64",
+            success: "#f0a53a", warning: "#ff8a3a", danger: "#ff4a38", info: "#d2a86a",
+            gaugeFace: "#1a130c", gaugeValue: "#f0a53a",
+            shades: shadesOf("#1a130c"),
+            gaugeReadout: "#f7c98a", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
+            gaugeWarn: "#ff8a3a", gaugeDanger: "#ff4a38",
+            // Warm, told apart by lightness and saturation as much as hue
+            series: ["#fff5bf", "#ff4000", "#ffd900", "#9e5d47", "#d17d00",
+                     "#9e9147", "#ffb299", "#ffe373", "#ff794d", "#b89c00"]
+        },
+        night: {
+            bg: "#080404", surface: "#130909", elevated: "#201010", elevatedLight: "#2b1616",
+            outline: "#934a44", primary: "#7a241c", text: "#ff9484", textDim: "#c46a5e",
+            success: "#e8584a", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
+            gaugeFace: "#150909", gaugeValue: "#ff5a4a",
+            shades: shadesOf("#150909"),
+            gaugeReadout: "#ff9686", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
+            gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
+            series: ["#ffdfbf", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
+                     "#ff8000", "#ffab73", "#d1431f", "#b86253", "#ebb0b0"]
+        }
+    })
+    readonly property var colors: palettes[active]
+
+    readonly property color bg:             colors.bg
+    readonly property color surface:        colors.surface
+    readonly property color elevated:       colors.elevated
+    readonly property color elevatedLight:  colors.elevatedLight
+    readonly property color outline:        colors.outline
+    readonly property color primary:        colors.primary
+    readonly property color text:           colors.text
+    readonly property color textDim:        colors.textDim
+    readonly property color success:        colors.success
+    readonly property color warning:        colors.warning
+    readonly property color danger:         colors.danger
+    readonly property color info:           colors.info
     readonly property int radius:           8
+
+    // The gauges' roles (ADR-0057 section 9): no gauge draws a literal color.
+    // The face under the dial and the cards; value: the lit segments, the
+    // progress arc and the trace; readout: the value's text; needle; the
+    // ticks and their numerals; warn and danger: the zones and a readout
+    // past them
+    readonly property color gaugeFace:      colors.gaugeFace
+    readonly property color gaugeValue:     colors.gaugeValue
+    readonly property color gaugeReadout:   colors.gaugeReadout
+    readonly property color gaugeNeedle:    colors.gaugeNeedle
+    readonly property color gaugeTick:      colors.gaugeTick
+    readonly property color gaugeWarn:      colors.gaugeWarn
+    readonly property color gaugeDanger:    colors.gaugeDanger
+    // The analog dial's own shades (bezelHi, bezelLo, faceHi, faceLo,
+    // needleBase, hubHi): Dark's are fixed colors
+    readonly property var gaugeShade:       colors.shades
 
     // A phone's density: Main.qml sets dense when the layout (after the
     // zoom) is narrower than 720 px or shorter than 480 px, a phone
@@ -31,12 +137,26 @@ QtObject {
     // Shorter than 480 px: a phone on its side, where Live's and the
     // viewer's charts start maximized (Main.qml sets it with dense)
     property bool shortLayout: false
+    // Narrower than 720 px: a phone upright, where the tab bar shows
+    // (Main.qml sets it)
+    property bool compact: false
     readonly property int spacing:          dense ? 6 : 8
     readonly property int pageMargin:       dense ? 10 : 16
     readonly property int controlHeight:    dense ? 32 : 36
     readonly property int rowHeight:        dense ? 36 : 44
     readonly property int toolBarHeight:    dense ? 40 : 48
     readonly property int sidebarWidth:     dense ? 150 : 220
+    // The least a tap target measures each way on a phone (Material's
+    // 48 dp), on the glass: in the layout's units, which the zoom scales,
+    // a zoom under 1 asks for more, so a target never shrinks below it;
+    // elsewhere a control's own height. A control may draw smaller
+    // inside it.
+    readonly property real touchTarget:     mobile || compact ? 48 * Math.max(1, 1 / zoom)
+                                                              : controlHeight
+    // Between a bar's targets and the window's edge, on the glass too, so
+    // a tap low on the tab bar never lands on the system's Back or Home
+    // beside it
+    readonly property real barGap:          8 * Math.max(1, 1 / zoom)
 
     // A phone or tablet: touch only, no keyboard shortcuts, no file
     // manager for the app's own folders
@@ -86,21 +206,11 @@ QtObject {
                                          ? "Menlo"
                                          : "monospace"
 
-    // Chart trace colors, one per hue family so traces stay distinct on
-    // the dark surface. LiveView keys them by model row. No red: it is
-    // the danger color, so a trace drawn in it would read as an alarm.
-    readonly property var seriesColors: [
-        "#4aa3ff",   // blue
-        "#31d08c",   // green
-        "#5dd9d0",   // aqua
-        "#f0e442",   // yellow
-        "#e39ac9",   // reddish purple
-        "#ffa94d",   // orange
-        "#f2f2f2",   // near-white
-        "#b08cff",   // violet
-        "#a3e635",   // lime
-        "#e879f9",   // fuchsia
-    ]
+    // Chart trace colors, per theme (each palette's `series`): one per hue
+    // family on Dark so traces stay distinct on the dark surface, warm in
+    // the night themes. LiveView keys them by model row. Dark has no red:
+    // it is the danger color, so a trace drawn in it would read as an alarm.
+    readonly property var seriesColors: colors.series
     // A trace's style by its row (Live's model row, a recording's signal
     // index): rows past the palette reuse its colors with a dashed trace,
     // so a chart still tells them apart (a list's swatch shows the color
@@ -135,6 +245,18 @@ QtObject {
     // states fall to "Link degraded", mirroring linkColor. LiveView's
     // banner keeps its own longer messages, which carry the episode count
     // and error code.
+    // The same states in one short word, for a header with no room
+    function linkShortLabel(state: string): string {
+        switch (state) {
+        case "ok":              return qsTr("Live")
+        case "fault":           return qsTr("Fault")
+        case "requests":        return qsTr("Failing")
+        case "quiet":           return qsTr("Quiet")
+        case "stopped":         return qsTr("Stopped")
+        case "disconnected":    return qsTr("Offline")
+        default:                return qsTr("Degraded")
+        }
+    }
     function linkLabel(state: string): string {
         switch (state) {
         case "ok":              return qsTr("Session active")

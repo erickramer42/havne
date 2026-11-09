@@ -92,14 +92,32 @@ struct ecuio_session {
     std::atomic<uint32_t> clear_generation[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_flags[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in
+     * the caller's order and one byte per def of the set (1 picked), both
+     * under the mutex; focus_generation moves on with each call, and a
+     * requesting worker that sees it move takes the picks
+     * (ecuio_take_focus). No ids is no focus. Under the same mutex,
+     * what the call judges a focus by: focus_requests, the session's
+     * worker asks requests (ecuio_build_requests found some), and
+     * focus_askable, one byte per def (1: its request is in the table and
+     * not dropped), set by ecuio_build_requests and kept by the worker
+     * as the table changes; a requesting session refuses a focus whose
+     * picks are none of them askable. */
+    std::mutex focus_mutex;
+    std::vector<uint16_t> focus_ids;
+    std::vector<uint8_t> focus_defs;
+    std::atomic<uint32_t> focus_generation{0};
+    bool focus_requests = false;
+    std::vector<uint8_t> focus_askable;
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),
      * set by attach, read by a recording's attach */
     std::string source_frame_flags;
-    /* The recorder's link (ADR-0049, recorder.h), set by
-     * ecuio_session_record before start and kept until the session is
-     * freed, so the worker reads it without a lock */
+    /* The recorder's link (ADR-0049, recorder.h), made by
+     * ecuio_session_create and kept until the session is freed, so the
+     * worker reads it without a lock; ecuio_session_record puts its
+     * recorder in it, before or after start (ADR-0056 section 3) */
     std::shared_ptr<ecuio_record_link> record_link;
     /* The pull queues' links (ecuio/queue.h, pull_queue.h), set by
      * ecuio_queue_open before start and kept until the session is freed,

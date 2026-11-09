@@ -81,8 +81,11 @@ TestCase {
             compare(shown, uri, "label is the URI")
 
         sameColor(find(main.contentItem, "linkPill").tone, tone, "header pill")
+        // With no room for the name (Start log is up) the pill is one word
+        const roomy = find(main.contentItem, "headerTitle").visible
         compare(find(main.contentItem, "linkPillText").text,
-                Bridge.connected ? label + " · " + shown : label, "header pill")
+                !roomy ? Theme.linkShortLabel(Bridge.linkState)
+                       : Bridge.connected ? label + " · " + shown : label, "header pill")
 
         const home = showPage(main, "homePage")
         sameColor(find(home, "linkDot").color, tone, "Home dot")

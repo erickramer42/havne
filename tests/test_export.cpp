@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -914,10 +915,68 @@ TEST(ExportTest, ArgumentsAreCheckedBeforeAnythingIsRead)
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_LOAD_FAILED);
     a.format = ECUIO_EXPORT_CSV;
     EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_LOAD_FAILED);
+
+    /* The CSV's shape (ADR-0056 section 5): the wide CSV's fields alone */
+    a = o;
+    a.layout = 1; /* a pcapng has no layout */
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a = o;
+    a.format = ECUIO_EXPORT_CSV;
+    a.layout = 2;
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a.layout = ECUIO_CSV_LONG;
+    a.row_ms = 100; /* the long form has no rows */
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a.row_ms = 0;
+    a.units = ECUIO_UNITS_IMPERIAL;
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a = o;
+    a.format = ECUIO_EXPORT_CSV;
+    a.units = 2;
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    a.units = 0;
+    a.column_count = 1; /* a count with no names */
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    const char* none[] = {nullptr};
+    a.columns_utf8 = none;
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    const char* empty[] = {""};
+    a.columns_utf8 = empty;
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_INVALID_ARGUMENT);
+    const char* rpm[] = {"RPM"};
+    a.columns_utf8 = rpm;
+    EXPECT_EQ(ecuio_export(&a, nullptr), ECUIO_ERR_LOAD_FAILED)
+        << "a named column reads the recording";
+
+    /* The estimate: the wide CSV's alone, each interval answered */
+    ecuio_export_estimate_t est[2];
+    const uint32_t rows_ms[2] = {0, 100};
+    a = o;
+    a.format = ECUIO_EXPORT_CSV;
+    EXPECT_EQ(ecuio_export_estimate(nullptr, rows_ms, 2, est),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_export_estimate(&a, nullptr, 2, est),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_export_estimate(&a, rows_ms, 2, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_export_estimate(&a, rows_ms, 0, est),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    a.layout = ECUIO_CSV_LONG;
+    EXPECT_EQ(ecuio_export_estimate(&a, rows_ms, 2, est),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    a = o;
+    EXPECT_EQ(ecuio_export_estimate(&a, rows_ms, 2, est),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a pcapng has no estimate";
+    a.format = ECUIO_EXPORT_CSV;
+    a.out_path_utf8 = nullptr; /* nothing is written */
+    EXPECT_EQ(ecuio_export_estimate(&a, rows_ms, 2, est),
+              ECUIO_ERR_LOAD_FAILED);
 }
 
 // ---- the CSV export: signals.csv's values as samples ----
 
+/* The long form (ECUIO_CSV_LONG), a row a value */
 struct CsvExported {
     ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
     ecuio_export_report_t report{};
@@ -930,6 +989,7 @@ struct CsvExported {
         const std::string out = f.utf8(name);
         ecuio_export_options_t o{};
         o.format = ECUIO_EXPORT_CSV;
+        o.layout = ECUIO_CSV_LONG;
         o.flags = flags;
         o.from_us = from_us;
         o.to_us = to_us;
@@ -942,6 +1002,75 @@ struct CsvExported {
         }
     }
 };
+
+/* The wide form (ECUIO_CSV_WIDE, the default): the columns named, or
+ * none for the header's focus line or every number signal */
+struct WideExported {
+    ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
+    ecuio_export_report_t report{};
+    std::string detail;
+    std::string bytes;
+    WideExported(const Folder& f, std::vector<const char*> columns = {},
+                 uint32_t row_ms = 0, uint32_t units = ECUIO_UNITS_METRIC,
+                 uint32_t flags = 0, uint64_t from_us = 0, uint64_t to_us = 0,
+                 const std::string& name = "wide.csv")
+    {
+        const std::string folder = f.utf8("rec");
+        const std::string out = f.utf8(name);
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_CSV;
+        o.flags = flags;
+        o.from_us = from_us;
+        o.to_us = to_us;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        o.row_ms = row_ms;
+        o.units = units;
+        o.column_count = static_cast<uint32_t>(columns.size());
+        o.columns_utf8 = columns.empty() ? nullptr : columns.data();
+        rc = ecuio_export(&o, &report);
+        detail = ecuio_last_error_detail();
+        if (fs::exists(f.path / name)) {
+            bytes = read_file(f.path / name);
+        }
+    }
+};
+
+/* A wide file's lines, the CRLFs checked and dropped */
+std::vector<std::string> wide_lines(const std::string& bytes)
+{
+    std::vector<std::string> out;
+    size_t at = 0;
+    while (at < bytes.size()) {
+        const size_t nl = bytes.find("\r\n", at);
+        EXPECT_NE(nl, std::string::npos)
+            << "a line without CRLF: " << bytes.substr(at);
+        if (nl == std::string::npos) {
+            out.push_back(bytes.substr(at));
+            break;
+        }
+        out.push_back(bytes.substr(at, nl - at));
+        at = nl + 2;
+    }
+    return out;
+}
+
+/* Three signals polled in turn every 100 ms, from 100 ms: RPM, Speed,
+ * Throttle, the throttle to one decimal; sweeps sweeps of them */
+std::string polled_rows(int sweeps, int from_ms = 100)
+{
+    std::string s;
+    for (int i = 0; i < sweeps; ++i) {
+        const int t = from_ms + 100 * i;
+        char b[160];
+        std::snprintf(b, sizeof b,
+                      "%d000,RPM,%d,rpm\n%d000,Speed,%d,km/h\n"
+                      "%d000,Throttle,%d.5,%%\n",
+                      t, 800 + i, t + 30, i / 2, t + 60, 10 + i);
+        s += b;
+    }
+    return s;
+}
 
 std::string csv_head(const char* kind, const std::string& counts,
                      uint64_t ident, uint64_t text)
@@ -1121,6 +1250,502 @@ TEST(CsvExportTest, ARecordingWithoutValuesOrWithABadRowWritesNothing)
 
 // ---- the folder export: a scrubbed copy of the recording ----
 
+// ---- The wide CSV (ADR-0056 sections 4 and 5) ----
+
+/* A row a sweep: once every column has a sample newer than the last
+ * row, at the completing sample's time in whole ms; the columns every
+ * number signal as first met, their decimals the most their values
+ * show; CRLF, no comment line, the report's rows and cells */
+TEST(CsvExportTest, WideWritesARowPerSweepOverEveryNumberSignal)
+{
+    Folder f;
+    recording(f, "", polled_rows(3));
+    fs::remove(f.path / "rec" / "frames.csv");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h),Throttle (%)\r\n"
+                       "160,800,0,10.5\r\n"
+                       "260,801,0,11.5\r\n"
+                       "360,802,1,12.5\r\n");
+    EXPECT_EQ(e.report.rows, 3u);
+    EXPECT_EQ(e.report.values, 9u);
+    EXPECT_EQ(e.report.signal_count, 3u);
+    EXPECT_EQ(e.report.frames, 0u);
+
+    /* A range: the rows its samples complete; the time stays the
+     * recording's */
+    WideExported mid(f, {}, 0, ECUIO_UNITS_METRIC, 0, 200000, 300000,
+                     "mid.csv");
+    ASSERT_EQ(mid.rc, ECUIO_OK) << mid.detail;
+    EXPECT_EQ(mid.bytes, "Time (ms),RPM (rpm),Speed (km/h),Throttle (%)\r\n"
+                         "260,801,0,11.5\r\n");
+    WideExported none(f, {}, 0, ECUIO_UNITS_METRIC, 0, 9000000, 0, "none.csv");
+    ASSERT_EQ(none.rc, ECUIO_OK) << none.detail;
+    EXPECT_EQ(none.bytes, "Time (ms)\r\n");
+    EXPECT_EQ(none.report.rows, 0u);
+}
+
+/* A signal that stops answering leaves the rule after 1 s of silence
+ * (3x its usual interval being shorter): the rows go on without it,
+ * its cells empty, and it rejoins with its next sample */
+TEST(CsvExportTest, WideAColumnThatStopsLeavesTheRuleAndRejoins)
+{
+    std::string rows;
+    for (int t = 100; t <= 3000; t += 100) {
+        rows += std::to_string(t) + "000,RPM," + std::to_string(t) + ",rpm\n";
+        if (t == 100 || t == 200 || t == 2500) {
+            rows += std::to_string(t + 50) + "000,Speed," +
+                    std::to_string(t / 100) + ",km/h\n";
+        }
+    }
+    Folder f;
+    recording(f, "", rows);
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_EQ(got.size(), 17u) << e.bytes;
+    EXPECT_EQ(got[0], "Time (ms),RPM (rpm),Speed (km/h)");
+    EXPECT_EQ(got[1], "150,100,1");
+    EXPECT_EQ(got[2], "250,200,2");
+    /* Speed is quiet from 250 ms: at 1300 ms the gap passes 1 s and the
+     * sweeps go on without it */
+    EXPECT_EQ(got[3], "1300,1300,") << "the first row after the silence";
+    EXPECT_EQ(got[4], "1400,1400,");
+    EXPECT_EQ(got[15], "2500,2500,");
+    /* Its sample at 2550 ms rejoins; the next RPM completes the row */
+    EXPECT_EQ(got[16], "2600,2600,25");
+    EXPECT_EQ(e.report.rows, 16u);
+    EXPECT_EQ(e.report.values, 16u + 3u);
+}
+
+/* A slow signal's own interval sets its silence, 3x it: one every
+ * 500 ms leaves the rule 1.5 s after its last, not 1 s */
+TEST(CsvExportTest, WideASlowColumnsIntervalSetsItsSilence)
+{
+    std::string rows;
+    for (int t = 100; t <= 4000; t += 100) {
+        rows += std::to_string(t) + "000,RPM," + std::to_string(t) + ",rpm\n";
+        if (t == 500 || t == 1000 || t == 1500) {
+            rows += std::to_string(t + 10) + "000,Slow," +
+                    std::to_string(t / 500) + ",\n";
+        }
+    }
+    Folder f;
+    recording(f, "", rows);
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_GE(got.size(), 5u) << e.bytes;
+    EXPECT_EQ(got[0], "Time (ms),RPM (rpm),Slow");
+    EXPECT_EQ(got[1], "510,500,1");
+    EXPECT_EQ(got[2], "1010,1000,2");
+    EXPECT_EQ(got[3], "1510,1500,3");
+    EXPECT_EQ(got[4], "3100,3100,")
+        << "quiet 1.6 s at 3100 ms, past 3x its 500 ms; not at 2600";
+    EXPECT_EQ(got.size(), 4u + 10u) << "then a row an RPM to 4000 ms";
+}
+
+/* A grid: a row at each interval from the recording's zero with the
+ * newest values at its time, held; a step with no new cell skipped;
+ * the last values on the step after the last sample */
+TEST(CsvExportTest, WideAGridHoldsTheNewestValuesAndSkipsAnEmptyStep)
+{
+    Folder f;
+    recording(f, "",
+              "50000,RPM,800,rpm\n60000,Speed,3,km/h\n120000,RPM,810,rpm\n"
+              "530000,RPM,820,rpm\n");
+    WideExported e(f, {}, 100);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+                       "100,800,3\r\n"
+                       "200,810,3\r\n"
+                       "600,820,3\r\n");
+    EXPECT_EQ(e.report.rows, 3u);
+    EXPECT_EQ(e.report.values, 6u);
+
+    /* A --from past the zero keeps the grid on the zero's multiples */
+    WideExported late(f, {}, 100, ECUIO_UNITS_METRIC, 0, 55000, 0, "late.csv");
+    ASSERT_EQ(late.rc, ECUIO_OK) << late.detail;
+    EXPECT_EQ(late.bytes, "Time (ms),Speed (km/h),RPM (rpm)\r\n"
+                          "100,3,\r\n"
+                          "200,3,810\r\n"
+                          "600,3,820\r\n");
+}
+
+/* Each cell in its signal's decimal places from the header's signal
+ * line, converted to the units asked for (one more place where the
+ * conversion needs it), the head cell in the unit shown */
+TEST(CsvExportTest, WideASweepRowsTimeIsTheCompletingSamplesToTheNearestMs)
+{
+    Folder f;
+    recording(f, "",
+              "100600,RPM,800,rpm\n100700,Speed,3,km/h\n"
+              "200000,RPM,801,rpm\n200500,Speed,4,km/h\n");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+                       "101,800,3\r\n"
+                       "201,801,4\r\n");
+}
+
+TEST(CsvExportTest, WideAGridAppliesTheSilenceAtTheStepItWrites)
+{
+    /* Speed answers once; RPM's sample at 1050 ms finds it 990 ms quiet
+     * (in the rule), the grid's step at 1100 ms finds it past 1 s: the
+     * step writes RPM alone */
+    Folder f;
+    recording(f, "",
+              "50000,RPM,800,rpm\n60000,Speed,3,km/h\n"
+              "1050000,RPM,810,rpm\n1250000,RPM,820,rpm\n");
+    WideExported e(f, {}, 100);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+                       "100,800,3\r\n"
+                       "1100,810,\r\n"
+                       "1300,820,\r\n");
+    EXPECT_EQ(e.report.values, 4u);
+}
+
+TEST(CsvExportTest, WideAGridJumpsAGapWithNothingNew)
+{
+    /* Two samples 1e9 s apart at --rows 1: a step at a time would be
+     * 1e12 steps; the file is two rows and the export is quick */
+    Folder f;
+    recording(f, "", "0,RPM,800,rpm\n1000000000000000,RPM,801,rpm\n");
+    const auto begun = std::chrono::steady_clock::now();
+    WideExported e(f, {}, 1);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm)\r\n"
+                       "0,800\r\n"
+                       "1000000000000,801\r\n");
+    EXPECT_EQ(e.report.rows, 2u);
+    EXPECT_LT(std::chrono::steady_clock::now() - begun,
+              std::chrono::seconds(5));
+}
+
+TEST(CsvExportTest, WideAValuePastTheFixedDigitsIsWrittenAsRecorded)
+{
+    Folder f;
+    recording(f, "", "100000,RPM,1e17,rpm\n200000,RPM,-2.5e16,rpm\n");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm)\r\n"
+                       "100,1e+17\r\n"
+                       "200,-2.5e+16\r\n");
+    EXPECT_EQ(e.report.values, 2u);
+}
+
+TEST(CsvExportTest, WideCellsFollowTheHeadersDecimalsAndTheUnits)
+{
+    const std::string header = "profile  obd2\n"
+                               "signal  Speed,number,km/h,0,1,0\n"
+                               "signal  Boost,number,kPa,1,2,0\n";
+    Folder f;
+    recording(f, "", "1000,Speed,100,km/h\n2000,Boost,101.3,kPa\n", header);
+    WideExported metric(f);
+    ASSERT_EQ(metric.rc, ECUIO_OK) << metric.detail;
+    EXPECT_EQ(metric.bytes, "Time (ms),Speed (km/h),Boost (kPa)\r\n"
+                            "2,100,101.3\r\n");
+    WideExported imperial(f, {}, 0, ECUIO_UNITS_IMPERIAL, 0, 0, 0,
+                          "imperial.csv");
+    ASSERT_EQ(imperial.rc, ECUIO_OK) << imperial.detail;
+    EXPECT_EQ(imperial.bytes, "Time (ms),Speed (mph),Boost (psi)\r\n"
+                              "2,62,14.69\r\n");
+}
+
+/* The columns named, in their order: one the recording lacks is empty,
+ * and leaves the rule after 1 s so the rows go on; a text or
+ * identification signal, or a name twice, is refused */
+TEST(CsvExportTest, WideNamedColumnsComeInTheirOrder)
+{
+    Folder f;
+    recording(f, "", polled_rows(12));
+    WideExported e(f, {"Speed", "RPM", "Nothing"});
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_GE(got.size(), 2u) << e.bytes;
+    EXPECT_EQ(got[0], "Time (ms),Speed (km/h),RPM (rpm),Nothing");
+    EXPECT_EQ(got[1], "130,0,800,")
+        << "the first sweep: Nothing has no sample, so it holds no row up";
+    EXPECT_EQ(got.size(), 13u) << "a row a sweep";
+    EXPECT_EQ(e.report.signal_count, 3u);
+
+    const std::string header =
+        "uri  mock://x?profile=uds-generic&did=D802:text,"
+        "F18C:u16\n"
+        "profile  uds-generic\n";
+    Folder g;
+    recording(g, "",
+              "1000,DID D802,ECM,\n2000,DID F18C,4242,\n3000,RPM,1,rpm\n",
+              header);
+    WideExported text(g, {"DID D802"});
+    EXPECT_EQ(text.rc, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(text.detail.find("text signal"), std::string::npos)
+        << text.detail;
+    WideExported ident(g, {"DID F18C"});
+    EXPECT_EQ(ident.rc, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(ident.detail.find("identification signal"), std::string::npos)
+        << ident.detail;
+    WideExported twice(g, {"RPM", "RPM"});
+    EXPECT_EQ(twice.rc, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(twice.detail.find("named twice"), std::string::npos)
+        << twice.detail;
+    EXPECT_FALSE(fs::exists(g.path / "wide.csv"));
+}
+
+/* No columns named: the header's focus line picks them, in its order;
+ * without one, every number signal */
+TEST(CsvExportTest, WideTakesTheFocusLinesColumnsWhenNoneAreNamed)
+{
+    Folder f;
+    recording(f, "", polled_rows(2), "profile  raw\nfocus  Speed,RPM\n");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),Speed (km/h),RPM (rpm)\r\n"
+                       "130,0,800\r\n"
+                       "230,0,801\r\n");
+    WideExported all(f, {"Throttle"}, 0, ECUIO_UNITS_METRIC, 0, 0, 0,
+                     "all.csv");
+    ASSERT_EQ(all.rc, ECUIO_OK) << all.detail;
+    EXPECT_EQ(all.bytes, "Time (ms),Throttle (%)\r\n160,10.5\r\n260,11.5\r\n");
+}
+
+/* A focus line that names a column twice, or a text or identification
+ * signal, is the recording's fault: LOAD_FAILED with the reason, not the
+ * caller's INVALID_ARGUMENT, and no file */
+TEST(CsvExportTest, WideAFocusLineThatCannotBeColumnsIsABadRecording)
+{
+    const std::string rows =
+        "1000,DID D802,ECM,\n2000,DID F18C,4242,\n3000,RPM,1,rpm\n";
+    const struct {
+        const char* focus;
+        const char* reason;
+    } cases[] = {{"RPM,RPM", "named twice"},
+                 {"DID D802", "text signal"},
+                 {"DID F18C", "identification signal"}};
+    for (const auto& c : cases) {
+        Folder g;
+        recording(g, "", rows,
+                  std::string("uri  mock://x?profile=uds-generic&did="
+                              "D802:text,F18C:u16\n"
+                              "profile  uds-generic\n"
+                              "focus  ") +
+                      c.focus + "\n");
+        WideExported e(g);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED) << c.focus;
+        EXPECT_NE(e.detail.find(c.reason), std::string::npos) << e.detail;
+        EXPECT_FALSE(fs::exists(g.path / "wide.csv")) << c.focus;
+    }
+}
+
+/* Text and identification signals are never columns, scrubbed, and
+ * their values are counted left out as the long form counts them; the
+ * header's number signals come first, in its order, with no sample
+ * dropped */
+TEST(CsvExportTest, WideTextAndIdentificationSignalsAreNeverColumns)
+{
+    const std::string header =
+        "uri  elm327://COM3?profile=uds-generic&did=D802:text,D803:u16,"
+        "F18C:u16\n"
+        "profile  uds-generic\n"
+        "signal  Code,text,,0,0\n"
+        "signal  Quiet,number,,0,0\n"
+        "signal  DID D803,number,,0,0\n";
+    Folder f;
+    recording(f, "",
+              "1000,DID D802,ECM-HavneSim,\n2000,DID D803,4660,\n"
+              "3000,DID F18C,424242,\n4000,DID D803,4661,\n"
+              "5000,Note,hello there,\n6000,Code,123456,\n7000,Extra,7,\n",
+              header);
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    /* Extra, in the rule from the start, holds the rows until its first
+     * sample, which completes the one row */
+    EXPECT_EQ(e.bytes, "Time (ms),DID D803,Extra\r\n7,4661,7\r\n");
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 1u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 3u);
+}
+
+/* A name holding a comma is quoted in the head cell; a formula's start
+ * in a name fails the export, leaving no file */
+TEST(CsvExportTest, WideQuotesAHeadAndRefusesAFormula)
+{
+    Folder f;
+    recording(f, "",
+              "1000,\"Trim, bank 1\",3.1,%\n2000,\"Trim, bank 1\",3.2,%\n");
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),\"Trim, bank 1 (%)\"\r\n1,3.1\r\n2,3.2\r\n");
+    Folder g;
+    recording(g, "", "1000,=RPM,5,rpm\n");
+    WideExported bad(g);
+    EXPECT_EQ(bad.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(bad.detail.find("formula"), std::string::npos) << bad.detail;
+    EXPECT_FALSE(fs::exists(g.path / "wide.csv"));
+}
+
+/* The estimate answers several intervals in one pass with what each
+ * export then writes: the rows, the bytes exactly, the columns */
+TEST(ExportTest, TheEstimateMatchesTheFileForEachInterval)
+{
+    Folder f;
+    recording(f, "", polled_rows(30));
+    const std::string folder = f.utf8("rec");
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_CSV;
+    o.folder_utf8 = folder.c_str();
+    const uint32_t intervals[3] = {0, 100, 250};
+    ecuio_export_estimate_t est[3];
+    ASSERT_EQ(ecuio_export_estimate(&o, intervals, 3, est), ECUIO_OK)
+        << ecuio_last_error_detail();
+    for (int i = 0; i < 3; ++i) {
+        SCOPED_TRACE(intervals[i]);
+        const std::string name = "est" + std::to_string(i) + ".csv";
+        WideExported e(f, {}, intervals[i], ECUIO_UNITS_METRIC, 0, 0, 0, name);
+        ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+        EXPECT_EQ(est[i].rows, e.report.rows);
+        EXPECT_EQ(est[i].bytes, e.bytes.size());
+        EXPECT_EQ(est[i].columns, 3u);
+        EXPECT_EQ(est[i].flags, 0u);
+        EXPECT_GT(est[i].rows, 0u);
+    }
+    EXPECT_GT(est[1].rows, est[2].rows) << "a 250 ms grid thins the sweeps";
+
+    /* Named columns (one quoted, one the recording lacks), a range and
+     * imperial units: the estimate is still the file's */
+    Folder g;
+    recording(g, "",
+              polled_rows(10) + "2000000,\"Boost, abs\",101,kPa\n"
+                                "2100000,\"Boost, abs\",102.5,kPa\n");
+    const std::string gfolder = g.utf8("rec");
+    const char* columns[3] = {"Throttle", "Boost, abs", "Nothing"};
+    ecuio_export_options_t n{};
+    n.format = ECUIO_EXPORT_CSV;
+    n.folder_utf8 = gfolder.c_str();
+    n.from_us = 500000;
+    n.to_us = 2050000;
+    n.units = ECUIO_UNITS_IMPERIAL;
+    n.column_count = 3;
+    n.columns_utf8 = columns;
+    ecuio_export_estimate_t named[3];
+    ASSERT_EQ(ecuio_export_estimate(&n, intervals, 3, named), ECUIO_OK)
+        << ecuio_last_error_detail();
+    for (int i = 0; i < 3; ++i) {
+        SCOPED_TRACE(intervals[i]);
+        const std::string name = "named" + std::to_string(i) + ".csv";
+        WideExported e(g, {"Throttle", "Boost, abs", "Nothing"}, intervals[i],
+                       ECUIO_UNITS_IMPERIAL, 0, 500000, 2050000, name);
+        ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+        EXPECT_EQ(named[i].rows, e.report.rows);
+        EXPECT_EQ(named[i].bytes, e.bytes.size());
+        EXPECT_EQ(named[i].columns, 3u);
+        EXPECT_GT(named[i].rows, 0u);
+        EXPECT_EQ(wide_lines(e.bytes)[0],
+                  "Time (ms),Throttle (%),\"Boost, abs (psi)\",Nothing");
+    }
+}
+
+/* The wide CSV has 16384 columns at most, found or named: the refusal
+ * names the limit, comes from the survey (a few seconds for 16384
+ * columns, not minutes) and leaves no file */
+TEST(ExportTest, TheWideCsvRefusesMoreThanTheColumnLimit)
+{
+    const auto names = [](size_t n) {
+        std::string rows;
+        for (size_t i = 0; i < n; ++i) {
+            rows += std::to_string(1000 * (i + 1)) + ",S" + std::to_string(i) +
+                    ",1,\n";
+        }
+        return rows;
+    };
+    Folder at;
+    recording(at, "", names(16384));
+    WideExported ok(at);
+    ASSERT_EQ(ok.rc, ECUIO_OK) << ok.detail;
+    EXPECT_EQ(ok.report.signal_count, 16384u);
+    Folder over;
+    recording(over, "", names(16385));
+    WideExported found(over);
+    EXPECT_EQ(found.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(found.detail,
+              "the wide CSV is limited to 16384 columns: pick the columns to "
+              "keep");
+    EXPECT_FALSE(fs::exists(over.path / "wide.csv"));
+    EXPECT_FALSE(partial_left(over.path, "wide.csv"));
+
+    /* The estimate refuses it the same way */
+    {
+        const std::string folder = over.utf8("rec");
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_CSV;
+        o.folder_utf8 = folder.c_str();
+        const uint32_t ms = 0;
+        ecuio_export_estimate_t est;
+        EXPECT_EQ(ecuio_export_estimate(&o, &ms, 1, &est),
+                  ECUIO_ERR_LOAD_FAILED);
+    }
+
+    /* Declared in events.log's header: the same limit */
+    {
+        std::string header = "profile  obd2\n";
+        for (size_t i = 0; i < 16385; ++i) {
+            header += "signal  H" + std::to_string(i) + ",number,,0,0,0\n";
+        }
+        Folder declared;
+        recording(declared, "", "1000,H0,1,\n", header);
+        WideExported d(declared);
+        EXPECT_EQ(d.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_NE(d.detail.find("limited to 16384 columns"), std::string::npos)
+            << d.detail;
+    }
+
+    /* Named: the limit holds for the picks, which the survey reads first */
+    std::vector<std::string> store;
+    for (size_t i = 0; i < 16385; ++i) {
+        store.push_back("S" + std::to_string(i));
+    }
+    std::vector<const char*> picks;
+    for (size_t i = 0; i < 16384; ++i) {
+        picks.push_back(store[i].c_str());
+    }
+    Folder few;
+    recording(few, "", names(3));
+    WideExported named(few, picks, 0, ECUIO_UNITS_METRIC, 0, 0, 0, "n.csv");
+    ASSERT_EQ(named.rc, ECUIO_OK) << named.detail;
+    picks.push_back(store[16384].c_str());
+    WideExported named_over(few, picks, 0, ECUIO_UNITS_METRIC, 0, 0, 0,
+                            "o.csv");
+    EXPECT_EQ(named_over.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(named_over.detail.find("limited to 16384 columns"),
+              std::string::npos)
+        << named_over.detail;
+    EXPECT_FALSE(fs::exists(few.path / "o.csv"));
+}
+
+/* The estimate takes 64 intervals in a call, no more, and refuses the
+ * 65th before it allocates or reads anything */
+TEST(ExportTest, TheEstimateRefusesMoreThanSixtyFourIntervals)
+{
+    Folder f;
+    recording(f, "", polled_rows(5));
+    const std::string folder = f.utf8("rec");
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_CSV;
+    o.folder_utf8 = folder.c_str();
+    std::vector<uint32_t> ms(65, 100);
+    std::vector<ecuio_export_estimate_t> est(65);
+    EXPECT_EQ(ecuio_export_estimate(&o, ms.data(), 64, est.data()), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_GT(est[63].rows, 0u);
+    est[0].rows = 7;
+    EXPECT_EQ(ecuio_export_estimate(&o, ms.data(), 65, est.data()),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(est[0].rows, 7u) << "refused before out was touched";
+    /* A count no array could back: refused before any allocation */
+    EXPECT_EQ(ecuio_export_estimate(&o, ms.data(), 0xFFFFFFFFu, est.data()),
+              ECUIO_ERR_INVALID_ARGUMENT);
+}
+
 struct FolderExported {
     ecuio_status_t rc = ECUIO_ERR_NOT_IMPLEMENTED;
     ecuio_export_report_t report{};
@@ -1160,7 +1785,8 @@ const std::vector<uint8_t> kWholeReply = {0x41, 0x0C, 0x1A, 0xF8, 0x0D,
 const std::vector<uint8_t> kTwelve = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
 
 /* A recording with every file the export knows and one it doesn't: an
- * ELM327 session through the app, a VIN reply in its frames and its
+ * ELM327 session through the app begun after start (a focus and the
+ * link's state on the header), a VIN reply in its frames and its
  * values, a marker, reply timing and a file of the user's */
 void whole_recording(const Folder& f)
 {
@@ -1173,6 +1799,8 @@ void whole_recording(const Folder& f)
                         "filter=7E8&label=Daily\n"
                         "profile  obd2\n"
                         "frame flags  complete\n"
+                        "focus  RPM\n"
+                        "link  recovered (state 0, 1 episode)\n"
                         "signal  RPM,number,rpm,0,1\n"
                         "signal  VIN,text,,0,0\n"
                         "caller  Havne 0.5.1\n"
@@ -1239,6 +1867,8 @@ const char* const kHead =
     "uri  elm327://<address>?profile=obd2&serial=115200&filter=7E8\n"
     "profile  obd2\n"
     "frame flags  complete\n"
+    "focus  RPM\n"
+    "link  recovered (state 0, 1 episode)\n"
     "signal  RPM,number,rpm,0,1\n"
     "signal  VIN,text,,0,0\n"
     "caller  Havne 0.5.1\n"
@@ -1297,6 +1927,7 @@ TEST(FolderExportTest, EachFileIsCopiedThroughItsClasses)
      * the source's */
     ecuio_export_options_t o{};
     o.format = ECUIO_EXPORT_CSV;
+    o.layout = ECUIO_CSV_LONG;
     const std::string copy = f.utf8("copy");
     const std::string out = f.utf8("copy.csv");
     o.folder_utf8 = copy.c_str();
@@ -1306,6 +1937,18 @@ TEST(FolderExportTest, EachFileIsCopiedThroughItsClasses)
     EXPECT_NE(read_file(f.path / "copy.csv")
                   .find("time_s,signal,unit,value\n1.000000,RPM,rpm,1726\n"),
               std::string::npos);
+    /* And wide, the default: the copied focus line picks the columns */
+    const std::string wide = f.utf8("copy-wide.csv");
+    o.layout = ECUIO_CSV_WIDE;
+    o.out_path_utf8 = wide.c_str();
+    ASSERT_EQ(ecuio_export(&o, &r), ECUIO_OK) << ecuio_last_error_detail();
+    const std::vector<std::string> wl =
+        wide_lines(read_file(f.path / "copy-wide.csv"));
+    ASSERT_EQ(wl.size(), 3u);
+    EXPECT_EQ(wl[0], "Time (ms),RPM (rpm)");
+    EXPECT_EQ(wl[1], "1000,1726");
+    EXPECT_EQ(wl[2], "3000,1730");
+    EXPECT_EQ(r.rows, 2u);
 }
 
 /* A range takes each file's rows and lines in it alone; the end line

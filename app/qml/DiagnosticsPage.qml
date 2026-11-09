@@ -27,6 +27,12 @@ Page {
     signal connectRequested()
 
     readonly property var ecus: Bridge.diagnostics
+    // The vehicles, Settings' VehicleBook document (Main binds it): the
+    // report names the picked vehicle's baseline recording by its start,
+    // never its folder (ADR-0049's appendix "a vehicle's baseline")
+    property var vehicles: VehicleBook.empty()
+    readonly property var pickedVehicle: VehicleBook.picked(vehicles)
+    readonly property string baselineFolder: pickedVehicle !== null ? pickedVehicle.baseline : ""
     // Read again needs a session and a read that has settled
     readonly property bool canReadAgain: Bridge.connected &&
         ecus.some(e => e.asked && e.complete)
@@ -75,9 +81,9 @@ Page {
     }
 
     // The health report to url, its format by the dialog's filter or the
-    // file's name; true when written
+    // file's name, naming the picked vehicle's baseline; true when written
     function saveReportTo(url, filterIndex) {
-        const r = Bridge.saveHealthReport(url, filterIndex)
+        const r = Bridge.saveHealthReport(url, filterIndex, baselineFolder)
         reportFailed = !r.ok
         reportNote = r.ok ? qsTr("Report saved: %1").arg(r.summary)
                           : qsTr("Report not saved: %1").arg(r.words)

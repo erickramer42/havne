@@ -9,6 +9,7 @@
 #   python tests/cli_transfer.py csv <havne-cli> <recording>
 #   python tests/cli_transfer.py folder <havne-cli> <findings> <values>
 #   python tests/cli_transfer.py csv-import <havne-cli> <csv fixtures>
+#   python tests/cli_transfer.py csv-guess <havne-cli> <csv fixtures>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -33,6 +34,11 @@
 # CSVs imported by their column maps and viewed (each signal's samples and
 # range, the UTC start or null); a missing map, a map core refuses and a
 # folder already there each exit 3 with words, leaving nothing made.
+# csv-guess: the same CSVs with no map: --print-map prints each logger's
+# guessed-map.json byte for byte, and the import writes the guess's line
+# (that map) before its own; a time of plain numbers with no unit is
+# refused until --time-unit gives one, and a file with no header is
+# refused, each exit 3 with words and nothing made.
 
 import csv
 import json
@@ -53,6 +59,12 @@ LOG = (
     "(1700000000.400000) can0 456##3AABBCCDDEEFF00112233\n"
 )
 UTC = 1700000000250000
+
+
+def partial_left(path):
+    """Whether core's own file or folder, <path>.partial-..., is left beside path"""
+    folder, name = os.path.split(path)
+    return any(e.startswith(name + ".partial-") for e in os.listdir(folder))
 
 
 def run(cli, args, want=0):
@@ -196,7 +208,7 @@ def refusals(cli):
         if one(lines, "export_failed")["class"] != "identification":
             raise SystemExit(f"FAIL  export said {lines}")
         if "ZZZFAKE" in json.dumps(lines) or os.path.exists(out) or \
-                os.path.exists(out + ".partial"):
+                partial_left(out):
             raise SystemExit("FAIL  the failed export left the VIN or a file")
         raw = one(run(cli, ["export", echo, out, "--format", "pcapng", "--raw"]),
                   "exported")
@@ -323,8 +335,10 @@ def csv_export(cli, recording):
             for t, name, value, unit in recorded]
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, "values.csv")
-        exported = one(run(cli, ["export", recording, out, "--format", "csv"]),
-                       "exported")
+        exported = one(run(cli, ["export", recording, out, "--format", "csv",
+                                 "--layout", "long"]), "exported")
+        if (exported["layout"], exported["row_ms"]) != ("long", 0):
+            raise SystemExit(f"FAIL  exported {exported}")
         names = {r[1] for r in want}
         if (exported["values"], exported["signals"], exported["frames"],
                 exported["scrubbed"]) != (len(want), len(names), 0, True):
@@ -338,19 +352,91 @@ def csv_export(cli, recording):
         if len(rows) != len(want):
             raise SystemExit(f"FAIL  {len(rows)} rows, not {len(want)}")
         again = os.path.join(d, "again.csv")
-        run(cli, ["export", recording, again, "--format", "csv"])
+        run(cli, ["export", recording, again, "--format", "csv", "--layout",
+                  "long"])
         with open(out, "rb") as a, open(again, "rb") as b:
             if a.read() != b.read():
                 raise SystemExit("FAIL  two exports differ")
         part = os.path.join(d, "part.csv")
         cut = one(run(cli, ["export", recording, part, "--format", "csv",
-                            "--from", "10", "--to", "20"]), "exported")
+                            "--layout", "long", "--from", "10", "--to", "20"]),
+                  "exported")
         inside = [r for r in want if 10.0 <= float(r[0]) <= 20.0]
         if cut["values"] != len(inside) or csv_rows(part)[1] != inside:
             raise SystemExit(f"FAIL  the range wrote {cut}")
+        # The wide layout, the default (ADR-0056 section 5): Time (ms)
+        # then a column a number signal, each cell a number or empty,
+        # the times whole ms ascending; a grid thins the sweeps; named
+        # columns come in their order
+        wide = os.path.join(d, "wide.csv")
+        shaped = one(run(cli, ["export", recording, wide, "--format", "csv"]),
+                     "exported")
+        head, rows = wide_rows(wide)
+        if head[0] != "Time (ms)" or len(head) != shaped["signals"] + 1:
+            raise SystemExit(f"FAIL  the wide header reads {head}")
+        if (shaped["layout"], shaped["row_ms"], shaped["rows"]) != \
+                ("wide", 0, len(rows)):
+            raise SystemExit(f"FAIL  wide exported {shaped}, {len(rows)} rows")
+        cells = sum(1 for r in rows for c in r[1:] if c != "")
+        if shaped["values"] != cells or not rows:
+            raise SystemExit(f"FAIL  {cells} cells against {shaped}")
+        grid = os.path.join(d, "grid.csv")
+        gridded = one(run(cli, ["export", recording, grid, "--format", "csv",
+                                "--rows", "1000"]), "exported")
+        ghead, grows = wide_rows(grid)
+        if gridded["row_ms"] != 1000 or len(grows) > len(rows) or \
+                any(int(r[0]) % 1000 for r in grows):
+            raise SystemExit(f"FAIL  the grid wrote {gridded}")
+        picked = os.path.join(d, "picked.csv")
+        named = one(run(cli, ["export", recording, picked, "--format", "csv",
+                              "--signal", head[2].split(" (")[0],
+                              "--signal", head[1].split(" (")[0]]), "exported")
+        phead, _ = wide_rows(picked)
+        if phead != [head[0], head[2], head[1]] or named["signals"] != 2 or \
+                named["missing"] != 0:
+            raise SystemExit(f"FAIL  the named columns read {phead}")
+        # A named column the recording lacks: an empty column, a stderr
+        # line naming it, the exported line counting it, exit 0
+        typo = os.path.join(d, "typo.csv")
+        done = subprocess.run([cli, "export", recording, typo, "--format",
+                               "csv", "--signal", head[1].split(" (")[0],
+                               "--signal", "Nothing here"],
+                              capture_output=True, stdin=subprocess.DEVNULL)
+        err = done.stderr.decode("utf-8", "replace")
+        if done.returncode != 0 or "'Nothing here'" not in err or \
+                "empty" not in err:
+            raise SystemExit(f"FAIL  the typo's run: exit {done.returncode}, "
+                             f"stderr {err!r}")
+        typo_line = one([json.loads(l) for l in
+                         done.stdout.decode("utf-8").splitlines()], "exported")
+        thead, trows = wide_rows(typo)
+        if thead != [head[0], head[1], "Nothing here"] or \
+                typo_line["missing"] != 1 or typo_line["signals"] != 2 or \
+                any(r[2] != "" for r in trows):
+            raise SystemExit(f"FAIL  the typo's column: {thead}, {typo_line}")
     print(f"ok    {len(want)} values of {len(names)} signals exported as CSV "
-          "and read back")
+          f"long and read back; wide {len(rows)} rows, grid {len(grows)}")
     return 0
+
+
+def wide_rows(path):
+    """The wide CSV: its header cells and its rows, each cell a number or
+    empty and the times whole ms ascending"""
+    with open(path, encoding="utf-8", newline="") as f:
+        raw = f.read()
+    if "\r\n" not in raw or "\n" in raw.replace("\r\n", ""):
+        raise SystemExit("FAIL  the wide CSV isn't CRLF throughout")
+    rows = list(csv.reader(raw.splitlines()))
+    head, body = rows[0], rows[1:]
+    last = -1
+    for r in body:
+        if len(r) != len(head) or not r[0].isdigit() or int(r[0]) < last:
+            raise SystemExit(f"FAIL  a wide row reads {r}")
+        last = int(r[0])
+        for c in r[1:]:
+            if c != "":
+                float(c)
+    return head, body
 
 
 def replayed(cli, folder):
@@ -367,7 +453,7 @@ def folder_copy(cli, source, out, want_files, raw=False):
     if (exported["format"], exported["scrubbed"], exported["files"],
             exported["files_left_out"]) != ("folder", not raw, want_files, 0):
         raise SystemExit(f"FAIL  exported {exported}")
-    if os.path.exists(out + ".partial"):
+    if partial_left(out):
         raise SystemExit("FAIL  the partial folder is left")
     return exported
 
@@ -478,7 +564,7 @@ def csv_import(cli, fixtures):
                     "error")
         if "'shade'" not in error["detail"]:
             raise SystemExit(f"FAIL  an unknown key said {error}")
-        if os.path.exists(rec) or os.path.exists(rec + ".partial"):
+        if os.path.exists(rec) or partial_left(rec):
             raise SystemExit("FAIL  a refused import left a folder")
         there = os.path.join(d, "logger-a")
         error = one(run(cli, ["import", "csv", log, there, "--map",
@@ -490,11 +576,118 @@ def csv_import(cli, fixtures):
     return 0
 
 
+GUESSED = [
+    # name, values imported with the guessed map (each column's samples)
+    ("logger-a", 25),
+    ("logger-b", 27),
+]
+
+
+def printed(cli, args, want=0):
+    """--print-map's stdout as bytes and its stderr, which aren't lines"""
+    done = subprocess.run([cli] + args, capture_output=True,
+                          stdin=subprocess.DEVNULL)
+    if done.returncode != want:
+        raise SystemExit(f"FAIL  {' '.join(args)} exited {done.returncode}, "
+                         f"not {want}: {done.stderr.decode()}")
+    return done.stdout, done.stderr.decode("utf-8")
+
+
+def committed(path):
+    with open(path, "rb") as f:
+        return f.read().replace(b"\r", b"")
+
+
+def csv_guess(cli, fixtures):
+    with tempfile.TemporaryDirectory() as d:
+        for name, values in GUESSED:
+            base = os.path.join(fixtures, name)
+            log = os.path.join(base, "log.csv")
+            want = committed(os.path.join(base, "guessed-map.json"))
+            # --print-map is core's slice byte for byte, which
+            # CsvGuessTest.TheMadeUpLoggersAreGuessedAndImported pins too
+            out, err = printed(cli, ["import", "csv", log, "--print-map"])
+            if out != want or err:
+                raise SystemExit(f"FAIL  {name}'s printed map: {out!r} {err}")
+            # With no map: the guess on a line, then the import with it
+            rec = os.path.join(d, name)
+            lines = run(cli, ["import", "csv", log, rec])
+            if [l["type"] for l in lines] != ["start", "guessed", "imported"]:
+                raise SystemExit(f"FAIL  {name} wrote {lines}")
+            guessed = one(lines, "guessed")
+            same(f"{name}'s guessed map", json.loads(want), guessed["map"])
+            if not all(c["used"] for c in guessed["columns"]):
+                raise SystemExit(f"FAIL  {name} left a column out: {guessed}")
+            imported = one(lines, "imported")
+            if (imported["values"], imported["columns_ignored"]) != (values, 0):
+                raise SystemExit(f"FAIL  {name} imported {imported}")
+            if sorted(os.listdir(rec)) != ["events.log", "signals.csv"]:
+                raise SystemExit(f"FAIL  {name} made {os.listdir(rec)}")
+        # A time of plain numbers whose header names no unit: refused
+        # without --time-unit, printed with a word on stderr, imported with
+        # --time-unit ms
+        plain = os.path.join(d, "plain.csv")
+        with open(plain, "w", newline="\n") as f:
+            f.write("time,A\n0,1\n1,2\n")
+        rec = os.path.join(d, "plain")
+        lines = run(cli, ["import", "csv", plain, rec], 3)
+        if "unit" in one(lines, "guessed")["map"]["time"]:
+            raise SystemExit(f"FAIL  a unit came from nowhere: {lines}")
+        error = one(lines, "error")
+        if "--time-unit" not in error["detail"] or os.path.exists(rec):
+            raise SystemExit(f"FAIL  no unit said {error}")
+        out, err = printed(cli, ["import", "csv", plain, "--print-map"])
+        if "unit" in json.loads(out)["time"] or "--time-unit" not in err:
+            raise SystemExit(f"FAIL  no unit printed {out!r} {err}")
+        out, err = printed(cli, ["import", "csv", plain, "--print-map",
+                                 "--time-unit", "ms"])
+        if json.loads(out)["time"]["unit"] != "ms" or err:
+            raise SystemExit(f"FAIL  --time-unit printed {out!r} {err}")
+        imported = one(run(cli, ["import", "csv", plain, rec, "--time-unit",
+                                 "ms"]), "imported")
+        if (imported["values"], imported["duration_us"]) != (2, 1000):
+            raise SystemExit(f"FAIL  --time-unit imported {imported}")
+        # ISO 8601 times with no offset: no --time-unit gives them a unit,
+        # so the refusal and stderr name a map, never --time-unit
+        zoneless = os.path.join(d, "zoneless.csv")
+        with open(zoneless, "w", newline="\n") as f:
+            f.write("timestamp,A\n2026-11-05T22:03:22.250,1\n"
+                    "2026-11-05T22:03:22.750,2\n")
+        rec = os.path.join(d, "zoneless")
+        error = one(run(cli, ["import", "csv", zoneless, rec, "--time-unit",
+                              "ms"], 3), "error")
+        if ("--time-unit" in error["detail"] or "--map" not in error["detail"]
+                or os.path.exists(rec)):
+            raise SystemExit(f"FAIL  a zoneless time said {error}")
+        out, err = printed(cli, ["import", "csv", zoneless, "--print-map"])
+        if "unit" in json.loads(out)["time"] or "--time-unit" in err or "zone" not in err:
+            raise SystemExit(f"FAIL  a zoneless time printed {out!r} {err}")
+        # A file with no header: core's words, exit 3, nothing printed
+        numbers = os.path.join(d, "numbers.csv")
+        with open(numbers, "w", newline="\n") as f:
+            f.write("1,2\n3,4\n")
+        error = one(run(cli, ["import", "csv", numbers,
+                              os.path.join(d, "none")], 3), "error")
+        if not error["detail"].startswith("no row within the file's first"):
+            raise SystemExit(f"FAIL  no header said {error}")
+        out, err = printed(cli, ["import", "csv", numbers, "--print-map"], 3)
+        if out or not err.startswith("havne-cli: no row within"):
+            raise SystemExit(f"FAIL  no header printed {out!r} {err}")
+        if os.path.exists(os.path.join(d, "none")):
+            raise SystemExit("FAIL  a refused guess left a folder")
+    print(f"ok    {len(GUESSED)} loggers' maps guessed, printed as committed "
+          "and imported; a time with no unit and a file with no header "
+          "refused")
+    return 0
+
+
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
     if len(sys.argv) == 4 and sys.argv[1] == "csv-import":
         sys.exit(csv_import(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 4 and sys.argv[1] == "csv-guess":
+        sys.exit(csv_guess(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 5 and sys.argv[1] == "folder":

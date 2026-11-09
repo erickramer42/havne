@@ -10,6 +10,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "adapterrelay.h"
+#include "recordingframes.h"
 #include "recordingview.h"
 #include "sessionbridge.h"
 
@@ -69,12 +70,30 @@ struct RecordingViewForeign {
     QML_NAMED_ELEMENT(RecordingView)
 };
 
+// The viewer's Frames table: the rows of the part in view, read from
+// frames.csv (ADR-0049's appendix "frames read back"); each page makes
+// its own
+struct RecordingFramesForeign {
+    Q_GADGET
+    QML_FOREIGN(RecordingFrames)
+    QML_NAMED_ELEMENT(RecordingFrames)
+};
+
 // Finding a signal among many (ADR-0050): Live's list holds one, and the
 // Recordings page makes its own
 struct SignalFilterForeign {
     Q_GADGET
     QML_FOREIGN(SignalFilter)
     QML_NAMED_ELEMENT(SignalFilter)
+};
+
+// The bridge's Import, named so a page reads its Kind values
+struct RecordingImportForeign
+{
+    Q_GADGET
+    QML_FOREIGN(RecordingImport)
+    QML_NAMED_ELEMENT(RecordingImport)
+    QML_UNCREATABLE("Bridge.recordingImport is the one import")
 };
 
 // The bridge's model properties, typed for qmllint. Not creatable or

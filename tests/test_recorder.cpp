@@ -148,7 +148,7 @@ struct Recording {
 
     Recording(const Root& root, const char* uri, uint32_t ring_bytes = 0,
               const char* label = nullptr, std::vector<const char*> header = {},
-              uint32_t note_lines = 0)
+              uint32_t note_lines = 0, bool attach_now = true)
     {
         EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
             << ecuio_last_error_detail();
@@ -170,9 +170,15 @@ struct Recording {
                 ECUIO_OK);
             folder = buf;
         }
-        if (session != nullptr && recorder != nullptr) {
-            EXPECT_EQ(ecuio_session_record(session, recorder), ECUIO_OK);
+        if (session != nullptr && recorder != nullptr && attach_now) {
+            attach();
         }
+    }
+
+    void attach()
+    {
+        EXPECT_EQ(ecuio_session_record(session, recorder), ECUIO_OK)
+            << ecuio_last_error_detail();
     }
 
     /* The session destroyed, then the recorder closed, as the app does */
@@ -340,22 +346,31 @@ TEST(RecorderTest, OpenAndAttachRefuseWhatTheyMust)
     EXPECT_EQ(ecuio_recorder_note(rec, "early"), ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_recorder_mark(rec, "early"), ECUIO_ERR_INVALID_ARGUMENT);
 
+    /* A started session takes a recorder (ADR-0056 section 3); a
+     * recorder that has had a session takes no other */
     ecuio_session_t* started = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://started", &started), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(started), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_record(started, rec), ECUIO_OK)
+        << ecuio_last_error_detail();
     EXPECT_EQ(ecuio_session_record(started, rec), ECUIO_ERR_INVALID_ARGUMENT);
     ecuio_session_destroy(started);
 
     ecuio_session_t* s = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://first", &s), ECUIO_OK);
     EXPECT_EQ(ecuio_session_record(s, nullptr), ECUIO_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(ecuio_session_record(s, rec), ECUIO_OK);
-    EXPECT_EQ(ecuio_session_record(s, rec), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_session_record(s, rec), ECUIO_ERR_INVALID_ARGUMENT)
+        << "a recorder whose session is gone takes no other";
+    ecuio_recorder_t* fresh = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &fresh), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_record(s, fresh), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_record(s, fresh), ECUIO_ERR_INVALID_ARGUMENT);
 
-    /* One recorder holds one session; a session holds one recorder */
+    /* One recorder holds one session; a session holds one recorder at a
+     * time */
     ecuio_session_t* other = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://other", &other), ECUIO_OK);
-    EXPECT_EQ(ecuio_session_record(other, rec), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_session_record(other, fresh), ECUIO_ERR_INVALID_ARGUMENT);
     ecuio_recorder_t* second = nullptr;
     ASSERT_EQ(ecuio_recorder_open(&o, &second), ECUIO_OK);
     EXPECT_EQ(ecuio_session_record(s, second), ECUIO_ERR_INVALID_ARGUMENT);
@@ -364,6 +379,7 @@ TEST(RecorderTest, OpenAndAttachRefuseWhatTheyMust)
     ecuio_session_destroy(other);
     ecuio_session_destroy(s);
     EXPECT_EQ(ecuio_recorder_close(second, nullptr), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_close(fresh, nullptr), ECUIO_OK);
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
 }
 
@@ -823,6 +839,39 @@ ecuio_request_timing_t published_row(uint8_t pid, uint32_t answered)
     return r;
 }
 
+/* A latency.csv row split at its t_s: the ms it names, and the rest of
+ * the row from its first comma */
+struct TimedRow {
+    uint64_t ms;
+    std::string rest;
+};
+
+TimedRow timed_row(const std::string& line)
+{
+    const size_t comma = line.find(',');
+    const std::string secs = line.substr(0, comma);
+    const size_t dot = secs.find('.');
+    EXPECT_NE(dot, std::string::npos) << line;
+    if (comma == std::string::npos || dot == std::string::npos)
+        return TimedRow{0, line};
+    return TimedRow{std::stoull(secs.substr(0, dot)) * 1000 +
+                        std::stoull(secs.substr(dot + 1)),
+                    line.substr(comma)};
+}
+
+/* A row's t_s is a host_us rounded to the ms, taken at a call made
+ * between from and to, from a zero set between before and attached (the
+ * test's own ecuio_clock_us reads, never a fixed bound) */
+void expect_between(const TimedRow& row, uint64_t before, uint64_t attached,
+                    uint64_t from, uint64_t to)
+{
+    const uint64_t us = row.ms * 1000;
+    EXPECT_LE(us, to - before + 500) << row.ms << " ms" << row.rest;
+    if (from > attached + 500) {
+        EXPECT_GE(us, from - attached - 500) << row.ms << " ms" << row.rest;
+    }
+}
+
 } // namespace
 
 /* Each link transition a worker publishes is a link line at its own
@@ -1026,11 +1075,16 @@ TEST(RecorderTest, AStateStillCarriedAtTheEndIsWritten)
 /* Reply timing reaches latency.csv every 10 s of session time and at the
  * end, each request's row only when its counts changed (ADR-0017's
  * appendix of 2026-10-31), under its channel's ECU (the mock's is
- * 0x7E8); the file is made with its first row */
+ * 0x7E8); the file is made with its first row. Each row's t_s is the
+ * recording's time of the call that published it, not the snapshot's
+ * session time (a recorder attached after start counts from its attach),
+ * so it's bounded by the test's clock reads */
 TEST(RecorderTest, ReplyTimingGoesToLatencyCsvEveryTenSeconds)
 {
     Root root;
+    const uint64_t before = ecuio_clock_us();
     Recording rec(root, "mock://timing");
+    const uint64_t attached = ecuio_clock_us();
     ASSERT_NE(rec.recorder, nullptr);
     ecuio_record_link* link = rec.session->record_link.get();
     ecuio_session_timing_t t{};
@@ -1046,35 +1100,53 @@ TEST(RecorderTest, ReplyTimingGoesToLatencyCsvEveryTenSeconds)
     rows[0].interval_p50_us = 100000;
     rows[0].interval_max_us = 120000;
 
+    /* Each call bracketed by the clock, for its rows' t_s */
+    uint64_t from[5], to[5];
+    const auto publish = [&](int k, bool final) {
+        from[k] = ecuio_clock_us();
+        ecuio_record_timing(link, t, rows, 2, final);
+        to[k] = ecuio_clock_us();
+    };
     t.snapshot_us = 5000000; /* before the first 10 s: nothing */
-    ecuio_record_timing(link, t, rows, 2, false);
+    publish(0, false);
     /* Past the writer's idle wake, so a file made would be there */
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     EXPECT_FALSE(fs::exists(fs::u8path(rec.folder) / "latency.csv"));
     t.snapshot_us = 10000000;
-    ecuio_record_timing(link, t, rows, 2, false);
+    publish(1, false);
     rows[0].answered = 6;
     t.snapshot_us = 12000000; /* not due */
-    ecuio_record_timing(link, t, rows, 2, false);
+    publish(2, false);
     rows[1].refused = 1;
     t.snapshot_us = 20400000;
-    ecuio_record_timing(link, t, rows, 2, false);
+    publish(3, false);
     rows[1].refused = 2;
     t.snapshot_us = 21000000; /* the final one, whenever it comes */
-    ecuio_record_timing(link, t, rows, 2, true);
+    publish(4, true);
     ASSERT_EQ(rec.finish(), ECUIO_OK);
 
     const std::vector<std::string> got = lines_of(rec.file("latency.csv"));
-    const std::vector<std::string> want = {
-        ECUIO_TIMING_COLUMNS,
-        "10.000,0x7E8,01 0C,5,0,1,0,12000,14000,,15000,4,0,100000,,,120000,"
-        "host",
-        "20.400,0x7E8,01 0C,6,0,1,0,12000,14000,,15000,4,0,100000,,,120000,"
-        "host",
-        "20.400,0x7E8,01 0D,0,1,0,0,0,,,0,0,0,,,,,host",
-        "21.000,0x7E8,01 0D,0,2,0,0,0,,,0,0,0,,,,,host",
+    ASSERT_EQ(got.size(), 5u) << rec.file("latency.csv");
+    EXPECT_EQ(got[0], ECUIO_TIMING_COLUMNS);
+    struct Want {
+        int call;
+        const char* rest;
     };
-    EXPECT_EQ(got, want);
+    const Want want[4] = {
+        {1, ",0x7E8,01 0C,5,0,1,0,12000,14000,,15000,4,0,100000,,,120000,host"},
+        {3, ",0x7E8,01 0C,6,0,1,0,12000,14000,,15000,4,0,100000,,,120000,host"},
+        {3, ",0x7E8,01 0D,0,1,0,0,0,,,0,0,0,,,,,host"},
+        {4, ",0x7E8,01 0D,0,2,0,0,0,,,0,0,0,,,,,host"},
+    };
+    uint64_t last_ms = 0;
+    for (int i = 0; i < 4; ++i) {
+        const TimedRow row = timed_row(got[i + 1]);
+        EXPECT_EQ(row.rest, want[i].rest);
+        expect_between(row, before, attached, from[want[i].call],
+                       to[want[i].call]);
+        EXPECT_GE(row.ms, last_ms) << got[i + 1];
+        last_ms = row.ms;
+    }
 }
 
 /* The final snapshot, the worker's last record, waits up to 1 s for the
@@ -1083,8 +1155,12 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
 {
     register_profile();
     Root root;
-    Recording rec(root, "mock://final?profile=rec-test", 512);
+    Recording rec(root, "mock://final?profile=rec-test", 512, nullptr, {}, 0,
+                  false);
     ASSERT_NE(rec.recorder, nullptr);
+    const uint64_t attach_from = ecuio_clock_us();
+    rec.attach();
+    const uint64_t attach_to = ecuio_clock_us();
     ecuio_record_link* link = rec.session->record_link.get();
     ecuio_session_timing_t t{};
     t.snapshot_us = 3000000;
@@ -1101,12 +1177,16 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
     ecuio_recorder_state_t st{};
     ecuio_recorder_get_state(rec.recorder, &st);
     const uint64_t frames_dropped = st.records_dropped;
+    uint64_t released_at = 0;
     std::thread release([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        released_at = ecuio_clock_us();
         ecuio_recorder_test_hold(rec.recorder, 0);
     });
     auto begun = std::chrono::steady_clock::now();
+    const uint64_t called = ecuio_clock_us();
     ecuio_record_timing(link, t, &row, 1, true);
+    const uint64_t returned = ecuio_clock_us();
     const auto waited = std::chrono::steady_clock::now() - begun;
     release.join();
     EXPECT_GE(waited, std::chrono::milliseconds(150));
@@ -1134,7 +1214,345 @@ TEST(RecorderTest, TheFinalTimingWaitsASecondForRoom)
     ASSERT_EQ(rec.finish(), ECUIO_OK);
     const std::vector<std::string> got = lines_of(rec.file("latency.csv"));
     ASSERT_EQ(got.size(), 2u);
-    EXPECT_EQ(got[1].rfind("3.000,0x7E8,01 0C,3,", 0), 0u) << got[1];
+    const TimedRow timed = timed_row(got[1]);
+    EXPECT_EQ(timed.rest.rfind(",0x7E8,01 0C,3,", 0), 0u) << got[1];
+    /* Its t_s is the call's time, kept through the wait for room: before
+     * the release that made the room, not after it */
+    expect_between(timed, attach_from, attach_to, called, returned);
+    EXPECT_LT(timed.ms * 1000 + 500, released_at - attach_to) << got[1];
+}
+
+/* A recorder attached after start (ADR-0056 section 3) counts its
+ * host_us from the attach, not the session's start: the first frame's
+ * is small against the session's age (its timestamp_us, which the mock
+ * counts from its start), every host_us fits between the test's clock
+ * reads around the recording, and the header says what the link was */
+TEST(RecorderTest, ARecorderAttachedAfterStartCountsFromItsAttach)
+{
+    Root root;
+    Recording rec(root, "mock://running", 0, nullptr, {}, 0, false);
+    ASSERT_NE(rec.recorder, nullptr);
+    ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const uint64_t before = ecuio_clock_us();
+    rec.attach();
+    ecuio_recorder_state_t st{};
+    ASSERT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(rec.recorder, &st);
+            return st.frame_rows >= 2;
+        },
+        5000))
+        << st.frame_rows << " frame rows";
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+    const uint64_t after = ecuio_clock_us();
+
+    const std::vector<std::string> frames = lines_of(rec.file("frames.csv"));
+    ASSERT_GE(frames.size(), 3u);
+    uint64_t last = 0;
+    for (size_t i = 1; i < frames.size(); ++i) {
+        const uint64_t host_us = std::stoull(frames[i]);
+        const uint64_t timestamp_us =
+            std::stoull(frames[i].substr(frames[i].find(',') + 1));
+        EXPECT_LE(host_us, after - before) << frames[i];
+        EXPECT_GE(host_us, last) << frames[i];
+        EXPECT_GE(timestamp_us, host_us + 400000)
+            << frames[i] << ": the session was half a second old at the attach";
+        last = host_us;
+    }
+    const std::string events = rec.file("events.log");
+    EXPECT_NE(events.find("\nlink  healthy (state 0, 0 episodes)\n"),
+              std::string::npos)
+        << events;
+    EXPECT_EQ(events.find("\nfocus  "), std::string::npos)
+        << "no focus, no line: " << events;
+    const std::vector<EventLine> ends = events_of(events, "end");
+    ASSERT_EQ(ends.size(), 1u) << events;
+    EXPECT_LE(ends[0].ms * 1000, after - before + 500) << events;
+}
+
+/* The header holds the focus as it stands at the attach, the picks in
+ * their order, and the link line only once the session has started;
+ * both sit between the frame flags and the signal lines, where the
+ * reader passes unknown keys by */
+TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
+{
+    register_profile();
+    Root root;
+    {
+        Recording rec(root, "mock://focus?profile=rec-test", 0, nullptr, {}, 0,
+                      false);
+        ASSERT_NE(rec.recorder, nullptr);
+        const uint16_t picks[2] = {2, 1};
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, picks, 2), ECUIO_OK);
+        rec.attach();
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        const size_t flags = events.find("\nframe flags  complete\n");
+        const size_t focus = events.find("\nfocus  Words,Half\n");
+        const size_t signal = events.find("\nsignal  ");
+        EXPECT_NE(flags, std::string::npos) << events;
+        EXPECT_NE(focus, std::string::npos) << events;
+        EXPECT_NE(signal, std::string::npos) << events;
+        EXPECT_TRUE(flags < focus && focus < signal) << events;
+        EXPECT_EQ(events.find("\nlink  "), std::string::npos)
+            << "not started: no link line: " << events;
+    }
+    {
+        Recording rec(root, "mock://focus-started?profile=rec-test", 0, nullptr,
+                      {}, 0, false);
+        ASSERT_NE(rec.recorder, nullptr);
+        ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+        const uint16_t pick = 1;
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, &pick, 1), ECUIO_OK);
+        rec.attach();
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        const size_t focus = events.find("\nfocus  Half\n");
+        const size_t link =
+            events.find("\nlink  healthy (state 0, 0 episodes)\n");
+        const size_t signal = events.find("\nsignal  ");
+        EXPECT_NE(focus, std::string::npos) << events;
+        EXPECT_NE(link, std::string::npos) << events;
+        EXPECT_TRUE(focus < link && link < signal) << events;
+    }
+}
+
+/* A session takes one recorder at a time: a second is refused while the
+ * first is attached and taken once the first has closed, counting from
+ * its own attach; the refusal left it as it was, so its recording has
+ * one header, one columns line and its signal file */
+TEST(RecorderTest, ASecondRecorderAttachesOnceTheFirstHasClosed)
+{
+    Root root;
+    Recording rec(root, "mock://second", 0, nullptr, {}, 0, false);
+    ASSERT_NE(rec.recorder, nullptr);
+    ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+    rec.attach();
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    const char* caller[] = {"app  the second"};
+    o.header_lines = caller;
+    o.header_line_count = 1;
+    ecuio_recorder_t* second = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &second), ECUIO_OK);
+    const std::string file = "{\"the mock's\": \"file\"}";
+    ASSERT_EQ(ecuio_recorder_take_signals(second,
+                                          rec.session->active_signal_set,
+                                          file.data(), file.size()),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_session_record(rec.session, second),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(second, buf, sizeof buf, &len),
+              ECUIO_OK);
+    const std::string folder = buf;
+
+    EXPECT_EQ(ecuio_recorder_close(rec.recorder, "the first"), ECUIO_OK);
+    rec.recorder = nullptr;
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const uint64_t before = ecuio_clock_us();
+    EXPECT_EQ(ecuio_session_record(rec.session, second), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recorder_state_t st{};
+    ASSERT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(second, &st);
+            return st.frame_rows >= 2;
+        },
+        5000))
+        << st.frame_rows << " frame rows";
+    ecuio_session_destroy(rec.session);
+    rec.session = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(second, "the second"), ECUIO_OK);
+    const uint64_t after = ecuio_clock_us();
+    const std::vector<std::string> frames =
+        lines_of(read_text(fs::u8path(folder) / "frames.csv"));
+    ASSERT_GE(frames.size(), 3u);
+    for (size_t i = 1; i < frames.size(); ++i) {
+        EXPECT_LE(std::stoull(frames[i]), after - before)
+            << frames[i] << ": counted from the second attach";
+    }
+    const std::string events = read_text(fs::u8path(folder) / "events.log");
+    const auto count = [&](const char* what) {
+        size_t n = 0;
+        for (size_t at = events.find(what); at != std::string::npos;
+             at = events.find(what, at + 1))
+            ++n;
+        return n;
+    };
+    EXPECT_EQ(count("ecuio session recording, format 3"), 1u) << events;
+    EXPECT_EQ(count("\ncolumns  "), 1u) << events;
+    EXPECT_EQ(count("\nsignal file  "), 1u) << events;
+    EXPECT_EQ(count("\ncaller  app  the second\n"), 1u) << events;
+    EXPECT_EQ(read_text(fs::u8path(folder) / "signals.json"), file);
+}
+
+/* Recorders attach and close one after another while the session
+ * streams, each attach and close answering OK: the lifetime under the
+ * worker's pins, for a sanitizer to judge */
+TEST(RecorderTest, RecordersComeAndGoWhileTheSessionStreams)
+{
+    Root root;
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://churn", &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    for (int i = 0; i < 12; ++i) {
+        ecuio_recorder_t* rec = nullptr;
+        ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK) << i;
+        ASSERT_EQ(ecuio_session_record(s, rec), ECUIO_OK)
+            << i << ": " << ecuio_last_error_detail();
+        if (i % 3 == 1)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        EXPECT_EQ(ecuio_recorder_close(rec, "churn"), ECUIO_OK) << i;
+    }
+    ecuio_session_destroy(s);
+}
+
+/* A recorder's marks and notes count from its own zero, not from a later
+ * recorder's, whose attach moves the link's */
+TEST(RecorderTest, AMarkCountsFromItsOwnRecordersZeroAfterASuccessorAttaches)
+{
+    Root root;
+    Recording first(root, "mock://zero");
+    ASSERT_NE(first.recorder, nullptr);
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    ecuio_record_detach(*first.session->record_link);
+
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* second = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &second), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(first.session, second), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_recorder_mark(first.recorder, "after the successor"),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_recorder_note(first.recorder, "a note after it"), ECUIO_OK);
+    ecuio_recorder_test_add_slept(first.recorder, 2000000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    ecuio_session_destroy(first.session);
+    first.session = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(second, "the second"), ECUIO_OK);
+    const std::string folder = first.folder;
+    EXPECT_EQ(ecuio_recorder_close(first.recorder, "the first"), ECUIO_OK);
+    first.recorder = nullptr;
+
+    const std::vector<std::string> marks =
+        lines_of(read_text(fs::u8path(folder) / "markers.csv"));
+    ASSERT_EQ(marks.size(), 2u);
+    EXPECT_GE(std::stoull(marks[1]), 350000u) << marks[1];
+    const std::vector<EventLine> notes =
+        events_of(read_text(fs::u8path(folder) / "events.log"), "note");
+    bool found = false;
+    for (const EventLine& n : notes) {
+        if (n.text.find("a note after it") != std::string::npos) {
+            found = true;
+            EXPECT_GE(n.ms, 350u) << n.text;
+        }
+    }
+    EXPECT_TRUE(found);
+    const std::vector<EventLine> sleeps =
+        events_of(read_text(fs::u8path(folder) / "events.log"), "asleep");
+    ASSERT_EQ(sleeps.size(), 1u);
+    EXPECT_GE(sleeps[0].ms, 350u) << "the asleep line, from the first's zero";
+}
+
+/* A recorder's close lets go of the link only while the link is its
+ * own: one detached earlier (the session's side) and closed after a
+ * successor attached leaves the successor taking frames */
+TEST(RecorderTest, AClosedRecorderNeverDetachesItsSuccessor)
+{
+    register_profile();
+    Root root;
+    Recording rec(root, "mock://successor?profile=rec-test");
+    ASSERT_NE(rec.recorder, nullptr);
+    ecuio_record_link& link = *rec.session->record_link;
+    ecuio_record_detach(link);
+    EXPECT_EQ(link.active.load(), nullptr);
+
+    ecuio_record_options_t o{};
+    const std::string keep = root.utf8();
+    o.root_utf8 = keep.c_str();
+    ecuio_recorder_t* second = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &second), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(rec.session, second), ECUIO_OK);
+    EXPECT_EQ(ecuio_recorder_close(rec.recorder, "the first"), ECUIO_OK);
+    rec.recorder = nullptr;
+    EXPECT_EQ(link.active.load(), second) << "the first's close left it";
+
+    dispatch(rec.session, kNumberId, std::string("\x02", 1));
+    ecuio_recorder_state_t st{};
+    EXPECT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(second, &st);
+            return st.frame_rows == 1;
+        },
+        2000))
+        << st.frame_rows << " frame rows";
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(second, buf, sizeof buf, &len),
+              ECUIO_OK);
+    ecuio_session_destroy(rec.session);
+    rec.session = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(second, "the second"), ECUIO_OK);
+    EXPECT_EQ(lines_of(read_text(fs::u8path(buf) / "frames.csv")).size(), 2u);
+    EXPECT_NE(rec.file("events.log").find("  end  the first: 0 frames, "),
+              std::string::npos)
+        << rec.file("events.log");
+}
+
+/* A recording begun mid-session opens in the reader as any other: its
+ * times run from the attach (the duration fits the test's clock reads
+ * around it), its signals carry samples */
+TEST(RecorderTest, ARecordingBegunMidSessionOpensInTheReader)
+{
+    Root root;
+    Recording rec(root, "mock://mid", 0, nullptr, {}, 0, false);
+    ASSERT_NE(rec.recorder, nullptr);
+    ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    const uint64_t before = ecuio_clock_us();
+    rec.attach();
+    ecuio_recorder_state_t st{};
+    ASSERT_TRUE(eventually(
+        [&] {
+            ecuio_recorder_get_state(rec.recorder, &st);
+            return st.value_rows >= 2;
+        },
+        5000))
+        << st.value_rows << " value rows";
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+    const uint64_t after = ecuio_clock_us();
+
+    ecuio_recording_t* r = nullptr;
+    ASSERT_EQ(ecuio_recording_open(rec.folder.c_str(), nullptr, nullptr, &r),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_info_t info{};
+    ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
+    EXPECT_EQ(info.flags, 0u) << "the summary is there";
+    EXPECT_LE(info.duration_us, after - before)
+        << "the recording's clock starts at the attach";
+    ASSERT_GE(info.signal_count, 1u);
+    std::vector<uint32_t> ids(info.signal_count);
+    std::vector<ecuio_recording_column_t> cols(info.signal_count);
+    for (uint32_t k = 0; k < info.signal_count; ++k)
+        ids[k] = k;
+    ASSERT_EQ(ecuio_recording_query(r, ids.data(), info.signal_count, 0,
+                                    info.duration_us + 1, cols.data(), 1),
+              ECUIO_OK);
+    uint64_t samples = 0;
+    for (const ecuio_recording_column_t& c : cols)
+        samples += c.samples;
+    EXPECT_GE(samples, 2u);
+    ecuio_recording_close(r);
 }
 
 /* A replay's recording writes its source's frame flags line, so a
