@@ -72,15 +72,18 @@ TestCase {
         sameColor(h.chosen.contentItem.color, Theme.text, "a chosen choice's text")
     }
 
-    // The ranks' fills follow the palette: Dark's light primary and the
-    // night palettes' dark ones
+    // The ranks' fills follow the palette: Dark's light primary, Daylight's
+    // dark one and the night palettes' dim ones
     function test_theRanksDrawTheirFillsInEveryPalette_data() {
         return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_theRanksDrawTheirFillsInEveryPalette(data) {
-        Theme.night = data.name === "dark" ? "off" : "on"
-        if (data.name !== "dark")
+        const night = Theme.nightPalettes.indexOf(data.name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
             Theme.nightStyle = data.name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = data.name
         const h = host(0)
         sameColor(h.secondary.background.color, Theme.elevated, "secondary fill")
         sameColor(h.primary.background.color, Theme.primary, "primary fill")
@@ -100,6 +103,7 @@ TestCase {
     function cleanup() {
         Theme.night = "off"
         Theme.nightStyle = "amber"
+        Theme.look = "dark"
     }
 
     function test_aQuietButtonFillsOnHover() {

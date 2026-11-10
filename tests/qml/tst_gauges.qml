@@ -15,9 +15,12 @@ TestCase {
 
     // A palette by its name: Dark is Night off, the others Night on in a style
     function usePalette(name) {
-        Theme.night = name === "dark" ? "off" : "on"
-        if (name !== "dark")
+        const night = Theme.nightPalettes.indexOf(name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
             Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = name
     }
     when: windowShown
 

@@ -74,26 +74,35 @@ TestCase {
         }
     }
 
-    // A trace in the danger color would read as an alarm, so no series
-    // color is a saturated hue within 20 degrees of it
-    function test_seriesColorsLeaveOutTheDangerHue() {
+    // A trace in the danger color would read as an alarm, so in a look no
+    // series color is a saturated hue within 20 degrees of it (the night
+    // palettes are warm by design)
+    function test_seriesColorsLeaveOutTheDangerHue_data() {
+        return Theme.lookNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_seriesColorsLeaveOutTheDangerHue(data) {
+        usePalette(data.name)
         const danger = Qt.color(Theme.danger).hsvHue
         for (const c of Theme.seriesColors) {
             const color = Qt.color(c)
             if (color.hsvSaturation < 0.2) continue   // grays and near-white
             const d = Math.abs(color.hsvHue - danger)
             const degrees = Math.min(d, 1 - d) * 360
-            verify(degrees > 20, c + " is " + degrees.toFixed(0) + "° from the danger color")
+            verify(degrees > 20, c + " is " + degrees.toFixed(0) + "° from the danger color in " + data.name)
         }
     }
 
-    // ---- Themes: Dark (the default), Low glare and Night
+    // ---- Palettes: the looks Dark (the default) and Daylight, and Night's two
 
-    // A palette by its name: Dark is Night off, the others Night on in a style
+    // A palette by its name: a look is Night off and that look, a night
+    // palette Night on in its style
     function usePalette(name) {
-        Theme.night = name === "dark" ? "off" : "on"
-        if (name !== "dark")
+        const night = Theme.nightPalettes.indexOf(name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
             Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = name
     }
     function cleanup() {
         Theme.stateSource = Qt.application
@@ -112,7 +121,9 @@ TestCase {
         "gaugeTick", "gaugeWarn", "gaugeDanger"]
 
     function test_paletteNamesAndClamps() {
-        compare(Theme.paletteNames.join(","), "dark,nightAmber,nightRed")
+        compare(Theme.paletteNames.join(","), "dark,nightAmber,nightRed,daylight")
+        compare(Theme.lookNames.join(","), "dark,daylight")
+        compare(Theme.nightPalettes.join(","), "nightAmber,nightRed")
         compare(Theme.look, "dark", "dark until chosen")
         compare(Theme.night, "off")
         compare(Theme.nightStyle, "amber")
@@ -123,6 +134,8 @@ TestCase {
         compare(Theme.clampStyle("red"), "red")
         compare(Theme.clampStyle("nonsense"), "amber", "an unknown style reads as amber")
         compare(Theme.clampLook("nonsense"), "dark", "an unknown look reads as dark")
+        compare(Theme.clampLook("daylight"), "daylight")
+        compare(Theme.clampLook("nightAmber"), "dark", "a night palette is not a look")
     }
 
     // The default theme is the near-neutral graphite: the accent is the text
@@ -143,14 +156,39 @@ TestCase {
         sameColor(Theme.gaugeNeedle, "#ff5a5f", "the analog needle")
     }
 
-    // The label on a primary fill: the page color in Dark, the text color at
-    // night; a hairline is the outline at 55 % over the surface; two radii
+    // Daylight is Paper: near-black on off-white, the panel white, the
+    // accent the text color as a fill, the zones the warning and danger
+    function test_daylightIsThePaperPalette() {
+        usePalette("daylight")
+        compare(Theme.active, "daylight")
+        const want = {
+            bg: "#f3f3f1", surface: "#ffffff", elevated: "#e4e4e8", elevatedLight: "#d3d3da",
+            outline: "#5f5f6a", text: "#141416", textDim: "#5b5b66",
+            success: "#1b7a3e", warning: "#8c5a00", danger: "#b9262b", info: "#2458b8",
+            gaugeValue: "#141416", gaugeReadout: "#141416", gaugeNeedle: "#d2232a",
+            gaugeTick: "#141416"
+        }
+        for (const r in want)
+            sameColor(Theme[r], want[r], r)
+        sameColor(Theme.primary, Theme.text, "primary")
+        sameColor(Theme.textOnPrimary, Theme.bg, "textOnPrimary")
+        sameColor(Theme.gaugeWarn, Theme.warning, "gaugeWarn")
+        sameColor(Theme.gaugeDanger, Theme.danger, "gaugeDanger")
+        const series = ["#1f5fc8", "#1e7d3f", "#0f7f84", "#8a6d00", "#8a3fa8", "#b85c00",
+                        "#3c3c44", "#5b48c9", "#4f7a0a", "#a81f8c"]
+        for (let i = 0; i < series.length; ++i)
+            sameColor(Theme.seriesColor(i), series[i], "row " + i)
+    }
+
+    // The label on a primary fill: the page color in a look, the text color
+    // at night; a hairline is the outline at 55 % over the surface; two radii
     function test_textOnPrimaryAndTheHairlinePerPalette_data() {
         return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_textOnPrimaryAndTheHairlinePerPalette(data) {
         usePalette(data.name)
-        sameColor(Theme.textOnPrimary, data.name === "dark" ? Theme.bg : Theme.text, "textOnPrimary")
+        const night = Theme.nightPalettes.indexOf(data.name) >= 0
+        sameColor(Theme.textOnPrimary, night ? Theme.text : Theme.bg, "textOnPrimary")
         const o = Qt.color(Theme.outline), s = Qt.color(Theme.surface)
         const mix = (a, b) => 0.55 * a + 0.45 * b
         const h = Qt.color(Theme.hairline)
@@ -232,7 +270,8 @@ TestCase {
 
     // Text holds 4.5:1 or more against the surfaces it sits on, in every
     // theme: the readouts against the card or panel, the zone
-    // colors a readout takes, and the page text against the page
+    // colors a readout takes, the page text against the page, the status
+    // and cold-zone colors on a panel, and a caption over a secondary fill
     function test_textContrastIsAtLeast4_5_data() {
         return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
@@ -242,7 +281,8 @@ TestCase {
                       ["textDim", "bg"], ["textDim", "surface"],
                       ["gaugeReadout", "surface"], ["gaugeTick", "surface"],
                       ["gaugeWarn", "surface"], ["gaugeDanger", "surface"],
-                      ["warning", "bg"], ["danger", "bg"]]
+                      ["warning", "bg"], ["danger", "bg"],
+                      ["success", "surface"], ["info", "surface"], ["textDim", "elevated"]]
         for (const [fg, bgName] of rows) {
             const c = contrast(Theme[fg], Theme[bgName])
             verify(c >= 4.5, fg + " on " + bgName + " is " + c.toFixed(2) + ":1 in " + data.name)
@@ -277,7 +317,7 @@ TestCase {
                    colors[i] + " on bg is " + contrast(colors[i], Theme.bg).toFixed(2) + ":1 in " + data.name)
             verify(contrast(colors[i], Theme.surface) >= 3.5,
                    colors[i] + " on surface is " + contrast(colors[i], Theme.surface).toFixed(2) + ":1 in " + data.name)
-            if (data.name !== "dark") {
+            if (Theme.nightPalettes.indexOf(data.name) >= 0) {
                 verify(a.hsvHue * 360 <= 60, colors[i] + " is warm in " + data.name)
                 // At night nothing outshines the text (ADR-0058 section 3)
                 verify(lum(colors[i]) <= lum(Theme.text) + 1e-9,
@@ -314,6 +354,14 @@ TestCase {
         Theme.look = "nonsense"
         Theme.night = "off"
         compare(Theme.active, "dark", "an unknown look is dark")
+        // Night wins over the look, and the look is back when it ends
+        Theme.look = "daylight"
+        compare(Theme.active, "daylight")
+        Theme.nightStyle = "amber"
+        Theme.night = "on"
+        compare(Theme.active, "nightAmber", "Night over Daylight")
+        Theme.night = "off"
+        compare(Theme.active, "daylight", "Daylight again")
     }
 
     // At night the readout is the text color, so nothing outshines the text
@@ -358,8 +406,10 @@ TestCase {
         tryVerify(() => stored("nightFrom") === "20:15", 2000, "from")
         Theme.nightUntil = "06:45"
         tryVerify(() => stored("nightUntil") === "06:45", 2000, "until")
+        Theme.look = "daylight"
+        tryVerify(() => stored("look") === "daylight", 2000, "look")
         Theme.look = "dark"
-        tryVerify(() => stored("look") === "dark", 2000, "look")
+        tryVerify(() => stored("look") === "dark", 2000, "look back")
         Theme.night = "off"
         tryVerify(() => stored("night") === "off", 2000, "and back")
     }
@@ -644,6 +694,11 @@ TestCase {
         loaded({ night: "schedule", nightFrom: "08:00", nightUntil: "08:00" })
         compare(Theme.nightFrom, "19:00", "an equal stored pair keeps the default")
         compare(Theme.nightUntil, "07:00")
+        loaded({ look: "daylight" })
+        compare(Theme.look, "daylight", "a stored look is read back")
+        compare(Theme.active, "daylight")
+        loaded({ look: "nonsense" })
+        compare(Theme.look, "dark", "an unknown one is Dark")
     }
     function test_anOverrideIsReadBackAndAnExpiredOneDropped() {
         setClock(at(18, 0))

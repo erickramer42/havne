@@ -79,9 +79,10 @@ int main(int argc, char *argv[])
     app.setApplicationName("Havne");
     app.setApplicationVersion(QStringLiteral(ECUIO_VERSION_STRING));
 
-    // The UI is dark only; saying so gives a dark title bar on Windows and
-    // Android's system bars drawn for a dark app, not over a white strip
-    // (docs/bench-sessions/2026-10-28-android-2.md)
+    // Dark, the default look, for the first frame: a dark title bar on
+    // Windows and Android's system bars drawn for a dark app, not over a
+    // white strip (docs/bench-sessions/2026-10-28-android-2.md);
+    // WindowTheme follows the look from then on
     QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
 
     // Barlow (bundled; Theme loads the same files) is the application's
