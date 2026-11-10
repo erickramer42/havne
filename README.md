@@ -40,7 +40,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 | Dashboard | Live | Dashboard at night |
 |---|---|---|
-| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](docs/images/phone-dashboard-dark.png)](docs/images/phone-dashboard-dark.png) | [![Live on the test phone on the limiter, each reading with its value and a minute of the chart](docs/images/phone-live.png)](docs/images/phone-live.png) | [![The phone layout's Dashboard with Night on in red](docs/images/phone-dashboard-night.png)](docs/images/phone-dashboard-night.png) |
+| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](docs/images/phone-dashboard-dark.png)](docs/images/phone-dashboard-dark.png) | [![Live on the test phone on the limiter: rpm, speed, MAF and lambda over a minute of the chart](docs/images/phone-live.png)](docs/images/phone-live.png) | [![The phone layout's Dashboard with Night on in red](docs/images/phone-dashboard-night.png)](docs/images/phone-dashboard-night.png) |
 | The phone layout in a 2nd-gear pull, the shift lights filling | Live on the test phone, on the rev limiter | Night in red, for a dark cabin |
 
 ![Live on the desktop: rpm, speed, MAF and lambda through a 3rd-gear pull onto the limiter](docs/images/live.png)

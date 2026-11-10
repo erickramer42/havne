@@ -5,24 +5,24 @@ vehicle (`mock://demo`) in US units. Dark is the default look; Night
 dims it for a dark cabin in amber or red (Settings, Display). The
 README shows a few of these.
 
-- **Desktop:** the Windows app at 1280x720.
+- **Desktop:** the Windows app at 1280x800.
 - **Phone:** Live, Codes, the Log and Settings are from the test phone
-  (Android 16). The Dashboard and the drive view are the phone layout
-  with its built-in default page, the same pages drawn by the desktop
-  build in the phone's form at the phone's width.
+  (Android 16). The Dashboard is the phone layout with its built-in
+  default page, the same page drawn by the desktop build in the phone's
+  form at the phone's width.
 
 ## Desktop
 
 ### Dashboard
 
-![The Dashboard through a quarter mile: a launch from the two-step near 3,900 rpm, upshifts that refill the shift lights, and about 103 mph near the line](images/dashboard.gif)
+![The Dashboard through a quarter mile: a launch from the two-step near 3,900 rpm, upshifts that refill the shift lights, and past 100 mph at the line](images/dashboard.gif)
 
 *A quarter mile on the warmed-up vehicle: the launch, each upshift, and
 coolant and oil climbing toward the fan's cut-in.*
 
 | Night, amber | Night, red |
 |---|---|
-| [![The Dashboard in Night's amber style in a 2nd-gear pull at 5,772 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,366 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| [![The Dashboard in Night's amber style in a 2nd-gear pull at 5,925 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,642 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
@@ -33,7 +33,7 @@ coolant and oil climbing toward the fan's cut-in.*
 
 | Night, amber | Night, red |
 |---|---|
-| [![Live in Night's amber style, all twelve signals plotted in a pull at 6,433 rpm](images/desktop-live-amber.png)](images/desktop-live-amber.png) | [![Live in Night's red style, all twelve signals plotted on the limiter](images/desktop-live-red.png)](images/desktop-live-red.png) |
+| [![Live in Night's amber style, rpm, speed, MAF and lambda on the limiter](images/desktop-live-amber.png)](images/desktop-live-amber.png) | [![Live in Night's red style, rpm, speed, MAF and lambda on the limiter](images/desktop-live-red.png)](images/desktop-live-red.png) |
 
 ### Diagnostics
 
@@ -52,11 +52,10 @@ readiness monitors, each done this drive and complete since the clear.*
 
 ### Recordings
 
-![The Recordings page: a 15-minute recording open in the viewer, four signals plotted, the frames check finding nothing](images/desktop-recordings.png)
+![The Recordings page: a recording of just over 3 minutes open in the viewer, four signals plotted from the cold start](images/desktop-recordings.png)
 
-*A 15-minute recording in the viewer: rpm and speed through each loop,
-coolant and oil warming from the cold start; the frames check found
-nothing in 18,442 frames.*
+*A recording in the viewer: rpm and speed through the first loop's
+pulls, coolant and oil warming from the cold start.*
 
 ### Link health
 
@@ -83,22 +82,16 @@ nothing in 18,442 frames.*
 *The phone's joined panel: the tach beside speed, coolant and oil, MAF
 with its trace, then intake air, load and throttle.*
 
-### Drive view
-
-![The drive view: the gauges full screen under a one-line status, every bar hidden](images/phone-drive-view.png)
-
-*The drive view: every bar hidden, the gauges full screen under a
-one-line status; a tap brings the controls back.*
-
 ### Live
 
 | Dark | Night, amber | Night, red |
 |---|---|---|
-| [![Live on the test phone on the limiter, twelve signals and a minute of the chart](images/phone-live.png)](images/phone-live.png) | [![Live on the test phone in Night's amber style on the limiter](images/phone-live-amber.png)](images/phone-live-amber.png) | [![Live on the test phone in Night's red style on the limiter](images/phone-live-red.png)](images/phone-live-red.png) |
+| [![Live on the test phone on the limiter, rpm, speed, MAF and lambda over a minute of the chart](images/phone-live.png)](images/phone-live.png) | [![Live on the test phone in Night's amber style in a pull at 6,558 rpm](images/phone-live-amber.png)](images/phone-live-amber.png) | [![Live on the test phone in Night's red style on the limiter](images/phone-live-red.png)](images/phone-live-red.png) |
 
-![Live on the test phone on its side: the chart takes the page through the quarter mile](images/phone-live-landscape.png)
+![Live on the test phone on its side: the chart takes the page through a 2nd-gear and a 3rd-gear pull](images/phone-live-landscape.png)
 
-*On its side, the chart takes the page: the quarter mile at the right.*
+*On its side, the chart takes the page: a 2nd-gear pull, then the
+3rd-gear pull onto the limiter.*
 
 ### Codes, Log and Settings
 
