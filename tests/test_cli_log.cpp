@@ -71,6 +71,54 @@ template <typename F> std::string text(F fill)
 
 } // namespace
 
+/* --min-sweep: taken with a --signal, its bad forms and a time with
+ * nothing to pace are usage */
+TEST(CliLogTest, AMinimumTimeBetweenSweepsIsTakenWithPicks)
+{
+    {
+        Args a({"havne-cli", "log", "mock://x", "out", "--signal", "RPM",
+                "--min-sweep", "250"});
+        cli::LogArgs la;
+        std::string why;
+        ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+        EXPECT_EQ(la.min_sweep_ms, 250U);
+    }
+    {
+        Args a({"havne-cli", "log", "mock://x", "out", "--signal", "RPM",
+                "--min-sweep", "60000"});
+        cli::LogArgs la;
+        std::string why;
+        ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+        EXPECT_EQ(la.min_sweep_ms, 60000U);
+    }
+    const std::string range =
+        "--min-sweep takes a whole number of ms from 1 to 60000";
+    for (const char* bad : {"0", "60001", "-1", "1.5", "x"}) {
+        EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--signal",
+                          "RPM", "--min-sweep", bad}),
+                  range)
+            << bad;
+    }
+    EXPECT_EQ(
+        why_of({"havne-cli", "log", "mock://x", "out", "--min-sweep", "250"}),
+        "--min-sweep goes with --signal: it paces the picked signals");
+}
+
+/* The focus line says the minimum only when one is set, after the picks,
+ * so a log with none keeps its line */
+TEST(CliLogTest, TheFocusLineNamesAMinimumOnlyWhenSet)
+{
+    Set s;
+    const std::vector<uint16_t> ids = {11, 10};
+    EXPECT_EQ(text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids); }),
+              "{\"type\":\"focus\",\"signals\":[{\"id\":11,\"name\":"
+              "\"Vehicle Speed\"},{\"id\":10,\"name\":\"RPM\"}]}");
+    EXPECT_EQ(text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids, 250); }),
+              "{\"type\":\"focus\",\"signals\":[{\"id\":11,\"name\":"
+              "\"Vehicle Speed\"},{\"id\":10,\"name\":\"RPM\"}],"
+              "\"min_sweep_ms\":250}");
+}
+
 TEST(CliLogTest, TheUriTheFolderAndEachOptionAreTaken)
 {
     Args a({"havne-cli", "log", "mock://x", "out", "--signal", "RPM", "--label",

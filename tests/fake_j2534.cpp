@@ -100,8 +100,9 @@
 //    and an empty read with ERR_BUFFER_EMPTY; after each accepted
 //    write a TX indication (RxStatus 0x09, the 4-byte CAN ID), and the
 //    reply 4 ms later; a read with a timeout of 0 held 50 ms, as a
-//    50 ms timeout would (the car, 2026-11-04), and one asked to wait
-//    less than 10 ms held 10 ms (the car, 2026-11-05). ECUIO_FAKE_NO_ACK=1
+//    50 ms timeout would (docs/bench-sessions/2026-11-04-two-ecu-car.md),
+//    and one asked to wait less than 10 ms held 10 ms
+//    (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md). ECUIO_FAKE_NO_ACK=1
 //    adds the bus with no other node: three writes accepted per connect, then each blocks about
 //    500 ms and fails ERR_FAILED, echoed with RxStatus 0x201.
 //  * A queued message has an arrival time; reads see only those that
@@ -154,13 +155,14 @@ int g_handle = 0;                       /* 1 between Open and Close */
 FrameSlot g_queue[FAKE_QUEUE_DEPTH];    /* in arrival order */
 unsigned long g_queue_len = 0;
 
-/* The VX as measured on 2026-10-22: its reply latency is the engine
- * ECU's median from indication to reply; with nothing on the bus to
+/* The VX as measured (docs/bench-sessions/2026-10-22.md): its reply
+ * latency is the engine ECU's median from indication to reply; with
+ * nothing on the bus to
  * acknowledge, it accepted three writes per connect, then blocked
  * each later one 500-515 ms and failed it. */
 constexpr unsigned long kVxReplyDelayMs = 4;
 /* A VX read with a timeout of 0 holds about 50 ms, whenever its reply
- * arrives: in the test car's frame log of 2026-11-04 a reply read that
+ * arrives: in the test car's frame log a reply read that
  * way reached the host a median 63 ms after its write, with the reply
  * on the adapter's clock a median 11.1 ms after its request's TX
  * indication (docs/bench-sessions/2026-11-04-two-ecu-car.md) */
@@ -906,6 +908,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             !fake_ecu::set_module_dids(spec)) {
             fake_ecu::set_module_dids(nullptr);
         }
+        /* The code a module's 7F 10 carries (0, the default, is 0x12) */
+        char code[32] = {};
+        fake_ecu::session_nrc() =
+            fake_j2534::read_knob("ECUIO_FAKE_SESSION_NRC", code, sizeof(code))
+                ? static_cast<unsigned>(strtol(code, nullptr, 0))
+                : 0u;
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
@@ -946,7 +954,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* RESPONSE GENERATION.
      * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
-     * 0x09; Service 0x22 or 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
+     * 0x09 (or 0x10 and 0x3E, the session's, ADR-0060); Service 0x22 or
+     * 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
      * bytes: the adapter-framed logical message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
@@ -959,7 +968,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
         const bool request =
-            has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09)) ||
+            has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09 ||
+                                       req[4] == 0x10 || req[4] == 0x3E)) ||
                            (n >= 7 && n <= 11 && req[4] == 0x01) ||
                            (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||

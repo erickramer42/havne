@@ -62,7 +62,6 @@ void read_diagnostics(ecuio_mock_transport* t)
                               t->diag_published);
 }
 
-/* Worker thread entrypoint */
 void mock_worker(ecuio_mock_transport* t)
 {
     const auto interval = std::chrono::milliseconds(t->interval_ms);
@@ -116,14 +115,12 @@ void mock_worker(ecuio_mock_transport* t)
     }
 }
 
-/* Under uds-generic (ADR-0020) the mock stands in for the ECUs the URI
- * named: each tick it answers every DID of the session's set once, as
- * the J2534 transport would deliver the reply, 62 <DID> and a value
- * that moves with the tick: the tick count in a number's width (big-
- * endian, as the defs read), four bytes of it for a hex def, and a
- * line naming the DID and the tick for a text def. The set is written
- * once before the worker starts (core.cpp), so reading it needs no
- * lock. The mock set has no such def, so mock:// is unchanged. */
+/* Under uds-generic (ADR-0020) the mock answers every DID of the session's
+ * set each tick, as the J2534 transport would deliver it: 62 <DID> and the
+ * tick count in a number's width (big-endian, as the defs read), four bytes
+ * of it for a hex def, a line naming the DID and tick for a text def.
+ * The set is written once before the worker starts (core.cpp): no lock.
+ * The mock set has no such def, so mock:// is unchanged. */
 void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us)
 {
     const ecuio_signal_set_t* set = t->session->active_signal_set;
@@ -172,7 +169,7 @@ void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us)
     }
 }
 
-/* ---- ops implementations: static, dispatched via the vtable ---- */
+/* Ops implementations */
 
 ecuio_status_t mock_start(ecuio_session_t* session, void* impl)
 {
@@ -206,7 +203,6 @@ void mock_detach(ecuio_session_t* session, void* impl)
     delete t;
 }
 
-/* Static ops table: one per transport implementation, immutable. */
 const ecuio_transport_ops_t kMockTransportOps = {
     mock_start,
     mock_detach

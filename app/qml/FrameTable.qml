@@ -18,6 +18,17 @@ Rectangle {
     property bool live: true
     // Shown while the table has no rows
     property string emptyText: ""
+    // The nearest ancestor's touchMin (the recordings page asks for a phone's
+    // touch size; the Log page has none), as ThemedButton takes it
+    // qmllint disable missing-property
+    readonly property real touchMin: {
+        for (let p = table.parent; p; p = p.parent) {
+            if (p.touchMin !== undefined)
+                return p.touchMin
+        }
+        return 0
+    }
+    // qmllint enable missing-property
     // A phone's width: the table leaves out DLC, narrows its columns and
     // wraps the payload under itself rather than cut it off
     readonly property bool narrowTable: frameList.width < 480   // the rows' narrow too
@@ -37,7 +48,7 @@ Rectangle {
     Rectangle {
         id: columnHeader
         anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: 32
+        height: Math.max(32, table.touchMin)
         z: 2
         color: Theme.elevated
 
@@ -62,7 +73,7 @@ Rectangle {
                     text: (table.frames.newestFirst ? qsTr("Time ↓") : qsTr("Time ↑"))
                           + (table.narrowTable ? "" : qsTr(" (s)"))
                     color: Theme.text
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
                 }
@@ -76,17 +87,17 @@ Rectangle {
                     Qt.callLater(table.live ? frameList.jumpToLatest : frameList.positionViewAtBeginning)
                 }
             }
-            Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: 36 }
-            Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 20 : 36 }
             // Fits a 29-bit ID ("0x18FF0C00") in the mono face
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 80 : 96 }
-            Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true }
-            Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: table.flagsWidth }
         }
@@ -99,7 +110,10 @@ Rectangle {
                   right: parent.right; bottom: parent.bottom }
         anchors.margins: 4
         clip: true
-        model: table.frames          // the bridge's FrameListModel
+        // Bound only while shown: each live frame inserts a row, and a hidden
+        // table would make and destroy a delegate for it on every page
+        model: table.visible ? table.frames : null
+        Accessible.name: qsTr("Frames")
 
         // Oldest-first reads as a tail: new rows land at the
         // bottom, and the view follows them while it's at the
@@ -126,9 +140,33 @@ Rectangle {
         // scroll may have started since the call was queued.
         function followTail() { if (follow) jumpToLatest() }
 
+        // A hidden table keeps its place: the first row shown and whether it
+        // followed, noted while shown and put back once it's bound again
+        property int keptTop: 0
+        property bool keptFollow: true
+        property bool rebinding: false
+        onContentYChanged: if (table.visible && count > 0) keptTop = indexAt(1, contentY + 1)
+        onFollowChanged: if (table.visible && count > 0) keptFollow = follow
+        function restoreTop() {
+            if (!follow && count > 0)
+                positionViewAtIndex(Math.min(Math.max(keptTop, 0), count - 1), ListView.Beginning)
+        }
+
         onCountChanged: {
-            if (count === 0) follow = true   // cleared or new session
-            else if (table.live && tailing && follow) Qt.callLater(frameList.followTail)
+            if (!table.visible) {
+                rebinding = true   // unbound while hidden, not cleared
+            } else if (count === 0) {
+                follow = true   // cleared or new session
+            } else if (rebinding) {
+                rebinding = false
+                follow = keptFollow
+                if (!follow)
+                    Qt.callLater(frameList.restoreTop)
+                else if (table.live && tailing)
+                    Qt.callLater(frameList.followTail)
+            } else if (table.live && tailing && follow) {
+                Qt.callLater(frameList.followTail)
+            }
         }
         // User scrolling decides. Following stops as a drag, flick
         // or wheel starts, or the next frame would pull the view
@@ -152,7 +190,7 @@ Rectangle {
             // flags under it
             height: narrow ? Math.max(26, payloadColumn.implicitHeight + 8) : 26
             radius: 4
-            color: frameRow.model.selected ? Qt.alpha(Theme.info, 0.22) : "transparent"
+            color: frameRow.model.selected ? Qt.alpha(Theme.text, 0.12) : "transparent"
 
             required property var model    // role access
             required property int  index
@@ -179,33 +217,40 @@ Rectangle {
                 // misspelled role is undefined at runtime, not a
                 // build error: the column would render empty and
                 // throw per delegate.
+                // The labels stay out of the accessibility tree: on
+                // Android each row's coming and going rebuilds a node
+                // on the main thread
                 Label {
                     // Session-relative us, shown as s.mmm
                     text: (frameRow.model.timestampUs / 1e6).toFixed(3)
+                    Accessible.ignored: true
                     color: Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 64 : 96
                     elide: Text.ElideRight
                 }
                 Label {
                     text: frameRow.model.dlc
+                    Accessible.ignored: true
                     visible: !frameRow.narrow
                     color: Theme.text
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: 36
                 }
                 Label {
                     text: frameRow.model.extended ? "E" : "-"
+                    Accessible.ignored: true
                     color: frameRow.model.extended ? Theme.success : Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 20 : 36
                 }
                 Label {
                     // Role name is "arbId" (a quint32): hex-format
                     // it for display.
                     text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
+                    Accessible.ignored: true
                     color: Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 80 : 96
                     elide: Text.ElideRight
                 }
@@ -216,8 +261,9 @@ Rectangle {
                         id: payloadLabel
                         width: parent.width
                         text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
+                        Accessible.ignored: true
                         color: Theme.text
-                        font.family: Theme.monoFamily; font.pixelSize: 12
+                        font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                         wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
                         elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
                     }
@@ -227,8 +273,9 @@ Rectangle {
                         width: parent.width
                         visible: frameRow.narrow && text !== ""
                         text: frameRow.model.flagsText
+                        Accessible.ignored: true
                         color: Theme.textDim
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                     }
                 }
@@ -236,8 +283,9 @@ Rectangle {
                     objectName: "rowFlags"
                     visible: !frameRow.narrow
                     text: frameRow.model.flagsText
+                    Accessible.ignored: true
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: table.flagsWidth
                     elide: Text.ElideRight
                 }

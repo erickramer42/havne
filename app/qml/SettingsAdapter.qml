@@ -27,7 +27,7 @@ ColumnLayout {
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
-                         + "put its URI in the field above, then Connect")
+                         + "put its address in the field above, then Connect")
                         .arg(root.host.j2534Devices.length).arg(root.host.serialPorts.length)
                         .arg((root.host.canInterfaces.length > 0
                               ? qsTr(", CAN interfaces: %1").arg(root.host.canInterfaces.length)
@@ -143,7 +143,7 @@ ColumnLayout {
                         text: row.modelData.versions === ""
                               ? "" : qsTr("last seen: %1").arg(row.modelData.versions)
                         color: Theme.textDim
-                        font.pointSize: 8
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignRight
                         rightPadding: Theme.spacing   // clear of the list's scroll bar
@@ -154,7 +154,7 @@ ColumnLayout {
                     objectName: "deviceDetail"
                     text: row.modelData.detail
                     color: Theme.textDim
-                    font.pointSize: 8
+                    font.pixelSize: Theme.fontCaption
                     elide: Text.ElideMiddle
                     Layout.fillWidth: true
                 }
@@ -277,7 +277,7 @@ ColumnLayout {
                         id: nameText
                         width: parent.width
                         text: preset.text
-                        font.pixelSize: 14
+                        font.pixelSize: Theme.fontBody
                         color: Theme.text
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter
@@ -288,7 +288,7 @@ ColumnLayout {
                         width: parent.width
                         visible: preset.modelData.hint !== ""
                         text: preset.modelData.hint
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontCaption
                         color: Theme.textDim
                         wrapMode: Text.Wrap
                         horizontalAlignment: Text.AlignHCenter

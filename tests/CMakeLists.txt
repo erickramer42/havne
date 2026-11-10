@@ -70,6 +70,12 @@ add_test(NAME NoticesTest.TheApkCarriesEachNoticeAsItsSource
 add_test(NAME NoticesTest.EachNoticeCarriesCoresData
     COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=core
             -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachCitedLicenseIsInTheTree
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=licenses
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachBundledFontIsNamed
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=fonts
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
@@ -110,7 +116,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp)
+add_executable(test_obd2 test_obd2.cpp test_session_control.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -217,6 +223,9 @@ if(Python3_Interpreter_FOUND)
     # scripts/api_check.py, the ABI check's source half: the declarations
     add_test(NAME ApiCheckTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/api_check.py selftest)
+    # scripts/verify_scope.py, which steps verify.sh --changed takes
+    add_test(NAME VerifyScopeTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/verify_scope.py selftest)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
@@ -376,6 +385,15 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
+        # An export to pcapng, a folder copy, a CSV's sizing, and a wide CSV
+        # and its sizing during their named columns' check, each interrupted
+        # mid-run: an interrupted end, nothing left behind
+        add_test(NAME CliTransferRunTest.interrupt
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    interrupt $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
+            TIMEOUT 90 SKIP_RETURN_CODE 77)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
@@ -545,6 +563,11 @@ if(TARGET havne-cli)
         # interrupt (skip 77 without a console on Windows), the output
         # closed under it and under stream --record (the recording whole
         # either way)
+        add_test(NAME CliLogRunTest.AMinimumTimeBetweenSweepsLimitsTheRows
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pace
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.AMinimumTimeBetweenSweepsLimitsTheRows
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
@@ -786,6 +809,12 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> frames
                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start
                --from 100 --to 101)
+        # The wide CSV's size per row interval, no file written (ADR-0056's
+        # appendix "the viewer's Export as built")
+        app_cli_golden(ExportEstimateSizesTheWideCsv export-estimate.jsonl
+            -- $<TARGET_FILE:havne-cli> export
+               ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2
+               --format csv --estimate)
         app_cli_golden(FramesRefusesAMissingFolder frames-missing-folder.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> frames
                ${CMAKE_CURRENT_BINARY_DIR}/never-there)
@@ -805,6 +834,14 @@ if(TARGET havne-cli)
             COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
                     "-DARGS=${args}" -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
     endfunction()
+    # The same, with the refusal's words on standard error: for a case
+    # another usage error could pass
+    function(app_cli_usage_says name args words)
+        add_test(NAME CliUsageTest.${name}
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
+                    "-DARGS=${args}" "-DEXPECT_ERR=${words}"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
+    endfunction()
     app_cli_usage(NoArgumentsIsUsage "")
     app_cli_usage(NoUriIsUsage "stream")
     app_cli_usage(AnUnknownCommandIsUsage "listen")
@@ -814,6 +851,9 @@ if(TARGET havne-cli)
     app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(ALabelWithoutRecordIsUsage "stream|mock://x|--label|lap")
     app_cli_usage(LogWithoutAUriIsUsage "log")
+    app_cli_usage(LogMinSweepWithoutASignalIsUsage "log|mock://x|out|--min-sweep|250")
+    app_cli_usage(LogMinSweepPastItsMostIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|60001")
+    app_cli_usage(LogMinSweepOfZeroIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|0")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
@@ -830,7 +870,16 @@ if(TARGET havne-cli)
     app_cli_usage(StreamSecondsPastTheCapIsUsage "stream|mock://x|--seconds|31622401")
     app_cli_usage(StreamSecondsThatWrapAreUsage "stream|mock://x|--seconds|18446744073710")
     app_cli_usage(SimSecondsPastTheCapIsUsage "sim|mock://x|--elm327|tcp:0|--seconds|31622401")
-    app_cli_usage(PlaySecondsPastTheCapIsUsage "play|mock://x|--to|vcan0|--seconds|31622401")
+    # play exists only on Linux (cli/main.cpp's HAVNE_CLI_PLAY); elsewhere
+    # its every form is the one refusal
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        app_cli_usage_says(PlaySecondsPastTheCapIsUsage
+            "play|mock://x|--to|vcan0|--seconds|31622401"
+            "--seconds takes a whole number from 1 to 31622400")
+    else()
+        app_cli_usage_says(PlayNeedsLinux
+            "play|mock://x|--to|vcan0" "play needs Linux")
+    endif()
     app_cli_usage(LogSignalsAndAPluginIsUsage "log|mock://x|f|--signals|a.json|--plugin|p")
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
@@ -948,6 +997,10 @@ if(TARGET havne-cli)
         "export|rec|out|--format|pcapng|--from|5|--to|4")
     app_cli_usage(ExportANegativeFromIsUsage "export|rec|out|--format|pcapng|--from|-1")
     app_cli_usage(ExportAnUnknownOptionIsUsage "export|rec|out|--format|pcapng|--scrub")
+    app_cli_usage(ExportEstimateWithAFileIsUsage "export|rec|out|--format|csv|--estimate")
+    app_cli_usage(ExportEstimateWithoutAFormatIsUsage "export|rec|--estimate")
+    app_cli_usage(ExportEstimateOfPcapngIsUsage "export|rec|--format|pcapng|--estimate")
+    app_cli_usage(ExportEstimateOfTheLongFormIsUsage "export|rec|--format|csv|--layout|long|--estimate")
     app_cli_usage(ImportWithoutCandumpIsUsage "import|bus.log|rec")
     # health (ADR-0054): refused before a session opens or a file is read
     app_cli_usage(HealthWithoutAFileIsUsage "health|mock://x")
@@ -1233,7 +1286,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
+        test_recording_export.cpp
         ../app/recordingview.cpp
+        ../app/recordingexport.cpp
         ../app/recordingframes.cpp
         ../app/sessionbridge.cpp
         ../app/recordingimport.cpp
@@ -1255,6 +1310,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(test_bridge)
+    # One file of many tests, past MSVC's default section limit
+    if(MSVC)
+        target_compile_options(test_bridge PRIVATE /bigobj)
+    endif()
 
     # core/src for pid_support.h: core's judgment of the unsupported
     # signals, fed to the model (test_core's precedent)

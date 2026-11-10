@@ -53,7 +53,7 @@ RELEASE_WORD = re.compile(r"(^|_)(free|close|destroy|unregister)(_|$)")
 MADE_BY_THE_LINKER = {"macho": {"_mh_dylib_header"}}
 
 
-# --- exports ---------------------------------------------------------------
+# Exports
 
 def dumpbin_names(text):
     """The names in `dumpbin /exports` output: the rows under its
@@ -110,7 +110,7 @@ def library_exports(library, fmt, tool):
     return dumpbin_names(run.stdout) if fmt == "dumpbin" else nm_names(run.stdout, fmt == "macho")
 
 
-# --- releasers -------------------------------------------------------------
+# Releasers
 
 def signature(text, name):
     """(the return type's tokens, each parameter's tokens) of a
@@ -163,7 +163,7 @@ def check_releasers(headers):
     return findings
 
 
-# --- self-test -------------------------------------------------------------
+# Self-test
 
 HEADER = """
 #ifndef ECUIO_T_H

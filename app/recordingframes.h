@@ -37,7 +37,7 @@ class RecordingFrames : public QObject
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     // The rows the models hold
     Q_PROPERTY(int rows READ rows NOTIFY loadedChanged)
-    // "the first 10,000 frames from 12.3 s: zoom in for the rest" when the
+    // "The first 10,000 frames from 12.3 s: zoom in for the rest" when the
     // part had more rows than MaxRows; "" otherwise
     Q_PROPERTY(QString note READ note NOTIFY loadedChanged)
     // Core's words for a read that failed (a row it refuses, no

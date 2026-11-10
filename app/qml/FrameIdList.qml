@@ -67,13 +67,13 @@ Rectangle {
             anchors.rightMargin: 12
             spacing: 8
             // Widths MUST match the delegate's columns below
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 104 }   // a 29-bit ID and its E
-            Label { text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 52 }
-            Label { text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 52 }
-            Label { text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: 12;
+            Label { text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true; elide: Text.ElideRight }
         }
     }
@@ -116,20 +116,20 @@ Rectangle {
                     text: "0x" + idRow.model.arbId.toString(16).toUpperCase()
                           + (idRow.model.extended ? " E" : "")
                     color: Theme.text
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: 104
                     elide: Text.ElideRight
                 }
                 Label {
                     text: idRow.model.frames
                     color: Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: 52
                 }
                 Label {
                     text: idTable.rateText(idRow.model.rate)
                     color: Theme.textDim
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: 52
                 }
                 // The bytes that changed from the ID's frame
@@ -141,7 +141,7 @@ Rectangle {
                                              idRow.model.changedBytes)
                     textFormat: Text.StyledText
                     color: Theme.text
-                    font.family: Theme.monoFamily; font.pixelSize: 12
+                    font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.fillWidth: true
                     wrapMode: idRow.narrow ? Text.Wrap : Text.NoWrap   // between bytes
                     elide: idRow.narrow ? Text.ElideNone : Text.ElideRight

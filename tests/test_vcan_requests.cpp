@@ -31,6 +31,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <time.h>
 #include <vector>
 
 namespace {
@@ -687,6 +688,90 @@ TEST_F(SocketCanRequestTest, AFocusAsksOnlyThePickedPids)
     EXPECT_EQ(ecuio_session_set_focus(s.get(), nullptr, 0), ECUIO_OK);
 }
 
+/* ADR-0056 section 4 off the bus, a raw listener's kernel-side order and
+ * its read times: two picks with a minimum time of 200 ms, sweeps at
+ * least that far apart at their median */
+TEST_F(SocketCanRequestTest, AMinimumTimeSpacesTheFocusSweeps)
+{
+    vcan_bus::Ecu ecu;
+    Session s("?profile=obd2&probe=0&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.get());
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    ASSERT_TRUE(listener.ok());
+    ASSERT_EQ(ecuio_session_set_focus_with(s.get(), ids.data(), 2, 200, 0),
+              ECUIO_OK);
+
+    std::vector<std::chrono::steady_clock::time_point> at;
+    const auto end = std::chrono::steady_clock::now() + 5s;
+    while (at.size() < 12 && std::chrono::steady_clock::now() < end) {
+        can_frame f{};
+        if (vcan_bus::read_for(listener.get(), &f, sizeof f, 100) ==
+                static_cast<long>(sizeof f) &&
+            (f.can_id & CAN_ERR_FLAG) == 0 &&
+            (f.can_id & CAN_SFF_MASK) == vcan_bus::kRequest && f.len >= 3 &&
+            f.data[1] == 0x01) {
+            at.push_back(std::chrono::steady_clock::now());
+        }
+    }
+    ASSERT_EQ(at.size(), 12u);
+    std::vector<int64_t> sweeps;
+    for (size_t k = 0; k + 2 < at.size(); k += 2) {
+        sweeps.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
+                             at[k + 2] - at[k])
+                             .count());
+    }
+    std::sort(sweeps.begin(), sweeps.end());
+    EXPECT_GE(sweeps[sweeps.size() / 2], 180000)
+        << "sweeps came faster than the minimum";
+}
+
+static int64_t process_cpu_us()
+{
+    timespec t{};
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
+    return int64_t{t.tv_sec} * 1000000 + t.tv_nsec / 1000;
+}
+
+/* The worker sleeps through a minimum time's gaps: a session older than
+ * the gap uses well under a second of CPU in a second of them, where a
+ * worker polling without a timeout uses all of it. Load only lowers
+ * the figure, so it can't fail this. */
+TEST_F(SocketCanRequestTest, AMinimumTimesGapIsSleptThrough)
+{
+    vcan_bus::Ecu ecu;
+    Session s("?profile=obd2&probe=0&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.get());
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Cu) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 1u);
+    ASSERT_EQ(ecuio_session_set_focus_with(s.get(), ids.data(), 1, 500, 0),
+              ECUIO_OK);
+    std::this_thread::sleep_for(1200ms); /* older than a gap */
+    const int64_t before = process_cpu_us();
+    std::this_thread::sleep_for(1s);
+    const int64_t used = process_cpu_us() - before;
+    RecordProperty("cpu_us", static_cast<int>(used));
+    EXPECT_LT(used, 400000) << "the worker polled through the gap";
+}
+
 /* vcan has no rate, so a stated one isn't checked against it */
 TEST_F(SocketCanRequestTest, ARequestingSessionOnVcanNeedsNoRate)
 {
@@ -808,6 +893,49 @@ TEST_F(SocketCanRequestTest, AnErrorFrameAfterTheFirstEchoHalts)
         << "an error after the first echo left the rate proven";
     EXPECT_EQ(requests_within(listener.get(), 1500), 0u)
         << "a request sent after the error";
+}
+
+/* A halted session has requests due and sends none: its worker sleeps
+ * through its reads instead of polling with no wait, still asking, so
+ * no quiet read moves the link off the hard failure. Load only lowers
+ * the figure, so it can't fail this. */
+TEST_F(SocketCanRequestTest, AHaltedSessionSleepsThroughItsReads)
+{
+    Unproven unproven(1'000'000);
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    ASSERT_TRUE(listener.ok());
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    can_frame f{};
+    bool first = false;
+    const auto end = std::chrono::steady_clock::now() + 2000ms;
+    while (!first && std::chrono::steady_clock::now() < end) {
+        first = vcan_bus::read_for(listener.get(), &f, sizeof f, 100) ==
+                    static_cast<long>(sizeof f) &&
+                (f.can_id & CAN_SFF_MASK) == vcan_bus::kRequest;
+    }
+    ASSERT_TRUE(first) << "no first request";
+    can_frame err{};
+    err.can_id = CAN_ERR_FLAG | CAN_ERR_ACK;
+    err.len = 8;
+    ASSERT_EQ(::write(listener.get(), &err, sizeof err),
+              static_cast<ssize_t>(sizeof err));
+    int32_t e = -1;
+    uint32_t n = 0;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_error_state(s.get(), &e, &n) == ECUIO_OK &&
+                   e == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+        },
+        1000ms));
+    const int64_t before = process_cpu_us();
+    std::this_thread::sleep_for(1500ms);
+    const int64_t used = process_cpu_us() - before;
+    RecordProperty("cpu_us", static_cast<int>(used));
+    EXPECT_LT(used, 600000) << "the halted worker polled with no wait";
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_ERR_TRANSPORT_HARD_FAILURE)
+        << "a halted session stays asking: no quiet read counts";
 }
 
 /* Reply timing (ADR-0042) on SocketCAN: a row per request in the
@@ -1407,6 +1535,63 @@ TEST_F(SimBusTest, OneSessionAsksBothModules)
     uint32_t n = 0;
     ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
     EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* ADR-0060 over socketcan://: the engine ECU enters the extended session
+ * and answers D200, which it keeps to it; the second module has none,
+ * refuses 10 03 with 12 and is read in the default session; the close
+ * returns only the engine ECU to the default session */
+TEST_F(SimBusTest, AnExtendedSessionScanReadsEachModuleInItsOwnSession)
+{
+    Sim sim("mock://sim?modules=2");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    vcan_bus::Fd raw = vcan_bus::open_raw();
+    ASSERT_GE(raw.get(), 0);
+    Values values;
+    Session s("?profile=uds-generic&did=D200:u16,7E9:D100:u8&session=03"
+              "&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    values.listen(s.get());
+    const uint16_t ext = ECUIO_UDS_GENERIC_SIG_ID_BASE;
+    const uint16_t fluid = ext + 1;
+    ASSERT_TRUE(
+        wait_for([&] { return values.has(ext) && values.has(fluid); }, 5000ms))
+        << "requests " << sim.stats().requests;
+    EXPECT_EQ(values.number_of(fluid), 130.0) << "D100's byte, 0x82";
+    ecuio_channel_support_t engine{}, module{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &engine) ==
+                       ECUIO_OK &&
+                   ecuio_session_get_channel_support(s.get(), 1, &module) ==
+                       ECUIO_OK &&
+                   engine.session_state == ECUIO_SESSION_STATE_ENTERED &&
+                   module.session_state == ECUIO_SESSION_STATE_REFUSED;
+        },
+        5000ms))
+        << "engine " << int(engine.session_state) << ", module "
+        << int(module.session_state);
+    EXPECT_EQ(engine.session, 0x03);
+    EXPECT_NE(engine.flags & ECUIO_SUPPORT_EXTENDED, 0u);
+    EXPECT_EQ(module.session, 0x01);
+    EXPECT_EQ(module.session_nrc, 0x12);
+    EXPECT_EQ(module.flags & ECUIO_SUPPORT_EXTENDED, 0u);
+    /* the close: 02 10 01 on 0x7E0 only; what the session sent before it
+     * is read off first, so the socket's queue has room */
+    can_frame f{};
+    while (vcan_bus::read_for(raw.get(), &f, sizeof f, 0) > 0) {
+    }
+    ecuio_session_close(s.get());
+    bool engine_left = false;
+    bool module_left = false;
+    while (vcan_bus::read_for(raw.get(), &f, sizeof f, 300) > 0) {
+        const bool leave = f.can_dlc >= 3 && f.data[0] == 0x02 &&
+                           f.data[1] == 0x10 && f.data[2] == 0x01;
+        engine_left = engine_left || (leave && f.can_id == 0x7E0u);
+        module_left = module_left || (leave && f.can_id == 0x7E1u);
+    }
+    EXPECT_TRUE(engine_left);
+    EXPECT_FALSE(module_left) << "the module never entered it";
 }
 
 /* Without modules=2 nothing answers on 0x7E9: the default stays the

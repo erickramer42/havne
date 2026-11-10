@@ -1297,6 +1297,22 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
         EXPECT_TRUE(flags < focus && focus < signal) << events;
         EXPECT_EQ(events.find("\nlink  "), std::string::npos)
             << "not started: no link line: " << events;
+        EXPECT_EQ(events.find("\nmin sweep  "), std::string::npos)
+            << "no minimum time, no line: " << events;
+    }
+    {
+        Recording rec(root, "mock://focus-floored?profile=rec-test", 0, nullptr,
+                      {}, 0, false);
+        ASSERT_NE(rec.recorder, nullptr);
+        const uint16_t pick = 1;
+        ASSERT_EQ(ecuio_session_set_focus_with(rec.session, &pick, 1, 250, 0),
+                  ECUIO_OK);
+        rec.attach();
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        EXPECT_NE(events.find("\nfocus  Half\n"), std::string::npos) << events;
+        EXPECT_EQ(events.find("\nmin sweep  "), std::string::npos)
+            << "the mock asks nothing, so nothing is paced: " << events;
     }
     {
         Recording rec(root, "mock://focus-started?profile=rec-test", 0, nullptr,

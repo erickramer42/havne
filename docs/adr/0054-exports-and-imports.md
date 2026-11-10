@@ -1651,3 +1651,72 @@ otherwise run for minutes and write a file nothing opens). The long
 layout has no such limit. `ecuio_export_estimate` takes at most 64 row
 intervals in a call, each one keeping a rows engine, and refuses more
 with `ECUIO_ERR_INVALID_ARGUMENT` before it allocates.
+
+## Note of 2026-11-08: the viewer's Export and the range
+
+Section 2 has the viewer's Export take its range from the chart's view.
+It covers the whole recording in every format instead:
+[ADR-0056](0056-analysis-log.md) section 5 sets the rule for a log
+(its size comes from the row interval, and the steady state is as much
+the analyst's as any pull), and one rule for all the Export's formats
+keeps a zoom from silently cutting a file, as Save report's zoom doesn't.
+`--from` and `--to` stay `havne-cli`'s alone, for scripts. Markers stay
+out of the CSV: the section's "the viewer's Export can take them up"
+isn't taken. ADR-0056's appendix "the viewer's Export as built" has the
+rest.
+
+## Appendix: an export canceled (2026-11-09)
+
+A long export, a wide CSV of a long log or a folder copy through a
+provider, can run tens of seconds, and the app can quit meanwhile, or
+Android tear it down. So the export and its sizing take a cancel, as the
+reader's open does (ADR-0049 section 5):
+
+- **The calls are added, nothing changed.** `ecuio_export_with(options,
+  cancel, user_data, report)` and `ecuio_export_estimate_with(options,
+  row_ms, count, cancel, user_data, out)`, with
+  `typedef int (*ecuio_cancel_t)(void* user_data)`. The type is any long
+  call's stop, not the export's, so a later long call (an import, the
+  viewer's report) takes the same one and Python has one `CFUNCTYPE`.
+  `ecuio_export` and `ecuio_export_estimate` are the same calls with a
+  NULL cancel, so their bytes don't change. `ECUIO_ERR_CANCELED` (19)
+  is the reader's.
+- **Where it's asked.** As each pass over the recording begins, as each
+  file of a folder copy begins, and as rows are read within a pass. The
+  header names those points and not how often, so the interval (1024
+  rows) can change without a contract change.
+- **A stop is a failure like any other.** The call returns
+  `ECUIO_ERR_CANCELED` with "the export was canceled" in the detail.
+  Nothing is at `out_path_utf8`, and the file or folder written under a
+  name of its own beside it is removed by the path every failure takes.
+  An estimate's `out` stays zeroed. A process killed mid-export still
+  leaves what it had begun: core's `<name>.partial-<pid>-<n>` beside a
+  local target, and the app's temporary folder. For the second, the
+  app's sweep of stale export folders at startup
+  (`RecordingExport::removeStaleCopies`, called from `main.cpp`) is the
+  backstop.
+- **Threads.** The call is one caller's. The cancel runs on that
+  caller's thread and never after the call returns, so what it reads to
+  decide, a flag another thread sets, is the caller's to make safe.
+- **Cancel only.** Nothing asks for progress. A progress callback would
+  be an addition of its own.
+- **The app.** `RecordingExport`'s destructor sets a flag that both
+  workers' cancels read, then joins them, so quitting the app, an
+  Android teardown included, waits for the next ask, not the export's
+  end. The Export panel lives as long as the Recordings page, a fixed
+  page of Main's, so leaving the page doesn't end an export: it goes on
+  while another page shows. The copy to a provider checks the same flag
+  between its 1 MiB chunks and removes what it made, as a failed copy
+  does. Nothing else is user-visible: a Cancel button in the Export
+  panel is a separate item.
+- **havne-cli.** `export` and `export --estimate` install the Ctrl+C and
+  SIGTERM handlers and pass the interrupt through the cancel. An
+  interrupted run writes `clear`'s interrupted end line,
+  `{"type":"end","reason":"interrupted"}`, and exits 1, since nothing was
+  written. `HAVNE_CLI_EXPORT_HOLD_MS` (tests only) holds the run's first
+  ask, naming it on stderr (the export's or the column check's), so a
+  test's interrupt lands where it says. The named columns' check of a
+  wide CSV (`--signal`) opens the recording before the export, through
+  the same cancel, so an interrupt during it leaves nothing written; its
+  stderr lines come after the export.
+- **Python** has no export wrapper. `_ecuio.py` binds both calls.

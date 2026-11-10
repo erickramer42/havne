@@ -157,7 +157,6 @@ Rectangle {
                     y: logo.cy + logo.r * 0.42
                     text: qsTr("RPM")
                     font.pixelSize: 8
-                    font.letterSpacing: 1
                     color: Theme.textDim
                 }
 
@@ -198,7 +197,7 @@ Rectangle {
             // Branding text
             Text {
                 text: qsTr("Havne")
-                font.pixelSize: 32
+                font.pixelSize: Theme.fontHero
                 font.bold: true
                 color: Theme.text
                 Layout.alignment: Qt.AlignHCenter
@@ -206,7 +205,7 @@ Rectangle {
             // description text
             Text {
                 text: qsTr("ECU reader / logger")
-                font.pixelSize: 16
+                font.pixelSize: Theme.fontEmphasis
                 color: Theme.textDim
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -234,23 +233,25 @@ Rectangle {
                         objectName: "linkLabel"
                         text: Theme.linkLabel(Bridge.linkState)
                         color: Theme.textDim
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontCaption
                     }
                     Item { Layout.fillWidth: true }
                     Text {
                         text: qsTr("core %1").arg(Bridge.coreVersion)
                         color: Theme.textDim
-                        font.pixelSize: 13
+                        font.pixelSize: Theme.fontCaption
                     }
                 }
             }
 
+            // Secondary beside the header's primary; ending a session is quiet
             ThemedButton {
-                text: Bridge.connected ? qsTr("End session")
+                objectName: "homeConnect"
+                text: Bridge.connected ? qsTr("Disconnect")
                     : Bridge.connecting ? qsTr("Connecting…")
                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                     : qsTr("Connect…")
-                highlighted: !Bridge.connected
+                flat: Bridge.connected
                 enabled: !Bridge.connecting && !Bridge.disconnecting
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: 8
@@ -258,12 +259,17 @@ Rectangle {
                                             : home.connectRequested()
             }
 
+            // Every way in, so a user with one of the others isn't sent away
             Text {
+                objectName: "homeHint"
                 visible: !Bridge.connected
                 text: Theme.developerMode
-                      ? qsTr("Choose a J2534 interface or a serial port, or the mock://demo preset, in Settings")
-                      : qsTr("Choose a J2534 interface or a serial port in Settings")
-                font.pixelSize: 12
+                      ? qsTr("Pick what to connect to in Settings: a J2534 interface, an ELM327 "
+                             + "adapter over a serial port, Bluetooth or WiFi, a SocketCAN bus, "
+                             + "or the mock://demo preset")
+                      : qsTr("Pick what to connect to in Settings: a J2534 interface, an ELM327 "
+                             + "adapter over a serial port, Bluetooth or WiFi, or a SocketCAN bus")
+                font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
                 Layout.alignment: Qt.AlignHCenter
                 // Wraps on a page narrower than the line

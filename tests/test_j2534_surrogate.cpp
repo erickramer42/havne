@@ -905,6 +905,20 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
     EXPECT_NE(off.find("OP_WRITE: status 0"), std::string::npos) << off;
 }
 
+/* The deadline as shipped; the case below shortens it */
+TEST(J2534SurrogateTest, TheTransactionDeadlineIsThreeSeconds)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_get_transact_ms(h), 3000u);
+    ecuio_j2534_sur_set_transact_ms(h, 200);
+    EXPECT_EQ(ecuio_j2534_sur_get_transact_ms(h), 200u);
+    ecuio_j2534_sur_set_transact_ms(h, 0);
+    EXPECT_EQ(ecuio_j2534_sur_get_transact_ms(h), 3000u);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
 /* A child that misses two deadlines in a row (a transaction's, then the
  * wait for its late reply) is wedged, not slow. Later transactions fail
  * at once instead of each costing another 3 s, which a teardown would
@@ -912,7 +926,8 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
  * close kills the child without waiting for a polite exit. A slow vendor
  * that answers inside the second wait still recovers
  * (TimedOutOpDoesNotDesyncNextRequest). The fake's one-shot ioctl stall
- * wedges the single-threaded child for 20 s. */
+ * wedges the single-threaded child for 20 s, so both
+ * deadlines here are missed whatever their length. */
 TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
 {
     using clock = std::chrono::steady_clock;
@@ -924,8 +939,10 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
     const std::string path = ecuio_j2534_sur_log_path(h);
+    ecuio_j2534_sur_set_transact_ms(h, 200);
 
-    /* First deadline: the ioctl outlives the 3 s transaction timeout. */
+    /* First deadline: the ioctl outlives the transaction timeout. */
+    const auto missed_from = clock::now();
     unsigned char out[8] = {};
     uint32_t out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
@@ -935,6 +952,8 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     /* Second: its late reply doesn't come within another timeout. */
     EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, channel),
               ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_LT(clock::now() - missed_from, std::chrono::milliseconds(4000))
+        << "the handle's shortened deadline";
 
     /* From here, every transaction fails at once. */
     auto t0 = clock::now();

@@ -2,8 +2,9 @@
 //             check (ADR-0049 section 6)
 // Testing: UNIT: RecordingCheckTest (test_core); FUZZ: fuzz_recording
 //
-// One pass: events.log first (whether its frame flags are complete, and
-// its link and asleep lines, which are few), then frames.csv a row at a
+// One pass: events.log first (whether its frame flags are complete, a
+// focus's minimum time between sweeps, and its link and asleep lines,
+// which are few), then frames.csv a row at a
 // time into recording_check.h's checker, which keeps per ID only a fixed
 // handful of numbers.
 
@@ -74,12 +75,14 @@ bool next_event_line(FILE* f, std::vector<char>& buf, size_t* n)
     }
 }
 
-/* events.log: whether its header says the frame flags are complete, and
- * its link and asleep lines. A folder without one has neither. */
+/* events.log: whether its header says the frame flags are complete, the
+ * focus's minimum time between sweeps it names (0 for none), and its link
+ * and asleep lines. A folder without one has none of them. */
 void read_events(const std::string& folder, bool* complete,
-                 std::vector<check::event>& out)
+                 uint64_t* min_sweep_us, std::vector<check::event>& out)
 {
     *complete = false;
+    *min_sweep_us = 0;
     file_ptr f = open_file(folder + "/events.log");
     if (f == nullptr) {
         return;
@@ -113,9 +116,12 @@ void read_events(const std::string& folder, bool* complete,
         if (in_header) {
             if (n == 0) {
                 in_header = false;
-            } else if (format == ECUIO_RECORDING_FORMAT_CORE &&
-                       rows::equals(p, n, "frame flags  complete")) {
-                *complete = true;
+            } else if (format == ECUIO_RECORDING_FORMAT_CORE) {
+                if (rows::equals(p, n, "frame flags  complete")) {
+                    *complete = true;
+                } else {
+                    (void)check::parse_min_sweep(p, n, min_sweep_us);
+                }
             }
             continue;
         }
@@ -181,11 +187,12 @@ ecuio_status_t run(const std::string& folder,
         return ECUIO_ERR_LOAD_FAILED;
     }
     bool complete = false;
+    uint64_t min_sweep_us = 0;
     std::vector<check::event> events;
-    read_events(folder, &complete, events);
+    read_events(folder, &complete, &min_sweep_us, events);
     sink_context context{finding, user};
     check::checker c(options, std::move(events), complete, to_callback,
-                     &context);
+                     &context, min_sweep_us);
     auto stop = [&](ecuio_status_t rc) {
         c.complete();
         *out = c.summary();

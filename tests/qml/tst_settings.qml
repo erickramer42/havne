@@ -29,17 +29,27 @@ TestCase {
         id: storedVehicles
         category: "vehicles"
     }
+    Settings {
+        id: uiStore
+        category: "ui"
+    }
 
     // A binding error in the app's QML fails the test. Each case starts
     // with nothing stored, or the last case's URI would fill the field
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
         stored.setValue("uri", "")
+        stored.setValue("recentUris", "[]")
         stored.setValue("recording", false)
         stored.setValue("adapterVersions", "{}")
         stored.sync()
         storedVehicles.setValue("document", "")
         storedVehicles.sync()
+        // After a turn: the last case's page writes its Settings as it goes
+        wait(0)
+        uiStore.setValue("driveHideMs", undefined)
+        uiStore.setValue("driveOrientation", undefined)
+        uiStore.sync()
     }
 
     // Every connect here is asynchronous, so a case that fails between
@@ -49,6 +59,10 @@ TestCase {
     function cleanup() {
         Theme.compact = false
         Theme.dense = false
+        Theme.night = "off"
+        Theme.nightStyle = "amber"
+        Theme.nightFrom = "19:00"
+        Theme.nightUntil = "07:00"
         Bridge.unitSystem = 0
         Bridge.recording = false
         tryVerify(() => !Bridge.connecting, 10000, "a connect in flight ends")
@@ -172,7 +186,7 @@ TestCase {
               parts: ["pluginsNone"] },
             { tag: "recording", title: "Recording", summary: "off",
               parts: ["recordBox", "recordStatus"] },
-            { tag: "display", title: "Display", summary: "100 % · metric",
+            { tag: "display", title: "Display", summary: "100 % · metric · Night off",
               parts: ["units_metric"] },
             { tag: "advanced", title: "Advanced", summary: "off", parts: ["developerBox"] },
         ]
@@ -209,7 +223,9 @@ TestCase {
             const child = item.children[i]
             if (!child.visible)
                 continue
-            if (child.down !== undefined && child.checkable !== undefined)
+            // A button, or a ComboBox, which has no checkable
+            if (child.down !== undefined
+                    && (child.checkable !== undefined || child.popup !== undefined))
                 out.push(child)
             buttonsUnder(child, out)
         }
@@ -217,7 +233,7 @@ TestCase {
     }
 
     // Density on a phone (qml.md): every page of Settings at 384 x 832,
-    // 100 %, has buttons a touch's size and nothing past 320 px
+    // 100 %, has buttons and choice boxes a touch's size and nothing past 320 px
     function test_everyPageMeetsAPhonesDensity_data() {
         return [
             { tag: "list", key: "", obj: "settingsListPage" },
@@ -399,6 +415,187 @@ TestCase {
         verify(find(find(page, "settingsDisplayPage"), "settingsBack").visible)
     }
 
+    // The rows of a page's buttons, top to bottom, each in the order given:
+    // [[button, ...], ...]. A button is in a row when its height overlaps the
+    // row's by more than half of it, since buttons of other heights centered
+    // in one row have other tops (the fonts set the heights)
+    function rowsOf(buttons, within) {
+        const rows = []
+        for (const b of buttons) {
+            const top = b.mapToItem(within, 0, 0).y
+            const bottom = top + b.height
+            const row = rows.find(r => Math.min(r.bottom, bottom) - Math.max(r.top, top) > b.height / 2)
+            if (row) {
+                row.items.push(b)
+                row.top = Math.min(row.top, top)
+                row.bottom = Math.max(row.bottom, bottom)
+            } else {
+                rows.push({ top: top, bottom: bottom, items: [b] })
+            }
+        }
+        return rows.sort((p, q) => p.top - q.top).map(r => r.items)
+    }
+
+    // rowsOf's rule: two heights centered in a row are one row, two stacked
+    // are two
+    Component {
+        id: rowOfTwoComponent
+        Row {
+            Rectangle { objectName: "low"; width: 60; height: 36; anchors.verticalCenter: parent.verticalCenter }
+            Rectangle { objectName: "high"; width: 60; height: 48; anchors.verticalCenter: parent.verticalCenter }
+        }
+    }
+    Component {
+        id: columnOfTwoComponent
+        Column {
+            Rectangle { objectName: "first"; width: 60; height: 36 }
+            Rectangle { objectName: "second"; width: 60; height: 48 }
+        }
+    }
+    function test_rowsOfGroupsByOverlapNotByTop() {
+        const row = createTemporaryObject(rowOfTwoComponent, testCase)
+        const low = find(row, "low"), high = find(row, "high")
+        verify(low.mapToItem(row, 0, 0).y !== high.mapToItem(row, 0, 0).y, "their tops differ")
+        const one = rowsOf([low, high], row)
+        compare(one.length, 1, "one row")
+        verify(one[0][0] === low && one[0][1] === high, "in the order given")
+        const column = createTemporaryObject(columnOfTwoComponent, testCase)
+        const first = find(column, "first"), second = find(column, "second")
+        const two = rowsOf([second, first], column)
+        compare(two.length, 2, "two rows")
+        verify(two[0][0] === first && two[1][0] === second, "top first")
+    }
+
+    // A phone's page scrolled: the title row stays at the top, its back
+    // arrow quiet at the left edge, and the content runs under it
+    function test_theTitleRowStaysWhileThePageScrolls() {
+        const page = createPage(true)
+        // Short, so the page scrolls past its title row whatever the fonts' heights
+        page.width = 384
+        page.height = 240
+        page.open("connection")
+        const flick = find(page, "settingsConnectionPage")
+        const header = find(flick, "settingsConnectionPageHeader")
+        const back = find(flick, "settingsBack")
+        const column = find(flick, "settingsConnectionPageColumn")
+        waitForPolish(column)
+        verify(flick.contentHeight - flick.height > header.height + 10,
+               "the page scrolls past the title row: " + flick.contentHeight + " in " + flick.height)
+        verify(back.visible && back.quiet, "a quiet back control")
+        compare(back.mapToItem(flick, 0, 0).x, Theme.pageMargin, "at the left edge")
+        compare(back.Accessible.name, "Back to Settings")
+        compare(header.mapToItem(flick, 0, 0).y, 0, "the title row at the top")
+        verify(column.mapToItem(flick, 0, 0).y >= header.height, "the content starts under it")
+        flick.contentY = Math.min(150, flick.contentHeight - flick.height)
+        compare(header.mapToItem(flick, 0, 0).y, 0, "still at the top, scrolled")
+        verify(column.mapToItem(flick, 0, 0).y < 0, "the content scrolled under it")
+        back.clicked()
+        compare(page.pageKey, "", "the arrow goes back")
+    }
+
+    // The list's values give way whole in a narrow row (a phone zoomed far
+    // in), instead of eliding to a few letters
+    function test_theListsValuesGiveWayInANarrowRow() {
+        const page = createPage(true)
+        page.width = 384
+        // The phone's list, not the hidden side list's row of the same name
+        const row = find(find(page, "settingsList"), "settingsRow_display")
+        const summary = find(row, "settingsRowSummary")
+        tryVerify(() => row.width >= 200, 2000, "a phone's row")
+        verify(summary.visible, "the value shows at a phone's width")
+        page.width = 224
+        tryVerify(() => row.width < 200, 2000, "a narrow row")
+        verify(!summary.visible, "the value gives way")
+        page.width = 384
+        tryVerify(() => summary.visible, 2000, "and comes back")
+    }
+
+    // The Vehicle page's rows on a phone: the field on its own row, New,
+    // Duplicate and More sharing the next, and More's four quiet actions
+    // two to a row, so no row holds one button alone
+    function test_theVehicleRowsNeverLeaveAButtonAlone() {
+        const page = createPage(true)
+        page.width = 384
+        page.open("vehicle")
+        press(page, "vehicleNew")
+        find(page, "vehicleMore").clicked()
+        const column = find(page, "settingsVehiclePageColumn")
+        waitForPolish(column)
+        const field = find(page, "vehicleLabelField")
+        const top = rowsOf(["vehicleNew", "vehicleDuplicate", "vehicleMore"].map(n => find(page, n)),
+                           column)
+        compare(top.length, 1, "New, Duplicate and More share a row")
+        const grid = field.parent
+        verify(field.mapToItem(column, 0, 0).y < top[0][0].mapToItem(column, 0, 0).y,
+               "the field has the row above them: field " + field.width + "@" + field.x + "," + field.y
+               + " New @" + top[0][0].x + "," + top[0][0].y + " grid " + grid.width + " x " + grid.height
+               + " columns " + grid.columns + " section " + grid.parent.width + " column " + column.width
+               + " past: " + pastTheEdge(column, column, []).join("; "))
+        compare(Math.round(field.width), Math.round(column.width), "the field takes the row")
+        const more = ["vehicleRename", "vehicleForgetVin", "vehicleForget", "vehicleForgetAll"]
+                     .map(n => find(page, n))
+        for (const b of more)
+            verify(b.quiet, b.objectName + " is quiet")
+        const rows = rowsOf(more, column)
+        compare(rows.map(r => r.length), [2, 2], "two to a row")
+        for (const b of more.concat(top[0]))
+            verify(b.width >= 48 - 0.5, b.objectName + " is " + b.width + " wide")
+
+        // Wide, each row is one row
+        page.width = 1000
+        const moreRow = find(page, "vehicleMoreRow")
+        tryVerify(() => moreRow.parent.width >= 560, 3000, "the section widens")
+        verify(waitForPolish(moreRow), "the actions laid out")
+        verify(waitForPolish(find(page, "vehicleNew").parent), "the field's row laid out")
+        compare(rowsOf(more, column).length, 1, "one row of actions: "
+                + more.map(b => b.objectName + " " + b.width + "@" + b.x + "," + b.y).join(" "))
+        compare(rowsOf([field].concat(top[0]), column).length, 1, "one row with the field")
+    }
+
+    // Night's three modes share a row under their caption on a phone,
+    // instead of Scheduled wrapping alone under Off and On
+    function test_theNightModesShareARowOnAPhone() {
+        const page = createPage(true)
+        page.width = 320
+        page.open("display")
+        const column = find(page, "settingsDisplayPageColumn")
+        waitForPolish(column)
+        const modes = ["off", "on", "schedule"].map(n => find(page, "night_" + n))
+        const rows = rowsOf(modes, column)
+        compare(rows.length, 1, "one row: "
+                + rows.map(r => r.map(b => b.objectName + " " + b.width + "@" + b.x).join("+")).join(" / "))
+        // Under the caption, which has the row above to itself
+        const caption = modes[0].parent.children[0]
+        compare(caption.text, "Night:")
+        verify(modes[0].mapToItem(column, 0, 0).y >= caption.mapToItem(column, 0, caption.height).y - 0.5,
+               "the modes start under the caption")
+        for (const b of modes)
+            verify(b.width >= 48 - 0.5, b.objectName + " is " + b.width + " wide")
+        verify(modes[2].mapToItem(column, modes[2].width, 0).x <= column.width + 0.5,
+               "Scheduled ends inside the column")
+    }
+
+    // The signal form names what each row of choices chooses, and Save is
+    // the form's one primary
+    function test_theFormNamesItsChoicesAndSaveIsPrimary() {
+        const page = createPage(true)
+        press(page, "vehicleNew")
+        page.open("ownform")
+        page.formKind = "number"
+        compare(find(page, "formReadBy").label, "Read by:")
+        compare(find(page, "formType").label, "Type:")
+        const order = find(page, "formOrderLabel")
+        verify(order.visible, "a number has a byte order")
+        compare(order.text, "Byte order:")
+        compare(find(page, "formOrder_be").text, "big")
+        compare(find(page, "formOrder_le").text, "little")
+        press(page, "formKind_hex")
+        verify(!order.visible, "hex has none")
+        verify(find(page, "formSave").primary, "Save is primary")
+        verify(!find(page, "formReadOnce").primary)
+        verify(find(page, "formClear").quiet)
+    }
+
     // Connect... elsewhere opens what to connect to, at the page's top
     function test_showAdaptersOpensWhatToConnectTo() {
         const page = createPage(true)
@@ -522,32 +719,116 @@ TestCase {
         compare(uri.text, "elm327://192.168.0.10:35000?profile=raw")
     }
 
-    // The Display page's theme buttons set Theme.theme at once and the
-    // chosen one is highlighted (Theme.qml stores it: tst_phone's case)
-    function test_theThemeButtonsSetTheTheme() {
+    // The Display page's Night buttons set Theme.night at once and the
+    // chosen one is chosen (Theme.qml stores it: tst_theme's case)
+    function test_theNightButtonsSetNight() {
         const page = createPage()
         page.open("display")
-        for (const name of ["night", "lowGlare", "dark"]) {
-            const b = find(page, "theme_" + name)
+        for (const name of ["on", "schedule", "off"]) {
+            const b = find(page, "night_" + name)
             verify(b.visible, name + " is offered")
             b.clicked()
-            compare(Theme.theme, name)
-            verify(b.highlighted, name + " is highlighted")
-            for (const other of Theme.themeNames.filter(n => n !== name))
-                verify(!find(page, "theme_" + other).highlighted, other + " is not")
+            compare(Theme.night, name)
+            verify(b.checked, name + " is chosen")
+            for (const other of Theme.nightModes.filter(n => n !== name))
+                verify(!find(page, "night_" + other).checked, other + " is not")
         }
-        compare(find(page, "theme_lowGlare").text, "Low glare")
+        compare(find(page, "night_off").text, "Off")
+        compare(find(page, "night_on").text, "On")
+        compare(find(page, "night_schedule").text, "Scheduled")
     }
 
-    // An unknown stored name reads as dark, and the buttons agree
-    function test_anUnknownThemeNameHighlightsDark() {
+    // The style is chosen with Night off too, and shows when Night is on
+    function test_theNightStyleButtonsSetTheStyle() {
         const page = createPage()
         page.open("display")
-        Theme.theme = "nonsense"
-        verify(find(page, "theme_dark").highlighted, "dark is shown as the theme in use")
-        verify(!find(page, "theme_night").highlighted)
-        verify(!find(page, "theme_lowGlare").highlighted)
-        Theme.theme = "dark"
+        compare(Theme.night, "off")
+        for (const name of ["red", "amber"]) {
+            const b = find(page, "nightStyle_" + name)
+            verify(b.visible && b.enabled, name + " is offered")
+            b.clicked()
+            compare(Theme.nightStyle, name)
+            verify(b.checked, name + " is chosen")
+            verify(!find(page, "nightStyle_" + (name === "red" ? "amber" : "red")).checked)
+        }
+        compare(find(page, "nightStyle_amber").text, "Amber")
+        compare(find(page, "nightStyle_red").text, "Red")
+        find(page, "night_on").clicked()
+        find(page, "nightStyle_red").clicked()
+        compare(Theme.active, "nightRed")
+    }
+
+    // A stored mode or style outside the lists reads as the default, and
+    // the buttons agree
+    function test_anUnknownNightValueHighlightsTheDefault() {
+        const page = createPage()
+        page.open("display")
+        Theme.night = "nonsense"
+        Theme.nightStyle = "nonsense"
+        verify(find(page, "night_off").checked, "off is shown as the mode in use")
+        verify(!find(page, "night_on").checked)
+        verify(!find(page, "night_schedule").checked)
+        verify(find(page, "nightStyle_amber").checked)
+        verify(!find(page, "nightStyle_red").checked)
+    }
+
+    // From and Until show under Scheduled and nowhere else; a valid time is
+    // stored, a bad one or an equal pair refused with the words
+    function test_theScheduleFieldsStoreATimeAndRefuseABadOne() {
+        const page = createPage()
+        page.open("display")
+        const sched = find(page, "nightSchedule")
+        compare(sched.visible, false, "hidden while Night is off")
+        find(page, "night_schedule").clicked()
+        compare(sched.visible, true, "shown under Scheduled")
+        const from = find(page, "nightFrom"), until = find(page, "nightUntil")
+        const problem = find(page, "nightProblem")
+        compare(from.text, "19:00")
+        compare(until.text, "07:00")
+        compare(problem.visible, false)
+        from.text = "20:30"
+        from.editingFinished()
+        compare(Theme.nightFrom, "20:30", "a valid time is stored")
+        compare(problem.visible, false)
+        until.text = "25:00"
+        until.editingFinished()
+        compare(Theme.nightUntil, "07:00", "a bad time is refused")
+        compare(problem.text, "Not a time")
+        verify(problem.visible)
+        compare(until.text, "07:00", "the field shows the stored time again")
+        until.text = "20:30"
+        until.editingFinished()
+        compare(Theme.nightUntil, "07:00", "an equal pair is refused")
+        compare(problem.text, "From and Until are the same time")
+        compare(until.text, "07:00")
+        until.text = "06:15"
+        until.editingFinished()
+        compare(Theme.nightUntil, "06:15")
+        compare(problem.visible, false, "the words go with a good time")
+        compare(find(page, "nightWords").text, "Scheduled 20:30 to 06:15")
+        Theme.nightUntil = "05:45"
+        compare(until.text, "05:45", "and follows it after an edit")
+        until.text = "99:99"
+        until.editingFinished()
+        verify(problem.visible)
+        find(page, "night_off").clicked()
+        compare(sched.visible, false, "hidden again")
+        find(page, "night_schedule").clicked()
+        compare(problem.visible, false, "the words went with the schedule")
+    }
+
+    // The list's row says the night state
+    function test_theDisplayRowSaysTheNightState() {
+        const page = createPage()
+        const summary = () => page.pageList.find(p => p.key === "display").summary
+        compare(summary(), "100 % · metric · Night off")
+        Theme.night = "on"
+        Theme.nightStyle = "red"
+        compare(summary(), "100 % · metric · Night on, red")
+        Theme.nightStyle = "amber"
+        compare(summary(), "100 % · metric · Night on, amber")
+        Theme.night = "schedule"
+        compare(summary(), "100 % · metric · Night scheduled 19:00 to 07:00")
     }
 
     // A preset or row of another scheme keeps the query's keys that
@@ -560,7 +841,7 @@ TestCase {
         type(uri, "replay://C:/rec/x?profile=mock&speed=10&loop=1")
         press(page, "preset_wifi_obdx")
         compare(uri.text, "elm327://192.168.4.1:23", "a replay's keys and the mock profile go")
-        verify(find(page, "profile_default").highlighted)
+        verify(find(page, "profile_default").checked)
 
         type(uri, "replay://C:/rec/x?profile=uds-generic&did=1E1C:u16&speed=max")
         press(page, "preset_j2534")
@@ -587,16 +868,16 @@ TestCase {
         const metric = find(page, "units_metric")
         const imperial = find(page, "units_imperial")
         compare(Bridge.unitSystem, 0)
-        verify(metric.highlighted && !imperial.highlighted)
+        verify(metric.checked && !imperial.checked)
         press(page, "units_imperial")
         compare(Bridge.unitSystem, 1)
-        verify(imperial.highlighted && !metric.highlighted)
+        verify(imperial.checked && !metric.checked)
 
         compare(Bridge.connectSession("mock://demo"), "", "connects")
         verify(metric.enabled, "units change while connected")
         press(page, "units_metric")
         compare(Bridge.unitSystem, 0)
-        verify(metric.highlighted)
+        verify(metric.checked)
     }
 
     function test_presetsProfilesAndDidsComposeTheUri() {
@@ -663,6 +944,9 @@ TestCase {
         compare(find(list.itemAtIndex(1), "deviceDetail").text,
                 "Serial port, for elm327:// · \\Device\\BthModem0")
         compare(find(list.itemAtIndex(2), "deviceDetail").text, "Serial port, for elm327://")
+        // The rows' detail is caption text, never under the 12 px floor
+        compare(find(list.itemAtIndex(1), "deviceDetail").font.pixelSize, Theme.fontCaption)
+        verify(Theme.fontCaption >= 12)
 
         press(page, "preset_elm327")
         compare(uri.text, "elm327://", "the port is the user's pick")
@@ -810,7 +1094,8 @@ TestCase {
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "elm327://bt:00:11:22:33:44:55")
         const top = uri.mapToItem(flick, 0, 0).y
-        verify(top >= 0 && top + uri.height <= flick.height, "the field is in view, at " + top)
+        verify(top >= flick.headerHeight && top + uri.height <= flick.height,
+               "the field is in view, under the title row, at " + top)
 
         // A field already in view stays where it is
         flick.contentY = 0
@@ -857,7 +1142,7 @@ TestCase {
         page.pickRecording(row.uri)
         verify(uri.text.startsWith("replay://")
                && uri.text.endsWith("?profile=uds-generic&did=F190:text"), uri.text)
-        verify(find(page, "profile_uds-generic").highlighted, "the row reads its profile back")
+        verify(find(page, "profile_uds-generic").checked, "the row reads its profile back")
         compare(find(page, "didField").text, "F190:text")
 
         Bridge.recording = false
@@ -885,8 +1170,8 @@ TestCase {
         type(uri, "mock://demo?profile=uds-generic&did=1E1C:u16")
         compare(uri.text, "mock://demo?profile=uds-generic&did=1E1C:u16", "left as typed")
         compare(page.profileChoice, "uds-generic")
-        verify(find(page, "profile_uds-generic").highlighted)
-        verify(!find(page, "profile_default").highlighted)
+        verify(find(page, "profile_uds-generic").checked)
+        verify(!find(page, "profile_default").checked)
         verify(didRow.visible)
         compare(did.text, "1E1C:u16")
         verify(hint.text.indexOf("Service 0x22") >= 0, "the hint is uds-generic's: " + hint.text)
@@ -898,7 +1183,7 @@ TestCase {
 
         type(uri, "j2534://Vendor?profile=raw&filter=0x7E9")
         compare(page.profileChoice, "raw")
-        verify(find(page, "profile_raw").highlighted)
+        verify(find(page, "profile_raw").checked)
         verify(!didRow.visible)
         compare(uri.text, "j2534://Vendor?profile=raw&filter=0x7E9", "left as typed")
         press(page, "profile_default")
@@ -907,12 +1192,12 @@ TestCase {
         // A profile the row doesn't offer: no button lit, the hint says so
         type(uri, "j2534://Vendor?profile=obd2")
         compare(page.profileChoice, "obd2")
-        verify(!find(page, "profile_default").highlighted)
-        verify(!find(page, "profile_raw").highlighted)
+        verify(!find(page, "profile_default").checked)
+        verify(!find(page, "profile_raw").checked)
         verify(hint.text.indexOf("obd2") >= 0, "the hint names it: " + hint.text)
         type(uri, "j2534://Vendor")
         compare(page.profileChoice, "default")
-        verify(find(page, "profile_default").highlighted)
+        verify(find(page, "profile_default").checked)
     }
 
     // A DID edit changes did= only; keys typed by hand stay where they were
@@ -1042,18 +1327,23 @@ TestCase {
     // A restart gets back the last URI that connected and the Record
     // switch. Recording is switched on only after the connects, so no
     // session here records
+    // The mock is never kept, so the URI half needs the fake DLL
     function test_theLastConnectedUriAndTheRecordSwitchComeBack() {
+        const fake = Harness.fakeDllPath === "" ? ""
+                   : "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
         let page = createPage()
         const error = find(page, "errorLabel")
-        find(page, "uriField").text = "mock://demo?profile=raw"
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "the URI connects")
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        if (fake !== "") {
+            find(page, "uriField").text = fake + "&profile=raw"
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, "the URI connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
 
-        find(page, "uriField").text = "mock://demo?profile=uds-generic"
-        press(page, "connectButton")
-        tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+            find(page, "uriField").text = fake + "&profile=uds-generic"
+            press(page, "connectButton")
+            tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+        }
         Bridge.recording = true
         verify(find(page, "recordBox").checked)
 
@@ -1063,11 +1353,137 @@ TestCase {
         Bridge.recording = false   // a fresh bridge starts with it off
 
         page = createPage()
-        compare(find(page, "uriField").text, "mock://demo?profile=raw",
-                "the URI that connected, not the refused one")
-        verify(find(page, "profile_raw").highlighted, "read back into the row")
+        if (fake !== "") {
+            compare(find(page, "uriField").text, fake + "&profile=raw",
+                    "the URI that connected, not the refused one")
+            verify(find(page, "profile_raw").checked, "read back into the row")
+        }
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
+    }
+
+    function sameList(a, b, what) {
+        compare(JSON.stringify(a), JSON.stringify(b), what)
+    }
+
+    // The recent addresses: newest first, a duplicate moved to the top, at
+    // most five
+    function test_recentUrisAreNewestFirstAndCapped() {
+        const page = createPage()
+        sameList(page.withRecentUri([], "a"), ["a"], "the first")
+        sameList(page.withRecentUri(["a", "b"], "c"), ["c", "a", "b"], "newest first")
+        sameList(page.withRecentUri(["a", "b", "c"], "b"), ["b", "a", "c"], "a duplicate moves up")
+        sameList(page.withRecentUri(["a", "b"], "a"), ["a", "b"], "the top stays")
+        sameList(page.withRecentUri(["a", "b", "c", "d", "e"], "f"), ["f", "a", "b", "c", "d"],
+                 "the oldest goes past five")
+        sameList(page.withRecentUri(["a", "b", "c", "d", "e"], "e"), ["e", "a", "b", "c", "d"],
+                 "a duplicate doesn't cost a row")
+    }
+
+    // The stored list as it reads back: strings only, damage reads as none,
+    // and with none the last URI seeds it
+    function test_recentUrisReadBackFromTheStoreOrTheLastUri() {
+        const page = createPage()
+        sameList(page.parseRecentUris('["a","b"]', "z"), ["a", "b"], "the stored list")
+        sameList(page.parseRecentUris('[]', "z"), ["z"], "seeded from the last URI")
+        sameList(page.parseRecentUris('[]', ""), [], "nothing at all")
+        sameList(page.parseRecentUris('not json', "z"), ["z"], "damage reads as none")
+        sameList(page.parseRecentUris('{"a":1}', ""), [], "not a list")
+        sameList(page.parseRecentUris('["a",3,"",null]', ""), ["a"], "strings only")
+        sameList(page.parseRecentUris('["a","b","c","d","e","f"]', ""), ["a", "b", "c", "d", "e"],
+                 "at most five")
+    }
+
+    function test_aFirstRunWithAnOlderUriSeedsTheList() {
+        stored.setValue("uri", "elm327://COM1?profile=obd2")
+        stored.sync()
+        const page = createPage()
+        sameList(page.recentUris, ["elm327://COM1?profile=obd2"], "what session/uri holds")
+    }
+
+    // Only a connect that succeeded is written, the newest first, and the
+    // list survives a restart
+    function test_onlyASuccessfulConnectWritesTheRecentUris() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+        const raw = fake + "&profile=raw"
+        let page = createPage()
+        sameList(page.recentUris, [], "nothing yet")
+        const field = find(page, "uriField")
+        for (const uri of [fake, raw, fake]) {
+            field.text = uri
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, uri + " connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        }
+        sameList(page.recentUris, [fake, raw], "newest first, once")
+
+        field.text = fake + "&profile=uds-generic"
+        press(page, "connectButton")
+        tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
+        sameList(page.recentUris, [fake, raw], "a refusal writes nothing")
+
+        // The page's store writes when the page goes, as at a quit
+        page.destroy()
+        wait(10)
+        page = createPage()
+        sameList(page.recentUris, [fake, raw], "kept between runs")
+    }
+
+    // A replay or the mock is never kept (Recordings is a replay's way
+    // back), and one an earlier version stored is dropped as it's read
+    function test_aReplayOrTheMockIsNeverKept() {
+        const kept = "elm327://COM1?profile=obd2"
+        const replay = "replay://" + Harness.replayFixtures + "/2026-10-25-engine-start?speed=max"
+        stored.setValue("uri", replay)
+        stored.setValue("recentUris", JSON.stringify([replay, kept, " MOCK://demo"]))
+        stored.sync()
+        let page = createPage()
+        compare(find(page, "uriField").text, "", "the stored replay isn't the field's")
+        sameList(page.recentUris, [kept], "nor in the list")
+        sameList(page.parseRecentUris("[]", "mock://demo"), [], "the mock seeds nothing")
+        verify(page.keptUri("socketcan://can0") && page.keptUri("j2534://Fake"), "an adapter is kept")
+
+        const field = find(page, "uriField")
+        for (const uri of ["mock://demo", replay]) {
+            field.text = uri
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, uri + " connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        }
+        sameList(page.recentUris, [kept], "a connect to either writes nothing")
+
+        page.destroy()
+        wait(10)
+        stored.sync()
+        compare(stored.value("uri"), "", "the stored replay is gone")
+        compare(stored.value("recentUris"), JSON.stringify([kept]), "and the list without either")
+    }
+
+    // The bridge's URI can differ from the request: a connect from this
+    // page leaves its field as it was typed
+    function test_aConnectLeavesTheFieldAsTyped() {
+        const page = createPage()
+        const field = find(page, "uriField")
+        field.text = "  mock://demo  "
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connects")
+        compare(field.text, "  mock://demo  ")
+    }
+
+    // Dash's list: the address connects through the field, like one typed
+    function test_aConnectFromTheListFillsTheFieldFirst() {
+        const page = createPage()
+        const field = find(page, "uriField")
+        field.text = "mock://other"
+        page.connectFromList("mock://demo")
+        compare(field.text, "mock://demo", "before the connect answers")
+        verify(Bridge.connecting)
+        tryVerify(() => Bridge.connected, 5000, "connects")
+        compare(Bridge.currentUri, "mock://demo")
     }
 
     function versionsOf(page, index) {
@@ -1165,10 +1581,17 @@ TestCase {
     function test_thePartsOfAPickedVehicleAreAbsentWithNone() {
         const page = createPage()
         page.open("signals")
-        verify(!find(page, "settingsSignalFilesPart").visible, "no files with no vehicle")
+        verify(!find(page, "signalFilesTitle").visible, "no files with no vehicle")
+        verify(!find(page, "signalImport").visible, "no import with no vehicle")
+        verify(!find(page, "obdbImport").visible, "no OBDb import with no vehicle")
+        const need = find(page, "signalFilesNeedVehicle")
+        verify(need.visible, "the line says a vehicle is needed")
+        verify(need.text.indexOf("vehicle") >= 0, need.text)
         verify(!find(page, "settingsOwnSignalsPart").visible, "no own signals with no vehicle")
         page.changeVehicles(VehicleBook.add(page.vehicles, "A"))
-        verify(find(page, "settingsSignalFilesPart").visible, "files with a vehicle")
+        verify(find(page, "signalFilesTitle").visible, "files with a vehicle")
+        verify(find(page, "signalImport").visible, "import with a vehicle")
+        verify(!find(page, "signalFilesNeedVehicle").visible, "and no line then")
         verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
     }
 
@@ -1178,14 +1601,14 @@ TestCase {
         let page = createPage()
         page.open("vehicle")
         const field = find(page, "vehicleLabelField")
-        verify(find(page, "vehicle_none").highlighted, "no vehicle to start")
+        verify(find(page, "vehicle_none").checked, "no vehicle to start")
         verify(!find(page, "vehicleDuplicate").enabled, "nothing to copy")
         compare(find(page, "vehicleLabelHint").text, "Left empty, New makes “Vehicle 1”")
 
         press(page, "vehicleNew")
         compare(labels(page), ["Vehicle 1"], "the default, with the field empty")
         compare(Bridge.vehicleLabel, "Vehicle 1", "the recording's label follows the pick")
-        verify(find(page, "vehicle_v1").highlighted)
+        verify(find(page, "vehicle_v1").checked)
 
         field.text = "Daily driver"
         press(page, "vehicleRename")
@@ -1222,7 +1645,7 @@ TestCase {
         press(page, "vehicleForget")
         press(page, "vehicleConfirm")
         compare(labels(page), ["Daily driver (copy)"])
-        verify(find(page, "vehicle_none").highlighted)
+        verify(find(page, "vehicle_none").checked)
 
         // The store writes as it changes, and a new page (a restart) reads it
         page.destroy()
@@ -1279,12 +1702,106 @@ TestCase {
         return page.importSignalFile(url)
     }
 
+    // The drive view's settings (ADR-0059 section 9), a phone's: stored at
+    // once and read back, each value one segment
+    function test_theDriveViewsSettingsRoundTrip_data() {
+        return [{ tag: "2 s", ms: 2000 }, { tag: "4 s", ms: 4000 },
+                { tag: "8 s", ms: 8000 }, { tag: "Never", ms: 0 }]
+    }
+    function test_theDriveViewsSettingsRoundTrip(data) {
+        const page = createPage()
+        page.open("display")
+        const display = find(page, "driveHideRow").parent
+        display.driveShown = true
+        display.orientationShown = true
+        waitForRendering(page)
+        // From another value: a click on the stored one writes nothing
+        mouseClick(find(page, "driveHide_" + (data.ms === 4000 ? 2000 : 4000)))
+        const seg = find(page, "driveHide_" + data.ms)
+        mouseClick(seg)
+        verify(seg.selected, "the chosen segment shows it")
+        for (const other of [2000, 4000, 8000, 0]) {
+            if (other !== data.ms)
+                verify(!find(page, "driveHide_" + other).selected, "only one")
+        }
+        compare(find(page, "driveSettings").driveHideMs, data.ms)
+        for (const mode of ["side", "follow", "upright"]) {
+            const button = find(page, "driveOrientation_" + mode)
+            mouseClick(button)
+            compare(find(page, "driveSettings").driveOrientation, mode)
+            verify(button.selected, mode + " shows it")
+        }
+        // A Settings object writes a change on a short timer: until it has, a read from the store sees the old value
+        tryVerify(() => { uiStore.sync(); return uiStore.value("driveHideMs", -1) === data.ms }, 3000, "written where it's read")
+        tryVerify(() => { uiStore.sync(); return uiStore.value("driveOrientation", "") === "upright" }, 3000, "and the orientation")
+    }
+
+    function test_theDriveViewsSettingsStartAtFourSecondsAndFollow() {
+        const page = createPage()
+        page.open("display")
+        const stored = find(page, "driveSettings")
+        compare(stored.driveHideMs, 4000)
+        compare(stored.driveOrientation, "follow")
+    }
+
+    function test_theDriveSettingsAreAPhonesAndTheLockWhereThereIsOne() {
+        const page = createPage()
+        page.open("display")
+        const row = find(page, "driveHideRow")
+        const display = row.parent
+        const lock = find(page, "driveOrientationRow")
+        compare(display.driveShown, false, "a desktop's")
+        compare(display.orientationShown, false, "a desktop's")
+        display.orientationShown = true
+        verify(!lock.visible, "the lock is a phone's too")
+        display.orientationShown = false
+        display.driveShown = false
+        verify(!row.visible, "none on the desktop")
+        display.driveShown = true
+        display.orientationShown = false
+        verify(row.visible)
+        verify(!lock.visible, "no lock where the phone can't hold one")
+        display.orientationShown = true
+        verify(lock.visible)
+    }
+
+    // With no session a page lists its signals from Settings' choice: the
+    // field's URI, or the chosen profile alone when no URI is typed
+    function test_theOfflineUriFollowsTheFieldAndTheChoice() {
+        const page = createPage()
+        page.uriField.text = ""
+        compare(page.offlineUri, "", "nothing typed, nothing chosen")
+
+        page.chooseProfile("obd2")
+        compare(page.uriField.text, "", "no URI is made up in the field")
+        compare(page.offlineUri, "mock://?profile=obd2")
+        verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
+               "a built-in profile's rows, with no URI typed")
+
+        page.uriField.text = "mock://demo"
+        compare(page.offlineUri, "mock://demo", "a typed URI is read as it is")
+        page.chooseProfile("obd2")
+        compare(page.offlineUri, "mock://demo?profile=obd2", "with the choice it composes")
+
+        page.uriField.text = ""
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "offline.json", "Offline"))
+        page.chooseProfile("user.offline")
+        compare(page.offlineUri, "mock://?profile=user.offline")
+        compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"],
+                "the picked vehicle's own file, before any connect")
+    }
+
     function test_anImportedFileIsTheVehiclesAndAProfile() {
         let page = createPage()
         verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")
         press(page, "vehicleNew")
         page.open("signals")
         verify(find(page, "signalFilesNone").visible)
+        compare(find(page, "signalFilesNone").text,
+                "None yet. Import adds a signal file, which is then offered under Profile "
+                + "as a profile of its own")
         verify(importFile(page, "extras.json", "Extras"))
         compare(page.pickedVehicle.signals.length, 1)
         compare(page.pickedVehicle.signals[0].profile, "user.extras")
@@ -1598,7 +2115,7 @@ TestCase {
                 "Plus: obd2 and 1 of your own, profile user.plus")
         const plus = find(page, "profile_user.plus")
         compare(plus.text, "obd2 + Plus")
-        verify(plus.highlighted)
+        verify(plus.checked)
         compare(page.profiles.filter(p => p.name === "user.plus").length, 1,
                 "one button for the file: the stand-in")
         tryVerify(() => findChild(page, "profile_default") === null, 1000,
@@ -1608,8 +2125,8 @@ TestCase {
 
         // Typed back to Default, both show, so the row is the URI's
         field.text = "elm327://COM9"
-        verify(find(page, "profile_default").highlighted)
-        verify(!find(page, "profile_user.plus").highlighted)
+        verify(find(page, "profile_default").checked)
+        verify(!find(page, "profile_user.plus").checked)
 
         // A second such file keeps its own button; Default stays read
         verify(importExtending(page, "more.json", "More"))
@@ -1675,10 +2192,10 @@ TestCase {
         press(page, "pluginMatch_1")
         compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
         compare(field.text, "mock://demo?profile=plugin.example-sim.my2019")
-        verify(find(page, "pluginMatch_1").highlighted)
+        verify(find(page, "pluginMatch_1").checked)
         const choice = find(page, "profile_plugin.example-sim.my2019")
         compare(choice.text, "Example: the simulated car: my2019")
-        verify(choice.highlighted)
+        verify(choice.checked)
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
         compare(find(page, "errorLabel").text, "")
@@ -2112,7 +2629,7 @@ TestCase {
         find(page, "uriField").text = "mock://demo"
         tap(find(page, "vehicle_v1"))
         compare(find(page, "uriField").text, "elm327://COM6?profile=uds-generic&did=F190")
-        verify(find(page, "profile_uds-generic").highlighted, "read back into the row")
+        verify(find(page, "profile_uds-generic").checked, "read back into the row")
         compare(find(page, "didField").text, "F190")
     }
 
@@ -2272,6 +2789,32 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         compare(find(page, "uriField").text, uri, "Default at the session's end")
+    }
+
+    // ADR-0056 section 4: the row lists Off and the bridge's choices,
+    // shows the bridge's and sets it, and says what it is for
+    function test_theMinimumTimeBetweenSweepsIsARowOfChoices() {
+        const page = createPage(true)
+        page.open("advanced")
+        const choice = find(page, "minSweepChoice")
+        verify(choice.visible)
+        verify(find(page, "minSweepNote").text.includes("file size"))
+        compare(choice.count, 5)
+        compare(choice.textAt(0), "Off")
+        compare(choice.textAt(2), "250 ms")
+        compare(Bridge.minSweepMs, 0)
+        compare(choice.currentIndex, 0)
+        Bridge.minSweepMs = 500
+        compare(choice.currentIndex, 3, "it shows the bridge's before any pick")
+        Bridge.minSweepMs = 0
+        choice.currentIndex = 2
+        choice.activated(2)
+        compare(Bridge.minSweepMs, 250)
+        Bridge.minSweepMs = 1000
+        compare(choice.currentIndex, 4, "it follows the bridge")
+        choice.activated(0)
+        compare(Bridge.minSweepMs, 0)
+        compare(choice.currentIndex, 0)
     }
 
     // While a vendor's open blocks, nothing may rewrite the URI field or

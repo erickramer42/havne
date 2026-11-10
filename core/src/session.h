@@ -40,15 +40,13 @@ struct ecuio_session {
     /* The profile's set: the registry's static one, or, under
      * uds-generic, the session's own below (ADR-0020). */
     const ecuio_signal_set_t* active_signal_set = nullptr;
-    /* uds-generic's set, built by create from the URI's ?did= entries
-     * and owned here so it lives as long as the session; the J2534
-     * transport reads its scan list at attach. NULL under any other
-     * profile. */
+    /* uds-generic's set, built by create from the URI's ?did= entries and
+     * owned here; the J2534 transport reads its scan list at attach. NULL
+     * under any other profile. */
     std::unique_ptr<ecuio_uds_session> uds;
-    /* The decode (frame_decoder.h, ADR-0024 section 4), prepared by create
-     * from the set, which never changes, with the absent signals' counts.
-     * Only dispatch decodes, on the session's one worker; the absent
-     * signals' and unsplit replies' counts are read on the caller's
+    /* The decode (frame_decoder.h, ADR-0024 section 4), prepared at create
+     * from the set, which never changes; only dispatch decodes (the
+     * worker), the absent and unsplit counts are read on the caller's
      * thread. */
     ecuio_frame_decoder decoder;
     /* replay://?faults= (ADR-0041): written by the replay worker, read by
@@ -71,9 +69,8 @@ struct ecuio_session {
      * create, before create returns; read-only afterwards, so
      * ecuio_session_get_info needs no lock. */
     ecuio_session_info_t info{};
-    /* What each channel's ECU said it supports, what it said it is
-     * (ADR-0021) and what it reported of its diagnostics (ADR-0037):
-     * the count and each rx_id set by attach, the rest updated by the
+    /* Each channel's support, identity (ADR-0021) and diagnostics
+     * (ADR-0037): the count and rx_ids set by attach, the rest by the
      * worker, all under the mutex (ecuio_session_get_channel_support,
      * _identity, _diagnostics). */
     mutable std::mutex support_mutex;
@@ -92,20 +89,19 @@ struct ecuio_session {
     std::atomic<uint32_t> clear_generation[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_flags[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
-    /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in
-     * the caller's order and one byte per def of the set (1 picked), both
-     * under the mutex; focus_generation moves on with each call, and a
-     * requesting worker that sees it move takes the picks
-     * (ecuio_take_focus). No ids is no focus. Under the same mutex,
-     * what the call judges a focus by: focus_requests, the session's
-     * worker asks requests (ecuio_build_requests found some), and
-     * focus_askable, one byte per def (1: its request is in the table and
-     * not dropped), set by ecuio_build_requests and kept by the worker
-     * as the table changes; a requesting session refuses a focus whose
-     * picks are none of them askable. */
+    /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in the
+     * caller's order and one byte per def (1 picked), under the mutex;
+     * focus_generation moves with each call and a requesting worker takes
+     * the picks (ecuio_take_focus). No ids is no focus. */
+    /* Also under the mutex: focus_requests (the worker asks requests) and
+     * focus_askable (one byte per def: its request is in the table, not
+     * dropped), which refuse a focus with no askable pick;
+     * focus_min_sweep_ms is the minimum time between sweeps (section 4), 0
+     * for none. */
     std::mutex focus_mutex;
     std::vector<uint16_t> focus_ids;
     std::vector<uint8_t> focus_defs;
+    uint32_t focus_min_sweep_ms = 0;
     std::atomic<uint32_t> focus_generation{0};
     bool focus_requests = false;
     std::vector<uint8_t> focus_askable;
@@ -114,15 +110,14 @@ struct ecuio_session {
     /* A replay's: its source's frame flags line (ADR-0049 section 2),
      * set by attach, read by a recording's attach */
     std::string source_frame_flags;
-    /* The recorder's link (ADR-0049, recorder.h), made by
-     * ecuio_session_create and kept until the session is freed, so the
-     * worker reads it without a lock; ecuio_session_record puts its
-     * recorder in it, before or after start (ADR-0056 section 3) */
+    /* The recorder's link (ADR-0049, recorder.h): made at create and kept
+     * until the session is freed, so the worker reads it without a lock;
+     * ecuio_session_record puts its recorder in it, before or after start
+     * (ADR-0056 section 3) */
     std::shared_ptr<ecuio_record_link> record_link;
-    /* The pull queues' links (ecuio/queue.h, pull_queue.h), set by
-     * ecuio_queue_open before start and kept until the session is freed,
-     * so the worker reads them without a lock; value_queues counts the
-     * values queues among them, for which dispatch decodes */
+    /* The pull queues' links (queue.h, pull_queue.h), set before start and
+     * kept until the session is freed (lock-free reads); value_queues
+     * counts the values queues, for which dispatch decodes */
     std::array<std::shared_ptr<ecuio_queue_link>, ECUIO_QUEUE_MAX_PER_SESSION>
         queues;
     uint32_t queue_count = 0;

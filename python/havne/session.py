@@ -247,7 +247,7 @@ class Session:
         self._recorders.append(r)
         return r
 
-    def set_focus(self, signals):
+    def set_focus(self, signals, min_sweep_ms=0):
         """Asks only the requests that carry these signals, until called
         again (ADR-0056 section 2): ids or names of the session's set, in
         any order; an empty list asks the whole set again. The picks run
@@ -256,7 +256,15 @@ class Session:
         set lacks is a KeyError; an id that isn't an int (a bool isn't) or
         is outside 0-65535 a ValueError; an id the set lacks, or a focus
         that leaves a requesting session nothing to ask, core's
+        INVALID_ARGUMENT. min_sweep_ms: at least this long from one
+        sweep's start to the next's (ADR-0056 section 4), for a slow
+        adapter or a busy ECU; 0, the default, is none. One that isn't
+        an int (a bool isn't) or is below 0 is a ValueError; one past
+        ECUIO_FOCUS_MIN_SWEEP_MAX_MS, or one with an empty list, core's
         INVALID_ARGUMENT."""
+        if (isinstance(min_sweep_ms, bool) or not isinstance(min_sweep_ms, int)
+                or not 0 <= min_sweep_ms <= 0xFFFFFFFF):
+            raise ValueError(f"min_sweep_ms is a whole number, not {min_sweep_ms!r}")
         by_name = {name: sid for sid, (name, unit) in self._names.items()}
         ids = []
         for s in signals:
@@ -271,8 +279,9 @@ class Session:
             else:
                 ids.append(s)
         picks = (ctypes.c_uint16 * len(ids))(*ids) if ids else None
-        check(lib.ecuio_session_set_focus(self._handle(), picks, len(ids)),
-              "ecuio_session_set_focus")
+        check(lib.ecuio_session_set_focus_with(self._handle(), picks, len(ids),
+                                               min_sweep_ms, 0),
+              "ecuio_session_set_focus_with")
 
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")

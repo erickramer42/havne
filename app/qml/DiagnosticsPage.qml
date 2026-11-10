@@ -241,34 +241,33 @@ Page {
         anchors.margins: Theme.pageMargin
         spacing: 12
 
-        PageHeader {
-            title: qsTr("Diagnostics")
-            // The actions, right-aligned; on a phone's width they wrap
-            // under each other rather than push the page past its edge
-            Flow {
+        // Wide, the title and the actions share a row, Clear codes last; on a
+        // phone the title stands alone and the actions take two rows under it
+        GridLayout {
+            id: headerGrid
+            readonly property bool twoRows: root.width < 560
+            Layout.fillWidth: true
+            columns: twoRows ? 1 : 3
+            columnSpacing: 10
+            rowSpacing: Theme.spacing
+            PageHeader {
+                title: qsTr("Diagnostics")
+            }
+            // The row's width: a title row alone reports its own width as
+            // its most, and the grid would stop there
+            Item {
+                visible: !headerGrid.twoRows
                 Layout.fillWidth: true
-                Layout.minimumWidth: Math.max(readAgain.implicitWidth, clearCodes.implicitWidth,
-                                              saveReport.implicitWidth)
-                Layout.preferredWidth: readAgain.implicitWidth + clearCodes.implicitWidth
-                                       + saveReport.implicitWidth + 2 * spacing
-                layoutDirection: Qt.RightToLeft
-                spacing: Theme.spacing
-                ThemedButton {
-                    id: clearCodes
-                    objectName: "clearCodes"
-                    visible: Bridge.connected
-                    enabled: root.canClear && !root.confirming
-                    text: qsTr("Clear codes…")
-                    onClicked: root.confirming = true
-                }
-                ThemedButton {
-                    id: readAgain
-                    objectName: "readAgain"
-                    visible: Bridge.connected
-                    enabled: root.canReadAgain && !root.clearing && !root.confirming
-                    text: qsTr("Read again")
-                    onClicked: Bridge.readDiagnostics()
-                }
+            }
+            // Each cell is placed, since the order differs between the forms
+            GridLayout {
+                id: actions
+                objectName: "diagnosticsActions"
+                readonly property bool twoRows: headerGrid.twoRows
+                Layout.fillWidth: twoRows
+                columns: twoRows ? 2 : 3
+                columnSpacing: Theme.spacing
+                rowSpacing: Theme.spacing
                 // Whatever the read's state: a report still being read says so
                 ThemedButton {
                     id: saveReport
@@ -276,7 +275,33 @@ Page {
                     visible: Bridge.connected
                     enabled: !root.confirming
                     text: qsTr("Save report…")
+                    Layout.row: actions.twoRows ? 1 : 0
+                    Layout.column: 0
+                    Layout.columnSpan: actions.twoRows ? 2 : 1
+                    Layout.fillWidth: actions.twoRows
                     onClicked: reportDialog.open()
+                }
+                ThemedButton {
+                    id: readAgain
+                    objectName: "readAgain"
+                    visible: Bridge.connected
+                    enabled: root.canReadAgain && !root.clearing && !root.confirming
+                    text: qsTr("Read again")
+                    Layout.row: 0
+                    Layout.column: actions.twoRows ? 0 : 1
+                    Layout.fillWidth: actions.twoRows
+                    onClicked: Bridge.readDiagnostics()
+                }
+                ThemedButton {
+                    id: clearCodes
+                    objectName: "clearCodes"
+                    visible: Bridge.connected
+                    enabled: root.canClear && !root.confirming
+                    text: qsTr("Clear codes…")
+                    Layout.row: 0
+                    Layout.column: actions.twoRows ? 1 : 2
+                    Layout.fillWidth: actions.twoRows
+                    onClicked: root.confirming = true
                 }
             }
         }
@@ -304,9 +329,10 @@ Page {
                 text: root.statusText()
                 color: Theme.textDim
             }
+            // Secondary: the header's Connect... is the window's primary
             ThemedButton {
+                objectName: "diagnosticsConnect"
                 visible: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
-                highlighted: true
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
             }
@@ -387,6 +413,7 @@ Page {
                             spacing: Theme.spacing
                             ThemedButton {
                                 objectName: "clearConfirm"
+                                highlighted: true
                                 text: qsTr("Clear codes")
                                 baseColor: Theme.danger
                                 hoverColor: Qt.lighter(Theme.danger, 1.15)
@@ -498,7 +525,7 @@ Page {
                             wrapMode: Text.Wrap
                             text: inspectionCard.entry.rule
                             color: Theme.textDim
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontCaption
                         }
                     }
                 }
@@ -523,7 +550,7 @@ Page {
                         spacing: 6
 
                         SectionLabel { text: qsTr("Look up a code") }
-                        TextField {
+                        ThemedTextField {
                             id: dtcLookupField
                             objectName: "dtcLookupField"
                             Layout.fillWidth: true
@@ -570,7 +597,7 @@ Page {
                 spacing: Theme.spacing
                 Label {
                     text: qsTr("ECU %1").arg(card.ecu.ecu)
-                    font.pixelSize: 16
+                    font.pixelSize: Theme.fontEmphasis
                     font.weight: Font.DemiBold
                     color: Theme.text
                 }
@@ -631,7 +658,7 @@ Page {
                             text: root.listTitle(listRow.modelData.key) + "  ·  " +
                                   root.listHint(listRow.modelData.key)
                             color: Theme.textDim
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontCaption
                         }
                         Label {
                             objectName: "codes_" + listRow.modelData.key
@@ -641,7 +668,7 @@ Page {
                             // An empty family is a bitmap face on Windows
                             font.family: listRow.modelData.codes.length > 0 ? Theme.monoFamily
                                                                             : root.font.family
-                            font.pixelSize: listRow.modelData.codes.length > 0 ? 16 : 14
+                            font.pixelSize: listRow.modelData.codes.length > 0 ? Theme.fontEmphasis : Theme.fontBody
                             color: listRow.modelData.codes.length > 0 ? Theme.text : Theme.textDim
                         }
                         Label {
@@ -651,7 +678,7 @@ Page {
                             wrapMode: Text.Wrap
                             text: root.titlesText(listRow.modelData)
                             color: Theme.textDim
-                            font.pixelSize: 13
+                            font.pixelSize: Theme.fontCaption
                         }
                     }
                 }
@@ -689,13 +716,13 @@ Page {
                         visible: monitorGrid.cycleShown
                         text: qsTr("This drive")
                         color: Theme.textDim
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                     }
                     Label {
                         visible: monitorGrid.cycleShown
                         text: qsTr("Since clear")
                         color: Theme.textDim
-                        font.pixelSize: 12
+                        font.pixelSize: Theme.fontCaption
                     }
                     Repeater {
                         // three cells a monitor: name, this drive, since the clear
@@ -766,7 +793,7 @@ Page {
     component SectionLabel: Label {
         Layout.fillWidth: true
         Layout.topMargin: 4
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         font.weight: Font.DemiBold
         color: Theme.textDim
     }

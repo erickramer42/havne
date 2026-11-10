@@ -37,7 +37,7 @@ ColumnLayout {
         spacing: Theme.spacing
         Captioned {
             caption: qsTr("Name")
-            TextField {
+            ThemedTextField {
                 id: formName
                 objectName: "formName"
                 placeholderText: qsTr("Name")
@@ -46,7 +46,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Reply ID")
-            TextField {
+            ThemedTextField {
                 id: formRx
                 objectName: "formRx"
                 text: "7E8"
@@ -56,7 +56,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Request ID")
-            TextField {
+            ThemedTextField {
                 id: formTx
                 objectName: "formTx"
                 placeholderText: qsTr("Request ID")
@@ -65,22 +65,23 @@ ColumnLayout {
         }
     }
 
-    Flow {
-        Layout.fillWidth: true
-        spacing: Theme.spacing
+    LabeledFlow {
+        objectName: "formReadBy"
+        label: qsTr("Read by:")
         Repeater {
             model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
             ThemedButton {
                 required property var modelData
                 objectName: "formService_" + modelData.name
                 text: modelData.label
-                highlighted: root.host.formService === modelData.name
+                checkable: true
+                checked: root.host.formService === modelData.name
                 onClicked: root.host.formService = modelData.name
             }
         }
         Captioned {
             caption: root.host.formService === "22" ? qsTr("DID") : qsTr("PID")
-            TextField {
+            ThemedTextField {
                 id: formNumber
                 objectName: "formNumber"
                 placeholderText: root.host.formService === "22" ? qsTr("DID, 4 hex digits")
@@ -90,16 +91,17 @@ ColumnLayout {
         }
     }
 
-    Flow {
-        Layout.fillWidth: true
-        spacing: Theme.spacing
+    LabeledFlow {
+        objectName: "formType"
+        label: qsTr("Type:")
         Repeater {
             model: SignalForm.kinds
             ThemedButton {
                 required property string modelData
                 objectName: "formKind_" + modelData
                 text: modelData
-                highlighted: root.host.formKind === modelData
+                checkable: true
+                checked: root.host.formKind === modelData
                 onClicked: root.host.formKind = modelData
             }
         }
@@ -110,7 +112,7 @@ ColumnLayout {
         spacing: Theme.spacing
         Captioned {
             caption: qsTr("Byte")
-            TextField {
+            ThemedTextField {
                 id: formByte
                 objectName: "formByte"
                 text: "0"
@@ -121,7 +123,7 @@ ColumnLayout {
         Captioned {
             caption: qsTr("Bits")
             visible: root.host.formKind === "number" || root.host.formKind === "enum"
-            TextField {
+            ThemedTextField {
                 id: formBits
                 objectName: "formBits"
                 text: "8"
@@ -132,7 +134,7 @@ ColumnLayout {
         Captioned {
             caption: qsTr("Start bit")
             visible: root.host.formKind === "number" || root.host.formKind === "enum"
-            TextField {
+            ThemedTextField {
                 id: formBit
                 objectName: "formBit"
                 placeholderText: qsTr("Bit")
@@ -142,20 +144,28 @@ ColumnLayout {
         Captioned {
             caption: qsTr("Bytes")
             visible: !(root.host.formKind === "number" || root.host.formKind === "enum")
-            TextField {
+            ThemedTextField {
                 id: formBytes
                 objectName: "formBytes"
                 placeholderText: qsTr("Bytes (all)")
                 width: Theme.controlHeight * 3
             }
         }
+        Label {
+            objectName: "formOrderLabel"
+            visible: root.host.formKind === "number" || root.host.formKind === "enum"
+            text: qsTr("Byte order:")
+            color: Theme.textDim
+            topPadding: 8
+        }
         Repeater {
             model: root.host.formKind === "number" || root.host.formKind === "enum" ? ["be", "le"] : []
             ThemedButton {
                 required property string modelData
                 objectName: "formOrder_" + modelData
-                text: modelData
-                highlighted: root.host.formOrder === modelData
+                text: modelData === "be" ? qsTr("big") : qsTr("little")
+                checkable: true
+                checked: root.host.formOrder === modelData
                 onClicked: root.host.formOrder = modelData
             }
         }
@@ -173,7 +183,7 @@ ColumnLayout {
         visible: root.host.formKind === "number"
         Captioned {
             caption: qsTr("Scale")
-            TextField {
+            ThemedTextField {
                 id: formScale
                 objectName: "formScale"
                 placeholderText: qsTr("Scale (1)")
@@ -182,7 +192,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Offset")
-            TextField {
+            ThemedTextField {
                 id: formOffset
                 objectName: "formOffset"
                 placeholderText: qsTr("Offset (0)")
@@ -191,7 +201,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Unit")
-            TextField {
+            ThemedTextField {
                 id: formUnit
                 objectName: "formUnit"
                 placeholderText: qsTr("Unit")
@@ -200,7 +210,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Decimals")
-            TextField {
+            ThemedTextField {
                 id: formDecimals
                 objectName: "formDecimals"
                 placeholderText: qsTr("Decimals")
@@ -209,7 +219,7 @@ ColumnLayout {
         }
     }
 
-    TextField {
+    ThemedTextField {
         id: formValues
         objectName: "formValues"
         visible: root.host.formKind === "enum"
@@ -225,7 +235,8 @@ ColumnLayout {
                 required property string modelData
                 objectName: "formGroup_" + (modelData === "" ? "other" : modelData)
                 text: modelData === "" ? qsTr("other") : modelData
-                highlighted: root.host.formGroup === modelData
+                checkable: true
+                checked: root.host.formGroup === modelData
                 onClicked: root.host.formGroup = modelData
             }
         }
@@ -240,9 +251,11 @@ ColumnLayout {
             enabled: root.host.idle && !Bridge.readingOnce && root.host.confirming === ""
             onClicked: root.host.readOnceDraft()
         }
+        // The form's one action
         ThemedButton {
             objectName: "formSave"
             text: qsTr("Save")
+            highlighted: true
             enabled: root.host.idle && root.host.confirming === ""
             onClicked: {
                 if (root.host.saveDraft()) {
@@ -256,6 +269,7 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "formClear"
+            flat: true
             text: qsTr("Clear")
             onClicked: root.host.clearForm()
         }

@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 
@@ -42,17 +42,20 @@ GaugeBase {
 
     Text {
         id: title
+        Accessible.ignored: true
         anchors { left: parent.left; top: parent.top }
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        font.letterSpacing: 1.2
-        font.capitalization: Font.AllUppercase
         color: Theme.textDim
     }
     Text {
-        anchors { left: title.right; leftMargin: 10; baseline: title.baseline }
-        visible: !gauge.hasValue
+        objectName: "gaugeNote"
+        Accessible.ignored: true
+        anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
+                  baseline: title.baseline }
+        visible: !gauge.hasValue && width > 0
+        elide: Text.ElideRight
         text: gauge.note
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
@@ -65,10 +68,12 @@ GaugeBase {
         Text {
             id: valueLabel
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: 22
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.weight: Font.Bold
+            font.family: Theme.valueFamily
+            font.features: Theme.valueFeatures
             color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
         }
         // Past dangerFrom, beside the value; its slot stays
@@ -80,6 +85,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: valueLabel.baseline
             text: gauge.unit
@@ -119,10 +125,7 @@ GaugeBase {
                     anchors.fill: parent
                     radius: parent.radius
                     opacity: cell.fill
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.lighter(cell.lit, 1.25) }
-                        GradientStop { position: 1.0; color: cell.lit }
-                    }
+                    color: cell.lit
                 }
             }
         }
@@ -150,17 +153,19 @@ GaugeBase {
         height: scaleFrom.implicitHeight
         Text {
             id: scaleFrom
+            Accessible.ignored: true
             anchors.left: parent.left
             text: gauge.formatScale(gauge.from)
             font.pixelSize: 10
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
         }
         Text {
+            Accessible.ignored: true
             anchors.right: parent.right
             text: gauge.formatScale(gauge.to)
             font.pixelSize: 10
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
         }
     }

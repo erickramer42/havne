@@ -35,8 +35,9 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud",     "flags",    "filter",  "txid", "poll", "probe",
-    "identify", "diagnose", "pack",    "scan",    "profile", "did", nullptr};
+    "baud",    "flags",    "filter",   "txid",         "poll",
+    "probe",   "identify", "diagnose", "pack",         "scan",
+    "profile", "did",      "session",  "keepalive_ms", nullptr};
 
 #ifdef _WIN32
 
@@ -504,6 +505,14 @@ void j2534_worker(ecuio_j2534_transport* t)
                                     t->stop_requested)) {
                 break;
             }
+        }
+    }
+    /* ADR-0060: each channel that entered the extended session goes back
+     * to the default one; its reply is left to the disconnect */
+    for (uint32_t c = 0; requests && c < e.chan_count; ++c) {
+        ecuio_request q;
+        if (ecuio_engine_session_leave(&e, c, &q)) {
+            (void)send_request(t, q, h);
         }
     }
     ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t), timing_at,

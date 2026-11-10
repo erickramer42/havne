@@ -26,7 +26,8 @@ ColumnLayout {
                 required property var modelData
                 objectName: "profile_" + modelData.name
                 text: modelData.label
-                highlighted: root.host.profileChoice === modelData.name
+                checkable: true
+                checked: root.host.profileChoice === modelData.name
                 enabled: root.host.idle
                 onClicked: root.host.chooseProfile(modelData.name)
             }
@@ -47,7 +48,7 @@ ColumnLayout {
         spacing: Theme.spacing
         visible: root.host.profileChoice === "uds-generic"
         Label { text: qsTr("DIDs:"); color: Theme.textDim }
-        TextField {
+        ThemedTextField {
             id: didField
             objectName: "didField"
             Layout.fillWidth: true

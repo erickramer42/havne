@@ -1,6 +1,6 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth (test_qml); Manual smoke
+//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
 
 import QtCore
 import QtQuick
@@ -21,7 +21,24 @@ Page {
 
     readonly property bool compact: width < 600
     readonly property real margin: Theme.pageMargin
+    // The tool row's width from which it holds every tool, Reset peaks
+    // among them (header.holdsResetPeaks)
+    readonly property real toolRowFull: 272
     readonly property real gap: compact ? 10 : 16
+    // The phone's gauges are one panel (ADR-0057's appendix, section 3):
+    // the cells meet, the grid draws the surface, the edge and the
+    // hairlines between neighbors, and no cell paints its own
+    readonly property bool joined: phoneForm
+    readonly property real cellGap: joined ? 0 : gap
+    // The space above the header and above the panel
+    readonly property real topGap: driving ? 0 : joined ? 12 : margin
+    // The panel's distance from the page's sides; none in the drive view
+    readonly property real panelMargin: driving ? 0 : margin
+    // One pixel of the display in the layout's units, and a hairline
+    // that many whole pixels wide, so every line draws the same width
+    readonly property real pixel: 1 / ((Screen.devicePixelRatio || 1) * Theme.zoom)
+    readonly property real hairlineWidth: Math.max(1, Math.round(1 / pixel)) * pixel
+    function snap(v) { return Math.round(v / pixel) * pixel }
 
     // The platform's form, never the window's width (section 4)
     property string form: Theme.mobile ? "phone" : "desktop"
@@ -40,14 +57,14 @@ Page {
         // A stored text that couldn't be read, kept by the first edit
         property string phoneUnread: ""
         property string desktopUnread: ""
+        // The drive view: left on when the last one ended (section 7), and
+        // how many times its hint has shown
+        property bool phoneDrive: false
+        property int driveHints: 0
     }
-    // The last URI that connected (SettingsPage's), whose profile's
-    // signals Add offers when there's no session
-    Settings {
-        id: sessionStore
-        category: "session"
-        property string uri: ""
-    }
+    // Settings' URI and profile, whose signals Add offers with no session
+    property string offlineUri: ""
+    onOfflineUriChanged: if (panel === "signal") refreshRows()
 
     // The stored text read: the document, or the built-in layout with
     // the reason when there is none or it can't be used
@@ -77,17 +94,28 @@ Page {
 
     property bool editing: false
     property int selected: -1        // the cell edited, on the page shown
+    property int selectedDigits: 4   // the selected Digits card's count
+    property int selectedCount: 15   // the selected Shift lights card's lights
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
 
+    // ---- The gesture (section 4): hold, then release or drag
+
+    property int held: -1            // the cell lifted on the page shown, -1 for none
+    property int dropAt: -1          // the place a drag would drop it; -1 until it moves
+    // A copied cell and the form it came from (section 5), for the app's run
+    property var copied: null        // { form, cell }
+    readonly property bool canPaste: copied !== null && copied.form === form
+                                     && DashboardBook.canAddCell(doc, pageIndex)
+
     // The kinds this page draws, in the order Add offers them, and the
     // component that makes each (a cell's and Add's preview); null for
     // a kind this version doesn't draw
     readonly property var drawnKinds: ["analog", "ring", "bar", "segments", "digital",
-                                       "seven-segment", "sparkline", "shift-light"]
+                                       "seven-segment", "sparkline", "shift-light", "blank"]
     function kindComponent(kind) {
         return kind === "analog" ? analogKind
              : kind === "ring" ? ringKind
@@ -97,6 +125,7 @@ Page {
              : kind === "segments" ? segmentsKind
              : kind === "seven-segment" ? readoutKind
              : kind === "sparkline" ? sparkKind
+             : kind === "blank" ? blankKind
              : null
     }
     // The kinds that draw a peak, so the panel offers Peak hold only there
@@ -104,18 +133,29 @@ Page {
     readonly property var kindNames: ({
         "analog": qsTr("Dial"), "ring": qsTr("Ring"), "bar": qsTr("Bar"),
         "digital": qsTr("Number"), "shift-light": qsTr("Shift lights"),
-        "segments": qsTr("Cells"), "seven-segment": qsTr("Digits"), "sparkline": qsTr("Sparkline")
+        "segments": qsTr("Cells"), "seven-segment": qsTr("Digits"), "sparkline": qsTr("Sparkline"),
+        "blank": qsTr("Blank")
     })
+    // A form's spans: the phone's grid has three columns for the desktop's one
+    readonly property bool phoneForm: form === "phone"
+    readonly property int spanScale: phoneForm ? DashboardBook.phoneSpanScale : 1
     // A new gauge's span: columns, and rows of a quarter column
-    readonly property var newSpans: ({
-        "analog": [1, 4], "ring": [1, 4], "bar": [2, 2], "digital": [1, 4],
-        "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3]
-    })
+    readonly property var newSpans: {
+        const spans = {
+            "analog": [1, 4], "ring": [1, 4], "bar": [2, 2], "digital": [1, 4],
+            "shift-light": [12, 1], "segments": [2, 3], "seven-segment": [1, 2], "sparkline": [2, 3],
+            "blank": [1, 4]
+        }
+        for (const k in spans)
+            spans[k] = [Math.min(DashboardBook.maxColumns, spans[k][0] * spanScale),
+                        spans[k][1] * spanScale]
+        return spans
+    }
 
     readonly property string formKey: form === "phone" ? "phone" : "desktop"
     readonly property var shownCells: pages[pageIndex] && Array.isArray(pages[pageIndex].cells)
                                       ? pages[pageIndex].cells : []
-    readonly property var selectedCell: editing && selected >= 0 && selected < shownCells.length
+    readonly property var selectedCell: selected >= 0 && selected < shownCells.length
                                         ? shownCells[selected] : null
     onSelectedCellChanged: if (selectedCell === null && panel === "cell") panel = ""
 
@@ -124,6 +164,7 @@ Page {
     }
     function stopEditing() {
         commitTyping()
+        cancelHold()
         editing = false
         selected = -1
         panel = ""
@@ -135,11 +176,11 @@ Page {
     // Takes the focus off a text field, so the field commits what was
     // typed to the cell or page it was typed for before the selection or
     // the page changes (a tap on a cell and a swipe take no focus). Its
-    // fields exist only in edit mode, and outside it the focus is left
-    // where it is. The field's own focus goes: the page is a focus scope,
-    // so focusing the page would give it back to the field
+    // fields exist only while a panel is open, and otherwise the focus is
+    // left where it is. The field's own focus goes: the page is a focus
+    // scope, so focusing the page would give it back to the field
     function commitTyping() {
-        if (!editing)
+        if (!editing && panel === "")
             return
         const f = Window.activeFocusItem
         if (f !== null && (f instanceof TextInput || f instanceof TextEdit))
@@ -184,11 +225,201 @@ Page {
         panel = "cell"
     }
 
+    // Ends a hold with no drop: the page, its document or its grid changed
+    // under the finger
+    function cancelHold() {
+        held = -1
+        dropAt = -1
+    }
+    onDocChanged: cancelHold()
+
+    // Outside edit mode nothing stays selected once the menu is gone
+    function closePanel() {
+        commitTyping()
+        panel = ""
+        if (!editing)
+            selected = -1
+    }
+
+    // ---- The drive view (ADR-0059): this page with every bar hidden
+
+    property bool driving: false
+    property bool barsUp: false          // the reveal
+    property bool barsHeld: false        // a fault or a log's notice keeps them up
+    // What Main hands over: Settings' two values, the header's height and
+    // the system's insets
+    property int driveHideMs: 4000
+    property string driveOrientation: "follow"
+    property real driveHeaderHeight: 0
+    property real driveInsetTop: 0
+    property real driveInsetBottom: 0
+    property string driveLogTime: ""
+    property string driveLogSize: ""   // "" until the header shows one
+    // The window made full screen; a test's stand-in keeps it off the desktop
+    property var driveWindow: Window.window
+
+    // How far the bars are in: 0 hidden, 1 revealed. Main's bars follow it
+    property real barsShown: driving && barsUp ? 1 : 0
+    Behavior on barsShown { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
+    property bool driveHintUp: false
+    function isReplay(uri) { return uri.toLowerCase().startsWith("replay://") }
+
+    function enterDrive() {
+        if (driving || !phoneForm || !Bridge.connected || editing)
+            return
+        closePanel()
+        cancelHold()
+        barsUp = false
+        barsHeld = false
+        // A fault or a notice already up raises the bars through their handlers
+        driving = true
+        store.phoneDrive = true
+        Immersive.enter(driveWindow, form)
+        PhoneWindow.lockOrientation(driveOrientation)
+        if (store.driveHints < 3) {
+            ++store.driveHints
+            driveHintUp = true
+        }
+    }
+    // Exit drive and a tab are for good; a session's end comes back at the next connect
+    function leaveDrive(forGood) {
+        if (!driving)
+            return
+        driving = false
+        barsUp = false
+        barsHeld = false
+        driveHintUp = false
+        driveLogEnded = false
+        if (forGood)
+            store.phoneDrive = false
+        Immersive.leave()
+        PhoneWindow.lockOrientation("follow")
+    }
+    Component.onDestruction: leaveDrive(false)
+
+    // Above the revealed tool row: a press restarts the hide delay and goes
+    // on to the buttons
+    MouseArea {
+        objectName: "driveToolsTouch"
+        enabled: root.driving
+        visible: topBar.visible && root.driving
+        z: 3
+        x: topBar.x
+        y: topBar.y
+        width: topBar.width
+        height: topBar.height
+        onPressed: mouse => {
+            root.barTouched()
+            mouse.accepted = false
+        }
+    }
+
+    // A tap on the gauges: the bars in or out, and a held reveal is over
+    function driveTap() {
+        barsUp = !barsUp
+        barsHeld = false
+        driveHintUp = false
+    }
+    // Android's Back in the view: the bars first, then out for good
+    function driveBack() {
+        if (!driving)
+            return false
+        if (barsUp)
+            leaveDrive(true)
+        else
+            barsUp = true
+        return true
+    }
+    // Android's Back on Dash: the drive view, a gauge's panel, then edit
+    // mode; false leaves it to the system
+    function goBack() {
+        if (driveBack())
+            return true
+        if (panel !== "") {
+            closePanel()
+            return true
+        }
+        if (editing) {
+            stopEditing()
+            return true
+        }
+        return false
+    }
+    function raiseBars(attention) {
+        if (!driving)
+            return
+        if (attention) {
+            barsUp = true
+            barsHeld = true
+        } else if (!driveFault && !driveNotice) {
+            barsHeld = false
+        }
+    }
+    // A fault may need Retry or Disconnect; the other states are for the status line
+    function raisesBars(state) { return state === "fault" }
+    readonly property bool driveFault: driving && raisesBars(Bridge.linkState)
+    readonly property bool driveNotice: driving && Bridge.logNotice !== ""
+    onDriveFaultChanged: raiseBars(driveFault)
+    onDriveNoticeChanged: raiseBars(driveNotice)
+
+    Timer {
+        id: driveHideTimer
+        objectName: "driveHideTimer"
+        interval: root.driveHideMs
+        running: root.driving && root.barsUp && !root.barsHeld && root.driveHideMs > 0
+        onTriggered: root.barsUp = false
+    }
+    // A touch on a bar starts its delay again
+    function barTouched() {
+        ++barTouches
+        if (driveHideTimer.running)
+            driveHideTimer.restart()
+    }
+    property int barTouches: 0    // counted for the tests
+    Timer {
+        objectName: "driveHintTimer"
+        interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
+        running: root.driveHintUp
+        onTriggered: root.driveHintUp = false
+    }
+    // Stop log stays in the view, so the status line says it ended; the bars
+    // stay as they are, since the driver asked for it
+    property bool driveLogEnded: false
+    Connections {
+        target: Bridge
+        function onLogStopped(folder, byUser) {
+            if (root.driving && byUser)
+                root.driveLogEnded = true
+        }
+    }
+    Timer {
+        objectName: "driveLogEndedTimer"
+        interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
+        // The header covers the status line while the bars are up
+        running: root.driveLogEnded && !root.barsUp
+        onTriggered: root.driveLogEnded = false
+    }
+
+    // ---- Copy and paste (section 5)
+
+    function copySelected() {
+        const c = DashboardBook.copyCell(doc, pageIndex, selected)
+        if (c !== null)
+            copied = { form: form, cell: c }
+    }
+    function pasteAfter(i) {
+        if (!canPaste)
+            return
+        commitTyping()
+        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell))
+    }
+
     // ---- Add: a kind, then a signal
 
     property var profileRows: []
     function refreshRows() {
-        profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : sessionStore.uri)
+        profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : offlineUri)
     }
     // The rows a gauge of `kind` can show: numbers with references, an
     // enumeration only on a digital tile
@@ -204,6 +435,12 @@ Page {
         panel = "add"
     }
     function pickKind(kind) {
+        if (kind === "blank") {
+            const span = newSpans[kind]
+            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] })))
+                select(shownCells.length - 1)
+            return
+        }
         addKind = kind
         refreshRows()
         panel = "signal"
@@ -329,6 +566,7 @@ Page {
     onPagesChanged: goTo(pageIndex)
     // A page change closes whatever panel was open
     onPageIndexChanged: {
+        cancelHold()
         selected = -1
         panel = ""
         addKind = ""
@@ -384,7 +622,12 @@ Page {
         sweepRequested()
     }
     function resetPeaks() { peaksResetRequested() }
-    onVisibleChanged: maybeSweep()
+    onVisibleChanged: {
+        maybeSweep()
+        // Any page but Dash ends the view for good: a tab, the status's Log
+        if (!visible)
+            leaveDrive(true)
+    }
     Component.onCompleted: {
         goTo(form === "phone" ? store.phonePage : store.desktopPage)
         restored = true
@@ -395,6 +638,11 @@ Page {
         function onConnectedChanged() {
             if (Bridge.connected) root.resetPeaks()
             root.maybeSweep()
+            // The view comes back with a session only with Dash showing
+            if (!Bridge.connected)
+                root.leaveDrive(false)
+            else if (store.phoneDrive && root.visible && !root.isReplay(Bridge.currentUri))
+                root.enterDrive()
         }
         // A peak held in the old units would read wrong in the new ones
         function onUnitSystemChanged() { root.resetPeaks() }
@@ -450,6 +698,37 @@ Page {
         property int pageNo: -1
         property int cellIndex: -1
         readonly property bool editable: root.editing && pageNo === root.pageIndex
+        readonly property bool lifted: root.held === cellIndex && pageNo === root.pageIndex
+        // The panel names this cell, in edit mode or out of it
+        readonly property bool chosen: pageNo === root.pageIndex && root.selected === cellIndex
+                                       && (root.editing || root.panel !== "")
+
+        // What the panel's Digits and Lights show with the option unset: what
+        // the cell draws, in or out of edit mode
+        Binding {
+            when: card.chosen
+            target: root
+            property: "selectedDigits"
+            value: card.digits
+        }
+        Binding {
+            when: card.chosen
+            target: root
+            property: "selectedCount"
+            value: card.count
+        }
+
+        // A press held still lifts the cell; these go to its page's grid
+        signal holdStarted(point scene)
+        signal holdMoved(point scene)
+        signal holdEnded(bool canceled)
+
+        // A blank cell draws its own outline in edit mode and nothing else.
+        // On a joined panel no cell paints, except the one held up: a card
+        // again, which covers what it passes over
+        plain: (root.joined && !lifted) || kind === "blank"
+        scale: lifted ? 1.03 : 1
+        z: lifted ? 5 : 0
 
         // The sweep plays on the dials, the cells and the shift lights only
         function sweep() {
@@ -485,7 +764,9 @@ Page {
             let words = ""
             if (!Bridge.connected) words = qsTr("no session")
             else if (entry === null) words = qsTr("not in this profile: %1").arg(label)
-            else if (entry.hidden) words = qsTr("not supported by this car")
+            // Live's rule (hiddenCount): the ECU reported it unsupported, or
+            // never answered it
+            else if (entry.hidden) words = qsTr("not sent by this ECU")
             else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
             else if (!entry.hasValue) words = qsTr("waiting for data")
             return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
@@ -545,23 +826,23 @@ Page {
         readonly property real coldBelow: zone("coldBelow")
         readonly property real warnFrom: zone("warnFrom")
         readonly property real dangerFrom: zone("dangerFrom")
+        // A stored "info" draws as the value's own color: blue means cold alone
         readonly property color accent: {
             const a = opt("accent", "accent")
-            return a === "info" ? Theme.info : a === "success" ? Theme.success
-                                             : Theme.gaugeValue
+            return a === "success" ? Theme.success : Theme.gaugeValue
         }
 
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
         readonly property string caption: opt("caption", unit)
-        readonly property string peakLabel: opt("peakLabel", qsTr("PEAK"))
+        readonly property string peakLabel: opt("peakLabel", qsTr("Peak"))
         readonly property bool showPeak: opt("peak", false)
         // The new kinds' own options (ADR-0057 section 1): the cells' count
         // and curve, the digits, the sparkline's window, the bar standing up
         // and its ticks
         readonly property int cells: opt("cells", 24)
         readonly property real rise: opt("rise", 1.6)
-        readonly property int digits: opt("digits", 4)
+        readonly property int digits: opt("digits", DashboardBook.digitsFor(from, to, decimals))
         readonly property int windowS: opt("window", 30)
         readonly property bool vertical: opt("vertical", false)
         readonly property bool marks: opt("marks", true)
@@ -601,6 +882,9 @@ Page {
             id: gauge
             objectName: "gauge"
             anchors.fill: parent
+            // Editable, the gauge leaves Remove's corner free, so the
+            // button covers no title
+            anchors.rightMargin: card.editable ? Theme.touchTarget - card.padding + 2 : 0
             asynchronous: card.later
             sourceComponent: root.kindComponent(card.kind)
             onLoaded: {
@@ -618,22 +902,57 @@ Page {
             }
         }
 
-        // In edit mode a tap opens the cell's panel; on the phone a long
-        // press starts edit mode at the cell
-        TapHandler {
+        // A tap on a dial that shows its peak resets the peak, and in edit
+        // mode a tap opens the cell's panel. A hold, in or out of edit mode,
+        // lifts the cell. A blank cell has nothing to hold outside edit mode
+        MouseArea {
             objectName: "cellTap"
-            onTapped: if (card.editable) root.select(card.cellIndex)
-            onLongPressed: {
-                if (root.form !== "phone" || card.pageNo !== root.pageIndex)
-                    return
-                root.startEditing()
-                root.select(card.cellIndex)
+            z: 1
+            anchors.fill: parent
+            anchors.margins: -card.padding
+            enabled: card.pageNo === root.pageIndex && (card.kind !== "blank" || root.editing)
+            // Moved past the drag distance before the hold completed: a
+            // swipe or a scroll, even where nothing has taken the finger
+            property bool strayed: false
+            property point pressedAt: Qt.point(0, 0)
+            onPressed: (mouse) => {
+                strayed = false
+                pressedAt = Qt.point(mouse.x, mouse.y)
             }
+            onClicked: {
+                if (strayed)
+                    return
+                if (root.driving) {
+                    root.driveTap()
+                    return
+                }
+                if (card.kind === "analog" && card.showPeak && gauge.item)
+                    (gauge.item as GaugeBase).resetPeaks()
+                if (card.editable)
+                    root.select(card.cellIndex)
+            }
+            onPressAndHold: (mouse) => {
+                if (root.driving)
+                    return
+                if (strayed)
+                    mouse.accepted = false
+                else
+                    card.holdStarted(mapToItem(null, mouse.x, mouse.y))
+            }
+            onPositionChanged: (mouse) => {
+                if (card.lifted)
+                    card.holdMoved(mapToItem(null, mouse.x, mouse.y))
+                else if (Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y)
+                         > Application.styleHints.startDragDistance)
+                    strayed = true
+            }
+            onReleased: if (card.lifted) card.holdEnded(false)
+            onCanceled: if (card.lifted) card.holdEnded(true)
         }
         // The outline and Remove exist only while the cell is editable
         Loader {
             z: 2
-            active: card.editable && root.selected === card.cellIndex
+            active: card.chosen || card.lifted
             anchors.fill: parent
             anchors.margins: -card.padding + 2
             sourceComponent: Rectangle {
@@ -671,7 +990,7 @@ Page {
             wrapMode: Text.WordWrap
             text: qsTr("a gauge this version of Havne doesn't have")
             color: Theme.textDim
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontCaption
         }
     }
 
@@ -711,7 +1030,7 @@ Page {
 
     component Caption: Label {
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
     }
 
     Component {
@@ -727,6 +1046,7 @@ Page {
             // The row the cell shows, whose decimals it uses until it has its own
             readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
             readonly property bool phone: root.form === "phone"
+            readonly property bool hasSignal: kind !== "blank"
             implicitHeight: panelColumn.implicitHeight + 2 * padding
             padding: 12
 
@@ -740,19 +1060,35 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
-                        text: (root.kindNames[panelCard.kind] ?? panelCard.kind) + ": "
-                              + (panelCard.cell && panelCard.cell.label ? panelCard.cell.label : "")
+                        text: (root.kindNames[panelCard.kind] ?? panelCard.kind)
+                              + (panelCard.cell && panelCard.cell.label ? ": " + panelCard.cell.label : "")
                     }
                     ThemedButton {
                         objectName: "panelClose"
                         text: qsTr("Close")
-                        onClicked: {
-                            root.commitTyping()
-                            root.panel = ""
-                        }
+                        onClicked: root.closePanel()
+                    }
+                }
+
+                // A copy of the whole cell, for this run (section 5)
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    ThemedButton {
+                        objectName: "panelCopy"
+                        Layout.fillWidth: true
+                        text: qsTr("Copy")
+                        onClicked: root.copySelected()
+                    }
+                    ThemedButton {
+                        objectName: "panelPaste"
+                        Layout.fillWidth: true
+                        enabled: root.canPaste
+                        text: qsTr("Paste after")
+                        onClicked: root.pasteAfter(root.selected)
                     }
                 }
 
@@ -762,10 +1098,11 @@ Page {
                     columnSpacing: 8
                     rowSpacing: 8
 
-                    Caption { text: qsTr("Label") }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Label") }
                     TextField {
                         id: labelField
                         objectName: "panelLabel"
+                        visible: panelCard.hasSignal
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.touchTarget
                         maximumLength: DashboardBook.maxLabel
@@ -776,39 +1113,43 @@ Page {
                                                     ? panelCard.cell.label : "")
                         }
                     }
-                    Caption { text: qsTr("Signal") }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Signal") }
                     ThemedButton {
                         objectName: "panelSignal"
+                        visible: panelCard.hasSignal
                         Layout.fillWidth: true
                         text: qsTr("Change signal")
                         onClicked: root.changeSignal()
                     }
 
-                    Caption { text: qsTr("From (%1)").arg(panelCard.unitShown) }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("From (%1)").arg(panelCard.unitShown) }
                     OptionField {
                         objectName: "panelFrom"
+                        visible: panelCard.hasSignal
                         option: "from"
                         clearable: false
                         fallback: panelCard.range.from
                     }
-                    Caption { text: qsTr("To (%1)").arg(panelCard.unitShown) }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("To (%1)").arg(panelCard.unitShown) }
                     OptionField {
                         objectName: "panelTo"
+                        visible: panelCard.hasSignal
                         option: "to"
                         clearable: false
                         fallback: panelCard.range.to
                     }
 
-                    Caption { text: qsTr("Cold below") }
-                    OptionField { objectName: "panelColdBelow"; option: "coldBelow" }
-                    Caption { text: qsTr("Warning from") }
-                    OptionField { objectName: "panelWarnFrom"; option: "warnFrom" }
-                    Caption { text: qsTr("Danger from") }
-                    OptionField { objectName: "panelDangerFrom"; option: "dangerFrom" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Cold below") }
+                    OptionField { objectName: "panelColdBelow"; visible: panelCard.hasSignal; option: "coldBelow" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Warning from") }
+                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.hasSignal; option: "warnFrom" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Danger from") }
+                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.hasSignal; option: "dangerFrom" }
 
-                    Caption { text: qsTr("Decimals") }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Decimals") }
                     SpinBox {
                         objectName: "panelDecimals"
+                        visible: panelCard.hasSignal
                         Accessible.name: qsTr("Decimals")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 0
@@ -820,33 +1161,39 @@ Page {
                         onValueModified: root.setOptions({ decimals: value })
                     }
 
-                    Caption { text: qsTr("Width") }
+                    // The span, in the grid's units, which the words name
+                    Caption { text: qsTr("Columns") }
                     SpinBox {
                         objectName: "panelW"
-                        Accessible.name: qsTr("Width")
+                        Accessible.name: qsTr("Columns")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 1
                         to: DashboardBook.maxColumns
                         value: panelCard.cell ? panelCard.cell.w : 1
                         onValueModified: root.resize(value, panelCard.cell.h)
                     }
-                    Caption { text: qsTr("Height") }
+                    Caption { text: qsTr("Rows") }
                     SpinBox {
                         objectName: "panelH"
-                        Accessible.name: qsTr("Height")
+                        Accessible.name: qsTr("Rows")
                         Layout.preferredHeight: Theme.touchTarget
-                        from: 1
-                        to: DashboardBook.maxRows
+                        // A stored h under the phone's step stays reachable
+                        from: root.phoneForm && panelCard.cell
+                              ? Math.min(root.spanScale, panelCard.cell.h) : 1
+                        // The desktop's 16, or a taller stored cell's own height
+                        to: root.phoneForm ? DashboardBook.maxRows
+                            : Math.max(DashboardBook.format1MaxRows, panelCard.cell ? panelCard.cell.h : 1)
+                        stepSize: root.spanScale
                         value: panelCard.cell ? panelCard.cell.h : 1
-                        onValueModified: root.resize(panelCard.cell.w, value)
+                        onValueModified: root.resize(panelCard.cell.w, root.phoneForm
+                            ? DashboardBook.stepRows(panelCard.cell.h, value > panelCard.cell.h)
+                            : value)
                     }
 
-                    Caption {
-                        visible: root.peakKinds.indexOf(panelCard.kind) >= 0
-                        text: qsTr("Peak hold")
-                    }
-                    Switch {
+                    // A checkbox, as every other yes-or-no in the app
+                    ThemedCheckBox {
                         objectName: "panelPeak"
+                        text: qsTr("Peak hold")
                         Accessible.name: qsTr("Peak hold")
                         visible: root.peakKinds.indexOf(panelCard.kind) >= 0
                         implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
@@ -928,7 +1275,7 @@ Page {
                         to: 8
                         value: panelCard.cell && panelCard.cell.options
                                && panelCard.cell.options.digits !== undefined
-                               ? panelCard.cell.options.digits : 4
+                               ? panelCard.cell.options.digits : root.selectedDigits
                         onValueModified: root.setOptions({ digits: value })
                     }
                     Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
@@ -961,10 +1308,11 @@ Page {
                             // (the resize rebinds this switch, so its state is read first)
                             const on = checked
                             const c = panelCard.cell
-                            if (c && on && c.w === 2 && c.h === 2)
-                                root.resize(1, 4)
-                            else if (c && !on && c.w === 1 && c.h === 4)
-                                root.resize(2, 2)
+                            const s = root.spanScale
+                            if (c && on && c.w === 2 * s && c.h === 2 * s)
+                                root.resize(s, 4 * s)
+                            else if (c && !on && c.w === s && c.h === 4 * s)
+                                root.resize(2 * s, 2 * s)
                             root.setOptions({ vertical: on })
                         }
                     }
@@ -989,7 +1337,7 @@ Page {
                         to: 32
                         value: panelCard.cell && panelCard.cell.options
                                && panelCard.cell.options.count !== undefined
-                               ? panelCard.cell.options.count : 15
+                               ? panelCard.cell.options.count : root.selectedCount
                         onValueModified: root.setOptions({ count: value })
                     }
                 }
@@ -1049,7 +1397,7 @@ Page {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         text: qsTr("Add a gauge: its kind")
@@ -1121,7 +1469,7 @@ Page {
     }
 
     // A signal for Add's kind, or the edited cell's new one: the session's
-    // rows with references, or those of the last URI that connected
+    // rows with references, or those of the profile Settings has chosen
     Component {
         id: signalPanel
         GaugeCard {
@@ -1150,7 +1498,7 @@ Page {
                     Layout.fillWidth: true
                     Label {
                         Layout.fillWidth: true
-                        font.pixelSize: 15
+                        font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
                         elide: Text.ElideRight
@@ -1200,6 +1548,41 @@ Page {
         }
     }
 
+    // No session on the phone: the connect list, in the panel's place above
+    // the gauges, on every page. Settings owns connecting
+    property var connectUris: []
+    property string connectVehicleUri: ""
+    // A tapped row is the user's choice; else the picked vehicle's address
+    property string connectTapped: ""
+    readonly property int connectPick: {
+        const wanted = connectTapped !== "" ? connectTapped : connectVehicleUri
+        return Math.max(0, connectUris.indexOf(wanted))
+    }
+    property string connectError: ""
+    readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
+    signal connectToUri(string uri)
+    signal otherAddressRequested()
+    onConnectUrisChanged: connectTapped = ""
+    onConnectVehicleUriChanged: connectTapped = ""
+    Connections {
+        target: Bridge
+        function onConnectResult(uri, error) { root.connectError = error }
+    }
+    Component {
+        id: connectPanel
+        DashConnectList {
+            uris: root.connectUris
+            selected: root.connectPick
+            errorText: root.connectError
+            onPicked: index => root.connectTapped = root.connectUris[index]
+            onConnectTo: uri => {
+                root.connectError = ""
+                root.connectToUri(uri)
+            }
+            onOtherAddress: root.otherAddressRequested()
+        }
+    }
+
     Component { id: analogKind; AnalogGauge {} }
     Component { id: ringKind; RingGauge {} }
     Component { id: barKind; BarGauge {} }
@@ -1208,48 +1591,176 @@ Page {
     Component { id: segmentsKind; SegmentGauge {} }
     Component { id: readoutKind; SegmentReadout {} }
     Component { id: sparkKind; SparkGauge {} }
+    // A spot held open: an outline to find it by in edit mode, else nothing
+    Component {
+        id: blankKind
+        GaugeBase {
+            // Nothing to announce where nothing is drawn
+            Accessible.ignored: !root.editing
+            Accessible.name: root.kindNames["blank"]
+            Accessible.description: ""
+            Rectangle {
+                objectName: "blankOutline"
+                anchors.fill: parent
+                visible: root.editing
+                color: "transparent"
+                border.color: Theme.outline
+                border.width: 1
+                radius: Theme.radius
+            }
+        }
+    }
 
-    // The link's dot and words
+    // The desktop's link state: the dot and words, and the Night switch at
+    // their end (ADR-0058 section 6: a status with a tap)
     Component {
         id: linkState
         RowLayout {
             spacing: 10
+            // Under 60 px the label would read "N...n": the dot and the label
+            // fade (opacity, so the layout still holds them) and the header's
+            // pill carries the state alone
             Rectangle {
                 objectName: "linkDot"
                 implicitWidth: 8; implicitHeight: 8   // layout-managed
                 radius: 4
                 color: Theme.linkColor(Bridge.linkState)
+                opacity: linkLabel.opacity
             }
             Label {
+                id: linkLabel
                 objectName: "linkLabel"
                 Layout.fillWidth: true
+                opacity: width >= 60 ? 1 : 0
                 elide: Text.ElideMiddle
-                // Short statuses come from Theme.linkLabel; "ok" keeps
-                // the richer URI text. Long-form detail (episode
-                // counts, error codes) stays in LiveView's banner.
+                // Short statuses come from Theme.linkLabel; "ok" adds the
+                // address where the row leaves room for it (the header
+                // shows it anyway). Long-form detail (episode counts,
+                // error codes) stays in LiveView's banner.
+                readonly property bool roomForAddress: width >= 150
                 text: Bridge.linkState === "ok"
-                      ? qsTr("Live · %1").arg(Bridge.uriLabel)
+                      ? (roomForAddress ? qsTr("Live · %1").arg(Bridge.uriLabel) : qsTr("Live"))
                       : Theme.linkLabel(Bridge.linkState)
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)
+            }
+            NightSwitch {}
+        }
+    }
+    Component { id: toolNight; NightSwitch {} }
+
+    // The drive view's one line of chrome: the link state and the address,
+    // and a log's or recording's progress (section 2). It takes no taps
+    Item {
+        id: driveStatus
+        objectName: "driveStatusLine"
+        visible: root.driving
+        x: 0
+        y: root.driveInsetTop
+        width: root.width
+        height: 28
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: root.margin
+            anchors.rightMargin: root.margin
+            spacing: 6
+            Rectangle {
+                objectName: "driveStatusDot"
+                implicitWidth: 8; implicitHeight: 8   // layout-managed
+                radius: 4
+                color: Theme.linkColor(Bridge.linkState)
+            }
+            Label {
+                objectName: "driveStatusWord"
+                font.pixelSize: Theme.fontCaption
+                color: Theme.text
+                text: Theme.linkShortLabel(Bridge.linkState)
+            }
+            Label {
+                objectName: "driveStatusAddress"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                elide: Text.ElideRight
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textDim
+                text: qsTr("· %1").arg(Bridge.uriLabel)
+            }
+            Label {
+                objectName: "driveStatusRun"
+                visible: Bridge.logActive || Bridge.recordingActive || root.driveLogEnded
+                font.pixelSize: Theme.fontCaption
+                color: Theme.text
+                text: Bridge.logActive ? qsTr("Log")
+                    : root.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
+            }
+            Label {
+                objectName: "driveStatusTime"
+                visible: Bridge.logActive
+                font.family: Theme.valueFamily
+                font.features: { "tnum": 1 }
+                font.pixelSize: Theme.fontCaption
+                color: Theme.text
+                text: root.driveLogTime
+            }
+            Label {
+                objectName: "driveStatusDetail"
+                readonly property string detail:
+                    Bridge.logActive ? root.driveLogSize
+                  : !Bridge.recordingActive || Bridge.markCount === 0 ? ""
+                  : Bridge.markCount === 1 ? qsTr("1 mark")
+                  : qsTr("%1 marks").arg(Bridge.markCount)
+                visible: detail !== ""
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textDim
+                text: qsTr("· %1").arg(detail)
             }
         }
     }
 
-    // ---- The header: title, link state, peak reset; the desktop's
-    // page buttons; why the stored layout isn't shown
+    // Behind the revealed tool row, so the gauges don't show through it.
+    // A touch on it counts as a touch on the bars
+    Rectangle {
+        objectName: "driveToolsBackdrop"
+        visible: topBar.visible && root.driving
+        z: 1
+        x: 0
+        y: topBar.y - root.gap / 2
+        width: root.width
+        height: topBar.height + root.gap
+        color: Theme.bg
+        MouseArea {
+            anchors.fill: parent
+            enabled: root.driving
+            onPressed: root.barTouched()
+        }
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: root.hairlineWidth
+            color: Theme.hairline
+        }
+    }
+
+    // ---- The header: on the desktop the title, the link state and the
+    // tools, on the phone the tools alone (the tab bar names the page and
+    // the top bar has the link state); the desktop's page buttons; why
+    // the stored layout isn't shown
 
     ColumnLayout {
         id: topBar
+        readonly property real revealedY: root.driveHeaderHeight + root.gap / 2
+        visible: !root.driving || root.barsShown > 0
+        z: root.driving ? 2 : 0
         x: (root.width - width) / 2
-        y: root.margin
+        // In the drive view it comes down from under the header's edge
+        y: root.driving ? revealedY - (1 - root.barsShown) * (revealedY + height + root.gap) : root.topGap
         width: Math.max(0, root.width - 2 * root.margin)
         spacing: root.gap / 2
 
         PageHeader {
             id: header
             Layout.fillWidth: true
-            title: qsTr("Dashboard")
+            title: root.phoneForm ? "" : qsTr("Dashboard")
+            spacing: root.phoneForm ? 8 : 10
             // At a narrow width the row's buttons are compact, the link
             // state gives way first and the title last, so the row fits
             // whatever the font's widths
@@ -1257,45 +1768,83 @@ Page {
             // Reset peaks and Edit at a phone's touch size
             readonly property real touchMin: Theme.touchTarget
 
-            // The desktop's link state follows the title; the phone's
-            // row has no room for it beside Reset peaks and Edit, so it
-            // takes a line of its own below, except on its side, where
-            // the row has the width and the line's height is the
-            // gauges'. No width of its own: it takes what the title and
-            // buttons leave
+            // The desktop's link state follows the title. No width of
+            // its own: it takes what the title and buttons leave
             Loader {
                 objectName: "linkInRow"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
-                active: root.form !== "phone" || Theme.shortLayout
+                active: !root.phoneForm
                 visible: active
                 sourceComponent: linkState
             }
-            Item {
-                Layout.fillWidth: true
-                visible: root.form === "phone" && !Theme.shortLayout
-            }
+            // Drive, at the start of the phone's row. Its tools sit at the
+            // right. With no session it stays, and says what it waits for
             ThemedButton {
+                id: driveButton
+                objectName: "dashDrive"
+                flat: true
+                compact: true
+                Layout.minimumWidth: Theme.touchTarget
+                visible: root.phoneForm
+                enabled: Bridge.connected && !root.editing
+                text: !Bridge.connected ? qsTr("Connect first")
+                    : root.driving ? qsTr("Exit drive") : qsTr("Drive")
+                Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
+                               : root.driving ? qsTr("Exit drive: leave the full-screen gauges")
+                                              : qsTr("Drive: show the gauges full screen")
+                onClicked: root.driving ? root.leaveDrive(true) : root.enterDrive()
+            }
+            Item {
+                objectName: "toolRowStart"
+                Layout.fillWidth: true
+                visible: root.phoneForm
+            }
+            // A row too narrow for every tool (a small window, a phone zoomed
+            // far in, or no session, whose Drive words are longer) drops Reset
+            // peaks, which edit mode's Pages row then offers (moreResetPeaks).
+            // Judged against the bar's width (the row can't shrink under its
+            // tools) and the tools' own widths, never the row's: no loop.
+            // The layout rounds each width up to a whole pixel, and each item
+            // shown ahead of the tools (the fills too) takes a spacing
+            readonly property real toolsWidth: {
+                let ahead = 0
+                for (const item of children) {
+                    if (item === resetPeaksButton)
+                        break
+                    if (item.visible)
+                        ahead += spacing + (item === driveButton ? Math.ceil(item.implicitWidth) : 0)
+                }
+                return ahead + Math.ceil(resetPeaksButton.implicitWidth) + spacing
+                    + Math.ceil(editButton.implicitWidth)
+                    + (nightLoader.active ? spacing + Math.ceil(nightLoader.implicitWidth) : 0)
+            }
+            readonly property bool holdsResetPeaks: topBar.width >= Math.max(root.toolRowFull, toolsWidth)
+            ThemedButton {
+                id: resetPeaksButton
                 objectName: "resetPeaks"
-                compact: root.compact
+                flat: true
+                compact: root.compact || root.phoneForm
+                visible: header.holdsResetPeaks
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
             }
             ThemedButton {
+                id: editButton
                 objectName: "dashEdit"
-                compact: root.compact
-                visible: !root.editing
+                compact: root.compact || root.phoneForm
+                horizontalPadding: root.phoneForm ? 18 : (compact ? 6 : 8)
+                visible: !root.editing && !root.driving
                 text: qsTr("Edit")
                 onClicked: root.startEditing()
             }
-        }
-
-        Loader {
-            objectName: "linkLine"
-            Layout.fillWidth: true
-            active: root.form === "phone" && !Theme.shortLayout
-            visible: active
-            sourceComponent: linkState
+            Loader {
+                id: nightLoader
+                objectName: "toolRowNight"
+                active: root.phoneForm
+                visible: active
+                sourceComponent: toolNight
+            }
         }
 
         // What the log did without being asked: Start log's refusal, or
@@ -1318,7 +1867,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.text
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: Bridge.logNotice
             }
             ThemedButton {
@@ -1353,9 +1902,18 @@ Page {
                 onClicked: root.startAdd()
             }
             ThemedButton {
+                objectName: "dashPaste"
+                compact: root.form === "phone"
+                visible: root.copied !== null
+                enabled: root.canPaste
+                text: qsTr("Paste")
+                onClicked: root.pasteAfter(root.shownCells.length - 1)
+            }
+            ThemedButton {
                 objectName: "dashMore"
                 compact: root.form === "phone"
-                highlighted: root.moreShown
+                checkable: true
+                checked: root.moreShown
                 text: qsTr("Pages")
                 onClicked: {
                     root.moreShown = !root.moreShown
@@ -1366,17 +1924,21 @@ Page {
             Item { Layout.fillWidth: true }
         }
 
-        // The pages' controls and Reset, in the page (never a menu)
+        // The pages' controls, then a gap, then Reset (it replaces every page,
+        // so it stands apart) and Reset peaks where the tool row has no room
         Flow {
+            id: moreRow
             objectName: "dashMoreRow"
             readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 1
             visible: root.editing && root.moreShown && !root.confirmReset && !root.confirmRemovePage
             spacing: 8
             TextField {
                 id: pageName
                 objectName: "moreRename"
-                width: Math.min(220, parent.width)
+                width: Math.min(220, topBar.width)
                 height: Theme.touchTarget
                 maximumLength: DashboardBook.maxLabel
                 text: root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : ""
@@ -1389,33 +1951,64 @@ Page {
                 }
             }
             ThemedButton {
+                id: moreAddPage
                 objectName: "moreAddPage"
                 enabled: DashboardBook.canAddPage(root.doc)
                 text: qsTr("Add page")
                 onClicked: root.addPage()
             }
+            // Nothing to move with one page
             ThemedButton {
+                id: moreLeft
                 objectName: "moreLeft"
+                visible: root.pages.length > 1
                 enabled: root.pageIndex > 0
                 text: qsTr("Move page left")
                 onClicked: root.movePage(-1)
             }
             ThemedButton {
+                id: moreRight
                 objectName: "moreRight"
+                visible: root.pages.length > 1
                 enabled: root.pageIndex < root.pages.length - 1
                 text: qsTr("Move page right")
                 onClicked: root.movePage(1)
             }
             ThemedButton {
+                id: moreRemovePage
                 objectName: "moreRemovePage"
                 enabled: DashboardBook.canRemovePage(root.doc)
                 text: qsTr("Remove page")
                 onClicked: root.confirmRemovePage = true
             }
+            Item {
+                objectName: "moreResetGap"
+                // The bar's width and the controls' own, never the flow's: a
+                // hidden flow sizes itself from its children, and would loop
+                readonly property real used: pageName.width + moreAddPage.width + moreRemovePage.width
+                    + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
+                    + 2 * moreRow.spacing
+                readonly property real tail: moreReset.width
+                    + (moreResetPeaks.visible ? moreResetPeaks.width + moreRow.spacing : 0)
+                width: Math.max(16, topBar.width - used - tail - 2 * moreRow.spacing)
+                height: 1
+            }
             ThemedButton {
+                id: moreReset
                 objectName: "moreReset"
+                flat: true
                 text: qsTr("Reset")
+                Accessible.name: qsTr("Reset: replace this form's pages with the built-in layout")
                 onClicked: root.confirmReset = true
+            }
+            // Reset peaks, when the tool row has no room for it
+            ThemedButton {
+                id: moreResetPeaks
+                objectName: "moreResetPeaks"
+                flat: true
+                visible: !header.holdsResetPeaks
+                text: qsTr("Reset peaks")
+                onClicked: root.resetPeaks()
             }
         }
         RowLayout {
@@ -1430,7 +2023,7 @@ Page {
                 Layout.minimumWidth: 0
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: qsTr("Remove the page \"%1\" and its gauges?")
                       .arg(root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : "")
             }
@@ -1458,7 +2051,7 @@ Page {
                 Layout.minimumWidth: 0
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: qsTr("Replace this form's pages with the built-in layout?")
             }
             ThemedButton {
@@ -1486,7 +2079,8 @@ Page {
                     required property int index
                     objectName: "dashPageButton_" + index
                     compact: true
-                    highlighted: index === root.pageIndex
+                    checkable: true
+                    checked: index === root.pageIndex
                     text: root.pages[index] && root.pages[index].name
                           ? root.pages[index].name : qsTr("Page %1").arg(index + 1)
                     onClicked: root.goTo(index)
@@ -1504,7 +2098,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.warning
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: root.problem === "newer"
                       ? qsTr("The saved dashboard was made by a newer version of Havne. "
                              + "This shows the built-in one; the saved one is kept.")
@@ -1531,10 +2125,11 @@ Page {
         objectName: "dashPages"
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: topBar.bottom
+        anchors.top: root.driving ? driveStatus.bottom : topBar.bottom
         anchors.bottom: indicator.visible ? indicator.top : parent.bottom
+        anchors.bottomMargin: root.driving ? root.driveInsetBottom : 0
         clip: true
-        interactive: root.form === "phone"
+        interactive: root.form === "phone" && root.held < 0
         // The page shown goes in once every page is in: the first page
         // added makes the index 0, which would override a stored one
         onCountChanged: {
@@ -1560,7 +2155,8 @@ Page {
                 objectName: "dashPage_" + index
                 clip: true
                 contentWidth: width
-                contentHeight: grid.y + grid.height + root.margin
+                contentHeight: grid.y + grid.height + root.panelMargin
+                interactive: root.held < 0
                 // Shown whenever there's more below, not only while
                 // scrolling, so a short window says it scrolls
                 ScrollBar.vertical: ScrollBar {
@@ -1568,41 +2164,138 @@ Page {
                                                                      : ScrollBar.AsNeeded
                 }
 
-                // The grid (section 4): the phone's 2 columns upright and
-                // 4 on its side, the desktop's one per 220 px from 2 to 12
-                readonly property real gridWidth: Math.max(0, width - 2 * root.margin)
+                // The grid (section 4): the phone's 6 columns upright and
+                // 12 on its side, the desktop's one per 220 px from 2 to 12
+                readonly property real gridWidth: Math.max(0, width - 2 * root.panelMargin)
                 readonly property int columns: root.form === "phone"
-                    ? (root.width > root.height ? 4 : 2)
+                    ? (root.width > root.height ? 12 : 6)
                     : Math.max(2, Math.min(12, Math.round(gridWidth / 220)))
                 readonly property real columnWidth: Math.max(0, (gridWidth - (columns - 1)
-                                                                 * root.gap) / columns)
+                                                                 * root.cellGap) / columns)
                 readonly property bool shown: index === root.pageIndex
                 // In edit mode the page ends with a "+" cell while it has room
                 readonly property bool addCell: root.editing && shown
                                                 && DashboardBook.canAddCell(root.doc, index)
-                readonly property var placed: addCell ? cells.concat([{ w: 1, h: 2 }]) : cells
-                readonly property var boxes: DashboardBook.place(placed, columns)
+                // While a held cell moves, the order its drop would make
+                readonly property bool reflowing: shown && root.dropAt >= 0
+                readonly property var ordered: reflowing
+                    ? DashboardBook.reordered(cells, root.held, root.dropAt) : cells
+                readonly property var placed: addCell
+                    ? ordered.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : ordered
+                // Edit mode and a held cell show the true sizes
+                readonly property var boxes: {
+                    const b = DashboardBook.place(placed, columns)
+                    return root.joined && !root.editing && root.held < 0
+                        ? DashboardBook.stretched(placed, b, columns) : b
+                }
+                readonly property var seams: root.joined
+                    ? DashboardBook.seams(placed, boxes, columns) : []
                 readonly property int tallest: placed.reduce((m, c) => Math.max(m, c.h), 1)
                 // The row unit is a quarter of a column, so h = 4w is
                 // square; never so tall that the tallest cell overflows
                 // what the page shows, down to a floor of 160 px, below
                 // which the page scrolls instead
                 readonly property real pitch: Math.max(1, Math.min(
-                    (columnWidth + root.gap) / 4,
-                    (Math.max(160, height - 2 * root.margin) + root.gap) / tallest))
+                    (columnWidth + root.cellGap) / 4,
+                    (Math.max(160, height - root.topGap - root.panelMargin) + root.cellGap) / tallest))
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
+                // The drop's places are measured on this grid
+                onColumnsChanged: root.cancelHold()
+                onPitchChanged: root.cancelHold()
+
+                function boxLeft(b) { return b.x * (columnWidth + root.cellGap) }
+                function boxTop(b) { return b.y * pitch }
+                function boxWidth(b) { return b.w * columnWidth + (b.w - 1) * root.cellGap }
+                function boxHeight(b) { return Math.max(0, b.h * pitch - root.cellGap) }
+
+                // ---- The held cell (section 4)
+
+                property var dropCenters: []     // the held cell's center at each place
+                property size heldSize: Qt.size(0, 0)
+                property point grab: Qt.point(0, 0)      // the finger within the cell
+                property point pressedAt: Qt.point(0, 0)
+                property point finger: Qt.point(0, 0)
+                property real dragX: 0
+                property real dragY: 0
+
+                function lift(i, scene) {
+                    root.commitTyping()
+                    const at = grid.mapFromItem(null, scene.x, scene.y)
+                    const b = DashboardBook.place(placed, columns)[i]
+                    heldSize = Qt.size(boxWidth(b), boxHeight(b))
+                    // A press on the stretched part lifts the cell under
+                    // the finger at its true size, not past its edge
+                    grab = Qt.point(Math.max(0, Math.min(at.x - boxLeft(b), heldSize.width)),
+                                    Math.max(0, Math.min(at.y - boxTop(b), heldSize.height)))
+                    pressedAt = scene
+                    finger = scene
+                    dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(
+                        d => ({ x: boxLeft(d) + boxWidth(d) / 2, y: boxTop(d) + boxHeight(d) / 2 }))
+                    root.held = i
+                }
+                function follow(scene) {
+                    finger = scene
+                    if (root.dropAt < 0 && Math.hypot(scene.x - pressedAt.x, scene.y - pressedAt.y)
+                            <= Application.styleHints.startDragDistance)
+                        return
+                    const at = grid.mapFromItem(null, scene.x, scene.y)
+                    dragX = at.x - grab.x
+                    dragY = at.y - grab.y
+                    root.dropAt = DashboardBook.nearest(dropCenters, dragX + heldSize.width / 2,
+                                                        dragY + heldSize.height / 2)
+                }
+                function letGo(canceled) {
+                    const from = root.held, to = root.dropAt
+                    root.cancelHold()
+                    if (canceled)
+                        return
+                    if (to < 0)
+                        root.select(from)
+                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to))
+                             && root.selected >= 0)
+                        root.selected = DashboardBook.movedIndex(root.selected, from, to)
+                }
+                // Near the view's top or bottom edge the page scrolls, at
+                // up to a quarter of the edge's width per tick
+                function scrollAtTheEdge() {
+                    const y = mapFromItem(null, finger.x, finger.y).y
+                    const edge = Theme.touchTarget
+                    const by = y < edge ? y - edge : y > height - edge ? y - (height - edge) : 0
+                    if (by === 0)
+                        return
+                    const bottom = Math.max(0, contentHeight - height)
+                    contentY = Math.max(0, Math.min(bottom,
+                        contentY + Math.max(-edge, Math.min(edge, by)) / 4))
+                    follow(finger)
+                }
+                Timer {
+                    interval: 16
+                    repeat: true
+                    running: pageView.reflowing
+                    onTriggered: pageView.scrollAtTheEdge()
+                }
+
+                // A tap between the cells reveals the drive view's bars too
+                MouseArea {
+                    objectName: "driveTapArea"
+                    enabled: root.driving
+                    width: pageView.width
+                    height: Math.max(pageView.height, pageView.contentHeight)
+                    onClicked: root.driveTap()
+                }
 
                 // The edit panel, in the page above its grid (never a Popup)
                 Loader {
                     id: panelHost
                     objectName: "dashPanel"
                     x: (pageView.width - width) / 2
-                    y: root.margin
+                    y: root.topGap
                     width: pageView.gridWidth
-                    active: root.editing && pageView.shown && root.panel !== ""
+                    active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
                                    : root.panel === "add" ? addPanel
-                                   : root.panel === "signal" ? signalPanel : null
+                                   : root.panel === "signal" ? signalPanel
+                                   : root.connectShown ? connectPanel : null
                     onLoaded: pageView.contentY = 0
                 }
 
@@ -1610,7 +2303,7 @@ Page {
                     objectName: "dashEmptyPage"
                     visible: pageView.cells.length === 0 && !root.editing
                     x: root.margin
-                    y: root.margin
+                    y: root.topGap
                     width: pageView.gridWidth
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
@@ -1619,17 +2312,52 @@ Page {
 
                 Item {
                     id: grid
-                    x: (pageView.width - width) / 2
-                    y: root.margin + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)
+                    // On whole pixels of the display, so the seams snapped inside it are
+                    x: root.snap((pageView.width - width) / 2)
+                    y: root.snap(swipe.y + root.topGap + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
                     width: pageView.gridWidth
-                    height: Math.max(0, pageView.rows * pageView.pitch - root.gap)
+                    height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
+
+                    // The joined panel, under its cells: the flat surface
+                    // with its edge, and the hairlines between neighbors
+                    Rectangle {
+                        objectName: "dashPanelSurface"
+                        anchors.fill: parent
+                        visible: root.joined && pageView.rows > 0
+                        color: Theme.surface
+                        radius: root.driving ? 0 : Theme.radiusCard
+                        border.color: Theme.hairline
+                        border.width: root.driving ? 0 : root.hairlineWidth
+                    }
+                    Repeater {
+                        model: pageView.seams
+                        Rectangle {
+                            required property var modelData
+                            readonly property real along: modelData.vertical
+                                ? modelData.y * pageView.pitch : modelData.x * pageView.columnWidth
+                            readonly property real across: root.snap((modelData.vertical
+                                ? modelData.x * pageView.columnWidth : modelData.y * pageView.pitch)
+                                - root.hairlineWidth / 2)
+                            readonly property real run: modelData.length
+                                * (modelData.vertical ? pageView.pitch : pageView.columnWidth)
+                            objectName: "dashSeam"
+                            x: modelData.vertical ? across : along
+                            y: modelData.vertical ? along : across
+                            width: modelData.vertical ? root.hairlineWidth : run
+                            height: modelData.vertical ? run : root.hairlineWidth
+                            color: Theme.hairline
+                        }
+                    }
 
                     Repeater {
                         model: pageView.cells.length
 
                         Cell {
+                            id: placedCell
                             required property int index
-                            readonly property var box: pageView.boxes[index]
+                            readonly property var box: pageView.boxes[pageView.reflowing
+                                ? DashboardBook.movedIndex(index, root.held, root.dropAt) : index]
+                            readonly property bool carried: pageView.reflowing && root.held === index
                             objectName: "dashCell_" + pageView.index + "_" + index
                             cell: pageView.cells[index]
                             pageNo: pageView.index
@@ -1640,23 +2368,37 @@ Page {
                                    && Qt.application.state !== Qt.ApplicationSuspended
                                    && Qt.application.state !== Qt.ApplicationHidden
                             // qmllint enable missing-property
-                            x: box ? box.x * (pageView.columnWidth + root.gap) : 0
-                            y: box ? box.y * pageView.pitch : 0
-                            width: box ? box.w * pageView.columnWidth + (box.w - 1) * root.gap : 0
-                            height: box ? Math.max(0, box.h * pageView.pitch - root.gap) : 0
+                            x: carried ? pageView.dragX : box ? pageView.boxLeft(box) : 0
+                            y: carried ? pageView.dragY : box ? pageView.boxTop(box) : 0
+                            width: box ? pageView.boxWidth(box) : 0
+                            height: box ? pageView.boxHeight(box) : 0
+                            Behavior on x {
+                                enabled: pageView.reflowing && !placedCell.carried
+                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                            }
+                            Behavior on y {
+                                enabled: pageView.reflowing && !placedCell.carried
+                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+                            }
+                            onHoldStarted: (scene) => pageView.lift(index, scene)
+                            onHoldMoved: (scene) => pageView.follow(scene)
+                            onHoldEnded: (canceled) => pageView.letGo(canceled)
                         }
                     }
 
                     ThemedButton {
                         readonly property var box: pageView.boxes[pageView.cells.length]
+                        // Off the joined panel's hairlines
+                        readonly property real inset: root.joined ? 4 : 0
                         objectName: "dashAddCell_" + pageView.index
                         visible: pageView.addCell
-                        x: box ? box.x * (pageView.columnWidth + root.gap) : 0
-                        y: box ? box.y * pageView.pitch : 0
-                        width: box ? pageView.columnWidth : 0
-                        height: box ? Math.max(Theme.touchTarget, box.h * pageView.pitch - root.gap) : 0
+                        x: box ? pageView.boxLeft(box) + inset : 0
+                        y: box ? pageView.boxTop(box) + inset : 0
+                        width: box ? pageView.boxWidth(box) - 2 * inset : 0
+                        height: box ? Math.max(Theme.touchTarget,
+                                               pageView.boxHeight(box) - 2 * inset) : 0
                         text: "+"
-                        font.pixelSize: 28
+                        font.pixelSize: Theme.fontHero
                         Accessible.name: qsTr("Add a gauge")
                         onClicked: root.startAdd()
                     }
@@ -1670,8 +2412,26 @@ Page {
         objectName: "dashIndicator"
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
-        visible: root.form === "phone" && root.pages.length > 1
+        visible: root.form === "phone" && root.pages.length > 1 && !root.driving
         count: swipe.count
         currentIndex: swipe.currentIndex
+    }
+
+    // The first entries' hint: over the gauges, and it takes no touch
+    Rectangle {
+        objectName: "driveHint"
+        visible: root.driving && root.driveHintUp
+        z: 1
+        anchors.centerIn: swipe
+        width: driveHintText.implicitWidth + 24
+        height: driveHintText.implicitHeight + 12
+        radius: Theme.radius
+        color: Theme.bg
+        Label {
+            id: driveHintText
+            anchors.centerIn: parent
+            text: qsTr("Tap for the controls")
+            color: Theme.textDim
+        }
     }
 }

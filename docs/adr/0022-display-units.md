@@ -52,6 +52,11 @@ unconverted, visibly, rather than wrongly.
 > water, two more decimal places), L/h into US gal/h (one more) and
 > `N·m` into `lb·ft`. The rule is unchanged: one row per unit string.
 
+> **Amended 2026-11-09:** the signal sets imported from OBDb bring `bar`
+> (tire pressures), so imperial also turns bar into psi, with no extra
+> decimal place because psi is finer than bar. The rule is unchanged: one
+> row per unit string.
+
 ### 2. The bridge stores decoded values and converts on the way out
 
 `SignalListModel` keeps each row's decoded value and its history ring

@@ -95,7 +95,15 @@
  * (ecuio_engine_rescan): an ECU that went quiet (the ignition off) left
  * its packs unanswered along with everything else, so packing is judged
  * again once it answers. An ECU that refuses packs answers the rest, so
- * its link never recovers and its channel stays unpacked. */
+ * its link never recovers and its channel stays unpacked.
+ *
+ * A focus can carry a minimum time between sweeps (ADR-0056 section 4,
+ * ecuio_engine_focus): a sweep ends once as many rows have been asked
+ * as the channel has in its rotation, a pack counting each of its rows,
+ * so every pick has been asked, and the next one starts no sooner than
+ * that long after this one started. A sweep that took longer waits for
+ * nothing. Only the rotation waits: the walk, identification, the
+ * diagnostics, a clear and the scan go out in the gap. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -116,7 +124,35 @@ constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_SUPPORTED = 0x12;
 constexpr uint8_t ECUIO_NRC_REQUEST_OUT_OF_RANGE = 0x31;
 constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
+constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION = 0x7E;
 constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
+
+/* Session control (ADR-0060): the one session core enters, the one a
+ * close returns to, and tester present. ISO 14229-2's S3 server time is
+ * 5 s; tester present goes after a quiet ECUIO_ENGINE_KEEPALIVE_US by
+ * default, and a channel quiet for S3 has lost its session. */
+constexpr uint8_t ECUIO_SESSION_DEFAULT = 0x01;
+constexpr uint8_t ECUIO_SESSION_EXTENDED = 0x03;
+constexpr uint8_t ECUIO_TESTER_PRESENT = 0x3E;
+constexpr uint8_t ECUIO_SESSION_CONTROL = 0x10;
+constexpr int64_t ECUIO_ENGINE_KEEPALIVE_US = 2000000;
+constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MIN_US = 500000;
+constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MAX_US = 4500000;
+constexpr int64_t ECUIO_ENGINE_S3_US = 5000000;
+
+/* A channel's session is one of core.h's ECUIO_SESSION_STATE_*; a module
+ * that loses it to 7E or 7F ECUIO_SESSION_LOSSES_MAX times within the
+ * window reads in default from then on (ABANDONED). */
+constexpr int64_t ECUIO_ENGINE_LOSS_WINDOW_US =
+    int64_t{ECUIO_SESSION_LOSS_WINDOW_MS} * 1000;
+
+/* A count that stops at the ABI's 65535 */
+inline void ecuio_engine_count16(uint16_t& n)
+{
+    if (n < UINT16_MAX) {
+        ++n;
+    }
+}
 
 /* Fast requests a channel sends for each slow one (ADR-0039 section 3). */
 constexpr uint32_t ECUIO_ENGINE_FAST_PER_SLOW = 2;
@@ -229,6 +265,8 @@ struct ecuio_request {
                            out (ADR-0056 section 2); back on a count of 0 */
     uint8_t slow_default; /* the class classify or judge_duplicates gave
                              it, which a focus's end restores */
+    uint8_t swept;        /* 1: counted in its channel's sweep under way (a
+                             focus's minimum time, ecuio_engine_count_sweep) */
 };
 
 struct ecuio_scan_entry {
@@ -308,6 +346,27 @@ struct ecuio_engine_channel {
     uint32_t pack_failures = 0; /* failed packs in a row */
     bool packed = false;        /* a pack was answered with several records */
     bool unpacked = false;      /* packing ended until a rescan */
+    /* A focus's minimum time between sweeps (ecuio_engine_count_sweep):
+     * the rows asked since this sweep started, those of them dropped
+     * since, when it started, and the time before which the next one
+     * doesn't */
+    uint32_t sweep_asked = 0;
+    uint32_t sweep_dropped = 0;
+    int64_t sweep_start_us = 0;
+    int64_t next_sweep_us = 0;
+    /* Session control (ADR-0060): the one-shot carries 10 xx or 3E 00
+     * while sessioning. session_fresh: no reply but the session's since it
+     * was entered, so a 7E or 7F then isn't a lost session. last_sent_us:
+     * the channel's last request, which S3 runs from. */
+    uint8_t session_step = ECUIO_SESSION_STATE_NOT_ASKED;
+    uint8_t session_nrc = 0;
+    bool sessioning = false;
+    bool session_fresh = false;
+    uint16_t session_entries = 0; /* each 50 03 */
+    uint16_t session_lost = 0;    /* each re-entry */
+    uint32_t refused_losses = 0;  /* 7E or 7F re-entries in this window */
+    int64_t loss_window_us = 0;   /* when that window started */
+    int64_t last_sent_us = 0;
 };
 
 struct ecuio_request_engine {
@@ -336,6 +395,13 @@ struct ecuio_request_engine {
      * driver resolves the picks again, and a pick that names it unparks
      * it (ecuio_take_focus). Cleared by the focus and its end. */
     bool focus_joined = false;
+    /* The focus's minimum time between sweeps, 0 for none (ADR-0056
+     * section 4); only a focus sets it */
+    int64_t min_sweep_us = 0;
+    /* The session every channel enters (ADR-0060): 0 for none, the
+     * default; set only by ecuio_engine_session */
+    uint8_t session = 0;
+    int64_t keepalive_us = ECUIO_ENGINE_KEEPALIVE_US;
     /* Reply timing (ADR-0042): the driver's, NULL for none. Before each
      * frame it hands over, a driver whose frames carry stamps of their
      * own sets stamp_us (session time on the frames' clock) and
@@ -385,8 +451,9 @@ enum class ecuio_engine_add_result { added, duplicate, refused, full };
 /* Section 3: the services a request may carry. 0x01 (current data), 0x02 (the
  * freeze frame), 0x03, 0x07 and 0x0A (stored, pending and permanent
  * trouble codes; ADR-0037), 0x09 (vehicle information) and 0x22
- * (ReadDataByIdentifier); nothing that clears codes, changes a session,
- * unlocks or writes. Every request enters the table through
+ * (ReadDataByIdentifier); nothing that clears codes, changes a session
+ * (ADR-0060's session step is its own one-shot, below), unlocks or
+ * writes. Every request enters the table through
  * ecuio_engine_add, which refuses the rest, and the one-shot lists are
  * checked against it below, so the rule holds whatever path enrols a
  * request. */
@@ -413,6 +480,35 @@ constexpr bool ecuio_engine_lists_allowed()
 }
 static_assert(ecuio_engine_lists_allowed(),
               "every one-shot list asks only what §3 allows, and never 04");
+
+/* ADR-0060: the session requests the engine may send, and no other: the
+ * extended session (10 03), the default one a close returns to (10 01)
+ * and tester present with a reply (3E 00). Never the programming session
+ * (10 02), a reset, security access (27) or a write. These never enter
+ * the table, which ecuio_engine_service_allowed keeps; the session's
+ * one-shot is built only through this check. */
+constexpr bool ecuio_engine_session_request_allowed(uint8_t sid, uint8_t sub)
+{
+    return (sid == ECUIO_SESSION_CONTROL &&
+            (sub == ECUIO_SESSION_DEFAULT || sub == ECUIO_SESSION_EXTENDED)) ||
+           (sid == ECUIO_TESTER_PRESENT && sub == 0x00);
+}
+static_assert(ecuio_engine_session_request_allowed(0x10, 0x03) &&
+                  ecuio_engine_session_request_allowed(0x10, 0x01) &&
+                  ecuio_engine_session_request_allowed(0x3E, 0x00) &&
+                  !ecuio_engine_session_request_allowed(0x10, 0x02) &&
+                  !ecuio_engine_session_request_allowed(0x10, 0x04) &&
+                  !ecuio_engine_session_request_allowed(0x3E, 0x80) &&
+                  !ecuio_engine_session_request_allowed(0x27, 0x01) &&
+                  !ecuio_engine_session_request_allowed(0x11, 0x01) &&
+                  !ecuio_engine_service_allowed(0x10) &&
+                  !ecuio_engine_service_allowed(0x3E) &&
+                  !ecuio_engine_service_allowed(0x27) &&
+                  !ecuio_engine_service_allowed(0x2E) &&
+                  !ecuio_engine_service_allowed(0x2F) &&
+                  !ecuio_engine_service_allowed(0x31) &&
+                  !ecuio_engine_service_allowed(0x14),
+              "sessions: 10 01, 10 03 and 3E 00 only, and never in the table");
 
 /* A clear (ADR-0038) asks the engine speed, then, only at 0 rpm, sends
  * 04; with the caller's word on a running engine it asks the vehicle
@@ -816,6 +912,17 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             ch.pack_failures = 0;
             ++ch.generation;
         }
+        /* ADR-0060: a link that went quiet may have outlasted S3, and an
+         * unanswered 10 03 is asked again; a refusal stands */
+        if (e->session != 0 &&
+            (ch.session_step == ECUIO_SESSION_STATE_ENTERED ||
+             ch.session_step == ECUIO_SESSION_STATE_UNANSWERED)) {
+            if (ch.session_step == ECUIO_SESSION_STATE_ENTERED) {
+                ecuio_engine_count16(ch.session_lost);
+            }
+            ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+            ++ch.generation;
+        }
         for (uint32_t i = 0; i < ch.ident_count; ++i) {
             if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
                 ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
@@ -973,6 +1080,10 @@ inline void ecuio_engine_drop(ecuio_request_engine* e, uint32_t i,
     if (r.parked == 0) {
         --ch.requests; /* a parked one was counted out already */
     }
+    if (r.swept != 0) {
+        ++ch.sweep_dropped; /* asked in this sweep: the sweep still ends
+                               once every row left has been asked */
+    }
     ++ch.generation;
 }
 
@@ -997,13 +1108,46 @@ inline void ecuio_engine_recount(ecuio_request_engine* e)
     }
 }
 
+/* Channel c's next request starts a sweep: nothing counted in one */
+inline void ecuio_engine_clear_sweep(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ch.sweep_asked = 0;
+    ch.sweep_dropped = 0;
+    for (uint32_t i = 0; i < e->count; ++i) {
+        if (e->requests[i].channel == c) {
+            e->requests[i].swept = 0;
+        }
+    }
+}
+
+/* A focus was asked for: starts every channel's sweep over and sets its
+ * minimum time between sweeps. A wait under way stands while the time is
+ * the same, and ends with a new one, which judges only the sweeps after
+ * it. */
+inline void ecuio_engine_restart_sweeps(ecuio_request_engine* e,
+                                        int64_t min_sweep_us)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        ecuio_engine_clear_sweep(e, c);
+        if (e->min_sweep_us != min_sweep_us) {
+            ch.next_sweep_us = 0;
+        }
+    }
+    e->min_sweep_us = min_sweep_us;
+}
+
 /* ADR-0056 section 2: parks every request keep (one byte per table row,
  * nonzero kept) leaves out and runs the kept ones in the fast class, so
  * the rotation is as short as the picks allow. The walk, the scan,
  * identification, diagnostics, a clear and a request already out are
  * untouched: a parked request's reply still correlates by the table. A
- * dropped request stays dropped. */
-inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep)
+ * dropped request stays dropped. Alone, it is the driver's answer to
+ * focus_joined: the sweep under way and its wait stand, so DIDs found
+ * faster than a sweep runs can't keep it from ever ending. */
+inline void ecuio_engine_focus_keep(ecuio_request_engine* e,
+                                    const uint8_t* keep)
 {
     for (uint32_t i = 0; i < e->count; ++i) {
         ecuio_request& r = e->requests[i];
@@ -1015,6 +1159,15 @@ inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep)
     e->focused = true;
     e->focus_joined = false;
     ecuio_engine_recount(e);
+}
+
+/* A focus asked for: ecuio_engine_focus_keep, with a sweep of the picks
+ * starting at most once every min_sweep_us (section 4; 0: none) */
+inline void ecuio_engine_focus(ecuio_request_engine* e, const uint8_t* keep,
+                               int64_t min_sweep_us = 0)
+{
+    ecuio_engine_restart_sweeps(e, min_sweep_us);
+    ecuio_engine_focus_keep(e, keep);
 }
 
 /* The focus's end: every parked request back in the rotation, each in
@@ -1031,6 +1184,7 @@ inline void ecuio_engine_unfocus(ecuio_request_engine* e)
     }
     e->focused = false;
     e->focus_joined = false;
+    ecuio_engine_restart_sweeps(e, 0);
     ecuio_engine_recount(e);
 }
 
@@ -1533,6 +1687,230 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
     }
 }
 
+/* ADR-0060: every channel enters session sub (only the extended session,
+ * 03) before anything else goes out, and keeps it with tester present
+ * after keepalive_us without a request (clamped to the bounds). False,
+ * and nothing changed, for any other session. */
+inline bool ecuio_engine_session(ecuio_request_engine* e, uint8_t sub,
+                                 int64_t keepalive_us)
+{
+    if (sub != ECUIO_SESSION_EXTENDED ||
+        !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL, sub)) {
+        return false;
+    }
+    e->session = sub;
+    e->keepalive_us = keepalive_us < ECUIO_ENGINE_KEEPALIVE_MIN_US
+                          ? ECUIO_ENGINE_KEEPALIVE_MIN_US
+                      : keepalive_us > ECUIO_ENGINE_KEEPALIVE_MAX_US
+                          ? ECUIO_ENGINE_KEEPALIVE_MAX_US
+                          : keepalive_us;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        e->chans[c].session_step = ECUIO_SESSION_STATE_ENTERING;
+    }
+    return true;
+}
+
+/* Whether channel c has a session to enter or keep */
+inline bool ecuio_engine_session_live(const ecuio_request_engine* e,
+                                      const ecuio_engine_channel& ch)
+{
+    return e->session != 0 &&
+           (ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
+            ch.session_step == ECUIO_SESSION_STATE_ENTERED);
+}
+
+/* When channel c's session next needs a request: at once while 10 03 is
+ * due, keepalive_us after its last request while entered, else never */
+inline int64_t ecuio_engine_session_next_us(const ecuio_request_engine* e,
+                                            const ecuio_engine_channel& ch)
+{
+    if (!ecuio_engine_session_live(e, ch)) {
+        return INT64_MAX;
+    }
+    if (ch.session_step == ECUIO_SESSION_STATE_ENTERING) {
+        return ch.next_send_us;
+    }
+    const int64_t k = ch.last_sent_us + e->keepalive_us;
+    return k > ch.next_send_us ? k : ch.next_send_us;
+}
+
+/* Channel c's session request, when one is due at now_us: 10 <session>
+ * to enter, again once S3 has passed with nothing sent, or 3E 00 after
+ * keepalive_us with nothing sent. Built only through the allow-list: a
+ * session it refuses goes nowhere, and the channel reads in default. */
+inline bool ecuio_engine_session_due(ecuio_request_engine* e, uint32_t c,
+                                     int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (!ecuio_engine_session_live(e, ch)) {
+        return false;
+    }
+    if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
+        now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US) {
+        ch.session_step = ECUIO_SESSION_STATE_ENTERING; /* lapsed */
+        ecuio_engine_count16(ch.session_lost);
+        ++ch.generation;
+    }
+    uint8_t sid = 0;
+    uint8_t sub = 0;
+    if (ch.session_step == ECUIO_SESSION_STATE_ENTERING) {
+        sid = ECUIO_SESSION_CONTROL;
+        sub = e->session;
+    } else if (now_us - ch.last_sent_us >= e->keepalive_us) {
+        sid = ECUIO_TESTER_PRESENT;
+        sub = 0x00;
+    } else {
+        return false;
+    }
+    if (!ecuio_engine_session_request_allowed(sid, sub)) {
+        ch.session_step = ECUIO_SESSION_STATE_REFUSED;
+        ch.session_nrc = 0;
+        ++ch.generation;
+        return false;
+    }
+    ch.once = ecuio_request{};
+    ch.once.bytes[0] = sid;
+    ch.once.bytes[1] = sub;
+    ch.once.len = 2;
+    ch.once.channel = static_cast<uint8_t>(c);
+    ch.sessioning = true;
+    return true;
+}
+
+/* Settles channel c's session request: a positive reply to 10 xx enters
+ * the session; a refusal of it reads on in default with its code; one
+ * unanswered reads on in default until ecuio_engine_rescan; tester
+ * present unanswered means the session may be gone, so it's entered
+ * again, and refused leaves it standing (the other requests keep it). */
+inline void ecuio_engine_session_settle(ecuio_request_engine* e, uint32_t c,
+                                        uint8_t outcome, uint8_t nrc,
+                                        int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ch.sessioning = false;
+    if (ch.once.bytes[0] == ECUIO_TESTER_PRESENT) {
+        if (outcome == ECUIO_DIAG_UNANSWERED) {
+            ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+            ecuio_engine_count16(ch.session_lost);
+            ++ch.generation;
+        }
+        return;
+    }
+    if (outcome == ECUIO_DIAG_ANSWERED) {
+        ch.session_step = ECUIO_SESSION_STATE_ENTERED;
+        ch.session_nrc = 0;
+        ch.session_fresh = true;
+        ch.last_sent_us = now_us;
+        ecuio_engine_count16(ch.session_entries);
+    } else if (outcome == ECUIO_DIAG_REFUSED) {
+        ch.session_step = ECUIO_SESSION_STATE_REFUSED;
+        ch.session_nrc = nrc;
+    } else {
+        ch.session_step = ECUIO_SESSION_STATE_UNANSWERED;
+    }
+    ++ch.generation;
+}
+
+/* A 7E or 7F reply on channel c in its session, to a request other than
+ * the session's: the ECU has left the session (a reset, S3 run out on its
+ * side), unless it was entered and has answered nothing else since. Then
+ * the session is entered again and the request isn't counted against
+ * itself: a one-shot goes back unasked and a rotation request stays. The
+ * ECUIO_SESSION_LOSSES_MAX-th within the window abandons the session
+ * instead: a module that keeps leaving it reads in default. True when it
+ * was entered again; false leaves the reply to the usual rules. */
+inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
+                                         int32_t out, uint8_t code,
+                                         int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (e->session == 0 || ch.session_step != ECUIO_SESSION_STATE_ENTERED ||
+        ch.session_fresh || ch.sessioning || ch.clearing ||
+        out == ECUIO_ENGINE_PACK ||
+        (code != ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION &&
+         code != ECUIO_NRC_NOT_IN_ACTIVE_SESSION)) {
+        return false;
+    }
+    if (ch.refused_losses == 0 ||
+        now_us - ch.loss_window_us >= ECUIO_ENGINE_LOSS_WINDOW_US) {
+        ch.refused_losses = 0;
+        ch.loss_window_us = now_us;
+    }
+    if (++ch.refused_losses >= ECUIO_SESSION_LOSSES_MAX) {
+        ch.session_step = ECUIO_SESSION_STATE_ABANDONED;
+        ch.session_nrc = code;
+        ++ch.generation;
+        return false;
+    }
+    ch.outstanding = ECUIO_ENGINE_NONE;
+    ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+    ecuio_engine_count16(ch.session_lost);
+    ++ch.generation;
+    if (out != ECUIO_ENGINE_ONCE) {
+        return true;
+    }
+    if (ch.scanning) {
+        ch.scanning = false;
+        ch.scan_cursor = ch.scan_index; /* asked first once back in */
+    }
+    ch.identifying = false; /* the item is still unasked */
+    ch.diagnosing = false;
+    return true;
+}
+
+/* At a close: the request that returns channel c to the default session
+ * (10 01), when it entered one, into *out. False when it never did. */
+inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
+                                       ecuio_request* out)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (e->session == 0 || ch.session_entries == 0 ||
+        !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL,
+                                              ECUIO_SESSION_DEFAULT)) {
+        return false;
+    }
+    *out = ecuio_request{};
+    out->bytes[0] = ECUIO_SESSION_CONTROL;
+    out->bytes[1] = ECUIO_SESSION_DEFAULT;
+    out->len = 2;
+    out->channel = static_cast<uint8_t>(c);
+    ch.session_step = ECUIO_SESSION_STATE_NOT_ASKED;
+    return true;
+}
+
+/* Rotation request r has just been chosen on channel c at now_us: counts
+ * its rows toward the sweep. The rows are consecutive in the rotation's
+ * one class (a focus runs its picks fast), so as many as the rotation
+ * holds have asked every pick; a pack that runs past that asks some
+ * twice, and its surplus counts for nothing, since the wait can only
+ * fall between two requests. A row asked and then dropped
+ * (ecuio_engine_drop) left ch.requests but stays in sweep_asked, so it
+ * counts in sweep_dropped too. */
+inline void ecuio_engine_count_sweep(ecuio_request_engine* e, uint32_t c,
+                                     int32_t r, int64_t now_us)
+{
+    if (e->min_sweep_us == 0) {
+        return;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.sweep_asked == 0) {
+        ch.sweep_start_us = now_us;
+    }
+    if (r == ECUIO_ENGINE_PACK) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            e->requests[ch.pack_rows[k]].swept = 1;
+        }
+        ch.sweep_asked += ch.pack_count;
+    } else if (r >= 0) {
+        e->requests[r].swept = 1;
+        ++ch.sweep_asked;
+    }
+    if (ch.sweep_asked >= ch.requests + ch.sweep_dropped) {
+        ecuio_engine_clear_sweep(e, c);
+        ch.next_sweep_us = ch.sweep_start_us + e->min_sweep_us;
+    }
+}
+
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
  * item, a diagnostics item, a clear's request or a scanned DID already
  * in the one-shot (its write failed), then while its walk has a bitmap
@@ -1541,8 +1919,9 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
  * item, then the next scanned DID, else the next
  * request of its rotation, or ECUIO_ENGINE_NONE while
  * one is outstanding, before the floor, or when there is nothing to
- * send. A walk out of budget ends here. Moves the rotation past the
- * request it returns; ecuio_engine_sent records what became of it. */
+ * send; the rotation's own turn also waits for a focus's next sweep. A
+ * walk out of budget ends here. Moves the rotation past the request it
+ * returns; ecuio_engine_sent records what became of it. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -1552,7 +1931,12 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     }
     /* Taken before a probe started the walk: it goes first, so its reply
      * settles it and no other request's reply does. */
-    if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing) {
+    if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
+        ch.sessioning) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    /* ADR-0060: the session first; while 10 03 is due nothing else goes */
+    if (ecuio_engine_session_due(e, c, now_us)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.walking) {
@@ -1641,6 +2025,9 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     if (ch.requests == 0) {
         return ECUIO_ENGINE_NONE;
     }
+    if (e->min_sweep_us > 0 && now_us < ch.next_sweep_us) {
+        return ECUIO_ENGINE_NONE;
+    }
     const bool slow_turn = ch.fast_run >= ECUIO_ENGINE_FAST_PER_SLOW;
     int32_t i = ecuio_engine_next_of(e, c, slow_turn);
     if (i < 0) {
@@ -1654,7 +2041,9 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     } else if (ch.fast_run < ECUIO_ENGINE_FAST_PER_SLOW) {
         ++ch.fast_run;
     }
-    return ecuio_engine_gather(e, c, i);
+    const int32_t asked = ecuio_engine_gather(e, c, i);
+    ecuio_engine_count_sweep(e, c, asked, now_us);
+    return asked;
 }
 
 /* A pack on channel c that failed: silence, a negative reply or one
@@ -1681,6 +2070,7 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
     ch.deadline_us = now_us + ECUIO_ENGINE_WAIT_US;
     if (sent) {
         ch.sent_us = now_us;
+        ch.last_sent_us = now_us;
     }
     ch.next_send_us = now_us + ECUIO_ENGINE_GAP_US;
 }
@@ -1713,6 +2103,8 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     }
     if (pack) {
         ecuio_engine_pack_failed(e, c);
+    } else if (once && ch.sessioning) {
+        ecuio_engine_session_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, now_us);
     } else if (once && ch.clearing) {
         ecuio_engine_clear_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, nullptr, 0);
     } else if (once && ch.identifying) {
@@ -1890,6 +2282,11 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                 : bytes <= table ? static_cast<uint8_t>(bytes)
                                  : ECUIO_ENGINE_PID_LONG;
         }
+        if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
+            ecuio_engine_session_settle(e, c, ECUIO_DIAG_ANSWERED, 0, now_us);
+            return ecuio_reply::positive;
+        }
+        ch.session_fresh = false;
         if (out == ECUIO_ENGINE_ONCE && ch.clearing) {
             ecuio_engine_clear_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
         } else if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
@@ -1909,8 +2306,8 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         return ecuio_reply::positive;
     }
     if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
-        !ch.diagnosing && !ch.scanning && !ch.clearing && len >= 2 &&
-        data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
+        !ch.diagnosing && !ch.scanning && !ch.clearing && !ch.sessioning &&
+        len >= 2 && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
         ch.walk_stray = true; /* another PID's answer, not the bitmap's */
     }
     if (ecuio_engine_scan_late(e, c, data, len)) {
@@ -1927,6 +2324,14 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     if (code == ECUIO_NRC_RESPONSE_PENDING) {
         ch.deadline_us = now_us + ECUIO_ENGINE_PENDING_WAIT_US;
         return ecuio_reply::pending;
+    }
+    if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
+        ch.outstanding = ECUIO_ENGINE_NONE;
+        ecuio_engine_session_settle(e, c, ECUIO_DIAG_REFUSED, code, now_us);
+        return ecuio_reply::negative;
+    }
+    if (ch.in_step && ecuio_engine_session_reenter(e, c, out, code, now_us)) {
+        return ecuio_reply::negative;
     }
     ch.outstanding = ECUIO_ENGINE_NONE;
     if (out >= 0) {
@@ -1961,9 +2366,20 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     return ecuio_reply::negative;
 }
 
+/* Whether channel c has anything to send but its rotation: what a
+ * focus's wait between sweeps doesn't hold back. */
+inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
+{
+    return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
+           ch.diag_pending > 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
+           ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING;
+}
+
 /* Microseconds until the engine next has something to do: a wait
- * ending, or a channel's floor passing while it has something to send;
- * 0 when something is due now, INT64_MAX when nothing is. */
+ * ending, or a channel's floor passing while it has something to send
+ * (with only its rotation left, a focus's next sweep, when that is
+ * later); 0 when something is due now, INT64_MAX when nothing is. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us)
 {
@@ -1972,11 +2388,29 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
         const ecuio_engine_channel& ch = e->chans[c];
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
             !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
-            ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE) {
+            ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+            !ecuio_engine_session_live(e, ch)) {
             continue;
         }
-        const int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE)
-                               ? ch.deadline_us : ch.next_send_us;
+        int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
+                                                           : ch.next_send_us;
+        const bool asks_more = ch.requests > 0 || ch.scan_pending > 0 ||
+                               ch.ident_pending > 0 || ch.diag_pending > 0 ||
+                               ch.walking ||
+                               ch.clear_step != ECUIO_CLEAR_STEP_NONE;
+        if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
+            !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {
+            at = ch.next_sweep_us;
+        }
+        if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more) {
+            at = INT64_MAX; /* only the session's keepalive is left */
+        }
+        if (ch.outstanding == ECUIO_ENGINE_NONE) {
+            const int64_t s = ecuio_engine_session_next_us(e, ch);
+            if (s < at) {
+                at = s;
+            }
+        }
         const int64_t in = (at > now_us) ? at - now_us : 0;
         if (in < next) {
             next = in;
@@ -2049,6 +2483,18 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     }
     if (out->scan_total > 0 && out->scan_done == out->scan_total) {
         out->flags |= ECUIO_SUPPORT_SCAN_COMPLETE;
+    }
+    const bool extended =
+        e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+    out->session_asked = e->session;
+    out->session = extended ? e->session : ECUIO_SESSION_DEFAULT;
+    out->session_state =
+        e->session != 0 ? ch.session_step : ECUIO_SESSION_STATE_NOT_ASKED;
+    out->session_nrc = ch.session_nrc;
+    out->session_entries = ch.session_entries;
+    out->session_lost = ch.session_lost;
+    if (extended) {
+        out->flags |= ECUIO_SUPPORT_EXTENDED;
     }
 }
 

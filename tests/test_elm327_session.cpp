@@ -232,6 +232,20 @@ bool wait_for(const std::function<bool()>& pred, int timeout_ms)
     return pred();
 }
 
+/* The worker's 5 s waits shortened for a scope; a running worker takes
+ * them on its next pass */
+class ShortTimeouts
+{
+public:
+    ShortTimeouts(uint32_t prompt_ms, uint32_t monitor_check_ms)
+    {
+        ecuio_elm327_set_timeouts_ms(prompt_ms, monitor_check_ms);
+    }
+    ~ShortTimeouts() { ecuio_elm327_set_timeouts_ms(0, 0); }
+    ShortTimeouts(const ShortTimeouts&) = delete;
+    ShortTimeouts& operator=(const ShortTimeouts&) = delete;
+};
+
 std::string hex_of(const uint8_t* d, size_t n)
 {
     static const char digits[] = "0123456789ABCDEF";
@@ -401,8 +415,9 @@ TEST_F(Elm327SessionTest, TheSessionInfoSaysWhatItRunsOn)
     EXPECT_STREQ(info.dll_version, "");
     EXPECT_STREQ(info.api_version, "");
     EXPECT_EQ(info.vbatt_mv, 13800u);
-    EXPECT_EQ(info.flags,
-              ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS);
+    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT |
+                              ECUIO_SESSION_INFO_VERSIONS |
+                              ECUIO_SESSION_INFO_REQUESTS);
     EXPECT_STREQ(info.profile, "obd2") << "elm327://'s default";
 }
 
@@ -778,6 +793,111 @@ TEST_F(Elm327SessionTest, AFocusAsksOnlyThePickedPids)
         },
         5000))
         << "the whole set is asked again";
+}
+
+/* ADR-0056 section 4: two picks with a minimum time of 200 ms, judged by
+ * the fake's own stamps on its requests: from one sweep's first request
+ * to the next's, the median is at least the minimum (a stall only adds)
+ * and each sweep's second request follows at the engine's floor, not
+ * spread over the gap */
+TEST_F(Elm327SessionTest, AMinimumTimeSpacesTheFocusSweeps)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0&probe=0")), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, ids.data(), 2, 200, 0),
+              ECUIO_OK);
+    s.start();
+    static constexpr uint32_t want = 12; /* no capture: MSVC and Clang agree */
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return on_fake<uint32_t>([](fake_elm327::adapter& a) {
+                       return a.requests;
+                   }) >= want;
+        },
+        5000));
+    const std::vector<int64_t> stamps =
+        on_fake<std::vector<int64_t>>([](fake_elm327::adapter& a) {
+            return std::vector<int64_t>(a.request_us, a.request_us + want);
+        });
+    std::vector<int64_t> sweeps;
+    std::vector<int64_t> within;
+    for (size_t i = 0; i + 2 < stamps.size(); i += 2) {
+        sweeps.push_back(stamps[i + 2] - stamps[i]);
+        within.push_back(stamps[i + 1] - stamps[i]);
+    }
+    std::sort(sweeps.begin(), sweeps.end());
+    std::sort(within.begin(), within.end());
+    const int64_t sweep = sweeps[sweeps.size() / 2];
+    const int64_t inner = within[within.size() / 2];
+    RecordProperty("sweep_median_us", static_cast<int>(sweep));
+    EXPECT_GE(sweep, 190000) << "sweeps came faster than the minimum";
+    EXPECT_LT(inner, 100000) << "a sweep's requests were spread over the gap";
+}
+
+/* A session that asks says so in its info, and a recording of it names
+ * the focus's minimum time, after the focus line and before the signals */
+TEST_F(Elm327SessionTest, ARecordingNamesTheMinimumTimeOfASessionThatAsks)
+{
+    const fs::path root =
+        fs::temp_directory_path() / temp_name("ecuio-elm327-floor");
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0&probe=0")), ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    uint16_t rpm = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Cu) {
+            rpm = d.id;
+        }
+    }
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 250, 0), ECUIO_OK);
+    const std::string root8 = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len), ECUIO_OK);
+    const fs::path folder = fs::u8path(buf);
+    ASSERT_EQ(ecuio_session_record(s.s, rec), ECUIO_OK);
+    ecuio_session_destroy(s.s);
+    s.s = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+    std::ifstream f(folder / "events.log", std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::string events;
+    for (char c : ss.str()) {
+        if (c != '\r') {
+            events += c;
+        }
+    }
+    const size_t focus = events.find("\nfocus  ");
+    const size_t floor = events.find("\nmin sweep  250 ms\n");
+    const size_t signal = events.find("\nsignal  ");
+    ASSERT_NE(focus, std::string::npos) << events;
+    ASSERT_NE(floor, std::string::npos) << events;
+    EXPECT_TRUE(focus < floor && floor < signal) << events;
+    fs::remove_all(root, ec);
 }
 
 /* A focus is judged by what the session can still ask: once the walk
@@ -1268,6 +1388,189 @@ TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
     }
 }
 
+namespace {
+
+/* The fakes' ECUs back in the default session before and after a case
+ * (the state is per process), and the module table empty */
+struct SessionsReset {
+    SessionsReset() { fake_ecu::reset_sessions(); }
+    ~SessionsReset()
+    {
+        fake_ecu::set_module_dids(nullptr);
+        fake_ecu::reset_sessions();
+    }
+};
+
+/* Each session-control command the adapter saw, with the header (the
+ * last AT SH) it went out under */
+struct SessionCommand {
+    std::string command;
+    std::string header;
+};
+
+std::vector<SessionCommand>
+session_commands(const std::vector<std::string>& sent)
+{
+    std::vector<SessionCommand> out;
+    std::string header;
+    for (const std::string& c : sent) {
+        if (c.rfind("ATSH", 0) == 0) {
+            header = c;
+        } else if (c == "1003" || c == "1001") {
+            out.push_back({c, header});
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+/* ADR-0060: ?session=03 sends 10 03 before any request, the engine ECU
+ * answers D200 only in the session it entered, and the close's last
+ * command is 10 01 */
+TEST_F(Elm327SessionTest, AnExtendedSessionIsEnteredFirstAndLeftAtClose)
+{
+    SessionsReset reset;
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C,D200&session=03"
+                           "&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> d200 = {0x62, 0xD2, 0x00, 0x1A, 0x2C};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            for (const Capture::Frame& f : s.cap.frames) {
+                if (f.id == 0x7E8u && f.data == d200) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        5000))
+        << "D200 answers only in the extended session";
+    ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    const std::vector<std::string> sent = fake_commands();
+    std::string first;
+    for (const std::string& c : sent) {
+        if (c.rfind("AT", 0) != 0 && c.rfind("ST", 0) != 0) {
+            first = c;
+            break;
+        }
+    }
+    EXPECT_EQ(first, "1003") << "the first request";
+    ASSERT_FALSE(sent.empty());
+    EXPECT_EQ(sent.back(), "1001") << "the close's last command";
+    EXPECT_EQ(fake_count("1003"), 1u);
+    EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
+}
+
+/* Without ?session=03 the engine ECU stays in the default session: D200
+ * is refused (7F 22 31), never answered, while 1E1C reads */
+TEST_F(Elm327SessionTest, WithoutASessionD200IsRefused)
+{
+    SessionsReset reset;
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C,D200&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> engine = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int a = 0;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a += f.id == 0x7E8u && f.data == engine;
+            }
+            return a >= 3;
+        },
+        5000));
+    EXPECT_EQ(fake_count("1003"), 0u);
+    std::lock_guard<std::mutex> g(s.cap.m);
+    for (const Capture::Frame& f : s.cap.frames) {
+        EXPECT_FALSE(f.data.size() >= 3 && f.data[0] == 0x62 &&
+                     f.data[1] == 0xD2)
+            << "D200 answered in the default session";
+    }
+}
+
+/* A module that refuses 10 03 goes on reading in the default session,
+ * and the close sends 10 01 to the engine ECU alone */
+TEST_F(Elm327SessionTest, AModuleThatRefusesTheSessionIsReadInTheDefaultOne)
+{
+    SessionsReset reset;
+    ASSERT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12"));
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=D200,7E9:D801"
+                           "&session=03&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> d200 = {0x62, 0xD2, 0x00, 0x1A, 0x2C};
+    const std::vector<uint8_t> mod = {0x62, 0xD8, 0x01, 0x00, 0x12};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            bool a = false;
+            bool b = false;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a = a || (f.id == 0x7E8u && f.data == d200);
+                b = b || (f.id == 0x7E9u && f.data == mod);
+            }
+            return a && b;
+        },
+        5000))
+        << "the engine ECU's D200 and the module's D801 both read";
+    ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    const std::vector<SessionCommand> cmds = session_commands(fake_commands());
+    int entered_engine = 0;
+    int entered_module = 0;
+    int left = 0;
+    for (const SessionCommand& c : cmds) {
+        if (c.command == "1003") {
+            entered_engine += c.header == "ATSH7E0";
+            entered_module += c.header == "ATSH7E1";
+        } else {
+            ++left;
+            EXPECT_EQ(c.header, "ATSH7E0")
+                << "10 01 goes to the ECU in the session alone";
+        }
+    }
+    EXPECT_EQ(entered_engine, 1);
+    EXPECT_GE(entered_module, 1) << "each channel tries the session";
+    EXPECT_EQ(left, 1);
+}
+
+/* ?session= and ?keepalive_ms= are refused where the engine can't use
+ * them, each with its reason */
+TEST_F(Elm327SessionTest, TheSessionKeysAreRefusedWhereTheyCannotApply)
+{
+    struct Case {
+        const char* query;
+        const char* detail;
+    };
+    const Case cases[] = {
+        {"?profile=obd2&session=03",
+         "?session=03 belongs to profile=uds-generic, the profile that reads "
+         "DIDs"},
+        {"?profile=uds-generic&did=1E1C&keepalive_ms=1000",
+         "?keepalive_ms= keeps the extended session alive: it needs "
+         "?session=03"},
+        {"?profile=uds-generic&did=1E1C&session=02",
+         "?session= needs 01 (the default session) or 03 (the extended one), "
+         "not '02'"},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.query);
+        Session s;
+        EXPECT_EQ(s.create(uri(c.query)), ECUIO_ERR_BAD_URI);
+        EXPECT_STREQ(ecuio_last_error_detail(), c.detail);
+    }
+}
+
 /* Two ECUs asked through one adapter, each at the engine's floor (20 ms
  * send to send on each channel): the fake answers at once, so the
  * worker's wait while no command is out sets the pace; never faster than
@@ -1290,7 +1593,7 @@ TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
      * so request i to request i + 2 is one channel's period, and its
      * median is the floor's (about 21 ms) whatever a few stalls add. The
      * floor is judged; the ceiling is loose, 4x the floor, since a loaded
-     * machine's median reached 34 ms (2026-11-07, under verify.sh) and
+     * machine's median reaches about 34 ms under a full verify.sh and
      * macOS runners end a plain sleep up to 18 ms late: it fails a pace
      * that drifted far slow, not load. The high-resolution timer's own
      * pace is CoreTest.APreciseWait*'s */
@@ -1505,17 +1808,37 @@ TEST_F(Elm327SessionTest, APendingReplyIsFollowedByItsAnswer)
     EXPECT_EQ(s.state(), ECUIO_OK);
 }
 
-/* An ECU that keeps answering 7F 01 78 past 5 s: the adapter listens on,
- * and so does the worker, since its 5 s limit counts from the last line,
- * not the request; the answer at 5.5 s completes the request, with no
- * failure on the way */
-TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastFiveSeconds)
+/* The waits as shipped; the cases below shorten them */
+TEST_F(Elm327SessionTest, TheWorkersWaitsAreFiveSeconds)
 {
+    uint32_t prompt = 0;
+    uint32_t check = 0;
+    ecuio_elm327_get_timeouts_ms(&prompt, &check);
+    EXPECT_EQ(prompt, 5000u);
+    EXPECT_EQ(check, 5000u);
+    {
+        ShortTimeouts timeouts(2000, 1500);
+        ecuio_elm327_get_timeouts_ms(&prompt, &check);
+        EXPECT_EQ(prompt, 2000u);
+        EXPECT_EQ(check, 1500u);
+    }
+    ecuio_elm327_get_timeouts_ms(&prompt, &check);
+    EXPECT_EQ(prompt, 5000u);
+    EXPECT_EQ(check, 5000u);
+}
+
+/* An ECU that keeps answering 7F 01 78 past the worker's limit: the adapter
+ * listens on, and so does the worker, since its limit counts from the last
+ * line, not the request; the answer past it completes the request, with no
+ * failure on the way */
+TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastThePromptLimit)
+{
+    ShortTimeouts timeouts(2000, 0);
     set_knobs([](fake_elm327::knobs& k) {
         k.pending = true;
         k.pending_count = 2;
-        k.pending_gap_ms = 3000;
-        k.reply_delay_ms = 5500;
+        k.pending_gap_ms = 1200;
+        k.reply_delay_ms = 2200;
     });
     Session s;
     ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
@@ -1885,21 +2208,31 @@ TEST_F(Elm327SessionTest, AResetWhoseSetupFailsIsAHardFailure)
 }
 
 /* An adapter that stops answering, prompt and all: a hard failure once
- * 5 s pass with nothing */
-TEST_F(Elm327SessionTest, NoPromptWithinFiveSecondsIsAHardFailure)
+ * the worker's limit passes with nothing, and the log names the limit
+ * in force */
+TEST_F(Elm327SessionTest, NoPromptWithinThePromptLimitIsAHardFailure)
 {
-    Session s;
-    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
-    s.start();
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
-    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
-    const auto from = std::chrono::steady_clock::now();
-    ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 9000));
-    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::steady_clock::now() - from)
-                          .count();
-    EXPECT_GE(took, 4900);
+    const LogDir logs("silent");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        const ShortTimeouts timeouts(500, 0);
+        const auto from = std::chrono::steady_clock::now();
+        set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            4000));
+        const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - from)
+                              .count();
+        EXPECT_GE(took, 400);
+    }
+    const std::string log = logs.only_log();
+    EXPECT_NE(log.find("] no line and no prompt for 500 ms ("),
+              std::string::npos)
+        << log;
 }
 
 /* ---- Passive listening (ADR-0026's appendix "passive listening") ---- */
@@ -2033,64 +2366,86 @@ TEST_F(Elm327SessionTest, ListeningGoesQuietAndAMessageEndsIt)
     EXPECT_EQ(episodes, 0u);
 }
 
-/* 5 s with no line: the monitor is stopped with a space, never a CR;
- * the adapter's STOPPED and prompt show it's there, and AT MA starts
- * again with no failure; both gaps on the fake's stamps */
-TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedEveryFiveSeconds)
+/* The check's interval with no line: the monitor is stopped with a space,
+ * never a CR; the adapter's STOPPED and prompt show it's there, and AT MA
+ * starts again with no failure; every gap and count on the fake's stamps of
+ * the first check, so a later check can't change them */
+TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedAtItsInterval)
 {
     Session s;
     listen_on(s);
     const int64_t first_monitor = monitor_started();
+    const ShortTimeouts timeouts(0, 2000);
     ASSERT_TRUE(wait_for(
         [] {
-            return on_fake<uint32_t>(
-                       [](fake_elm327::adapter& a) { return a.stops; }) >= 1;
+            return on_fake<int64_t>([](fake_elm327::adapter& a) {
+                       return a.monitor_after_stop_us;
+                   }) != 0;
         },
-        8000));
-    const int64_t stopped =
-        on_fake<int64_t>([](fake_elm327::adapter& a) { return a.stop_us; });
-    EXPECT_GE(stopped - first_monitor, 4900000);
-    ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 2000));
-    EXPECT_LT(monitor_started() - stopped, 90000)
+        4500));
+    const int64_t stopped = on_fake<int64_t>(
+        [](fake_elm327::adapter& a) { return a.first_stop_us; });
+    EXPECT_GE(stopped - first_monitor, 1900000);
+    const int64_t restarted = on_fake<int64_t>(
+        [](fake_elm327::adapter& a) { return a.monitor_after_stop_us; });
+    EXPECT_LT(restarted - stopped, 90000)
         << "AT MA again at once, not on the backoff";
-    EXPECT_EQ(
-        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.stops; }), 1u);
+    const auto second_stop = [] {
+        return on_fake<int64_t>(
+            [](fake_elm327::adapter& a) { return a.second_stop_us; });
+    };
+    (void)wait_for([&] { return second_stop() != 0; }, 300);
+    if (second_stop() != 0) {
+        EXPECT_GE(second_stop() - restarted, 1900000)
+            << "the next check waits its interval from the new AT MA";
+    }
     EXPECT_EQ(
         on_fake<uint8_t>([](fake_elm327::adapter& a) { return a.last_stop; }),
         ' ');
     EXPECT_EQ(
         on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.bare_crs; }),
         0u);
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 3000));
     uint32_t episodes = 99;
-    EXPECT_EQ(s.state(&episodes), ECUIO_ERR_VEHICLE_TIMEOUT);
+    (void)s.state(&episodes);
     EXPECT_EQ(episodes, 0u);
 }
 
-/* No prompt within 5 s of the check's stop: a hard failure; the adapter
- * back, the reset that stops its monitor and the setup bring the monitor
- * back with no reconnect */
+/* No prompt within the check's interval of its stop: a hard failure; the
+ * adapter back, the reset that stops its monitor and the setup bring the
+ * monitor back with no reconnect. The log names the interval in force. */
 TEST_F(Elm327SessionTest, AHungMonitorIsAHardFailureAndRecovers)
 {
-    Session s;
-    listen_on(s);
-    set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
-    const int64_t from = monitor_started();
-    ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 12000));
-    EXPECT_GE(fake_elm327::steady_us() - from, 9800000)
-        << "5 s with no line, then 5 s with no prompt";
-    set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
-    ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
-    EXPECT_GE(fake_count("ATZ"), 2u) << "the setup ran again";
-    ASSERT_TRUE(wait_for(
-        [&] {
-            on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
-            return s.state() == ECUIO_OK;
-        },
-        3000));
-    uint32_t episodes = 0;
-    (void)s.state(&episodes);
-    EXPECT_EQ(episodes, 1u);
+    const LogDir logs("hung");
+    {
+        Session s;
+        listen_on(s);
+        set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
+        const ShortTimeouts timeouts(0, 500);
+        const int64_t from = monitor_started();
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            4000));
+        EXPECT_GE(fake_elm327::steady_us() - from, 800000)
+            << "the interval with no line, then the interval with no prompt";
+        set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
+        ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
+        EXPECT_GE(fake_count("ATZ"), 2u) << "the setup ran again";
+        ASSERT_TRUE(wait_for(
+            [&] {
+                on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
+                return s.state() == ECUIO_OK;
+            },
+            3000));
+        uint32_t episodes = 0;
+        (void)s.state(&episodes);
+        EXPECT_EQ(episodes, 1u);
+    }
+    const std::string log = logs.only_log();
+    EXPECT_TRUE(in_order(log, {"] no line for 500 ms: the monitor stops",
+                               "] no prompt within 500 ms of the stop"}))
+        << log;
 }
 
 /* BUFFER FULL with the monitor going on (an STN): the next message
@@ -2359,7 +2714,8 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?serial= needs a serial rate from 300 to 4000000, not '9'"},
         {uri("?flags=0"), ECUIO_ERR_BAD_URI,
          "elm327:// takes no query key 'flags', only baud, serial, filter, "
-         "txid, poll, probe, identify, diagnose, pack, scan, profile and did"},
+         "txid, poll, probe, identify, diagnose, pack, scan, profile, did, "
+         "session and keepalive_ms"},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "

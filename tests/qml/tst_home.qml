@@ -52,6 +52,22 @@ TestCase {
         return out
     }
 
+    // Home's Connect... is secondary beside the header's primary, and
+    // Disconnect is quiet
+    function test_theConnectButtonRanksUnderTheHeaders() {
+        const page = createPage(380, 800)
+        const button = find(page, "homeConnect")
+        compare(button.text, "Connect…")
+        verify(!button.highlighted, "secondary")
+        verify(!button.flat, "not quiet: it is the page's action")
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        tryCompare(button, "text", "Disconnect", 5000)
+        verify(button.flat, "ending a session is quiet")
+        verify(!button.highlighted)
+        Bridge.disconnectSession()
+        tryCompare(button, "text", "Connect…", 5000)
+    }
+
     // Developer mode's hint line is the longest
     function test_uprightEverythingFitsTheWidth() {
         Theme.developerMode = true
@@ -71,5 +87,19 @@ TestCase {
         compare(column.y, Theme.pageMargin, "the column starts at the margin")
         verify(flick.contentHeight >= column.y + column.height,
                "the page scrolls to the column's end: " + flick.contentHeight)
+    }
+
+    // The hint names every way in, not the first two the app had
+    function test_theHintNamesEveryWayIn() {
+        const page = createPage(1280, 720)
+        const hint = find(page, "homeHint")
+        verify(hint.visible, "shown with no session")
+        compare(hint.text, "Pick what to connect to in Settings: a J2534 interface, "
+                + "an ELM327 adapter over a serial port, Bluetooth or WiFi, or a SocketCAN bus")
+        Theme.developerMode = true
+        compare(hint.text, "Pick what to connect to in Settings: a J2534 interface, "
+                + "an ELM327 adapter over a serial port, Bluetooth or WiFi, a SocketCAN bus, "
+                + "or the mock://demo preset")
+        Theme.developerMode = false
     }
 }

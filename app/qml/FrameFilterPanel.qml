@@ -21,6 +21,17 @@ GridLayout {
     required property var frames
     // FrameFilter::Direction's order: All, Received, Sent
     property int direction: 0
+    // The nearest ancestor's touchMin (the recordings page asks for a phone's
+    // touch size; the Log page has none), as ThemedButton takes it
+    // qmllint disable missing-property
+    readonly property real touchMin: {
+        for (let p = panel.parent; p; p = p.parent) {
+            if (p.touchMin !== undefined)
+                return p.touchMin
+        }
+        return 0
+    }
+    // qmllint enable missing-property
 
     // The fields to the model, which keeps the last good part of a field
     // that doesn't parse and says why
@@ -53,8 +64,8 @@ GridLayout {
         apply()
     }
 
-    Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 13 }
-    TextField {
+    Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+    ThemedTextField {
         id: filterIds
         objectName: "filterIds"
         Layout.fillWidth: true
@@ -70,14 +81,14 @@ GridLayout {
         objectName: "filterIdsProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
     }
 
-    Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: 13 }
-    TextField {
+    Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+    ThemedTextField {
         id: filterData
         objectName: "filterData"
         Layout.fillWidth: true
@@ -93,19 +104,19 @@ GridLayout {
         objectName: "filterDataProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
     }
 
     // The data length in bytes, and a span of the table's seconds
-    Label { text: qsTr("Length"); color: Theme.textDim; font.pixelSize: 13 }
+    Label { text: qsTr("Length"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     RowLayout {
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
         spacing: Theme.spacing
-        TextField {
+        ThemedTextField {
             id: filterLengths
             objectName: "filterLengths"
             Layout.fillWidth: true
@@ -115,8 +126,8 @@ GridLayout {
             inputMethodHints: Qt.ImhPreferNumbers | Qt.ImhNoPredictiveText
             onTextEdited: panel.apply()
         }
-        Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: 13 }
-        TextField {
+        Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        ThemedTextField {
             id: filterTimes
             objectName: "filterTimes"
             Layout.fillWidth: true
@@ -133,7 +144,7 @@ GridLayout {
         objectName: "filterLengthsProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
@@ -144,7 +155,7 @@ GridLayout {
         objectName: "filterTimesProblem"
         visible: text !== ""
         color: Theme.warning
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
@@ -172,6 +183,7 @@ GridLayout {
                         required property string modelData
                         required property int index
                         objectName: "direction_" + index
+                        tapHeight: Math.max(30, panel.touchMin)
                         text: modelData
                         selected: panel.direction === index
                         onClicked: {
@@ -190,7 +202,7 @@ GridLayout {
                     qsTr("Standard (11-bit)"), qsTr("CAN FD"),
                     qsTr("Reassembled"), qsTr("Truncated"),
                     qsTr("After a loss"), qsTr("Error")]
-            implicitHeight: Theme.controlHeight
+            implicitHeight: Math.max(Theme.controlHeight, panel.touchMin)
             onActivated: panel.apply()
         }
         ThemedButton {
@@ -212,7 +224,7 @@ GridLayout {
         Layout.preferredWidth: 0   // the panel's width, not its text's
         text: qsTr("No adapter reports the frames the session sends yet, so Sent shows none")
         color: Theme.textDim
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         wrapMode: Text.Wrap
     }
 }

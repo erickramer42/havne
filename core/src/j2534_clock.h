@@ -29,12 +29,11 @@
  * The result never decreases. */
 constexpr uint64_t J2534_CLOCK_WRAP_US = 1ull << 32;
 
-/* How far a vendor delta may run ahead of the host's before it counts
- * as a step. Frames that waited in the adapter's queue reach the host
- * together, so the vendor's delta between them exceeds the host's by
- * up to how long the first one waited: a read's hold, or the worker's
- * backoff sleep (5 s at most). A minute covers both with room; a clock
- * that stepped backwards reads as about 71 minutes ahead. */
+/* How far a vendor delta may run ahead of the host's before it counts as a
+ * step. Queued frames reach the host together, so their delta exceeds the
+ * host's by how long the first waited (a read's hold, or the worker's 5 s
+ * backoff at most); a minute covers that, and a clock stepped backwards
+ * reads about 71 minutes ahead. */
 constexpr uint64_t J2534_CLOCK_SLACK_US = 60ull * 1000 * 1000;
 
 struct j2534_clock {

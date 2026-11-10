@@ -83,7 +83,7 @@ What the code gives this decision:
 - **A `Popup` doesn't fit the zoom** (it draws in the unscaled
   overlay); every in-page question so far is a panel inside the page's
   `Flickable`.
-- **The density rules** (`.claude/rules/qml.md`): 48 dp targets on a
+- **The density rules:** 48 dp targets on a
   phone (`Theme.touchTarget`), 8 dp between them, at most three buttons
   in a phone's row, nothing past the edge at 320 dp.
 
@@ -428,27 +428,27 @@ Home's logo) are the themes item's.
 Each step is handed over on its own branch with its tests and mutants;
 the model named is the one sized for it.
 
-1. **Core** (Opus): `ecuio_signal_file_key` and `ecuio_def_range`,
+1. **Core:** `ecuio_signal_file_key` and `ecuio_def_range`,
    their tests, `test_c_abi`, the exports check, the regenerated
    `_ecuio.py`.
-2. **The bridge and the hub** (Opus): `RefRole`, `RangeLowRole`,
+2. **The bridge and the hub:** `RefRole`, `RangeLowRole`,
    `RangeHighRole`, `profileSignals(uri)`; `SignalHub` by reference
    with its wider `Entry`; `gaugeSignals` as reference lists. The
    Dashboard reads through it and looks the same.
-3. **The rules** (Opus): `DashboardBook.qml` with the built-in layout
+3. **The rules:** `DashboardBook.qml` with the built-in layout
    per form (today's gauges, in today's order, at spans that keep their
    proportions) and every function of section 7; `tst_dashboardbook`.
-4. **The renderer** (Sonnet, to this ADR): `DashboardPage.qml` draws a
+4. **The renderer**, to this ADR: `DashboardPage.qml` draws a
    form's pages from a document (no editing yet): the grid, the phone's
    swipe, the desktop's buttons and keys, section 3's states and notes,
    the saved last page. `tst_dashboard` keeps its cases over the
    built-in layout.
-5. **The new kinds and options** (Sonnet): `segments`, `seven-segment`,
+5. **The new kinds and options:** `segments`, `seven-segment`,
    `sparkline`; `vertical` and `marks` on the bar; `peak` on every kind.
-6. **Edit mode** (Sonnet for the controls, the rules being step 3's):
+6. **Edit mode** (the rules being step 3's):
    Edit and Done, Add, the cell's panel, remove, the pages' controls,
    Reset, the save to `Settings` and the restart test.
-7. **The gauge roles in `Theme`** (Sonnet, with the themes item).
+7. **The gauge roles in `Theme`**, with the themes item.
 8. **The done-when run** on the test phone and the desktop: a page built
    from the library survives a restart; the run sheet names the build.
 
@@ -1048,3 +1048,268 @@ a kind, this is the present state; the earlier text is kept as written.
   color is the theme's red or orange, so a danger is told by more than
   hue: a mark beside the readout and a heavier zone stroke, in every
   theme.
+
+## Appendix: section 9 amended (2026-11-08)
+
+Amended 2026-11-08: the themes section's "low-glare and night themes" are
+the night styles of [ADR-0058](0058-night-mode.md): Night is a mode (off,
+on, or on a schedule) beside the look, and its style is amber or red. The
+palettes are `dark`, `nightAmber` and `nightRed`, and in the two night
+palettes `gaugeReadout` is the text color and no chart trace is brighter
+than the text. The gauge roles of section 9 are unchanged.
+
+## Appendix: six columns, the panel, one gesture, copy and paste (2026-11-08)
+
+Sections 1 and 2 of this appendix are built. Sections 3 to 5 are decided
+and not built.
+
+### 1. Six columns upright, twelve on the side
+
+Section 4 gives the phone 2 columns upright and 4 on its side. The
+decided layout puts an RPM dial at two thirds of the width with three
+readouts stacked beside it, and three readouts across a row; neither is
+a half or a whole. The phone form moves to **6 columns upright and 12
+on the side**. The row unit stays a quarter of the column width, so a
+column is a third as wide as before and a row a third as tall, and the
+same shape on screen needs `w` and `h` three times larger. The bound on
+`h` rises from 16 to **48**; `w` stays 1 to 12 (12 is the whole row on
+the side, and anything 6 or more is the whole row upright, as section 4
+already says of a span wider than the grid). The built-in phone layout
+(`DashboardBook.builtIn("phone")`) is written with the new spans
+directly: the shift lights at 12 x 3, the dial at 4 x 18 with three
+digital tiles at 2 x 6 stacked beside it, a digital trace across the
+grid at 6 x 8, and three digital tiles at 2 x 7 across. A digital tile
+too short for its trace and footer (under 84 px of gauge) draws its
+label and value alone. The desktop form is unchanged: its columns
+follow the width (2 to 12), its documents do not move, and its height
+control stays 1 to 16.
+
+### 2. The migration of a stored layout
+
+v0.7.0 ships format 1 with phone layouts on 2 and 4 columns. A user
+who edited theirs has a `dashboards/phone` document whose spans mean
+half and whole widths; read on 6 columns unchanged, every gauge would
+shrink to a third. So:
+
+- **Format 2.** `format` becomes 2. The only difference from 1 is the
+  meaning of a phone document's spans and the `h` bound of 48. The
+  desktop document's spans mean the same in 1 and 2.
+- **When it runs.** In `DashboardBook.parse(text, form)`, which already
+  has the form (`"phone"` or `"desktop"`). A format 1 document is first
+  checked against **format 1's bounds** (`w` 1 to 12, `h` 1 to 16), with
+  a bad page or cell dropped exactly as v0.7.0 drops it; only then is it
+  upgraded. So `cellProblem` takes the bound from the text's format: a
+  format 1 `h` of 17 stays invalid on either form, and a format 1 `w` of
+  13 is dropped, not clamped. A format 1 phone document is then upgraded
+  in memory: every cell's `w` and `h` are multiplied by 3, `w` clamped
+  to 12. A format 1 desktop document is upgraded by setting `format`
+  alone, before `documentProblem`, which compares it. Nothing is written
+  at read time: as with the built-in layout, the stored text changes on
+  the user's first edit, when `serialize` writes format 2. Until then a
+  user who goes back to v0.7.0 finds their format 1 text as it was.
+- **After the first edit,** v0.7.0 reads format 2 as "made by a newer
+  version of Havne" and shows the built-in layout, leaving the text
+  alone, by section 7's existing rule (a format 2 text past 64 KiB reads
+  there as damaged instead, with the same result). Nothing is lost in
+  either direction.
+- **A span that does not scale cleanly.** With a factor of 3 on
+  integers there is none; the one edge is the bound. `h` x 3 is at most
+  48, the new bound. `w` x 3 above 12 is clamped to 12, and the clamp
+  changes nothing on screen: upright, a format 1 `w` of 2 or more was
+  the whole row and becomes 6 or more, still the whole row; on the
+  side, a `w` of 4 or more was the whole row and becomes 12, the whole
+  row. So the upgrade is exact, and at any gap between cells: a row's
+  pitch is (column + gap) / 4 and a cell's height is `h` x pitch - gap,
+  one gap whatever its rows, and three times the columns makes column +
+  gap exactly a third, so three times the rows at a third of the pitch
+  is the same height. The cap on the pitch, (shown height + gap) /
+  tallest `h`, scales the same way.
+- **`phonePage` and `desktopPage`** (the page last shown) are not part
+  of the document and need nothing.
+- **The two forms differ.** Each document has its own `format`, so a
+  phone document at 1 and a desktop document at 2 read correctly side
+  by side, and a device that has only one of the two (a phone never
+  used as a desktop) upgrades the one it has. The form is the key the
+  text came from, never guessed from the content.
+- **The 64 KiB bound.** Scaling can add up to two bytes per cell, so a
+  format 1 document just under the limit could pass the read's check
+  and fail `documentProblem` as written back. The upgrade must not turn
+  a readable document into "damaged": format 1 keeps its 64 KiB
+  (`format1MaxBytes`), and format 2's bound, `maxBytes`, is that plus
+  two bytes for each of the most cells a document can hold, which the
+  first edit's write follows too.
+- **Spans written in the code.** Everything that names a phone span
+  moves to the new grid with the form known: the built-in layout, the
+  bar's vertical switch (2 x 2 and 1 x 4 become 6 x 6 and 3 x 12 on the
+  phone), the add placeholder and a new cell's default span. The
+  desktop's stay as they are.
+- **The size control.** The phone's height control steps by 3 (one old
+  row), not by 1 up to 48; `w` steps by 1. A stored odd `h` still reads
+  and displays; a step moves to the next multiple of 3.
+- **Idempotence.** A format 2 document is never multiplied again; a
+  format 1 document read twice (two launches before the first edit)
+  gives the same result each time, since the stored text has not
+  changed.
+- **Unknown cells and keys** (section 7's "within format 1" rule) are
+  kept and, if they are cells, scaled like the rest: their `w` and `h`
+  are known fields even when their kind is not.
+
+**The tests** are in `tst_dashboardbook.qml`, the last in
+`tst_dashedit.qml`:
+
+1. The sample document of section 7 as a format 1 phone text: after
+   `parse`, `format` is 2, the shift lights are `w` 12 `h` 3, the dial
+   `w` 6 `h` 24, the digital `w` 3 `h` 12; `place` on 6 columns puts
+   them in the same relative positions as `place` on 2 columns put the
+   original.
+2. The same text as a desktop document: `format` 2, spans unchanged.
+3. A format 1 phone cell with `w` 5 (whole row on 4 columns) becomes
+   `w` 12 and is still the whole row on 12 columns; `h` 16 becomes 48
+   and reads.
+4. A format 2 phone text through `parse` is unchanged.
+5. `serialize(parse(format1))` writes `"format": 2` and the scaled
+   spans; `parse` of that gives the same document (round trip).
+6. An unknown kind's cell keeps its keys and scales.
+7. A format 3 text shows the built-in layout and the "newer version"
+   notice, as before.
+8. A format 1 cell with `h` 17 is dropped, phone and desktop; with `w`
+   13 is dropped, not clamped; the dropped count is reported as in
+   v0.7.0. A format 2 cell with `h` 48 reads, with `h` 49 is dropped.
+9. A format 1 phone document at 64 KiB, whose upgrade passes that
+   limit, reads with no problem and survives its first edit.
+10. On the real page at its own gap, a stored format 1 phone layout
+    gives every cell the box the 2 and 4 column grid gave it, and the
+    store changes only on the first edit.
+11. The bar's vertical switch on a format 2 phone cell at 6 x 6 and at
+    3 x 12; on a desktop cell at 2 x 2 and 1 x 4.
+
+### 3. The panel chrome
+
+Cells on the phone meet at hairlines on one flat surface: the grid's
+spacing is 0 and it draws a 1 dp line (`Theme.hairline`, the outline at
+55 % over surface) between neighbors and around the panel, with
+radius 6 on the panel; `GaugeCard` paints no gradient, no border and no
+radius of its own. Hierarchy comes from the spans. The desktop keeps
+its cards in v0.7.1 and takes this design in the release after it.
+
+### 4. One gesture on a gauge
+
+Press and hold on a gauge (the platform's long-press time,
+`styleHints.mousePressAndHoldInterval`), in or out of edit mode, except
+in the drive view, where the long press does nothing. Then:
+
+- **release** opens the cell's menu (section 5's panel with Copy and
+  Paste after added), in the page, in its scroll area;
+- **move** drags the cell; the drop is a change of order (section 4),
+  and placement reflows the page as the drag passes other cells.
+
+It yields to the page swipe and to scrolling by time: a finger that
+moves before the hold completes is a swipe or a scroll and the hold is
+canceled; once the hold completes (a short haptic, the cell lifts) the
+`SwipeView` and the page's `Flickable` are made non-interactive until
+release, and a drag near the top or bottom edge scrolls the page
+itself. Nothing in the two gestures' timing collides, since both
+alternatives need motion before the hold and the hold needs stillness.
+The Edit button's mode remains for Add, Remove, the pages' controls and
+Reset to the built-in layout, and in it the same gesture works the same
+way. Drag-to-reorder is v0.7.1's, as section 5 already says.
+
+Added 2026-11-09. Qt has no haptic from QML without native code, so
+the hold shows only the cell lifting.
+
+### 5. Copy and paste
+
+**Copy** takes the whole cell: kind, refs, unit, label, options and
+span, into one in-app slot that lives for the app's run (not the system
+clipboard: a dashboard cell is not text a user pastes elsewhere, and
+the slot survives a page swipe without a serialization step). **Paste
+after**, in a cell's menu, inserts a copy after that cell; **Paste**, in
+the edit bar, appends it to the page shown. A paste onto a full page
+(24 cells) is refused with the page's existing message. The pasted cell
+is independent of its source. `DashboardBook` gains `copyCell(doc,
+page, i)` returning the cell and `pasteCell(doc, page, i, cell)`, both
+pure, with the bound check; the slot is page state. The slot is per
+form, and Paste is disabled when it holds the other form's cell, whose
+spans are meant for the other grid.
+
+Added 2026-11-09. As built it is one slot, `{form, cell}`, for the
+app's run: a copy on either form replaces it, and Paste is disabled
+while it holds the other form's cell.
+
+### 6. A blank cell
+
+Added 2026-11-08. A new kind, `blank`, appended to
+`DashboardBook.kinds` and offered in Add: sized and placed like any
+gauge, needing no signal (its `refs` are empty), drawing nothing
+outside edit mode and an outlined empty cell in it. It holds a spot
+open, for instance beside a floating overlay app, so placement doesn't
+pack the next gauges into it. Its panel has the size, the order, Copy
+and Paste after. Outside edit mode it has nothing to hold, so section
+4's gesture starts on it only in edit mode.
+
+## Appendix: the phone's panel, the gauges under the S2 look and the fit, as built (2026-11-09)
+
+The appendix "six columns, the panel, one gesture, copy and paste" says
+its sections 3 to 5 are decided and not built. All six of its sections
+are built: section 4's hold without a haptic and section 5's one slot,
+as their notes say.
+
+**The panel (section 3).** On the phone form the cells meet: the grid's
+gap is 0, and the grid draws one `Theme.surface` panel with a
+`Theme.hairline` edge and radius `Theme.radiusCard` (6), and a hairline
+between neighboring cells. `DashboardBook.seams(placed, boxes, columns)`
+gives the lines: between two different cells with at least one drawn,
+none past a blank or an empty square, one line along a boundary. A cell
+draws no fill, border or radius of its own; a held cell fills with
+`surface`, so it covers what it crosses. A hairline is a whole number of
+the display's pixels. The desktop keeps a card for each gauge. In the
+drive view ([ADR-0059](0059-drive-view.md)) the panel reaches the
+screen's edges with the same lines.
+
+**No empty strips.** Outside edit mode and while no cell is held, a
+gauge's drawn height runs down over the empty squares under it, as far
+as every column it spans stays empty, within the panel's rows, and a
+gauge alone in its rows runs right to the panel's edge
+(`DashboardBook.stretched(placed, boxes, columns)`). A blank cell
+doesn't stretch, and nothing stretches over one. The stored document
+keeps its `w` and `h`; edit mode and a held cell show the true sizes.
+
+**The built-in phone page's heights** are multiples of
+`phoneSpanScale` (3), the Height control's step: the shift lights 12 x 3,
+the dial 4 x 18 with three digital tiles at 2 x 6 beside it, the trace
+6 x 9, and three digital tiles at 2 x 6 across, so the page keeps its 36
+rows. Saved layouts don't change.
+
+**Digits.** A Digits card stacks when that draws its digits at least a
+fifth larger: the digits take the card's width, centered, with the unit
+centered under them; a short card keeps the unit beside, as section 1's
+table has it. With its `digits` option unset, a card's count comes from
+its range (`DashboardBook.digitsFor(from, to, decimals)`): what a value
+10 % past either end needs at the card's decimals, a minus counting as a
+digit, from 3 to 8, and 4 without a finite range, so a brief overshoot
+still draws. The option, 1 to 8, still wins. The appendix "the new kinds
+and the theme roles as built" gives the option a default of 4; that
+holds only without a finite range. A card's decimals come from the
+signal once a session runs, so an unset card's count can change by one
+at connect.
+
+**The gauges' drawing.** The appendix "the new kinds and the theme roles
+as built" lists `gaugeFace` and `gaugeShade`, and section 9 lists
+`gaugeFace`. Neither role is in `Theme`. A dial has no bezel and no
+face: its ticks, zones and needle draw on what is behind them, a card on
+the desktop and the panel on the phone. Its drawing grows by up to 6 %
+into the margin the bezel held, and less on a small dial, so the
+progress arc's glow stays inside the item at every size. The needle is
+one flat tapered shape in `gaugeNeedle` with no shadow, and the hub is
+`elevatedLight` with a `gaugeNeedle` pin. A bar's and the cells' lit
+segments are one flat color. The Digital and Sparkline traces are the
+line alone, with no fill under it. The danger mark's point is `surface`.
+
+**The card and the type.** A desktop card is flat: `Theme.surface`, a
+`Theme.hairline` border (the outline at 55 % over the surface) and
+radius `Theme.radiusCard` (6); controls take `Theme.radius` (4). The
+type is Barlow, bundled with its license (`THIRD_PARTY_NOTICES`), and
+readings at 17 sp and above take Barlow Semi Condensed Bold with
+fixed-width digits (`Theme.valueFamily`, `Theme.valueFeatures`). A
+bundled face draws the same on every platform, and Barlow gives the app
+an automotive feel.

@@ -354,6 +354,53 @@ int ended(Output& out, int code)
     return out.ok() ? code : kExitFailed;
 }
 
+// export's cancel (ecuio_export_with) and its column check's: Ctrl+C or
+// SIGTERM stops it, and core removes what it had begun.
+// HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the run's first ask that
+// long, naming whose it is on stderr, so a test's interrupt lands there
+int interrupted_at(bool* asked, const char* where)
+{
+    if (!*asked) {
+        *asked = true;
+        const uint64_t hold_ms = env_ms("HAVNE_CLI_EXPORT_HOLD_MS", 0);
+        if (hold_ms > 0) {
+            std::fprintf(stderr, "havne-cli: holding the %s's first ask\n",
+                         where);
+            std::fflush(stderr);
+        }
+        const uint64_t until = ecuio_clock_us() + hold_ms * 1000ULL;
+        while (!g_interrupted.load() && ecuio_clock_us() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    return g_interrupted.load() ? 1 : 0;
+}
+
+int export_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "export");
+}
+
+// The column check's open (ecuio_open_progress_t) asks as the export does
+int open_interrupted(uint64_t, uint64_t, void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "column check");
+}
+
+// An export or its sizing stopped by an interrupt: the end line the other
+// commands write on one, and exit 1, as clear's, since nothing was written
+int ended_interrupted(Output& out)
+{
+    char buf[64];
+    cli::Line l(buf, sizeof buf);
+    l.raw("{\"type\":\"end\"");
+    l.key("reason");
+    l.string("interrupted", SIZE_MAX);
+    l.ch('}');
+    write_line(out, l);
+    return ended(out, kExitFailed);
+}
+
 // A recording's signal line (view's and info's), an enum's labels on it
 void write_signal_line(Output& out, const ecuio_recording_t* r,
                        uint32_t recording, uint32_t index,
@@ -600,12 +647,12 @@ void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
-// A scan line per ECU whose DID scan moved (cli/scan_line.h), every
-// change when final; the channels' reports into reports[], for
-// --until-scanned
+// A session line per ECU whose session changed and a scan line per ECU
+// whose DID scan moved (cli/scan_line.h), every change when final; the
+// channels' reports into reports[], for --until-scanned
 void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
-               cli::ScanSeen* seen, ecuio_channel_support_t* reports,
-               bool final = false)
+               cli::ScanSeen* seen, cli::SessionSeen* sessions,
+               ecuio_channel_support_t* reports, bool final = false)
 {
     const uint64_t now = ecuio_clock_us();
     for (uint32_t c = 0; c < channels; ++c) {
@@ -613,6 +660,12 @@ void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
         if (ecuio_session_get_channel_support(session, c, &s) != ECUIO_OK) {
             s = ecuio_channel_support_t{};
             continue;
+        }
+        if (cli::session_due(s, sessions[c])) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::session_line(l, s);
+            write_line(out, l);
         }
         if (cli::scan_due(s, seen[c], now, final)) {
             char buf[512];
@@ -1906,9 +1959,9 @@ void usage(FILE* to)
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli log <uri> <folder> [--signal <name>]... "
-        "[--label <name>]\n"
-        "                      [--seconds S] [--signals <file> | --plugin "
-        "<pkg>]\n"
+        "[--min-sweep <ms>]\n"
+        "                      [--label <name>] [--seconds S]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -1928,6 +1981,9 @@ void usage(FILE* to)
         "       havne-cli export <recording> <out> --format folder|csv|pcapng\n"
         "                      [--from S] [--to S] [--raw]\n"
         "                      [--layout wide|long] [--rows sweep|<ms>]\n"
+        "                      [--units metric|imperial] [--signal <name>]...\n"
+        "       havne-cli export <recording> --format csv --estimate\n"
+        "                      [--from S] [--to S] [--rows sweep|<ms>]\n"
         "                      [--units metric|imperial] [--signal <name>]...\n"
         "       havne-cli import candump <log> <folder> [--interface <name>]\n"
         "       havne-cli import csv <file> <folder> [--map <map.json> |\n"
@@ -2052,7 +2108,9 @@ void usage(FILE* to)
         "         markers' labels kept as typed. Scrubbed unless --raw:\n"
         "         identification replies and text signals left out, then\n"
         "         each file checked for the car's identity; a check that\n"
-        "         finds any writes nothing.\n"
+        "         finds any writes nothing. --estimate writes no file: the\n"
+        "         wide CSV's rows and bytes, exact, at --rows' interval, or\n"
+        "         for a row a sweep, every 100 ms and every 250 ms.\n"
         "health   writes a car's health as one scrubbed file, JSON or a\n"
         "         text for a person: the vehicle from its VIN (model year,\n"
         "         make, check digit; never the VIN), the inspection's\n"
@@ -2473,8 +2531,9 @@ int run_stream(const StreamArgs& args)
     poll_identity(out, session, channels, identity_generations);
     poll_diagnostics(out, session, channels, diag_generations);
     cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     ecuio_channel_support_t scan_reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    poll_scan(out, session, channels, scan_seen, scan_reports);
+    poll_scan(out, session, channels, scan_seen, session_seen, scan_reports);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     std::vector<uint16_t> absent_read(
@@ -2561,7 +2620,8 @@ int run_stream(const StreamArgs& args)
 
         poll_identity(out, session, channels, identity_generations);
         poll_diagnostics(out, session, channels, diag_generations);
-        poll_scan(out, session, channels, scan_seen, scan_reports);
+        poll_scan(out, session, channels, scan_seen, session_seen,
+                  scan_reports);
         poll_absent(out, session, absent_read, absent_last);
         if (args.values) {
             poll_refused(out, set, scan_reports, channels, refused_last,
@@ -2620,7 +2680,8 @@ int run_stream(const StreamArgs& args)
     char buf[512];
     cli::Line l(buf, sizeof buf);
     if (!out.failed) {
-        poll_scan(out, session, channels, scan_seen, scan_reports, true);
+        poll_scan(out, session, channels, scan_seen, session_seen, scan_reports,
+                  true);
         poll_timing(out, session, info, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
@@ -2665,13 +2726,20 @@ int run_stream(const StreamArgs& args)
 
 // The named columns the recording has no values for, by the reader's
 // signal list (ecuio_recording_open lists the signals with a sample; a
-// pick the recording never answered isn't among them)
-std::vector<const char*> missing_columns(const cli::ExportArgs& ex)
+// pick the recording never answered isn't among them). False when an
+// interrupt stopped the open; a recording the reader refuses has none
+bool missing_columns(const cli::ExportArgs& ex, bool* asked,
+                     std::vector<const char*>* missing)
 {
+    missing->clear();
     ecuio_recording_t* r = nullptr;
-    if (ecuio_recording_open(ex.folder, nullptr, nullptr, &r) != ECUIO_OK ||
-        r == nullptr) {
-        return {};
+    const ecuio_status_t opened =
+        ecuio_recording_open(ex.folder, open_interrupted, asked, &r);
+    if (opened == ECUIO_ERR_CANCELED) {
+        return false;
+    }
+    if (opened != ECUIO_OK || r == nullptr) {
+        return true;
     }
     std::vector<std::string> recorded;
     ecuio_recording_info_t info;
@@ -2686,7 +2754,8 @@ std::vector<const char*> missing_columns(const cli::ExportArgs& ex)
         }
     }
     ecuio_recording_close(r);
-    return cli::missing_names(ex.signals, recorded);
+    *missing = cli::missing_names(ex.signals, recorded);
+    return true;
 }
 
 // The machine's CAN interfaces (ecuio/socketcan.h); none off Linux
@@ -2799,8 +2868,9 @@ int run_log(const cli::LogArgs& args)
     write_session(out, info);
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
-    st = ecuio_session_set_focus(session, ids.empty() ? nullptr : ids.data(),
-                                 static_cast<uint32_t>(ids.size()));
+    st = ecuio_session_set_focus_with(
+        session, ids.empty() ? nullptr : ids.data(),
+        static_cast<uint32_t>(ids.size()), args.min_sweep_ms, 0);
     if (st != ECUIO_OK) {
         write_error(out, st, ecuio_last_error_detail());
         out.flush();
@@ -2809,7 +2879,7 @@ int run_log(const cli::LogArgs& args)
     }
     {
         BigLine b(cli::focus_line_bytes(ids.size()));
-        cli::focus_line(b.line, set, ids);
+        cli::focus_line(b.line, set, ids, args.min_sweep_ms);
         write_line(out, b.line);
     }
     ecuio_recorder_t* recorder = nullptr;
@@ -4590,10 +4660,55 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
+        // A named column the recording has no values for stays empty
+        // (a focus pick that never answered is a column of a log): each is
+        // said on stderr once the export is done, so a typo isn't silent,
+        // and counted. The check runs first, so an interrupt during it
+        // leaves nothing written
+        std::vector<const char*> missing;
+        const auto say_missing = [&missing] {
+            for (const char* name : missing) {
+                std::fprintf(stderr,
+                             "havne-cli: the recording has no values for "
+                             "'%s': its column is empty\n",
+                             name);
+            }
+            return missing.size();
+        };
         Output out;
+        install_handlers();
         write_start(out);
+        bool asked = false;
+        if (ex.options.format == ECUIO_EXPORT_CSV &&
+            ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
+            !missing_columns(ex, &asked, &missing)) {
+            return ended_interrupted(out);
+        }
+        if (ex.estimate) {
+            const std::vector<uint32_t> rows = cli::estimate_intervals(ex);
+            std::vector<ecuio_export_estimate_t> sized(rows.size());
+            const ecuio_status_t sizing = ecuio_export_estimate_with(
+                &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
+                export_interrupted, &asked, sized.data());
+            if (sizing == ECUIO_ERR_CANCELED) {
+                return ended_interrupted(out);
+            }
+            if (sizing != ECUIO_OK) {
+                write_error(out, sizing);
+                return ended(out, kExitConnect);
+            }
+            BigLine sizes(1024);
+            cli::estimate_line(sizes.line, rows.data(), sized.data(),
+                               sized.size(), say_missing());
+            write_line(out, sizes.line);
+            return ended(out, kExitOk);
+        }
         ecuio_export_report_t report{};
-        const ecuio_status_t rc = ecuio_export(&ex.options, &report);
+        const ecuio_status_t rc =
+            ecuio_export_with(&ex.options, export_interrupted, &asked, &report);
+        if (rc == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
+        }
         BigLine b(cli::exported_line_bytes(ex));
         cli::Line& l = b.line;
         if (rc != ECUIO_OK) {
@@ -4604,21 +4719,7 @@ int run(int argc, char** argv)
             write_error(out, rc);
             return ended(out, kExitConnect);
         }
-        // A named column the recording has no values for stays empty
-        // (a focus pick that never answered is a column of a log): each is
-        // said on stderr, so a typo isn't silent, and counted
-        std::vector<const char*> missing;
-        if (ex.options.format == ECUIO_EXPORT_CSV &&
-            ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty()) {
-            missing = missing_columns(ex);
-            for (const char* name : missing) {
-                std::fprintf(stderr,
-                             "havne-cli: the recording has no values for "
-                             "'%s': its column is empty\n",
-                             name);
-            }
-        }
-        cli::exported_line(l, ex, report, missing.size());
+        cli::exported_line(l, ex, report, say_missing());
         write_line(out, l);
         return ended(out, kExitOk);
     }

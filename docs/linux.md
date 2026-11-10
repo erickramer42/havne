@@ -85,7 +85,10 @@ On a distribution without `apt`, the tarball
 `-DCMAKE_PREFIX_PATH=<folder>` or pkg-config with
 `PKG_CONFIG_PATH=<folder>/lib/pkgconfig`. Before 1.0 a minor version may
 change the C ABI, so the CMake package answers a version request only
-with the same minor: `find_package(ecuio 0.3)` takes any 0.3.x.
+with the same minor: `find_package(ecuio 0.3)` takes any 0.3.x. A patch
+can add a call (ADR-0048's appendix "what a PATCH may carry"), so a
+program that uses one asks for that patch, as in
+`find_package(ecuio 0.7.1)`, which takes 0.7.1 or later within 0.7.
 
 The core packages are reproducible: the same release tag builds the
 same bytes, which CI checks on every change. The AppImage is too, as
@@ -316,7 +319,7 @@ counts the frames per CAN ID.
   there too: the deb's `havne-cli` streams the mock at the release's
   version, the AppImage stays up 10 s offscreen, and the aarch64 wheel
   installs into a fresh venv with `pip --no-index` and reads `mock://`
-  through `python/examples/read_pids.py` (v0.6.0, 2026-11-07).
+  through `python/examples/read_pids.py` (v0.7.0, 2026-11-08).
 - **A laptop on native Ubuntu 26.04** (no WSL), on the test car's OBD
   port through a Y-splitter, `dev` at bbc9050, built with GCC 15.2 and
   Qt 6.12.0: the OBDLink MX+ over Bluetooth through `rfcomm`, the OBDX

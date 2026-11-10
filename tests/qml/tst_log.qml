@@ -35,6 +35,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false   // only between sessions
+        Harness.clearFakeKnobs()
     }
 
     function find(within, name) {
@@ -53,6 +54,9 @@ TestCase {
         const page = create(logComponent)
         const log = find(page, "activityLog")
         compare(log.text, "Ready.")
+        // Prose: the text face, wrapped at words, never inside one
+        compare(log.wrapMode, TextEdit.WordWrap)
+        verify(log.font.family !== Theme.monoFamily, "not mono: " + log.font.family)
         compare(Bridge.connectSession("mock://demo"), "")
         verify(/\d\d:\d\d:\d\d\.\d\d\d  Connected: mock:\/\/demo/.test(log.text),
                "stamped like the surrogate's log: " + log.text)
@@ -89,6 +93,71 @@ TestCase {
         verify(activity.visible, "back to the activity log")
         verify(!frames.visible)
         verify(!toFrames.visible)
+    }
+
+    // A hidden table takes no rows, so a frame makes no delegate on any other
+    // page; shown, it holds the ring's rows at once, not only the next ones
+    function test_aHiddenTableHoldsNoRowsAndShowsTheRingWhenShown() {
+        const page = create(logComponent)
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.model.count >= 5, 5000, "frames arrive")
+        compare(list.count, 0, "hidden: no rows")
+
+        Theme.developerMode = true
+        compare(list.count, 0, "the activity log still shows")
+        const held = Bridge.model.count
+        find(page, "view_frames").clicked()
+        verify(list.count >= held, list.count + " rows of the " + held + " held")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "a row is drawn")
+
+        Theme.developerMode = false
+        compare(list.count, 0, "hidden again: no rows")
+    }
+
+    // A hidden table keeps its place: paused and scrolled, it shows the same
+    // first row when shown again, and doesn't follow
+    function test_aHiddenTableKeepsItsPlace() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
+        Bridge.logPaused = true
+        list.follow = false
+        list.positionViewAtIndex(20, ListView.Beginning)
+        tryCompare(list, "keptTop", 20, 2000, "noted while shown")
+        find(page, "view_activity").clicked()
+        compare(list.count, 0, "hidden: no rows")
+        find(page, "view_frames").clicked()
+        tryVerify(() => list.count > 0 && list.indexAt(1, list.contentY + 1) === 20, 2000,
+                  "the same first row")
+        verify(!list.follow, "and it doesn't follow")
+    }
+
+    // The list is one named node; its rows' labels are kept out of the tree
+    function test_theFrameRowsLabelsAreIgnored() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count > 0 && list.itemAtIndex(0) !== null, 2000, "a row shows")
+        compare(list.Accessible.name, "Frames")
+        let labels = 0
+        const walk = item => {
+            for (let i = 0; i < item.children.length; ++i) {
+                const child = item.children[i]
+                if (child.textFormat !== undefined) {
+                    ++labels
+                    verify(child.Accessible.ignored, "ignored: '" + child.text + "'")
+                }
+                walk(child)
+            }
+        }
+        walk(list.itemAtIndex(0))
+        compare(labels, 7, "every column's label")
     }
 
     // The items painted past the page's right edge (a Text by its
@@ -241,10 +310,11 @@ TestCase {
         const row0 = list.itemAtIndex(0)
         mouseClick(row0, row0.width / 2, row0.height / 2)
         compare(Bridge.model.selectedCount, 1, "a tap selects the row")
-        verify(Qt.colorEqual(row0.color, Qt.alpha(Theme.info, 0.22)), "and marks it")
+        verify(Qt.colorEqual(row0.color, Qt.alpha(Theme.text, 0.12)), "and marks it in the text's tone")
         verify(bar.visible && !tools.visible, "the selection bar in the tools' place")
         verify(copy.visible && copy.enabled)
         compare(find(page, "selectedLabel").text, "1 selected")
+        verify(Qt.colorEqual(find(page, "selectedLabel").color, Theme.textDim), "a count, in the dim tone")
 
         const row2 = list.itemAtIndex(2)
         mouseClick(row2, row2.width / 2, row2.height / 2, Qt.LeftButton, Qt.ShiftModifier)
@@ -298,11 +368,13 @@ TestCase {
 
     // ---- The filter and By ID (framefilter.h) ----
 
-    // The frames a mock session puts in the table, held still
+    // The frames a mock session puts in the table, held still. The mock
+    // sends its extended ID every 16th frame and 0x0C0 otherwise, so any
+    // 17 in a row hold both
     function heldFrames(page) {
         find(page, "view_frames").clicked()
         compare(Bridge.connectSession("mock://demo"), "")
-        tryVerify(() => Bridge.model.heldCount >= 40, 10000, "frames arrive")
+        tryVerify(() => Bridge.model.heldCount >= 17, 10000, "frames arrive")
         Bridge.logPaused = true
     }
 
@@ -570,5 +642,25 @@ TestCase {
         pasted.paste()
         verify(pasted.text.indexOf("Ready.") >= 0 && pasted.text.indexOf("a line to copy") >= 0,
                "the whole log was copied: " + pasted.text)
+    }
+
+    // ADR-0060: each module's session reaches the activity log, a refusal
+    // with its code (the fake's module has no extended session)
+    function test_aModulesSessionIsInTheActivityLog() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        Harness.armFakeKnob("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12")
+        const page = create(logComponent)
+        const log = find(page, "activityLog")
+        compare(Bridge.connectSession("j2534://" + Harness.fakeDllPath
+                                      + "?profile=uds-generic&did=1E1C,7E9:D801"
+                                      + "&session=03&identify=0&diagnose=0"), "")
+        tryVerify(() => log.text.includes(
+                      "ECU 0x7E8: reading in the extended session (50 03)"),
+                  5000, "the engine ECU's session line")
+        tryVerify(() => log.text.includes(
+                      "ECU 0x7E9: refused the extended session (subFunctionNotSupported, "
+                      + "7F 10 12): reading in the default session"),
+                  5000, "the module's refusal")
     }
 }

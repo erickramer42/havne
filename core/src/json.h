@@ -36,15 +36,14 @@
 
 namespace ecuio_json {
 
-/* The input bound: five times the largest OBDb signal set measured
- * (about 200 KB, 2026-11-05) and far past what a hand-written signal file
- * holds. It also bounds the DOM: a value takes at least two bytes of
- * input ("0,"), so a 1 MiB input makes at most half a million values. */
+/* The input bound: five times the largest OBDb signal set measured (about
+ * 200 KB, 2026-11-05). It also bounds the DOM: a value takes at least two
+ * bytes ("0,"), so 1 MiB makes at most half a million values. */
 constexpr size_t kMaxBytes = size_t{1} << 20;
 
-/* The nesting bound: arrays and objects inside one another. A signal file
- * nests 4 deep and an OBDb signal set 8; parsing recurses once a level,
- * so the bound also bounds the stack a parse uses, on any thread. */
+/* The nesting bound (a signal file nests 4 deep, an OBDb set 8). Parsing
+ * recurses once a level, so it also bounds the stack a parse uses, on any
+ * thread. */
 constexpr unsigned kMaxDepth = 32;
 
 struct Limits {
@@ -142,10 +141,9 @@ size_t invisible_length(const char* p, size_t n);
  * U+10FFFF): the rule the reader holds a string to, for a writer's own */
 size_t utf8_length(const unsigned char* p, const unsigned char* end);
 
-/* Text from the input shown in words: single-quoted, control characters
- * and the characters invisible_length finds as '?', cut to 32 characters
- * with "..." after. For keys and strings (valid UTF-8), so a message
- * stays one line of reasonable length that shows what it quotes. */
+/* Text from the input shown in words: single-quoted, control and
+ * invisible_length characters as '?', cut to 32 characters with "...".
+ * For keys and strings (valid UTF-8), so a message stays one line. */
 std::string quoted(std::string_view text);
 
 }  // namespace ecuio_json

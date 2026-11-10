@@ -27,7 +27,8 @@ ColumnLayout {
         ThemedButton {
             objectName: "vehicle_none"
             text: qsTr("None")
-            highlighted: root.host.pickedVehicle === null
+            checkable: true
+            checked: root.host.pickedVehicle === null
             enabled: root.host.idle
             onClicked: root.host.pickVehicle("")
         }
@@ -45,7 +46,8 @@ ColumnLayout {
                 text: vehicle?.label ?? ""
                 // A long label wraps rather than run past a phone's edge
                 width: Math.min(implicitWidth, parent.width)
-                highlighted: vehicle !== undefined && root.host.vehicles.picked === vehicle.id
+                checkable: true
+                checked: vehicle !== undefined && root.host.vehicles.picked === vehicle.id
                 enabled: root.host.idle
                 onClicked: root.host.pickVehicle(vehicle.id)
             }
@@ -61,27 +63,40 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    Flow {
+    // Wide, the field and its three buttons share a row; on a phone the
+    // field takes a row and the three split the next, so none wraps alone
+    GridLayout {
+        id: labelRow
         Layout.fillWidth: true
-        spacing: Theme.spacing
+        columnSpacing: Theme.spacing
+        rowSpacing: Theme.spacing
         visible: root.host.confirming === ""
+        readonly property bool oneRow: root.width >= 300 + 3 * 120 + 3 * columnSpacing
+        columns: oneRow ? 4 : 3
 
-        TextField {
+        ThemedTextField {
             id: vehicleLabelField
             objectName: "vehicleLabelField"
-            width: Math.min(300, parent.width)
+            Layout.preferredWidth: 300
+            Layout.fillWidth: true
+            Layout.maximumWidth: labelRow.oneRow ? 300 : Number.POSITIVE_INFINITY
+            Layout.columnSpan: labelRow.oneRow ? 1 : 3
             enabled: root.host.idle
             placeholderText: qsTr("Label")
         }
         ThemedButton {
             objectName: "vehicleNew"
             text: qsTr("New")
+            Layout.fillWidth: true
+            Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             enabled: root.host.idle && VehicleBook.labelProblem(root.host.vehicles, root.host.newLabel, "") === ""
             onClicked: root.host.changeVehicles(VehicleBook.add(root.host.vehicles, root.host.newLabel))
         }
         ThemedButton {
             objectName: "vehicleDuplicate"
             text: qsTr("Duplicate")
+            Layout.fillWidth: true
+            Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             enabled: root.host.idle && root.host.pickedVehicle !== null
                      && VehicleBook.labelProblem(root.host.vehicles, root.host.copyLabel, "") === ""
             onClicked: root.host.duplicateVehicle()
@@ -89,24 +104,32 @@ ColumnLayout {
         ThemedButton {
             objectName: "vehicleMore"
             text: qsTr("More")
+            Layout.fillWidth: true
+            Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             enabled: root.host.idle
-            highlighted: root.moreShown
+            checkable: true
+            checked: root.moreShown
             onClicked: root.moreShown = !root.moreShown
         }
     }
 
-    // The destructive actions apart from New, in a row of their own under
-    // the page's zoom (a Popup menu keeps the window's scale and the
-    // Basic style's row height), each still confirming
-    Flow {
+    // The minor and destructive actions apart from New, all quiet, each
+    // destructive one confirming; on a phone two share each row
+    GridLayout {
         id: moreRow
         objectName: "vehicleMoreRow"
         Layout.fillWidth: true
-        spacing: Theme.spacing
+        columnSpacing: Theme.spacing
+        rowSpacing: Theme.spacing
         visible: root.moreShown && root.host.confirming === ""
+        readonly property bool oneRow: root.width >= 560
+        columns: oneRow ? 4 : 2
 
         ThemedButton {
             objectName: "vehicleRename"
+            flat: true
+            Layout.fillWidth: true
+            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Rename")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.typedLabel !== ""
                      && root.host.typedLabel !== root.host.pickedVehicle.label
@@ -119,6 +142,9 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleForgetVin"
+            flat: true
+            Layout.fillWidth: true
+            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Forget the VIN")
             enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
             onClicked: {
@@ -128,6 +154,9 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleForget"
+            flat: true
+            Layout.fillWidth: true
+            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Forget")
             enabled: root.host.idle && root.host.pickedVehicle !== null
             onClicked: {
@@ -137,6 +166,9 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleForgetAll"
+            flat: true
+            Layout.fillWidth: true
+            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Forget all vehicles")
             enabled: root.host.idle && root.host.vehicles.list.length > 0
             onClicked: {

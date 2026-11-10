@@ -152,9 +152,8 @@ ecuio_status_t read_queue(ecuio_queue_t* q, uint32_t capacity, uint32_t chunk,
                                   ? ECUIO_ERR_SESSION_CLOSED
                                   : ECUIO_OK;
     --q->readers;
-    /* The last read out of a closing queue wakes the close, holding the
-     * mutex: the close can't return and free the queue until the lock's
-     * release below, the read's last touch of it */
+    /* The last read out of a closing queue wakes the close while holding the
+     * mutex, so the close can't free the queue before the release below */
     if (q->closing && q->readers == 0) {
         q->cv.notify_all();
     }

@@ -46,6 +46,8 @@ qt_add_library(app_ui STATIC
     signalstore.h
     recordingimport.cpp
     recordingimport.h
+    recordingexport.cpp
+    recordingexport.h
     recordingframes.cpp
     recordingframes.h
     recordingview.cpp
@@ -56,12 +58,14 @@ qt_add_library(app_ui STATIC
     signalfilter.h
     latencystats.h
     urlwrite.h
+    phonewindow.cpp
+    phonewindow.h
     windowtheme.cpp
     windowtheme.h
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
-                            qml/DashboardBook.qml qml/SignalForm.qml PROPERTIES
+                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -72,13 +76,18 @@ qt_add_qml_module(app_ui
     OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/App
     QML_FILES
         qml/Main.qml
+        qml/Immersive.qml
+        qml/KeepAwake.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
         qml/ThemedCheckBox.qml
+        qml/ThemedTextField.qml
         qml/SegmentButton.qml
         qml/CsvGuessPreview.qml
+        qml/RecordingExportPanel.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
+        qml/DashConnectList.qml
         qml/LogPage.qml
         qml/FrameFilterPanel.qml
         qml/FrameTable.qml
@@ -114,6 +123,7 @@ qt_add_qml_module(app_ui
         qml/SignalHub.qml
         qml/GaugeBase.qml
         qml/DangerMark.qml
+        qml/NightSwitch.qml
         qml/SegmentGauge.qml
         qml/SegmentReadout.qml
         qml/SparkGauge.qml
@@ -126,6 +136,14 @@ qt_add_qml_module(app_ui
         qml/ShiftLightBar.qml
         qml/SignalFilterBar.qml
         qml/DoubleTapHandler.qml
+    # Barlow (text) and Barlow Semi Condensed (values), SIL OFL 1.1: the
+    # notices carry the license. Theme loads them with FontLoader
+    RESOURCES
+        fonts/Barlow-Regular.ttf
+        fonts/Barlow-Medium.ttf
+        fonts/Barlow-SemiBold.ttf
+        fonts/Barlow-Bold.ttf
+        fonts/BarlowSemiCondensed-Bold.ttf
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -139,6 +157,12 @@ target_link_libraries(app_ui PUBLIC
     ecuio-core
 )
 app_enable_warnings(app_ui)
+# PhoneWindow's iOS half (UIKit), the one Objective-C++ source
+if(IOS)
+    target_sources(app_ui PRIVATE phonewindow_ios.mm)
+    target_link_libraries(app_ui PRIVATE "-framework UIKit")
+endif()
+
 # The phone's Bluetooth (ADR-0028 section 2): the links behind core's app-fed
 # streams, on Android only, so no desktop build ships it unverified.
 # Elsewhere the Bluetooth singleton lists nothing.

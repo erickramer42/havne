@@ -42,3 +42,25 @@ def test_the_fake_dll_through_the_surrogate():
             time.sleep(0.05)
         assert rpm, "the fake's ECU answered 01 0C"
         assert s.vin(0) == "FAKEJ2534VIN00001"
+
+def test_a_scan_in_the_extended_session_reports_its_session():
+    """ADR-0060: the fake's ECU answers D200 only in its extended session,
+    so the range's one find and the report's session say it was entered"""
+    uri = ("j2534://" + FAKE.replace("\\", "/") +
+           "?profile=uds-generic&did=1E1C&did=D200-D203&session=03"
+           "&identify=0&diagnose=0")
+    with havne.Session(uri) as s:
+        s.start()
+        until = time.monotonic() + 15
+        report = s.support(0)
+        while (not report.flags & havne.c.ECUIO_SUPPORT_SCAN_COMPLETE and
+               time.monotonic() < until):
+            time.sleep(0.05)
+            report = s.support(0)
+        assert report.flags & havne.c.ECUIO_SUPPORT_SCAN_COMPLETE
+        assert report.session_asked == 3
+        assert report.session == 3
+        assert report.session_state == havne.c.ECUIO_SESSION_STATE_ENTERED
+        assert report.flags & havne.c.ECUIO_SUPPORT_EXTENDED
+        assert report.session_entries == 1
+        assert report.scan_found == 1, "D200, answered in the session alone"

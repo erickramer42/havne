@@ -1,5 +1,5 @@
 // File/layer: app/qml/SparkGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 import QtQuick.Shapes
@@ -66,12 +66,11 @@ GaugeBase {
     }
 
     // The trace's points for a box, newest at the right edge, one point per
-    // 1.5 px at most (the newest kept), and the area under them for the fill
-    // (the same points between two corners). A flat range draws a midline
-    function buildTrace(w, h) {
+    // 1.5 px at most (the newest kept). A flat range draws a midline
+    function tracePoints(w, h) {
         const n = history.length
         if (n < 2 || w <= 0)
-            return { points: [], area: [] }
+            return []
         const step = w / (historyLength - 1)
         const stride = Math.max(1, Math.ceil(n / (w / 1.5 + 1)))
         const range = extent.hi - extent.lo
@@ -82,30 +81,27 @@ GaugeBase {
             points.push(Qt.point(w - (n - 1 - i) * step, y))
         }
         points.reverse()
-        const area = [Qt.point(points[0].x, h)]
-        for (const p of points)
-            area.push(p)
-        area.push(Qt.point(w, h))
-        return { points: points, area: area }
+        return points
     }
-    // The points alone, as the tests and the trace read them
-    function tracePoints(w, h) { return buildTrace(w, h).points }
 
     implicitHeight: 96
 
     Text {
         id: title
+        Accessible.ignored: true
         anchors { left: parent.left; top: parent.top }
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        font.letterSpacing: 1.2
-        font.capitalization: Font.AllUppercase
         color: Theme.textDim
     }
     Text {
-        anchors { left: title.right; leftMargin: 10; baseline: title.baseline }
-        visible: !gauge.hasValue
+        objectName: "gaugeNote"
+        Accessible.ignored: true
+        anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
+                  baseline: title.baseline }
+        visible: !gauge.hasValue && width > 0
+        elide: Text.ElideRight
         text: gauge.note
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
@@ -120,10 +116,12 @@ GaugeBase {
         Text {
             id: valueLabel
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: 22
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.weight: Font.Bold
+            font.family: Theme.valueFamily
+            font.features: Theme.valueFeatures
             color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
         }
         DangerMark {
@@ -134,6 +132,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: valueLabel.baseline
             text: gauge.unit
@@ -154,35 +153,39 @@ GaugeBase {
         Text {
             id: highText
             objectName: "scaleHigh"
+            Accessible.ignored: true
             text: gauge.history.length > 0 ? gauge.format(gauge.extent.hi) : ""
             font.pixelSize: 10
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
         }
         Item { width: 1; height: Math.max(0, scaleBox.height - highText.height - lowText.height) }
         Text {
             id: lowText
             objectName: "scaleLow"
+            Accessible.ignored: true
             text: gauge.history.length > 0 ? gauge.format(gauge.extent.lo) : ""
             font.pixelSize: 10
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
         }
     }
 
     Text {
         id: sampleLow
+        Accessible.ignored: true
         visible: false
         text: gauge.format(gauge.from) + "0"
         font.pixelSize: 10
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
     }
     Text {
         id: sampleHigh
+        Accessible.ignored: true
         visible: false
         text: gauge.format(gauge.to) + "0"
         font.pixelSize: 10
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
     }
 
     Shape {
@@ -192,7 +195,7 @@ GaugeBase {
                   top: readout.bottom; topMargin: 6; bottom: parent.bottom }
         preferredRendererType: Shape.CurveRenderer
 
-        readonly property var drawn: gauge.buildTrace(width, height)
+        readonly property var points: gauge.tracePoints(width, height)
 
         ShapePath {   // baseline
             strokeColor: Qt.alpha(Theme.gaugeTick, 0.06)
@@ -202,21 +205,12 @@ GaugeBase {
             PathLine { x: trace.width; y: trace.height - 0.5 }
         }
         ShapePath {
-            strokeColor: "transparent"
-            fillGradient: LinearGradient {
-                x1: 0; y1: 0; x2: 0; y2: trace.height
-                GradientStop { position: 0.0; color: Qt.alpha(gauge.accent, 0.30) }
-                GradientStop { position: 1.0; color: Qt.alpha(gauge.accent, 0.0) }
-            }
-            PathPolyline { path: trace.drawn.area }
-        }
-        ShapePath {
             strokeColor: gauge.stale ? Theme.textDim : gauge.accent
             strokeWidth: 1.5
             fillColor: "transparent"
             joinStyle: ShapePath.RoundJoin
             capStyle: ShapePath.RoundCap
-            PathPolyline { path: trace.drawn.points }
+            PathPolyline { path: trace.points }
         }
     }
 }

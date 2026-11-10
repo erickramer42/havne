@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <algorithm>
 #include <set>
 #include <string>
 #include <thread>
@@ -397,10 +398,11 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     snprintf(uri, sizeof(uri), "j2534://%s?baud=abc&band=250000",
              FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
-    EXPECT_STREQ(
-        ecuio_last_error_detail(),
-        "j2534:// takes no query key 'band', only baud, flags, "
-        "filter, txid, poll, probe, identify, diagnose, pack, scan, profile and did");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "j2534:// takes no query key 'band', only baud, flags, "
+                 "filter, txid, poll, probe, identify, diagnose, pack, scan, "
+                 "profile, did, "
+                 "session and keepalive_ms");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");
@@ -1928,6 +1930,148 @@ TEST_F(J2534AdoptionTest, TwoEcusInOneSessionAnswerEachItsOwn)
     ecuio_session_destroy(session);
 }
 
+/* ADR-0060: ?session=03 writes 10 03 first, the engine ECU answers D200
+ * only in the session it entered, and the close's last write is 10 01 */
+TEST_F(J2534AdoptionTest, AnExtendedSessionIsEnteredFirstAndLeftAtClose)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=uds-generic&did=1E1C,D200&session=03"
+             "&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 4, 200);
+
+    bool d200 = false;
+    const int n = cap.count.load() < 8 ? cap.count.load() : 8;
+    for (int i = 0; i < n; ++i) {
+        const unsigned char want[5] = {0x62, 0xD2, 0x00, 0x1A, 0x2C};
+        d200 = d200 ||
+               (cap.arbitration_ids[i] == 0x7E8u && cap.payload_lens[i] == 5 &&
+                memcmp(cap.payloads[i], want, 5) == 0);
+    }
+    EXPECT_TRUE(d200) << "D200 answers only in the extended session";
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+
+    unsigned long count = 0;
+    get_write_count(&count);
+    ASSERT_GE(count, 2u);
+    ASSERT_LE(count, 16u) << "the page keeps the first 16 writes";
+    unsigned char w[64] = {};
+    unsigned long len = 0, flags = 0;
+    get_recorded_write(0, w, &len, &flags);
+    const unsigned char first[6] = {0x00, 0x00, 0x07, 0xE0, 0x10, 0x03};
+    ASSERT_EQ(len, 6u);
+    EXPECT_EQ(memcmp(w, first, sizeof(first)), 0) << "the first write";
+    get_recorded_write(count - 1, w, &len, &flags);
+    const unsigned char last[6] = {0x00, 0x00, 0x07, 0xE0, 0x10, 0x01};
+    ASSERT_EQ(len, 6u);
+    EXPECT_EQ(memcmp(w, last, sizeof(last)), 0) << "the close's write";
+}
+
+/* Without ?session=03 the engine ECU stays in the default session: D200
+ * is refused (7F 22 31), never answered, while 1E1C reads */
+TEST_F(J2534AdoptionTest, WithoutASessionD200IsRefused)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=uds-generic&did=1E1C,D200&identify=0"
+             "&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 6, 200);
+    const int n = cap.count.load() < 8 ? cap.count.load() : 8;
+    ASSERT_GE(n, 3);
+    for (int i = 0; i < n; ++i) {
+        EXPECT_FALSE(cap.payload_lens[i] >= 3 && cap.payloads[i][0] == 0x62 &&
+                     cap.payloads[i][1] == 0xD2)
+            << "D200 answered in the default session";
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    unsigned long count = 0;
+    get_write_count(&count);
+    for (unsigned long i = 0; i < count && i < 16; ++i) {
+        unsigned char w[64] = {};
+        unsigned long len = 0, flags = 0;
+        get_recorded_write(i, w, &len, &flags);
+        EXPECT_FALSE(len == 6u && w[4] == 0x10) << "no session control asked";
+    }
+}
+
+/* A module that refuses 10 03 (7F 10 12) is read in the default session
+ * and gets no 10 01 at the close; the engine ECU's D200 reads too */
+TEST_F(J2534AdoptionTest, AModuleThatRefusesTheSessionIsReadInTheDefaultOne)
+{
+    KnobGuard module("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12");
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=uds-generic&did=D200,7E9:D801&session=03"
+             "&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 6, 200);
+
+    bool engine = false, module_ok = false;
+    const int n = cap.count.load() < 8 ? cap.count.load() : 8;
+    for (int i = 0; i < n; ++i) {
+        const unsigned char d200[5] = {0x62, 0xD2, 0x00, 0x1A, 0x2C};
+        const unsigned char d801[5] = {0x62, 0xD8, 0x01, 0x00, 0x12};
+        engine = engine || (cap.arbitration_ids[i] == 0x7E8u &&
+                            cap.payload_lens[i] == 5 &&
+                            memcmp(cap.payloads[i], d200, 5) == 0);
+        module_ok = module_ok || (cap.arbitration_ids[i] == 0x7E9u &&
+                                  cap.payload_lens[i] == 5 &&
+                                  memcmp(cap.payloads[i], d801, 5) == 0);
+    }
+    EXPECT_TRUE(engine) << "D200 on 0x7E8";
+    EXPECT_TRUE(module_ok) << "D801 on 0x7E9, in the default session";
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+
+    unsigned long count = 0;
+    get_write_count(&count);
+    ASSERT_LE(count, 16u) << "the page keeps the first 16 writes";
+    int tried_module = 0, left_engine = 0, left_module = 0;
+    for (unsigned long i = 0; i < count; ++i) {
+        unsigned char w[64] = {};
+        unsigned long len = 0, flags = 0;
+        get_recorded_write(i, w, &len, &flags);
+        if (len != 6u || w[4] != 0x10) {
+            continue;
+        }
+        const unsigned id = (unsigned{w[2]} << 8) | w[3];
+        if (w[5] == 0x03) {
+            tried_module += id == 0x7E1u;
+        } else if (w[5] == 0x01) {
+            left_engine += id == 0x7E0u;
+            left_module += id == 0x7E1u;
+        }
+    }
+    EXPECT_GE(tried_module, 1) << "10 03 goes to the module too";
+    EXPECT_EQ(left_engine, 1);
+    EXPECT_EQ(left_module, 0) << "no 10 01 to a module outside the session";
+}
+
 /* A range is scanned once, in order: of 1E18 to 1E20 the fake's ECU
  * knows only 1E1C, which the scan finds and then polls, taking turns
  * with the rest of the scan, while the eight it refuses (7F 22 31) are
@@ -2613,6 +2757,60 @@ TEST_F(J2534AdoptionTest, AFocusAsksOnlyThePickedPids)
         pids.insert(wbuf[5]);
     }
     EXPECT_GT(pids.size(), 2u) << "the whole set is asked again";
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* ADR-0056 section 4 through the fake's write stamps: two picks with a
+ * minimum time of 200 ms, the sweeps at least that far apart at their
+ * median and each sweep's two requests together */
+TEST_F(J2534AdoptionTest, AMinimumTimeSpacesTheFocusSweeps)
+{
+    char uri[700];
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=obd2&filter=0x7E8&probe=0&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> ids;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            (d.mux_key == 0x410Cu || d.mux_key == 0x410Du)) {
+            ids.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(ids.size(), 2u);
+    ASSERT_EQ(ecuio_session_set_focus_with(session, ids.data(), 2, 200, 0),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    const unsigned long want = 12;
+    wait_for_writes(get_write_count, want, 500);
+    unsigned long written = 0;
+    get_write_count(&written);
+    ASSERT_GE(written, want);
+    std::vector<int64_t> sweeps;
+    std::vector<int64_t> within;
+    for (uint32_t i = 0; i + 2 < want; i += 2) {
+        fake_control::Write a{};
+        fake_control::Write b{};
+        fake_control::Write c{};
+        fake_control::recorded_write(fake_page(), i, &a);
+        fake_control::recorded_write(fake_page(), i + 1, &b);
+        fake_control::recorded_write(fake_page(), i + 2, &c);
+        sweeps.push_back(static_cast<int64_t>(c.us - a.us));
+        within.push_back(static_cast<int64_t>(b.us - a.us));
+    }
+    std::sort(sweeps.begin(), sweeps.end());
+    std::sort(within.begin(), within.end());
+    EXPECT_GE(sweeps[sweeps.size() / 2], 190000)
+        << "sweeps came faster than the minimum";
+    EXPECT_LT(within[within.size() / 2], 100000)
+        << "a sweep's requests were spread over the gap";
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }

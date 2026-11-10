@@ -1,5 +1,5 @@
 // File/layer: app/qml/RingGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 import QtQuick.Shapes
@@ -126,19 +126,21 @@ GaugeBase {
 
     // Range ends under the arc tips
     Text {
+        Accessible.ignored: true
         text: gauge.formatScale(gauge.from)
         x: gauge.px(gauge.startAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.startAngle, gauge.rr) + gauge.ringWidth * 0.75
         font.pixelSize: Math.max(9, gauge.rr * 0.14)
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
         color: Theme.textDim
     }
     Text {
+        Accessible.ignored: true
         text: gauge.formatScale(gauge.to)
         x: gauge.px(gauge.endAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.endAngle, gauge.rr) + gauge.ringWidth * 0.75
         font.pixelSize: Math.max(9, gauge.rr * 0.14)
-        font.features: ({ "tnum": 1 })
+        font.features: Theme.valueFeatures
         color: Theme.textDim
     }
 
@@ -153,10 +155,12 @@ GaugeBase {
             Text {
                 id: readout
                 objectName: "readout"
+                Accessible.ignored: true
                 text: gauge.valueText
                 font.pixelSize: Math.max(16, gauge.rr * 0.5)
-                font.weight: Font.DemiBold
-                font.features: ({ "tnum": 1 })
+                font.weight: Font.Bold
+                font.family: Theme.valueFamily
+                font.features: Theme.valueFeatures
                 color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
             }
             // Past dangerFrom, beside the value
@@ -170,6 +174,7 @@ GaugeBase {
             }
             Text {
                 objectName: "unit"
+                Accessible.ignored: true
                 visible: gauge.hasValue
                 anchors.baseline: readout.baseline
                 text: gauge.unit
@@ -178,14 +183,14 @@ GaugeBase {
             }
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.label
             font.pixelSize: Math.max(9, gauge.rr * 0.13)
-            font.letterSpacing: 1.5
-            font.capitalization: Font.AllUppercase
             color: Theme.textDim
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             visible: !gauge.hasValue && text !== ""
             text: gauge.note

@@ -43,6 +43,7 @@ ColumnLayout {
             }
             ThemedButton {
                 objectName: "pluginRemove_" + pluginRow.index
+                flat: true
                 text: qsTr("Remove")
                 enabled: root.host.idle && root.host.confirming === ""
                 onClicked: root.host.removePlugin(pluginRow.modelData.sha256)
@@ -113,7 +114,8 @@ ColumnLayout {
                 objectName: "pluginMatch_" + index
                 width: Math.min(implicitWidth, parent.width)
                 text: qsTr("%1: %2").arg(modelData.name, modelData.variant)
-                highlighted: root.host.pickedVehicle !== null
+                checkable: true
+                checked: root.host.pickedVehicle !== null
                              && root.host.pickedVehicle.plugin === modelData.profile
                 enabled: root.host.idle
                 onClicked: root.host.pickPluginVariant(modelData.profile)

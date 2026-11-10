@@ -108,7 +108,13 @@ typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bit
 typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
 typedef char abi_support_scan_check[(offsetof(ecuio_channel_support_t, scan_total) == 120) ? 1 : -1];
 typedef char abi_support_pids_check[(offsetof(ecuio_channel_support_t, pids_supported) == 132) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 136) ? 1 : -1];
+typedef char abi_support_session_check[(offsetof(ecuio_channel_support_t, session_asked) == 136) ? 1 : -1];
+typedef char abi_support_session_in_force_check[(offsetof(ecuio_channel_support_t, session) == 137) ? 1 : -1];
+typedef char abi_support_session_state_check[(offsetof(ecuio_channel_support_t, session_state) == 138) ? 1 : -1];
+typedef char abi_support_session_nrc_check[(offsetof(ecuio_channel_support_t, session_nrc) == 139) ? 1 : -1];
+typedef char abi_support_session_entries_check[(offsetof(ecuio_channel_support_t, session_entries) == 140) ? 1 : -1];
+typedef char abi_support_session_lost_check[(offsetof(ecuio_channel_support_t, session_lost) == 142) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 144) ? 1 : -1];
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
@@ -168,6 +174,13 @@ typedef char abi_queue_value_size_check[(sizeof(ecuio_queue_value_t) == 160) ? 1
 typedef char abi_queue_value_value_check[(offsetof(ecuio_queue_value_t, value) == 16) ? 1 : -1];
 typedef char abi_queue_value_len_check[(offsetof(ecuio_queue_value_t, text_len) == 24) ? 1 : -1];
 typedef char abi_queue_value_text_check[(offsetof(ecuio_queue_value_t, text) == 32) ? 1 : -1];
+
+/* A long call's cancel as C writes one (ecuio_cancel_t) */
+static int never_cancel(void* user_data)
+{
+    (void)user_data;
+    return 0;
+}
 
 int main(void)
 {
@@ -279,6 +292,7 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
+        (ECUIO_SESSION_INFO_REQUESTS & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0u ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
@@ -332,9 +346,13 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_set_focus(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_session_clear_diagnostics_with(NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING |
-                                                 ECUIO_CLEAR_ALLOW_MOVING) !=
+        ecuio_session_set_focus_with(NULL, NULL, 0, 0, 0) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_FOCUS_MIN_SWEEP_MAX_MS != 60000u ||
+        ecuio_session_clear_diagnostics(NULL, 0, 0) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_clear_diagnostics_with(
+            NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         (ECUIO_DIAG_CLEAR_RPM & ECUIO_DIAG_CLEARING) != 0 ||
         (ECUIO_DIAG_CLEAR_KMH & ECUIO_DIAG_CLEAR_RPM) != 0 ||
@@ -499,6 +517,10 @@ int main(void)
         ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
         ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_with(NULL, never_cancel, NULL, &export_report) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_estimate_with(NULL, &estimate_ms, 1, never_cancel, NULL,
+                                   &estimate) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export_estimate(NULL, &estimate_ms, 1, &estimate) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export_estimate(&export_options, &estimate_ms, 1, &estimate) !=

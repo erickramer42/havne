@@ -1,5 +1,5 @@
 // File/layer: app/qml/ThemedButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.buttons, QmlTest.settings, QmlTest.phone (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -7,22 +7,51 @@ import QtQuick.Controls
 Button {
     id: control
 
-    // Expose so callers can tweak if needed. `highlighted` marks the
-    // page's one primary action.
-    property color baseColor: control.highlighted ? Theme.primary : Theme.elevated
-    property color hoverColor: control.highlighted ? Qt.lighter(Theme.primary, 1.15)
-                                                   : Theme.elevatedLight
-    property color pressedColor: control.highlighted ? Qt.darker(Theme.primary, 1.2)
-                                                     : Theme.surface
+    // The ranks (Qt's own properties): `highlighted` is the one action a
+    // page or bar is for (primary), the default is every other action
+    // (secondary), `flat` a frequent-but-minor or destructive one (quiet: no
+    // fill or outline at rest, its label in `text` like any other),
+    // and `checkable` with `checked` a choice among a few or an open panel
+    // (selected, which wins over the others). `checked` is the page's
+    // state: bind it. A click that toggled it is undone here (onToggled
+    // calls toggle() again), so the binding stays the truth (a click on
+    // the chosen one leaves it chosen) and the page's onClicked changes
+    // what the binding reads. A checkable button whose `checked` is not
+    // bound un-toggles itself on every click.
+    readonly property bool quiet: control.flat && !control.checked
+    readonly property bool primary: control.highlighted
+
+    // Exposed so callers can tweak if needed
+    property color baseColor: control.checked ? Theme.elevatedLight
+                            : control.primary ? Theme.primary
+                            : control.quiet ? "transparent"
+                            : Theme.elevated
+    property color hoverColor: control.checked ? Qt.lighter(Theme.elevatedLight, 1.15)
+                             : control.primary ? (Theme.primary.hslLightness > 0.5
+                                                  ? Qt.darker(Theme.primary, 1.08)
+                                                  : Qt.lighter(Theme.primary, 1.15))
+                             : control.quiet ? Theme.elevated
+                             : Theme.elevatedLight
+    property color pressedColor: control.checked ? Qt.darker(Theme.elevatedLight, 1.2)
+                               : control.primary ? Qt.darker(Theme.primary, 1.2)
+                               : control.quiet ? Theme.elevated
+                               : Theme.surface
+    property color textColor: control.checked ? Theme.text
+                            : control.primary ? Theme.textOnPrimary
+                            : Theme.text
+
+    onToggled: control.toggle()
 
     // Compact, for a phone's crowded rows: as wide as its text with
     // narrow sides (40 px at least), not the 120 px a button otherwise
-    // starts from
+    // starts from; a quiet button is as wide as its text too, with
+    // `touchMin` the least
     property bool compact: false
-    horizontalPadding: compact ? 6 : 8
+    horizontalPadding: compact || quiet ? 6 : 8
     implicitWidth: compact ? Math.max(40, implicitContentWidth + leftPadding + rightPadding)
-                           : Math.max(implicitBackgroundWidth + leftInset + rightInset,
-                                      implicitContentWidth + leftPadding + rightPadding)
+                 : quiet ? Math.max(touchMin, implicitContentWidth + leftPadding + rightPadding)
+                 : Math.max(implicitBackgroundWidth + leftInset + rightInset,
+                            implicitContentWidth + leftPadding + rightPadding)
 
     // A page that needs its buttons a phone's touch size (Settings) has a
     // touchMin property; the button takes the nearest one up its parents
@@ -48,16 +77,17 @@ Button {
              : control.hovered ? control.hoverColor
              :                   control.baseColor
         // Keyboard focus ring; visualFocus stays false for mouse clicks
-        border.width: control.visualFocus ? 2 : 0
-        border.color: Theme.text
+        // The selected state also takes the outline
+        border.width: control.visualFocus ? 2 : control.checked ? 1 : 0
+        border.color: control.visualFocus ? Theme.text : Theme.outline
     }
 
     // Given less than its text's width, the text wraps and the button
     // grows taller
     contentItem: Text {
         text: control.text
-        font.pixelSize: 14
-        color: Theme.text
+        font.pixelSize: Theme.fontBody
+        color: control.textColor
         wrapMode: Text.Wrap
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

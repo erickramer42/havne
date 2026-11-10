@@ -317,6 +317,25 @@ def test_a_focus_takes_ids_or_names_and_refuses_a_stranger():
         s.set_focus([sid])
 
 
+def test_a_focus_takes_a_minimum_time_between_sweeps():
+    with havne.Session("mock://py") as s:
+        sid = next(iter(s.signals))
+        s.set_focus([sid], min_sweep_ms=250)
+        s.set_focus([sid], min_sweep_ms=60000)
+        s.set_focus([sid], min_sweep_ms=0)
+        for bad in (-1, 1.5, True, None, 0x100000000):
+            with pytest.raises(ValueError):
+                s.set_focus([sid], min_sweep_ms=bad)
+        with pytest.raises(havne.Error) as e:
+            s.set_focus([sid], min_sweep_ms=60001)
+        assert e.value.name == "INVALID_ARGUMENT"
+        assert "60000" in e.value.detail
+        with pytest.raises(havne.Error) as e:
+            s.set_focus([], min_sweep_ms=250)
+        assert e.value.name == "INVALID_ARGUMENT"
+        assert "focus" in e.value.detail
+
+
 def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
     with havne.Session("mock://py") as s:
         sid = next(iter(s.signals))

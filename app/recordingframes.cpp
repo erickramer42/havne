@@ -186,7 +186,7 @@ void RecordingFrames::finished(const std::shared_ptr<Job>& job)
             m_frames.appendFrame(f, f.data_length);
         }
         if (job->capped) {
-            m_note = tr("the first %1 frames from %2 s: zoom in for the rest")
+            m_note = tr("The first %1 frames from %2 s: zoom in for the rest")
                          .arg(QLocale(QLocale::English).toString(MaxRows))
                          .arg(job->fromMs / 1000.0, 0, 'f', 1);
         }

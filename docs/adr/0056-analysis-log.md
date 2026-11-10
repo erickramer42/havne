@@ -3,8 +3,9 @@
 - **Status:** Accepted. Built: the focus (section 2), the recorder
   attached to a running session (section 3), the rows and the wide CSV
   with its estimate (sections 4 and 5), `havne-cli log` and the app's
-  Start log and Stop log (the appendices); the viewer's Export and the
-  steps after it are v0.7.1's.
+  Start log and Stop log, the viewer's Export and a focus's minimum time
+  between sweeps (the appendices). The navigation aids (section 6) are
+  v0.7.3's.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request
   engine) and [ADR-0039](0039-full-service01-coverage.md) (its two rate classes);
@@ -479,3 +480,159 @@ carries a response-count digit, and the VX in ELM mode still prints its
 prompt about one `AT ST 19` timeout after a multi-frame reply, as the sheet's bus and prompt timings show. `&pack=0` helped at 4
 signals and cost at 8. J2534 and SocketCAN sending have no row: they
 have not run.
+
+## Appendix: the viewer's Export as built (2026-11-08)
+
+Step 6 ships in v0.7.1, not v0.7.0 as the appendix "the build" has it.
+
+**The whole log, in every format.** The Export writes the whole
+recording (`from_us` and `to_us` 0), the chart's zoom being a view, as
+Save report's. `--from` and `--to` are `havne-cli`'s alone
+([ADR-0054](0054-exports-and-imports.md)'s note of 2026-11-08).
+
+**The panel** (`RecordingExportPanel.qml`), opened by Export... beside
+Save report, takes the chart's place while it's open: a phone keeps the
+rest of the viewer on its first screen. Inline, since a Popup doesn't
+follow the zoom. Save as... and the last result come first, so they stay
+on a phone's first screen, then CSV, pcapng or Folder (CSV disabled, with the reason,
+for a folder with no `signals.csv`; pcapng hidden with no `frames.csv`);
+Wide or Long under CSV; under Wide the row interval and the columns.
+Every control is a touch's size on a phone.
+
+**The sizes.** One row a choice: every sweep, every 100 ms, every 250 ms
+and a custom interval (1 to 86400000 ms, `--rows`' range), each with its
+rows and the file's exact bytes, from one `ecuio_export_estimate` call
+over them all on a worker of its own. Asked at the open and 300 ms after
+a custom interval or a column change; the Export never waits for one.
+Core can't stop a call under way, so one runs at a time, a newer call
+waits behind it and replaces any already waiting, and only the newest's
+answer is shown. The long form, pcapng and the folder show no figure:
+core sizes the wide CSV alone. The last interval is kept between runs;
+format, layout, columns and Raw start over at each open.
+
+**The columns:** the log's own (core's rule: the focus line, else every
+number signal) or the viewer's ticks, by name in the recording's order.
+The ticks aren't offered while the viewer shows values decoded through a
+profile, whose names aren't the recording's columns. The panel says then
+that the CSV holds the values as recorded, since `signals.csv` is what
+core exports and no front end has a profile option.
+
+**Raw** is the named option ADR-0054 section 1 asks for: "Raw, not
+scrubbed", shown in Developer mode alone, off at each open, with a line
+saying the file can hold the VIN and calibration IDs.
+
+**Where it's written** (`app/recordingexport.{h,cpp}`, `RecordingExport`,
+QtCore, on a thread of its own; its destructor waits, core having no
+cancel). Core writes paths and refuses one that exists, and Android's
+picker hands back a `content://` URI, so a file is written in a
+`QTemporaryDir` and copied a chunk at a time to the place picked:
+`QSaveFile` for a local file, whole or not at all; the provider's own
+stream otherwise. *Amended 2026-11-09:* the destructor, which runs when
+the app quits (an Android teardown included), stops both workers
+through core's cancel and waits only for the next ask (ADR-0054's
+appendix "an export canceled"); at startup the app removes an export's
+temporary folder (`havne-export-` and six letters or digits) once it is
+a day old. A picker makes its document before the export runs, so
+a refused export or a failed copy removes a provider's document; a local
+file stays as it was. A folder copy on a local disk is core's own, made
+whole under its partial name; through a provider it is made in the
+temporary folder, then a new folder is made under the one picked and
+filled file by file, and removed if a file fails. The picker asks for a
+folder, a copy's name being the app's to choose. Android's picker
+offers neither the storage's root nor Download as that folder.
+
+Run on the test phone (Android 16) over a `mock://demo` recording,
+2026-11-08: through the document picker, the folder copy, a wide CSV and
+a pcapng each byte for byte what `havne-cli export` writes for the same
+recording and options, and a second copy named `<stamp>-2`.
+
+**The names** offered are the recording's stamp alone (`<yyyyMMdd-HHmmss>`
+with its `-n`, or "recording"), never the rest of its folder's name,
+which can hold the vehicle's label. A folder copy takes the first of
+`<stamp>`, `<stamp>-2` and on that is free.
+
+**The result** says what was written and what was left out, by class, in
+the panel and as one activity line, never a path.
+
+**`havne-cli export <recording> --format csv --estimate`** (no `<out>`)
+writes the same sizes, one `estimate` line {format, layout, columns,
+missing, sizes [{row_ms, rows, bytes}]}: at `--rows`' interval, else
+the three the panel offers. Exit codes as `export`'s; other formats, the
+long form and a file named are usage.
+
+**Tests:** `RecordingExportTest` (test_bridge: each format byte for byte
+against core's own call for the same options, a provider's path through
+`setThroughProviderForTesting`, the sizes against the files written, the
+newest estimate winning), `QmlTest.recordings`' Export cases,
+`QmlTest.phone`'s `test_theExportPanelFitsAPhone`, `CliTransferTest`,
+`CliUsageTest.ExportEstimate*`, `CliGoldenTest.ExportEstimateSizesTheWideCsv`
+and `CliTransferRunTest.csv` (each estimate's bytes the file's).
+
+## Appendix: the minimum time between sweeps as built (2026-11-08)
+
+Section 4's advanced setting belongs to the focus: it is asked for with
+the picks and lasts as long as they do.
+
+- `ecuio_session_set_focus_with(session, ids, count, min_sweep_ms,
+  flags)` (`core.h`); `ecuio_session_set_focus` is the same call with
+  0 and 0. 0 is none; the most is `ECUIO_FOCUS_MIN_SWEEP_MAX_MS`
+  (60000). A flag, a time past that, or a time with no signals picked
+  is `ECUIO_ERR_INVALID_ARGUMENT` with nothing changed.
+- It is on the focus call rather than a URI key, since a key needs a
+  reconnect to change, and rather than a call of its own, which would
+  be a second state that does nothing outside a focus.
+- **Only a focused session has one.** Live, Record sessions and
+  `havne-cli stream` keep their pace, and the focus's end takes it
+  away. A sweep is defined here because a focus runs every pick in one
+  class; across the fast and slow classes of a whole set it isn't, and
+  a busy ECU gets no relief on Live.
+- **In the engine, per channel, from one sweep's start to the next's**
+  (`ecuio_engine_focus`'s `min_sweep_us`, `ecuio_engine_count_sweep`;
+  the time is the driver's, as for every engine rule). A sweep ends once
+  as many rows have been asked as the rotation holds, and the rows are
+  consecutive, so every pick has been asked. A sweep longer than the
+  minimum waits for nothing.
+- **Packing:** a pack counts each of its rows. Eight picks at six PIDs
+  a pack are two requests a sweep, four rows asked twice; the count
+  starts over at each sweep, since the wait can only fall between two
+  requests.
+- **Only the rotation waits.** The walk, identification, diagnostics, a
+  clear and the DID scan go out in the gap.
+  `ecuio_engine_next_event_us` reports the wait, so the workers sleep
+  through it and, still having something to ask, count no quiet reads:
+  a long minimum raises no link-health banner. "Not responding" stays
+  ten unanswered requests in a row, so with one request a sweep it comes
+  after ten times the minimum: 10 s at 1000 ms.
+- A later call with the same time keeps a wait under way; a different
+  time ends it. A scanned DID joining the focus changes neither the
+  sweep under way nor its wait, so DIDs found faster than a sweep runs
+  can't keep it from ending.
+- `mock://`, `replay://` and a listening session accept it and change
+  nothing, as with the focus, so neither the recording's header nor the
+  activity log's line names it there. `ECUIO_SESSION_INFO_REQUESTS` (set
+  at create) says which sessions ask.
+- **The front ends:** Settings' Advanced page, Off (the default), 100,
+  250, 500 or 1000 ms, kept between runs and read at each Start log, so
+  no reconnect, and the activity log's line says it;
+  `havne-cli log --min-sweep <ms>` (with `--signal`), the `focus` line's
+  `min_sweep_ms` when one is set; Python's `set_focus(signals,
+  min_sweep_ms=0)`.
+- **The recording** has `min sweep  250 ms` after its `focus` line, so
+  a log's row rate can be explained later; the folder export keeps it.
+  A row of the wide CSV is unchanged: a minimum gives fewer of them, and
+  the silence rule's 3x interval follows the sweep's.
+- **The frames check** reads that line and adds the minimum to its
+  bus-gap limit (the default or the caller's): a sweep of one reply can
+  be that quiet, start to start, plus its overshoot. A limit of the
+  larger of the two would call every sweep at 1000 ms a gap.
+- No real adapter has run it; the checks are the fakes' and the
+  simulated ELM327's.
+
+## Appendix: where the later steps landed (2026-11-09)
+
+The appendix "the build" places the minimum time between sweeps
+(section 4) and the navigation aids (section 6) in v0.7.1. The minimum
+time is v0.7.1's and is built (the appendix "the minimum time between
+sweeps as built"). The navigation aids moved to v0.7.3, with the
+analysis viewer, since they need logs from real drives to design
+against.

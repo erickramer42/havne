@@ -7,7 +7,8 @@
 # listed, one registered, a session decoding through it, and its
 # recording holding the variant's file as signals.json. Two threads
 # loading at once each read their own folder; a read that raises is a
-# file core can't read; a file is read no further than core's bound.
+# file core can't read; a file is read no further than core's bound. A
+# packed plugin (one file, no read callback) loads too.
 
 import os
 import shutil
@@ -20,7 +21,7 @@ import havne
 import havne.signals
 from havne._core import lib
 
-from conftest import PLUGINS
+from conftest import PLUGINS, ROOT
 
 
 def test_the_example_plugin_loads_and_a_session_decodes_through_a_variant():
@@ -50,6 +51,13 @@ def test_a_plugin_session_s_recording_holds_its_variant_s_file(tmp_path):
     assert "profile  plugin.example-sim." + variant in header
     assert any(line.startswith("signal file  signals.json,") for line in header), header
     assert any(line.startswith("plugin  ") for line in header), header
+
+
+def test_a_packed_plugin_loads_with_no_read_callback():
+    p = havne.Plugin(os.path.join(ROOT, "tests", "fixtures", "plugins", "packed.json"))
+    assert p.id == "packed"
+    assert p.variants == ["base"]
+    assert oil_name(p) == "Oil Temp"
 
 
 def copy_of_the_example(folder, plugin_id, oil_name):

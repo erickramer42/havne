@@ -1,18 +1,20 @@
 // File/layer: app/qml/AnalogGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo at 160 px
+// Testing: QML: QmlTest.gauges, QmlTest.accessibility;
+//          manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
 //          QML: QmlTest.dashboard (no negative tick count while a
-//          reused cell rebinds)
+//          reused cell rebinds), QmlTest.gauges (no bezel, no face)
 
 import QtQuick
 import QtQuick.Shapes
 
 pragma ComponentBehavior: Bound
 
-// Needle dial: tach, speedo. Face, ticks, numerals and zones are
+// Needle dial: tach, speedo. It has no bezel or face and draws on what's
+// behind it (a card, or the phone's panel). Ticks, numerals and zones are
 // static Rectangles, Text and Shape arcs. Per frame only the needle
-// (shadow and body) rotates and, with showProgress, the three progress
+// rotates and, with showProgress, the three progress
 // arcs (two glow, one core) change their sweep. No Canvas:
 // its repaint is a CPU raster of the whole dial, which a 3x phone
 // screen would pay at animation rate.
@@ -25,12 +27,16 @@ GaugeBase {
     property real startAngle: 135       // degrees; 0 = 3 o'clock, clockwise
     property real sweepAngle: 270
     property string caption: ""         // above the hub, e.g. "×1000 r/min"
-    property string peakLabel: qsTr("PEAK")
+    property string peakLabel: qsTr("Peak")
     property bool showProgress: false   // lit arc from `from` to the needle
     property color needleColor: Theme.gaugeNeedle
 
-    // Geometry, all from the square the dial fits in
-    readonly property real size: Math.min(width, height)
+    // Geometry, all from the square the dial fits in. With no bezel the
+    // drawing grows into its item, as far as keeps the widest thing it
+    // draws, the progress arc's glow, inside at every size: ringWidth's
+    // floor makes that glow relatively wider on a small dial
+    readonly property real box: Math.min(width, height)
+    readonly property real size: Math.max(0, Math.min(box * 1.06, (box - 10) / 0.89))
     readonly property real r: size / 2
     readonly property real cx: width / 2
     readonly property real cy: height / 2
@@ -60,41 +66,6 @@ GaugeBase {
     function angleOf(v) { return startAngle + fractionOf(v) * sweepAngle }
     function px(deg, radius) { return cx + radius * Math.cos(deg * Math.PI / 180) }
     function py(deg, radius) { return cy + radius * Math.sin(deg * Math.PI / 180) }
-
-    TapHandler {
-        enabled: gauge.showPeak
-        onTapped: gauge.resetPeaks()
-    }
-
-    // ---- Bezel and face
-    Rectangle {
-        anchors.centerIn: parent
-        width: gauge.size; height: width; radius: width / 2
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.gaugeShade.bezelHi }
-            GradientStop { position: 0.45; color: Theme.gaugeFace }
-            GradientStop { position: 1.0; color: Theme.gaugeShade.bezelLo }
-        }
-    }
-    Shape {
-        anchors.fill: parent
-        preferredRendererType: Shape.CurveRenderer
-        ShapePath {   // lit from above
-            strokeColor: "transparent"
-            fillGradient: RadialGradient {
-                centerX: gauge.cx; centerY: gauge.cy - gauge.r * 0.35
-                centerRadius: gauge.r * 1.25
-                focalX: gauge.cx; focalY: gauge.cy - gauge.r * 0.35
-                GradientStop { position: 0.0; color: Theme.gaugeShade.faceHi }
-                GradientStop { position: 1.0; color: Theme.gaugeShade.faceLo }
-            }
-            PathAngleArc {
-                centerX: gauge.cx; centerY: gauge.cy
-                radiusX: gauge.r * 0.95; radiusY: gauge.r * 0.95
-                startAngle: 0; sweepAngle: 360
-            }
-        }
-    }
 
     // ---- Chapter ring and zone washes behind the ticks
     Shape {
@@ -200,6 +171,7 @@ GaugeBase {
         model: gauge.majorCount
         delegate: Text {
             required property int index
+            Accessible.ignored: true
             readonly property real v: gauge.from + index * gauge.majorStep
             readonly property real a: gauge.angleOf(v)
 
@@ -209,7 +181,7 @@ GaugeBase {
             y: gauge.py(a, gauge.numRadius) - height / 2
             font.pixelSize: gauge.numSize
             font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: gauge.zoneColor(v, Theme.gaugeTick)
         }
     }
@@ -238,11 +210,11 @@ GaugeBase {
 
     // ---- Readout: caption above the hub, value below it
     Text {
+        Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
         y: gauge.cy - gauge.r * 0.36 - height / 2
         text: gauge.caption
         font.pixelSize: Math.max(10, gauge.size * 0.038)
-        font.letterSpacing: 1
         color: Theme.textDim
     }
     Column {
@@ -257,11 +229,13 @@ GaugeBase {
             Text {
                 id: valueLabel
                 objectName: "readout"
+                Accessible.ignored: true
                 text: gauge.valueText
                 // Sized to clear the end numerals beside it at full scale
                 font.pixelSize: Math.max(16, gauge.size * 0.1)
-                font.weight: Font.DemiBold
-                font.features: ({ "tnum": 1 })
+                font.weight: Font.Bold
+                font.family: Theme.valueFamily
+                font.features: Theme.valueFeatures
                 color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
             }
             // Past dangerFrom, beside the value
@@ -275,13 +249,14 @@ GaugeBase {
             }
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.unit
             font.pixelSize: Math.max(10, gauge.size * 0.036)
-            font.letterSpacing: 1.5
             color: Theme.textDim
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             topPadding: gauge.size * 0.012
             text: !gauge.hasValue ? gauge.note
@@ -289,19 +264,15 @@ GaugeBase {
                    ? "%1 %2".arg(gauge.peakLabel).arg(gauge.format(gauge.peakValue))
                    : ""
             font.pixelSize: Math.max(9, gauge.size * 0.032)
-            font.letterSpacing: 1
-            font.features: ({ "tnum": 1 })
+            font.features: Theme.valueFeatures
             color: gauge.hasValue ? Theme.gaugeWarn : Theme.textDim
         }
     }
 
-    // ---- Needle: shadow, then body; both drawn pointing at 3 o'clock
-    component Needle: Shape {
+    // ---- Needle: flat, tapered, drawn pointing at 3 o'clock
+    Shape {
         id: needle
-        property color tint: gauge.needleColor
-        property bool shadow: false
-        property real shiftX: 0     // the shadow's offset
-        property real shiftY: 0
+        objectName: "needle"
 
         // The box is the square whose corners lie as far from the center
         // as the needle's tip, so turning it never carries a corner past
@@ -309,8 +280,8 @@ GaugeBase {
         // draws beyond the box, which a Shape doesn't clip. Centered on
         // the dial, so the box's center is the rotation's
         width: body.len * Math.SQRT2; height: width
-        x: gauge.cx - width / 2 + shiftX
-        y: gauge.cy - height / 2 + shiftY
+        x: gauge.cx - width / 2
+        y: gauge.cy - height / 2
         rotation: gauge.needleAngle
         opacity: gauge.hasValue || gauge.sweeping ? 1.0 : 0.4
         preferredRendererType: Shape.CurveRenderer
@@ -324,8 +295,7 @@ GaugeBase {
             readonly property real tailW: gauge.size * 0.010
 
             strokeColor: "transparent"
-            fillColor: needle.shadow ? Qt.rgba(0, 0, 0, 0.45) : "transparent"
-            fillGradient: needle.shadow ? null : grad
+            fillColor: gauge.needleColor
             startX: needle.width / 2 - body.tail; startY: needle.height / 2 - body.tailW
             PathLine { x: needle.width / 2; y: needle.height / 2 - body.baseW }
             PathLine { x: needle.width / 2 + body.len; y: needle.height / 2 - body.tipW }
@@ -334,36 +304,19 @@ GaugeBase {
             PathLine { x: needle.width / 2 - body.tail; y: needle.height / 2 + body.tailW }
             PathLine { x: needle.width / 2 - body.tail; y: needle.height / 2 - body.tailW }
         }
-        LinearGradient {
-            id: grad
-            x1: needle.width / 2 - gauge.r * 0.18; y1: 0
-            x2: needle.width / 2 + gauge.r * 0.80; y2: 0
-            GradientStop { position: 0.0; color: Theme.gaugeShade.needleBase }
-            GradientStop { position: 0.17; color: Theme.gaugeShade.needleBase }
-            GradientStop { position: 0.19; color: Qt.darker(needle.tint, 1.25) }
-            GradientStop { position: 1.0; color: Qt.lighter(needle.tint, 1.2) }
-        }
     }
-    Needle {
-        shadow: true
-        shiftX: gauge.size * 0.006; shiftY: gauge.size * 0.014
-    }
-    Needle {}
 
     // ---- Hub cap
     Rectangle {
+        objectName: "hub"
         anchors.centerIn: parent
         width: gauge.size * 0.11; height: width; radius: width / 2
-        border.color: Qt.alpha(Theme.gaugeTick, 0.10)
-        border.width: 1
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Theme.gaugeShade.hubHi }
-            GradientStop { position: 1.0; color: Theme.bg }
-        }
+        color: Theme.elevatedLight
         Rectangle {
+            objectName: "hubPin"
             anchors.centerIn: parent
             width: parent.width * 0.36; height: width; radius: width / 2
-            color: Qt.darker(gauge.needleColor, 1.5)
+            color: gauge.needleColor
         }
     }
 }

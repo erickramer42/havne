@@ -1,6 +1,7 @@
 // File/layer: tests/qml/tst_phone.qml | Qt Quick Test, QML tier
 // Testing: QML: QmlTest.phone (test_qml)
 
+import QtCore
 import QtQuick
 import QtTest
 import App
@@ -12,6 +13,20 @@ TestCase {
     when: windowShown
 
     Component { id: mainComponent; Main {} }
+    // Main's `ui` store, as a window made later reads it
+    Component {
+        id: uiStoreComponent
+        Settings {
+            category: "ui"
+            property int minSweepMs: -1
+        }
+    }
+    function storedUi(key) {
+        const reader = uiStoreComponent.createObject(null)
+        const value = reader[key]
+        reader.destroy()
+        return value
+    }
 
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
@@ -21,10 +36,12 @@ TestCase {
     function cleanup() {
         Relay.stop()
         Theme.developerMode = false
+        Theme.night = "off"
         Theme.zoom = 1.0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false
+        Bridge.minSweepMs = 0
     }
 
     function find(within, name) {
@@ -209,6 +226,54 @@ TestCase {
             find(page, "clearCancel").clicked()
     }
 
+    // The drive view's settings on the narrowest phone, also at the top
+    // zoom: a word longer than any row can't widen the page or leave its
+    // button. Only 100 % judges the whole page: other rows pass the edge at
+    // the top zoom.
+    function test_theDriveSettingsFitAPhone_data() {
+        return [{ tag: "100 %", zoom: 1.0 }, { tag: "the top zoom", zoom: 2.0 }]
+    }
+    function test_theDriveSettingsFitAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 800
+        main.font.pixelSize = 16
+        Theme.zoom = data.zoom
+        const page = find(main.contentItem, "settingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open("display")
+        const display = find(page, "driveHideRow").parent
+        wait(300)
+        const widthBefore = display.width
+        display.driveShown = true
+        display.orientationShown = true
+        find(page, "driveHide_0").text = "W".repeat(60)
+        find(page, "driveOrientation_follow").text = "W".repeat(60)
+        wait(300)
+        // Geometry alone is read below; a render waits out 5 s at 100 % when no frame is due
+        verify(waitForPolish(main), "laid out")
+        compare(display.width, widthBefore, "the rows leave the page's width alone")
+        for (const row of ["driveHideRow", "driveOrientationRow"]) {
+            const past = pastTheEdge(find(page, row), display, [])
+            compare(past.length, 0, row + " past the page: " + past.join(", "))
+        }
+        if (data.zoom === 1.0) {
+            const out = pastTheEdge(page, main.contentItem, [])
+            compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        }
+        for (const name of ["driveHide_2000", "driveHide_4000", "driveHide_8000", "driveHide_0",
+                            "driveOrientation_follow", "driveOrientation_upright",
+                            "driveOrientation_side"]) {
+            const seg = find(page, name)
+            const label = seg.contentItem
+            verify(label.contentWidth <= label.width + 0.5,
+                   name + " is " + label.contentWidth + " wide in " + label.width)
+            verify(label.contentHeight <= seg.height + 0.5,
+                   name + " is " + label.contentHeight + " high in " + seg.height)
+        }
+    }
+
     // On a phone upright and on its side, the viewer's page scrolls to all
     // of it: the chart a readable height, the frames check's line inside
     // the page once scrolled to its end, and the filter's options inside
@@ -216,6 +281,45 @@ TestCase {
     // The viewer's Frames view on a phone's width: the switch, the table
     // narrowed to the page (no DLC column), its rows inside the window, and
     // the filter's fields inside it too
+    function test_theExportPanelFitsAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.developerMode = true
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const button = find(page, "exportButton")
+        verify(button.mapToItem(main.contentItem, button.width, 0).x <= main.contentItem.width + 0.5,
+               "the button is on the screen")
+        button.clicked()
+        const panel = find(page, "exportPanel")
+        tryVerify(() => panel.visible && panel.sizes.length >= 3, 10000, "the sizes")
+        panel.rowChoice = "custom"
+        panel.raw = true
+        verify(waitForPolish(main), "laid out")
+        const over = []
+        pastTheEdge(panel, main.contentItem, over)
+        compare(over, [], "past the edge: " + over.join(", "))
+        // The panel's controls are a touch's size on the glass
+        for (const name of ["exportFormat_csv", "exportFormat_folder", "exportLayout_wide",
+                            "exportRows_sweep", "exportRows_custom", "exportCustomMs",
+                            "exportGo", "exportClose", "exportRaw"]) {
+            const item = find(panel, name)
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+        }
+        panel.rowChoice = "sweep"
+        panel.raw = false
+        Theme.developerMode = false
+    }
+
     function test_theViewersFramesViewFitsAPhone() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -340,6 +444,43 @@ TestCase {
         compare(small.length, 0, "under " + Theme.touchTarget + ": " + small.join(", "))
     }
 
+    // The text fields are a touch's size on a phone without a page asking
+    function test_theFieldsAreATouchsSizeOnAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        tryCompare(Theme, "compact", true)
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        verify(waitForPolish(main), "laid out")
+        const field = find(live, "filterText")
+        verify(field && field.visible, "Find a signal shows")
+        const h = field.mapToItem(main.contentItem, 0, field.height).y
+                  - field.mapToItem(main.contentItem, 0, 0).y
+        verify(h >= Theme.touchTarget - 0.5, "Find a signal is " + h + " tall")
+        verify(field.width >= 80, "and not squeezed out: " + field.width)
+        // A signal row's plot box has no text and is a touch's width, and
+        // the row still fits the phone
+        const box = find(live, "plotCheck")
+        verify(box && box.visible, "a plot box shows")
+        verify(box.width >= Theme.touchTarget - 0.5, "the plot box is " + box.width + " wide")
+        const row = box.parent.parent
+        const edge = row.mapToItem(main.contentItem, row.width, 0).x
+        const names = []
+        const walk = item => {
+            for (const c of item.children) {
+                if (c.visible && c.width > 0
+                        && c.mapToItem(main.contentItem, c.width, 0).x > edge + 0.5)
+                    names.push(c.objectName || String(c))
+                walk(c)
+            }
+        }
+        walk(row)
+        compare(names.length, 0, "past the row's edge: " + names.join(", "))
+    }
+
     // A phone's density: upright (narrower than 720) and on its side
     // (shorter than 480), and not in a desktop's window
     function test_densityFollowsThePhonesShape_data() {
@@ -412,7 +553,7 @@ TestCase {
         tryVerify(() => bar.visible, 2000, "the tab bar shows upright")
         const glass = main.contentItem.height
         const floor = glass - data.insets.bottom - 8
-        compare(bar.count, 7, "today's tabs")
+        compare(bar.count, 5, "the five tabs")
         for (let i = 0; i < bar.count; ++i) {
             const tab = bar.itemAt(i)
             const r = onGlass(tab, main)
@@ -478,7 +619,7 @@ TestCase {
         const bar = find(main.contentItem, "tabBar")
         tryVerify(() => bar.visible, 2000, "a phone's tab bar shows")
         const head = find(main.contentItem, "headerBar")
-        compare(head.height - data.insets.top, 40, "the header's own height")
+        compare(head.height - data.insets.top, Theme.touchTarget, "the header's own height")
         compare(bar.height - data.insets.bottom, Theme.touchTarget + Theme.barGap,
                 "the tab row and its gap")
         compare(Theme.touchTarget + Theme.barGap, 56)
@@ -650,6 +791,9 @@ TestCase {
         page.chartHeight = 300
         const chartSplitter = find(page, "chartSplitter")
         tryVerify(() => chartSplitter.visible, 2000, "the viewer's splitter shows")
+        // The name's own line on a phone pushes the splitter down: scroll to it
+        const scroll = find(page, "recordingsScroll")
+        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
         verify(waitForPolish(main), "laid out")
         tap(chartSplitter, chartSplitter.width / 2 - 15, chartSplitter.height / 2)
         tap(chartSplitter, chartSplitter.width / 2 + 15, chartSplitter.height / 2)
@@ -733,17 +877,14 @@ TestCase {
     // The Dashboard's title row fits a phone's width whatever the font:
     // a title longer than any font makes "Dashboard" stands in for a wide
     // one, and gives way, eliding, while the buttons keep their words
-    function test_theDashboardsHeaderFitsWhateverTheFont_data() {
-        return [{ tag: "phone" }, { tag: "desktop" }]
-    }
-    function test_theDashboardsHeaderFitsWhateverTheFont(data) {
+    function test_theDashboardsHeaderFitsWhateverTheFont() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
         main.width = 384
         main.height = 832
         const dash = find(main.contentItem, "dashboardPage")
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
-        dash.form = data.tag
+        dash.form = "desktop"
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
         verify(waitForPolish(main), "laid out at 384 px")
@@ -781,7 +922,6 @@ TestCase {
     // makes one on any platform; the title stays whole wherever it has room
     function test_aFractionalTitleIsNotElided_data() {
         return [
-            { tag: "phone at 384", form: "phone", w: 384 },
             { tag: "desktop at 384", form: "desktop", w: 384 },
             { tag: "desktop at 1280", form: "desktop", w: 1280 }
         ]
@@ -807,60 +947,51 @@ TestCase {
         Bridge.disconnectSession()
     }
 
-    // The phone's link state: a line of its own under the title row,
-    // no taller than its words, which name the state (never the color
-    // alone)
-    function test_thePhonesLinkStateTakesACompactLine() {
-        const main = createTemporaryObject(mainComponent, testCase)
-        verify(main, "Main loads")
-        main.width = 384
-        main.height = 832
-        const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
-        dash.form = "phone"
-        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        // the Loader after the header row; the desktop one's label may
-        // still be in the tree, waiting for its deletion
-        const header = find(dash, "resetPeaks").parent
-        const line = header.parent.children[1]
-        tryVerify(() => line.item && line.item.children[1].width > 0, 3000, "the line is laid out")
-        const words = line.item.children[1]
-        compare(words.objectName, "linkLabel", "the line's words")
-        tryVerify(() => words.mapToItem(header, 0, 0).y >= header.height, 3000,
-                  "below the title row: " + words.mapToItem(header, 0, 0).y + " in " + header.height)
-        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
-        compare(words.truncated, false, "whole at 384 px")
-        verify(line.height <= words.implicitHeight + 0.5,
-               "the line is " + line.height + " px for " + words.implicitHeight + " px of words")
-        verify(words.font.pixelSize <= 13, "the small font")
+    // The phone's one tool row: inside the page at any width and font,
+    // one line of words on each button, every tool a touch target
+    function test_thePhonesToolRowFits_data() {
+        return [
+            { tag: "at 320", w: 320, h: 800, session: true },
+            { tag: "at 384", w: 384, h: 832, session: true },
+            { tag: "on its side", w: 832, h: 384, session: true },
+            { tag: "at 320 with no session", w: 320, h: 800, session: false },
+            { tag: "at 384 with no session", w: 384, h: 832, session: false }
+        ]
     }
-
-    // A phone on its side has the link state in the title row, so the line
-    // under it, a gauge row's height, is gone
-    function test_aPhoneOnItsSideKeepsTheLinkStateInTheTitleRow() {
+    // With no session Drive reads "Connect first", longer than "Drive":
+    // Reset peaks gives way before anything passes the edge
+    function test_thePhonesToolRowFits(data) {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
-        main.width = 384
-        main.height = 832
+        main.width = data.w
+        main.height = data.h
         const dash = find(main.contentItem, "dashboardPage")
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
         dash.form = "phone"
-        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const line = find(dash, "linkLine")
-        const inRow = find(dash, "linkInRow")
-        tryVerify(() => line.active && !inRow.active, 3000, "upright: a line of its own")
-        main.width = 832
-        main.height = 384
-        tryVerify(() => Theme.shortLayout, 2000, "on its side")
-        tryVerify(() => !line.active && inRow.active, 3000, "on its side: in the row")
-        const header = find(dash, "resetPeaks").parent
-        tryVerify(() => inRow.item && inRow.item.children[1].width > 0, 3000, "laid out")
-        const words = inRow.item.children[1]
-        verify(words.mapToItem(header, 0, 0).y < header.height, "in the title row")
-        compare(words.text, qsTr("Live · %1").arg(Bridge.uriLabel), "the state in words")
-        main.width = 384
-        main.height = 832
-        tryVerify(() => line.active && !inRow.active, 3000, "upright again")
+        if (data.session)
+            compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        tryVerify(() => find(dash, "toolRowNight").item, 3000, "the row is there")
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const row = find(dash, "resetPeaks").parent
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "inside the page")
+        const drive = find(dash, "dashDrive")
+        compare(drive.text, data.session ? "Drive" : "Connect first")
+        compare(drive.enabled, data.session)
+        for (const n of ["dashDrive", "resetPeaks", "dashEdit"]) {
+            const b = find(dash, n)
+            if (!b.visible)
+                continue
+            compare(b.contentItem.lineCount, 1, n + " on one line")
+            verify(b.contentItem.contentWidth <= b.width + 0.5, n + " keeps its words")
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " px tall")
+        }
+        const night = find(dash, "nightSwitch")
+        verify(night.height >= Theme.touchTarget - 0.5, "Night is " + night.height + " px tall")
+        verify(night.width >= Theme.touchTarget - 0.5, "Night is " + night.width + " px wide")
+        fuzzyCompare(row.height, Theme.touchTarget, 0.5, "one touch target tall")
+        if (data.session)
+            Bridge.disconnectSession()
     }
 
     // Edit mode's controls on the phone: each a touch target, the bar at
@@ -896,7 +1027,11 @@ TestCase {
         }
         tall(["dashDone", "dashAdd", "dashMore", "dashAddCell_0"])
         find(dash, "dashMore").clicked()
-        tall(["moreRename", "moreAddPage", "moreLeft", "moreRight", "moreRemovePage", "moreReset"])
+        // Move page left and right show only with pages to move among
+        tall(["moreRename", "moreAddPage", "moreRemovePage", "moreReset"])
+        dash.addPage()
+        tall(["moreLeft", "moreRight"])
+        dash.removePage()
         dash.confirmReset = true
         tall(["resetConfirm", "resetKeep"])
         dash.confirmReset = false
@@ -907,7 +1042,11 @@ TestCase {
         dash.select(1)
         tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
               "panelDecimals", "panelW", "panelH", "panelPeak", "panelEarlier", "panelLater",
-              "panelStart", "panelEnd"])
+              "panelStart", "panelEnd", "panelCopy", "panelPaste"])
+        dash.copySelected()
+        tall(["dashPaste"])
+        compare(pastTheEdge(find(dash, "dashEditBar"), main.contentItem, []).length, 0,
+                "Paste fits the edit bar")
         dash.startAdd()
         tall(["addClose", "addKind_analog", "addKind_digital"])
         dash.pickKind("analog")
@@ -915,11 +1054,31 @@ TestCase {
         dash.stopEditing()
     }
 
-    // The Dashboard's phone form: two columns upright, the tach and the
-    // speedo side by side under the shift lights, and four on its side
+    // Settings' profile reaches the Dashboard's picker with no session, and
+    // a change there reaches a list already open
+    function test_theDashboardsPickerFollowsSettingsOffline() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        const settings = find(main.contentItem, "settingsPage")
+        settings.uriField.text = ""
+        settings.chooseProfile("obd2")
+        dash.startEditing()
+        dash.pickKind("ring")
+        verify(dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
+               "obd2's speed, with no URI typed")
+        settings.uriField.text = "mock://demo"
+        tryVerify(() => dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][0]),
+                  3000, "the list follows the field")
+        dash.stopEditing()
+    }
+
+    // The Dashboard's phone form: six columns upright, the tach and its
+    // first readout side by side under the shift lights, and twelve on
+    // its side
     function test_theDashboardsDialsShareARowUpright_data() {
-        return [{ tag: "a phone upright", w: 384, h: 832, columns: 2 },
-                { tag: "a phone on its side", w: 832, h: 384, columns: 4 }]
+        return [{ tag: "a phone upright", w: 384, h: 832, columns: 6 },
+                { tag: "a phone on its side", w: 832, h: 384, columns: 12 }]
     }
     function test_theDashboardsDialsShareARowUpright(data) {
         const main = createTemporaryObject(mainComponent, testCase)
@@ -1002,8 +1161,9 @@ TestCase {
             live.stepWindow(1)
     }
 
-    // Developer mode's corner badge: hidden otherwise, and counting the
-    // frames the window draws while a session moves the page
+    // Developer mode's frame-rate readout: in the header, so it covers no
+    // page; hidden otherwise, and counting the frames the window draws
+    // while a session moves the page
     function test_theFrameRateBadgeCountsInDeveloperMode() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -1014,12 +1174,8 @@ TestCase {
         compare(main.framesPerSecond, 0)
         Theme.developerMode = true
         verify(badge.visible, "shown in developer mode")
-        // Above a phone's tab bar, covering none of its tabs
-        const tabs = find(main.contentItem, "tabBar")
-        tryVerify(() => tabs.visible && tabs.height > 0, 2000, "the tab bar shows")
-        const badgeBottom = badge.mapToItem(main.contentItem, 0, badge.height).y
-        const tabsTop = tabs.mapToItem(main.contentItem, 0, 0).y
-        verify(badgeBottom <= tabsTop, "the badge ends at " + badgeBottom + ", the tabs start at " + tabsTop)
+        compare(badge.parent, find(main.contentItem, "headerRow"), "in the header's row")
+        compare(badge.text, "0 frames/s")
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const live = find(main.contentItem, "livePage")
         main.gotoPage(Array.from(live.parent.children).indexOf(live))
@@ -1039,13 +1195,17 @@ TestCase {
         main.font.pixelSize = 16
         const button = find(main.contentItem, "markButton")
         const title = find(main.contentItem, "headerTitle")
+        const recording = find(main.contentItem, "linkPillRecording")
         verify(!button.visible, "nothing to mark yet")
+        verify(!recording.visible, "nothing recorded yet")
         verify(title.visible)
         Bridge.recording = true
         compare(Bridge.connectSession("mock://marked"), "", "mock://marked connects")
         verify(Bridge.recordingActive)
         verify(button.visible)
         compare(button.text, "Mark")
+        verify(recording.visible, "the pill says why Mark is there")
+        compare(recording.text, "· recording")
         button.clicked()
         compare(Bridge.markCount, 1)
         compare(button.text, "Mark (1)")
@@ -1056,6 +1216,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         verify(!button.visible, "the recording ended")
+        verify(!recording.visible)
         verify(title.visible)
     }
 
@@ -1082,8 +1243,9 @@ TestCase {
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way to Start log on a phone")
         const pillText = find(main.contentItem, "linkPillText")
-        tryCompare(pillText, "text", "Live", 5000, "the pill is a word, not 'Ses...'")
+        tryCompare(pillText, "text", "Live", 5000, "the state is a word, not 'Ses...'")
         verify(!pillText.truncated, "and it fits")
+        compare(find(main.contentItem, "linkPillAddress").text, "· mock://logged")
         let out = pastTheEdge(row, main.contentItem, [])
         compare(out.length, 0, "before the log, past " + main.contentItem.width + " px: "
                                + out.join(", "))
@@ -1094,7 +1256,9 @@ TestCase {
                "Start log, Mark and Disconnect step aside")
         tryVerify(() => Bridge.logBytes > 0 && Bridge.logElapsedMs >= 1000, 10000,
                   "the readout's second")
-        tryVerify(() => /^\d+:\d\d\n\d+\.\d MB$/.test(readout.text), 2000, readout.text)
+        // A second's log is well under the 0.1 MB the size shows from
+        tryVerify(() => /^\d+:\d\d$/.test(readout.text), 2000, readout.text)
+        verify(!find(main.contentItem, "linkPillRecording").visible, "a log is no recording")
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way on a phone")
         out = pastTheEdge(row, main.contentItem, [])
@@ -1132,6 +1296,638 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting && !Bridge.logActive, 5000,
                   "the disconnect ends the log")
         compare(main.currentPage, livePage, "still on Live")
+    }
+
+    // The log readout's text: the time alone under 0.1 MB, then the size
+    // beside it where the row has room, else under it
+    function test_theLogReadoutShowsASizeOnceThereIsOne_data() {
+        return [
+            { tag: "aSecond", ms: 2000, bytes: 1000, oneLine: false, text: "0:02" },
+            { tag: "aSecondWide", ms: 2000, bytes: 1000, oneLine: true, text: "0:02" },
+            { tag: "justUnder", ms: 12000, bytes: 104857, oneLine: true, text: "0:12" },
+            { tag: "twoLines", ms: 12000, bytes: 104858, oneLine: false, text: "0:12\n0.1 MB" },
+            { tag: "oneLine", ms: 12000, bytes: 104858, oneLine: true, text: "0:12 · 0.1 MB" },
+            { tag: "tenHours", ms: 36307000, bytes: 129395916, oneLine: false,
+              text: "10:05:07\n123.4 MB" },
+        ]
+    }
+    function test_theLogReadoutShowsASizeOnceThereIsOne(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        compare(main.logReadoutText(data.ms, data.bytes, data.oneLine), data.text)
+    }
+
+    // A running log's readout takes one line where the header row has
+    // room (a tablet, a desktop window) and two on a phone
+    function test_theLogReadoutTakesOneLineWhereTheRowHasRoom() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        const readout = find(main.contentItem, "logReadout")
+        const row = find(main.contentItem, "headerRow")
+        compare(Bridge.connectSession("mock://readout"), "", "mock://readout connects")
+        const start = find(main.contentItem, "startLogButton")
+        tryVerify(() => start.visible && start.enabled, 5000, "Start log once connected")
+        start.clicked()
+        verify(Bridge.logActive, "the log runs")
+        // The log's own size is a second's worth: what the row would show
+        // of a 0.1 MB one is read from the function with the row's choice
+        verify(row.width < 560, "a phone's row is under 560 px: " + row.width)
+        verify(!main.logReadoutOneLine, "two lines on a phone")
+        compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01\n0.1 MB")
+        main.width = 700
+        waitForRendering(main.contentItem)
+        verify(row.width >= 560, "a wide row: " + row.width)
+        verify(main.logReadoutOneLine, "one line where the row has room")
+        compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01 · 0.1 MB")
+        compare(readout.font.pixelSize, Theme.fontBody, "the readout is body text")
+        main.width = 559 + (main.width - row.width)
+        waitForRendering(main.contentItem)
+        verify(!main.logReadoutOneLine, "two lines again at " + row.width)
+    }
+
+    // The header ends in the one divider the look has, a hairline
+    function test_theHeaderEndsInAHairline() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const rule = find(main.contentItem, "headerRule")
+        compare(rule.height, 1)
+        compare(rule.color, Theme.hairline)
+        verify(rule.visible)
+    }
+
+    // The tab bar's labels at a narrow bar (a phone zoomed far in): each
+    // stays inside its tab, smaller and elided before it runs into the
+    // next
+    function test_theTabLabelsStayInsideTheirTabs() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 700
+        const tabs = find(main.contentItem, "tabBar")
+        tryVerify(() => tabs.visible && tabs.height > 0, 2000, "the tab bar shows")
+        const pages = [main.dashboardPage, 2, 3, main.recordingsPage, main.settingsPage]
+        for (const page of pages)
+            compare(find(main.contentItem, "tabLabel_" + page).font.pixelSize, Theme.fontBody,
+                    "body text at 64 px a tab")
+        Theme.zoom = 2
+        waitForRendering(main.contentItem)
+        for (const page of pages) {
+            const tab = find(main.contentItem, "tab_" + page)
+            const label = find(main.contentItem, "tabLabel_" + page)
+            verify(tab.width < 64, "a tab at zoom 2: " + tab.width)
+            compare(label.font.pixelSize, Theme.fontCaption, "caption text in a narrow tab")
+            verify(label.width <= tab.width, label.text + " is " + label.width + " in " + tab.width)
+            verify(label.contentWidth <= label.width + 0.5,
+                   label.text + " paints " + label.contentWidth + " in " + label.width)
+        }
+        const settings = find(main.contentItem, "tabLabel_" + main.settingsPage)
+        verify(settings.truncated, "Settings elides in a tab of " + settings.width)
+    }
+
+    // A recording's Replay connects it in one tap and lands on Live, the
+    // address in Settings' field as a typed one would be
+    function test_replayConnectsInOneTapAndLandsOnLive() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.gotoPage(main.recordingsPage)
+        const row = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        verify(row.uri.startsWith("replay://"), "a replay address: " + row.uri)
+        main.replayRecording(row.uri)
+        tryVerify(() => Bridge.connected, 10000, "the replay connects")
+        compare(Bridge.currentUri, row.uri)
+        tryCompare(main, "currentPage", main.livePage, 2000, "on Live once it connects")
+        compare(find(main.contentItem, "settingsPage").uriField.text, row.uri, "Settings shows it")
+    }
+
+    // A Replay the core refuses (its folder gone) leaves the user on
+    // Settings' Connection page with the field's error, never on Live
+    function test_aFailedReplayShowsSettingsWithItsReason() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.gotoPage(main.recordingsPage)
+        const settings = find(main.contentItem, "settingsPage")
+        const uri = "replay://" + Harness.recordingFixtures + "/no-such-recording?profile=obd2"
+        main.replayRecording(uri)
+        tryVerify(() => settings.errorLabel.text !== "", 10000, "the refusal arrives")
+        verify(!Bridge.connected, "nothing connected")
+        compare(main.currentPage, main.settingsPage, "on Settings, not Live")
+        verify(settings.errorLabel.visible, "the refusal shows")
+        compare(settings.shownKey, "connection", "the Connection page")
+        compare(settings.uriField.text, uri, "the address in the field")
+        verify(settings.errorLabel.text !== "", "with its reason")
+        compare(main.replayPending, "", "nothing left waiting")
+        // Back returns to Recordings, as Other address returns to Dash
+        verify(main.goBack(), "Back is the app's")
+        compare(main.currentPage, main.recordingsPage, "back to Recordings")
+    }
+
+    // One primary on Dash: while its connect list shows, the header's
+    // Connect... is secondary and the list's Connect the primary; on
+    // another page the header's is primary again
+    function test_theHeadersConnectGivesWayToDashsList() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        main.gotoPage(main.dashboardPage)
+        const header = find(main.contentItem, "disconnectButton")
+        tryVerify(() => dash.connectShown, 3000, "Dash shows its connect list")
+        verify(header.visible, "the header's Connect... shows")
+        verify(!header.highlighted, "secondary on Dash")
+        verify(!header.flat, "a secondary, not a quiet one")
+        main.gotoPage(main.livePage)
+        verify(header.highlighted, "primary elsewhere")
+    }
+
+    // The header at the narrowest phone and the top zoom: the pill's word
+    // elides inside the pill, and the pill stays inside the page. The
+    // header's Connect... passes the edge there (160 layout units hold no
+    // button of its words beside a pill), which is the review's open item
+    function test_thePillsWordElidesAtTheTopZoom() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 800
+        main.font.pixelSize = 16
+        const pill = find(main.contentItem, "linkPill")
+        const word = find(main.contentItem, "linkPillText")
+        const rate = find(main.contentItem, "frameRate")
+        const was = Theme.developerMode
+        Theme.developerMode = true
+        try {
+            verify(waitForPolish(main), "laid out at 100 %")
+            verify(!word.truncated, "at 100 % the word is whole")
+            verify(!rate.visible, "the frame rate gives way in a row this narrow")
+            main.width = 384
+            // The row follows the window a resize event later
+            tryVerify(() => rate.visible, 2000, "and shows at 384")
+            verify(waitForPolish(main), "laid out at 384")
+            verify(rate.x >= word.mapToItem(rate.parent, word.width, 0).x + 8 - 0.5,
+                   "apart from the word")
+            main.width = 320
+        } finally {
+            Theme.developerMode = was
+        }
+        Theme.zoom = 2
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        verify(word.width <= pill.width + 0.5, "the word inside the pill")
+        verify(word.contentWidth <= word.width + 0.5 || word.truncated, "painted inside its box or elided")
+        verify(pill.mapToItem(main.contentItem, pill.width, 0).x <= main.contentItem.width + 0.5,
+               "the pill inside the page")
+        compare(find(main.contentItem, "disconnectButton").visible, true, "Connect... still on the row")
+    }
+
+    // A Main on a phone's form at 384 x 832, laid out, with Android's text
+    function phoneMain() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.testMobile = true
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        verify(waitForPolish(main), "laid out")
+        return main
+    }
+
+    function checkedTabs(bar) {
+        const on = []
+        for (let i = 0; i < bar.count; ++i) {
+            if (bar.itemAt(i).checked)
+                on.push(bar.itemAt(i).text)
+        }
+        return on.join()
+    }
+
+    // The bar lists five pages and each tab marks its own; the phone opens
+    // on Dash. The Log, reached from the status, marks none, and a tap on
+    // the tab that was marked still goes there
+    function test_theTabBarHasFivePagesAndThePhoneOpensOnDash() {
+        const main = phoneMain()
+        const bar = find(main.contentItem, "tabBar")
+        tryVerify(() => bar.visible, 2000, "the tab bar shows")
+        compare(main.currentPage, main.dashboardPage, "a phone opens on Dash")
+        const pages = [main.dashboardPage, 2, 3, main.recordingsPage, main.settingsPage]
+        const names = ["Dash", "Live", "Codes", "Recs", "Settings"]
+        compare(bar.count, names.length)
+        for (let i = names.length - 1; i >= 0; --i) {
+            const tab = bar.itemAt(i)
+            compare(tab.text, names[i])
+            mouseClick(tab)
+            tryCompare(main, "currentPage", pages[i], 2000, names[i] + "'s page")
+            compare(checkedTabs(bar), names[i], "only its own tab is marked")
+            verify(find(tab, "tabMark_" + pages[i]).visible, names[i] + "'s mark")
+        }
+        const pill = find(main.contentItem, "linkPill")
+        mouseClick(pill)
+        tryCompare(main, "currentPage", main.logPage, 2000, "the status opens the Log")
+        compare(checkedTabs(bar), "", "no tab is the Log's")
+        mouseClick(bar.itemAt(0))
+        tryCompare(main, "currentPage", main.dashboardPage, 2000, "the last tab still answers")
+        compare(checkedTabs(bar), "Dash")
+    }
+
+    // The mark is the primary fill in Dark and the text at night, where the
+    // primary is a dim fill
+    function test_theTabMarkIsTheTextAtNight() {
+        const main = phoneMain()
+        const mark = find(find(main.contentItem, "tabBar"), "tabMark_" + main.dashboardPage)
+        verify(Qt.colorEqual(mark.color, Theme.primary), "Dark")
+        Theme.night = "on"
+        verify(Theme.nightActive)
+        verify(Qt.colorEqual(mark.color, Theme.text), "night")
+        verify(!Qt.colorEqual(mark.color, Theme.primary), "not the dim fill")
+    }
+
+    // Every header button is a touch's size on the glass and draws inside
+    // the bar, in each state the header can be in, the address keeping its
+    // width beside them at 100 %
+    function checkHeaderButtons(main, names) {
+        for (const name of names) {
+            const button = find(main.contentItem, name)
+            verify(button.visible, name + " shows")
+            const r = onGlass(button, main)
+            verify(r.height >= 48 - 0.5, name + " is " + r.height + " tall on the glass")
+            verify(r.width >= 48 - 0.5, name + " is " + r.width + " wide on the glass")
+            verify(button.background.height < button.height, name + " draws inside its target")
+        }
+    }
+
+    function test_theHeadersButtonsAreATouchsSize_data() {
+        return [{ tag: "100 %", zoom: 1.0 }, { tag: "67 %", zoom: 0.67 }]
+    }
+
+    function test_theHeadersButtonsAreATouchsSize(data) {
+        const main = phoneMain()
+        Theme.zoom = data.zoom
+        verify(waitForPolish(main), "laid out")
+        checkHeaderButtons(main, ["disconnectButton"])    // Connect...
+
+        compare(Bridge.connectSession("mock://demo"), "", "connects")
+        const start = find(main.contentItem, "startLogButton")
+        tryVerify(() => start.visible && start.enabled, 5000, "Start log")
+        waitForRendering(main.contentItem)
+        checkHeaderButtons(main, ["startLogButton", "disconnectButton"])
+        if (data.zoom === 1.0)
+            verify(!find(main.contentItem, "linkPillAddress").truncated, "the address keeps its width")
+
+        start.clicked()
+        verify(Bridge.logActive, "the log runs")
+        waitForRendering(main.contentItem)
+        checkHeaderButtons(main, ["stopLogButton"])
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+
+        Bridge.recording = true
+        compare(Bridge.connectSession("mock://marked"), "", "a recorded session connects")
+        const mark = find(main.contentItem, "markButton")
+        tryVerify(() => mark.visible, 5000, "Mark")
+        waitForRendering(main.contentItem)
+        checkHeaderButtons(main, ["markButton", "disconnectButton"])
+    }
+
+    // On the phone Settings' list is where the core's version is shown
+    function test_thePhonesSettingsShowTheCoresVersion() {
+        const main = phoneMain()
+        main.gotoPage(main.settingsPage)
+        const label = find(find(main.contentItem, "settingsPage"), "settingsCoreVersion")
+        tryVerify(() => label.visible, 2000, "on Settings' list")
+        compare(label.text, "core " + Bridge.coreVersion)
+        verify(Bridge.coreVersion !== "", "a version to show")
+    }
+
+    // A window narrowed past the sidebar's width leaves Home, which the bar
+    // doesn't list; the sidebar's own pages stay
+    function test_aNarrowedWindowLeavesHomeForDash() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        compare(main.currentPage, 0, "the desktop opens on Home")
+        main.width = 500
+        tryCompare(main, "currentPage", main.dashboardPage, 2000)
+        main.width = 1400
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar again")
+        compare(main.currentPage, main.dashboardPage, "and the page stays")
+    }
+
+    // The status reads the state and the address, the address eliding from
+    // its end and the state word never; with the sidebar it is no button
+    function test_theStatusReadsTheStateAndTheAddress_data() {
+        return [{ tag: "100 %", zoom: 1.0 }, { tag: "67 %", zoom: 0.67 }]
+    }
+
+    function test_theStatusReadsTheStateAndTheAddress(data) {
+        const main = phoneMain()
+        Theme.zoom = data.zoom
+        verify(waitForPolish(main), "laid out")
+        const state = find(main.contentItem, "linkPillText")
+        const address = find(main.contentItem, "linkPillAddress")
+        const pill = find(main.contentItem, "linkPill")
+        const row = find(main.contentItem, "headerRow")
+        compare(state.text, "No session")
+        verify(!address.visible, "no address without a session")
+        verify(onGlass(pill, main).height >= 48 - 0.5,
+               "a touch's size: " + onGlass(pill, main).height)
+
+        compare(Bridge.connectSession("mock://demo"), "", "connects")
+        tryCompare(state, "text", "Live", 5000)
+        compare(address.text, "· mock://demo")
+        waitForRendering(main.contentItem)
+        verify(address.visible && !address.truncated, "a short address fits")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        const long = "mock://a-long-name-for-an-adapter-that-cannot-fit-beside-the-buttons"
+        compare(Bridge.connectSession(long), "", "the long one connects")
+        tryCompare(state, "text", "Live", 5000)
+        waitForRendering(main.contentItem)
+        verify(address.truncated, "the address elides")
+        verify(!state.truncated && state.width >= state.implicitWidth - 0.5, "the word doesn't")
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "the row fits")
+    }
+
+    function test_theStatusIsNoButtonBesideTheSidebar() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        const pill = find(main.contentItem, "linkPill")
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar shows")
+        verify(!pill.enabled, "the sidebar lists the Log")
+        const before = main.currentPage
+        mouseClick(pill)
+        wait(0)
+        compare(main.currentPage, before, "a tap stays put")
+    }
+
+    // Dash with no session on the phone: the recent addresses, the newest
+    // chosen, and one Connect; the list goes once a session runs
+    function connectListOn(main, uris) {
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        find(main.contentItem, "settingsPage").recentUris = uris
+        tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list loads")
+        const list = findChild(dash, "dashConnectList")
+        verify(waitForPolish(main), "laid out")
+        return list
+    }
+
+    function test_dashsConnectListConnectsTheChosenAddress() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["mock://newest", "elm327://bt:00:11:22:33:44:55",
+                                          "mock://older"])
+        const first = find(list, "connectRow_0")
+        const second = find(list, "connectRow_1")
+        verify(first.checked, "the newest is chosen")
+        verify(find(first, "connectRowMark").visible, "and marked")
+        verify(!find(second, "connectRowMark").visible)
+        compare(find(first, "connectRowAddress").text, "mock://newest")
+        compare(find(first, "connectRowKind").text, "Demo data")
+        compare(find(second, "connectRowAddress").text, "elm327://bt:…:44:55", "the short form")
+        compare(find(list, "connectGo").text, "Connect")
+        verify(find(list, "connectGo").highlighted, "a chosen row: Connect is the list's primary")
+
+        const third = find(list, "connectRow_2")
+        mouseClick(third)
+        tryVerify(() => third.checked && !first.checked, 2000, "a tap chooses the row")
+        mouseClick(third)
+        wait(0)
+        verify(third.checked, "a second tap keeps it chosen")
+
+        mouseClick(find(list, "connectGo"))
+        tryVerify(() => Bridge.connected, 5000, "the chosen address connects")
+        compare(Bridge.currentUri, "mock://older")
+        compare(JSON.stringify(settings.recentUris), JSON.stringify(
+                    ["mock://newest", "elm327://bt:00:11:22:33:44:55", "mock://older"]),
+                "the mock is never kept: the list as it was")
+        compare(find(settings, "uriField").text, "mock://older", "Settings shows it")
+        const dash = find(main.contentItem, "dashboardPage")
+        tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "a session ends the list")
+
+        // The list comes back as it was, the tapped row still chosen
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list returns")
+        const again = findChild(dash, "dashConnectList")
+        tryVerify(() => findChild(again, "connectRow_2") !== null, 2000, "its rows")
+        verify(find(again, "connectRow_2").checked, "the tap still stands")
+        compare(find(find(again, "connectRow_2"), "connectRowAddress").text, "mock://older")
+    }
+
+    // Nothing in the list takes a tap while a session starts or ends
+    function test_theConnectListWaitsWhileASessionStartsOrEnds() {
+        const main = phoneMain()
+        const dash = find(main.contentItem, "dashboardPage")
+        const list = connectListOn(main, ["mock://demo"])
+        const go = find(list, "connectGo")
+        verify(go.enabled, "ready")
+        go.clicked()
+        verify(Bridge.connecting, "the connect is under way")
+        verify(!go.enabled, "Connect waits")
+        verify(!find(list, "connectRow_0").enabled, "a row waits")
+        verify(!find(list, "connectOther").enabled, "Other address waits")
+        compare(go.text, "Connecting…")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+
+        Bridge.disconnectSession()
+        verify(Bridge.disconnecting, "the teardown is under way")
+        const back = findChild(dash, "dashConnectList")
+        verify(back !== null, "the list is back at once")
+        verify(!find(back, "connectGo").enabled, "Connect waits")
+        verify(!find(back, "connectRow_0").enabled, "a row waits")
+        compare(find(back, "connectGo").text, "Disconnecting…")
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => find(back, "connectGo").enabled, 2000, "and it's ready again")
+    }
+
+    // A relay holds the adapter: the list can't connect, as Settings can't
+    function test_aRelayStopsTheListsConnect() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["mock://demo"])
+        const go = find(list, "connectGo")
+        verify(go.enabled)
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        tryVerify(() => !go.enabled, 2000, "no connect while it runs")
+        Relay.stop()
+        tryVerify(() => go.enabled, 2000, "and again after")
+    }
+
+    function test_aRelayLeavesTheLoneConnectToSettings() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        const go = find(list, "connectGo")
+        wait(0)
+        verify(go.enabled, "it only opens Settings")
+    }
+
+    function vehicleWith(label, uri) {
+        const doc = VehicleBook.add(VehicleBook.empty(), label)
+        return uri === "" ? doc : VehicleBook.rememberUri(doc, uri)
+    }
+
+    function rowIs(list, index, uri) {
+        const row = findChild(list, "connectRow_" + index)
+        return row !== null && row.checked && find(row, "connectRowAddress").text === uri
+    }
+
+    // Picking a vehicle fills Settings' field, so the row Dash has chosen
+    // is that vehicle's address, or a connect would save another into it
+    function test_theChosenRowIsThePickedVehiclesAddress() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["elm327://COM1", "elm327://COM2"])
+        verify(rowIs(list, 0, "elm327://COM1"), "no vehicle: the newest")
+
+        settings.vehicles = vehicleWith("Daily driver", "elm327://COM2")
+        tryVerify(() => rowIs(list, 1, "elm327://COM2"), 2000, "its address, not the newest")
+        compare(list.chosen, "elm327://COM2")
+
+        settings.vehicles = vehicleWith("Weekend car", "elm327://COM9")
+        tryVerify(() => rowIs(list, 0, "elm327://COM9"), 2000, "listed first when it isn't recent")
+        tryCompare(list, "chosen", "elm327://COM9")
+        compare(JSON.stringify(settings.recentUris),
+                JSON.stringify(["elm327://COM1", "elm327://COM2"]),
+                "listing it writes nothing to the recent addresses")
+
+        settings.vehicles = vehicleWith("New car", "")
+        tryVerify(() => rowIs(list, 0, "elm327://COM1"), 2000, "none saved: the newest")
+    }
+
+    // A tapped row is a choice, as a typed URI is in Settings, until
+    // another vehicle is picked
+    function test_aTappedRowOutranksTheVehiclesAddress() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["elm327://COM1", "elm327://COM2", "elm327://COM3"])
+        settings.vehicles = vehicleWith("Daily driver", "elm327://COM2")
+        tryVerify(() => rowIs(list, 1, "elm327://COM2"), 2000, "its address")
+        mouseClick(find(list, "connectRow_0"))
+        tryVerify(() => rowIs(list, 0, "elm327://COM1"), 2000, "the tap stands")
+        compare(list.chosen, "elm327://COM1")
+        settings.vehicles = vehicleWith("Weekend car", "elm327://COM2")
+        wait(0)
+        verify(rowIs(list, 0, "elm327://COM1"), "the same address changes nothing")
+        settings.vehicles = vehicleWith("Other car", "elm327://COM3")
+        tryVerify(() => rowIs(list, 2, "elm327://COM3"), 2000, "another vehicle's address replaces the tap")
+    }
+
+    // A list that changed under a tap, as a connect from Settings changes
+    // it, goes back to the newest
+    function test_aNewListDropsTheTappedRow() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["mock://first", "mock://second"])
+        mouseClick(find(list, "connectRow_1"))
+        tryVerify(() => rowIs(list, 1, "mock://second"), 2000, "the tap")
+        settings.recentUris = ["mock://third", "mock://first", "mock://second"]
+        tryVerify(() => rowIs(list, 0, "mock://third"), 2000, "the newest again")
+        compare(list.chosen, "mock://third")
+    }
+
+    function test_aFailedConnectFromTheListSaysWhyAndChangesNothing() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const refused = "mock://demo?profile=no-such-profile"
+        const list = connectListOn(main, [refused, "mock://demo"])
+        const error = find(list, "connectError")
+        verify(!error.visible, "nothing to say yet")
+        mouseClick(find(list, "connectGo"))
+        tryVerify(() => error.visible && error.text !== "", 5000, "the bridge's words")
+        verify(!Bridge.connected)
+        compare(JSON.stringify(settings.recentUris), JSON.stringify([refused, "mock://demo"]),
+                "a failed connect writes nothing")
+        const second = find(list, "connectRow_1")
+        mouseClick(second)
+        tryVerify(() => second.checked, 2000)
+        mouseClick(find(list, "connectGo"))
+        tryVerify(() => Bridge.connected, 5000, "the other connects")
+    }
+
+    function test_otherAddressOpensSettingsConnectField() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, ["mock://demo"])
+        mouseClick(find(list, "connectOther"))
+        tryCompare(main, "currentPage", main.settingsPage, 2000)
+        tryCompare(settings, "shownKey", "connection", 2000)
+    }
+
+    function test_withNoRecentAddressConnectGoesToSettings() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const list = connectListOn(main, [])
+        verify(!find(list, "connectOther").visible, "one way to Settings")
+        verify(findChild(list, "connectRow_0") === null, "no rows")
+        const go = find(list, "connectGo")
+        compare(go.text, "Connect…")
+        verify(!go.highlighted, "nothing to connect to: it opens Settings, so it isn't primary")
+        mouseClick(go)
+        tryCompare(main, "currentPage", main.settingsPage, 2000)
+        tryCompare(settings, "shownKey", "connection", 2000)
+        verify(!Bridge.connecting && !Bridge.connected, "nothing to connect to")
+    }
+
+    function test_theConnectListGoesInEditModeAndOnTheDesktopForm() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["mock://demo"])
+        const dash = find(main.contentItem, "dashboardPage")
+        verify(list.visible)
+        dash.startEditing()
+        tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "edit mode's own panels")
+        dash.stopEditing()
+        tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "back after Done")
+        dash.form = "desktop"
+        tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "the desktop keeps Home")
+    }
+
+    // Five rows of long addresses fit a phone's width, every target a
+    // touch's size on the glass, and the page scrolls to the gauges
+    function test_theConnectListFitsAPhone_data() {
+        return [{ tag: "384 upright", w: 384, h: 832 }, { tag: "320 upright", w: 320, h: 640 },
+                { tag: "on its side", w: 832, h: 384 }]
+    }
+
+    function test_theConnectListFitsAPhone(data) {
+        const main = phoneMain()
+        main.width = data.w
+        main.height = data.h
+        verify(waitForPolish(main), "laid out")
+        const uris = []
+        for (let i = 0; i < 5; ++i)
+            uris.push("mock://a-long-name-for-an-adapter-that-cannot-fit-in-its-row-" + i)
+        const list = connectListOn(main, uris)
+        tryVerify(() => list.width > 0 && find(list, "connectRow_4").width > 0, 2000)
+        waitForRendering(main.contentItem)
+        const out = pastTheEdge(list, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        const targets = [find(list, "connectGo"), find(list, "connectOther")]
+        for (let i = 0; i < 5; ++i)
+            targets.push(find(list, "connectRow_" + i))
+        for (const t of targets) {
+            const r = onGlass(t, main)
+            verify(r.height >= 48 - 0.5, t.objectName + " is " + r.height + " tall")
+            verify(r.width >= 48 - 0.5, t.objectName + " is " + r.width + " wide")
+        }
+        if (data.w < 500)
+            verify(find(find(list, "connectRow_0"), "connectRowAddress").truncated, "the address elides")
+        const view = find(main.contentItem, "dashPage_0")
+        verify(view.contentHeight > list.height, "the gauges follow the list in the page")
+        const under = find(view, "dashPanelSurface").mapToItem(list, 0, 0).y
+        verify(under >= list.height, "the joined panel starts " + under + " down a list "
+               + list.height + " tall")
     }
 
     // The readout's time: m:ss, then h:mm:ss past an hour
@@ -1185,5 +1981,23 @@ TestCase {
                + Math.round(traffic.width) + " px")
         verify(traffic.mapToItem(page, traffic.contentWidth, 0).x
                <= button.mapToItem(page, 0, 0).x + 0.5, "it ends before the button")
+    }
+
+    // The minimum time between a log's sweeps is kept between runs: written
+    // as it changes, and the next Main gives it to the bridge
+    function test_theMinimumTimeBetweenSweepsIsKept() {
+        Bridge.minSweepMs = 0
+        const first = createTemporaryObject(mainComponent, testCase)
+        verify(first)
+        Bridge.minSweepMs = 500
+        tryVerify(() => storedUi("minSweepMs") === 500, 2000, "written as it changes")
+        first.destroy()
+        wait(0)
+        Bridge.minSweepMs = 0
+        const next = createTemporaryObject(mainComponent, testCase)
+        verify(next)
+        compare(Bridge.minSweepMs, 500, "the next run starts with it")
+        Bridge.minSweepMs = 0
+        tryVerify(() => storedUi("minSweepMs") === 0, 2000, "and Off is kept too")
     }
 }

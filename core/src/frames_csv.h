@@ -70,9 +70,9 @@ struct native_path {
         return true;
 #endif
     }
-    /* Shared for reading and writing, as fopen is elsewhere: playing a
-     * recording never locks it against the app or the user (_wfopen_s
-     * would), and a file changed under it is ECUIO_ERR_RECORDING_CHANGED */
+    /* Shared for reading and writing, as fopen is elsewhere: _wfopen_s
+     * would lock the recording against the app and the user, and a file
+     * changed under it is ECUIO_ERR_RECORDING_CHANGED */
     FILE* open() const
     {
 #ifdef _WIN32

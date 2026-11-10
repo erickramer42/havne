@@ -1,6 +1,6 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.linkhealth, QmlTest.log,
-//          QmlTest.phone (test_qml)
+//          QmlTest.phone, QmlTest.driveview (test_qml)
 
 import QtCore
 import QtQuick
@@ -14,6 +14,8 @@ Pane {
     padding: 0
     background: Rectangle { color: Theme.bg }
 
+    readonly property int driveHideMs: settingsDisplay.driveHideMs
+    readonly property string driveOrientation: settingsDisplay.driveOrientation
     property alias uriField: settingsConnect.uriField
     property alias errorLabel: settingsConnect.errorLabel
     property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
@@ -833,7 +835,8 @@ Pane {
           summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off") },
         { key: "display", title: qsTr("Display"),
           summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
-                   + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric")) },
+                   + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric"))
+                   + " · " + Theme.nightSummary() },
         { key: "advanced", title: qsTr("Advanced"),
           summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
     ]
@@ -881,16 +884,26 @@ Pane {
     }
     // qmllint enable missing-property
     onShownKeyChanged: askBluetoothIfSeen()
-    onVisibleChanged: askBluetoothIfSeen()
+    onVisibleChanged: {
+        askBluetoothIfSeen()
+        if (!visible)
+            backLeaves = false
+    }
 
-    // A best-effort back key: where Qt delivers it, it repeats the back
-    // arrow. Nothing relies on it
+    // Back from Connection opened through Dash's "Other address..." or a
+    // refused Replay: Main goes back to that page instead of this list
+    property bool backLeaves: false
+    onPageKeyChanged: if (pageKey !== "connection") backLeaves = false
+    // The back key repeats the back arrow, and answers whether it had a page to close
+    function closeShown() {
+        if (twoPane || pageKey === "")
+            return false
+        back()
+        return true
+    }
     focus: true
     Keys.onBackPressed: event => {
-        if (!twoPane && pageKey !== "") {
-            back()
-            event.accepted = true
-        }
+        event.accepted = !backLeaves && closeShown()
     }
 
     // Connect... on Home, Live or the header lands here: what to connect to
@@ -939,7 +952,9 @@ Pane {
     // as on a phone, where the pick otherwise seems to do nothing
     function showUriField() {
         const body = connectionPage.body
+        // Under the pinned title row, not behind it
         const top = uriField.mapToItem(body, 0, 0).y + body.y - Theme.spacing
+                    - connectionPage.headerHeight
         if (top < connectionPage.contentY)
             connectionPage.contentY = Math.max(0, top)
     }
@@ -1008,6 +1023,16 @@ Pane {
                      + "once and the DIDs the ECU answers join the polling") }
     ])
 
+    // What a page that works with no session lists its signals from: the
+    // field's URI, which carries the chosen profile, or with no URI typed
+    // the chosen profile alone
+    readonly property string offlineUri: {
+        const typed = uriField.text.trim()
+        if (typed !== "")
+            return typed
+        return profileChoice === "default" ? "" : composeUri("mock://", [])
+    }
+
     // True while a typed URI is being read into the choices, so the DID
     // field's change doesn't recompose the URI that set it; and true
     // while the page writes the field from the choices, so that text
@@ -1026,7 +1051,7 @@ Pane {
             if (p.name === profileChoice)
                 return p.hint
         }
-        return qsTr("The URI names profile '%1'; core judges it at connect").arg(profileChoice)
+        return qsTr("The address names profile '%1'; core judges it at connect").arg(profileChoice)
     }
 
     // A URI as its base and its query's [key, value] pairs, in order
@@ -1178,14 +1203,55 @@ Pane {
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
-    // ---- The last URI that connected, the Record switch and each
-    // device's versions (seenVersions, as JSON), kept between runs as
-    // Main.qml keeps the zoom and units. Only a URI that connected is
+    // The addresses that connected, newest first, for Dash's connect list
+    readonly property int maxRecentUris: 5
+    property var recentUris: []
+    // A replay or the mock is never kept: Recordings is a replay's way back
+    function keptUri(uri) {
+        const u = String(uri).trim().toLowerCase()
+        return !u.startsWith("replay://") && !u.startsWith("mock://")
+    }
+    // The stored list, or `lastUri` alone when it holds none; a damaged
+    // list reads as none, and anything but a non-empty kept string is left out
+    function parseRecentUris(text, lastUri) {
+        let list = []
+        try {
+            const read = JSON.parse(text)
+            if (Array.isArray(read))
+                list = read.filter(u => typeof u === "string" && u !== "" && keptUri(u))
+        } catch (e) {
+            // none, until the next connect writes one
+        }
+        if (list.length === 0 && lastUri !== "" && keptUri(lastUri))
+            list = [lastUri]
+        return list.slice(0, maxRecentUris)
+    }
+    // `uri` first and only once, the list cut to its most recent
+    function withRecentUri(list, uri) {
+        return [uri].concat(list.filter(u => u !== uri)).slice(0, maxRecentUris)
+    }
+    // What Dash lists: the recent addresses, the picked vehicle's saved one
+    // first when absent. Display only: recentUris holds what connected
+    readonly property string vehicleUri: pickedVehicle !== null ? pickedVehicle.uri : ""
+    function connectRows(recents, vehicle) {
+        return vehicle === "" || recents.includes(vehicle) ? recents : [vehicle].concat(recents)
+    }
+    readonly property var connectUris: connectRows(recentUris, vehicleUri)
+    // Dash's Connect: the field shows it as typed text, before the connect
+    function connectFromList(uri) {
+        uriField.text = uri
+        requestConnect(uri)
+    }
+
+    // ---- The last URI that connected, the recent ones, the Record switch
+    // and each device's versions (seenVersions, as JSON), kept between runs
+    // as Main.qml keeps the zoom and units. Only a URI that connected is
     // stored, so a typo or a refused query doesn't come back
     Settings {
         id: sessionSettings
         category: "session"
         property string uri: ""
+        property string recentUris: "[]"
         property bool recording: false
         property string adapterVersions: "{}"
     }
@@ -1209,10 +1275,16 @@ Pane {
         loadPlugins()
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens
+        // A replay or mock address an earlier version stored is dropped
+        if (!keptUri(sessionSettings.uri))
+            sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
         // it back
         if (uriField.text === "")
             uriField.text = sessionSettings.uri
+        recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
+        if (JSON.stringify(recentUris) !== sessionSettings.recentUris)
+            sessionSettings.recentUris = JSON.stringify(recentUris)
         Bridge.recording = sessionSettings.recording
     }
 
@@ -1227,7 +1299,11 @@ Pane {
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
             if (error === "") {
-                sessionSettings.uri = uri
+                if (page.keptUri(uri)) {
+                    sessionSettings.uri = uri
+                    page.recentUris = page.withRecentUri(page.recentUris, uri)
+                    sessionSettings.recentUris = JSON.stringify(page.recentUris)
+                }
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
                 // for an adapter's session only (ADR-0027 section 1, section 2)
@@ -1307,6 +1383,16 @@ Pane {
                     Layout.fillWidth: true
                     pages: page.pageList
                     onChosen: key => page.open(key)
+                }
+
+                // The phone has no Home page to show it, and a bug report needs it
+                Label {
+                    objectName: "settingsCoreVersion"
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacing
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: qsTr("core %1").arg(Bridge.coreVersion)
                 }
             }
 

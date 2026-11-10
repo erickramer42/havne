@@ -344,6 +344,11 @@ _Static_assert(offsetof(ecuio_recording_find_t, label_utf8) == 64,
 typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
                                      uint64_t bytes_total, void* user_data);
 
+/* A long call's stop: asked whether to stop, a nonzero answer ends the
+ * call with ECUIO_ERR_CANCELED. Called only on the thread that made the
+ * call, before it returns; each call taking one says when it asks */
+typedef int (*ecuio_cancel_t)(void* user_data);
+
 /* ecuio_recording_signals_t.flags: NAMED, events.log's header names
  * signals.json and its SHA-256 (format 3); PRESENT, signals.json is in
  * the folder; MATCH, named and present, and its SHA-256 the header's */
@@ -535,7 +540,10 @@ void ecuio_recording_close(ecuio_recording_t* r);
 
 /* What the check looks for; zero fields take the defaults */
 typedef struct ecuio_check_options {
-    uint64_t gap_us;         /* 0 for the default */
+    uint64_t gap_us;         /* 0 for the default; a recording that names
+                                a focus's minimum time between sweeps
+                                (ADR-0056 section 4) has it added here,
+                                since a sweep can end in that long a wait */
     uint32_t rate_drop_x100; /* 0 for the default; else more than 100 */
     uint32_t flags;          /* zero */
     uint64_t settle_us;      /* 0 for the default */
@@ -840,6 +848,23 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
 ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
                             ecuio_export_report_t* report);
 
+/*
+ * ecuio_export with a way to stop it (ADR-0054's appendix "an export
+ * canceled"): cancel, when not NULL, is asked as each pass over the
+ * recording and each file of a folder copy begins and as rows are read
+ * within a pass. A nonzero answer ends the call with ECUIO_ERR_CANCELED
+ * ("the export was canceled" in the detail): nothing is at out_path_utf8,
+ * and the file or folder written under a name of its own beside it is
+ * removed, as for any failure. A NULL cancel is ecuio_export. The call
+ * itself is one caller's, like ecuio_export; cancel runs on that caller's
+ * thread, so what it reads to decide (a flag another thread sets) is the
+ * caller's to make safe across threads. cancel must not call back into
+ * the export.
+ */
+ecuio_status_t ecuio_export_with(const ecuio_export_options_t* options,
+                                 ecuio_cancel_t cancel, void* user_data,
+                                 ecuio_export_report_t* report);
+
 /* What a wide CSV export would write, per row interval */
 typedef struct ecuio_export_estimate {
     uint64_t rows;  /* the rows the interval gives */
@@ -874,6 +899,15 @@ _Static_assert(sizeof(ecuio_export_estimate_t) == 40,
 ecuio_status_t ecuio_export_estimate(const ecuio_export_options_t* options,
                                      const uint32_t* row_ms, uint32_t count,
                                      ecuio_export_estimate_t* out);
+
+/* ecuio_export_estimate with ecuio_export_with's cancel, asked the same
+ * way; ECUIO_ERR_CANCELED when it stops the sizing, out zeroed. A NULL
+ * cancel is ecuio_export_estimate */
+ecuio_status_t ecuio_export_estimate_with(const ecuio_export_options_t* options,
+                                          const uint32_t* row_ms,
+                                          uint32_t count, ecuio_cancel_t cancel,
+                                          void* user_data,
+                                          ecuio_export_estimate_t* out);
 
 /* Puts frame index of the caller's frames in *out (zeroed first); nonzero
  * cancels. Called on the caller's thread before ecuio_scrub_frames

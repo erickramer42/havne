@@ -1,7 +1,7 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo; sparkline
-//          scrolls at 10 Hz, flat-line guard holds at idle; "not in
-//          profile" note for signals the active set lacks
+// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.gauges, QmlTest.accessibility,
+//          QmlTest.dashboard;
+//          manual smoke: DashboardPage under mock://demo
 
 import QtQuick
 import QtQuick.Shapes
@@ -31,7 +31,10 @@ GaugeBase {
         repeat: true
         objectName: "sampler"
         running: gauge.hasValue && gauge.visible && gauge.shown
+        // A value that isn't a number is never kept, as SparkGauge's
         onTriggered: {
+            if (!isFinite(gauge.value))
+                return
             const h = gauge.history.slice(1 - gauge.historyLength)
             h.push(gauge.value)
             gauge.history = h
@@ -39,6 +42,8 @@ GaugeBase {
     }
 
     readonly property bool roomy: height >= 160
+    // Too short for the trace and the footer: the label and the value alone
+    readonly property bool brief: height < 84
     readonly property color levelColor: gauge.hasValue
                                         ? gauge.zoneColor(gauge.value, Theme.gaugeReadout)
                                         : Theme.textDim
@@ -73,16 +78,16 @@ GaugeBase {
         id: heading
         anchors { left: parent.left; right: status.left; top: parent.top }
         Text {
+            Accessible.ignored: true
             width: parent.width
             text: gauge.label
             elide: Text.ElideRight
             font.pixelSize: 12
             font.weight: Font.DemiBold
-            font.letterSpacing: 1.2
-            font.capitalization: Font.AllUppercase
             color: Theme.textDim
         }
         Text {
+            Accessible.ignored: true
             width: parent.width
             visible: gauge.roomy && text !== ""
             text: gauge.description
@@ -105,6 +110,7 @@ GaugeBase {
     }
 
     Row {
+        id: valueRow
         anchors.left: parent.left
         anchors.verticalCenter: valueBand.verticalCenter
         spacing: 4
@@ -112,10 +118,12 @@ GaugeBase {
         Text {
             id: readout
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: Math.max(18, Math.min(valueBand.height * 0.9, gauge.width * 0.24))
-            font.weight: Font.DemiBold
-            font.features: ({ "tnum": 1 })
+            font.weight: Font.Bold
+            font.family: Theme.valueFamily
+            font.features: Theme.valueFeatures
             color: gauge.levelColor
         }
         // Past dangerFrom, beside the value
@@ -129,6 +137,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: readout.baseline
             text: gauge.unit
@@ -139,19 +148,19 @@ GaugeBase {
     // Vertical slot the readout centers in
     Item {
         id: valueBand
-        anchors { left: parent.left; right: parent.right; top: heading.bottom; bottom: trace.top }
+        anchors { left: parent.left; right: parent.right; top: heading.bottom
+                  bottom: gauge.brief ? parent.bottom : trace.top }
     }
 
     Shape {
         id: trace
+        objectName: "trace"
+        visible: !gauge.brief
         anchors { left: parent.left; right: parent.right; bottom: footer.top; bottomMargin: 6 }
         height: Math.max(20, gauge.height * 0.24)
         preferredRendererType: Shape.CurveRenderer
 
         readonly property var points: gauge.tracePoints(width, height)
-        readonly property var area: points.length < 2 ? []
-            : [Qt.point(points[0].x, height)].concat(points,
-                                                      [Qt.point(width, height)])
 
         ShapePath {   // baseline
             strokeColor: Qt.alpha(Theme.gaugeTick, 0.06)
@@ -159,15 +168,6 @@ GaugeBase {
             fillColor: "transparent"
             startX: 0; startY: trace.height - 0.5
             PathLine { x: trace.width; y: trace.height - 0.5 }
-        }
-        ShapePath {
-            strokeColor: "transparent"
-            fillGradient: LinearGradient {
-                x1: 0; y1: 0; x2: 0; y2: trace.height
-                GradientStop { position: 0.0; color: Qt.alpha(gauge.accent, 0.30) }
-                GradientStop { position: 1.0; color: Qt.alpha(gauge.accent, 0.0) }
-            }
-            PathPolyline { path: trace.area }
         }
         ShapePath {
             strokeColor: gauge.stale ? Theme.textDim : gauge.accent
@@ -178,8 +178,16 @@ GaugeBase {
             PathPolyline { path: trace.points }
         }
     }
+    // In the trace's place, or beside the value on a card too short for one
     Text {
-        anchors.centerIn: trace
+        objectName: "gaugeNote"
+        Accessible.ignored: true
+        anchors.left: gauge.brief ? valueRow.right : parent.left
+        anchors.leftMargin: gauge.brief ? 8 : 0
+        anchors.right: parent.right
+        anchors.verticalCenter: gauge.brief ? valueBand.verticalCenter : trace.verticalCenter
+        horizontalAlignment: gauge.brief ? Text.AlignLeft : Text.AlignHCenter
+        elide: Text.ElideRight
         visible: !gauge.hasValue && text !== ""
         text: gauge.note
         font.pixelSize: 11
@@ -188,22 +196,22 @@ GaugeBase {
 
     Row {
         id: footer
+        objectName: "footer"
+        visible: !gauge.brief
         anchors { left: parent.left; bottom: parent.bottom }
         spacing: 14
-        Repeater {
-            model: [
-                { tag: qsTr("MIN"), v: gauge.lowValue },
-                { tag: qsTr("MAX"), v: gauge.peakValue }
-            ]
-            delegate: Text {
-                required property var modelData
-                text: "%1  %2".arg(modelData.tag)
-                              .arg(isNaN(modelData.v) ? qsTr("—") : gauge.format(modelData.v))
-                font.pixelSize: 11
-                font.letterSpacing: 0.8
-                font.features: ({ "tnum": 1 })
-                color: Theme.textDim
-            }
+        // Two fixed items: a Repeater over the holds would rebuild both at
+        // each new low or peak
+        component Hold: Text {
+            required property string tag
+            required property real held
+            text: "%1  %2".arg(tag).arg(isNaN(held) ? qsTr("—") : gauge.format(held))
+            font.pixelSize: 11
+            font.features: Theme.valueFeatures
+            color: Theme.textDim
+            Accessible.ignored: true
         }
+        Hold { objectName: "lowHold"; tag: qsTr("MIN"); held: gauge.lowValue }
+        Hold { objectName: "peakHold"; tag: qsTr("MAX"); held: gauge.peakValue }
     }
 }

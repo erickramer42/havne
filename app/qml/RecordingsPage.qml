@@ -12,8 +12,8 @@ import App
 pragma ComponentBehavior: Bound
 
 // The recordings a session saved (ADR-0049), newest first: Open shows one
-// in the viewer, Replay puts its replay:// URI in Settings' field, and the
-// viewer's Replay in Settings the part in view's (?from=&to=). The
+// in the viewer, Replay connects it as a session in one tap, and the
+// viewer's Replay the part in view (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
@@ -73,6 +73,15 @@ Page {
     property string openedTitle: ""
     property string openedUri: ""
     readonly property bool viewing: recording.state !== RecordingView.Closed
+    // A replay can start: no session running, starting or ending, and no
+    // relay holding the adapter (ADR-0047), as Settings' Connect judges it
+    readonly property bool sessionIdle: !Bridge.connected && !Bridge.connecting
+                                        && !Bridge.disconnecting && !Relay.running
+    // Replay's words: what to do first, or plain while a session starts or
+    // ends (connected is false once a disconnect begins)
+    readonly property string replayText: Relay.running ? qsTr("Stop the relay to replay")
+                                       : Bridge.connected ? qsTr("Disconnect to replay")
+                                                          : qsTr("Replay")
 
     // The chart maximized: it takes the page but for the zoom row, and the
     // cursor's values move to a strip beside it. Kept apart for a short
@@ -151,7 +160,12 @@ Page {
     readonly property real minSpanMs: 200
     // The dot marking the cursor's sample on each trace
     readonly property real cursorDotR: 3.5
-    readonly property int rowHeight: Theme.dense ? 36 : 40
+    // A phone's targets are Theme.touchTarget; the desktop keeps its sizes
+    readonly property bool phoneShape: Theme.mobile || Theme.compact
+    // The buttons, boxes and fields below take it, as under Settings' pages
+    readonly property real touchMin: phoneShape ? Theme.touchTarget : 0
+    readonly property real rowHeight: phoneShape ? Theme.touchTarget : Theme.dense ? 36 : 40
+    readonly property real segmentHeight: phoneShape ? Theme.touchTarget : 30
     // A column narrower than a second reads the recording's raw rows of
     // every signal in it (ADR-0049 section 5); a second or wider, the
     // reader's per-second summaries. Past this many rows in view, columns
@@ -385,6 +399,7 @@ Page {
     }
 
     function backToList() {
+        closeExport()
         recording.close()
         viewFrames.clear()
         detailView = "values"
@@ -500,10 +515,14 @@ Page {
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
+        // A plotted signal with no samples in this recording has nothing to
+        // draw here, so its columns aren't read; the compared recording's
+        // of the same name still draw. With nothing drawn the chart says so
         const sigs = recording.signalList
-        const indexes = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
-        if (indexes.length === 0)
+        const plotted = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
+        if (plotted.length === 0)
             return []
+        const indexes = plotted.filter(i => sigs[i].samples > 0)
         const spanS = (viewT1 - viewT0) / 1000
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
         if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
@@ -522,7 +541,7 @@ Page {
         const g0 = Math.floor(viewT0 / colMs) * colMs
         const gn = Math.max(1, Math.ceil((viewT1 - g0) / colMs - 1e-9))
         const g1 = g0 + gn * colMs
-        const out = recording.columns(indexes, g0, g1, gn).map(c => {
+        const out = indexes.length === 0 ? [] : recording.columns(indexes, g0, g1, gn).map(c => {
             const s = sigs[c.index]
             return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
                      scaleKey: c.index, decimals: s.decimals, unit: s.unit,
@@ -532,8 +551,9 @@ Page {
         if (!compareAligned)
             return out
         const theirs = compare.signalList
-        const pairs = indexes.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
-                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText)
+        const pairs = plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
+                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
+                                          && theirs[p.theirs].samples > 0)
         if (pairs.length === 0)
             return out
         const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,
@@ -723,7 +743,7 @@ Page {
         }
     }
     function findingColor(kind) {
-        return kind === 7 ? Theme.info : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
+        return kind === 7 ? Theme.textDim : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
     }
 
     // Where the values can come from (ADR-0049's appendix of 2026-11-06):
@@ -745,6 +765,24 @@ Page {
             recording.open(recording.folder)
         else
             recording.openFrames(recording.folder, value)
+    }
+
+    // A row's second line: the address it was recorded from and the
+    // profile it replays under, the profile only where the address
+    // doesn't name it already. A row without frames (a CSV import's
+    // values) has nothing to replay; a row that doesn't say has
+    function rowDetail(row) {
+        if (row.frames === false)
+            return qsTr("values alone: the recording has no frames to replay")
+        if (row.source === "")
+            return qsTr("replays as %1").arg(row.profile)
+        // The address's own profile, or its scheme's default (mock:// is mock)
+        const m = /[?&]profile=([^&]*)/.exec(row.source)
+        const own = m !== null ? decodeURIComponent(m[1])
+                  : row.source.toLowerCase().startsWith("mock://") ? "mock" : ""
+        if (own === row.profile)
+            return row.source
+        return qsTr("%1 · replays as %2").arg(row.source).arg(row.profile)
     }
 
     function infoText() {
@@ -810,6 +848,42 @@ Page {
     // The signal rows' filter: Live has its own
     SignalFilter {
         id: signalFilter
+    }
+
+    // The Export panel: it takes the chart's place while open
+    property bool exportOpen: false
+    readonly property bool exportShown: exportOpen && recording.state === RecordingView.Open
+                                        && !chartMaximized
+    readonly property var plottedNames: recording.signalList
+        .filter(s => !s.isText && root.plotted[s.index] === true).map(s => s.name)
+    // The plotted signals, when none of them draws: no values in this
+    // recording, nor in the compared one's signal of the same name. The
+    // chart then has nothing to draw and says so
+    readonly property var plottedNoValues: {
+        const plotted = recording.signalList.filter(s => !s.isText && root.plotted[s.index] === true)
+        return plotted.length > 0 && plotted.every(s => !root.draws(s)) ? plotted.map(s => s.name) : []
+    }
+    function draws(s) {
+        if (s.samples > 0)
+            return true
+        if (!compareAligned)
+            return false
+        const theirs = compare.signalList[root.compareByName[s.name]]
+        return theirs !== undefined && !theirs.isText && theirs.samples > 0
+    }
+    function noValuesText(names) {
+        const list = names.length <= 2 ? names.join(qsTr(" and "))
+                   : names.slice(0, -1).join(", ") + qsTr(" and ") + names[names.length - 1]
+        return names.length === 1 ? qsTr("%1 has no values in this recording").arg(list)
+                                  : qsTr("%1 have no values in this recording").arg(list)
+    }
+    function openExport() {
+        exportOpen = true
+        exportPanel.begin()
+    }
+    function closeExport() {
+        exportPanel.end()
+        exportOpen = false
     }
 
     // The last Save report's outcome in words, "" before one on this
@@ -1034,6 +1108,7 @@ Page {
                         anchors.centerIn: parent
                         spacing: 2
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "importKind_csv"
                             text: qsTr("CSV")
                             selected: root.importKind === RecordingImport.Csv
@@ -1045,6 +1120,7 @@ Page {
                             }
                         }
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "importKind_candump"
                             text: qsTr("candump")
                             selected: root.importKind === RecordingImport.Candump
@@ -1060,7 +1136,7 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     text: qsTr("Guessed from its first line")
                 }
             }
@@ -1092,6 +1168,9 @@ Page {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ComboBox {
+                    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                             implicitContentHeight + topPadding + bottomPadding,
+                                             implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                     id: savedMapChoice
                     objectName: "savedMaps"
                     visible: root.savedMaps.length > 0
@@ -1138,8 +1217,8 @@ Page {
                 visible: root.importKind === RecordingImport.Candump && root.importAsksInterface
                 Layout.fillWidth: true
                 spacing: Theme.spacing
-                Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: 13 }
-                TextField {
+                Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+                ThemedTextField {
                     id: importInterface
                     objectName: "importInterface"
                     Layout.fillWidth: true
@@ -1280,16 +1359,9 @@ Page {
                         }
                         Label {
                             objectName: "recordingDetail"
-                            // A row without frames (a CSV import's values) has
-                            // nothing to replay; a row that doesn't say has
-                            text: recordingRow.modelData.frames === false
-                                  ? qsTr("values alone: the recording has no frames to replay")
-                                  : recordingRow.modelData.source !== ""
-                                  ? qsTr("%1 · replays as %2").arg(recordingRow.modelData.source)
-                                                              .arg(recordingRow.modelData.profile)
-                                  : qsTr("replays as %1").arg(recordingRow.modelData.profile)
+                            text: root.rowDetail(recordingRow.modelData)
                             color: Theme.textDim
-                            font.pointSize: 8
+                            font.pixelSize: Theme.fontCaption
                             elide: Text.ElideMiddle
                             Layout.fillWidth: true
                         }
@@ -1301,7 +1373,7 @@ Page {
                                  && recordingRow.modelData.folder === root.baselineFolder
                         text: qsTr("Baseline")
                         color: Theme.text
-                        font.pointSize: 8
+                        font.pixelSize: Theme.fontCaption
                         leftPadding: 6
                         rightPadding: 6
                         topPadding: 2
@@ -1310,7 +1382,7 @@ Page {
                             radius: Theme.radius
                             color: "transparent"
                             border.width: 1
-                            border.color: Theme.info
+                            border.color: Theme.textDim
                         }
                         Accessible.name: qsTr("%1's baseline").arg(root.pickedVehicle !== null
                                                                   ? root.pickedVehicle.label : "")
@@ -1318,11 +1390,12 @@ Page {
                     ThemedButton {
                         objectName: "replayButton"
                         visible: recordingRow.modelData.frames !== false
-                        text: qsTr("Replay")
+                        // One tap connects; during a session it says what to do first
+                        text: root.replayText
                         // Darker than its row, so it reads as a button there
                         baseColor: Theme.surface
-                        enabled: !Bridge.connected && !Bridge.connecting
-                        Layout.maximumWidth: 96
+                        enabled: root.sessionIdle
+                        Layout.maximumWidth: enabled ? 96 : 160
                         Accessible.name: qsTr("Replay %1").arg(recordingRow.modelData.title)
                         onClicked: root.replayRequested(recordingRow.modelData.uri)
                     }
@@ -1342,23 +1415,33 @@ Page {
             }
             Label {
                 objectName: "openedTitle"
+                // On a phone the name takes a line of its own below
+                visible: !Theme.compact
                 text: root.openedTitle
                 color: Theme.text
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
-            // The part in view replayed as a session: Settings' field
-            // filled as the list's Replay fills it, and Connect left to
-            // the user, so the name says where it goes; off while a
-            // session runs, as the list's is
+            // The part in view replayed as a session in one tap, as the
+            // list's Replay does; off while a session runs, as the list's is
             ThemedButton {
                 objectName: "replayView"
                 visible: recording.state === RecordingView.Open && recording.hasFrames
-                enabled: !(Bridge.connected || Bridge.connecting)
-                text: qsTr("Replay in Settings")
-                Accessible.name: qsTr("Put the part in view in Settings, to replay it as a session")
+                enabled: root.sessionIdle
+                text: root.replayText
+                Accessible.name: qsTr("Replay the part in view as a session")
                 onClicked: root.replayRequested(root.stretchUri())
             }
+        }
+
+        Label {
+            objectName: "openedTitleCompact"
+            visible: Theme.compact && root.viewing && !root.chartMaximized
+            text: root.openedTitle
+            color: Theme.text
+            // The folder's date is at the end
+            elide: Text.ElideMiddle
+            Layout.fillWidth: true
         }
 
         RowLayout {
@@ -1394,16 +1477,35 @@ Page {
             text: recording.state === RecordingView.Open ? root.infoText() : ""
         }
 
-        // The whole recording's health as one scrubbed file to share
-        RowLayout {
+        // The whole recording's health as one scrubbed file to share. A
+        // phone has two columns, so the views' switch has the second row
+        GridLayout {
             visible: recording.state === RecordingView.Open && !root.chartMaximized
             Layout.fillWidth: true
-            spacing: Theme.spacing
+            Layout.preferredWidth: 100000   // the page's width, not its buttons'
+            columns: root.phoneShape ? 2 : 4
+            columnSpacing: Theme.spacing
+            rowSpacing: Theme.spacing
             ThemedButton {
                 objectName: "saveReport"
+                compact: Theme.compact
                 enabled: !recording.reporting
                 text: qsTr("Save report…")
                 onClicked: reportDialog.open()
+            }
+            ThemedButton {
+                objectName: "exportButton"
+                compact: Theme.compact
+                text: qsTr("Export…")
+                // Selected while its panel is open: Save as... is the primary there
+                checkable: true
+                checked: root.exportOpen
+                onClicked: {
+                    if (root.exportOpen)
+                        root.closeExport()
+                    else
+                        root.openExport()
+                }
             }
             // The signal area's two views: the values at the cursor, or the
             // frames in view. Hidden for a recording with no frames.csv
@@ -1420,12 +1522,14 @@ Page {
                     anchors.centerIn: parent
                     spacing: 2
                     SegmentButton {
+                        tapHeight: root.segmentHeight
                         objectName: "detailView_values"
                         text: qsTr("Values")
                         selected: !root.framesShown
                         onClicked: root.detailView = "values"
                     }
                     SegmentButton {
+                        tapHeight: root.segmentHeight
                         objectName: "detailView_frames"
                         text: qsTr("Frames")
                         selected: root.framesShown
@@ -1435,16 +1539,31 @@ Page {
             }
             Label {
                 objectName: "reportNote"
+                visible: text !== ""
                 Layout.fillWidth: true
+                Layout.columnSpan: root.phoneShape ? 2 : 1
                 wrapMode: Text.WordWrap
                 text: root.reportNote
                 color: root.reportFailed ? Theme.danger : Theme.textDim
             }
         }
 
+        RecordingExportPanel {
+            id: exportPanel
+            objectName: "exportPanel"
+            visible: root.exportShown
+            Layout.fillWidth: true
+            view: recording
+            plottedNames: root.plottedNames
+            onCloseRequested: root.closeExport()
+        }
+
         // Where the values come from: offered once it opened, or failed
         // (a profile that can't decode it, a folder with frames alone)
         ComboBox {
+            implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                     implicitContentHeight + topPadding + bottomPadding,
+                                     implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
             id: decodeChoice
             objectName: "decodeChoice"
             // Values alone have no frames to decode through a profile
@@ -1481,7 +1600,7 @@ Page {
                 objectName: "isBaseline"
                 visible: root.isBaseline
                 width: Math.min(implicitWidth, baselineFlow.width)
-                height: Theme.controlHeight
+                height: root.phoneShape ? Theme.touchTarget : Theme.controlHeight
                 verticalAlignment: Text.AlignVCenter
                 wrapMode: Text.WordWrap
                 color: Theme.textDim
@@ -1505,6 +1624,9 @@ Page {
             Layout.fillWidth: true
             spacing: Theme.spacing
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 id: compareChoice
                 objectName: "compareChoice"
                 readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
@@ -1532,6 +1654,9 @@ Page {
             Layout.fillWidth: true
             spacing: 6
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 id: alignChoice
                 objectName: "alignChoice"
                 width: 170
@@ -1546,6 +1671,9 @@ Page {
                 onActivated: root.setAlignOn(currentValue)
             }
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 objectName: "alignMarker"
                 visible: root.alignOn === "marker"
                 width: 150
@@ -1553,13 +1681,16 @@ Page {
                 onActivated: root.alignLabel = currentText
             }
             ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
                 objectName: "alignSignal"
                 visible: root.alignOn === "rise" || root.alignOn === "fall"
                 width: 150
                 model: recording.state === RecordingView.Open ? root.numberNames() : []
                 onActivated: root.alignSignal = currentText
             }
-            TextField {
+            ThemedTextField {
                 objectName: "alignLevel"
                 visible: root.alignOn === "rise" || root.alignOn === "fall"
                 width: 100
@@ -1567,7 +1698,7 @@ Page {
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
                 onEditingFinished: root.alignLevel = root.numberOf(text)
             }
-            TextField {
+            ThemedTextField {
                 objectName: "alignHysteresis"
                 visible: root.alignOn === "rise" || root.alignOn === "fall"
                 width: 100
@@ -1610,12 +1741,14 @@ Page {
                         anchors.centerIn: parent
                         spacing: 2
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "framesTable_frames"
-                            text: qsTr("Frames")
+                            text: qsTr("List")
                             selected: !root.framesById
                             onClicked: root.framesById = false
                         }
                         SegmentButton {
+                            tapHeight: root.segmentHeight
                             objectName: "framesTable_byId"
                             text: qsTr("By ID")
                             selected: root.framesById
@@ -1631,7 +1764,8 @@ Page {
                     text: viewFrames.frames.filterTerms > 0
                           ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
                           : qsTr("Filter")
-                    highlighted: root.framesFilterOpen
+                    checkable: true
+                    checked: root.framesFilterOpen
                     onClicked: root.framesFilterOpen = !root.framesFilterOpen
                 }
             }
@@ -1650,7 +1784,7 @@ Page {
                 Layout.preferredWidth: 0
                 wrapMode: Text.WordWrap
                 color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: viewFrames.error !== "" ? viewFrames.error
                       : viewFrames.loading ? qsTr("Reading the frames…")
                       : viewFrames.note !== "" ? viewFrames.note
@@ -1729,7 +1863,7 @@ Page {
                     anchors.fill: parent
                     anchors.leftMargin: 8
                     anchors.rightMargin: 12
-                    CheckBox {
+                    ThemedCheckBox {
                         objectName: "plotCheck"
                         checked: root.plotted[signalRow.signalIndex] === true
                         enabled: !signalRow.modelData.isText
@@ -1791,7 +1925,8 @@ Page {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
-            text: qsTr("Showing %1 of %2 signals · plotting %3")
+            text: (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
+                                 : qsTr("Showing %1 of %2 signals · plotting %3"))
                   .arg(root.shownSignals.length).arg(recording.signalList.length)
                   .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
         }
@@ -1834,13 +1969,20 @@ Page {
                 Layout.maximumWidth: 120
                 onClicked: root.startFrameTest()
             }
+            // On a phone the hint wraps onto two caption lines where the
+            // row leaves it little width, instead of eliding to "Tap for …"
             Label {
                 objectName: "cursorTime"
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: Theme.compact ? 2 : 1
                 elide: Text.ElideRight
+                font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
                 color: Theme.textDim
-                text: !root.hasCursor ? qsTr("Tap the chart to read the values at a time")
+                text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
+                                                       : qsTr("Click the chart for values"))
                                       : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
             }
             ThemedButton {
@@ -1858,7 +2000,7 @@ Page {
         Rectangle {
             id: chartFrame
             objectName: "chartFrame"
-            visible: recording.state === RecordingView.Open
+            visible: recording.state === RecordingView.Open && !root.exportShown
             Layout.fillWidth: true
             // Tall enough to read on a phone; the page scrolls to it. The
             // splitter below sets it once dragged (not while maximized)
@@ -1902,7 +2044,8 @@ Page {
                 y: 4
                 shownW: parent.width - 8 - chartFrame.stripWidth
                 shownH: parent.height - 8 - chartFrame.stripHeight
-                emptyText: qsTr("No signals plotted; tick a row to plot it")
+                emptyText: root.plottedNoValues.length > 0 ? root.noValuesText(root.plottedNoValues)
+                                                           : qsTr("No signals plotted; tick a row to plot it")
                 fetch: function(widthPx) { return root.series(widthPx) }
                 layoutOpts: ({
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
@@ -1920,8 +2063,8 @@ Page {
                         const left = Math.max(0, x0)
                         ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(l.plotW, x1) - left), 4)
                     }
-                    ctx.strokeStyle = Theme.info
-                    ctx.fillStyle = Theme.info
+                    ctx.strokeStyle = Theme.textDim
+                    ctx.fillStyle = Theme.textDim
                     ctx.lineWidth = 1
                     ctx.setLineDash([4, 3])
                     ctx.textAlign = "left"
@@ -2066,7 +2209,7 @@ Page {
                         width: parent.width - 12
                         text: stripRow.modelData.name
                         color: Theme.textDim
-                        font.pixelSize: 11
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                     }
                     Label {
@@ -2087,11 +2230,18 @@ Page {
             }
         }
 
+        // With the chart gone for the Export panel, the rest stays at the top
+        Item {
+            visible: root.exportShown
+            Layout.fillHeight: true
+        }
+
         // The splitter: drag it to make the chart taller or shorter, kept
         // between runs; a double-tap gives the chart the page's own height
         Item {
             objectName: "chartSplitter"
             visible: recording.state === RecordingView.Open && !root.chartMaximized
+                     && !root.exportShown
             Layout.fillWidth: true
             implicitHeight: 12
             Rectangle {
@@ -2141,7 +2291,7 @@ Page {
             objectName: "findingList"
             visible: recording.state === RecordingView.Open && count > 0 && !root.chartMaximized
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(count, 3) * 32
+            Layout.preferredHeight: Math.min(count, 3) * Math.max(32, root.touchMin)
             clip: true
             currentIndex: -1
             highlightFollowsCurrentItem: false
@@ -2153,7 +2303,7 @@ Page {
                 id: findingRow
                 required property var modelData
                 width: findingList.width
-                height: 32
+                height: Math.max(32, root.touchMin)
                 color: findingArea.hovered ? Theme.elevatedLight : "transparent"
                 AbstractButton {
                     id: findingArea

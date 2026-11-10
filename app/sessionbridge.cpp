@@ -9,6 +9,7 @@
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
+#include "scan_line.h"       /* cli/: when a module's session earns a line */
 #include "urlwrite.h"
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
@@ -37,6 +38,7 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <chrono>
 #include <cstring>
@@ -1462,10 +1464,9 @@ SessionBridge::SessionBridge(QObject* parent)
         pollChannelDiagnostics();
         pollReplayEnd();
         pollSleep();
-        // Must fire even when nothing arrived this window: dimming exists
-        // for rows that STOPPED updating. 100 ms is well
-        // inside the 3 s dim threshold and the span emission is one
-        // signal for the whole model.
+        // Fires even when nothing arrived this window: dimming exists for
+        // rows that stopped updating. 100 ms is well inside the 3 s dim
+        // threshold, and the emission is one signal for the whole model.
         m_signalModel->refreshAges();
         // Drop count at tick rate rather than per frame; onFrame also
         // queues a report as it drops (at most one pending).
@@ -1499,12 +1500,11 @@ SessionBridge::~SessionBridge()
     // A Read once's session closes within its wait; its queued result is
     // dropped with `this`, and core must outlive it
     m_readOnce.join();
-    // Async connect worker first: it calls core and posts a queued
-    // completion against `this`. Join before tearing the session or
-    // shutting core down. Worst case bounded by the surrogate handshake
-    // timeout (~8 s) at app exit with a wedged vendor: acceptable for
-    // shutdown, unacceptable for the UI thread mid-session (which is
-    // why connect is async at all).
+    // The async connect worker calls core and posts a queued completion
+    // against `this`: join it before tearing the session or core down.
+    // With a wedged vendor that waits up to the surrogate handshake
+    // timeout (~8 s): fine at exit, not on the UI thread mid-session,
+    // hence the async connect.
     if (m_connectThread.joinable()) {
         m_connectThread.join();
     }
@@ -1653,7 +1653,7 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
                                             const QString& baselineFolder)
 {
     if (m_session == nullptr || !connected()) {
-        const QString words = QStringLiteral("Not connected");
+        const QString words = QStringLiteral("No session");
         emit logMessage(
             QStringLiteral("Health report not saved: %1").arg(words));
         return {{QStringLiteral("ok"), false},
@@ -2427,7 +2427,7 @@ QVariantMap SessionBridge::recordingRow(const QString& folder) const
     return row;
 }
 
-// Pure-core half: safe on ANY thread. Creates and registers, the slow
+// Pure-core half: safe on any thread. Creates and registers, the slow
 // part (DLL load, PassThruOpen), but doesn't start: until the GUI thread
 // has taken the session, no worker may call onFrame with `this`. On
 // failure, cleans up fully (core API, mutex-safe off-thread) and returns
@@ -2500,10 +2500,9 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     return {};
 }
 
-// GUI-thread half: state application after a successful connect,
-// ending with the "Connected:" and "Session:" log lines. Factored out of
-// connectSession so the sync and async paths apply IDENTICAL state
-// (parity by construction, not by care).
+// GUI-thread half: the state a successful connect applies, ending with the
+// "Connected:" and "Session:" log lines; the sync and async paths share it,
+// so they apply the same state.
 void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
     // Before any emit: each runs handlers synchronously, and a connect one
@@ -2549,6 +2548,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     }
     for (ecuio_channel_support_t& s : m_supportReports) {
         s = ecuio_channel_support_t{};
+    }
+    for (SessionWritten& w : m_sessionWritten) {
+        w = SessionWritten{};
     }
     if (!m_refusedUnnamed.isEmpty()) {
         m_refusedUnnamed.clear();
@@ -2655,9 +2657,9 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         m_pendingSession.store(session);
 
         QMetaObject::invokeMethod(this, [this, uri, core_err]() {
-            // JOIN FIRST, then clear the flag, then emit: assigning to a
+            // Join first, then clear the flag, then emit: assigning to a
             // joinable std::thread terminates the process, and a QML
-            // handler can run SYNCHRONOUSLY inside connectingChanged.
+            // handler can run synchronously inside connectingChanged.
             // connecting clears only once the session is applied, so a
             // handler always sees connecting or connected: a connect it
             // starts is refused, never a second session over this one.
@@ -2692,6 +2694,13 @@ void SessionBridge::disconnectSession()
 
     const QString uri = m_currentUri;
     emit logMessage(QStringLiteral("Disconnecting: %1").arg(uri));
+    // The close sends 10 01 after the worker's last report (ADR-0060)
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        const QString line = sessionReturnedText(m_supportReports[c]);
+        if (!line.isEmpty()) {
+            emit logMessage(line);
+        }
+    }
 
     // Every flag before any emit: a QML handler can run synchronously
     // inside one, and must already see disconnecting with connected
@@ -2748,7 +2757,7 @@ void SessionBridge::disconnectSession()
         QMetaObject::invokeMethod(
             this,
             [this, uri, timing, rows]() {
-                // JOIN FIRST, then close the recording, then clear the
+                // Join first, then close the recording, then clear the
                 // flag and emit, as the connect completion does: a QML
                 // handler inside disconnectingChanged may start the next
                 // connect, which must find this session's recorder gone.
@@ -2760,8 +2769,11 @@ void SessionBridge::disconnectSession()
                     emit logMessage(timingLine);
                 }
                 emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
-                // Kept open until here, so it brackets the whole teardown
-                stopRecording(QStringLiteral("disconnected"));
+                // Kept open until here, so it brackets the whole teardown.
+                // Only the user's Disconnect gets here: the Dashboard needs
+                // no reason, the recording's end note keeps it
+                stopRecording(QStringLiteral("disconnected"), false,
+                              QStringLiteral("Log ended"));
                 m_disconnecting = false;
                 emit disconnectingChanged();
             },
@@ -2778,6 +2790,31 @@ void SessionBridge::setRecording(bool on)
     if (m_recording == on) return;
     m_recording = on;
     emit recordingChanged();
+}
+
+namespace {
+// Settings' choices for a log's minimum time between sweeps, ms; 0 is off
+constexpr int kMinSweepChoices[] = {0, 100, 250, 500, 1000};
+} // namespace
+
+QVariantList SessionBridge::minSweepChoices() const
+{
+    QVariantList choices;
+    for (int ms : kMinSweepChoices) {
+        choices.append(ms);
+    }
+    return choices;
+}
+
+void SessionBridge::setMinSweepMs(int ms)
+{
+    if (std::find(std::begin(kMinSweepChoices), std::end(kMinSweepChoices),
+                  ms) == std::end(kMinSweepChoices) ||
+        ms == m_minSweepMs) {
+        return;
+    }
+    m_minSweepMs = ms;
+    emit minSweepMsChanged();
 }
 
 void SessionBridge::setUnitSystem(int units)
@@ -2996,7 +3033,8 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
     if (rc != ECUIO_OK) {
         // The folder is this call's own, made by the open above; a
         // session never attached wrote it no frame, so nothing is lost
-        const QString folder = folderOf(recorder);
+        const QString folder =
+            m_failRecorderFolderForTesting ? QString() : folderOf(recorder);
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");
         if (!folder.isEmpty() && !holdsFrames(folder)) {
@@ -3010,7 +3048,8 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
 void SessionBridge::adoptRecorder(ecuio_recorder_t* recorder)
 {
     m_recorder = recorder;
-    m_recordingFolder = folderOf(recorder);
+    m_recordingFolder =
+        m_failRecorderFolderForTesting ? QString() : folderOf(recorder);
     if (m_markCount != 0) {
         m_markCount = 0;
         emit markCountChanged();
@@ -3047,8 +3086,9 @@ bool SessionBridge::startLog()
     }
     // The focus first, so one core refuses (it would leave nothing to
     // ask) opens no folder
-    const ecuio_status_t rc = ecuio_session_set_focus(
-        m_session, ids.data(), static_cast<uint32_t>(ids.size()));
+    const ecuio_status_t rc = ecuio_session_set_focus_with(
+        m_session, ids.data(), static_cast<uint32_t>(ids.size()),
+        static_cast<uint32_t>(m_minSweepMs), 0);
     if (rc != ECUIO_OK) {
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
         return refuse(detail.isEmpty() ? failureText(rc) : detail);
@@ -3071,9 +3111,18 @@ bool SessionBridge::startLog()
     m_logTimer->start();
     emit logStateChanged();
     emit logProgressChanged();
-    emit logMessage(QStringLiteral("Log started: %1 (%2)")
+    /* A session that asks nothing takes the minimum and changes nothing */
+    ecuio_session_info_t info{};
+    const bool asks = ecuio_session_get_info(m_session, &info) == ECUIO_OK &&
+                      (info.flags & ECUIO_SESSION_INFO_REQUESTS) != 0;
+    const QString pace = m_minSweepMs > 0 && asks
+                             ? QStringLiteral(", at least %1 ms between sweeps")
+                                   .arg(m_minSweepMs)
+                             : QString();
+    emit logMessage(QStringLiteral("Log started: %1 (%2%3)")
                         .arg(recordingFolder(),
-                             signalCountText(static_cast<int>(ids.size()))));
+                             signalCountText(static_cast<int>(ids.size())),
+                             pace));
     return true;
 }
 
@@ -3108,7 +3157,8 @@ void SessionBridge::countLogBytes()
     m_logBytes = bytes;
 }
 
-void SessionBridge::stopRecording(const QString& why, bool byUser)
+void SessionBridge::stopRecording(const QString& why, bool byUser,
+                                  const QString& told)
 {
     if (m_recorder == nullptr) {
         return;
@@ -3143,7 +3193,8 @@ void SessionBridge::stopRecording(const QString& why, bool byUser)
     // An end the user didn't ask for is told on the Dashboard; Stop
     // log's isn't, the viewer opens on it
     if (!byUser) {
-        setLogNotice(QStringLiteral("Log ended: %1").arg(why));
+        setLogNotice(told.isEmpty() ? QStringLiteral("Log ended: %1").arg(why)
+                                    : told);
     }
     emit logStateChanged();
     emit logProgressChanged();
@@ -3238,9 +3289,9 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
         bool expected = false;
         if (self->m_dropNotifyPending.compare_exchange_strong(expected, true)) {
             QMetaObject::invokeMethod(self, [self]() {
-                // Clear the flag FIRST: if new drops arrive while we process,
-                // a fresh notification is allowed to be queued and will read
-                // a newer value. Reset-after-read could suppress a drop report.
+                // Clear the flag first: drops arriving meanwhile may queue a
+                // fresh notification that reads a newer value; reset-after-read
+                // could suppress a drop report.
                 self->m_dropNotifyPending.store(false, std::memory_order_release);
                 self->notifyDropped();
             }, Qt::QueuedConnection);
@@ -3248,19 +3299,18 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
         return;
     }
 
-    // ecuio_frame_t holds its payload INLINE (data[ECUIO_FRAME_DATA_MAX]):
-    // this struct copy is a deep copy of the payload; no dangling pointer
-    // is possible.
+    // ecuio_frame_t holds its payload inline (data[ECUIO_FRAME_DATA_MAX]),
+    // so this struct copy is a deep copy: no dangling pointer is possible.
     const ecuio_frame_t copy = *frame;
     // Stamped here, as it arrives, not when the GUI thread gets to it:
     // the frame's wait for the GUI thread starts here
     const auto arrived = HostClock::now();
     self->m_inFlightFrames.fetch_add(1, std::memory_order_relaxed);
 
-    // Lifetime contract: invoking with `self` as context object means the
-    // queued lambda is dropped if the bridge is destroyed before it runs.
-    // DO NOT change to a context-free postEvent pattern without revisiting
-    // destruction ordering.
+    // Lifetime contract: with `self` as the context object, the queued
+    // lambda is dropped if the bridge is destroyed before it runs. Don't
+    // change it to a context-free postEvent without revisiting the
+    // destruction order.
     QMetaObject::invokeMethod(self, [self, copy, arrived]() {
         self->m_inFlightFrames.fetch_sub(1, std::memory_order_relaxed);
         self->handleFrameInternal(&copy, arrived);
@@ -3677,9 +3727,8 @@ void SessionBridge::pollLinkHealth()
     m_linkErrorCode = last_error;
     m_errorEpisodes = episodes;
 
-    /* Transitions land in the activity log with ZERO QML work: this
-     * alone turns "connected with frozen values" into a named fault
-     * in the existing log surface. */
+    /* Transitions land in the activity log with no QML work, which turns
+     * "connected with frozen values" into a named fault there. */
     if (prev != ECUIO_OK && last_error == ECUIO_OK) {
         logUnnoted(QStringLiteral("Link: recovered"));
     } else if (last_error == ECUIO_ERR_VEHICLE_TIMEOUT) {
@@ -3721,6 +3770,16 @@ void SessionBridge::pollChannelSupport()
         m_supportGeneration[c] = s.generation;
         m_supportReports[c] = s;
         changed = true;
+        // The session's change first (ADR-0060): it's why this report moved
+        SessionWritten& w = m_sessionWritten[c];
+        cli::SessionSeen seen{w.state, w.nrc, w.entries, w.lost, w.written};
+        if (cli::session_due(s, seen)) {
+            w = {seen.state, seen.nrc, seen.entries, seen.lost, seen.written};
+            const QString line = channelSessionText(s);
+            if (!line.isEmpty()) {
+                emit logMessage(line);
+            }
+        }
         emit logMessage(channelSupportText(s));
     }
     // Live says which signals their ECU refused, and with what (ADR-0051
@@ -3860,7 +3919,13 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
                     why = QStringLiteral("service not supported: ") + nrc;
                     break;
                 case ECUIO_DROP_ACCESS:
-                    why = QStringLiteral("needs security access or another session: ") + nrc;
+                    // in the extended session, "another session" is wrong
+                    why = (s.session == cli::kExtendedSession
+                               ? QStringLiteral("needs security access, or a "
+                                                "session Havne doesn't enter: ")
+                               : QStringLiteral("needs security access or "
+                                                "another session: ")) +
+                          nrc;
                     break;
                 default:
                     why = QStringLiteral("reason %1").arg(static_cast<uint>(d.reason));
@@ -3898,7 +3963,70 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
         }
         parts << scan;
     }
+    if (s.session_asked != 0) {
+        parts << (s.session == cli::kExtendedSession
+                      ? QStringLiteral("extended session")
+                      : QStringLiteral("default session"));
+    }
     return QStringLiteral("ECU %1: ").arg(hexId(s.rx_id)) + parts.join(QStringLiteral("; "));
+}
+
+/* A module's session change (ADR-0060), one line per state the CLI's
+ * session line reports; the refusal's code by name, as Live's refusals
+ * are. Static, so test_bridge pins every state's words. */
+QString SessionBridge::channelSessionText(const ecuio_channel_support_t& s)
+{
+    const QString ecu = QStringLiteral("ECU %1: ").arg(hexId(s.rx_id));
+    const QString name = QString::fromLatin1(cli::nrc_name(s.session_nrc));
+    switch (s.session_asked != 0 ? s.session_state
+                                 : ECUIO_SESSION_STATE_NOT_ASKED) {
+    case ECUIO_SESSION_STATE_ENTERED:
+        if (s.session_lost == 0) {
+            return ecu +
+                   QStringLiteral("reading in the extended session (50 03)");
+        }
+        return ecu +
+               QStringLiteral("left the extended session and entered it again "
+                              "(%1 %2 so far)")
+                   .arg(s.session_lost)
+                   .arg(s.session_lost == 1 ? QStringLiteral("time")
+                                            : QStringLiteral("times"));
+    case ECUIO_SESSION_STATE_REFUSED: {
+        const QString code = refusalCode(0x10, s.session_nrc);
+        return ecu + QStringLiteral(
+                         "refused the extended session (%1): reading in the "
+                         "default session")
+                         .arg(name.isEmpty()
+                                  ? code
+                                  : name + QStringLiteral(", ") + code);
+    }
+    case ECUIO_SESSION_STATE_UNANSWERED:
+        return ecu + QStringLiteral(
+                         "no answer to 10 03: reading in the default session, "
+                         "asked again when the link recovers");
+    case ECUIO_SESSION_STATE_ABANDONED: {
+        const QString code =
+            QStringLiteral("code %1").arg(hexByte(s.session_nrc));
+        return ecu +
+               QStringLiteral("kept leaving the extended session (%1, %2 times "
+                              "within %3 s): reading in the default session")
+                   .arg(name.isEmpty() ? code
+                                       : name + QStringLiteral(", ") + code)
+                   .arg(ECUIO_SESSION_LOSSES_MAX)
+                   .arg(ECUIO_SESSION_LOSS_WINDOW_MS / 1000);
+    }
+    default:
+        return QString();
+    }
+}
+
+QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
+{
+    if (s.session_asked == 0 || s.session_entries == 0) {
+        return QString();
+    }
+    return QStringLiteral("ECU %1: returned to the default session (10 01)")
+        .arg(hexId(s.rx_id));
 }
 
 /* What each channel's ECU said it is (ADR-0021), in the activity log

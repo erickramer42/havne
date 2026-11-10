@@ -188,6 +188,14 @@ information) and 0x22 (ReadDataByIdentifier), and nothing else.
 > above still holds for everything else: no def, URI key or one-shot
 > list can enrol 0x04, and the engine refuses it from any of them.
 
+> **Amended 2026-11-09 ([ADR-0060](0060-extended-session-reads.md)):**
+> session control comes into scope for one built-in, read-only step:
+> with uds-generic's `?session=03`, each channel sends `10 03` before
+> its reads, `3E 00` in quiet gaps and `10 01` at the close, built only
+> through a second list of its own (`10 01`, `10 03`, `3E 00`), checked
+> in the engine. The table's list above is unchanged, and security
+> access, writes and routine control stay out of scope.
+
 ### 4. The probe runs on the engine, and only explicit answers prune
 
 The post-connect probe (ADR-0013 section 3) uses the engine before the

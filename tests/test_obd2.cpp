@@ -34,6 +34,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <set>
 #include <vector>
 
 namespace {
@@ -1072,7 +1073,7 @@ int class_of(const ecuio_request_engine& e, uint8_t pid)
 }
 
 /* The test car's six bitmaps (docs/bench-sessions/2026-10-25-vehicle.md,
- * the same on 2026-10-31) */
+ * the same in docs/bench-sessions/2026-10-31-elm327-vehicle.md) */
 const std::vector<std::pair<uint8_t, uint32_t>> kTestCar = {
     {0x00, 0xFE7FA813u}, {0x20, 0xA017F011u}, {0x40, 0xFED08C81u},
     {0x60, 0x63080001u}, {0x80, 0x0004000Du}, {0xA0, 0x04000000u}};
@@ -6548,6 +6549,299 @@ TEST(RequestEngineTest, APackGathersKeptRequestsAlone)
     EXPECT_TRUE(all_three) << "the three picks pack as one request";
 }
 
+namespace {
+
+/* One request out on channel 0: when, and what it asked */
+struct Asked {
+    int64_t at;
+    Bytes request;
+};
+
+/* Channel 0's rotation up to until_us on the engine's own clock, each
+ * request answered 4 ms later through respond, the clock stepped by
+ * ecuio_engine_next_event_us alone: a wait it doesn't report fails here,
+ * where a worker would spin */
+std::vector<Asked> paced_run(ecuio_request_engine* e, int64_t until_us,
+                             const Responder& respond)
+{
+    std::vector<Asked> out;
+    int64_t now = 0;
+    while (now < until_us) {
+        (void)ecuio_engine_expire(e, 0, now);
+        const int32_t r = ecuio_engine_due(e, 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            const int64_t next = ecuio_engine_next_event_us(e, now);
+            if (next <= 0 || next == INT64_MAX) {
+                ADD_FAILURE() << "nothing due, and next event " << next
+                              << " us, at " << now;
+                break;
+            }
+            now += next;
+            continue;
+        }
+        const ecuio_request& q = ecuio_engine_request_of(e, 0, r);
+        const Bytes req(q.bytes, q.bytes + q.len);
+        out.push_back({now, req});
+        ecuio_engine_sent(e, 0, r, true, now);
+        now += 4 * kMs;
+        const Bytes reply = respond(req);
+        if (!reply.empty()) {
+            (void)ecuio_engine_on_frame(e, 0, reply.data(),
+                                        static_cast<uint16_t>(reply.size()),
+                                        now, nullptr);
+        }
+    }
+    return out;
+}
+
+Bytes single_pid_reply(const Bytes& req)
+{
+    return Bytes{0x41, req[1], 0x12, 0x34};
+}
+
+/* Keeps every row of a table one_channel_of made */
+void focus_all(ecuio_request_engine* e, int64_t min_sweep_us)
+{
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    for (uint32_t i = 0; i < e->count; ++i) {
+        keep[i] = 1;
+    }
+    ecuio_engine_focus(e, keep, min_sweep_us);
+}
+
+} // namespace
+
+/* ADR-0056 section 4: a sweep starts no sooner than the floor after the
+ * last one started, the requests inside it at the engine's own 20 ms
+ * floor; the picks keep their order, and the wait is reported to the
+ * driver (paced_run steps by it) */
+TEST(RequestEngineTest, AMinimumTimeSpacesTheSweepsFromStartToStart)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    focus_all(&e, 200 * kMs);
+    const std::vector<Asked> sent = paced_run(&e, 1000 * kMs, single_pid_reply);
+    ASSERT_EQ(sent.size(), 15u) << "five sweeps of three in 1 s";
+    const uint8_t order[3] = {0x0C, 0x0D, 0x0F};
+    for (size_t k = 0; k < sent.size(); ++k) {
+        EXPECT_EQ(sent[k].request[1], order[k % 3]) << "request " << k;
+        EXPECT_EQ(sent[k].at, int64_t(k / 3) * 200 * kMs +
+                                  int64_t(k % 3) * ECUIO_ENGINE_GAP_US)
+            << "request " << k;
+    }
+}
+
+/* A sweep that takes longer than the floor waits for nothing: one
+ * after another at the engine's own pace, as with no floor at all */
+TEST(RequestEngineTest, ASweepLongerThanItsMinimumIsNotHeldBack)
+{
+    ecuio_request_engine floored;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&floored, {0x0C, 0x0D, 0x0F, 0x10}));
+    focus_all(&floored, 50 * kMs); /* a sweep takes 80 ms */
+    ecuio_request_engine plain;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&plain, {0x0C, 0x0D, 0x0F, 0x10}));
+    focus_all(&plain, 0);
+    const std::vector<Asked> a =
+        paced_run(&floored, 500 * kMs, single_pid_reply);
+    const std::vector<Asked> b = paced_run(&plain, 500 * kMs, single_pid_reply);
+    ASSERT_EQ(a.size(), b.size());
+    for (size_t k = 0; k < a.size(); ++k) {
+        EXPECT_EQ(a[k].at, b[k].at) << "request " << k;
+        EXPECT_EQ(a[k].request, b[k].request) << "request " << k;
+    }
+}
+
+/* Eight picks at six PIDs a pack: a sweep is two requests, whose rows
+ * run past the eight, and the count starts over, so every sweep asks
+ * every pick, sweeps start a floor apart and the wait falls only
+ * between requests */
+TEST(RequestEngineTest, AMinimumTimeCountsAPacksRowsAndEveryPickIsAsked)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    (void)packing_turns(&e, 200, packed_from(fake_reply));
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    std::set<uint8_t> picks;
+    for (uint32_t i = 0; i < e.count && picks.size() < 8; ++i) {
+        if (ecuio_engine_packable(&e, 0, i)) {
+            keep[i] = 1;
+            picks.insert(e.requests[i].bytes[1]);
+        }
+    }
+    ASSERT_EQ(picks.size(), 8u);
+    ecuio_engine_focus(&e, keep, 300 * kMs);
+    ASSERT_NO_FATAL_FAILURE(clock_over(&e));
+    const std::vector<Asked> sent =
+        paced_run(&e, 3000 * kMs, packed_from(fake_reply));
+    ASSERT_EQ(sent.size(), 20u) << "ten sweeps of two requests";
+    for (size_t k = 0; k < sent.size(); k += 2) {
+        EXPECT_EQ(sent[k].at, int64_t(k / 2) * 300 * kMs) << "sweep " << k / 2;
+        EXPECT_EQ(sent[k + 1].at - sent[k].at, ECUIO_ENGINE_GAP_US);
+        EXPECT_EQ(sent[k].request.size(), 7u) << "six PIDs in the pack";
+        std::set<uint8_t> asked;
+        for (size_t r = 0; r < 2; ++r) {
+            asked.insert(sent[k + r].request.begin() + 1,
+                         sent[k + r].request.end());
+        }
+        EXPECT_EQ(asked, picks) << "sweep " << k / 2;
+    }
+}
+
+/* Only the rotation waits: a scanned DID goes out in the gap, the next
+ * event says so, and the sweep after it starts on its own time */
+TEST(RequestEngineTest, AOneShotGoesOutInAMinimumTimesGap)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+    focus_all(&e, 1000 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    const uint8_t a[4] = {0x41, 0x0C, 0x12, 0x34};
+    (void)ecuio_engine_on_frame(&e, 0, a, sizeof a, 4 * kMs, nullptr);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 20 * kMs), 1);
+    ecuio_engine_sent(&e, 0, 1, true, 20 * kMs);
+    const uint8_t b[3] = {0x41, 0x0D, 0x20};
+    (void)ecuio_engine_on_frame(&e, 0, b, sizeof b, 24 * kMs, nullptr);
+
+    /* The gap, with only the rotation left to send */
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 40 * kMs), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 40 * kMs), 960 * kMs);
+
+    ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E1C));
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 40 * kMs), 0)
+        << "the scanned DID is due now";
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 40 * kMs), ECUIO_ENGINE_ONCE);
+    ecuio_engine_sent(&e, 0, ECUIO_ENGINE_ONCE, true, 40 * kMs);
+    const uint8_t refused[3] = {0x7F, 0x22, 0x31};
+    (void)ecuio_engine_on_frame(&e, 0, refused, sizeof refused, 44 * kMs,
+                                nullptr);
+
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 60 * kMs), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, 60 * kMs), 940 * kMs)
+        << "the rotation waits on";
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 999 * kMs), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 1000 * kMs), 0);
+}
+
+/* The wait lasts as long as its focus: the same time again (a scanned
+ * DID joined) keeps a wait under way, another ends it, and the focus's
+ * end frees the rotation and sets the minimum back to none */
+TEST(RequestEngineTest, AMinimumTimeLastsAsLongAsItsFocus)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C}));
+    focus_all(&e, 5000 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    (void)ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), ECUIO_ENGINE_NONE);
+
+    focus_all(&e, 5000 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), ECUIO_ENGINE_NONE)
+        << "the same time keeps the wait";
+
+    focus_all(&e, 100 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), 0)
+        << "a new time ends it";
+    ecuio_engine_sent(&e, 0, 0, true, ECUIO_ENGINE_WAIT_US);
+    (void)ecuio_engine_expire(&e, 0, 2 * ECUIO_ENGINE_WAIT_US);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 2 * ECUIO_ENGINE_WAIT_US - 20 * kMs),
+              ECUIO_ENGINE_NONE)
+        << "the new time, from that sweep's start";
+
+    ecuio_engine_unfocus(&e);
+    EXPECT_EQ(e.min_sweep_us, 0);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 2 * ECUIO_ENGINE_WAIT_US), 0)
+        << "no focus, no minimum";
+}
+
+/* A focus taken in the middle of a sweep starts a new one: every row
+ * of it is asked before the next wait */
+TEST(RequestEngineTest, AFocusInTheMiddleOfASweepStartsANewOne)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    focus_all(&e, 500 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    (void)ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US);
+    focus_all(&e, 500 * kMs);
+    int64_t now = 100 * kMs;
+    for (int k = 0; k < 3; ++k) {
+        const int32_t r = ecuio_engine_due(&e, 0, now);
+        ASSERT_NE(r, ECUIO_ENGINE_NONE) << "row " << k << " of the new sweep";
+        ecuio_engine_sent(&e, 0, r, true, now);
+        now += ECUIO_ENGINE_WAIT_US;
+        (void)ecuio_engine_expire(&e, 0, now);
+    }
+    EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_NONE)
+        << "its three rows asked, the wait begins";
+}
+
+/* A pick refused and dropped after it was asked still leaves the sweep
+ * to ask every pick left, and the next sweep counts from the first
+ * request's time */
+TEST(RequestEngineTest, APickDroppedInASweepStillLeavesTheRestAsked)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    e.probe = true; /* an explicit refusal drops its request */
+    focus_all(&e, 500 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    const uint8_t refused[3] = {0x7F, 0x01, 0x12};
+    (void)ecuio_engine_on_frame(&e, 0, refused, sizeof refused, 4 * kMs,
+                                nullptr);
+    ASSERT_NE(e.requests[0].dropped, 0) << "0C dropped";
+
+    int64_t now = 20 * kMs;
+    for (const int32_t row : {1, 2}) {
+        ASSERT_EQ(ecuio_engine_due(&e, 0, now), row)
+            << "row " << row << " in the sweep the drop happened in";
+        ecuio_engine_sent(&e, 0, row, true, now);
+        const uint8_t ok[4] = {0x41, e.requests[row].bytes[1], 0x12, 0x34};
+        (void)ecuio_engine_on_frame(&e, 0, ok, sizeof ok, now + 4 * kMs,
+                                    nullptr);
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, now), 500 * kMs - now)
+        << "the next sweep is a minimum after the first request";
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 500 * kMs), 1);
+}
+
+/* A row dropped before it was asked in this sweep isn't waited for:
+ * the sweep ends once the rows left have been asked */
+TEST(RequestEngineTest, ARowDroppedBeforeItsTurnShortensTheSweep)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    focus_all(&e, 500 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    (void)ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US);
+    ecuio_engine_drop(&e, 2, ECUIO_DROP_BITMAP, 0);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), 1);
+    ecuio_engine_sent(&e, 0, 1, true, ECUIO_ENGINE_WAIT_US);
+    (void)ecuio_engine_expire(&e, 0, 2 * ECUIO_ENGINE_WAIT_US);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 2 * ECUIO_ENGINE_WAIT_US),
+              ECUIO_ENGINE_NONE)
+        << "0C and 0D asked, 0F gone: the wait begins";
+}
+
+/* No focus, no minimum: the rotation runs at the engine's own pace */
+TEST(RequestEngineTest, ASessionWithNoFocusHasNoMinimumTime)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x05}));
+    EXPECT_EQ(e.min_sweep_us, 0);
+    const std::vector<Asked> sent = paced_run(&e, 400 * kMs, single_pid_reply);
+    ASSERT_EQ(sent.size(), 20u) << "a request every 20 ms";
+    for (size_t k = 0; k < sent.size(); ++k) {
+        EXPECT_EQ(sent[k].at, int64_t(k) * ECUIO_ENGINE_GAP_US);
+    }
+}
+
 /* A request out when a focus parks it is still answered: its reply
  * correlates by the table, and the next request is a pick */
 TEST(RequestEngineTest, ARequestOutWhenParkedIsStillAnswered)
@@ -6662,4 +6956,197 @@ TEST(RequestEngineTest, AFocusMovesOnlyTheChangedChannelsGenerations)
     EXPECT_EQ(e.chans[0].requests, 2u);
     EXPECT_GT(e.chans[0].generation, g0_focused);
     EXPECT_EQ(e.chans[1].generation, g1);
+}
+
+/* ---------- Diagnostic sessions (ADR-0060) ---------- */
+
+// The engine ECU's D200-D203 answer in the extended session alone; the
+// default session refuses them 7F 22 31
+TEST(SimEcuTest, TheExtendedDidsAnswerOnlyInTheExtendedSession)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    const std::vector<uint8_t> refused = {0x7F, 0x22, 0x31};
+    const auto ask_in = [&](std::initializer_list<uint8_t> req, bool ext) {
+        const std::vector<uint8_t> q(req);
+        uint8_t out[ECUIO_SIM_REPLY_MAX];
+        const uint32_t n = ecuio_sim_answer(
+            e, q.data(), static_cast<uint32_t>(q.size()), false, out, ext);
+        return std::vector<uint8_t>(out, out + n);
+    };
+    for (uint8_t i = 0; i < 4; ++i) {
+        SCOPED_TRACE(static_cast<int>(i));
+        EXPECT_EQ(ask_in({0x22, 0xD2, i}, false), refused);
+        const std::vector<uint8_t> got = ask_in({0x22, 0xD2, i}, true);
+        ASSERT_EQ(got.size(), 5u);
+        EXPECT_EQ(got[0], 0x62);
+        EXPECT_EQ(got[2], i);
+        EXPECT_EQ(got[3], ECUIO_SIM_EXTENDED_DIDS[i].data[0]);
+    }
+    EXPECT_EQ(ask_in({0x22, 0xD2, 0x04}, true), refused) << "past D203";
+    EXPECT_EQ(ask_in({0x22, 0xD1, 0x00}, true), refused)
+        << "the module's DID isn't the engine ECU's";
+}
+
+// 10 and 3E as the sim answers them: the session entered, kept by 3E,
+// left by 10 01 or by S3 of silence on the ECU's own time; a node
+// without an extended session refuses 10 03 with 12 and still answers
+// 3E 00
+TEST(SimEcuTest, SessionControlEntersKeepsAndLeaves)
+{
+    ecuio_sim_session s;
+    uint8_t out[8];
+    bool handled = false;
+    const auto call = [&](bool has, int64_t t,
+                          std::initializer_list<uint8_t> req) {
+        const std::vector<uint8_t> q(req);
+        const uint32_t n = ecuio_sim_session_answer(
+            s, has, t, q.data(), static_cast<uint32_t>(q.size()), out,
+            &handled);
+        return std::vector<uint8_t>(out, out + n);
+    };
+    const int64_t s3 = ECUIO_SIM_S3_US;
+    EXPECT_EQ(call(true, 0, {0x10, 0x03}),
+              (std::vector<uint8_t>{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_TRUE(handled);
+    EXPECT_TRUE(s.extended);
+    EXPECT_EQ(call(true, 1000000, {0x3E, 0x00}),
+              (std::vector<uint8_t>{0x7E, 0x00}));
+    EXPECT_TRUE(call(true, 2000000, {0x3E, 0x80}).empty())
+        << "the suppress bit: no reply";
+    EXPECT_TRUE(handled);
+    EXPECT_TRUE(s.extended) << "and the session kept";
+    EXPECT_EQ(call(true, 3000000, {0x10, 0x02}),
+              (std::vector<uint8_t>{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(call(true, 3000000, {0x10}),
+              (std::vector<uint8_t>{0x7F, 0x10, 0x13}));
+    // each request restarts S3
+    call(true, 3000000 + s3 - 1, {0x3E, 0x00});
+    EXPECT_TRUE(s.extended);
+    // S3 of silence: back in the default session before the request
+    const int64_t quiet = 3000000 + s3 - 1 + s3;
+    EXPECT_TRUE(call(true, quiet, {0x22, 0xD2, 0x00}).empty());
+    EXPECT_FALSE(handled) << "a service that isn't the session's";
+    EXPECT_FALSE(s.extended);
+    call(true, quiet, {0x10, 0x03});
+    EXPECT_TRUE(s.extended);
+    EXPECT_EQ(call(true, quiet, {0x10, 0x01}),
+              (std::vector<uint8_t>{0x50, 0x01, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_FALSE(s.extended);
+
+    EXPECT_EQ(call(false, 0, {0x10, 0x03}),
+              (std::vector<uint8_t>{0x7F, 0x10, 0x12}));
+    EXPECT_FALSE(s.extended);
+    EXPECT_EQ(call(false, 0, {0x3E, 0x00}), (std::vector<uint8_t>{0x7E, 0x00}));
+}
+
+// Session control to the functional ID: unanswered, whatever it says
+TEST(SimEcuTest, SessionControlToTheFunctionalIdIsUnanswered)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    EXPECT_TRUE(ask(e, {0x10, 0x03}, true).empty());
+    EXPECT_TRUE(ask(e, {0x3E, 0x00}, true).empty());
+    EXPECT_TRUE(ask(e, {0x22, 0xD2, 0x00}, true).empty())
+        << "a functional refusal is unsaid";
+}
+
+// Through the unbound sim's nodes: the engine node enters, answers D200
+// and leaves by S3 on the caller's clock; module 2 has no session
+TEST(SimAskTest, TheEngineNodeHasAnExtendedSessionAndTheModuleHasNone)
+{
+    Unbound u("mock://ask?values=canned&modules=2");
+    ASSERT_NE(u.sim, nullptr);
+    const Bytes refused{0x7F, 0x22, 0x31};
+    const Bytes entered{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+    int64_t t = 0;
+    const auto only = [&](uint32_t id, std::initializer_list<uint8_t> req) {
+        const auto r = sim_ask(u.sim, id, req, t);
+        return r.empty() ? Bytes{} : reply_bytes(r[0]);
+    };
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}), refused);
+    EXPECT_EQ(only(0x7E0, {0x10, 0x03}), entered);
+    t += 100000;
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}),
+              (Bytes{0x62, 0xD2, 0x00, 0x1A, 0x2C}));
+    EXPECT_EQ(only(0x7E0, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_TRUE(only(0x7E0, {0x3E, 0x80}).empty());
+    t += ECUIO_SIM_S3_US - ECUIO_SIM_TICK_US;
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x01}),
+              (Bytes{0x62, 0xD2, 0x01, 0x00, 0x64}))
+        << "heard 3E 80 just inside S3";
+    t += ECUIO_SIM_S3_US + ECUIO_SIM_TICK_US;
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x01}), refused)
+        << "S3 of silence returns it to the default session";
+    EXPECT_EQ(only(0x7E0, {0x10, 0x03}), entered);
+    EXPECT_EQ(only(0x7E0, {0x10, 0x01}),
+              (Bytes{0x50, 0x01, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}), refused);
+    EXPECT_EQ(only(0x7E0, {0x10, 0x02}), (Bytes{0x7F, 0x10, 0x12}));
+
+    EXPECT_EQ(only(0x7E1, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(only(0x7E1, {0x22, 0xD1, 0x00}), (Bytes{0x62, 0xD1, 0x00, 0x82}));
+    EXPECT_EQ(only(0x7E1, {0x22, 0xD2, 0x00}), refused)
+        << "D200 is the engine ECU's, and only in its session";
+    EXPECT_EQ(only(0x7E1, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_TRUE(sim_ask(u.sim, 0x7DF, {0x10, 0x03}, t).empty());
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}), refused)
+        << "the functional ID entered nothing";
+}
+
+// A profile's nodes have no extended session
+TEST(SimAskTest, AProfilesNodesHaveNoExtendedSession)
+{
+    Unbound u("mock://ask?values=canned&profile=obd2");
+    ASSERT_NE(u.sim, nullptr);
+    const auto r = sim_ask(u.sim, 0x7E0, {0x10, 0x03});
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(reply_bytes(r[0]), (Bytes{0x7F, 0x10, 0x12}));
+}
+
+// The fakes' engine ECU enters and leaves its extended session per reply
+// ID and answers D200 only in it; a module has none and its refusal code
+// is the knob's
+TEST_F(FakeEcuTest, TheEngineEcuHasAnExtendedSessionAndAModuleNone)
+{
+    struct Restore {
+        ~Restore()
+        {
+            fake_ecu::set_module_dids(nullptr);
+            fake_ecu::reset_sessions();
+            fake_ecu::session_nrc() = 0;
+        }
+    } restore;
+    fake_ecu::reset_sessions();
+    const auto ask = [](uint32_t rx, Bytes req) {
+        uint8_t out[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        if (!fake_ecu::answer_for(rx, req.data(), req.size(), -1, out, &n)) {
+            return Bytes{};
+        }
+        return Bytes(out, out + n);
+    };
+    const Bytes d200{0x22, 0xD2, 0x00};
+    const Bytes ok3{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x03}), ok3);
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x62, 0xD2, 0x00, 0x1A, 0x2C}));
+    EXPECT_EQ(ask(0x7E9, d200), (Bytes{0x7F, 0x22, 0x31}))
+        << "the session is the ECU's own, by its reply ID";
+    EXPECT_EQ(ask(0x7E8, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_TRUE(ask(0x7E8, {0x3E, 0x80}).empty());
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x01}),
+              (Bytes{0x50, 0x01, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x7F, 0x22, 0x31}));
+    ask(0x7E8, {0x10, 0x03});
+    fake_ecu::reset_sessions();
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x7F, 0x22, 0x31}));
+
+    ASSERT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12"));
+    EXPECT_EQ(ask(0x7E9, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x01}),
+              (Bytes{0x62, 0xD8, 0x01, 0x00, 0x12}))
+        << "its DIDs answer in the default session";
+    EXPECT_EQ(ask(0x7E9, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    fake_ecu::session_nrc() = 0x22;
+    EXPECT_EQ(ask(0x7E9, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x22}));
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x03}), ok3) << "the knob is a module's code";
 }

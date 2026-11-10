@@ -1,6 +1,7 @@
 // File/layer: core/src/recording_check.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
-// Testing: UNIT: CheckRulesTest (test_core); FUZZ: fuzz_recording
+// Testing: UNIT: CheckRulesTest, RecordingCheckTest (test_core); FUZZ:
+//          fuzz_recording
 //
 // The frames check (ADR-0049 section 6) as a stream: a checker is fed the
 // events.log lines it takes first, then each frame in order, and settles
@@ -213,6 +214,33 @@ inline bool parse_asleep(const char* p, size_t n, uint64_t* us)
     return true;
 }
 
+/* "min sweep  N ms", the header's line for a focus's minimum time between
+ * sweeps (ADR-0056 section 4), in us; false for anything else, a time no
+ * focus can have included */
+inline bool parse_min_sweep(const char* p, size_t n, uint64_t* us)
+{
+    const char* const lead = "min sweep  ";
+    const size_t lead_n = std::strlen(lead);
+    if (n <= lead_n || std::memcmp(p, lead, lead_n) != 0) {
+        return false;
+    }
+    const char* const digits = p + lead_n;
+    const char* const end = p + n;
+    const char* q = digits;
+    while (q < end && *q >= '0' && *q <= '9') {
+        ++q;
+    }
+    uint64_t ms = 0;
+    if (!ecuio_recording_rows::parse_count(
+            digits, static_cast<size_t>(q - digits), &ms) ||
+        ms > ECUIO_FOCUS_MIN_SWEEP_MAX_MS || end - q != 3 ||
+        std::memcmp(q, " ms", 3) != 0) {
+        return false;
+    }
+    *us = ms * 1000;
+    return true;
+}
+
 /* An events.log line the check keeps: a link transition or a sleep */
 struct event {
     uint64_t at_us;     /* the line's time */
@@ -229,10 +257,12 @@ class checker
 {
 public:
     /* options already judged; events in time order; isotp: events.log
-     * says the frame flags are complete */
+     * says the frame flags are complete; min_sweep_us: the recording's
+     * minimum time between sweeps, allowed on top of the gap, since a
+     * sweep can end in that long a wait */
     checker(const ecuio_check_options_t& o, std::vector<event> events,
-            bool isotp, sink_fn sink, void* user)
-        : gap_us_(o.gap_us != 0 ? o.gap_us : kGapUs),
+            bool isotp, sink_fn sink, void* user, uint64_t min_sweep_us = 0)
+        : gap_us_(gap_limit(o.gap_us != 0 ? o.gap_us : kGapUs, min_sweep_us)),
           settle_us_(o.settle_us != 0 ? o.settle_us : kSettleUs),
           events_(std::move(events)), sink_(sink), user_(user),
           drop_x100_(o.rate_drop_x100 != 0 ? o.rate_drop_x100 : kRateDropX100),
@@ -291,10 +321,9 @@ public:
         const bool extended = (flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
         const bool wire = isotp_ && iso15765_id(id, extended) &&
                           (flags & ECUIO_FRAME_FLAG_REASSEMBLED) == 0;
-        /* On the wire a consecutive frame or a flow control is part of a
-         * message: the ID's rate is its messages', as an adapter that
-         * reassembles delivers them, the recordings the defaults were set
-         * against */
+        /* On the wire a consecutive or flow control frame is part of a
+         * message: the ID's rate is its messages', as a reassembling
+         * adapter delivers them (what the defaults were set against) */
         const bool message_part =
             wire && length > 0 &&
             ((data[0] >> 4) == 0x2 || (data[0] >> 4) == 0x3);
@@ -396,6 +425,12 @@ private:
         uint64_t tp_frames = 0;
         uint8_t tp_next_sn = 0;
     };
+
+    static uint64_t gap_limit(uint64_t gap_us, uint64_t min_sweep_us)
+    {
+        return gap_us > UINT64_MAX - min_sweep_us ? UINT64_MAX
+                                                  : gap_us + min_sweep_us;
+    }
 
     static uint32_t extended_flag(bool extended)
     {

@@ -86,6 +86,8 @@ TestCase {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         compare(Bridge.diagnostics.length, 0)
         verify(find(page, "diagnosticsStatus").text.indexOf("Connect a session") === 0)
+        verify(!find(page, "diagnosticsConnect").highlighted,
+               "Connect… is secondary: the header holds the primary")
         verify(!find(page, "readAgain").visible, "no Read again without a session")
         verify(!find(page, "clearCodes").visible, "nor a clear")
     }
@@ -452,5 +454,38 @@ TestCase {
         compare(find(find(page, "ecu_0x7E8"), "codes_stored").text, "P0301  P0420  U0100")
         verify(!find(page, "readAgain").visible)
         verify(!find(page, "clearCodes").visible)
+    }
+
+    // The header's three actions: one row on a wide page, Clear codes at
+    // the right; on a phone two rows chosen on purpose, Read again and
+    // Clear codes above, Save report across the row below
+    function test_theHeadersActionsTakeTwoRowsOnAPhone() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        page.width = 900
+        connectAndRead(page, "mock://demo")
+        const read = find(page, "readAgain"), clear = find(page, "clearCodes")
+        const save = find(page, "saveReport")
+        // One row when their heights overlap by more than half of either:
+        // buttons of other heights centered in a row have other tops
+        const y = b => b.mapToItem(page, 0, 0).y
+        const sameRow = (a, b) => Math.min(y(a) + a.height, y(b) + b.height) - Math.max(y(a), y(b))
+                                  > Math.min(a.height, b.height) / 2
+        const right = b => b.mapToItem(page, b.width, 0).x
+        waitForRendering(page)
+        verify(sameRow(read, clear) && sameRow(clear, save), "one row wide")
+        verify(right(clear) > right(read) && right(read) > right(save), "Save, Read again, Clear codes")
+        tryVerify(() => right(clear) >= page.width - Theme.pageMargin - 0.5, 2000,
+                  "at the right edge wide: " + right(clear) + " of " + page.width)
+        page.width = 384
+        waitForRendering(page)
+        tryVerify(() => !sameRow(save, read) && y(save) > y(read), 2000, "Save report below")
+        verify(sameRow(read, clear), "Read again and Clear codes share a row")
+        verify(right(clear) > right(read), "Clear codes at the right")
+        verify(right(clear) >= page.width - Theme.pageMargin - 0.5, "at the right edge: " + right(clear))
+        fuzzyCompare(save.width, page.width - 2 * Theme.pageMargin, 0.5, "Save report takes the row")
+        for (const b of [read, clear, save])
+            verify(b.width >= b.implicitWidth - 0.5, b.text + " keeps its words: " + b.width + " of "
+                   + b.implicitWidth)
+        compare(pastTheEdge(page, page, []).length, 0, "inside the page")
     }
 }

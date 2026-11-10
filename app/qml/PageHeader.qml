@@ -20,6 +20,7 @@ RowLayout {
     spacing: 10
 
     Label {
+        visible: header.title !== ""
         Layout.fillWidth: header.titleShrinks
         // A whole pixel: the layout rounds a fractional maximum down, which
         // leaves the text short of its own width and elides a title that fits
@@ -27,7 +28,7 @@ RowLayout {
                                                  : Number.POSITIVE_INFINITY
         elide: header.titleShrinks ? Text.ElideRight : Text.ElideNone
         text: header.title
-        font.pixelSize: 20
+        font.pixelSize: Theme.fontTitle
         font.weight: Font.DemiBold
         color: Theme.text
     }

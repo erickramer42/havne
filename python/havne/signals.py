@@ -106,7 +106,7 @@ class Plugin:
         else:
             with open(path, "rb") as f:
                 packed = f.read()
-            rc = lib.ecuio_plugin_load(packed, len(packed), None, None,
+            rc = lib.ecuio_plugin_load(packed, len(packed), e.ecuio_plugin_read_t(), None,
                                        ctypes.byref(self._handle))
         check(rc, "ecuio_plugin_load")
         info = e.ecuio_plugin_info_t()

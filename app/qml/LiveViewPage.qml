@@ -93,16 +93,21 @@ Page {
     function statusText() {
         if (Bridge.connecting) return qsTr("Connecting…")
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
-        if (!Bridge.connected) return qsTr("Connect a session to stream decoded values")
+        if (!Bridge.connected) return qsTr("Connect a session to read live values")
         if (Bridge.liveSignalModel.shownCount === 0)
             return qsTr("This profile decodes no signals; its frames are on the Log page")
         // Refusals past an ECU's report list leave their rows blank: say
         // how many, since the rows can't
         const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
         if (Bridge.liveSignalModel.filter.active)
-            return qsTr("Showing %1 of %2 signals · plotting %3")
+            return (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
+                                  : qsTr("Showing %1 of %2 signals · plotting %3"))
                        .arg(signalList.count).arg(Bridge.liveSignalModel.shownCount)
                        .arg(Bridge.signalModel.subscribedCount) + unnamed
+        // The 10 Hz clause is a desktop fact; a phone's line keeps the count
+        if (Theme.compact)
+            return qsTr("%1 of %2 plotted")
+                       .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
         return qsTr("Plotting %1 of %2 signals · values update at 10 Hz")
                    .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
     }
@@ -139,6 +144,8 @@ Page {
         PageHeader {
             visible: !root.chartMaximized
             title: qsTr("Live signals")
+            // On a phone the title gives way first, so the field keeps its words
+            titleShrinks: Theme.compact
 
             // Finding a signal among many (ADR-0050): the list's own
             // filter, in the title's row so a short page loses no height
@@ -168,7 +175,7 @@ Page {
                 anchors.centerIn: parent
                 text: root.bannerText(Bridge.linkState, Bridge.errorEpisodes, Bridge.linkErrorCode)
                 color: Theme.linkColor(Bridge.linkState)
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
             }
         }
 
@@ -184,9 +191,10 @@ Page {
                 text: root.statusText()
                 color: Theme.textDim
             }
+            // Secondary: the header's Connect... is the window's primary
             ThemedButton {
+                objectName: "liveConnect"
                 visible: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
-                highlighted: true
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
             }
@@ -276,7 +284,7 @@ Page {
 
                     // Plots the row on the chart; the value keeps
                     // updating either way, here and on the Dashboard
-                    CheckBox {
+                    ThemedCheckBox {
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
                         enabled: !signalDelegate.isText   // nothing to plot
@@ -347,8 +355,11 @@ Page {
                         Layout.maximumWidth: Math.round(signalDelegate.width * 0.6)
                         elide: Text.ElideRight
                         color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
-                        font.pixelSize: 16
-                        font.family: Theme.monoFamily   // fixed-width digits, no jitter
+                        font.pixelSize: Theme.fontEmphasis
+                        // The value face, its digits tabular, so a reading
+                        // doesn't jitter as its digits change
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         opacity: signalDelegate.hasValue
                                  && signalDelegate.ageMs > root.staleMs
                                      ? 0.45 : 1.0
@@ -397,7 +408,8 @@ Page {
                     horizontalPadding: Theme.dense ? 4 : 8
                     objectName: "chartWindow_" + modelData
                     text: qsTr("%1 s").arg(modelData)
-                    highlighted: root.chartWindowS === modelData
+                    checkable: true
+                    checked: root.chartWindowS === modelData
                     Accessible.name: qsTr("Show the last %1 seconds").arg(modelData)
                     onClicked: liveSettings.chartWindowS = modelData
                 }

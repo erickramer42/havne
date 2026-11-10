@@ -26,6 +26,8 @@ TestCase {
     }
 
     function cleanup() {
+        Bridge.unitSystem = 0
+        Theme.developerMode = false
         Bridge.recording = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -56,10 +58,18 @@ TestCase {
         title: "2026-11-03 10:01:30 · Late", uri: "replay://y?profile=obd2",
         folder: Harness.recordingFixtures + "/pull-late", source: "", profile: "obd2" })
 
-    // A recording that opens moves the page's items at the layout's next
-    // polish, a frame later; a case whose checks all pass at once would
-    // otherwise press where an item was before it opened
-    // Opens pull-early with pull-late listed beside it
+    // Opens pull-early and waits for its viewer
+    function openEarlyViewer() {
+        const page = createPage()
+        page.open(earlyRow)
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        return page
+    }
+
+    // Opens pull-early with pull-late listed beside it. A recording that
+    // opens moves the page's items at the layout's next polish, a frame
+    // later; a case whose checks all pass at once would otherwise press
+    // where an item was before it opened
     function openEarly() {
         const page = createPage()
         page.recordings = [lateRow, earlyRow]
@@ -97,8 +107,8 @@ TestCase {
         tryVerify(() => list.count === Math.min(before + 1, page.recordingsListed), 10000,
                   "the recording that ended is listed")
         tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        compare(find(list.itemAtIndex(0), "recordingDetail").text,
-                "mock://recordings-page · replays as mock")
+        compare(find(list.itemAtIndex(0), "recordingDetail").text, "mock://recordings-page",
+                "a mock address replays as mock: the address alone")
         verify(page.recordings[0].folder !== "", "a row knows its folder")
     }
 
@@ -126,7 +136,7 @@ TestCase {
         verify(waitForPolish(page.Window.window), "the viewer laid out")
         compare(find(page, "signalRows").count, 3)
         compare(find(page, "checkSummary").text, "Frames check: the recording has no frames")
-        verify(!find(page, "replayView").visible, "no Replay in Settings")
+        verify(!find(page, "replayView").visible, "no Replay of the view")
         verify(!find(page, "decodeChoice").visible, "no frames to decode")
         compare(page.series(400).length, 3, "its numbers are plotted")
     }
@@ -449,6 +459,38 @@ TestCase {
         verify(!page.viewing, "Replay doesn't open the viewer")
     }
 
+    // Replay off says what to do first: stop the relay, or disconnect;
+    // while a session starts or ends it's plain Replay, off
+    function test_replaySaysWhatStopsIt() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        const button = find(list.itemAtIndex(0), "replayButton")
+        verify(button.enabled)
+        compare(button.text, "Replay")
+
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        tryVerify(() => !button.enabled, 2000, "off while relaying")
+        compare(button.text, "Stop the relay to replay")
+        Relay.stop()
+        tryVerify(() => button.enabled, 2000, "on again")
+
+        Bridge.connectSessionAsync("mock://replay-words")
+        verify(Bridge.connecting, "the connect is under way")
+        verify(!button.enabled)
+        compare(button.text, "Replay", "nothing to disconnect yet")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        compare(button.text, "Disconnect to replay")
+        Bridge.disconnectSession()
+        verify(Bridge.disconnecting, "the teardown is under way")
+        verify(!button.enabled)
+        compare(button.text, "Replay", "already disconnecting")
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(button.enabled, "on again")
+        compare(button.text, "Replay")
+    }
+
     // The viewer's Replay view hands on the part in view as a stretch of
     // the row's URI, in the recording's seconds; the whole recording in
     // view, the row's URI alone
@@ -467,19 +509,276 @@ TestCase {
         button.clicked()
         compare(replaySpy.signalArguments[2][0], findingsRow.uri + "&from=0&to=4")
         compare(replaySpy.count, 3)
-        compare(button.text, "Replay in Settings", "the name says where it goes")
+        compare(button.text, "Replay", "one tap replays the part in view")
+        compare(button.Accessible.name, "Replay the part in view as a session")
 
         // Off while a session runs, as the list's Replay is
         Bridge.connectSessionAsync("mock://replay-view")
         tryVerify(() => Bridge.connected, 10000, "the mock connects")
         verify(!button.enabled, "off while connected")
+        compare(button.text, "Disconnect to replay", "and it says why")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         verify(button.enabled, "on again")
     }
 
-    // Open shows the recording: its signal plotted by default, the chart's
-    // series over the whole recording, the check's findings listed
+    // The Export panel over an opened recording, its sizes in
+    function openExport(page) {
+        find(page, "exportButton").clicked()
+        const panel = find(page, "exportPanel")
+        tryVerify(() => panel.visible, 2000, "the panel opens")
+        return panel
+    }
+    function sizesIn(panel) {
+        tryVerify(() => panel.sizes.length >= 3, 10000, "the sizes come back")
+    }
+    function restoreExportChoices(panel) {
+        panel.rowChoice = "sweep"
+        panel.customText = ""
+    }
+    // The directory of a scratch file, to pick as a folder
+    function scratchFolder(name) {
+        const url = Harness.writeScratchFile(name + "-marker", "").toString()
+        return url.substring(0, url.lastIndexOf("/"))
+    }
+
+    function test_theExportPanelTakesTheChartsPlaceAndClosesAgain() {
+        const page = openEarlyViewer()
+        const chart = find(page, "chartFrame")
+        verify(chart.visible, "the chart first")
+        const panel = openExport(page)
+        verify(!chart.visible, "the panel takes its place")
+        verify(!find(page, "chartSplitter").visible)
+        find(panel, "exportClose").clicked()
+        tryVerify(() => chart.visible, 2000, "the chart comes back")
+        verify(!panel.visible)
+    }
+
+    function test_theExportSizesEachIntervalAndTheCustomOne() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
+        verify(/^\d[\d,.'\u2019\s]* rows, [\d.,]+ (B|KB|MB)$/.test(sweep.text), sweep.text) // any locale's
+        const grid = findChild(find(panel, "exportRows_250"), "intervalSize")
+        verify(/ rows, /.test(grid.text), grid.text)
+        verify(sweep.text !== grid.text, sweep.text + " and " + grid.text)
+
+        // A custom interval is asked for once typed, and a bad one is said
+        find(panel, "exportRows_custom").clicked()
+        const field = find(panel, "exportCustomMs")
+        verify(field.visible)
+        panel.customText = "40"
+        tryVerify(() => panel.sizes.length === 4, 10000, "the custom interval sized")
+        compare(panel.chosenMs, 40)
+        verify(find(panel, "exportGo").enabled)
+        panel.customText = "12x"
+        compare(panel.customMs, -1)
+        verify(!find(panel, "exportGo").enabled, "not with a bad interval")
+        compare(find(panel, "exportCustomProblem").text, "ms, 1 to 86400000")
+        restoreExportChoices(panel)
+    }
+
+    // A row reads in one locale: a comma-decimal one groups the count
+    // with a point and writes the size with a comma
+    function test_theExportSizeIsInTheRowsLocale() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        panel.numberLocale = Qt.locale("de_DE")
+        compare(panel.bytesText(999), "999 B")
+        compare(panel.bytesText(12345), "12,3 KB")
+        compare(panel.bytesText(1234567), "1,2 MB")
+        compare(panel.bytesText(2500000000), "2,5 GB")
+        sizesIn(panel)
+        const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
+        verify(/^\d[\d.]* rows?, (\d+ B|\d+,\d (KB|MB))$/.test(sweep.text), sweep.text)
+        panel.sizes = [{ rowMs: 0, rows: 18402, bytes: 1234567 }]
+        compare(panel.sizeOf(0), "18.402 rows, 1,2 MB", "the count grouped as the size is written")
+        panel.numberLocale = Qt.locale()
+    }
+
+    function test_theRowIntervalIsRememberedAndTheRestStartsOver() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        find(panel, "exportRows_100").clicked()
+        find(panel, "exportLayout_long").clicked()
+        find(panel, "exportColumns_plotted")
+        panel.columnChoice = "plotted"
+        panel.raw = true
+        find(panel, "exportClose").clicked()
+        const again = openExport(page)
+        compare(again.format, "csv")
+        verify(!again.longLayout, "wide each time")
+        compare(again.columnChoice, "own")
+        verify(!again.raw, "raw is off each time")
+        // Kept between runs: a page of its own reads it back from the store
+        page.destroy()
+        wait(0)
+        const next = openEarlyViewer()
+        const nextPanel = openExport(next)
+        compare(nextPanel.rowChoice, "100", "the interval is kept")
+        restoreExportChoices(nextPanel)
+    }
+
+    function test_theExportWritesTheChosenWideCsvAndSaysSo() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        find(panel, "exportRows_250").clicked()
+        const url = "file:///" + scratchFolder("wide").replace(/^file:\/+/, "") + "/early-wide.csv"
+        verify(panel.exportTo(url))
+        const note = find(panel, "exportNote")
+        tryVerify(() => note.text.indexOf("Saved: ") === 0, 10000, "the export ends saved")
+        verify(/ rows of \d+ signals?, left out: 1 text value$/.test(note.text), note.text)
+        const text = Harness.readScratchFile(url)
+        verify(text.indexOf("Time (ms),") === 0, text.substring(0, 40))
+        const seconds = text.split("\r\n")[2].split(",")[0]
+        compare(Number(seconds) % 250, 0, "on the grid: " + seconds)
+        restoreExportChoices(panel)
+    }
+
+    function test_thePlottedColumnsAreOffered() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        verify(page.plottedNames.length > 0, "some plotted")
+        const plotted = find(panel, "exportColumns_plotted")
+        compare(plotted.text, "The " + page.plottedNames.length + " plotted")
+        // One plotted, so its CSV differs from the log's own
+        const plottedAtFirst = page.plottedNames.slice()
+        verify(plottedAtFirst.length >= 2, "two or more plotted to start")
+        const first = plottedAtFirst[0]
+        const one = {}
+        for (const s of panel.view.signalList)
+            one[s.index] = s.name === first
+        page.plotted = one
+        tryVerify(() => page.plottedNames.length === 1, 2000, "one plotted")
+        sizesIn(panel)
+        const own = panel.sizes.find(s => s.rowMs === 0).bytes
+        panel.columnChoice = "plotted"
+        verify(panel.usePlotted)
+        compare(panel.columnNames(), [first])
+        // The sizes are asked again for the columns, the old ones gone at once
+        compare(panel.sizes.length, 0, "no size for the other columns")
+        sizesIn(panel)
+        const oneBytes = panel.sizes.find(s => s.rowMs === 0).bytes
+        verify(oneBytes !== own, "the plotted column's own size: " + own + " then " + oneBytes)
+        // Another plotted while they're chosen: asked again
+        const two = {}
+        for (const s of panel.view.signalList)
+            two[s.index] = s.name === first || s.name === plottedAtFirst[1]
+        page.plotted = two
+        tryVerify(() => page.plottedNames.length === 2, 2000, "two plotted")
+        compare(panel.sizes.length, 0, "no size for the old plotted set")
+        sizesIn(panel)
+        verify(panel.sizes.find(s => s.rowMs === 0).bytes !== oneBytes, "two columns' size")
+        // Nothing plotted, nothing to offer: the log's own again
+        const none = {}
+        for (const s of panel.view.signalList)
+            none[s.index] = false
+        page.plotted = none
+        tryVerify(() => !panel.plottedOffered, 2000)
+        verify(!panel.usePlotted, "back to the log's own")
+        compare(panel.columnNames(), [])
+        // Other units, other sizes asked for, with the log's own columns
+        sizesIn(panel)
+        Bridge.unitSystem = 1 - Bridge.unitSystem
+        compare(panel.sizes.length, 0, "no size in the other units")
+        sizesIn(panel)
+        restoreExportChoices(panel)
+    }
+
+    function test_aRecordingOfFramesAloneExportsNoCsv() {
+        const page = createPage()
+        const folder = Harness.writeFramesRecording("export-frames-only", 50, 10000)
+        verify(folder !== "")
+        page.open({ title: "Frames", uri: "replay://x?profile=raw", source: "", folder: folder, profile: "raw" })
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        const panel = openExport(page)
+        compare(panel.format, "pcapng", "CSV isn't offered")
+        verify(!find(panel, "exportFormat_csv").enabled)
+        verify(find(panel, "exportNoValues").visible)
+        verify(find(panel, "exportGo").enabled)
+    }
+
+    function test_aRecordingOfValuesAloneHasNoPcapng() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        verify(!find(panel, "exportFormat_pcapng").visible, "pull-early has no frames.csv")
+        verify(find(panel, "exportFormat_folder").visible)
+    }
+
+    function test_aDecodedViewSaysTheCsvIsAsRecorded() {
+        const page = openFindings()
+        page.decodeWith("obd2")
+        tryVerify(() => page.viewing && find(page, "recordingInfo").visible
+                        && find(page, "recordingInfo").text.indexOf("decoded") >= 0, 10000, "decoded")
+        const panel = openExport(page)
+        verify(find(panel, "exportDecodedNote").visible)
+        verify(!panel.plottedOffered, "a decode's names aren't the recording's columns")
+        panel.format = "pcapng"
+        verify(!find(panel, "exportDecodedNote").visible, "the CSV's note alone")
+    }
+
+    function test_rawIsDevelopersAndWarnsAboutTheVin() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        const box = find(panel, "exportRaw")
+        const was = Theme.developerMode
+        Theme.developerMode = false
+        verify(!box.visible, "hidden outside Developer mode")
+        panel.raw = true
+        verify(!panel.rawOn, "and no effect")
+        Theme.developerMode = true
+        verify(box.visible)
+        verify(panel.rawOn)
+        const warning = find(panel, "exportRawWarning")
+        verify(warning.visible)
+        verify(warning.text.indexOf("VIN") >= 0, warning.text)
+        panel.raw = false
+        verify(!warning.visible)
+        Theme.developerMode = was
+    }
+
+    function test_aFolderCopyAndAFailedExportSaySo() {
+        const page = openFindings()
+        const panel = openExport(page)
+        panel.format = "folder"
+        compare(find(panel, "exportGo").text, "Choose a folder...")
+        verify(panel.exportTo(scratchFolder("copy")))
+        const note = find(panel, "exportNote")
+        tryVerify(() => note.text.indexOf("Saved as ") === 0, 10000, "the copy ends saved")
+        verify(/^Saved as recording(-\d+)?: \d+ files?, /.test(note.text), note.text)
+        panel.format = "pcapng"
+        verify(panel.exportTo("file:///" + scratchFolder("bad").replace(/^file:\/+/, "") + "/no-such/out.pcapng"))
+        tryVerify(() => note.text.indexOf("Not exported: ") === 0, 10000, "the export ends refused")
+        compare(note.color, Theme.danger)
+        // A start the exporter refuses says so too
+        verify(!panel.exportTo(""))
+        compare(note.text, "Not exported: the export couldn't start")
+        compare(note.color, Theme.danger)
+    }
+
+    // A finished export for a recording the viewer has left says nothing
+    // here: Back and another recording opened before it ended
+    function test_aLateExportForAnotherRecordingLeavesTheNote() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        const note = find(panel, "exportNote")
+        const exporter = find(panel, "exporter")
+        const result = folder => ({ ok: true, folder: folder, name: "", summary: "1 row",
+                                    line: "Exported: a test's line", words: "" })
+        const before = note.text
+        exporter.finished(result(panel.view.folder + "-another"))
+        compare(note.text, before, "another recording's export")
+        exporter.finished(result(panel.view.folder))
+        compare(note.text, "Saved: 1 row", "this one's")
+    }
+
     // Save report: the whole recording's (the zoom never narrows it), on
     // the view's thread, the picked vehicle's baseline named, the note and
     // one log line when it ends
@@ -584,7 +883,7 @@ TestCase {
         const page = openFindings()
         mouseClick(find(page, "detailView_frames"))
         const words = find(page, "framesWords")
-        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000, words.text)
+        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000, "the frames in view are counted")
         verify(!find(page, "viewerFrameIds").visible, "the table first")
 
         mouseClick(find(page, "framesTable_byId"))
@@ -637,7 +936,7 @@ TestCase {
         mouseClick(find(page, "detailView_frames"))
         verify(page.framesShown, "the press reached the switch")
         const words = find(page, "framesWords")
-        tryVerify(() => words.text === "the first 10,000 frames from 0.0 s: zoom in for the rest",
+        tryVerify(() => words.text === "The first 10,000 frames from 0.0 s: zoom in for the rest",
                   longWait, "the table's cap is said")
         compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
         page.setView(0, 2000)
@@ -652,6 +951,213 @@ TestCase {
         compare(list.itemAtIndex(0).model.timestampUs, 5000000)
     }
 
+    // On a phone the strings that were cut at 384 dp are short forms, and
+    // the recording's name takes a line of its own
+    function test_aPhoneGetsTheShortStrings() {
+        const page = openFindings()
+        const title = find(page, "openedTitle")
+        const compactTitle = find(page, "openedTitleCompact")
+        verify(title.visible && !compactTitle.visible, "the desktop's name sits in the row")
+        Theme.compact = true
+        try {
+            compare(find(page, "cursorTime").text, "Tap for values")
+            verify(!title.visible && compactTitle.visible, "a phone's name has its own line")
+            compare(compactTitle.text, findingsRow.title)
+            compare(compactTitle.elide, Text.ElideMiddle)
+            page.setCursor(5000)
+            compare(find(page, "cursorTime").text, "At 5.0 s", "a cursor reads the same")
+        } finally {
+            Theme.compact = false
+        }
+        verify(title.visible && !compactTitle.visible, "and back")
+    }
+
+    // On a phone every button, box, choice and field the page shows, its
+    // list rows and the viewer's signal rows are a touch's size (48), and
+    // nothing runs past the page's right edge; the desktop keeps its own sizes
+    // The frame table's rows and the By ID list's are data rows, as dense
+    // as Live's signal rows; the UI review judges them with those
+    readonly property var dataRows: ["frameRowArea", "idRowArea"]
+    function walkTargets(page) {
+        const seen = []
+        const small = []
+        const wide = []
+        const walk = item => {
+            for (const child of item.children) {
+                if (child.visible && child.width > 0
+                        && (child.pressed !== undefined || child.placeholderText !== undefined)) {
+                    const name = child.objectName || String(child)
+                    const h = child.mapToItem(page, 0, child.height).y
+                              - child.mapToItem(page, 0, 0).y
+                    seen.push(name)
+                    if (h < Theme.touchTarget - 0.5 && dataRows.indexOf(name) < 0)
+                        small.push(name + " " + Math.round(h))
+                    if (child.mapToItem(page, child.width, 0).x > page.width + 0.5)
+                        wide.push(name + "@" + Math.round(child.mapToItem(page, child.width, 0).x) + " w" + Math.round(child.width))
+                }
+                // A label too: its box ends inside the page
+                if (child.visible && child.width > 0 && child.contentWidth !== undefined
+                        && child.pressed === undefined && child.placeholderText === undefined
+                        && child.mapToItem(page, child.width, 0).x > page.width + 0.5)
+                    wide.push((child.objectName || String(child)) + "@"
+                              + Math.round(child.mapToItem(page, child.width, 0).x))
+                walk(child)
+            }
+        }
+        walk(page)
+        return { seen: seen, small: small, wide: wide }
+    }
+
+    function test_aPhonesRecordingListRowsAreATouchsSize() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        const desk = list.itemAtIndex(0).height
+        Theme.compact = true
+        try {
+            page.width = 384
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(list.itemAtIndex(0).height >= Theme.touchTarget - 0.5,
+                   "a list row is " + list.itemAtIndex(0).height)
+            const b = walkTargets(page)
+            verify(b.seen.length >= 1, "buttons found")
+            compare(b.small.join(", "), "", "under " + Theme.touchTarget)
+        } finally {
+            Theme.compact = false
+        }
+        tryCompare(list.itemAtIndex(0), "height", desk, 2000, "the desktop's row is as it was")
+        verify(desk >= 56)
+    }
+
+    // Each panel the page opens: the import's guessed map, the Export panel,
+    // the Frames table with its filter and By ID list, the compare and align
+    // rows, at the narrowest phone widths
+    function test_aPhonesImportPanelIsATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesImportPanelIsATouchsSize(data) {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("phone-guess-plain.csv",
+            "time,rpm\n0,800\n1,900\n2,950\n"))
+        const preview = guessed(page)
+        Theme.compact = true
+        try {
+            page.width = data.w
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(find(preview, "guessWaiting").visible, "the unit is asked for")
+            const b = walkTargets(page)
+            for (const name of ["importKind_csv", "guessTimeUnit_ms"])
+                verify(b.seen.indexOf(name) >= 0, name + " is seen: " + b.seen.join(", "))
+            compare(b.small.join(", "), "", "under " + Theme.touchTarget)
+            compare(b.wide.join(", "), "", "past the right edge at " + data.w)
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    // The walk of an open viewer: every control a touch's size, every label
+    // and control inside the page, and the names it must have reached
+    function walkPanel(page, data, seen, what) {
+        verify(waitForPolish(page.Window.window), "laid out")
+        const b = walkTargets(page)
+        for (const n of b.seen)
+            seen.push(n)
+        const out = []
+        if (b.small.length > 0)
+            out.push(what + ": under " + Theme.touchTarget + ": " + b.small.join(", "))
+        if (b.wide.length > 0)
+            out.push(what + ": past the right edge at " + data.w + ": " + b.wide.join(", "))
+        return out
+    }
+    function wasWalked(seen, names) {
+        for (const n of names)
+            verify(seen.indexOf(n) >= 0, n + " was walked: " + seen.join(", "))
+    }
+
+    function test_aPhonesViewerPanelsAreATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesViewerPanelsAreATouchsSize(data) {
+        const page = openFindings()
+        Theme.compact = true
+        try {
+            page.width = data.w
+            verify(!find(page, "reportNote").visible, "no note, no row for it")
+            page.reportNote = "Saved to a-recording-with-a-rather-long-file-name-for-a-phone.zip"
+            verify(waitForPolish(page.Window.window), "laid out")
+            const note = find(page, "reportNote")
+            tryVerify(() => note.width > 0.6 * data.w, 2000,
+                      "the note has the row: " + note.width + " of " + note.parent.width)
+            const seen = []
+            const problems = []
+            problems.push(...walkPanel(page, data, seen, "the viewer"))
+            openExport(page)
+            problems.push(...walkPanel(page, data, seen, "the Export panel"))
+            find(page, "exportButton").clicked()
+
+            mouseClick(find(page, "detailView_frames"))
+            tryVerify(() => /^\d+ frames? in view$/.test(find(page, "framesWords").text), 10000)
+            find(page, "framesFilterToggle").clicked()
+            problems.push(...walkPanel(page, data, seen, "the Frames table and its filter"))
+            mouseClick(find(page, "framesTable_byId"))
+            problems.push(...walkPanel(page, data, seen, "the By ID list"))
+            mouseClick(find(page, "detailView_values"))
+            problems.push(...walkPanel(page, data, seen, "the values again"))
+            compare(problems.join("; "), "")
+            wasWalked(seen, ["exportFormat_csv", "exportRows_sweep", "direction_0",
+                             "framesTable_byId", "detailView_values", "decodeChoice"])
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    function test_aPhonesCompareAndAlignRowsAreATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesCompareAndAlignRowsAreATouchsSize(data) {
+        const page = openEarly()
+        Theme.compact = true
+        try {
+            page.width = data.w
+            find(page, "compareChoice").activated(1)
+            tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+            const seen = []
+            const problems = []
+            problems.push(...walkPanel(page, data, seen, "the compare and align rows"))
+            compare(problems.join("; "), "")
+            wasWalked(seen, ["compareChoice", "alignChoice"])
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    function test_aPhonesViewerTargetsAreATouchsSize_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_aPhonesViewerTargetsAreATouchsSize(data) {
+        const page = openFindings()
+        const rows = find(page, "signalRows")
+        compare(rows.itemAtIndex(0).height, page.rowHeight)
+        const desk = rows.itemAtIndex(0).height
+        verify(desk < 48, "a desktop's signal row is " + desk)
+        Theme.compact = true
+        try {
+            page.width = data.w
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(rows.itemAtIndex(0).height >= Theme.touchTarget - 0.5,
+                   "a signal row is " + rows.itemAtIndex(0).height)
+            const b = walkTargets(page)
+            compare(b.wide.join(", "), "", "past the right edge at " + data.w)
+            verify(b.seen.indexOf("detailView_values") >= 0, "the view switch is seen: " + b.seen.join(", "))
+            compare(b.small.join(", "), "", "under " + Theme.touchTarget)
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    // Open shows the recording: its signal plotted by default, the chart's
+    // series over the whole recording, the check's findings listed
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)
@@ -748,7 +1254,7 @@ TestCase {
     // The cursor reads each signal's value in force at its time
     function test_theCursorReadsTheValuesAtItsTime() {
         const page = openFindings()
-        compare(find(page, "cursorTime").text, "Tap the chart to read the values at a time")
+        compare(find(page, "cursorTime").text, "Click the chart for values")
         const row = find(page, "signalRows").itemAtIndex(0)
         compare(find(row, "cursorValue").text, "—")
         page.setCursor(5000)
@@ -1222,6 +1728,8 @@ TestCase {
         tryVerify(() => list.itemAtIndex(1) !== null, 2000, "the rows have delegates")
         verify(find(list.itemAtIndex(1), "baselineBadge").visible)
         compare(find(list.itemAtIndex(1), "baselineBadge").text, "Baseline")
+        verify(Qt.colorEqual(find(list.itemAtIndex(1), "baselineBadge").background.border.color,
+                             Theme.textDim), "outlined in the dim tone")
         verify(!find(list.itemAtIndex(0), "baselineBadge").visible)
 
         // Another recording overlays it, aligned on the engine starts
@@ -1241,6 +1749,24 @@ TestCase {
         page.vehicles = VehicleBook.pick(page.vehicles, "")
         verify(!find(page, "baselineRow").visible, "no vehicle picked")
         compare(vehiclesSpy.count, 1)
+    }
+
+    // The baseline's name is as tall as the buttons beside it: a touch's size on a phone
+    function test_theBaselineLabelIsATouchsSizeOnAPhone() {
+        const page = createBookPage("")
+        page.recordings = [startLateRow, startEarlyRow]
+        openRow(page, startEarlyRow)
+        mouseClick(find(page, "useAsBaseline"))
+        const mine = find(page, "isBaseline")
+        verify(mine.visible)
+        compare(mine.height, Theme.controlHeight, "the desktop's")
+        Theme.compact = true
+        try {
+            tryCompare(mine, "height", 48)
+        } finally {
+            Theme.compact = false
+        }
+        tryCompare(mine, "height", Theme.controlHeight)
     }
 
     // A baseline whose folder is gone says so on the list and in the
@@ -1374,5 +1900,177 @@ TestCase {
         mouseClick(find(page, "backToList"))
         verify(!page.viewing)
         verify(find(page, "recordingList").visible)
+    }
+
+    // A row's detail is caption text, and says "replays as" only where
+    // the profile differs from the address's own
+    function test_aRowsDetailSaysReplaysAsOnlyWhereItDiffers() {
+        const page = createPage()
+        const row = (source, profile) => ({ title: "T", uri: "replay://x?profile=" + profile,
+                                            folder: Harness.recordingFixtures + "/findings",
+                                            source: source, profile: profile, frames: true })
+        page.recordings = [row("mock://x?profile=mock", "mock"), row("mock://x?profile=raw", "mock"),
+                           row("mock://x", "mock"), row("", "mock"), row("mock://x", "raw"),
+                           row("elm327://COM3", "obd2")]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(5) !== null, 2000, "the rows have delegates")
+        const detail = i => find(list.itemAtIndex(i), "recordingDetail")
+        compare(detail(0).text, "mock://x?profile=mock", "the same profile: the address alone")
+        compare(detail(1).text, "mock://x?profile=raw · replays as mock")
+        compare(detail(2).text, "mock://x", "a mock address replays as mock: nothing to say")
+        compare(detail(3).text, "replays as mock")
+        compare(detail(4).text, "mock://x · replays as raw", "a mock address under another profile: said")
+        compare(detail(5).text, "elm327://COM3 · replays as obd2", "an adapter's address without one: said")
+        compare(detail(0).font.pixelSize, Theme.fontCaption, "caption text, never under the floor")
+        compare(find(list.itemAtIndex(0), "replayButton").text, "Replay")
+    }
+
+    // The viewer's Export opens its panel and shows as selected while it
+    // is open, not as a second primary; its lower controls name what
+    // they choose
+    function test_exportShowsAsSelectedAndNamesItsChoices() {
+        const page = openFindings()
+        const button = find(page, "exportButton")
+        compare(button.text, "Export…")
+        verify(!button.checked && !button.highlighted, "closed: a plain button")
+        const panel = openExport(page)
+        verify(button.checked, "open: selected")
+        verify(!button.highlighted, "never primary: Save as… is the panel's")
+        verify(find(panel, "exportGo").highlighted)
+        const signals = find(panel, "exportColumnsLabel")
+        compare(signals.text, "Signals:")
+        compare(signals.visible, find(panel, "exportColumns_own").visible, "with the switch it names")
+        const was = Theme.developerMode
+        Theme.developerMode = true
+        const hint = find(panel, "exportRawHint")
+        verify(hint.visible, "the scrub's hint beside its box")
+        verify(hint.text.indexOf("identification") >= 0, hint.text)
+        Theme.developerMode = false
+        verify(!hint.visible)
+        Theme.developerMode = was
+        button.clicked()
+        tryVerify(() => !panel.visible, 2000, "closed again")
+        verify(!button.checked)
+    }
+
+    // The Frames view's table switch: List or By ID, under Values / Frames
+    function test_theFramesTableSwitchReadsListOrById() {
+        const page = openFindings()
+        mouseClick(find(page, "detailView_frames"))
+        verify(page.framesShown)
+        compare(find(page, "framesTable_frames").text, "List")
+        compare(find(page, "framesTable_byId").text, "By ID")
+    }
+
+    // On a phone with developer mode on (Frame test in the row) the
+    // toolbar's hint keeps its words, wrapping onto a second caption line
+    // instead of eliding
+    function test_theCursorHintKeepsItsWordsOnAPhone() {
+        const page = openFindings()
+        const hint = find(page, "cursorTime")
+        const was = Theme.developerMode
+        Theme.compact = true
+        Theme.dense = true
+        Theme.developerMode = true
+        try {
+            page.width = 384
+            verify(waitForPolish(page.Window.window), "laid out")
+            tryVerify(() => find(page, "frameTest").visible, 2000, "Frame test in the row")
+            compare(hint.text, "Tap for values")
+            tryVerify(() => !hint.truncated, 2000, "every word shows")
+            verify(hint.lineCount <= 2, hint.lineCount + " lines")
+            compare(hint.font.pixelSize, Theme.fontCaption)
+            // Where the row leaves it less than its words, it wraps onto a
+            // second line rather than eliding
+            compare(hint.wrapMode, Text.WordWrap, "wraps on a phone")
+            compare(hint.maximumLineCount, 2, "two lines at most")
+        } finally {
+            Theme.developerMode = was
+            Theme.compact = false
+            Theme.dense = false
+        }
+    }
+
+    // Compared with a recording that holds the signal's values, an empty
+    // signal's dashed trace draws and the chart says nothing about it
+    function test_aComparedRecordingDrawsASignalTheFirstLacks() {
+        const page = createPage()
+        const events = "ecuio session recording, format 2 (ADR-0049)\n"
+                       + "started  2026-11-03 09:00:00.000 (local time)\n"
+                       + "profile  test\n"
+                       + "signal  RPM,number,rpm,0,0\n"
+                       + "signal  Quiet,number,rpm,0,0\n"
+                       + "\n00:00:01.000  +1.000  end  test: 0 frames, 1 values, 0 records "
+                       + "dropped, 0 notes dropped\n"
+        const first = Harness.writeFramesRecording("lacks-quiet", 1, 10000)
+        const second = Harness.writeFramesRecording("has-quiet", 1, 10000)
+        verify(first !== "" && second !== "")
+        verify(Harness.writeScratchFile("lacks-quiet/events.log", events).toString() !== "")
+        verify(Harness.writeScratchFile("lacks-quiet/signals.csv",
+                   "host_us,signal,value,unit\n100000,RPM,1000,rpm\n").toString() !== "")
+        verify(Harness.writeScratchFile("has-quiet/events.log", events).toString() !== "")
+        verify(Harness.writeScratchFile("has-quiet/signals.csv",
+                   "host_us,signal,value,unit\n100000,RPM,900,rpm\n100000,Quiet,5,rpm\n"
+                   + "200000,Quiet,7,rpm\n").toString() !== "")
+        page.open({ title: "Lacks", uri: "replay://x?profile=test", source: "", folder: first,
+                    profile: "test" })
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        const quiet = page.shownSignals.find(s => s.name === "Quiet")
+        const rpm = page.shownSignals.find(s => s.name === "RPM")
+        page.togglePlotted(rpm.index)
+        page.togglePlotted(quiet.index)
+        compare(page.plottedNoValues, ["Quiet"], "alone, it has nothing to draw")
+        compare(page.series(400).length, 0)
+        page.compareWith({ title: "Has", folder: second })
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.plottedNoValues, [], "the compared recording draws it")
+        const all = page.series(400)
+        compare(all.length, 1, "its dashed trace alone")
+        verify(all[0].dash !== undefined, "dashed")
+        compare(all[0].row, quiet.index)
+        page.stopComparing()
+        compare(page.plottedNoValues, ["Quiet"], "alone again")
+    }
+
+    // A ticked signal with no values in the recording: the chart says so
+    // instead of staying blank
+    function test_aPlottedSignalWithNoValuesIsSaidInTheChart() {
+        const page = createPage()
+        compare(page.noValuesText(["RPM"]), "RPM has no values in this recording")
+        compare(page.noValuesText(["RPM", "Speed"]), "RPM and Speed have no values in this recording")
+        compare(page.noValuesText(["RPM", "Speed", "Load"]),
+                "RPM, Speed and Load have no values in this recording")
+        // A values recording listing two signals, with rows for one: the
+        // harness's frames folder, its events.log and signals.csv written over
+        const folder = Harness.writeFramesRecording("no-values", 1, 10000)
+        verify(folder !== "")
+        verify(Harness.writeScratchFile("no-values/events.log",
+                   "ecuio session recording, format 2 (ADR-0049)\n"
+                   + "started  2026-11-03 09:00:00.000 (local time)\n"
+                   + "profile  test\n"
+                   + "signal  RPM,number,rpm,0,0\n"
+                   + "signal  Quiet,number,rpm,0,0\n"
+                   + "\n00:00:01.000  +1.000  end  test: 0 frames, 1 values, 0 records "
+                   + "dropped, 0 notes dropped\n").toString() !== "")
+        verify(Harness.writeScratchFile("no-values/signals.csv",
+                   "host_us,signal,value,unit\n100000,RPM,1000,rpm\n").toString() !== "")
+        page.open({ title: "Quiet", uri: "replay://x?profile=test", source: "", folder: folder,
+                    profile: "test" })
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        const chart = find(page, "chart")
+        const empty = page.shownSignals.find(s => s.name === "Quiet")
+        verify(empty !== undefined && empty.samples === 0, "a listed signal with no rows")
+        verify(page.plotted[empty.index] !== true, "not plotted on its own")
+        // RPM is plotted by default and draws, so the chart says nothing
+        // about Quiet until RPM is unticked: the words are for a chart
+        // with nothing to draw
+        page.togglePlotted(empty.index)
+        compare(page.plottedNoValues, [], "RPM still draws")
+        const rpm = page.shownSignals.find(s => s.name === "RPM")
+        page.togglePlotted(rpm.index)
+        tryCompare(chart, "emptyText", "Quiet has no values in this recording", 3000)
+        compare(page.series(400).length, 0, "nothing to draw, so the words show")
+        page.togglePlotted(empty.index)
+        compare(chart.emptyText, "No signals plotted; tick a row to plot it")
     }
 }

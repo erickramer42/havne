@@ -1,12 +1,12 @@
 // File/layer: app/qml/DangerMark.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.gauges (test_qml)
+// Testing: QML: QmlTest.gauges, QmlTest.accessibility (test_qml)
 
 import QtQuick
 import QtQuick.Shapes
 
 // The mark beside a readout once its value is past dangerFrom: a filled
 // triangle with an exclamation point, so danger is told from warning by
-// more than hue (the low-glare and night themes draw both in warm colors).
+// more than hue (the night palettes draw both in warm colors).
 // The gauge shows it only while it applies.
 Item {
     id: mark
@@ -19,9 +19,9 @@ Item {
     width: size
     height: size
 
-    Accessible.role: Accessible.Indicator
-    Accessible.name: qsTr("Danger")
-    Accessible.ignored: opacity === 0
+    // Never a node of its own, which would be shown and hidden at each
+    // crossing: the gauge's name says danger
+    Accessible.ignored: true
 
     Shape {
         anchors.fill: parent
@@ -41,8 +41,9 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         y: mark.size * 0.30
         text: "!"
+        Accessible.ignored: true
         font.pixelSize: mark.size * 0.62
         font.weight: Font.Bold
-        color: Theme.gaugeFace
+        color: Theme.surface
     }
 }

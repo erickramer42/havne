@@ -377,9 +377,8 @@ struct importer {
         if (note_fn == nullptr) {
             return;
         }
-        // One line each, whatever the set holds: an id, a protocol or an
-        // address quoted from it can carry a control character, and a
-        // bound keeps a note a line's length
+        // One line each: a quoted id, protocol or address can carry a control
+        // character, and a bound keeps a note a line long
         bool cut = false;
         const std::string signal_line = clean(signal, 128, &cut);
         const std::string text_line = clean(text, 512, &cut);

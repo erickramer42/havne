@@ -66,10 +66,9 @@ constexpr auto kFinalTimingWait = std::chrono::seconds(1);
 constexpr auto kFinalTimingRetry = std::chrono::milliseconds(10);
 
 /* A record in the ring: this head, then its body, which starts with its
- * host_us. A frame's body is frame_body, the frame's used bytes, then
- * each value as value_head followed by its double or its text; a link
- * transition's is link_body; reply timing's is timing_body, then its
- * rows. */
+ * host_us. A frame's is frame_body, the used bytes, then each value as
+ * value_head and its double or text; a link transition's link_body; reply
+ * timing's timing_body and its rows. */
 struct record_head {
     uint32_t size; /* the whole record, head included */
     uint32_t type;
@@ -461,12 +460,10 @@ std::string absolute(const std::string& path)
     char out[4096 * 3];
     return ecuio_wide_to_utf8(buf, out, sizeof out) ? std::string(out) : path;
 #else
-    /* As the caller spelled it, its links kept, as GetFullPathNameW keeps
-     * them: realpath would turn macOS's temporary directory (/var, a link
-     * to /private/var) or an iOS container's into another spelling of
-     * the folder than the one the caller named and shows relative to. A
-     * relative path joins the working directory; ".", ".." and repeated
-     * separators go */
+    /* As the caller spelled it, links kept: realpath would turn macOS's
+     * /var into /private/var, or an iOS container's into another spelling
+     * than the caller shows relative to. A relative path joins the working
+     * directory; ".", ".." and repeated separators go */
     std::string full = path;
     if (full.empty() || full[0] != '/') {
         char cwd[PATH_MAX];
@@ -1083,9 +1080,8 @@ struct ecuio_recorder {
             if (hold.load(std::memory_order_acquire) && !stopping) {
                 continue;
             }
-            /* Nothing until a session attaches: the attach completes the
-             * header item open queued, and a recorder closed unattached
-             * leaves its files empty */
+            /* Nothing until a session attaches: it completes the header
+             * item open queued; one closed unattached leaves its files empty */
             if (!attached.load(std::memory_order_acquire)) {
                 if (stopping) {
                     return;
@@ -1257,9 +1253,9 @@ void ecuio_record_timing(ecuio_record_link* link,
             ecuio_record_unpin(*link);
             return;
         }
-        /* No room: a snapshot every 10 s is dropped and counted once, and
-         * the next one's totals cover it; the final one waits for the
-         * writer, unpinned, so a detach meanwhile never waits on it */
+        /* No room: a periodic snapshot is dropped and counted (the next's
+         * totals cover it); the final one waits unpinned, so a detach never
+         * waits on it */
         if (!final || size > r->cap ||
             std::chrono::steady_clock::now() >= give_up) {
             r->records_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -1494,9 +1490,8 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
 
-    /* Everything the attach makes goes into locals first: the recorder
-     * changes only once the link is taken, so a refused attach (another
-     * recorder is live) leaves it as it was, ready for the next try */
+    /* Built in locals first: the recorder changes only once the link is
+     * taken, so a refused attach leaves it ready for the next try */
     const std::shared_ptr<ecuio_record_link> link = session->record_link;
     std::vector<def_entry> defs;
     std::string header;
@@ -1564,11 +1559,10 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       ? "from an older recording"
                       : session->source_frame_flags.c_str();
         header += "\n";
-        /* A session attached to after start (ADR-0056 section 3) says
-         * what it had come to: the signals its focus holds at this
-         * moment, in the order they were picked (none: no line), and,
-         * once started, the link's state and episode count in the words
-         * of the link lines, so a reader needn't wait for a transition */
+        /* A session attached to after start (ADR-0056 section 3) says what
+         * it had come to: its focus in pick order (none: no line) and, once
+         * started, the link's state and episodes in the link lines' words,
+         * so a reader needn't wait for a transition */
         {
             std::lock_guard<std::mutex> f(session->focus_mutex);
             std::string focus;
@@ -1587,6 +1581,14 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             }
             if (!focus.empty()) {
                 header += "focus  " + focus + "\n";
+                /* Only a session that asks has one: the others take the
+                 * call and change nothing */
+                if (session->focus_requests &&
+                    session->focus_min_sweep_ms != 0) {
+                    header += "min sweep  " +
+                              std::to_string(session->focus_min_sweep_ms) +
+                              " ms\n";
+                }
             }
         }
         if (session->started) {
@@ -1649,11 +1651,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         recorder->start_wall = start_wall;
     };
     {
-        /* Under the mutex that orders detaches: a recorder closing or a
-         * second attach meanwhile sees one state of the link, and the
-         * refusal is judged here alone. The zero goes in before active,
-         * whose release publishes it to the worker (dispatch pins the
-         * recorder, then reads the zero). */
+        /* Under the mutex that orders detaches, so a closing recorder or a
+         * second attach sees one state of the link, and the refusal is judged
+         * here alone. The zero goes in before active, whose release publishes
+         * it to the worker (dispatch pins the recorder, then reads the
+         * zero). */
         std::lock_guard<std::mutex> g(link->m);
         if (link->active.load(std::memory_order_seq_cst) != nullptr) {
             return ECUIO_ERR_INVALID_ARGUMENT;

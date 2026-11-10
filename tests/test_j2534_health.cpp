@@ -744,7 +744,7 @@ TEST_F(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
  * so a reply can read up to that round trip under the fake's delay: a
  * floor on the latency is the delay less this. A read that answers at
  * its message has nothing else to add (3.7 ms seen for a 4 ms reply
- * through the x86 surrogate, 2026-11-05) */
+ * through the x86 surrogate) */
 constexpr uint32_t kWriteReturnUs = 1000;
 
 /* Reply timing (ADR-0042) through the surrogate, the fake as the VX
@@ -795,8 +795,8 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
 /* The surrogate holds a 1 ms timer: the fake as the VX waits for its
  * message inside the surrogate's process, in the timer's steps, so the
  * default timer sees a 4 ms reply at 15.6 ms. With Windows' default 15.6 ms timer
- * every request's median read 15.4 to 16.4 ms (bench_timing,
- * 2026-11-01); with 1 ms, 11.3 ms. 14 ms sits between, for the median
+ * every request's median read 15.4 to 16.4 ms (bench_timing); with
+ * 1 ms, 11.3 ms. 14 ms sits between, for the median
  * of the requests' medians: a slow-class PID has few replies in the
  * run, and on a loaded CI runner one median alone read 14.2 ms. */
 TEST_F(J2534HealthTest, VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep)
@@ -952,7 +952,7 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
  * empty reads return at once, so the worker's waits set the pace, which
  * end on time only on its high-resolution timer (precise_wait.h). On a
  * plain sleep each channel's requests came 31 ms apart, about 63 a
- * second for the two; on the timer 192 to 194 in 2 s (2026-11-06). The
+ * second for the two; on the timer 192 to 194 in 2 s. The
  * floor's 100 a second bounds it from above. */
 TEST_F(J2534HealthTest, ATwoEcuSessionAsksAtTheEnginesFloor)
 {
@@ -1060,8 +1060,8 @@ TEST_F(J2534HealthTest, VxAReplyPastTheSliceIsNotHeldByAZeroTimeoutRead)
 
 /* A read asks for one message, so the VX's read ends when the reply
  * arrives, 4 ms after its request, instead of holding the 10 ms slice
- * for a batch of 16, and answers with it. Measured 2026-11-05 (the
- * median is a test property): 5.1 ms through either surrogate; held to
+ * for a batch of 16, and answers with it. Measured (the median is a
+ * test property): 5.1 ms through either surrogate; held to
  * the slice, 11.3 ms (x64) and 13.3 ms (x86); with one more call for the
  * rest of a batch, which the fake holds 10 ms as the VX did, failing.
  * The 10 ms bound sits between */
@@ -1452,9 +1452,8 @@ namespace {
 
 /* How a read past its deadline called the vendor, from the fake's own
  * record (the control page), not the wall clock, which a loaded machine
- * stretches past any margin one scheduling slice wide (55 ms on
- * 2026-11-05 and 70 ms on 2026-11-06, against 55, with other sessions
- * building on the machine): the stalled
+ * stretches past any margin one scheduling slice wide (55 ms and
+ * 70 ms against 55, with other sessions building on the machine): the stalled
  * call, then exactly one more, and neither asked to wait 0 ms, which
  * the VX holds 50 ms */
 void expect_the_stalled_call_then_one_more(fake_control::Page* page)

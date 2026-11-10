@@ -178,10 +178,10 @@ inline bool make_folder(const std::string& utf8, std::string* why)
 #endif
 }
 
-/* A name of this call's own beside out, for what is written whole there
- * and then renamed into place: <out>.partial-<pid>-<n>, n counted across
- * the process. Another export's (one under way, or one a crash left) is
- * then never in the way, never truncated and never removed. */
+/* A name of this call's own beside out for what is written whole and then
+ * renamed into place: <out>.partial-<pid>-<n>, n counted across the
+ * process, so another export's (under way or left by a crash) is never
+ * in the way, truncated or removed. */
 inline std::string partial_name(const std::string& out)
 {
     static std::atomic<unsigned> next{0};

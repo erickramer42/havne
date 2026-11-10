@@ -8,19 +8,27 @@ import App
 TestCase {
     id: testCase
     name: "Kinds"
+
+    // A palette by its name: Dark is Night off, the others Night on in a style
+    function usePalette(name) {
+        Theme.night = name === "dark" ? "off" : "on"
+        if (name !== "dark")
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+    }
     when: windowShown
 
     Component { id: segmentsC; SegmentGauge { width: 300; height: 110; from: 0; to: 8000; warnFrom: 5500; dangerFrom: 6800 } }
     Component { id: readoutC;  SegmentReadout { width: 260; height: 90; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: sparkC;    SparkGauge { width: 300; height: 110; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
+    Component { id: digitalC;  DigitalGauge { width: 180; height: 122; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: barC;      BarGauge { width: 300; height: 72; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: ringC;     RingGauge { width: 240; height: 220; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
 
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
-        Theme.theme = "dark"
+        usePalette("dark")
     }
-    function cleanup() { Theme.theme = "dark" }
+    function cleanup() { usePalette("dark") }
 
     function find(item, name) {
         const found = findChild(item, name)
@@ -46,6 +54,74 @@ TestCase {
         const g = createTemporaryObject(comp, testCase.parent, props || {})
         verify(g, "loads")
         return g
+    }
+
+    // ---- A status note
+
+    // Whole on a wide card, cut inside a narrow one, gone when the title
+    // leaves it no room, and clear of the value on a tile too short for a trace
+    function test_aNoteStaysInItsCard_data() {
+        return [{ tag: "digits", c: readoutC, narrow: 125, titled: true },
+                { tag: "bar", c: barC, narrow: 190, titled: true },
+                { tag: "cells", c: segmentsC, narrow: 190, titled: true },
+                { tag: "sparkline", c: sparkC, narrow: 190, titled: true },
+                { tag: "number", c: digitalC, narrow: 70, titled: false },
+                { tag: "number, short", c: digitalC, narrow: 70, titled: false, height: 60 }]
+    }
+    function test_aNoteStaysInItsCard(data) {
+        const words = { label: "Battery Voltage", note: "waiting for data" }
+        if (data.height !== undefined)
+            words.height = data.height
+        const wide = find(make(data.c, Object.assign({ width: 400 }, words)), "gaugeNote")
+        verify(wide.visible, "shown when there's room")
+        verify(!wide.truncated, "whole when there's room")
+
+        const g = make(data.c, Object.assign({ width: data.narrow }, words))
+        const n = find(g, "gaugeNote")
+        const left = n.mapToItem(g, 0, 0).x
+        verify(n.visible, "there's room for part of it: " + n.width)
+        verify(n.truncated, "cut to fit")
+        verify(left + n.width <= g.width + 0.5, "ends at " + (left + n.width) + " in " + g.width)
+        verify(n.contentWidth <= n.width + 0.5, n.contentWidth + " drawn in " + n.width)
+        if (data.titled)
+            verify(!find(make(data.c, Object.assign({ width: 60 }, words)), "gaugeNote").visible,
+                   "no room past the title")
+        if (data.height !== undefined) {
+            const value = find(g, "readout")
+            verify(g.brief, "a short tile")
+            verify(left >= value.mapToItem(g, 0, 0).x + value.width, "beside the value")
+        }
+    }
+
+    // ---- SegmentReadout's shape
+
+    // A tall card stacks: the digits across its width, centered with the
+    // unit under them; a short one keeps the unit beside
+    function test_aTallReadoutPutsItsUnitUnderCenteredDigits() {
+        const g = make(readoutC, { width: 180, height: 200, digits: 4, unit: "mph" })
+        const row = find(g, "digits"), unit = find(g, "unitBox")
+        tryVerify(() => row.width > 0, 2000, "laid out")
+        verify(g.tall, "tall")
+        verify(unit.y >= row.y + row.height, "the unit is under the digits")
+        fuzzyCompare(row.x + row.width / 2, g.width / 2, 0.5, "the digits centered across")
+        fuzzyCompare(unit.x + unit.width / 2, g.width / 2, 0.5, "the unit centered across")
+        const above = row.y - find(g, "readoutTitle").height
+        fuzzyCompare(above, g.height - (unit.y + unit.height), 0.5, "centered down")
+        verify(row.digitH > (g.width - unit.width - 14) / (4 * 0.62), "larger than beside the unit")
+        verify(row.x + row.width <= g.width + 0.5, "inside the card")
+    }
+    function test_aShortReadoutKeepsItsUnitBeside_data() {
+        return [{ tag: "wide and short", width: 260, height: 90 },
+                { tag: "short and too narrow for the digits", width: 14, height: 40 }]
+    }
+    function test_aShortReadoutKeepsItsUnitBeside(data) {
+        const g = make(readoutC, { digits: 4, unit: "mph", width: data.width, height: data.height })
+        const row = find(g, "digits"), unit = find(g, "unitBox")
+        tryVerify(() => row.width > 0, 2000, "laid out")
+        verify(!g.tall, "not tall")
+        fuzzyCompare(unit.y + unit.height, row.y + row.height, 0.5, "the unit ends with the digits")
+        fuzzyCompare(row.x, 0, 0.5, "the digits at the left")
+        fuzzyCompare(unit.x + unit.width, g.width, 0.5, "the unit at the right")
     }
 
     // ---- SegmentGauge
@@ -236,16 +312,23 @@ TestCase {
         compare(row.height, before.h, "no value again")
     }
 
-    // Eight digits on a narrow card end before the unit, inside the card
+    // Eight digits on a narrow card never overlap the unit and stay inside it,
+    // whichever layout the fonts' metrics pick (beside or stacked)
     function test_eightDigitsFitANarrowCard() {
         const g = make(readoutC, { digits: 8, width: 120, height: 64, unit: "rpm", dangerFrom: 85 })
         g.hasValue = true
         g.value = 12345678
         waitForRendering(g)
         const row = find(g, "digits")
-        verify(row.x + row.width <= find(g, "unitBox").x + 0.5,
-               "the digits end at " + (row.x + row.width) + ", the unit starts at " + find(g, "unitBox").x)
-        verify(find(g, "unitBox").x + find(g, "unitBox").width <= g.width + 0.5, "the unit ends inside")
+        const unit = find(g, "unitBox")
+        const apart = row.x + row.width <= unit.x + 0.5 || row.y + row.height <= unit.y + 0.5
+        verify(apart, (g.tall ? "stacked" : "beside") + ": the digits span x " + row.x + " to "
+                      + (row.x + row.width) + " and y " + row.y + " to " + (row.y + row.height)
+                      + ", the unit x " + unit.x + " to " + (unit.x + unit.width)
+                      + " and y " + unit.y + " to " + (unit.y + unit.height))
+        verify(row.x >= -0.5 && row.x + row.width <= g.width + 0.5, "the digits end inside")
+        verify(unit.x >= -0.5 && unit.x + unit.width <= g.width + 0.5, "the unit ends inside")
+        verify(unit.y + unit.height <= g.height + 0.5, "the unit ends above the card's bottom")
         verify(row.height >= 8, "and they are not too small to read: " + row.height)
     }
 
@@ -315,10 +398,10 @@ TestCase {
 
     // The digits take the zones' colors, in every theme
     function test_theDigitsTakeTheZonesColors_data() {
-        return Theme.themeNames.map(n => ({ tag: n, name: n }))
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
     }
     function test_theDigitsTakeTheZonesColors(data) {
-        Theme.theme = data.name
+        usePalette(data.name)
         const g = make(readoutC, { digits: 3 })
         g.hasValue = true
         g.value = 30
@@ -465,11 +548,40 @@ TestCase {
         fuzzyCompare(after.u, before.u, 0.5, "the unit's x")
     }
 
+    // ---- A number tile too short for its trace
+
+    // A phone's 2-wide readout: the label and the value, nothing under them
+    function test_aShortDigitalTileShowsItsLabelAndValueAlone() {
+        const g = make(digitalC, { width: 91, height: 60 })
+        g.hasValue = true
+        g.value = 50
+        g.label = "Coolant"
+        g.unit = "C"
+        waitForRendering(g)
+        verify(g.brief, "brief at 60")
+        const value = find(g, "readout")
+        const top = value.mapToItem(g, 0, 0).y
+        verify(top >= 14, "below the label: " + top)
+        verify(top + value.height <= g.height + 1, "inside the tile: " + (top + value.height))
+        verify(!find(g, "trace").visible, "no trace")
+        verify(!find(g, "footer").visible, "no footer")
+
+        const tall = make(digitalC, { width: 180, height: 122 })
+        waitForRendering(tall)
+        verify(!tall.brief, "a tile with the room keeps its trace")
+        verify(find(tall, "trace").visible, "the trace")
+        verify(find(tall, "footer").visible, "the footer")
+        const edge = make(digitalC, { width: 180, height: 84 })
+        verify(!edge.brief, "84 is enough")
+        edge.height = 83
+        verify(edge.brief, "83 isn't")
+    }
+
     // ---- Every new kind, at two sizes and in each theme
 
     function test_everyNewKindLoadsAtTwoSizesInEachTheme_data() {
         const rows = []
-        for (const n of Theme.themeNames)
+        for (const n of Theme.paletteNames)
             for (const k of [{ t: "segments", c: segmentsC }, { t: "seven-segment", c: readoutC },
                              { t: "sparkline", c: sparkC }])
                 for (const s of [{ w: 300, h: 110 }, { w: 120, h: 64 }])
@@ -477,7 +589,7 @@ TestCase {
         return rows
     }
     function test_everyNewKindLoadsAtTwoSizesInEachTheme(data) {
-        Theme.theme = data.theme
+        usePalette(data.theme)
         const g = make(data.c, { width: data.w, height: data.h })
         g.hasValue = true
         g.value = g.dangerFrom + 1   // in the danger zone: the mark's slot is in use

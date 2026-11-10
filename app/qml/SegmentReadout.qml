@@ -1,12 +1,13 @@
 // File/layer: app/qml/SegmentReadout.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 
 pragma ComponentBehavior: Bound
 
 // Digits of seven segments (ADR-0057 section 1), the unlit segments faint,
-// the unit beside. It has no scale to color, so it colors its digits by the
+// the unit beside, or under them and centered on a card where stacking draws
+// them larger. It has no scale to color, so it colors its digits by the
 // zones instead: lit in the gauge's accent, warm past warnFrom, danger past
 // dangerFrom (with the mark beside the unit). A value too long for `digits`
 // (or past 1e15, or infinite) shows dashes in every digit, never a wrong
@@ -69,21 +70,33 @@ GaugeBase {
     readonly property real unitPx: Math.max(11, Math.min(16, height * 0.16))
     readonly property real markPx: Math.max(12, Math.min(18, height * 0.2))
 
+    // Stacked, the digits have the card's width, less the unit's line in
+    // height; worth moving the unit when that draws them a fifth larger
+    readonly property real unitGap: 4
+    readonly property real roomBelow: height - title.height - 14
+    readonly property real besideH: Math.min(roomBelow, (width - unitBox.width - 14) / (count * 0.62))
+    readonly property real stackedH: Math.min(roomBelow - unitBox.height - unitGap,
+                                              (width - 14) / (count * 0.62))
+    readonly property bool tall: stackedH > Math.max(besideH, 1) * 1.2
+
     implicitHeight: 64
 
     Text {
         id: title
+        objectName: "readoutTitle"
+        Accessible.ignored: true
         anchors { left: parent.left; top: parent.top }
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        font.letterSpacing: 1.2
-        font.capitalization: Font.AllUppercase
         color: Theme.textDim
     }
     Text {
-        anchors { left: title.right; leftMargin: 10; baseline: title.baseline }
-        visible: !gauge.hasValue
+        objectName: "gaugeNote"
+        Accessible.ignored: true
+        anchors { left: title.right; leftMargin: 10; right: parent.right; baseline: title.baseline }
+        visible: !gauge.hasValue && width > 0
+        elide: Text.ElideRight
         text: gauge.note
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
@@ -92,11 +105,13 @@ GaugeBase {
     Row {
         id: row
         objectName: "digits"
-        anchors { left: parent.left; top: title.bottom; topMargin: 6 }
-        // The room left of the unit's box, divided among the digits (each a
-        // little over half its height wide), at most the card's own height
-        readonly property real digitH: Math.max(8, Math.min(gauge.height - title.height - 14,
-            (gauge.width - unitBox.width - 14) / (gauge.count * 0.62)))
+        // The room divided among the digits (each a little over half its
+        // height wide), at most the card's own height
+        readonly property real digitH: Math.max(8, gauge.tall ? gauge.stackedH : gauge.besideH)
+        x: gauge.tall ? (gauge.width - width) / 2 : 0
+        y: gauge.tall ? title.height + (gauge.height - title.height - digitH - gauge.unitGap
+                                        - unitBox.height) / 2
+                      : title.height + 6
         height: digitH
         spacing: digitH * 0.14
         opacity: gauge.stale ? 0.45 : 1.0
@@ -146,11 +161,13 @@ GaugeBase {
     Row {
         id: unitBox
         objectName: "unitBox"
-        anchors { right: parent.right; bottom: row.bottom }
+        x: gauge.tall ? (gauge.width - width) / 2 : gauge.width - width
+        y: gauge.tall ? row.y + row.height + gauge.unitGap : row.y + row.height - height
         spacing: 4
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             // Kept laid out without a value, so the digits keep their size
             opacity: gauge.hasValue ? 1 : 0
             text: gauge.unit

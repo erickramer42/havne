@@ -88,11 +88,10 @@ public:
         m_buf[m_len++] = '"';
     }
 
-    // A decimal that reads back as the same double: 15 significant
-    // digits when they do (most values, and the shortest form for any
-    // reading with a few decimals), else 16 or 17. JSON has no NaN or
-    // infinity, so those are null. The CLI never sets a locale, so the
-    // point is '.'.
+    // A decimal that reads back as the same double: 15 significant digits
+    // when they do (most values, and the shortest form for a reading with a
+    // few decimals), else 16 or 17. NaN and infinity are null (JSON has
+    // none). The CLI never sets a locale, so the point is '.'.
     void number(double v)
     {
         if (!std::isfinite(v)) {

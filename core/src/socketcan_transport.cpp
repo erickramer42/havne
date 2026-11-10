@@ -26,8 +26,9 @@ extern "C" {
 /* did is read only so a uds-generic session is refused for what it is,
  * a profile that requests, not for a key the scheme doesn't take */
 const char* const ecuio_socketcan_query_keys[] = {
-    "profile", "did",      "baud",     "filter", "txid", "poll",
-    "probe",   "identify", "diagnose", "pack",   "scan",   nullptr};
+    "profile", "did",     "baud",         "filter",   "txid",
+    "poll",    "probe",   "identify",     "diagnose", "pack",
+    "scan",    "session", "keepalive_ms", nullptr};
 }
 
 #if ECUIO_HAVE_SOCKETCAN
@@ -367,9 +368,12 @@ void request_worker(ecuio_socketcan_transport* t)
         }
 
         /* Until the next event: the echo's N_As, the engine's next wait or
-         * floor, ISO-TP's N_Cr; at most one quiet window */
-        int64_t next_us = ecuio_engine_next_event_us(&e, now);
-        const bool asking = next_us != INT64_MAX;
+         * floor, ISO-TP's N_Cr; at most one quiet window. A halted session
+         * sends nothing more, so what the engine calls due isn't one: it
+         * waits the window out, still asking, so no quiet read counts */
+        const int64_t in_us = ecuio_engine_next_event_us(&e, now);
+        const bool asking = in_us != INT64_MAX;
+        int64_t next_us = asking && !t->proof.halted ? now + in_us : INT64_MAX;
         if (pending.active) {
             next_us =
                 std::min(next_us, pending.at_us + ECUIO_ISOTP_N_AS_US + 1);
@@ -563,6 +567,18 @@ void request_worker(ecuio_socketcan_transport* t)
                                       published_diagnostics[c]);
         }
         ecuio_publish_timing(s, e, &iso, now_us(t), timing_at, false);
+    }
+    /* ADR-0060: each channel that entered the extended session goes back
+     * to the default one, a Single Frame; its reply is left unread */
+    for (uint32_t c = 0; t->fd >= 0 && c < e.chan_count; ++c) {
+        ecuio_request q;
+        isotp_can f;
+        *t->sender = isotp_tx{};
+        if (ecuio_engine_session_leave(&e, c, &q) &&
+            isotp_tx_start(*t->sender, t->tx_ids[c], q.bytes,
+                           static_cast<uint16_t>(q.len), now_us(t), &f)) {
+            (void)write_frame(t->fd, f, t->ext29[c]);
+        }
     }
     ecuio_publish_timing(s, e, &iso, now_us(t), timing_at, true);
 }
@@ -798,7 +814,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
         if (!requesting &&
             (p.is("txid") || p.is("poll") || p.is("probe") ||
              p.is("identify") || p.is("diagnose") || p.is("pack") ||
-             p.is("scan"))) {
+             p.is("scan") || p.is("session") || p.is("keepalive_ms"))) {
             ecuio_detail_set("?%.*s= belongs to a profile that asks an ECU, "
                              "and this one only listens",
                              static_cast<int>(p.key_len), p.key);

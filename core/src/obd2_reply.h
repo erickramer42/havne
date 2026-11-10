@@ -55,16 +55,14 @@ enum class ecuio_obd2_reply : uint8_t {
 };
 
 /* What reply (len bytes) holds. learned[pid] is a PID's data length as
- * this ECU sends it alone, where that's shorter than J1979's (0 = the
- * table's), and this keeps it: a reply no longer than its first PID's
- * length is that PID's alone (core can't see the request, only the
- * length), so it teaches the length when it's shorter than the table's
- * (the test car's PID 55: bank 1's byte, no bank 3), and the table's
- * length again when it isn't. A longer reply is split by those lengths:
- * each record's PID known and seen once, at most ECUIO_OBD2_MAX_RECORDS,
- * ending exactly at the reply's end; the records go to out (*n of
- * them). A reply that won't split is the first PID's alone when it's
- * no longer than the table's length (a longer one than this ECU sent
+ * this ECU sends it alone, where shorter than J1979's (0 = the table's).
+ * A reply no longer than its first PID's length is that PID's alone (core
+ * sees the length, not the request), so it teaches a shorter length (the
+ * test car's PID 55: bank 1's byte, no bank 3) and the table's again when
+ * it isn't. A longer reply is split by those lengths: each PID known and seen
+ * once, at most ECUIO_OBD2_MAX_RECORDS, ending exactly at the end; the
+ * records go to out (*n). A reply that won't split is the first PID's
+ * alone when within the table's length (a longer one than this ECU sent
  * before), else unsplit. */
 inline ecuio_obd2_reply ecuio_obd2_split(const uint8_t* reply, uint16_t len,
                                          uint8_t* learned,

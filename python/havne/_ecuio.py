@@ -139,6 +139,7 @@ ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE = 1
 ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED = 4
 ECUIO_EXPORT_PCAPNG = 3
 ECUIO_EXPORT_RAW = 1
+ECUIO_FOCUS_MIN_SWEEP_MAX_MS = 0xea60
 ECUIO_FRAME_DATA_MAX = 0x1000
 ECUIO_FRAME_FLAG_BITRATE_SWITCH = 8
 ECUIO_FRAME_FLAG_ERROR = 16
@@ -233,9 +234,18 @@ ECUIO_SESSION_INFO_PENDING_OFF = 8
 ECUIO_SESSION_INFO_PROFILE_LEN = 64
 ECUIO_SESSION_INFO_REPLAY_FAULTS = 32
 ECUIO_SESSION_INFO_REPLAY_LOOP = 4
+ECUIO_SESSION_INFO_REQUESTS = 64
 ECUIO_SESSION_INFO_TEXT_LEN = 80
 ECUIO_SESSION_INFO_VBATT = 1
 ECUIO_SESSION_INFO_VERSIONS = 2
+ECUIO_SESSION_LOSSES_MAX = 3
+ECUIO_SESSION_LOSS_WINDOW_MS = 0xea60
+ECUIO_SESSION_STATE_ABANDONED = 5
+ECUIO_SESSION_STATE_ENTERED = 2
+ECUIO_SESSION_STATE_ENTERING = 1
+ECUIO_SESSION_STATE_NOT_ASKED = 0
+ECUIO_SESSION_STATE_REFUSED = 3
+ECUIO_SESSION_STATE_UNANSWERED = 4
 ECUIO_SET_MAX_TABLE = 0x10000
 ECUIO_SIGNAL_FILE_FORMAT = 1
 ECUIO_SIGNAL_FILE_MAX_BYTES = 0x100000
@@ -260,6 +270,7 @@ ECUIO_SIM_REPLY_PENDING = 1
 ECUIO_SIM_REPLY_STALLED = 8
 ECUIO_SIM_YIELDED = 2
 ECUIO_SUPPORT_COMPLETE = 2
+ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
 ECUIO_SUPPORT_PACKED = 8
 ECUIO_SUPPORT_PROBED = 1
@@ -546,6 +557,7 @@ class ecuio_vin_info_t(Structure):
     pass
 
 # --- callbacks ---------------------------------------------------------
+ecuio_cancel_t = CFUNCTYPE(c_int, c_void_p)
 ecuio_check_finding_callback_t = CFUNCTYPE(c_int, POINTER(ecuio_check_finding_t), c_void_p)
 ecuio_frame_callback_t = CFUNCTYPE(None, POINTER(ecuio_frame_t), c_void_p)
 ecuio_frame_row_callback_t = CFUNCTYPE(c_int, c_void_p, POINTER(ecuio_frame_t), c_uint64)
@@ -651,7 +663,13 @@ ecuio_channel_support_t._fields_ = [
     ('scan_reserved', c_uint16),
     ('pids_supported', c_uint16),
     ('pids_through', c_uint16),
-    ('reserved', (c_uint32 * 4)),
+    ('session_asked', c_uint8),
+    ('session', c_uint8),
+    ('session_state', c_uint8),
+    ('session_nrc', c_uint8),
+    ('session_entries', c_uint16),
+    ('session_lost', c_uint16),
+    ('reserved', (c_uint32 * 2)),
 ]
 ecuio_check_finding_t._fields_ = [
     ('kind', c_uint32),
@@ -1150,6 +1168,8 @@ FUNCTIONS = {
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_export_estimate': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, POINTER(ecuio_export_estimate_t)]),  # recording.h
+    'ecuio_export_estimate_with': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, ecuio_cancel_t, c_void_p, POINTER(ecuio_export_estimate_t)]),  # recording.h
+    'ecuio_export_with': (c_int, [POINTER(ecuio_export_options_t), ecuio_cancel_t, c_void_p, POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_health_export': (c_int, [POINTER(ecuio_health_options_t), POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h
     'ecuio_identity_vin': (c_int, [POINTER(ecuio_channel_identity_t), c_char_p, c_uint32]),  # core.h
@@ -1230,6 +1250,7 @@ FUNCTIONS = {
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h
     'ecuio_session_send': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t)]),  # core.h
     'ecuio_session_set_focus': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32]),  # core.h
+    'ecuio_session_set_focus_with': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, c_uint32, c_uint32]),  # core.h
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h

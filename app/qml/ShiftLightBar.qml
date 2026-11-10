@@ -1,5 +1,6 @@
 // File/layer: app/qml/ShiftLightBar.qml | Qt6 Quick, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo; LEDs fill
+// Testing: QML: QmlTest.gauges, QmlTest.accessibility;
+//          manual smoke: DashboardPage under mock://demo; LEDs fill
 //          green -> amber -> red through the band and flash at the shift
 //          point (the 2nd/3rd-gear limiter holds show it for 5 s)
 
@@ -9,7 +10,7 @@ pragma ComponentBehavior: Bound
 
 // Motorsport shift-light strip driven by RPM. `from` is where the
 // first LED lights, `to` the shift point; at or past `to` every LED
-// flashes in Theme.info.
+// flashes, each in its stage's color.
 GaugeBase {
     id: gauge
 
@@ -48,14 +49,15 @@ GaugeBase {
                                            : Theme.gaugeDanger
                 readonly property bool lit: gauge.shiftNow ? gauge.flashOn
                                                            : gauge.fraction >= pos - 1e-6
-                readonly property color glow: gauge.shiftNow ? Theme.info : hue
+                // A lit light keeps its stage's color, flashing or not
+                readonly property color glow: hue
 
                 width: gauge.led; height: gauge.led
 
                 Rectangle {   // halo
                     anchors.centerIn: parent
                     width: parent.width * 1.5; height: width; radius: width / 2
-                    visible: slot.lit
+                    opacity: slot.lit ? 1 : 0
                     color: Qt.alpha(slot.glow, 0.16)
                 }
                 Rectangle {   // lens

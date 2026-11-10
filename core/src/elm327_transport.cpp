@@ -30,8 +30,9 @@
 
 /* The query keys attach reads, for create's check (internal.h). */
 extern "C" const char* const ecuio_elm327_query_keys[] = {
-    "baud",     "serial",   "filter",  "txid", "poll", "probe",
-    "identify", "diagnose", "pack",    "scan",    "profile", "did", nullptr};
+    "baud",    "serial",   "filter",   "txid",         "poll",
+    "probe",   "identify", "diagnose", "pack",         "scan",
+    "profile", "did",      "session",  "keepalive_ms", nullptr};
 
 namespace {
 
@@ -66,6 +67,43 @@ constexpr uint32_t ELM327_WAIT_SLICE_MS = 10;
  * is waited for this long, then the port closes either way. */
 constexpr uint32_t ELM327_MONITOR_CHECK_MS = 5000;
 constexpr uint32_t ELM327_MONITOR_DETACH_MS = 1000;
+
+/* At the close, 10 01's prompt (ADR-0060) is waited for this long. */
+constexpr uint32_t ELM327_LEAVE_MS = 500;
+
+/* ecuio_elm327_set_timeouts_ms's waits; 0 is the constant */
+std::atomic<uint32_t> g_prompt_timeout_ms{0};
+std::atomic<uint32_t> g_monitor_check_ms{0};
+
+uint32_t prompt_timeout_ms()
+{
+    const uint32_t ms = g_prompt_timeout_ms.load();
+    return (ms != 0) ? ms : ELM327_PROMPT_TIMEOUT_MS;
+}
+
+uint32_t monitor_check_ms()
+{
+    const uint32_t ms = g_monitor_check_ms.load();
+    return (ms != 0) ? ms : ELM327_MONITOR_CHECK_MS;
+}
+
+/* A wait in the words the log and the detail print: "5 s", or "300 ms"
+ * for a test's shortened one */
+struct wait_words {
+    char text[24];
+};
+
+wait_words words_of(uint32_t ms)
+{
+    wait_words w{};
+    if (ms % 1000 == 0) {
+        snprintf(w.text, sizeof(w.text), "%u s",
+                 static_cast<unsigned>(ms / 1000));
+    } else {
+        snprintf(w.text, sizeof(w.text), "%u ms", static_cast<unsigned>(ms));
+    }
+    return w;
+}
 
 /* A reply the count digit cut after its First Frame goes on on the bus:
  * the adapter sent the flow control, and the ECU sends the rest and
@@ -162,6 +200,9 @@ struct ecuio_elm327_transport {
     std::thread worker;
     elm327_log log; /* the wire log (elm327_log.h) */
     std::atomic<bool> stop_requested{false};
+    /* The close's 10 01 is under way (leave_sessions): a command waits
+     * for its prompt, ELM327_LEAVE_MS at most, whatever the stop */
+    bool leaving = false;
     /* A request's exchange, or a monitor, is under way: the wire log
      * takes its lines only with frame logging */
     bool in_ask = false;
@@ -340,20 +381,22 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
         if (line) {
             last = now;
         }
-        if (t->stop_requested.load()) {
+        if (t->stop_requested.load() && !t->leaving) {
             return elm327_io::stopped;
         }
         const auto quiet =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
                 .count();
-        if (quiet >= ELM327_PROMPT_TIMEOUT_MS) {
-            elm327_log_write(
-                t->log, "no line and no prompt for %u s (%s)",
-                static_cast<unsigned>(ELM327_PROMPT_TIMEOUT_MS / 1000), sent);
+        const uint32_t timeout =
+            (t->leaving && prompt_timeout_ms() > ELM327_LEAVE_MS)
+                ? ELM327_LEAVE_MS
+                : prompt_timeout_ms();
+        if (quiet >= timeout) {
+            elm327_log_write(t->log, "no line and no prompt for %s (%s)",
+                             words_of(timeout).text, sent);
             return elm327_io::silent;
         }
-        const uint32_t left =
-            ELM327_PROMPT_TIMEOUT_MS - static_cast<uint32_t>(quiet);
+        const uint32_t left = timeout - static_cast<uint32_t>(quiet);
         const int32_t n = t->port.ops->read(
             t->port.impl, t->rx_buf, sizeof(t->rx_buf),
             (left < ELM327_READ_SLICE_MS) ? left : ELM327_READ_SLICE_MS);
@@ -435,9 +478,9 @@ ecuio_status_t refuse(transport* t, const char* cmd, const setup_answer& a,
         ecuio_detail_set("%s: the port failed during the adapter's setup",
                          t->port_name);
     } else if (a.io == elm327_io::silent) {
-        ecuio_detail_set(
-            "the adapter on %s didn't answer %s within %u s", t->port_name,
-            sent, static_cast<unsigned>(ELM327_PROMPT_TIMEOUT_MS / 1000));
+        ecuio_detail_set("the adapter on %s didn't answer %s within %s",
+                         t->port_name, sent,
+                         words_of(prompt_timeout_ms()).text);
     } else if (a.first[0] == '\0') {
         ecuio_detail_set("the adapter on %s answered %s with nothing, not %s",
                          t->port_name, sent, wanted);
@@ -1032,14 +1075,13 @@ monitor_end listen(transport* t, link_health& h)
             heard_now = false;
             window = now;
         }
-        if (now - last_line >=
-            std::chrono::milliseconds(ELM327_MONITOR_CHECK_MS)) {
-            elm327_log_write(
-                t->log,
-                "no line for %u s: the monitor stops to "
-                "check the adapter",
-                static_cast<unsigned>(ELM327_MONITOR_CHECK_MS / 1000));
-            end.io = stop_monitor(t, ELM327_MONITOR_CHECK_MS, on_line);
+        const uint32_t check_ms = monitor_check_ms();
+        if (now - last_line >= std::chrono::milliseconds(check_ms)) {
+            elm327_log_write(t->log,
+                             "no line for %s: the monitor stops to "
+                             "check the adapter",
+                             words_of(check_ms).text);
+            end.io = stop_monitor(t, check_ms, on_line);
             if (reset) {
                 end.io = elm327_io::reset;
             } else if (end.io == elm327_io::prompt) {
@@ -1047,9 +1089,8 @@ monitor_end listen(transport* t, link_health& h)
                 elm327_log_write(t->log, "the adapter answered the stop: AT MA "
                                          "again");
             } else if (end.io == elm327_io::silent) {
-                elm327_log_write(
-                    t->log, "no prompt within %u s of the stop",
-                    static_cast<unsigned>(ELM327_MONITOR_CHECK_MS / 1000));
+                elm327_log_write(t->log, "no prompt within %s of the stop",
+                                 words_of(check_ms).text);
             }
             break;
         }
@@ -1127,6 +1168,37 @@ bool backoff_sleep(transport* t, uint32_t ms)
         std::this_thread::sleep_for(chunk);
     }
     return true;
+}
+
+/* At the close (ADR-0060): 10 01 to each channel that entered the
+ * extended session, so its ECU doesn't wait out S3 in it. The adapter
+ * takes no command before the last one's prompt, so each is waited for. */
+void leave_sessions(transport* t)
+{
+    if (!t->configured || !t->port_open) {
+        return;
+    }
+    t->leaving = true;
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        ecuio_request q;
+        if (!ecuio_engine_session_leave(&t->engine, c, &q)) {
+            continue;
+        }
+        char failed[ELM327_CMD_MAX];
+        char cmd[ELM327_CMD_MAX];
+        if (!set_header(t, t->tx_ids[c], failed).ok ||
+            elm327_format_request(q.bytes, q.len, 0, cmd, sizeof(cmd)) == 0) {
+            break;
+        }
+        elm327_log_write(t->log,
+                         "the close returns %X to the default session (10 01)",
+                         static_cast<unsigned>(t->rx_ids[c]));
+        if (command(t, cmd, false, [](const elm327_reader&) {}) !=
+            elm327_io::prompt) {
+            break;
+        }
+    }
+    t->leaving = false;
 }
 
 /* The worker (ADR-0026 section 3): the request engine driven as the J2534
@@ -1313,6 +1385,7 @@ void elm327_worker(transport* t)
             h.backoff_ms = link_backoff_next(h.backoff_ms);
         }
     }
+    leave_sessions(t);
     ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at, true);
 }
 
@@ -1539,4 +1612,18 @@ ecuio_elm327_transport_attach(ecuio_session_t* session, const char* uri,
 extern "C" void ecuio_elm327_set_port_opener(ecuio_elm327_port_open_t open)
 {
     g_opener.store(open);
+}
+
+extern "C" void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
+                                             uint32_t monitor_check_ms)
+{
+    g_prompt_timeout_ms.store(prompt_ms);
+    g_monitor_check_ms.store(monitor_check_ms);
+}
+
+extern "C" void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
+                                             uint32_t* check_ms)
+{
+    *prompt_ms = prompt_timeout_ms();
+    *check_ms = monitor_check_ms();
 }

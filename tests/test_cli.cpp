@@ -624,6 +624,101 @@ TEST(CliScanTest, UntilScannedWaitsForEveryChannelThatScans)
     EXPECT_TRUE(cli::scans_complete(s, 3)) << "the second has no scan";
 }
 
+// With ?session=03 the scan line names the session in force (ADR-0060);
+// without it, the line is as it was
+TEST(CliSessionTest, TheScanLineNamesTheSessionOnlyWhenOneWasAsked)
+{
+    ecuio_channel_support_t s{};
+    s.rx_id = 0x7E8;
+    s.scan_total = 2;
+    s.scan_done = 2;
+    s.scan_found = 1;
+    s.scan_refused = 1;
+    s.flags = ECUIO_SUPPORT_SCAN_COMPLETE;
+    const auto line = [](const ecuio_channel_support_t& r) {
+        char buf[512];
+        cli::Line l(buf, sizeof buf);
+        cli::scan_line(l, r);
+        EXPECT_TRUE(l.finish());
+        return std::string(l.data(), l.size());
+    };
+    const std::string plain =
+        "{\"type\":\"scan\",\"ecu\":\"0x7E8\",\"total\":2,"
+        "\"done\":2,\"found\":1,\"refused\":1,\"left\":0,"
+        "\"polled\":0,\"complete\":true";
+    EXPECT_EQ(line(s), plain + "}\n");
+    s.session_asked = 0x03;
+    s.session = 0x03;
+    EXPECT_EQ(line(s), plain + ",\"session\":\"03\"}\n");
+    s.session = 0x01;
+    EXPECT_EQ(line(s), plain + ",\"session\":\"01\"}\n");
+}
+
+TEST(CliSessionTest, ASessionLineSaysWhatTheModuleReadsIn)
+{
+    ecuio_channel_support_t s{};
+    s.rx_id = 0x7E9;
+    s.generation = 1;
+    s.session_asked = 0x03;
+    s.session = 0x01;
+    s.session_state = ECUIO_SESSION_STATE_REFUSED;
+    s.session_nrc = 0x12;
+    const auto line = [](const ecuio_channel_support_t& r) {
+        char buf[512];
+        cli::Line l(buf, sizeof buf);
+        cli::session_line(l, r);
+        EXPECT_TRUE(l.finish());
+        return std::string(l.data(), l.size());
+    };
+    EXPECT_EQ(line(s),
+              "{\"type\":\"session\",\"ecu\":\"0x7E9\",\"asked\":\"03\","
+              "\"session\":\"01\",\"state\":\"refused\",\"nrc\":\"12\","
+              "\"entries\":0,\"lost\":0}\n");
+    s.session = 0x03;
+    s.session_state = ECUIO_SESSION_STATE_ENTERED;
+    s.session_nrc = 0;
+    s.session_entries = 2;
+    s.session_lost = 1;
+    EXPECT_EQ(line(s),
+              "{\"type\":\"session\",\"ecu\":\"0x7E9\",\"asked\":\"03\","
+              "\"session\":\"03\",\"state\":\"entered\",\"nrc\":null,"
+              "\"entries\":2,\"lost\":1}\n");
+    for (unsigned st :
+         {ECUIO_SESSION_STATE_NOT_ASKED, ECUIO_SESSION_STATE_ENTERING,
+          ECUIO_SESSION_STATE_UNANSWERED, ECUIO_SESSION_STATE_ABANDONED}) {
+        s.session_state = static_cast<uint8_t>(st);
+        EXPECT_NE(line(s).find(cli::session_state_word(s.session_state)),
+                  std::string::npos);
+    }
+    EXPECT_STREQ(cli::session_state_word(6), "unknown");
+}
+
+// A line on each change of state, code or counts; none without a session
+// asked or before the channel's first report
+TEST(CliSessionTest, ALineIsWrittenOnEachChangeAndOnlyWithASession)
+{
+    ecuio_channel_support_t s{};
+    s.generation = 1;
+    cli::SessionSeen seen;
+    EXPECT_FALSE(cli::session_due(s, seen)) << "no session asked";
+    s.session_asked = 0x03;
+    s.generation = 0;
+    EXPECT_FALSE(cli::session_due(s, seen)) << "no report yet";
+    s.generation = 1;
+    s.session_state = ECUIO_SESSION_STATE_ENTERING;
+    EXPECT_TRUE(cli::session_due(s, seen));
+    EXPECT_FALSE(cli::session_due(s, seen)) << "nothing changed";
+    s.session_state = ECUIO_SESSION_STATE_ENTERED;
+    s.session_entries = 1;
+    EXPECT_TRUE(cli::session_due(s, seen));
+    s.generation = 5; /* a scan's progress alone */
+    EXPECT_FALSE(cli::session_due(s, seen));
+    s.session_lost = 1;
+    EXPECT_TRUE(cli::session_due(s, seen));
+    s.session_nrc = 0x7F;
+    EXPECT_TRUE(cli::session_due(s, seen));
+}
+
 /* devices' can line (ADR-0040 section 2): what a connect is judged on,
  * in ip link's words; the driver's modes null when the kernel doesn't
  * say; a vcan's state null and its modes empty */

@@ -1,8 +1,11 @@
 # File/layer: tests/notices_match.cmake | test-only, cmake -P
 # Testing: HARNESS (ctest NoticesTest.TheApkCarriesEachNoticeAsItsSource,
-#          NoticesTest.EachNoticeCarriesCoresData)
+#          NoticesTest.EachNoticeCarriesCoresData,
+#          NoticesTest.EachCitedLicenseIsInTheTree,
+#          NoticesTest.EachBundledFontIsNamed)
 #
-#   cmake -DROOT=<source dir> -DMODE=apk|core -P notices_match.cmake
+#   cmake -DROOT=<source dir> -DMODE=apk|core|licenses|fonts
+#         -P notices_match.cmake
 #
 # The APK's notices are committed copies under app/android/assets/havne/
 # (Qt's Android build takes app/android as its package source, so the
@@ -10,7 +13,12 @@
 # its source byte for byte, and that the folder holds nothing else.
 # core checks that each notice a download ships carries core's data
 # notices (core/THIRD_PARTY_NOTICES.txt from its first section on) word
-# for word, since every app links core.
+# for word, since every app links core. licenses checks that every
+# licenses/<name>.txt a notice cites is in packaging/notices/licenses or
+# packaging/windows/licenses, where the packages take them from. fonts
+# checks that each font family in app/fonts (a file's name before its
+# first '-') is named in both notices, spaces ignored, since the app
+# bundles every file there.
 
 # A script run with -P takes no policies from the project, so it names its
 # version itself: under CMake 3.x, if(IN_LIST) needs CMP0057 NEW.
@@ -81,6 +89,61 @@ elseif(MODE STREQUAL "core")
         message(FATAL_ERROR "without core/THIRD_PARTY_NOTICES.txt's sections word for word:\n  ${_list}")
     endif()
     message("each download's notice carries core's data notices")
+elseif(MODE STREQUAL "licenses")
+    set(_missing "")
+    set(_cited 0)
+    foreach(_notice packaging/notices/THIRD_PARTY_NOTICES.txt
+                    packaging/windows/THIRD_PARTY_NOTICES.txt)
+        file(READ "${ROOT}/${_notice}" _text)
+        string(REGEX MATCHALL "licenses[/\\\\][A-Za-z0-9._-]+\\.txt" _refs
+               "${_text}")
+        foreach(_ref IN LISTS _refs)
+            string(REGEX REPLACE "^licenses[/\\\\]" "" _name "${_ref}")
+            math(EXPR _cited "${_cited} + 1")
+            if(NOT EXISTS "${ROOT}/packaging/notices/licenses/${_name}" AND
+               NOT EXISTS "${ROOT}/packaging/windows/licenses/${_name}")
+                list(APPEND _missing "${_notice} cites ${_ref}")
+            endif()
+        endforeach()
+    endforeach()
+    if(_cited EQUAL 0)
+        message(FATAL_ERROR "no notice cites a licenses/ file: the pattern no longer matches them")
+    endif()
+    if(_missing)
+        list(REMOVE_DUPLICATES _missing)
+        string(JOIN "\n  " _list ${_missing})
+        message(FATAL_ERROR "cited, and in neither licenses folder:\n  ${_list}")
+    endif()
+    message("${_cited} citations, each a file in the tree")
+elseif(MODE STREQUAL "fonts")
+    file(GLOB _fonts RELATIVE "${ROOT}/app/fonts" "${ROOT}/app/fonts/*.ttf"
+                                                  "${ROOT}/app/fonts/*.otf")
+    if(NOT _fonts)
+        message(FATAL_ERROR "app/fonts holds no font: the check sees nothing")
+    endif()
+    set(_families "")
+    foreach(_font IN LISTS _fonts)
+        string(REGEX REPLACE "[-.].*$" "" _family "${_font}")
+        list(APPEND _families "${_family}")
+    endforeach()
+    list(REMOVE_DUPLICATES _families)
+    set(_missing "")
+    foreach(_notice packaging/notices/THIRD_PARTY_NOTICES.txt
+                    packaging/windows/THIRD_PARTY_NOTICES.txt)
+        file(READ "${ROOT}/${_notice}" _text)
+        string(REPLACE " " "" _text "${_text}")
+        foreach(_family IN LISTS _families)
+            string(FIND "${_text}" "${_family}" _found)
+            if(_found LESS 0)
+                list(APPEND _missing "${_notice} doesn't name ${_family}")
+            endif()
+        endforeach()
+    endforeach()
+    if(_missing)
+        string(JOIN "\n  " _list ${_missing})
+        message(FATAL_ERROR "app/fonts' families need a notice:\n  ${_list}")
+    endif()
+    message("app/fonts: ${_families}, each named in both notices")
 else()
-    message(FATAL_ERROR "MODE is apk or core")
+    message(FATAL_ERROR "MODE is apk, core, licenses or fonts")
 endif()

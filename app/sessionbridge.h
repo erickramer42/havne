@@ -409,7 +409,7 @@ public:
                       const ecuio_signal_file_t* file = nullptr);
     // A def's fixed facts beyond the def itself, the same for a row and
     // for SessionBridge::profileSignals: its ref (RefRole), whether it
-    // is an ENUM, and its decoded range in the def's unit, NaN for none
+    // is an enum, and its decoded range in the def's unit, NaN for none
     struct DefFacts {
         QString ref;
         double rangeLow = 0.0;
@@ -495,27 +495,22 @@ public:
     Q_INVOKABLE QStringList unplottedNames() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
 
-    // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
-    // history: { id, row, name, unit, decimals, value,
-    // samples: [ts, val, ts, val, ...] }. windowMs > 0 keeps the samples
-    // of the last windowMs before the newest plotted one; columns > 0
-    // keeps, in each of that many equal slices of the window, its lowest
-    // and highest sample (the newest sample always), so a long window
-    // hands the chart at most what it can draw.
-    // `row` is the signal's model row, so the trace color can match the
-    // list row's swatch and stays put when other signals are unsubscribed.
-    // Samples are flattened doubles, oldest-first. Called by the QML
-    // Canvas once per valuesUpdated batch (~10 Hz). One call per repaint
-    // instead of per-row role lookups keeps the QML side free of
-    // role-number hacks.
+    // Strip-chart pull API: one map per subscribed signal with history,
+    // { id, row, name, unit, decimals, value, samples: [ts, val, ...] },
+    // samples flattened doubles, oldest first. windowMs > 0 keeps the last
+    // windowMs before the newest plotted sample; columns > 0 keeps each of
+    // that many equal slices' lowest and highest (and always the newest),
+    // so a long window hands the chart at most what it can draw. `row` is
+    // the model row, so the trace's color matches the list's swatch and
+    // stays put as others are unsubscribed. The QML Canvas calls it once
+    // per valuesUpdated batch (~10 Hz), one call per repaint rather than
+    // role lookups per row.
     Q_INVOKABLE QVariantList chartData(qint64 windowMs = 0, int columns = 0) const;
 
-    /* Periodic age refresh: ageMs is computed lazily from
-     * the internal clock, but dataChanged only fires on updateValues:
-     * so a stalled signal's row never re-evaluates and never dims, the
-     * exact row dimming exists for. Emits dataChanged over ALL rows for
-     * AgeMsRole ONLY: views re-query data(), which recomputes elapsed
-     * time. No value/hasValue churn, no reset. */
+    /* Periodic age refresh: ageMs is computed from the clock at data(), but
+     * dataChanged fires only on updateValues, so a stalled row would never
+     * dim. Emits dataChanged over every row for AgeMsRole alone (no value
+     * or hasValue churn, no reset). */
     void refreshAges();
 
 signals:
@@ -707,10 +702,11 @@ class SessionBridge : public QObject
     Q_PROPERTY(qint64 logBytes READ logBytes NOTIFY logProgressChanged)
     // What the Dashboard's header says about the log: "Log not started:
     // <why>" after a refusal, "Log ended: <why>" after an end the user
-    // didn't ask for (a failed write, the session's end), "" otherwise. A
-    // log that starts clears it, as does clearLogNotice (Dismiss). A
-    // property, not a signal: Start log sits in Main's header, on every
-    // page, so the Dashboard may not exist when the refusal lands
+    // didn't ask for (a failed write), "Log ended" after the user's
+    // Disconnect, "" otherwise (Stop log). A log that starts clears it, as
+    // does clearLogNotice (Dismiss). A property, not a signal: Start log
+    // sits in Main's header, on every page, so the Dashboard may not exist
+    // when the refusal lands
     Q_PROPERTY(QString logNotice READ logNotice NOTIFY logNoticeChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
@@ -720,6 +716,11 @@ class SessionBridge : public QObject
     // Applies to what the UI shows at once, connected or not; recordings
     // keep the decoded values. Main.qml persists it.
     Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
+    // A log's minimum time between sweeps (ADR-0056 section 4), ms, 0 off;
+    // Settings' Advanced page and Main.qml, which keeps it
+    Q_PROPERTY(int minSweepMs READ minSweepMs WRITE setMinSweepMs NOTIFY
+                   minSweepMsChanged)
+    Q_PROPERTY(QVariantList minSweepChoices READ minSweepChoices CONSTANT)
     // What each channel's ECU has reported of its diagnostics (ADR-0037),
     // one map per ECU (diagnosticsEntry), for the Diagnostics page:
     // refreshed on the tick as a read settles each item, and when the
@@ -856,22 +857,21 @@ public:
     Q_INVOKABLE QVariantList decodeProfiles();
     QVariantMap gaugeSignals() const;
     // The signals a session on uri would show, without connecting: the
-    // profile the URI selects (profileOfUri), its registered set, and
-    // one map per def as the model's rows give it: { id, ref, name,
-    // unit, decimals, isText, isEnum, group, rangeLow, rangeHigh }, unit,
-    // decimals and range in the current unit system, rangeLow and
-    // rangeHigh NaN for no range (RangeLowRole); and decodedUnit,
-    // decodedLow, decodedHigh, the def's own unit and range as core
-    // decodes them in any unit system (what a dashboard cell stores,
-    // ADR-0057 section 6), NaN for no range. [] when profileOfUri
-    // gives "" (a scheme or profile= core refuses), for an unknown
-    // profile, and for a profile whose set is a session's own
-    // (uds-generic) or none (raw); a URI core refuses for another
-    // reason (an unknown key, too many segments) still gives its
-    // profile's rows. A replay's own
-    // signals.json is registered only when it connects, so its profile
-    // gives [] before then and its rows after. A snapshot: call it
-    // again on unitSystemChanged, a signal file's change and a connect.
+    // profile the URI selects (profileOfUri), its registered set, and one
+    // map per def as the model's rows give it: { id, ref, name, unit,
+    // decimals, isText, isEnum, group, rangeLow, rangeHigh }, unit,
+    // decimals and range in the current unit system, the range NaN for
+    // none (RangeLowRole); and decodedUnit, decodedLow, decodedHigh, the
+    // def's own unit and range as core decodes them in any unit system
+    // (what a dashboard cell stores, ADR-0057 section 6), NaN for none.
+    // [] when profileOfUri gives "" (a scheme or profile= core refuses),
+    // for an unknown profile, and for a profile whose set is a session's
+    // own (uds-generic) or none (raw); a URI core refuses for another
+    // reason (an unknown key, too many segments) still gives its profile's
+    // rows. A replay's own signals.json is registered only when it
+    // connects, so its profile gives [] before then and its rows after. A
+    // snapshot: call it again on unitSystemChanged, a signal file's change
+    // and a connect.
     Q_INVOKABLE QVariantList profileSignals(const QString& uri) const;
     // The profile a session on uri decodes through, as core picks it at
     // ecuio_session_create: the last profile= (1 to
@@ -909,10 +909,17 @@ public:
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code -> state string; static so tests need no session */
-    static QString uriLabelFor(const QString& uri);  /* a direct-load DLL or replay path cut to its last name, a Bluetooth address to its last two octets */
+    /* A direct-load DLL or replay path cut to its last name, a Bluetooth address to its last two octets */
+    Q_INVOKABLE static QString uriLabelFor(const QString& uri);
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
+    // A module's session change (ADR-0060): "ECU 0x7E8: reading in the
+    // extended session (50 03)" and the like; "" for none to tell
+    static QString channelSessionText(const ecuio_channel_support_t& support);
+    // At Disconnect, for a module that entered the extended session; ""
+    // otherwise
+    static QString sessionReturnedText(const ecuio_channel_support_t& support);
     // Live's "Refused: <name> (7F <service> <code>)"
     static QString refusalText(uint8_t service, uint8_t nrc);
     // The negative reply alone: "7F 22 31"
@@ -962,13 +969,12 @@ public:
         emit vehicleIdentified();
     }
 
-    // J2534 device discovery (Windows; empty list elsewhere). One map per
-    // installed Pass-Thru interface driver: { vendorName, dllPath,
-    // architecture }: all QString. Registry read, no session attached; bounded at
-    // ECUIO_J2534_MAX_VENDORS by core. Safe to call synchronously from
-    // QML (few reg keys, no I/O beyond the registry). UI sees display
-    // values only (rule 2): dllPath is exposed because it is the user's
-    // route to a direct-load URI, not for parsing.
+    // J2534 device discovery (Windows; empty elsewhere): one map per
+    // installed Pass-Thru driver, { vendorName, dllPath, architecture } as
+    // QStrings, at most ECUIO_J2534_MAX_VENDORS (core's bound). A registry
+    // read with no session and no other I/O, so safe to call synchronously
+    // from QML. dllPath is a display value (rule 2), the user's route to a
+    // direct-load URI, not for parsing.
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
     // The machine's serial ports, for elm327:// (ADR-0026 section 7): one map
     // per port, { name, device } as QStrings, in core's order. name is
@@ -988,13 +994,13 @@ public:
     // to open or replay by a tap: one map per folder holding a signals.csv
     // or a frames.csv (what the viewer opens; a CSV import holds values
     // alone), { title, uri, folder, source, profile } as QStrings and
-    // frames, true when it holds a frames.csv (what Replay plays). title is the
-    // folder's date and label ("2026-10-28 14:30:12 · Daily driver"), uri
-    // its replay:// URI (replayUriFor), folder its path, source the recorded URI as the pill shows it
-    // (uriLabelFor), "" when events.log doesn't name one. Reads the
-    // earlier product name's folder too, when it's another (ADR-0001's
-    // appendix of 2026-10-28), newest first across both. A directory
-    // listing and one short read per folder.
+    // frames, true when it holds a frames.csv (what Replay plays). title is
+    // the folder's date and label ("2026-10-28 14:30:12 · Daily driver"),
+    // uri its replay:// URI (replayUriFor), folder its path, source the
+    // recorded URI as the pill shows it (uriLabelFor), "" when events.log
+    // doesn't name one. Reads the earlier product name's folder too, when
+    // it's another (ADR-0001's appendix of 2026-10-28), newest first across
+    // both. A directory listing and one short read per folder.
     Q_INVOKABLE QVariantList recentRecordings(int limit) const;
     // One recording's row, as recentRecordings gives it, for a folder
     // that holds a signals.csv or a frames.csv (what the viewer opens);
@@ -1070,6 +1076,9 @@ public:
     static QString folderLabel(const QString& label);
     int unitSystem() const { return static_cast<int>(m_signalModel->unitSystem()); }
     void setUnitSystem(int units);   // anything but 0 or 1 is ignored
+    int minSweepMs() const { return m_minSweepMs; }
+    void setMinSweepMs(int ms); // anything but a choice is ignored
+    QVariantList minSweepChoices() const;
     // A quantity in a decoded unit, as the current unit system shows it:
     // the Dashboard's scale ends and zones are written once, in decoded
     // units, and converted here rather than in QML (rule 2).
@@ -1128,14 +1137,13 @@ public:
     // "unsupported": the ECU's bitmaps leave it out, so it wasn't asked);
     // monitors, [{id, name, complete, cycleEnabled, cycleComplete}], the
     // last two this drive cycle's (PID 41) once cycle is "answered";
-    // freeze, {outcome,
-    // nrc, stored, code, values: [{name, value, unit, decimals}]}, each
-    // value through the obd2 def that decoded it and the unit system;
-    // clearing, and the last clear's clear ("none", "cleared", "refused",
-    // "unanswered", "engineRunning", "noEngineSpeed", "reportChanged"),
-    // clearNrc ("7F 04 22" when refused, "7F 01 12" when the engine speed
-    // was) and clearRpm.
-    // Static, so test_bridge pins it without a session.
+    // freeze, {outcome, nrc, stored, code, values: [{name, value, unit,
+    // decimals}]}, each value through the obd2 def that decoded it and the
+    // unit system; clearing, and the last clear's clear ("none", "cleared",
+    // "refused", "unanswered", "engineRunning", "noEngineSpeed",
+    // "reportChanged"), clearNrc ("7F 04 22" when refused, "7F 01 12" when
+    // the engine speed was) and clearRpm. Static, so test_bridge pins it
+    // without a session.
     static QVariantMap diagnosticsEntry(const ecuio_channel_diagnostics_t& d,
                                         uint32_t units);
     // Test seam: where recordings go instead of Documents/Havne/recordings
@@ -1175,6 +1183,12 @@ public:
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
+    // Test seam: core can't give a recorder's folder whole, so the bridge
+    // reads it as empty
+    void failRecorderFolderForTesting(bool on)
+    {
+        m_failRecorderFolderForTesting = on;
+    }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -1224,6 +1238,7 @@ signals:
     // The folder is absolute, as recordingRow takes it
     void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
+    void minSweepMsChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
     void refusedUnnamedChanged();
@@ -1270,8 +1285,10 @@ private:
     void adoptRecorder(ecuio_recorder_t* recorder);
     // Its last notes, then closed with why; "" with nothing open. A log
     // ends with it: the whole set asked again while the session runs,
-    // its readout's last count, logStopped (byUser: Stop log's)
-    void stopRecording(const QString& why, bool byUser = false);
+    // its readout's last count, logStopped (byUser: Stop log's). An end
+    // not byUser is told on the Dashboard: told, or "Log ended: <why>"
+    void stopRecording(const QString& why, bool byUser = false,
+                       const QString& told = QString());
     // The log's folder size, its files' sum (a handful, stat'd once a
     // second on the GUI thread)
     void countLogBytes();
@@ -1314,6 +1331,7 @@ private:
     // test seam's addition to it
     uint64_t m_sleptUs = 0;
     uint64_t m_sleptAddedForTesting = 0;
+    bool m_failRecorderFolderForTesting = false;
     uint64_t sleptUs() const
     {
         return ecuio_clock_slept_us() + m_sleptAddedForTesting;
@@ -1383,9 +1401,8 @@ private:
     std::atomic<bool> m_dropNotifyPending{false};   // at most one queued drop notification
     static constexpr int MaxInFlightFrames = 1000; // queue backlog bound
 
-    // Async connect support. m_connecting is written ONLY on the GUI
-    // thread (in the async entry and the queued completion), so a plain
-    // bool suffices despite the worker's existence.
+    // Async connect support. m_connecting is written only on the GUI thread
+    // (in the async entry and the queued completion), so a plain bool will do.
     QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
     // A replay:// URI selecting the profile its recording names (or that
     // copy's own name, rec.<16 hex>), with the recording's signals.json
@@ -1400,7 +1417,7 @@ private:
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
     bool m_connecting = false;
-    // The created, registered, NOT started session the connect thread
+    // The created, registered, not started session the connect thread
     // hands back. The queued completion takes it; if the bridge dies
     // first, the completion is dropped and the destructor destroys it.
     // Atomic only for the test seam: both owners read it after joining
@@ -1421,6 +1438,15 @@ private:
     // Each channel's last report, for the signals their ECUs refused
     ecuio_channel_support_t m_supportReports[ECUIO_SESSION_INFO_MAX_CHANNELS] =
         {};
+    // What each channel's session line last said (cli::session_due's rule)
+    struct SessionWritten {
+        uint8_t state = 0;
+        uint8_t nrc = 0;
+        uint16_t entries = 0;
+        uint16_t lost = 0;
+        bool written = false;
+    };
+    SessionWritten m_sessionWritten[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     QString m_refusedUnnamed;
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
@@ -1474,6 +1500,7 @@ private:
     qint64 m_logElapsedMs = 0;         // the last log's, once it ends
     qint64 m_logBytes = 0;             // countLogBytes' last sum
     QString m_logNotice;               // the header's line about the log
+    int m_minSweepMs = 0;              // read at each Start log
     QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder

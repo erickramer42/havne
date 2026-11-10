@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone, QmlTest.settings (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -9,9 +9,12 @@ import QtQuick.Controls
 AbstractButton {
     id: seg
     property bool selected: false
+    // A page on a phone sets Theme.touchTarget
+    property real tapHeight: 30
+    property alias wrapMode: segLabel.wrapMode
 
     implicitWidth: segLabel.implicitWidth + 24
-    implicitHeight: 30
+    implicitHeight: seg.tapHeight
     hoverEnabled: true
     Accessible.checkable: true
     Accessible.checked: seg.selected
@@ -27,7 +30,7 @@ AbstractButton {
     contentItem: Text {
         id: segLabel
         text: seg.text
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         color: seg.selected ? Theme.text : Theme.textDim
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

@@ -246,7 +246,9 @@ TEST_F(J2534ConnectTest, InfoDescribesTheAdapter)
         EXPECT_EQ(info.rx_ids[i], 0u);
         EXPECT_EQ(info.tx_ids[i], 0u);
     }
-    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS);
+    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT |
+                              ECUIO_SESSION_INFO_VERSIONS |
+                              ECUIO_SESSION_INFO_REQUESTS);
     EXPECT_EQ(info.vbatt_mv, 13800u);
     EXPECT_STREQ(info.firmware_version, "fake-fw 1.0");
     EXPECT_STREQ(info.dll_version, "fake_j2534 0.3");
@@ -282,7 +284,7 @@ TEST_F(J2534ConnectTest, RefusedReadingsLeaveTheirFlagsClear)
     ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session), ECUIO_OK);
     EXPECT_STREQ(ecuio_last_error_detail(), "");
     const ecuio_session_info_t info = info_of_session();
-    EXPECT_EQ(info.flags, 0u);
+    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_REQUESTS);
     EXPECT_EQ(info.vbatt_mv, 0u);
     EXPECT_STREQ(info.firmware_version, "");
     EXPECT_STREQ(info.dll_version, "");
@@ -421,7 +423,8 @@ TEST_F(J2534ConnectTest, ADllWithoutReadVersionReportsNoVersions)
               ECUIO_OK);
     ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
     const ecuio_session_info_t info = info_of_session();
-    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT);
+    EXPECT_EQ(info.flags,
+              ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_REQUESTS);
     EXPECT_STREQ(info.firmware_version, "");
     EXPECT_STREQ(info.api_version, "");
 }

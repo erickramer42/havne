@@ -130,7 +130,7 @@ ColumnLayout {
         maximumLineCount: 2
         elide: Text.ElideRight
         color: Theme.textDim
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         text: preview.timeColumn === null ? "" : preview.timeColumn.samples.join("  ")
     }
     RowLayout {
@@ -140,7 +140,7 @@ ColumnLayout {
         Label {
             text: qsTr("Unit")
             color: Theme.textDim
-            font.pixelSize: 13
+            font.pixelSize: Theme.fontCaption
         }
         Rectangle {
             implicitWidth: unitSwitch.implicitWidth + 4
@@ -172,7 +172,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: preview.guess === null ? ""
               : preview.guess.timeUnit === "iso8601" ? qsTr("Its times are dates with a UTC offset")
               : preview.guess.unitKnown ? qsTr("Its unit: %1").arg(preview.guess.timeUnit)
@@ -184,7 +184,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.danger
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: preview.waiting
     }
 
@@ -215,7 +215,7 @@ ColumnLayout {
                 anchors.margins: 8
                 spacing: 4
 
-                CheckBox {
+                ThemedCheckBox {
                     id: includeBox
                     objectName: "include"
                     Layout.fillWidth: true
@@ -233,7 +233,6 @@ ColumnLayout {
                         wrapMode: Text.WrapAnywhere
                         verticalAlignment: Text.AlignVCenter
                         leftPadding: includeBox.indicator.width + includeBox.spacing
-                        opacity: includeBox.enabled ? 1 : 0.6
                     }
                 }
                 // Why a column was left out, and whether it can be put back
@@ -245,7 +244,7 @@ ColumnLayout {
                     maximumLineCount: 2
                     elide: Text.ElideRight
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     text: row.col.canPutBack ? qsTr("Left out: %1. Check it to put it back.").arg(row.col.why)
                                              : qsTr("Left out: %1").arg(row.col.why)
                 }
@@ -253,7 +252,7 @@ ColumnLayout {
                     visible: row.on
                     Layout.fillWidth: true
                     spacing: Theme.spacing
-                    TextField {
+                    ThemedTextField {
                         objectName: "name"
                         Layout.fillWidth: true
                         Layout.preferredWidth: 0   // the row's width, not its text's
@@ -262,7 +261,7 @@ ColumnLayout {
                         text: row.col.name
                         onTextChanged: row.col.name = text
                     }
-                    TextField {
+                    ThemedTextField {
                         objectName: "unit"
                         Layout.preferredWidth: 72
                         Layout.preferredHeight: Theme.touchTarget
@@ -292,7 +291,7 @@ ColumnLayout {
                     maximumLineCount: 2
                     elide: Text.ElideRight
                     color: Theme.textDim
-                    font.pixelSize: 12
+                    font.pixelSize: Theme.fontCaption
                     font.family: Theme.monoFamily
                     text: row.col.samples.join("  ")
                 }
@@ -315,7 +314,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        font.pixelSize: 12
+        font.pixelSize: Theme.fontCaption
         text: preview.guess === null ? "" : preview.guess.notes.join("\n")
     }
 
@@ -324,7 +323,7 @@ ColumnLayout {
         visible: preview.guess !== null
         Layout.fillWidth: true
         spacing: Theme.spacing
-        TextField {
+        ThemedTextField {
             id: saveName
             objectName: "saveMapName"
             Layout.fillWidth: true
@@ -348,7 +347,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: preview.saveFailed ? Theme.danger : Theme.success
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: preview.saveNote
     }
 }

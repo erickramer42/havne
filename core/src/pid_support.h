@@ -66,11 +66,10 @@ inline bool ecuio_pid_marked_unsupported(const ecuio_channel_support_t& s,
     return (s.pid_bitmap[(pid - 1u) / 8u] & (0x80u >> ((pid - 1u) % 8u))) == 0;
 }
 
-/* The set's Service 01 defs whose PID the report of the channel their
- * message ID names marks unsupported; a report with nothing learned
- * (generation 0) judges nothing, nor does a def no report names. Fills
- * ids with up to capacity def IDs in the set's order and returns how
- * many there are. */
+/* The set's Service 01 defs whose PID their channel's report marks
+ * unsupported (generation 0 judges nothing, nor does a def no report
+ * names). Fills ids with up to capacity def IDs in set order and returns
+ * how many there are. */
 inline uint32_t ecuio_unsupported_signals(
     const ecuio_signal_set_t& set, const ecuio_channel_support_t* reports,
     uint32_t report_count, uint16_t* ids, uint32_t capacity)

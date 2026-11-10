@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QKeyEvent>
 #include <QObject>
 #include <QQmlEngine>
 #include <QQmlExtensionPlugin>
@@ -14,6 +15,7 @@
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QUrl>
+#include <QWindow>
 #include <QtQuickTest>
 
 #include "packed_plugin.h"
@@ -30,6 +32,7 @@
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "sessionbridge.h"
+#include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
@@ -154,6 +157,28 @@ public:
         qt_handleMouseEvent(window, at, global, Qt::NoButton, Qt::LeftButton,
                             QEvent::MouseButtonRelease, Qt::NoModifier,
                             stampMs + 1);
+    }
+
+    // The system's Back key, into a window as Android sends it (a keyClick
+    // goes to the test's window); true when something in QML took it
+    Q_INVOKABLE bool pressBack(QObject* window, bool autoRepeat = false)
+    {
+        auto* target = qobject_cast<QWindow*>(window);
+        if (!target)
+            return false;
+        QKeyEvent press(QEvent::KeyPress, Qt::Key_Back, Qt::NoModifier,
+                        QString(), autoRepeat);
+        QCoreApplication::sendEvent(target, &press);
+        QKeyEvent release(QEvent::KeyRelease, Qt::Key_Back, Qt::NoModifier);
+        QCoreApplication::sendEvent(target, &release);
+        return press.isAccepted();
+    }
+
+    // The running recording's next write fails, as on a full disk
+    Q_INVOKABLE void failRecordingWrites()
+    {
+        ecuio_recorder_test_fail_writes(
+            BridgeSingleton::instance->recorderForTesting());
     }
 
     // A file of text in a scratch folder of the harness's own, as a URL a
