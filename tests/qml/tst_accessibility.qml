@@ -35,11 +35,12 @@ TestCase {
         return kinds.map(k => ({ tag: k.tag, kind: k }))
     }
 
-    // A gauge with zones and a peak shown, at its range's start
+    // A gauge with zones and a peak shown, at its range's start. No easing,
+    // so the drawn position is the value as soon as it is set
     function gaugeOf(kind) {
         const g = createTemporaryObject(kind.c, testCase.parent, {
             label: "Test", unit: "u", from: 0, to: 100,
-            warnFrom: 60, dangerFrom: 80, showPeak: true })
+            warnFrom: 60, dangerFrom: 80, showPeak: true, smoothingMs: 0 })
         verify(g, kind.tag + " loads")
         g.hasValue = true
         g.value = 0
@@ -67,16 +68,30 @@ TestCase {
         return out
     }
 
+    // What a kind's timers do, done at once: the trace's sample and the
+    // shift lights' flash
+    function tick(g) {
+        if (typeof g.takeSample === "function")
+            g.takeSample()
+        const sampler = findChild(g, "sampler")
+        if (sampler)
+            sampler.triggered()
+        if (g.shiftNow)
+            g.flashOn = !g.flashOn
+    }
+
     function test_aValueSweepShowsHidesMakesAndDestroysNothing_data() { return rowsOfKinds() }
     function test_aValueSweepShowsHidesMakesAndDestroysNothing(data) {
         const g = gaugeOf(data.kind)
-        wait(20)
+        wait(0)
         const items = itemsOf(g, [])
         const shown = items.map(it => it.visible)
         verify(items.length > 0, "the gauge has parts")
         for (const v of sweep) {
             g.value = v
-            wait(10)
+            tick(g)
+            wait(0)
+            compare(g.fraction, g.fractionOf(v), "drawn at " + v)
             const now = itemsOf(g, [])
             compare(now.length, items.length, "the items at " + v)
             for (let i = 0; i < items.length; ++i) {

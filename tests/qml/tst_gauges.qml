@@ -426,4 +426,23 @@ TestCase {
         g.note = "not in profile"
         compare(g.Accessible.name, "Oil: not in profile")
     }
+
+    // The Number's footer: MIN the lowest value held, MAX the highest, a
+    // dash before the first value and after Reset peaks
+    function test_theNumbersFooterHoldsItsLowAndPeak() {
+        const g = createTemporaryObject(digitalC, testCase.parent)
+        const low = find(g, "lowHold")
+        const peak = find(g, "peakHold")
+        compare(low.text, "MIN  \u2014", "no value yet")
+        compare(peak.text, "MAX  \u2014", "no value yet")
+        g.value = 30
+        g.hasValue = true
+        g.value = 70
+        g.value = 10
+        compare(low.text, "MIN  " + g.format(10))
+        compare(peak.text, "MAX  " + g.format(70))
+        g.resetPeaks()
+        compare(low.text, "MIN  \u2014", "after Reset peaks")
+        compare(peak.text, "MAX  \u2014", "after Reset peaks")
+    }
 }

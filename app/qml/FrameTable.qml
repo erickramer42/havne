@@ -113,8 +113,6 @@ Rectangle {
         // Bound only while shown: each live frame inserts a row, and a hidden
         // table would make and destroy a delegate for it on every page
         model: table.visible ? table.frames : null
-        // The rows' labels stay out of the accessibility tree: on Android each
-        // row's coming and going rebuilds a node on the main thread
         Accessible.name: qsTr("Frames")
 
         // Oldest-first reads as a tail: new rows land at the
@@ -195,6 +193,9 @@ Rectangle {
                 // misspelled role is undefined at runtime, not a
                 // build error: the column would render empty and
                 // throw per delegate.
+                // The labels stay out of the accessibility tree: on
+                // Android each row's coming and going rebuilds a node
+                // on the main thread
                 Label {
                     // Session-relative us, shown as s.mmm
                     text: (frameRow.model.timestampUs / 1e6).toFixed(3)
