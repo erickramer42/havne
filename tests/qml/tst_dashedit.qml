@@ -1729,9 +1729,16 @@ TestCase {
         const where = "Reset at " + reset.x + "," + reset.y + ", Remove page ends at "
                       + (remove.x + remove.width) + "," + (remove.y + remove.height) + " in a row of "
                       + row.width
-        const shown = Array.from(row.children).filter(c => c.visible)
+        // Reset peaks follows it when the tool row has no room, which at a
+        // phone's width depends on the font's
+        const resetPeaks = find(page, "moreResetPeaks")
+        const shown = Array.from(row.children).filter(c => c.visible && c !== resetPeaks)
         compare(shown[shown.length - 1], reset, "the last of the row")
         compare(shown[shown.length - 2].objectName, "moreResetGap", "after a gap")
+        if (resetPeaks.visible) {
+            const all = Array.from(row.children).filter(c => c.visible)
+            compare(all[all.length - 1], resetPeaks, "Reset peaks after Reset")
+        }
         if (page.width >= 560) {
             fuzzyCompare(reset.x + reset.width, row.width, 0.5, "at the row's end: " + where)
             compare(Math.round(reset.y), Math.round(remove.y), "on the controls' row: " + where)
