@@ -1,5 +1,5 @@
 // File/layer: app/qml/SparkGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 import QtQuick.Shapes
@@ -88,6 +88,7 @@ GaugeBase {
 
     Text {
         id: title
+        Accessible.ignored: true
         anchors { left: parent.left; top: parent.top }
         text: gauge.label
         font.pixelSize: 12
@@ -96,6 +97,7 @@ GaugeBase {
     }
     Text {
         objectName: "gaugeNote"
+        Accessible.ignored: true
         anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
                   baseline: title.baseline }
         visible: !gauge.hasValue && width > 0
@@ -114,6 +116,7 @@ GaugeBase {
         Text {
             id: valueLabel
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: 22
             font.weight: Font.Bold
@@ -129,6 +132,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: valueLabel.baseline
             text: gauge.unit
@@ -149,6 +153,7 @@ GaugeBase {
         Text {
             id: highText
             objectName: "scaleHigh"
+            Accessible.ignored: true
             text: gauge.history.length > 0 ? gauge.format(gauge.extent.hi) : ""
             font.pixelSize: 10
             font.features: Theme.valueFeatures
@@ -158,6 +163,7 @@ GaugeBase {
         Text {
             id: lowText
             objectName: "scaleLow"
+            Accessible.ignored: true
             text: gauge.history.length > 0 ? gauge.format(gauge.extent.lo) : ""
             font.pixelSize: 10
             font.features: Theme.valueFeatures
@@ -167,6 +173,7 @@ GaugeBase {
 
     Text {
         id: sampleLow
+        Accessible.ignored: true
         visible: false
         text: gauge.format(gauge.from) + "0"
         font.pixelSize: 10
@@ -174,6 +181,7 @@ GaugeBase {
     }
     Text {
         id: sampleHigh
+        Accessible.ignored: true
         visible: false
         text: gauge.format(gauge.to) + "0"
         font.pixelSize: 10

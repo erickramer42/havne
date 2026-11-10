@@ -1,5 +1,5 @@
 // File/layer: app/qml/DangerMark.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.gauges (test_qml)
+// Testing: QML: QmlTest.gauges, QmlTest.accessibility (test_qml)
 
 import QtQuick
 import QtQuick.Shapes
@@ -19,9 +19,9 @@ Item {
     width: size
     height: size
 
-    Accessible.role: Accessible.Indicator
-    Accessible.name: qsTr("Danger")
-    Accessible.ignored: opacity === 0
+    // Never a node of its own, which would be shown and hidden at each
+    // crossing: the gauge's name says danger
+    Accessible.ignored: true
 
     Shape {
         anchors.fill: parent
@@ -41,6 +41,7 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         y: mark.size * 0.30
         text: "!"
+        Accessible.ignored: true
         font.pixelSize: mark.size * 0.62
         font.weight: Font.Bold
         color: Theme.surface

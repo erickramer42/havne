@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentReadout.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 
@@ -84,6 +84,7 @@ GaugeBase {
     Text {
         id: title
         objectName: "readoutTitle"
+        Accessible.ignored: true
         anchors { left: parent.left; top: parent.top }
         text: gauge.label
         font.pixelSize: 12
@@ -92,6 +93,7 @@ GaugeBase {
     }
     Text {
         objectName: "gaugeNote"
+        Accessible.ignored: true
         anchors { left: title.right; leftMargin: 10; right: parent.right; baseline: title.baseline }
         visible: !gauge.hasValue && width > 0
         elide: Text.ElideRight
@@ -165,6 +167,7 @@ GaugeBase {
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             // Kept laid out without a value, so the digits keep their size
             opacity: gauge.hasValue ? 1 : 0
             text: gauge.unit

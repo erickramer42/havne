@@ -1,5 +1,6 @@
 // File/layer: app/qml/AnalogGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo at 160 px
+// Testing: QML: QmlTest.gauges, QmlTest.accessibility;
+//          manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
 //          QML: QmlTest.dashboard (no negative tick count while a
@@ -170,6 +171,7 @@ GaugeBase {
         model: gauge.majorCount
         delegate: Text {
             required property int index
+            Accessible.ignored: true
             readonly property real v: gauge.from + index * gauge.majorStep
             readonly property real a: gauge.angleOf(v)
 
@@ -208,6 +210,7 @@ GaugeBase {
 
     // ---- Readout: caption above the hub, value below it
     Text {
+        Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
         y: gauge.cy - gauge.r * 0.36 - height / 2
         text: gauge.caption
@@ -226,6 +229,7 @@ GaugeBase {
             Text {
                 id: valueLabel
                 objectName: "readout"
+                Accessible.ignored: true
                 text: gauge.valueText
                 // Sized to clear the end numerals beside it at full scale
                 font.pixelSize: Math.max(16, gauge.size * 0.1)
@@ -245,12 +249,14 @@ GaugeBase {
             }
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.unit
             font.pixelSize: Math.max(10, gauge.size * 0.036)
             color: Theme.textDim
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             topPadding: gauge.size * 0.012
             text: !gauge.hasValue ? gauge.note

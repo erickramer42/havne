@@ -234,7 +234,6 @@ TestCase {
         verify(shown(), "past it")
         g.hasValue = false
         verify(!shown(), "none without a value")
-        compare(mark.Accessible.name, "Danger")
     }
 
     // A gauge with no danger zone never shows the mark
@@ -412,12 +411,19 @@ TestCase {
         verify(2 * flasher.interval >= 1000 / 3, "a cycle is two toggles: " + flasher.interval)
     }
 
-    // The danger mark is hidden from assistive technology while it is off
-    function test_theDangerMarkIsIgnoredWhileItIsOff() {
+    // The gauge's own name says danger; the mark is never a node of its own
+    function test_theDangerIsInTheGaugesName() {
         const g = gaugeOf(kinds[0], 10)
+        g.label = "Oil"
+        g.unit = "deg"
         const mark = find(g, "dangerMark")
+        compare(g.Accessible.name, "Oil: 10 deg")
         compare(mark.Accessible.ignored, true, "value below danger")
         g.value = 90
-        tryCompare(mark.Accessible, "ignored", false)
+        compare(g.Accessible.name, "Oil: 90 deg, danger")
+        compare(mark.Accessible.ignored, true, "past danger too")
+        g.hasValue = false
+        g.note = "not in profile"
+        compare(g.Accessible.name, "Oil: not in profile")
     }
 }

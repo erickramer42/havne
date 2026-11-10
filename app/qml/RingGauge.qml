@@ -1,5 +1,5 @@
 // File/layer: app/qml/RingGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 import QtQuick.Shapes
@@ -126,6 +126,7 @@ GaugeBase {
 
     // Range ends under the arc tips
     Text {
+        Accessible.ignored: true
         text: gauge.formatScale(gauge.from)
         x: gauge.px(gauge.startAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.startAngle, gauge.rr) + gauge.ringWidth * 0.75
@@ -134,6 +135,7 @@ GaugeBase {
         color: Theme.textDim
     }
     Text {
+        Accessible.ignored: true
         text: gauge.formatScale(gauge.to)
         x: gauge.px(gauge.endAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.endAngle, gauge.rr) + gauge.ringWidth * 0.75
@@ -153,6 +155,7 @@ GaugeBase {
             Text {
                 id: readout
                 objectName: "readout"
+                Accessible.ignored: true
                 text: gauge.valueText
                 font.pixelSize: Math.max(16, gauge.rr * 0.5)
                 font.weight: Font.Bold
@@ -171,6 +174,7 @@ GaugeBase {
             }
             Text {
                 objectName: "unit"
+                Accessible.ignored: true
                 visible: gauge.hasValue
                 anchors.baseline: readout.baseline
                 text: gauge.unit
@@ -179,12 +183,14 @@ GaugeBase {
             }
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.label
             font.pixelSize: Math.max(9, gauge.rr * 0.13)
             color: Theme.textDim
         }
         Text {
+            Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             visible: !gauge.hasValue && text !== ""
             text: gauge.note

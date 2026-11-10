@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 
@@ -42,6 +42,7 @@ GaugeBase {
 
     Text {
         id: title
+        Accessible.ignored: true
         anchors { left: parent.left; top: parent.top }
         text: gauge.label
         font.pixelSize: 12
@@ -50,6 +51,7 @@ GaugeBase {
     }
     Text {
         objectName: "gaugeNote"
+        Accessible.ignored: true
         anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
                   baseline: title.baseline }
         visible: !gauge.hasValue && width > 0
@@ -66,6 +68,7 @@ GaugeBase {
         Text {
             id: valueLabel
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: 22
             font.weight: Font.Bold
@@ -82,6 +85,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: valueLabel.baseline
             text: gauge.unit
@@ -149,6 +153,7 @@ GaugeBase {
         height: scaleFrom.implicitHeight
         Text {
             id: scaleFrom
+            Accessible.ignored: true
             anchors.left: parent.left
             text: gauge.formatScale(gauge.from)
             font.pixelSize: 10
@@ -156,6 +161,7 @@ GaugeBase {
             color: Qt.alpha(Theme.textDim, 0.8)
         }
         Text {
+            Accessible.ignored: true
             anchors.right: parent.right
             text: gauge.formatScale(gauge.to)
             font.pixelSize: 10
