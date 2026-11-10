@@ -70,6 +70,12 @@ add_test(NAME NoticesTest.TheApkCarriesEachNoticeAsItsSource
 add_test(NAME NoticesTest.EachNoticeCarriesCoresData
     COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=core
             -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachCitedLicenseIsInTheTree
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=licenses
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachBundledFontIsNamed
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=fonts
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
@@ -379,6 +385,15 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
+        # An export to pcapng, a folder copy, a CSV's sizing, and a wide CSV
+        # and its sizing during their named columns' check, each interrupted
+        # mid-run: an interrupted end, nothing left behind
+        add_test(NAME CliTransferRunTest.interrupt
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    interrupt $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
+            TIMEOUT 90 SKIP_RETURN_CODE 77)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
@@ -819,6 +834,14 @@ if(TARGET havne-cli)
             COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
                     "-DARGS=${args}" -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
     endfunction()
+    # The same, with the refusal's words on standard error: for a case
+    # another usage error could pass
+    function(app_cli_usage_says name args words)
+        add_test(NAME CliUsageTest.${name}
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
+                    "-DARGS=${args}" "-DEXPECT_ERR=${words}"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
+    endfunction()
     app_cli_usage(NoArgumentsIsUsage "")
     app_cli_usage(NoUriIsUsage "stream")
     app_cli_usage(AnUnknownCommandIsUsage "listen")
@@ -847,7 +870,16 @@ if(TARGET havne-cli)
     app_cli_usage(StreamSecondsPastTheCapIsUsage "stream|mock://x|--seconds|31622401")
     app_cli_usage(StreamSecondsThatWrapAreUsage "stream|mock://x|--seconds|18446744073710")
     app_cli_usage(SimSecondsPastTheCapIsUsage "sim|mock://x|--elm327|tcp:0|--seconds|31622401")
-    app_cli_usage(PlaySecondsPastTheCapIsUsage "play|mock://x|--to|vcan0|--seconds|31622401")
+    # play exists only on Linux (cli/main.cpp's HAVNE_CLI_PLAY); elsewhere
+    # its every form is the one refusal
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        app_cli_usage_says(PlaySecondsPastTheCapIsUsage
+            "play|mock://x|--to|vcan0|--seconds|31622401"
+            "--seconds takes a whole number from 1 to 31622400")
+    else()
+        app_cli_usage_says(PlayNeedsLinux
+            "play|mock://x|--to|vcan0" "play needs Linux")
+    endif()
     app_cli_usage(LogSignalsAndAPluginIsUsage "log|mock://x|f|--signals|a.json|--plugin|p")
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage

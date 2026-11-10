@@ -169,6 +169,13 @@ typedef char abi_queue_value_value_check[(offsetof(ecuio_queue_value_t, value) =
 typedef char abi_queue_value_len_check[(offsetof(ecuio_queue_value_t, text_len) == 24) ? 1 : -1];
 typedef char abi_queue_value_text_check[(offsetof(ecuio_queue_value_t, text) == 32) ? 1 : -1];
 
+/* A long call's cancel as C writes one (ecuio_cancel_t) */
+static int never_cancel(void* user_data)
+{
+    (void)user_data;
+    return 0;
+}
+
 int main(void)
 {
     /* Zeroed frame must be a plain classic CAN data frame (flag value 0). */
@@ -504,6 +511,10 @@ int main(void)
         ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
         ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_with(NULL, never_cancel, NULL, &export_report) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_export_estimate_with(NULL, &estimate_ms, 1, never_cancel, NULL,
+                                   &estimate) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export_estimate(NULL, &estimate_ms, 1, &estimate) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export_estimate(&export_options, &estimate_ms, 1, &estimate) !=

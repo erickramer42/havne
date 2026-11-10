@@ -6778,6 +6778,57 @@ TEST(RequestEngineTest, AFocusInTheMiddleOfASweepStartsANewOne)
         << "its three rows asked, the wait begins";
 }
 
+/* A pick refused and dropped after it was asked still leaves the sweep
+ * to ask every pick left, and the next sweep counts from the first
+ * request's time */
+TEST(RequestEngineTest, APickDroppedInASweepStillLeavesTheRestAsked)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    e.probe = true; /* an explicit refusal drops its request */
+    focus_all(&e, 500 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    const uint8_t refused[3] = {0x7F, 0x01, 0x12};
+    (void)ecuio_engine_on_frame(&e, 0, refused, sizeof refused, 4 * kMs,
+                                nullptr);
+    ASSERT_NE(e.requests[0].dropped, 0) << "0C dropped";
+
+    int64_t now = 20 * kMs;
+    for (const int32_t row : {1, 2}) {
+        ASSERT_EQ(ecuio_engine_due(&e, 0, now), row)
+            << "row " << row << " in the sweep the drop happened in";
+        ecuio_engine_sent(&e, 0, row, true, now);
+        const uint8_t ok[4] = {0x41, e.requests[row].bytes[1], 0x12, 0x34};
+        (void)ecuio_engine_on_frame(&e, 0, ok, sizeof ok, now + 4 * kMs,
+                                    nullptr);
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, now), 500 * kMs - now)
+        << "the next sweep is a minimum after the first request";
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 500 * kMs), 1);
+}
+
+/* A row dropped before it was asked in this sweep isn't waited for:
+ * the sweep ends once the rows left have been asked */
+TEST(RequestEngineTest, ARowDroppedBeforeItsTurnShortensTheSweep)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D, 0x0F}));
+    focus_all(&e, 500 * kMs);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 0), 0);
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+    (void)ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US);
+    ecuio_engine_drop(&e, 2, ECUIO_DROP_BITMAP, 0);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_WAIT_US), 1);
+    ecuio_engine_sent(&e, 0, 1, true, ECUIO_ENGINE_WAIT_US);
+    (void)ecuio_engine_expire(&e, 0, 2 * ECUIO_ENGINE_WAIT_US);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 2 * ECUIO_ENGINE_WAIT_US),
+              ECUIO_ENGINE_NONE)
+        << "0C and 0D asked, 0F gone: the wait begins";
+}
+
 /* No focus, no minimum: the rotation runs at the engine's own pace */
 TEST(RequestEngineTest, ASessionWithNoFocusHasNoMinimumTime)
 {

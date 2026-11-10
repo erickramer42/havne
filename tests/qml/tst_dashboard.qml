@@ -813,16 +813,16 @@ TestCase {
         compare(Bridge.logNotice, "")
         tryVerify(() => !line.visible, 2000, "Dismiss hides it")
 
-        // A log the session's end closes, told; the next log clears it
+        // A log the user's Disconnect closes, told; the next log clears it
         connect("mock://demo")
         compare(Bridge.startLog(), true)
         compare(Bridge.logNotice, "")
         verify(!line.visible, "a running log says nothing")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "disconnect ends")
-        compare(Bridge.logNotice, "Log ended: disconnected")
+        compare(Bridge.logNotice, "Log ended")
         tryVerify(() => line.visible, 2000, "the end shows")
-        compare(words.text, "Log ended: disconnected")
+        compare(words.text, "Log ended")
         connect("mock://demo")
         compare(Bridge.startLog(), true)
         compare(Bridge.logNotice, "", "the next log clears it")

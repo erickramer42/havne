@@ -10,6 +10,7 @@
 #   python tests/cli_transfer.py folder <havne-cli> <findings> <values>
 #   python tests/cli_transfer.py csv-import <havne-cli> <csv fixtures>
 #   python tests/cli_transfer.py csv-guess <havne-cli> <csv fixtures>
+#   python tests/cli_transfer.py interrupt <havne-cli> <recording>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -38,16 +39,26 @@
 # guessed-map.json byte for byte, and the import writes the guess's line
 # (that map) before its own; a time of plain numbers with no unit is
 # refused until --time-unit gives one, and a file with no header is
-# refused, each exit 3 with words and nothing made.
+# refused, each exit 3 with words and nothing made. interrupt: an
+# export to pcapng, a folder copy, a CSV's sizing, and a wide CSV and its
+# sizing during their named columns' check, each held at its first ask
+# (HAVNE_CLI_EXPORT_HOLD_MS, which names that ask on stderr: the wide
+# CSVs' must be the check's) and stopped by Ctrl+Break or SIGINT once held, end within a few seconds with an
+# interrupted end line and exit 1, nothing at the file or folder named
+# and no partial beside it; exit 77 where there's no console to send the
+# event through.
 
 import csv
 import json
 import os
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 LOG = (
     "(1700000000.250000) can0 7DF#0201000000000000\n"
@@ -697,6 +708,99 @@ def csv_guess(cli, fixtures):
     return 0
 
 
+# Long enough that a stop the export never asks about fails the case
+HOLD_MS = 20000
+# How long a run may take to reach its first ask and say it holds there
+HELD_WAIT_S = 30
+
+
+def interrupted(cli, args, where):
+    """args run held at the first ask, which must be where's (b"export" or
+    b"column check"), then interrupted: None, a failure's words, or "skip"
+    with no console"""
+    env = dict(os.environ)
+    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
+    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+          "stdin": subprocess.DEVNULL, "env": env}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen([cli] + args, **kw)
+    held = []
+    reader = threading.Thread(target=lambda: held.append(p.stderr.readline()))
+    reader.start()
+    reader.join(HELD_WAIT_S)
+    if reader.is_alive() or not held or \
+            not held[0].startswith(b"havne-cli: holding the " + where + b"'s"):
+        p.kill()
+        out, err = p.communicate()
+        reader.join()
+        return (f"didn't hold at the {where.decode()} within "
+                f"{HELD_WAIT_S} s: exit "
+                f"{p.returncode}, {(held[0] if held else b'') + err!r}")
+    try:
+        p.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt"
+                      else signal.SIGINT)
+    except OSError as e:
+        p.kill()
+        p.communicate()
+        print(f"skip  no console to send the interrupt through: {e}")
+        return "skip"
+    sent = time.monotonic()
+    try:
+        out, err = p.communicate(timeout=HOLD_MS / 2000)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return f"still running {HOLD_MS / 2000:.0f} s after the interrupt"
+    took = time.monotonic() - sent
+    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
+    if p.returncode != 1 or not lines or \
+            lines[-1] != {"type": "end", "reason": "interrupted"}:
+        return (f"exit {p.returncode}, lines {lines}, "
+                f"{err.decode('utf-8', 'replace')}")
+    if any(l["type"] in ("exported", "estimate", "error") for l in lines):
+        return f"an interrupted run says more than its end: {lines}"
+    print(f"ok    {' '.join(args[args.index('--format'):])}: interrupted, "
+          f"ended {took:.2f} s "
+          f"after it")
+    return None
+
+
+def interrupt(cli, recording):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-int-") as root:
+        cases = [
+            (["export", recording, os.path.join(root, "out.pcapng"),
+              "--format", "pcapng"], os.path.join(root, "out.pcapng"),
+             b"export"),
+            (["export", recording, os.path.join(root, "copy"),
+              "--format", "folder"], os.path.join(root, "copy"), b"export"),
+            (["export", recording, "--format", "csv", "--estimate"], None,
+             b"export"),
+            (["export", recording, os.path.join(root, "out.csv"),
+              "--format", "csv", "--signal", "Engine RPM"],
+             os.path.join(root, "out.csv"), b"column check"),
+            (["export", recording, "--format", "csv", "--estimate",
+              "--signal", "Engine RPM"], None, b"column check"),
+        ]
+        failed = 0
+        for args, made, where in cases:
+            why = interrupted(cli, args, where)
+            if why == "skip":
+                return 77
+            if why is None and made is not None and (
+                    os.path.exists(made) or partial_left(made)):
+                why = (f"something was left at or beside "
+                       f"{os.path.basename(made)}: {os.listdir(root)}")
+            if why is not None:
+                print(f"FAIL  {' '.join(args[args.index('--format'):])}: "
+                      f"{why}")
+                failed += 1
+    if failed:
+        return 1
+    print("ok    an interrupt stops an export and its sizing, leaving nothing")
+    return 0
+
+
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
@@ -704,6 +808,8 @@ if __name__ == "__main__":
         sys.exit(csv_import(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv-guess":
         sys.exit(csv_guess(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 4 and sys.argv[1] == "interrupt":
+        sys.exit(interrupt(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 5 and sys.argv[1] == "folder":

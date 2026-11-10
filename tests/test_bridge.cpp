@@ -1094,6 +1094,48 @@ TEST(BridgeTest, StartLogIsRefusedWithItsReason)
 /* A start the session refuses after its focus took (a recorder of the
  * test's own holds the session's one slot): the whole set is asked
  * again, and the folder the start made, holding no frame, is gone. */
+/* An attach the session refuses, with a folder core can't give whole:
+ * the bridge removes nothing, so the working folder (QDir("") is it) is
+ * left alone. The working folder is a scratch one of the case's own, so
+ * a mutant without the guard empties only that. */
+TEST(BridgeTest, ARecorderFolderCoreCantGiveRemovesNothing)
+{
+    QTemporaryDir root;
+    QTemporaryDir own;
+    QTemporaryDir work;
+    ASSERT_TRUE(root.isValid() && own.isValid() && work.isValid());
+    {
+        QFile kept(work.filePath(QStringLiteral("kept.txt")));
+        ASSERT_TRUE(kept.open(QIODevice::WriteOnly));
+        kept.write("the user's");
+    }
+    struct Cwd {
+        QString was = QDir::currentPath();
+        ~Cwd() { QDir::setCurrent(was); }
+    } cwd;
+    ASSERT_TRUE(QDir::setCurrent(work.path()));
+
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    ASSERT_TRUE(bridge.connectSession("mock://cut").isEmpty());
+    const QByteArray own8 = own.path().toUtf8();
+    ecuio_record_options_t o{};
+    o.root_utf8 = own8.constData();
+    ecuio_recorder_t* holder = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &holder), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(bridge.sessionForTesting(), holder),
+              ECUIO_OK);
+
+    bridge.failRecorderFolderForTesting(true);
+    EXPECT_FALSE(bridge.startLog());
+    EXPECT_TRUE(QFileInfo::exists(work.filePath(QStringLiteral("kept.txt"))))
+        << "the working folder's file is still there";
+    EXPECT_EQ(recordingFolders(root.path()).size(), 1)
+        << "the refused log's folder stays: its name couldn't be read";
+    (void)ecuio_recorder_close(holder, "the test's");
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 TEST(BridgeTest, AStartLogTheSessionRefusesLeavesNoFolderAndNoFocus)
 {
     QTemporaryDir root;
@@ -1176,9 +1218,10 @@ TEST(BridgeTest, AFailedWriteEndsALogNotAsTheUsers)
 
 /* The Dashboard header's notice: a refusal's "Log not started: <why>"
  * (startLog's own reasons and the recorder's), an end the user didn't
- * ask for as "Log ended: <why>", nothing for Stop log's, a log that
- * starts clearing it, Dismiss clearing it, and a change signal for
- * each change alone. */
+ * ask for as "Log ended: <why>", the user's Disconnect as "Log ended"
+ * (the recording's end note keeps "disconnected"), nothing for Stop
+ * log's, a log that starts clearing it, Dismiss clearing it, and a
+ * change signal for each change alone. */
 TEST(BridgeTest, TheLogNoticeTellsRefusalsAndUnaskedEnds)
 {
     QTemporaryDir root;
@@ -1242,10 +1285,14 @@ TEST(BridgeTest, TheLogNoticeTellsRefusalsAndUnaskedEnds)
     EXPECT_EQ(bridge.logNotice(), QString());
     EXPECT_EQ(changes, before);
 
-    // The session's end closes a running log, told as "disconnected"
+    // The user's Disconnect closes a running log: "Log ended" on the
+    // Dashboard, "disconnected" in the recording's end note
     ASSERT_TRUE(bridge.startLog()) << log.join('\n').toStdString();
+    const QString folder = bridge.recordingFolder();
     ASSERT_TRUE(disconnectAndWait(bridge));
-    EXPECT_EQ(bridge.logNotice(), QStringLiteral("Log ended: disconnected"));
+    EXPECT_EQ(bridge.logNotice(), QStringLiteral("Log ended"));
+    EXPECT_TRUE(readFile(folder + QStringLiteral("/events.log"))
+                    .contains("  end  disconnected: "));
 }
 
 /* A connect started from disconnectingChanged's end (as a QML handler
@@ -1285,11 +1332,6 @@ TEST(BridgeTest, AConnectAtTheTeardownsEndFindsTheRecordingClosed)
                     .contains("  end  disconnected: "));
 }
 
-/* A log on a running session (ADR-0056 section 1): its own folder, the
- * plotted rows its focus line, a readout that counts the folder's bytes
- * and its time, Stop log's folder in logStopped as the user's; a second
- * log in the same session, which the session's end closes and reports
- * with its folder, not as the user's. */
 /* ADR-0056 section 4: Settings' minimum time takes only its choices,
  * and on a session that asks nothing (the mock), where it changes
  * nothing, neither the log's line nor its header name it; a session
@@ -1366,6 +1408,11 @@ TEST(BridgeTest, ALogTakesItsMinimumTimeBetweenSweeps)
     disconnectAndWait(bridge);
 }
 
+/* A log on a running session (ADR-0056 section 1): its own folder, the
+ * plotted rows its focus line, a readout that counts the folder's bytes
+ * and its time, Stop log's folder in logStopped as the user's; a second
+ * log in the same session, which the session's end closes and reports
+ * with its folder, not as the user's. */
 TEST(BridgeTest, ALogRecordsTheRunningSessionUntilStopped)
 {
     QTemporaryDir root;
@@ -11306,8 +11353,17 @@ TEST(BridgeTest, WindowThemeWarnsOfAColorItCannotFollow)
         partial.setBg(Qt::red);
         EXPECT_EQ(applied, 1) << "the colors it has still follow";
     }
+    {
+        FakeThemeWithConstantSurface constant;
+        WindowTheme follower(&constant, nullptr);
+    }
     qInstallMessageHandler(previous);
-    ASSERT_EQ(g_themeWarnings.size(), 1);
+    ASSERT_EQ(g_themeWarnings.size(), 2)
+        << g_themeWarnings.join(u'\n').toStdString();
     EXPECT_TRUE(g_themeWarnings[0].contains(QStringLiteral("'surface'")))
         << g_themeWarnings[0].toStdString();
+    EXPECT_TRUE(g_themeWarnings[1].contains(
+        QStringLiteral("no notifying property 'surface'")))
+        << "a property that never notifies: "
+        << g_themeWarnings[1].toStdString();
 }

@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -403,6 +404,82 @@ TEST(RecordingExportTest, ARefusedExportLeavesAPickedDocumentGone)
     EXPECT_FALSE(QFileInfo::exists(picked)) << "the empty document goes";
 }
 
+/* Startup's sweep: an export's own temporary folder a day old goes, and
+ * nothing else there, however near its name or however old */
+TEST(RecordingExportTest, StartupRemovesOnlyStaleExportFolders)
+{
+    QTemporaryDir temp;
+    ASSERT_TRUE(temp.isValid());
+    const QDir t(temp.path());
+    const QStringList kept = {QStringLiteral("havne-export-Ab12C"),
+                              QStringLiteral("havne-export-Ab12Cd7"),
+                              QStringLiteral("havne-exporter-Ab12Cd"),
+                              QStringLiteral("other")};
+    for (const QString& n : kept) {
+        ASSERT_TRUE(t.mkpath(n));
+    }
+    ASSERT_TRUE(t.mkpath(QStringLiteral("havne-export-Ab12Cd")));
+    writeFile(t.filePath(QStringLiteral("havne-export-Ab12Cd/export")), "copy");
+    writeFile(t.filePath(QStringLiteral("havne-export-Zz99Yy")), "a file");
+
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(), now), 0);
+    EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(),
+                                                 now.addSecs(23 * 60 * 60)),
+              0)
+        << "under a day old";
+    EXPECT_TRUE(t.exists(QStringLiteral("havne-export-Ab12Cd")));
+
+    EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(), now.addDays(2)),
+              1);
+    EXPECT_FALSE(t.exists(QStringLiteral("havne-export-Ab12Cd")));
+    for (const QString& n : kept) {
+        EXPECT_TRUE(t.exists(n)) << n.toStdString();
+    }
+    EXPECT_TRUE(
+        QFileInfo(t.filePath(QStringLiteral("havne-export-Zz99Yy"))).isFile())
+        << "a file of that name stays";
+}
+
+/* Core's export written, the copy to the provider refused: the picked
+ * document goes, as after core's refusal */
+TEST(RecordingExportTest, ACopyAProviderRefusesLeavesThePickedDocumentGone)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    e.setFailCopyForTesting(true);
+    const QString picked = dir.filePath(QStringLiteral("picked.csv"));
+    writeFile(picked, QByteArray());
+    const QVariantMap r = exported(e, fixture("pull-early"), Options{},
+                                   QUrl::fromLocalFile(picked));
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(text(r, "words"), QStringLiteral("Couldn't write the file"));
+    EXPECT_FALSE(QFileInfo::exists(picked)) << "the empty document goes";
+}
+
+/* A folder copy whose first file a provider refuses leaves no folder of
+ * its own behind */
+TEST(RecordingExportTest, AFolderCopyAProviderRefusesLeavesNoFolder)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    e.setFailCopyForTesting(true);
+    const QString picked = dir.filePath(QStringLiteral("picked"));
+    ASSERT_TRUE(QDir().mkpath(picked));
+    Options o;
+    o.format = RecordingExport::Folder;
+    const QVariantMap r = exported(e, labeledCopy(dir, "findings"), o,
+                                   QUrl::fromLocalFile(picked));
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(text(r, "words"), QStringLiteral("Couldn't write the folder"));
+    EXPECT_TRUE(QDir(picked)
+                    .entryList(QDir::AllEntries | QDir::NoDotAndDotDot)
+                    .isEmpty())
+        << "the copy's folder goes";
+}
+
 TEST(RecordingExportTest, ARefusedExportLeavesALocalFileAsItWas)
 {
     QTemporaryDir dir;
@@ -554,6 +631,22 @@ TEST(RecordingExportTest, ADroppedEstimateSaysNothing)
     EXPECT_TRUE(ok(again)) << "it works after one is dropped";
 }
 
+/* The panel's own case: one estimate out, the format switched. Nothing
+ * waits behind it, so only the drop's generation keeps its answer from
+ * being said */
+TEST(RecordingExportTest, ADroppedEstimateWithNoneWaitingSaysNothing)
+{
+    RecordingExport e;
+    int answers = 0;
+    QObject context;
+    QObject::connect(&e, &RecordingExport::estimated, &context,
+                     [&](const QVariantMap&) { ++answers; });
+    ASSERT_TRUE(e.estimate(fixture("pull-early"), asked({10}), 0, {}));
+    e.dropEstimate();
+    EXPECT_TRUE(waitUntil([&] { return !e.sizing(); }));
+    EXPECT_EQ(answers, 0);
+}
+
 TEST(RecordingExportTest, AWorkerOutOfMemorySaysSoAndFreesTheNext)
 {
     QTemporaryDir dir;
@@ -574,15 +667,98 @@ TEST(RecordingExportTest, AWorkerOutOfMemorySaysSoAndFreesTheNext)
     EXPECT_TRUE(ok(sized(e, fixture("pull-early"), {0})));
 }
 
-TEST(RecordingExportTest, DestroyedWithAnExportRunningItWaits)
+// Longer than any wait a stop reaching the workers takes
+constexpr int kHoldMs = 20000;
+
+using Hold = RecordingExport::HoldForTesting;
+
+/* Destroyed with an export and a sizing held at core's first ask, as long
+ * ones would be: the destructor's stop ends both long before the hold
+ * would, and nothing is written */
+TEST(RecordingExportTest, DestroyedMidExportItStopsBothWorkers)
 {
     QTemporaryDir dir;
     const QString out = dir.filePath(QStringLiteral("a.csv"));
+    QElapsedTimer t;
     {
         RecordingExport e;
+        e.setHoldForTesting(Hold::FirstAsk, kHoldMs);
         ASSERT_TRUE(e.start(asMap(fixture("pull-early"), Options{}),
                             QUrl::fromLocalFile(out)));
         ASSERT_TRUE(e.estimate(fixture("pull-early"), asked({0}), 0, {}));
+        ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 2; }))
+            << e.heldForTesting() << " of 2 held";
+        t.start();
     }
-    EXPECT_TRUE(QFileInfo::exists(out));
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    EXPECT_FALSE(QFileInfo::exists(out));
+    EXPECT_EQ(
+        QDir(dir.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot),
+        QStringList());
+}
+
+/* Destroyed at core's first ask of a local folder copy, which core makes
+ * in place with no copy of the app's after it: core's own stop leaves no
+ * copy */
+TEST(RecordingExportTest, DestroyedAsALocalFolderCopyBeginsLeavesNoCopy)
+{
+    QTemporaryDir dir;
+    QElapsedTimer t;
+    {
+        RecordingExport e;
+        e.setHoldForTesting(Hold::FirstAsk, kHoldMs);
+        Options o;
+        o.format = RecordingExport::Folder;
+        ASSERT_TRUE(e.start(asMap(fixture("pull-early"), o),
+                            QUrl::fromLocalFile(dir.path())));
+        ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+        t.start();
+    }
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    EXPECT_EQ(
+        QDir(dir.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot),
+        QStringList());
+}
+
+/* Destroyed after core's export, before a provider's copy: the copy
+ * stops at its first chunk and the picked document goes */
+TEST(RecordingExportTest, DestroyedBeforeAProvidersCopyItCopiesNothing)
+{
+    QTemporaryDir dir;
+    const QString out = dir.filePath(QStringLiteral("a.csv"));
+    writeFile(out, "the picker's document");
+    QElapsedTimer t;
+    {
+        RecordingExport e;
+        e.setThroughProviderForTesting(true);
+        e.setHoldForTesting(Hold::BeforeCopy, kHoldMs);
+        ASSERT_TRUE(e.start(asMap(fixture("pull-early"), Options{}),
+                            QUrl::fromLocalFile(out)));
+        ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+        t.start();
+    }
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    EXPECT_FALSE(QFileInfo::exists(out));
+}
+
+/* The same for a folder copy through a provider: no copy is left */
+TEST(RecordingExportTest, DestroyedBeforeAProvidersFolderCopyLeavesNoCopy)
+{
+    QTemporaryDir dir;
+    QElapsedTimer t;
+    {
+        RecordingExport e;
+        e.setThroughProviderForTesting(true);
+        e.setHoldForTesting(Hold::BeforeCopy, kHoldMs);
+        Options o;
+        o.format = RecordingExport::Folder;
+        ASSERT_TRUE(e.start(asMap(fixture("pull-early"), o),
+                            QUrl::fromLocalFile(dir.path())));
+        ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+        t.start();
+    }
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    EXPECT_EQ(
+        QDir(dir.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot),
+        QStringList());
 }

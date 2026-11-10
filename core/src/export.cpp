@@ -1,6 +1,7 @@
 // File/layer: core/src/export.cpp | C++17, Qt-free; a recording out to
 //             another tool's format (ADR-0054 sections 1 and 3)
-// Testing: UNIT: ExportTest, CsvExportTest, FolderExportTest (test_core)
+// Testing: UNIT: ExportTest, CsvExportTest, FolderExportTest,
+//          ExportCancelTest (test_core)
 //
 // ecuio_export: frames.csv read twice. The first pass classifies every
 // frame (scrub.h), the frames of ISO-TP messages as they crossed the bus
@@ -28,6 +29,10 @@
 // and signals.json as they are), each through its own file check, under
 // a name of its own beside <out> (folder_files.h's partial_name) until
 // every one passes.
+//
+// The caller's cancel (ecuio_export_with) is asked as each pass and each
+// file of a copy begins, and every kCancelRows rows; a stop is a failure
+// like any other, so the partial goes the same way.
 
 #include "error_detail.h"
 #include "folder_files.h"
@@ -81,6 +86,8 @@ constexpr size_t kWideColumnsMax = 16384;
 /* The most row intervals one ecuio_export_estimate call sizes: each one
  * keeps its own rows engine */
 constexpr uint32_t kEstimateCountMax = 64;
+/* Rows read between two asks of the caller's cancel */
+constexpr uint32_t kCancelRows = 1024;
 constexpr uint64_t kSilenceUs = 1000000;
 constexpr uint64_t kSilenceTimes = 3;
 
@@ -238,6 +245,12 @@ public:
      * INVALID_ARGUMENT for a column the recording can't give */
     ecuio_status_t status() const { return status_; }
 
+    void set_cancel(ecuio_cancel_t cancel, void* user_data)
+    {
+        cancel_ = cancel;
+        cancel_user_ = user_data;
+    }
+
     /* *partial names the file made under a name of its own (pcapng, CSV)
      * while it isn't in place, so the caller removes it on any failure */
     bool run(const std::string& folder, const std::string& out,
@@ -313,6 +326,22 @@ public:
     }
 
 private:
+    /* The caller's cancel: asked now, or once kCancelRows rows have gone
+     * by; true when it stops the export */
+    bool canceled(bool now = false)
+    {
+        if (cancel_ == nullptr || (!now && ++unasked_ < kCancelRows)) {
+            return false;
+        }
+        unasked_ = 0;
+        if (cancel_(cancel_user_) == 0) {
+            return false;
+        }
+        status_ = ECUIO_ERR_CANCELED;
+        ecuio_detail_set("the export was canceled");
+        return true;
+    }
+
     bool in_range(uint64_t host_us) const
     {
         return host_us >= o_.from_us && (o_.to_us == 0 || host_us <= o_.to_us);
@@ -412,6 +441,9 @@ private:
     /* Each text value signals.csv holds: what a number can't be */
     bool read_text_values(const std::string& folder)
     {
+        if (canceled(true)) {
+            return false;
+        }
         std::string why;
         file_ptr f(files::open_file(folder + "/signals.csv", false, &why));
         if (!f) {
@@ -424,6 +456,9 @@ private:
         rows::signal_row row;
         std::unordered_set<std::string> seen;
         while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            if (canceled()) {
+                return false;
+            }
             ++line;
             if (line == 1) {
                 continue; /* the header */
@@ -485,6 +520,9 @@ private:
     /* The first pass: each frame's fate, the counts, the identity values */
     bool plan(const std::string& folder)
     {
+        if (canceled(true)) {
+            return false;
+        }
         frame_rows rows_in;
         if (!rows_in.open(folder)) {
             return false;
@@ -496,6 +534,9 @@ private:
         uint64_t index = 0;
         int got = 0;
         while ((got = rows_in.next()) == 1) {
+            if (canceled()) {
+                return false;
+            }
             const ecuio_frame_t& f = rows_in.frame();
             const seg s{index++, rows_in.host_us()};
             ends.clear();
@@ -718,6 +759,9 @@ private:
     /* The second pass */
     bool write(const std::string& folder)
     {
+        if (canceled(true)) {
+            return false;
+        }
         file_check_.reset(new scrub::check(values_));
         made_up_ = kMadeUp;
         made_up_flow_ = kMadeUpFlow;
@@ -734,6 +778,9 @@ private:
         uint64_t index = 0;
         int got = 0;
         while ((got = rows_in.next()) == 1) {
+            if (canceled()) {
+                return false;
+            }
             const ecuio_frame_t& f = rows_in.frame();
             const seg s{index++, rows_in.host_us()};
             const bool wire = reassembly::on_the_wire(f);
@@ -841,6 +888,9 @@ private:
      * or written. The same decisions both times. */
     bool values(const std::string& folder, bool write)
     {
+        if (canceled(true)) {
+            return false;
+        }
         std::string why;
         file_ptr f(files::open_file(folder + "/signals.csv", false, &why));
         if (!f) {
@@ -853,6 +903,9 @@ private:
         rows::signal_row row;
         std::unordered_set<std::string> signals;
         while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            if (canceled()) {
+                return false;
+            }
             ++line;
             if (line == 1) {
                 if (write && folder_) {
@@ -1331,6 +1384,9 @@ private:
     bool wide_walk(const std::string& folder, bool survey,
                    std::vector<wide_rows>* engines)
     {
+        if (canceled(true)) {
+            return false;
+        }
         std::string why;
         file_ptr f(files::open_file(folder + "/signals.csv", false, &why));
         if (!f) {
@@ -1348,6 +1404,9 @@ private:
         rows::signal_row row;
         std::string text;
         while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            if (canceled()) {
+                return false;
+            }
             ++line;
             if (line == 1) {
                 continue;
@@ -1474,6 +1533,9 @@ private:
      * into events_head_ and events_body_; the lines left out counted */
     bool plan_events(const std::string& folder)
     {
+        if (canceled(true)) {
+            return false;
+        }
         std::string why;
         file_ptr f(files::open_file(folder + "/events.log", false, &why));
         if (!f) {
@@ -1484,6 +1546,9 @@ private:
         bool header = true;
         bool first = true;
         while (csv::read_line(f.get(), buf, &too_long)) {
+            if (canceled()) {
+                return false;
+            }
             if (too_long) {
                 return fail("events.log holds a line longer than a row's");
             }
@@ -1598,6 +1663,9 @@ private:
     bool plan_rows(const std::string& folder, const char* name, bool markers,
                    std::vector<std::string>& out, bool* present)
     {
+        if (canceled(true)) {
+            return false;
+        }
         std::string why;
         file_ptr f(files::open_file(folder + "/" + name, false, &why));
         *present = static_cast<bool>(f);
@@ -1610,6 +1678,9 @@ private:
         uint64_t line = 0;
         std::string field;
         while (csv::read_line(f.get(), buf, &too_long, &torn) && !torn) {
+            if (canceled()) {
+                return false;
+            }
             ++line;
             if (line == 1) {
                 out.emplace_back(buf.data());
@@ -1700,6 +1771,9 @@ private:
     /* A file of the copy: written under partial, checked as it goes */
     bool begin_file(const std::string& partial, const char* name)
     {
+        if (canceled(true)) {
+            return false;
+        }
         std::string why;
         /* listed before it's made, so a failure past it (bad_alloc
          * included) still removes it with the partial folder */
@@ -1740,6 +1814,9 @@ private:
     bool put_lines(const std::vector<std::string>& lines)
     {
         for (const std::string& l : lines) {
+            if (canceled()) {
+                return false;
+            }
             buf_ += l;
             buf_ += '\n';
             if (!flush(false)) {
@@ -1753,6 +1830,9 @@ private:
      * carries checked before segmenting, as the pcapng's second pass */
     bool write_frames(const std::string& folder)
     {
+        if (canceled(true)) {
+            return false;
+        }
         buf_ += "host_us,timestamp_us,id,flags,data\n";
         frame_rows rows_in;
         if (!rows_in.open(folder)) {
@@ -1765,6 +1845,9 @@ private:
         int got = 0;
         written_ = 0;
         while ((got = rows_in.next()) == 1) {
+            if (canceled()) {
+                return false;
+            }
             const ecuio_frame_t& f = rows_in.frame();
             const seg s{index++, rows_in.host_us()};
             const bool wire = reassembly::on_the_wire(f);
@@ -1966,6 +2049,9 @@ private:
     uint64_t surveyed_ = 0;
     uint64_t seen_ = 0;
     ecuio_status_t status_ = ECUIO_ERR_LOAD_FAILED;
+    ecuio_cancel_t cancel_ = nullptr;
+    void* cancel_user_ = nullptr;
+    uint32_t unasked_ = 0;
     /* The folder export's */
     std::string partial_;
     std::vector<std::string> written_paths_;
@@ -2064,6 +2150,13 @@ std::string folder_of(const char* utf8)
 extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
                                        ecuio_export_report_t* report)
 {
+    return ecuio_export_with(options, nullptr, nullptr, report);
+}
+
+extern "C" ecuio_status_t
+ecuio_export_with(const ecuio_export_options_t* options, ecuio_cancel_t cancel,
+                  void* user_data, ecuio_export_report_t* report)
+{
     if (report != nullptr) {
         *report = ecuio_export_report_t{};
     }
@@ -2084,6 +2177,7 @@ extern "C" ecuio_status_t ecuio_export(const ecuio_export_options_t* options,
             /* closed before its partial is removed: Windows removes no
              * file still open */
             recording_export e(*options, r);
+            e.set_cancel(cancel, user_data);
             ok = e.run(folder, out, &partial);
             failed = e.status();
         }
@@ -2111,6 +2205,16 @@ ecuio_export_estimate(const ecuio_export_options_t* options,
                       const uint32_t* row_ms, uint32_t count,
                       ecuio_export_estimate_t* out)
 {
+    return ecuio_export_estimate_with(options, row_ms, count, nullptr, nullptr,
+                                      out);
+}
+
+extern "C" ecuio_status_t
+ecuio_export_estimate_with(const ecuio_export_options_t* options,
+                           const uint32_t* row_ms, uint32_t count,
+                           ecuio_cancel_t cancel, void* user_data,
+                           ecuio_export_estimate_t* out)
+{
     if (row_ms == nullptr || out == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
@@ -2128,6 +2232,7 @@ ecuio_export_estimate(const ecuio_export_options_t* options,
     ecuio_export_report_t r{};
     try {
         recording_export e(*options, r);
+        e.set_cancel(cancel, user_data);
         if (!e.estimate(folder_of(options->folder_utf8), row_ms, count, out)) {
             return e.status();
         }

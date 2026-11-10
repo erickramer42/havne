@@ -3,6 +3,8 @@
 //          (compiles it)
 
 #include <QColor>
+#include <QDateTime>
+#include <QDir>
 #include <QFont>
 #include <QFontDatabase>
 #include <QGuiApplication>
@@ -23,6 +25,7 @@
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "carryover.h"
+#include "recordingexport.h"
 #include "sessionbridge.h"
 #if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
 #include "windowtheme.h"
@@ -116,6 +119,10 @@ int main(int argc, char *argv[])
                           app.organizationName(), app.applicationName());
 
     QQuickStyle::setStyle("Basic");
+
+    // An export killed mid-way leaves its temporary copy behind
+    RecordingExport::removeStaleCopies(QDir::tempPath(),
+                                       QDateTime::currentDateTimeUtc());
 
     // Declared before the bridge, so it outlives the bridge's sessions:
     // the Bluetooth links' streams unregister when it goes (ADR-0028)

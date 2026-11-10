@@ -2025,22 +2025,31 @@ TEST_F(Elm327SessionTest, AResetWhoseSetupFailsIsAHardFailure)
 }
 
 /* An adapter that stops answering, prompt and all: a hard failure once
- * the worker's limit passes with nothing */
+ * the worker's limit passes with nothing, and the log names the limit
+ * in force */
 TEST_F(Elm327SessionTest, NoPromptWithinThePromptLimitIsAHardFailure)
 {
-    Session s;
-    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
-    s.start();
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
-    const ShortTimeouts timeouts(500, 0);
-    const auto from = std::chrono::steady_clock::now();
-    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
-    ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 4000));
-    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::steady_clock::now() - from)
-                          .count();
-    EXPECT_GE(took, 400);
+    const LogDir logs("silent");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        const ShortTimeouts timeouts(500, 0);
+        const auto from = std::chrono::steady_clock::now();
+        set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            4000));
+        const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - from)
+                              .count();
+        EXPECT_GE(took, 400);
+    }
+    const std::string log = logs.only_log();
+    EXPECT_NE(log.find("] no line and no prompt for 500 ms ("),
+              std::string::npos)
+        << log;
 }
 
 /* ---- Passive listening (ADR-0026's appendix "passive listening") ---- */
@@ -2222,30 +2231,38 @@ TEST_F(Elm327SessionTest, AQuietMonitorIsCheckedAtItsInterval)
 
 /* No prompt within the check's interval of its stop: a hard failure; the
  * adapter back, the reset that stops its monitor and the setup bring the
- * monitor back with no reconnect */
+ * monitor back with no reconnect. The log names the interval in force. */
 TEST_F(Elm327SessionTest, AHungMonitorIsAHardFailureAndRecovers)
 {
-    Session s;
-    listen_on(s);
-    set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
-    const ShortTimeouts timeouts(0, 500);
-    const int64_t from = monitor_started();
-    ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 4000));
-    EXPECT_GE(fake_elm327::steady_us() - from, 800000)
-        << "the interval with no line, then the interval with no prompt";
-    set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
-    ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
-    EXPECT_GE(fake_count("ATZ"), 2u) << "the setup ran again";
-    ASSERT_TRUE(wait_for(
-        [&] {
-            on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
-            return s.state() == ECUIO_OK;
-        },
-        3000));
-    uint32_t episodes = 0;
-    (void)s.state(&episodes);
-    EXPECT_EQ(episodes, 1u);
+    const LogDir logs("hung");
+    {
+        Session s;
+        listen_on(s);
+        set_knobs([](fake_elm327::knobs& k) { k.hung = true; });
+        const ShortTimeouts timeouts(0, 500);
+        const int64_t from = monitor_started();
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            4000));
+        EXPECT_GE(fake_elm327::steady_us() - from, 800000)
+            << "the interval with no line, then the interval with no prompt";
+        set_knobs([](fake_elm327::knobs& k) { k.hung = false; });
+        ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
+        EXPECT_GE(fake_count("ATZ"), 2u) << "the setup ran again";
+        ASSERT_TRUE(wait_for(
+            [&] {
+                on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
+                return s.state() == ECUIO_OK;
+            },
+            3000));
+        uint32_t episodes = 0;
+        (void)s.state(&episodes);
+        EXPECT_EQ(episodes, 1u);
+    }
+    const std::string log = logs.only_log();
+    EXPECT_TRUE(in_order(log, {"] no line for 500 ms: the monitor stops",
+                               "] no prompt within 500 ms of the stop"}))
+        << log;
 }
 
 /* BUFFER FULL with the monitor going on (an STN): the next message

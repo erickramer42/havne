@@ -8,11 +8,14 @@
 // (ecuio_export_estimate), each on a thread of its own. Core writes paths and
 // refuses one that exists, while a picker hands back a content:// URI on
 // Android, so a file is written into a temporary folder and copied to the
-// place picked.
+// place picked. The object's end stops both through core's cancel
+// (ecuio_export_with) and the copy's own check, so quitting mid-export, or
+// Android closing the app, waits only for the next ask.
 
 #pragma once
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -21,6 +24,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <atomic>
 #include <optional>
 #include <thread>
 
@@ -36,7 +40,8 @@ public:
     Q_ENUM(Format)
 
     explicit RecordingExport(QObject* parent = nullptr);
-    // Waits for the workers: core's calls have no cancel
+    // Stops the workers, then waits for them: what they had begun is
+    // removed and nothing is said
     ~RecordingExport() override;
     RecordingExport(const RecordingExport&) = delete;
     RecordingExport& operator=(const RecordingExport&) = delete;
@@ -50,6 +55,11 @@ public:
     Q_INVOKABLE static QString fileStem(const QString& folder);
     // Whether the folder holds a signals.csv, what a CSV export reads
     Q_INVOKABLE static bool holdsValues(const QString& folder);
+    // At startup: removes the folders an export killed mid-way left in
+    // tempPath (raw, they can hold a VIN), each named havne-export- and six
+    // letters or digits and last changed more than a day before now, and
+    // nothing else; the count removed
+    static int removeStaleCopies(const QString& tempPath, const QDateTime& now);
 
     // Sizes the wide CSV for each of rowMs (0 a row a sweep, at most 64), the
     // columns named (none: core's rule). One runs at a time: a newer call
@@ -77,6 +87,18 @@ public:
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
     // The workers run out of memory at once
     void setFailWorkerForTesting(bool on) { m_failWorkerForTesting = on; }
+    // Where a worker waits, up to ms or until the stop, as a long export
+    // would: at core's first ask, or between core's export and the copy
+    enum class HoldForTesting { None, FirstAsk, BeforeCopy };
+    void setHoldForTesting(HoldForTesting where, int ms)
+    {
+        m_holdForTesting = where;
+        m_holdMsForTesting = ms;
+    }
+    // The workers that have come to their hold
+    int heldForTesting() const { return m_heldForTesting.load(); }
+    // Every copy to the target fails, as a provider refusing the bytes
+    void setFailCopyForTesting(bool on) { m_failCopyForTesting = on; }
 
 signals:
     void busyChanged();
@@ -98,6 +120,8 @@ private:
 
     std::thread m_worker;
     std::thread m_estimateWorker;
+    // Set once, by the destructor; read by the workers
+    std::atomic<bool> m_stopping{false};
     std::optional<EstimateJob> m_waitingEstimate;
     quint64 m_estimateGeneration = 0;
     quint64 m_waitingGeneration = 0;
@@ -105,4 +129,8 @@ private:
     bool m_sizing = false;
     bool m_throughProvider = false;
     bool m_failWorkerForTesting = false;
+    HoldForTesting m_holdForTesting = HoldForTesting::None;
+    int m_holdMsForTesting = 0;
+    std::atomic<int> m_heldForTesting{0};
+    bool m_failCopyForTesting = false;
 };
