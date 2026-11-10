@@ -69,7 +69,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A blank cell in Add holds a spot open, for instance beside a floating
   overlay app. It draws nothing outside edit mode.
 - Phone: with no session, Dash lists the last five addresses that
-  connected, ready to connect, with Other address... for any other.
+  connected, replays and the demo left out, ready to connect, with Other
+  address... for any other.
 
 ### Changed
 
@@ -136,8 +137,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   high, and the Save report, Export and views row wraps instead of running
   past a narrow screen.
 - Recordings: Replay connects in one tap and lands on Live, or on
-  Settings with the reason when core refuses it, and reads "Disconnect to
-  replay" during a session. A plotted signal with no values is said in
+  Settings with the reason when core refuses it. It reads "Disconnect to
+  replay" while connected and "Stop the relay to replay" while the relay
+  runs, and is a plain, disabled Replay while a session starts or ends.
+  A plotted signal with no values is said in
   the chart, unless a compared recording draws it. The cursor hint says
   "Click the chart for values" on the desktop and wraps on a phone; the
   Frames view's switch reads List and By ID; the Export panel names
@@ -156,8 +159,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - Android: Back, the key or a back swipe under gesture navigation, reaches
   the app: it closes a Settings page however it was reached, closes an
-  open recording to the list, and returns from the Log, or from Connection
-  opened through Other address..., to where it came from.
+  open recording to the list, closes a Dashboard gauge's panel and then
+  edit mode, and returns from the Log, or from Connection opened through
+  Other address... or by a refused Replay, to where it came from.
 - Android: with an accessibility service on, such as a screen reader or a
   password manager, Havne could stop answering for minutes after you left
   the Dashboard and came back during a session. The gauges and the Log's
@@ -170,6 +174,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   behind: the app removes it at its next start, once it is a day old.
 - The Dashboard says Log ended when your own Disconnect ends a log, with
   no reason; it gives one only for an end you didn't ask for.
+- Settings no longer brings back a replay or the demo (`mock://`) as the
+  address at the next start, and Dash's recent addresses leave both out
+  (Recordings is a replay's way back); one an earlier version stored is
+  dropped.
 - Imperial units show bar as psi (tire pressures from imported OBDb signal
   sets).
 - With no session, a gauge's signal list follows the profile chosen in
