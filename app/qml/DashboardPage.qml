@@ -95,6 +95,7 @@ Page {
     property bool editing: false
     property int selected: -1        // the cell edited, on the page shown
     property int selectedDigits: 4   // the selected Digits card's count
+    property int selectedCount: 15   // the selected Shift lights card's lights
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool moreShown: false
@@ -253,6 +254,7 @@ Page {
     property real driveInsetTop: 0
     property real driveInsetBottom: 0
     property string driveLogTime: ""
+    property string driveLogSize: ""   // "" until the header shows one
     // The window made full screen; a test's stand-in keeps it off the desktop
     property var driveWindow: Window.window
 
@@ -328,6 +330,21 @@ Page {
         else
             barsUp = true
         return true
+    }
+    // Android's Back on Dash: the drive view, a gauge's panel, then edit
+    // mode; false leaves it to the system
+    function goBack() {
+        if (driveBack())
+            return true
+        if (panel !== "") {
+            closePanel()
+            return true
+        }
+        if (editing) {
+            stopEditing()
+            return true
+        }
+        return false
     }
     function raiseBars(attention) {
         if (!driving)
@@ -686,12 +703,19 @@ Page {
         readonly property bool chosen: pageNo === root.pageIndex && root.selected === cellIndex
                                        && (root.editing || root.panel !== "")
 
-        // What the panel's Digits shows with the option unset
+        // What the panel's Digits and Lights show with the option unset: what
+        // the cell draws, in or out of edit mode
         Binding {
-            when: card.editable && root.selected === card.cellIndex
+            when: card.chosen
             target: root
             property: "selectedDigits"
             value: card.digits
+        }
+        Binding {
+            when: card.chosen
+            target: root
+            property: "selectedCount"
+            value: card.count
         }
 
         // A press held still lifts the cell; these go to its page's grid
@@ -1156,7 +1180,9 @@ Page {
                         // A stored h under the phone's step stays reachable
                         from: root.phoneForm && panelCard.cell
                               ? Math.min(root.spanScale, panelCard.cell.h) : 1
-                        to: root.phoneForm ? DashboardBook.maxRows : DashboardBook.format1MaxRows
+                        // The desktop's 16, or a taller stored cell's own height
+                        to: root.phoneForm ? DashboardBook.maxRows
+                            : Math.max(DashboardBook.format1MaxRows, panelCard.cell ? panelCard.cell.h : 1)
                         stepSize: root.spanScale
                         value: panelCard.cell ? panelCard.cell.h : 1
                         onValueModified: root.resize(panelCard.cell.w, root.phoneForm
@@ -1311,7 +1337,7 @@ Page {
                         to: 32
                         value: panelCard.cell && panelCard.cell.options
                                && panelCard.cell.options.count !== undefined
-                               ? panelCard.cell.options.count : 15
+                               ? panelCard.cell.options.count : root.selectedCount
                         onValueModified: root.setOptions({ count: value })
                     }
                 }
@@ -1679,7 +1705,7 @@ Page {
             Label {
                 objectName: "driveStatusDetail"
                 readonly property string detail:
-                    Bridge.logActive ? qsTr("%1 MB").arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                    Bridge.logActive ? root.driveLogSize
                   : !Bridge.recordingActive || Bridge.markCount === 0 ? ""
                   : Bridge.markCount === 1 ? qsTr("1 mark")
                   : qsTr("%1 marks").arg(Bridge.markCount)
@@ -1778,10 +1804,21 @@ Page {
             // far in, or no session, whose Drive words are longer) drops Reset
             // peaks, which edit mode's Pages row then offers (moreResetPeaks).
             // Judged against the bar's width (the row can't shrink under its
-            // tools) and the tools' own widths, never the row's: no loop
-            readonly property real toolsWidth: (driveButton.visible ? driveButton.implicitWidth + spacing : 0)
-                + resetPeaksButton.implicitWidth + spacing + editButton.implicitWidth
-                + (nightLoader.active ? spacing + nightLoader.implicitWidth : 0)
+            // tools) and the tools' own widths, never the row's: no loop.
+            // The layout rounds each width up to a whole pixel, and each item
+            // shown ahead of the tools (the fills too) takes a spacing
+            readonly property real toolsWidth: {
+                let ahead = 0
+                for (const item of children) {
+                    if (item === resetPeaksButton)
+                        break
+                    if (item.visible)
+                        ahead += spacing + (item === driveButton ? Math.ceil(item.implicitWidth) : 0)
+                }
+                return ahead + Math.ceil(resetPeaksButton.implicitWidth) + spacing
+                    + Math.ceil(editButton.implicitWidth)
+                    + (nightLoader.active ? spacing + Math.ceil(nightLoader.implicitWidth) : 0)
+            }
             readonly property bool holdsResetPeaks: topBar.width >= Math.max(root.toolRowFull, toolsWidth)
             ThemedButton {
                 id: resetPeaksButton
@@ -2185,8 +2222,11 @@ Page {
                     root.commitTyping()
                     const at = grid.mapFromItem(null, scene.x, scene.y)
                     const b = DashboardBook.place(placed, columns)[i]
-                    grab = Qt.point(at.x - boxLeft(b), at.y - boxTop(b))
                     heldSize = Qt.size(boxWidth(b), boxHeight(b))
+                    // A press on the stretched part lifts the cell under
+                    // the finger at its true size, not past its edge
+                    grab = Qt.point(Math.max(0, Math.min(at.x - boxLeft(b), heldSize.width)),
+                                    Math.max(0, Math.min(at.y - boxTop(b), heldSize.height)))
                     pressedAt = scene
                     finger = scene
                     dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(

@@ -396,6 +396,33 @@ TestCase {
         compare(storedText(page), DashboardBook.serialize(page.doc))
     }
 
+    // An option the cell leaves unset shows in its box as the cell draws it,
+    // in edit mode and out of it; a stored cell taller than the desktop's 16
+    // rows shows its own height
+    function test_theBoxesShowWhatTheCellDraws() {
+        const lights = cellOf("S", "shift-light")
+        const tall = Object.assign(cellOf("T"), { h: 20 })
+        const page = pageOf({ width: 400 }, docOf([lights, tall]))
+        verify(page.compact)
+        compare(find(page, "dashCell_0_0").count, 11, "a compact page draws 11")
+        page.select(0)
+        compare(find(page, "panelCount").value, 11, "out of edit mode")
+        page.closePanel()
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(find(page, "panelCount").value, 11, "in edit mode")
+        spin(find(page, "panelCount"), 12)
+        compare(page.doc.pages[0].cells[0].options.count, 12, "one more than shown")
+
+        page.select(1)
+        const rows = find(page, "panelH")
+        compare(rows.value, 20, "its own height")
+        spin(rows, 19)
+        compare(page.doc.pages[0].cells[1].h, 19)
+        page.select(0)
+        compare(rows.to, 16, "a cell of 16 or fewer stops at 16")
+    }
+
     // Step 5's kinds offer their own options in the panel, the bar its two
     // switches, and the peak switch shows for the kinds that draw a peak
     function test_theNewKindsOwnOptionsAreEditable() {
@@ -970,6 +997,29 @@ TestCase {
         click(page, "panelClose")
         compare(page.panel, "")
         compare(page.selected, data.edit ? 1 : -1, "only edit mode keeps a selection")
+    }
+
+    // A cell drawn stretched lifts at its true size with the finger on it:
+    // a lone cell fills its row on the joined panel, and a hold at its
+    // middle is past its true width
+    function test_aStretchedCellLiftsUnderTheFinger() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A")]))
+        const a = find(page, "dashCell_0_0")
+        tryVerify(() => a.width > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
+        const wide = a.width
+        const from = centerOf(page, a)   // where the hold presses
+        hold(page, a)
+        verify(a.width < wide, "the true size while held: " + a.width + " of " + wide)
+        const x = from.x + 4 * Application.styleHints.startDragDistance
+        mouseMove(page, x, from.y, -1, Qt.LeftButton)
+        tryVerify(() => a.carried, 2000, "the cell follows the finger")
+        // Its edges as drawn: a lifted cell is scaled up a little
+        const left = a.mapToItem(page, 0, 0).x
+        const right = a.mapToItem(page, a.width, 0).x
+        verify(x >= left - 0.5 && x <= right + 0.5,
+               "the finger at " + x + " is on the cell, " + left + " to " + right)
+        mouseRelease(page, x, from.y)
     }
 
     // A press let go before the hold is a tap
@@ -1702,9 +1752,16 @@ TestCase {
         const where = "Reset at " + reset.x + "," + reset.y + ", Remove page ends at "
                       + (remove.x + remove.width) + "," + (remove.y + remove.height) + " in a row of "
                       + row.width
-        const shown = Array.from(row.children).filter(c => c.visible)
+        // Reset peaks follows it when the tool row has no room, which at a
+        // phone's width depends on the font's
+        const resetPeaks = find(page, "moreResetPeaks")
+        const shown = Array.from(row.children).filter(c => c.visible && c !== resetPeaks)
         compare(shown[shown.length - 1], reset, "the last of the row")
         compare(shown[shown.length - 2].objectName, "moreResetGap", "after a gap")
+        if (resetPeaks.visible) {
+            const all = Array.from(row.children).filter(c => c.visible)
+            compare(all[all.length - 1], resetPeaks, "Reset peaks after Reset")
+        }
         if (page.width >= 560) {
             fuzzyCompare(reset.x + reset.width, row.width, 0.5, "at the row's end: " + where)
             compare(Math.round(reset.y), Math.round(remove.y), "on the controls' row: " + where)

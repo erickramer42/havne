@@ -60,7 +60,7 @@ function Fail([string] $why) { Write-Error "stage: $why"; exit 1 }
 
 if (-not (Test-Path (Join-Path $appDir 'havne.exe'))) { Fail "no havne.exe in $appDir; build the app first" }
 if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate.exe'))) {
-    Fail 'no x86 surrogate beside havne.exe; build build-win32 before configuring the app (CLAUDE.md, Commands)'
+    Fail 'no x86 surrogate beside havne.exe; build build-win32 before configuring the app (docs/development.md, Build configurations)'
 }
 if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate-x64.exe'))) {
     Fail 'no x64 surrogate beside havne.exe; the app build copies it from its own tree (app/CMakeLists.txt)'

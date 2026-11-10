@@ -106,10 +106,10 @@ void decode_frame(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
     }
 }
 
-/* Appends each computed value one of the frame's values feeds (ADR-0051
- * section 5): from each input's newest value, when every input has one
- * no older than its bound at the frame's time. A division by zero or a
- * result that isn't finite gives none. */
+/* Appends each computed value a frame value feeds (ADR-0051 section 5),
+ * from each input's newest value, when every input has one no older than
+ * its bound at the frame's time. A division by zero or a non-finite
+ * result gives none. */
 void compute_values(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
                     uint32_t& n)
 {
@@ -169,13 +169,11 @@ void plan_computed(ecuio_frame_decoder& d, const ecuio_signal_set_t* set)
 
 } // namespace
 
-/* On one message ID, every unkeyed text def matches every frame; of the
- * keyed ones, one frame holds one key of each shape (offset and length),
- * so each shape adds its largest group sharing one key. A packed Service
- * 01 reply is the exception: split, it decodes a record for each PID it
- * holds, within one frame's slots, so the 41 <PID> keys add their groups,
- * the largest ECUIO_OBD2_MAX_RECORDS of them. The answer is the largest
- * such total over the IDs. */
+/* On one message ID, every unkeyed text def matches every frame, and each
+ * key shape (offset and length) adds its largest group sharing one key. A
+ * packed Service 01 reply decodes a record per PID within one frame's
+ * slots, so the 41 <PID> keys add their ECUIO_OBD2_MAX_RECORDS largest
+ * groups. The answer is the largest total over the IDs. */
 uint32_t ecuio_text_slots_for(const ecuio_signal_set_t* set)
 {
     /* ecuio_service01_keyed's shape: offset 0, two bytes */
@@ -275,11 +273,10 @@ void ecuio_frame_decoder::prepare(const ecuio_signal_set_t* s, bool absent)
 }
 
 /* A packed Service 01 reply decodes record by record (ADR-0039 Appendix
- * A), each record a frame of its own in record_frame for the defs keyed
- * by its PID, every other def from the reply whole, so each def decodes
- * at most once. Each text value takes the next slot, from the first
- * again each frame; prepare gave a slot for every text value a frame can
- * decode to. */
+ * A): each record a frame in record_frame for the defs keyed by its PID,
+ * every other def from the reply whole, so each def decodes at most once.
+ * Text values take the next slot, restarting each frame; prepare gave a
+ * slot for every text value a frame can decode to. */
 uint32_t ecuio_frame_decoder::decode(const ecuio_frame_t* frame)
 {
     if (set == nullptr) {

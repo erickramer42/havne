@@ -19,21 +19,20 @@
 namespace {
 
 /* One def per field of every linear PID in J1979's Service 01 table
- * (ADR-0039): the ten first, as they always were, then the rest in PID
- * order. Payload as the decoder sees it, after the transport strips the
- * 4-byte address header: [0x41][PID][A][B]...
+ * (ADR-0039): the ten first, then the rest in PID order. Payload as the
+ * decoder sees it, after the transport strips
+ * the 4-byte address header: [0x41][PID][A][B]...
  *   - mux key: bytes 0..1, compared as 0x4100|PID (mode echo + PID)
  *   - data: from byte 2; multi-byte fields are big-endian (J1979's
- *     256*A + B), the rest single bytes
+ *     256*A + B)
  *   - no PCI byte: the adapter does the ISO-TP framing
  *   - temperatures are 8-bit UINT (J1979: A - 40, so -40..215 degC)
- * Scaling follows SAE J1979 Service 01, typed out here and checked
- * against tests/fixtures/obd2/service01.csv by Obd2TableTest, never
- * generated from it. Only the PIDs listed here are requested and
- * decoded; the probe drops those a car's bitmaps leave out.
- * Names, units and decimal places are display strings: the UI shows
- * them as they are (UTF-8), so each name is unique in the set (a
- * recording keys its values by name) and fits the def's 31 bytes. */
+ * Scaling follows SAE J1979 Service 01, typed out here and checked against
+ * tests/fixtures/obd2/service01.csv by Obd2TableTest, never generated from
+ * it. Only these PIDs are requested; the probe drops those a car's bitmaps
+ * leave out. Names, units and decimals are shown as they are (UTF-8); each
+ * name is unique in the set (a recording keys values by name) and fits 31
+ * bytes. */
 ecuio_signal_def_t obd2_def(uint16_t id, const char* name,
                             ecuio_value_kind_t kind, uint8_t bit_length,
                             double scale, double offset_val, const char* unit,
@@ -105,17 +104,13 @@ ecuio_signal_def_t kObd2Defs[] = {
              100.0 / 255.0, 0.0, "%", 1, 0x2F, ECUIO_BYTE_ORDER_LE),
     obd2_def(ECUIO_OBD2_SIG_BATTERY_V_ID, "Battery Voltage", ECUIO_VALUE_UINT,
              16, 0.001, 0.0, "V", 2, 0x42, ECUIO_BYTE_ORDER_BE),
-    /* SAE J1979 PID 0x10: air flow rate, (256*A + B)/100 g/s. Two-byte
-     * big-endian like RPM/0x42; the 0.01 scale needs no decoder
-     * extension (generic raw*scale + offset). Shown to two decimals, the
-     * step of the PID (ADR-0056 section 5). */
+    /* SAE J1979 PID 0x10: air flow rate, (256*A + B)/100 g/s, two-byte
+     * big-endian. Two decimals, the PID's step (ADR-0056 section 5). */
     obd2_def(ECUIO_OBD2_SIG_MAF_ID, "MAF", ECUIO_VALUE_UINT, 16, 0.01, 0.0,
              "g/s", 2, 0x10, ECUIO_BYTE_ORDER_BE),
-    /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
-     * def shape as coolant and IAT. Transmission fluid temperature isn't
-     * a standard Mode-01 PID (it's manufacturer-specific, usually
-     * Mode 22), and PID 0x5F is the bit-encoded emission-requirements
-     * byte, not a temperature. */
+    /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC. Transmission
+     * fluid isn't a standard Mode-01 PID (manufacturer-specific, usually
+     * Mode 22), and PID 0x5F is a bit-encoded byte, not a temperature. */
     obd2_def(ECUIO_OBD2_SIG_OIL_TEMP_ID, "Engine Oil Temp", ECUIO_VALUE_UINT, 8,
              1.0, -40.0, DEG_C, 0, 0x5C, ECUIO_BYTE_ORDER_LE),
     /* The rest of the table, in PID order (ADR-0039 section 1): pid, field,
@@ -251,12 +246,10 @@ ecuio_signal_def_t kObd2Defs[] = {
     pid_def(0xA6, 0, 0, "Odometer", U, 32, 0.1, 0.0, "km", 1),
 };
 
-/* The signals a UI plots when a session starts, best first (ADR-0039
- * section 8): the engine's state, then how hard it works and how it
- * fuels. A UI plots the first few the car supports, so a car without
- * one (oil temperature, a MAF) plots the next: MAP stands in for a
- * speed-density engine's missing MAF. Throttle is left to load, which
- * says more of the engine's state. */
+/* The signals a UI plots at session start, best first (ADR-0039 section
+ * 8): the engine's state, how hard it works, how it fuels. A UI plots the
+ * first few the car supports (MAP stands in for a speed-density engine's
+ * missing MAF). Throttle is left to load, which says more. */
 const uint16_t kPlotOrder[] = {
     ECUIO_OBD2_SIG_RPM_ID,
     ECUIO_OBD2_SIG_COOLANT_TEMP_ID,
@@ -354,10 +347,9 @@ uint8_t obd2_group(const ecuio_signal_def_t& d)
 #undef DEG
 #undef DEG_C
 
-/* ADR-0013 section 4: the obd2 profile declares the standard physical pair,
- * 0x7E8 (ECU response) / 0x7E0 (tester request). The transport
- * registers its receive filter and addresses requests from this list;
- * ?filter= and ?txid= override it. Multi-ECU profiles add entries. */
+/* ADR-0013 section 4: the standard physical pair, 0x7E8 (response) /
+ * 0x7E0 (request). The transport filters and addresses from this list;
+ * ?filter= and ?txid= override it. */
 const ecuio_channel_decl_t kObd2Channels[] = {
     { ECUIO_OBD2_ECU_ARB_ID, ECUIO_OBD2_TESTER_ARB_ID },
 };

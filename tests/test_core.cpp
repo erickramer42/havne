@@ -2266,8 +2266,8 @@ Waited wait_n(ecuio_precise_wait& w, std::chrono::microseconds d, int n)
  * best kept, since one preempted round proves nothing. Where there is
  * no such timer (Linux, macOS: a plain sleep, which CI's macOS runners
  * end 10 to 18 ms late and core can't shorten) the two are one path and
- * only the floor is judged. Mutation-checked 2026-11-08: the timer
- * ignored in sleep_for (both medians the step's) fails both bounds. */
+ * only the floor is judged. With the timer ignored in sleep_for (both
+ * medians the step's) both bounds fail. */
 TEST(CoreTest, APreciseWaitEndsOnTime)
 {
     ecuio_precise_wait w;

@@ -5,10 +5,10 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/havne/graph/badge.svg)](https://codecov.io/gh/erickramer42/havne) [![Release](https://img.shields.io/github/v/release/erickramer42/havne)](https://github.com/erickramer42/havne/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
-Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux and Android: live data, trouble codes, and recordings to replay or share, scrubbed. A Qt-free C++17 core behind a C ABI serves a Qt app, `havne-cli` and Python. [Download](https://github.com/erickramer42/havne/releases/latest).
+Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux and Android: live data, trouble codes, and recordings to replay or share, scrubbed, from an app, `havne-cli` or Python. [Download](https://github.com/erickramer42/havne/releases/latest).
 
 > [!WARNING]
-> **Experimental.** It has read one car through two adapters and listened through a third; other cars and adapters are untested. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
+> **Experimental.** Tested on one car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it.
 
 ![The Dashboard through a quarter mile](docs/images/dashboard.gif)
 
@@ -17,7 +17,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 ## Engineering highlights
 
 - **Vendor drivers run out of process.** Each J2534 DLL runs in a surrogate of its own architecture, so a crashing driver ends its process, not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Fast paths, measured.** The worker decodes with no allocation per frame; a recorded engine start replays at over 300,000 frames a second in a load test CI repeats ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Fast paths, measured.** The worker decodes with no allocation per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI repeats the load test ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Measured on a real car.** A second controller on its bus showed Havne's adapter read adding 52 ms; fixing it cut latency from 65.5-73.7 ms to 16.4 ms ([session sheet](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Protocol logic with no I/O, fuzzed.** The request engine, ISO-TP and the ELM327 layer take no I/O or clock, so rules are unit tests; parsers run fuzzed in CI ([ADR-0015](docs/adr/0015-request-engine.md)).
 - **A user's signals are data.** Signal files are JSON that core reads from bytes and refuses at load with line and column, so every platform loads them alike ([ADR-0051](docs/adr/0051-signal-files.md)).
@@ -27,7 +27,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 ## What it does
 
-- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, and Dark, Low glare and Night themes ([ADR-0057](docs/adr/0057-dashboards.md)).
+- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
@@ -38,22 +38,16 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **`havne-cli` and Python:** any session as JSON lines or iterators, recordings viewed and exported offline, the simulated car served as an ELM327 adapter ([ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md)).
 - **A simulated vehicle:** a modeled car through a cold start, pulls onto the limiter and a quarter mile, so every page runs with no hardware.
 
-| Live view | Link health |
-|---|---|
-| [![Live view: a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Live view with every request failing: an amber banner](docs/images/link-health.png)](docs/images/link-health.png) |
-| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+| Dashboard | Live | Dashboard at night |
+|---|---|---|
+| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](docs/images/phone-dashboard-dark.png)](docs/images/phone-dashboard-dark.png) | [![Live on the test phone on the limiter: rpm, speed, MAF and lambda over a minute of the chart](docs/images/phone-live.png)](docs/images/phone-live.png) | [![The phone layout's Dashboard with Night on in red](docs/images/phone-dashboard-night.png)](docs/images/phone-dashboard-night.png) |
+| The phone layout in a 2nd-gear pull, the shift lights filling | Live on the test phone, on the rev limiter | Night in red, for a dark cabin |
 
-![The Diagnostics page on the simulated vehicle](docs/images/diagnostics.png)
+![Live on the desktop: rpm, speed, MAF and lambda through a 3rd-gear pull onto the limiter](docs/images/live.png)
 
-*Diagnostics: the inspection verdict, each code with its SAE J2012 title, the readiness monitors.*
+*Live on the desktop: a 3rd-gear pull onto the limiter, lambda swinging lean on each fuel cut.*
 
-![The Log page in developer mode: activity, then raw frames](docs/images/log.gif)
-
-*The Log page in developer mode: each session, then the frames.*
-
-![The Recordings page: two runs overlaid](docs/images/recordings.png)
-
-*Recordings: a warm loop's pull with the cold start's overlaid, aligned on a marker.*
+Every page on the desktop and the phone, in each theme: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 
@@ -124,11 +118,12 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.7.0, the dashboard and the UI, is the latest release. Next:
+v0.7.1, a more modern look, phone first, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.1-v0.10.0 | A more modern look; triggered logging and alerts; discovery of every module; the scan tool |
+| v0.7.2 | The Dashboard and signals finished: the desktop's panel, undo, a Daylight look, gauge ranges from signal files, a short user guide |
+| v0.7.3-v0.10.0 | The analysis viewer; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.
@@ -145,6 +140,7 @@ v0.7.0, the dashboard and the UI, is the latest release. Next:
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
+| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in each theme |
 | [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |

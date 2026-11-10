@@ -485,11 +485,10 @@ inline uint32_t elm327_def_end(const ecuio_signal_def_t& d)
  * each PID whose every def keyed 41 <PID> ends within a Single Frame and
  * whose reply, at J1979's length (ECUIO_OBD2_PID_BYTES), fits one too:
  * a def reading the first bytes of a longer reply (PID 68's first
- * sensor of seven bytes) would otherwise ask for one frame, and the
- * adapter would cut the reply after it. For a PID that table doesn't
- * define, the transport takes it out when a reply spans frames after
- * all, losing that reply. A NULL set gives the
- * bitmaps alone. */
+ * sensor of seven bytes) would ask for one frame, and the adapter would
+ * cut the reply. For a PID that table doesn't define, the transport
+ * takes it out when a reply spans frames, losing that reply. A NULL set
+ * gives the bitmaps alone. */
 inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
                                       elm327_one_frame_pids* out)
 {

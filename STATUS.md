@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-08, **Version:** v0.7.0,
+**Updated:** 2026-11-10, **Version:** v0.7.1,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,10 +14,14 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.7.0, the dashboard and the UI, is
-out** (its section below). The Dashboard is built by hand
-from eight kinds of gauge and saved per phone and desktop, with Low
-glare and Night themes; Settings is a list of pages; an analysis log
+**Current phase: v0.7.1, a more modern look, phone first, is
+out** (its section below): Night as its own control, the S2 look, the
+phone's five tabs, joined panel and drive view, the viewer's Export, the
+log's minimum time between sweeps and reads in the extended session.
+v0.7.0, the dashboard and the UI, is out: the Dashboard is built by hand
+from eight kinds of gauge and saved per phone and desktop, with Night
+off, on or scheduled in an amber or a red style; Settings is a list of
+pages; an analysis log
 records the signals picked on Live at their own rate, as a wide CSV; the
 app imports CSV and candump logs and shows a recording's frames. v0.6.0
 is out, sharing and scripting: everything reaches
@@ -228,12 +232,17 @@ background too ([roadmap](#roadmap)).
     numeric signal of the profile, each with its label, range, zones,
     decimals, size and place, saved as made, one set for every vehicle,
     the phone's and the desktop's apart, with peak hold and stale
-    dimming; Dark, Low glare and Night themes; Settings as a list of
+    dimming; Night (off, on or scheduled, in an amber or a red style)
+    beside the Dark look; on the phone, five tabs, a joined panel of
+    gauges and a drive view with the bars hidden
+    ([ADR-0059](docs/adr/0059-drive-view.md)); Settings as a list of
     pages; Live's table and strip chart, the Log page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
     findings, two runs overlaid and aligned, a vehicle's baseline
-    recording overlaid on a new run aligned on the engine starts, and a
-    Mark while recording), one signal filter on Live and the viewer (words, plotted
+    recording overlaid on a new run aligned on the engine starts, a Mark
+    while recording, and Export: the whole recording as a CSV, wide or
+    long, pcapng or a folder copy, scrubbed, through the system's
+    pickers), one signal filter on Live and the viewer (words, plotted
     only, the part of the car), and Settings composing the URI. Live's
     and the viewer's chart can take the whole page (a button, a
     double-click or `F`; on a phone on its side by default), a splitter
@@ -444,13 +453,13 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1814 ctest cases on Windows (both trees rebuilt,
-  2026-11-08), all passing but six skips (the cross-arch case and
+- **Tests:** 1931 ctest cases on Windows (both trees rebuilt,
+  2026-11-10), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
   without tshark installed), plus the
-  cross-arch subset (102/102); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (103/103); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
@@ -501,8 +510,8 @@ can confirm, each with its evidence, are in
 [docs/bench-sessions/bench-prep.md](docs/bench-sessions/bench-prep.md);
 every session walks it. Every item is settled for the adapters on
 hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
-the VX clock's zero (#5), the VX's serial port on a machine without
-OBDX's software (#11), response pending (#17), the VX's WiFi while
+the VX clock's zero (#5), the VX's serial port on Windows without
+OBDX's INF (#11), response pending (#17), the VX's WiFi while
 its USB port is held (#20, in part), a BLE adapter (#25), a real CAN controller that sends with
 one-shot mode (#32), a sleep on a Linux
 machine (#27), and a busy bus through the surrogate (#34). Any other adapter starts the list again.
@@ -583,64 +592,68 @@ an issue is resolved it is removed, and its number is not reused.
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.6.0 | Sharing and scripting: exports and imports scrubbed by construction, Python bindings, the ELM327 emulator, `havne-cli clear`, the viewer reading a recording's frames, JSON Schemas for signal files, the health report | Released |
 | v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | Released |
-| v0.7.1-v0.10.0 | v0.7.1, a more modern look, phone first: the shared controls, Night as its own control. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
+| v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
+| v0.7.2-v0.10.0 | v0.7.2, finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Daylight look, a signal file's dial range and warning levels. v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, Live's pause. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
 ([ADR-0048](docs/adr/0048-semantic-versioning.md)): each feature
-release raises the minor number, fixes alone the patch number. Earlier
-releases are in [CHANGELOG.md](CHANGELOG.md). The planned releases are
-in order and hold about three features each; a release's detail comes
-in here when its work starts.
+release raises the minor number; a patch carries fixes and follow-up
+work on its minor's theme, and never breaks the C ABI, `havne-cli`'s
+schema or a plugin format (ADR-0048's appendix "what a PATCH may
+carry"). Earlier releases are in [CHANGELOG.md](CHANGELOG.md). The
+planned releases are in order and hold about three features each; a
+release's detail comes in here when its work starts.
 
-### v0.7.0: the dashboard and the UI
+### v0.7.1: a more modern look, phone first
 
-For people who watch the car while it runs, and for anyone who wants
-the values of a drive in a spreadsheet. A minor release
-([ADR-0048](docs/adr/0048-semantic-versioning.md)): the C ABI grows,
-append-only, and the CSV export's default changes (a breaking change
-for scripts, named in CHANGELOG).
+For people who read the Dashboard in a car, and anyone who wants a
+recording's values out of the app. A patch on v0.7.0's theme
+([ADR-0048](docs/adr/0048-semantic-versioning.md)'s appendix "what a
+PATCH may carry"): the C ABI grows, append-only
+(`ecuio_session_set_focus_with`, `ecuio_export_with`,
+`ecuio_export_estimate_with`, the session fields of
+`ecuio_channel_support_t`).
 - **Built:**
-  - the Dashboard, built in the app
-    ([ADR-0057](docs/adr/0057-dashboards.md)): eight kinds of gauge,
-    pages, edit mode, one layout for every vehicle and one per form,
-    saved as it is made; core names a signal file's key and a def's
-    range (`ecuio_signal_file_key`, `ecuio_def_range`);
-  - the Low glare and Night themes, with the gauges' color roles in
-    `Theme`;
-  - Settings as a list of pages, and the phone's tab bar and top bar at
-    a finger's size;
-  - the analysis log ([ADR-0056](docs/adr/0056-analysis-log.md)): a
-    running session's requests narrowed to picked signals
-    (`ecuio_session_set_focus`), a recorder attached to a running
-    session, `havne-cli log` and the app's Start log and Stop log, the
-    wide CSV as the export's default (`--rows`, `--signal`,
-    `--units`) with its size estimate (`ecuio_export_estimate`); it has
-    run on the test car through the MX+ and the VX over ELM327 on
-    native Linux, with the rates per signal count in ADR-0056's
-    appendix of 2026-11-08
-    ([2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md));
-    not through J2534, and no request has gone out through SocketCAN;
-  - the app's Import for CSV and candump logs, a CSV's map guessed from
-    its header (`havne-cli import csv` with no map, Python's
-    `havne.guess_csv_map`), and the viewer's Frames switch with
-    `havne-cli frames` and `havne.read_frames`;
-  - the Log page's ID mask, length and time filters, and By ID's
-    changed bytes;
-  - the health report naming the vehicle's baseline recording;
-  - the downloads' notices: Qt's, the AppImage's pinned runtime and
-    its sources, and no Microsoft shader DLLs in the Windows zip.
-- **Left for v0.7.1:** the viewer's Export, undo and drag in edit mode,
-  the minimum sweep interval and the viewer's navigation aids
-  (ADR-0056), and a more modern look.
+  - Night as its own control, off, on or scheduled, in an amber or a
+    red style, with a one-tap switch on the Dashboard
+    ([ADR-0058](docs/adr/0058-night-mode.md));
+  - the S2 look: a graphite palette, Barlow type with fixed-width
+    digits for readings, flat cards and gauges, button ranks, one type
+    scale, and shared text fields and check boxes;
+  - the phone's Dashboard on 6 columns upright and 12 on its side, with
+    a stored v0.7.0 layout upgraded in memory, one joined panel, one
+    tool row, a gauge's press and hold for its menu or a drag, copy and
+    paste, a blank cell, and cells that fill the empty squares under
+    them ([ADR-0057](docs/adr/0057-dashboards.md)'s appendices);
+  - the phone's five tabs, the address in the top bar's status, and
+    Dash's list of recent addresses with no session;
+  - the drive view: the gauges to the screen's edges with every bar
+    hidden, revealed by a tap, kept awake while connected on external
+    power or with Dash showing, entered again at the next connect, and
+    Android's Back as one route across the app
+    ([ADR-0059](docs/adr/0059-drive-view.md)); on the test phone with
+    the mock, three-button and gesture navigation, not on a car;
+  - the viewer's Export ([ADR-0056](docs/adr/0056-analysis-log.md)'s
+    appendix "the viewer's Export as built") and `havne-cli export
+    --estimate`, both stopped cleanly when the app quits or on Ctrl+C
+    (ADR-0054's appendix "an export canceled");
+  - a focus's minimum time between sweeps, in the app, `havne-cli log
+    --min-sweep` and Python (ADR-0056's appendix "the minimum time
+    between sweeps as built"); no real adapter has run it;
+  - reads in the extended session, `?session=03` on `uds-generic`
+    ([ADR-0060](docs/adr/0060-extended-session-reads.md)), with each
+    module's session on the Log page, in `havne-cli` and in Python; run
+    against the fakes and the simulated ECU only;
+  - the Recordings page sized for a phone's touch, and each gauge one
+    screen-reader item on Android.
+- **Left:** README's screenshots in the new look, and the review and
+  docs passes.
 
-**Done when:** a user builds a dashboard page from the library on the
-test phone and on the desktop, it survives a restart (tested:
-`QmlTest.dashedit`'s `test_aLayoutBuiltInEditModeSurvivesARestart`; the
-phone's run is not filed as a session sheet), and Settings fits the test
-phone with no section longer than two screens.
+**Done when:** the phone's pages use the shared controls in all three
+palettes, with no cut text at the test phone's width, and the README
+shows them.
 
 ### Waiting on a tester: an iPhone download
 

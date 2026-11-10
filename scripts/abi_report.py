@@ -244,7 +244,7 @@ Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
                           array type subrange 1 changed length from 3 to 2
                         and offset changed from 712 to 720 (in bits) (by +8 bits)
 """
-# The diagnostics report as v0.3.6 grew it: clear_kmh took a word of
+# The diagnostics report: clear_kmh took a word of
 # reserved[3], and cycle took reserved0[1] whole (abidiff's own lines)
 TAKEN = """Functions changes summary: 0 Removed, 1 Changed, 1 Added functions
 Variables changes summary: 0 Removed, 0 Changed, 0 Added variable

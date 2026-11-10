@@ -140,9 +140,33 @@ Rectangle {
         // scroll may have started since the call was queued.
         function followTail() { if (follow) jumpToLatest() }
 
+        // A hidden table keeps its place: the first row shown and whether it
+        // followed, noted while shown and put back once it's bound again
+        property int keptTop: 0
+        property bool keptFollow: true
+        property bool rebinding: false
+        onContentYChanged: if (table.visible && count > 0) keptTop = indexAt(1, contentY + 1)
+        onFollowChanged: if (table.visible && count > 0) keptFollow = follow
+        function restoreTop() {
+            if (!follow && count > 0)
+                positionViewAtIndex(Math.min(Math.max(keptTop, 0), count - 1), ListView.Beginning)
+        }
+
         onCountChanged: {
-            if (count === 0) follow = true   // cleared or new session
-            else if (table.live && tailing && follow) Qt.callLater(frameList.followTail)
+            if (!table.visible) {
+                rebinding = true   // unbound while hidden, not cleared
+            } else if (count === 0) {
+                follow = true   // cleared or new session
+            } else if (rebinding) {
+                rebinding = false
+                follow = keptFollow
+                if (!follow)
+                    Qt.callLater(frameList.restoreTop)
+                else if (table.live && tailing)
+                    Qt.callLater(frameList.followTail)
+            } else if (table.live && tailing && follow) {
+                Qt.callLater(frameList.followTail)
+            }
         }
         // User scrolling decides. Following stops as a drag, flick
         // or wheel starts, or the next frame would pull the view

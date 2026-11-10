@@ -93,9 +93,8 @@ public:
         std::this_thread::sleep_for(d);
     }
 
-    /* Waits until `until` in waits of at most `piece`, looking at stop
-     * between them, so a stop is seen within a piece however long the
-     * wait; true when it ended at a stop */
+    /* Waits until `until` in pieces of at most `piece`, checking stop between
+     * them, so a stop is seen within a piece; true when it ended at a stop */
     bool
     sleep_until(std::chrono::steady_clock::time_point until,
                 const std::atomic<bool>& stop,

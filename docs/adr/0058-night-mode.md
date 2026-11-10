@@ -6,8 +6,8 @@
   set), the phone's density rules (targets of 48 dp), and the contrast
   floors `tests/qml/tst_theme.qml` asserts.
 - **Read against:** `origin/dev` bbc9050: `app/qml/Theme.qml`,
-  `SettingsDisplay.qml`, `DashboardPage.qml` (the header, lines
-  1212-1300), `Main.qml` (the top bar), `app/windowtheme.*`.
+  `SettingsDisplay.qml`, `DashboardPage.qml` (the header's row),
+  `Main.qml` (the top bar), `app/windowtheme.*`.
 - **Out of scope here:** the button hierarchy, the tab bar, the type
   scale, Home, and the `/design` mockups.
 
@@ -499,6 +499,40 @@ Decided 2026-11-08; the sections above describe the decided form.
     uses, documented beside the zoom keys.
 12. **The ADR number.** 0058, with ADR-0057 section 9 amended by a dated
     note, not rewritten.
+
+## Appendix: the switch as a state, and the label on a primary fill (2026-11-09)
+
+**The switch is a dot and a word, not a pill.** Section 6 draws a pill
+28 to 32 px tall like the link pill. `NightSwitch.qml` draws a 10 px dot
+and the word "Night" with no fill and no outline, inside the same hit
+area (`Theme.touchTarget` each way): on the desktop at the end of the
+header's link state, on the phone at the right end of the Dashboard's
+tool row. Night on: the dot filled and the word in `text`. Off: the dot
+as a ring and the word in `textDim`. The accessible name and the
+schedule's words (section 5) are unchanged. The top bar's link status
+follows the same rule: its dot in `linkColor(state)` and its word, with
+no capsule.
+
+**`textOnPrimary`, a role for the label on a `primary` fill.** The Dark
+look's `primary` is the text color (`#ebebee`), so a button's label on
+it can't be `text`. Per palette:
+
+| Palette | `primary` | `textOnPrimary` | Contrast |
+|---|---|---|---|
+| Dark | `#ebebee` (the text color) | `#141416` (the ground) | 15.5:1 |
+| Night Amber | `#7f440d` | `#f3c895` (the text color) | 4.9:1 |
+| Night Red | `#7a241c` | `#ff9484` (the text color) | 4.7:1 |
+
+The night palettes keep their dim primary fills: a text-colored fill at
+night would be the brightest thing on the page, against section 3's
+rule that nothing outshines the text. Every primary button's label is
+`Theme.textOnPrimary`, and `QmlTest.theme` holds each palette's pair to
+4.5:1. The role is not named `onPrimary`: QML reads a property named
+`on` and a capital as a signal handler.
+
+**The active tab's mark** (the phone tab bar's 3 px bar) is `primary`
+in Dark and `text` at night, since `primary` on `surface` is 2.4:1 in
+Amber and 2.0:1 in Red.
 
 ## Appendix: how the numbers were measured
 

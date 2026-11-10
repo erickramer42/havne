@@ -759,10 +759,8 @@ void write_value(std::string& out, const Value& v, size_t depth)
             const int n = std::snprintf(buf, sizeof buf, "%.0f", v.number);
             out.append(buf, n > 0 ? static_cast<size_t>(n) : 0);
         } else {
-            /* A number written with a fraction or an exponent keeps
-             * one, so it reads back as no integer and -0.0 as -0.0: ".0"
-             * within the 15 digits the reader reads exactly, "e0" past
-             * them, which adds no digit */
+            /* A fraction or exponent keeps one so it reads back as no integer
+             * (and -0.0 as -0.0): ".0" within 15 digits, "e0" past them */
             const std::string n = number_text(v.number);
             out += n;
             if (!v.integer && n.find_first_of(".e") == std::string::npos) {
@@ -919,10 +917,8 @@ bool parse(const char* data, size_t size, Value* out, Error* error,
         *out = Value();
         return false;
     } catch (...) {
-        /* bad_alloc: a refusal like any other. Clearing frees what the
-         * parse held and allocates nothing, and the words fit every
-         * standard library's short-string buffer, so nothing here
-         * throws. */
+        /* bad_alloc: a refusal like any other; clearing allocates nothing
+         * and the words fit the short-string buffer, so nothing throws. */
         *out = Value();
         error->line = 0;
         error->column = 0;

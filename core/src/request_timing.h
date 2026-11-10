@@ -18,11 +18,10 @@
 
 #include <cstdint>
 
-/* A distribution of microseconds, log-linear like the bridge's delivery
- * figures (app/latencystats.h): exact below 16 us, then eight buckets to
- * a power of two, so a quantile reads at most 12.5 % above the true
- * value and never below it. Up to 2^24 us (16.8 s); longer samples go in
- * the last bucket, whose quantile is the exact maximum. */
+/* A distribution of microseconds, log-linear like app/latencystats.h:
+ * exact below 16 us, then eight buckets per power of two, so a quantile
+ * reads at most 12.5 % above the true value, never below. Up to 2^24 us;
+ * longer samples go in the last bucket, whose quantile is the maximum. */
 struct timing_hist {
     static constexpr int kSub = 8;
     static constexpr int kTopBand = 23; /* 2^23 to 2^24 us */

@@ -1,7 +1,7 @@
 # ADR-0060: Reads in the extended session, one built-in step
 
-- **Status:** Accepted; built in v0.7.1 (on
-  `feat/v072-extended-session`).
+- **Status:** Accepted; built in v0.7.1. Run against the fakes and the
+  simulated ECU only, not on a car.
 - **Date:** 2026-11-09.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request
   engine and its service allow-list, section 3);

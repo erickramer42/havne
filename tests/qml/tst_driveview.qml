@@ -299,7 +299,12 @@ TestCase {
         compare(find(s.dash, "driveStatusRun").text, qsTr("Log"))
         verify(find(s.dash, "driveStatusTime").visible, "the elapsed time")
         compare(find(s.dash, "driveStatusTime").text, s.main.logTimeText(Bridge.logElapsedMs))
-        verify(find(s.dash, "driveStatusDetail").text.endsWith(" MB"), "and the size")
+        // The size as the header gives it, none under 0.1 MB
+        const detail = find(s.dash, "driveStatusDetail")
+        compare(detail.detail, s.main.logSizeText(Bridge.logBytes))
+        compare(detail.visible, detail.detail !== "")
+        compare(s.main.logSizeText(104857), "", "none under 0.1 MB")
+        compare(s.main.logSizeText(104858), "0.1 MB")
         Bridge.stopLog()
         tryCompare(Bridge, "logActive", false, 5000)
     }
@@ -452,8 +457,7 @@ TestCase {
     }
 
     // Pressed over the delay's first part, the delay starts over: the bars
-    // outlast the first delay by the press's own time (a 1 s margin each way
-    // around a 3 s delay)
+    // outlast the first delay by the press's own time
     function test_aTouchRestartsTheDelayAndTheButtonStillWorks() {
         const s = driven()
         enterOn(s)
@@ -606,11 +610,16 @@ TestCase {
         verify(dashSaved(s), "the session's end doesn't clear it")
     }
 
+    // The bridge's "Replay finished" line is the recording's end
     function test_aRecordingThatEndsKeepsTheView() {
         const s = phoneMain()
+        let finished = false
+        const heard = line => { if (line.indexOf("Replay finished") === 0) finished = true }
+        Bridge.logMessage.connect(heard)
         connect(replayUri())
         enterOn(s)
-        wait(1500)
+        tryVerify(() => finished, 10000, "the replay plays to its end")
+        Bridge.logMessage.disconnect(heard)
         verify(Bridge.connected, "still connected at the recording's end")
         verify(s.dash.driving, "a replay user may rewind")
     }
@@ -668,6 +677,29 @@ TestCase {
     function test_backOnDashWithoutTheViewIsLeftToTheSystem() {
         const s = driven()
         compare(back(s), false, "nowhere to go back to")
+    }
+
+    // Edit mode is Dash's own view: Back closes a gauge's panel, then
+    // leaves edit mode, then leaves the app
+    function test_backClosesThePanelThenEditModeThenLeaves() {
+        const s = driven()
+        verify(s.dash.shownCells.length > 0, "a gauge to edit")
+        s.dash.startEditing()
+        s.dash.select(0)
+        compare(s.dash.panel, "cell", "its panel is open")
+        compare(back(s), true, "taken")
+        compare(s.dash.panel, "", "the panel closes first")
+        verify(s.dash.editing, "edit mode stays")
+        compare(s.dash.selected, 0, "and the gauge stays selected")
+        compare(back(s), true, "taken")
+        verify(!s.dash.editing, "then edit mode ends")
+        compare(back(s), false, "then the system's")
+
+        // A panel outside edit mode closes alone
+        s.dash.select(0)
+        compare(back(s), true)
+        compare(s.dash.panel, "")
+        compare(back(s), false)
     }
 
     // ---- Remembered once connected (section 7)

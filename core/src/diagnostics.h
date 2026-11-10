@@ -119,12 +119,12 @@ inline void ecuio_diag_take_readiness(const uint8_t abcd[4],
     }
 }
 
-/* PID 41's four data bytes (after 41 41) onto the monitors PID 01
- * listed: PID 01's layout, its A always 0, an availability bit meaning
- * enabled this drive cycle and a completeness bit 0 for complete this
- * cycle (SAE J1979; Wikipedia's "OBD-II PIDs", Service 01 PID 41). A
- * monitor PID 01 didn't list stays out: the report's monitors are the
- * ECU's. Sets ECUIO_DIAG_CYCLE. */
+/* PID 41's four data bytes (after 41 41) onto the monitors PID 01 listed
+ * (SAE J1979; Wikipedia's "OBD-II PIDs", Service 01 PID 41): PID 01's
+ * layout, A always 0, an availability bit meaning enabled this drive cycle,
+ * a completeness bit 0 for complete this cycle. A monitor PID 01 didn't
+ * list stays out: the report's monitors are the ECU's. Sets
+ * ECUIO_DIAG_CYCLE. */
 inline void ecuio_diag_take_cycle(const uint8_t abcd[4],
                                   ecuio_channel_diagnostics_t* out)
 {

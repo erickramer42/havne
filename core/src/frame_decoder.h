@@ -57,11 +57,10 @@ struct ecuio_frame_decoder {
      * the decode, read on another thread (relaxed). */
     std::unique_ptr<std::atomic<uint8_t>[]> short_frames;
     std::unique_ptr<std::atomic<uint8_t>[]> carried;
-    /* A packed Service 01 reply's split (obd2_reply.h): the message IDs a
-     * Service 01 def listens on, the only frames split; the frame each
-     * record decodes from; and each PID's length as this ECU sends it
-     * alone, where shorter than J1979's. The count of replies that
-     * wouldn't split is read on another thread. */
+    /* A packed Service 01 reply's split (obd2_reply.h): the IDs of Service
+     * 01 defs (the only frames split), the frame each record decodes from,
+     * and each PID's learned length where shorter than J1979's. The unsplit
+     * count is read on another thread. */
     std::vector<uint32_t> service01_ids;
     std::unique_ptr<ecuio_frame_t> record_frame;
     uint8_t learned_lengths[256] = {};

@@ -43,8 +43,8 @@ constexpr uint64_t kRowsMax = 100000000;
  * buffer), so a row of signals.csv stays within the reader's row bound */
 constexpr size_t kTextMax = ECUIO_DECODE_TEXT_MAX;
 /* A row stamped this much before the one before it takes that one's
- * time (a logger's clock stepping back a little, as candump's CPUs'
- * do); further back is refused */
+ * time (a logger's clock stepping back a little, as candump's CPUs' do);
+ * further is refused */
 constexpr int64_t kReorderUs = 100000;
 /* A relative time's bound, about 31 years: past it a double's
  * microseconds stop being whole */

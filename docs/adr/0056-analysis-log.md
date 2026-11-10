@@ -3,8 +3,9 @@
 - **Status:** Accepted. Built: the focus (section 2), the recorder
   attached to a running session (section 3), the rows and the wide CSV
   with its estimate (sections 4 and 5), `havne-cli log` and the app's
-  Start log and Stop log (the appendices); the viewer's Export and the
-  steps after it are v0.7.1's.
+  Start log and Stop log, the viewer's Export and a focus's minimum time
+  between sweeps (the appendices). The navigation aids (section 6) are
+  v0.7.3's.
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request
   engine) and [ADR-0039](0039-full-service01-coverage.md) (its two rate classes);
@@ -526,7 +527,12 @@ cancel). Core writes paths and refuses one that exists, and Android's
 picker hands back a `content://` URI, so a file is written in a
 `QTemporaryDir` and copied a chunk at a time to the place picked:
 `QSaveFile` for a local file, whole or not at all; the provider's own
-stream otherwise. A picker makes its document before the export runs, so
+stream otherwise. *Amended 2026-11-09:* the destructor, which runs when
+the app quits (an Android teardown included), stops both workers
+through core's cancel and waits only for the next ask (ADR-0054's
+appendix "an export canceled"); at startup the app removes an export's
+temporary folder (`havne-export-` and six letters or digits) once it is
+a day old. A picker makes its document before the export runs, so
 a refused export or a failed copy removes a provider's document; a local
 file stays as it was. A folder copy on a local disk is core's own, made
 whole under its partial name; through a provider it is made in the
@@ -621,3 +627,12 @@ the picks and lasts as long as they do.
   larger of the two would call every sweep at 1000 ms a gap.
 - No real adapter has run it; the checks are the fakes' and the
   simulated ELM327's.
+
+## Appendix: where the later steps landed (2026-11-09)
+
+The appendix "the build" places the minimum time between sweeps
+(section 4) and the navigation aids (section 6) in v0.7.1. The minimum
+time is v0.7.1's and is built (the appendix "the minimum time between
+sweeps as built"). The navigation aids moved to v0.7.3, with the
+analysis viewer, since they need logs from real drives to design
+against.

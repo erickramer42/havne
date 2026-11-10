@@ -70,11 +70,16 @@ ColumnLayout {
     readonly property int units: Bridge.unitSystem
     onUnitsChanged: askSizes()
     onWideCsvChanged: askSizes()
-    onUsePlottedChanged: sizeTimer.restart()
+    onUsePlottedChanged: newColumns()
     onCustomMsChanged: sizeTimer.restart()
     onPlottedNamesChanged: {
         if (usePlotted)
-            sizeTimer.restart()
+            newColumns()
+    }
+    // Other columns: every interval's size goes until the new ones come
+    function newColumns() {
+        sizes = []
+        sizeTimer.restart()
     }
 
     // The panel as it opens
@@ -111,14 +116,17 @@ ColumnLayout {
         exporter.estimate(view.folder, asked, Bridge.unitSystem, columnNames())
     }
 
+    // The row count and the size in one locale's format
+    property var numberLocale: Qt.locale()
     function bytesText(n) {
+        const one = x => Number(x).toLocaleString(numberLocale, 'f', 1)
         if (n < 1000)
             return qsTr("%1 B").arg(n)
         if (n < 1000000)
-            return qsTr("%1 KB").arg((n / 1000).toFixed(1))
+            return qsTr("%1 KB").arg(one(n / 1000))
         if (n < 1000000000)
-            return qsTr("%1 MB").arg((n / 1000000).toFixed(1))
-        return qsTr("%1 GB").arg((n / 1000000000).toFixed(1))
+            return qsTr("%1 MB").arg(one(n / 1000000))
+        return qsTr("%1 GB").arg(one(n / 1000000000))
     }
     // "18,402 rows, 1.2 MB" for an interval; "" for none known
     function sizeOf(ms) {
@@ -127,7 +135,7 @@ ColumnLayout {
         const s = sizes.find(x => x.rowMs === ms)
         if (s === undefined)
             return exporter.sizing ? qsTr("Sizing...") : ""
-        const rows = Number(s.rows).toLocaleString(Qt.locale(), 'f', 0)
+        const rows = Number(s.rows).toLocaleString(numberLocale, 'f', 0)
         return s.rows === 1 ? qsTr("1 row, %1").arg(bytesText(s.bytes))
                             : qsTr("%1 rows, %2").arg(rows).arg(bytesText(s.bytes))
     }
@@ -161,10 +169,8 @@ ColumnLayout {
             columns: wideCsv ? columnNames() : [],
             raw: rawOn
         }, url)
-        if (started) {
-            failed = false
-            note = qsTr("Exporting...")
-        }
+        failed = !started
+        note = started ? qsTr("Exporting...") : qsTr("Not exported: the export couldn't start")
         return started
     }
 

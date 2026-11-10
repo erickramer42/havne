@@ -1073,7 +1073,7 @@ int class_of(const ecuio_request_engine& e, uint8_t pid)
 }
 
 /* The test car's six bitmaps (docs/bench-sessions/2026-10-25-vehicle.md,
- * the same on 2026-10-31) */
+ * the same in docs/bench-sessions/2026-10-31-elm327-vehicle.md) */
 const std::vector<std::pair<uint8_t, uint32_t>> kTestCar = {
     {0x00, 0xFE7FA813u}, {0x20, 0xA017F011u}, {0x40, 0xFED08C81u},
     {0x60, 0x63080001u}, {0x80, 0x0004000Du}, {0xA0, 0x04000000u}};

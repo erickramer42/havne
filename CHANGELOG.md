@@ -11,16 +11,191 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-10
+
 ### Added
 
+- Phone: a drive view. Drive on the Dash page shows the gauges to the
+  screen's edges, with the system's bars hidden and a one-line status. A
+  tap brings the controls back for 2, 4 or 8 s, or until tapped away, as
+  set under Settings, Display, where Android also sets which way the view
+  holds the screen. It keeps the screen on, and comes back by itself the
+  next time a session connects on Dash
+  ([ADR-0059](docs/adr/0059-drive-view.md)).
+- Recordings viewer: Export. Save the whole recording as a CSV (wide or
+  long), pcapng or a folder copy, scrubbed, with the file's size shown
+  beside each row interval before anything is written. It uses the
+  system's file and folder pickers, so a scrubbed copy can be saved to
+  share from a phone
+  ([ADR-0056](docs/adr/0056-analysis-log.md)).
+- `havne-cli export --format csv --estimate` prints the wide CSV's rows
+  and exact bytes for each row interval, without writing a file.
+- The analysis log takes a minimum time between sweeps, for a slow
+  adapter or a busy ECU (default off): Settings' Advanced page,
+  `havne-cli log --min-sweep <ms>` and Python's
+  `set_focus(signals, min_sweep_ms=...)`. No real adapter has run it.
 - `uds-generic` can read in the extended diagnostic session: add
   `?session=03` to the address, and Havne asks each module to enter it
-  before reading, keeps it there while it reads, and returns it to the
-  default session at the end. A module that refuses is read in the
+  before reading, keeps it there while it reads (tester present after
+  `?keepalive_ms=` without a request, default 2000), and returns it to
+  the default session at the end. A module that refuses is read in the
   default session, and the Log page, `havne-cli`'s new `session` line
   and the Python bindings say which session each module was read in.
-  Only reads are sent in it
+  Nothing but reads and the session's own requests (`10 03` to enter,
+  `3E 00` to stay, `10 01` to leave) is sent in it: no write, routine or
+  security-access request. It has run against the simulated car only,
+  not on a real one
   ([ADR-0060](docs/adr/0060-extended-session-reads.md)).
+- C ABI, append-only: `ecuio_session_set_focus_with` (a focus with a
+  minimum time between sweeps, at most `ECUIO_FOCUS_MIN_SWEEP_MAX_MS`),
+  `ECUIO_SESSION_INFO_REQUESTS` (the session asks requests),
+  `ecuio_export_with` and `ecuio_export_estimate_with` (an export and
+  its sizing that an `ecuio_cancel_t` can stop; `ecuio_export` and
+  `ecuio_export_estimate` are the same calls with none), and the
+  session fields of `ecuio_channel_support_t` with
+  `ECUIO_SUPPORT_EXTENDED` and `ECUIO_SESSION_STATE_*` (ADR-0060). A
+  CMake consumer that uses them asks for `find_package(ecuio 0.7.1)`
+  ([ADR-0048](docs/adr/0048-semantic-versioning.md)).
+- The Dashboard has a **Night** switch in its header (on a phone, its
+  tool row): one tap turns night on or off. Under a schedule (default
+  19:00 to 07:00, set under Display) a tap holds the opposite until the
+  schedule's next boundary, and a second tap hands back to the schedule.
+  The switch says when the shown state next changes ("On until 07:00")
+  ([ADR-0058](docs/adr/0058-night-mode.md)).
+- Press and hold a gauge on the Dashboard, in or out of edit mode: let go
+  to open its menu (signal, size, Copy, Paste after), or move to drag it
+  to a new place. Near the top or bottom edge the page scrolls with you
+  ([ADR-0057](docs/adr/0057-dashboards.md)).
+- Dashboard gauges can be copied and pasted, on the page or onto another
+  page, for as long as the app runs.
+- A blank cell in Add holds a spot open, for instance beside a floating
+  overlay app. It draws nothing outside edit mode.
+- Phone: with no session, Dash lists the last five addresses that
+  connected, replays and the demo left out, ready to connect, with Other
+  address... for any other.
+
+### Changed
+
+- Night is its own control: **Night** (Off, On or Scheduled) and a
+  **Night style** (Amber or Red), under Settings, Display, in place of the
+  Low glare and Night themes. A stored v0.7.0 theme carries over (Low
+  glare becomes Night on in amber, Night becomes Night on in red). In both
+  styles no chart trace and no gauge readout is brighter than the text.
+- The look is neutral graphite with a light accent, squarer corners (4 and
+  6), flat gauge cards and Barlow type (Barlow Semi Condensed with
+  fixed-width digits for readings). Captions are sentence case, and the
+  link status and the Night switch are a dot and a word.
+- Dashboard gauges are flatter: a dial has no bezel and draws larger in
+  its cell, needles and bars are one flat color, and a trace is a line
+  with no fill under it.
+- Buttons have four ranks: one primary action per page or bar, secondary,
+  quiet, and a selected state for a choice that is on. Text fields and
+  check boxes share one look and are a touch's size on a phone. Live's,
+  Diagnostics' and Home's Connect are secondary; the header's gives way
+  to the Dashboard's connect list, whose Connect is primary only with a
+  row to connect; and Export shows as selected while its panel is open.
+- One vocabulary: "address", "Disconnect" and "No session" everywhere.
+  Live's empty line reads "Connect a session to read live values", and
+  Home's hint names every way in.
+- Small text is one size (12), and on a phone the filter field, Live's
+  status line and the viewer's hints say less, so they are no longer cut
+  off. The header has a hairline rule, its logging readout fits one line
+  with its size, and the tab labels stay inside their tabs at 320 px.
+- Live's values take the value face with fixed-width digits, as the
+  gauges do, and the activity log wraps at words. The chart's axis labels
+  stay in the mono face.
+- Color: blue only where it means cold. In Night Red, success is a quiet
+  warm tint and danger alone is full red; lit shift lights keep their
+  stage's color.
+- Phone: the tab bar has five labeled tabs: Dash, Live, Codes, Recs and
+  Settings. Tap the status in the top bar for the Log. The phone opens on
+  Dash. The status shows the link state and the address; a long address
+  shortens from its end.
+- Phone: the Dashboard is laid out on 6 columns upright and 12 on its
+  side, and its built-in page opens with the RPM dial beside three
+  readouts. A layout you have already edited keeps its shape and is only
+  rewritten by your next edit to it
+  ([ADR-0057](docs/adr/0057-dashboards.md)).
+- Phone: the Dashboard's tools share one row (Drive, Reset peaks, Edit
+  and the Night switch), and its gauges are one flat panel with thin lines
+  between the cells, in place of a card per gauge. The title and the link
+  line are gone from the page: the tab bar names it and the top bar shows
+  the link. The desktop keeps its cards.
+- Phone: a gauge shorter than its neighbor fills the empty space under it
+  on the Dashboard, so the panel has no empty strips. A blank cell stays
+  open, and edit mode shows the true sizes.
+- Dashboard: Reset peaks moves to the end of edit mode's Pages row where
+  the tool row is narrow (a small window, a zoomed phone, or no session);
+  Drive reads "Connect first" with no session; the status reads "Live"
+  alone where the address wouldn't fit; the cell panel says Columns,
+  Rows and Peak hold; a cell the ECU doesn't send reads "not sent by this
+  ECU"; a stored blue accent draws as the value's color.
+- A tall Digits gauge puts its unit under larger, centered digits, and
+  takes its digit count from its range unless one is set.
+- Phone: the screen stays on while connected, on external power or with
+  Dash showing.
+- Phone: the Recordings page, the Frames filter and the Frames table's
+  header, and every button, box and field on them, are at least 48 dp
+  high, and the Save report, Export and views row wraps instead of running
+  past a narrow screen.
+- Recordings: Replay connects in one tap and lands on Live, or on
+  Settings with the reason when core refuses it. It reads "Disconnect to
+  replay" while connected and "Stop the relay to replay" while the relay
+  runs, and is a plain, disabled Replay while a session starts or ends.
+  A plotted signal with no values is said in
+  the chart, unless a compared recording draws it. The cursor hint says
+  "Click the chart for values" on the desktop and wraps on a phone; the
+  Frames view's switch reads List and By ID; the Export panel names
+  Signals and says what the scrub leaves out; a row's details are at
+  the caption size, with "replays as" only where it differs.
+- Settings: the title row stays while a page scrolls, with a back arrow
+  at its left on a phone; the Vehicle page's rows and the Night row share
+  a row on a phone; the list's values give way in a narrow row; the
+  signal form names its choices and Save is its primary.
+- Diagnostics' header actions take two rows on a phone, Save report
+  across the second.
+- Signals: with no vehicle picked, the page says that signal files and the
+  OBDb import need one.
+
+### Fixed
+
+- Android: Back, the key or a back swipe under gesture navigation, reaches
+  the app: it closes a Settings page however it was reached, closes an
+  open recording to the list, closes a Dashboard gauge's panel and then
+  edit mode, and returns from the Log, or from Connection opened through
+  Other address... or by a refused Replay, to where it came from.
+- Android: with an accessibility service on, such as a screen reader or a
+  password manager, Havne could stop answering for minutes after you left
+  the Dashboard and came back during a session. The gauges and the Log's
+  frame table no longer add and remove screen-reader items as values
+  arrive, and each gauge reads as one line: its name, value and unit.
+- Quitting the app during a long export, or Android closing it, no
+  longer waits for the export to finish: it stops, and nothing half
+  written is left. `havne-cli export` stops cleanly on Ctrl+C.
+- An export the app was closed in the middle of leaves no temporary copy
+  behind: the app removes it at its next start, once it is a day old.
+- The Dashboard says Log ended when your own Disconnect ends a log, with
+  no reason; it gives one only for an end you didn't ask for.
+- Settings no longer brings back a replay or the demo (`mock://`) as the
+  address at the next start, and Dash's recent addresses leave both out
+  (Recordings is a replay's way back); one an earlier version stored is
+  dropped.
+- Imperial units show bar as psi (tire pressures from imported OBDb signal
+  sets).
+- With no session, a gauge's signal list follows the profile chosen in
+  Settings, even with no adapter typed in.
+- A gauge's status, such as "waiting for data", stays inside its card on a
+  narrow card.
+- Remove no longer covers a gauge's title in edit mode.
+- A Shift lights gauge's Lights box shows the number of lights it draws
+  (11 on a narrow page, where it showed 15), and a Digits gauge's Digits
+  box does the same when its menu is opened outside edit mode.
+- A Number's trace keeps drawing when its signal gives a value that
+  isn't a number.
+- A SocketCAN session that asks requests, or one halted after its first
+  request failed, no longer keeps a CPU core busy between reads.
+- Python: `havne.Plugin` loads a packed plugin file; it raised
+  `ArgumentError`.
 
 ## [0.7.0] - 2026-11-08
 
@@ -1087,7 +1262,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/erickramer42/havne/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/erickramer42/havne/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/erickramer42/havne/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/erickramer42/havne/compare/v0.5.0...v0.5.1

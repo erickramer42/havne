@@ -1,6 +1,7 @@
 // File/layer: tests/qml/tst_phone.qml | Qt Quick Test, QML tier
 // Testing: QML: QmlTest.phone (test_qml)
 
+import QtCore
 import QtQuick
 import QtTest
 import App
@@ -12,6 +13,20 @@ TestCase {
     when: windowShown
 
     Component { id: mainComponent; Main {} }
+    // Main's `ui` store, as a window made later reads it
+    Component {
+        id: uiStoreComponent
+        Settings {
+            category: "ui"
+            property int minSweepMs: -1
+        }
+    }
+    function storedUi(key) {
+        const reader = uiStoreComponent.createObject(null)
+        const value = reader[key]
+        reader.destroy()
+        return value
+    }
 
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
@@ -26,6 +41,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false
+        Bridge.minSweepMs = 0
     }
 
     function find(within, name) {
@@ -1406,6 +1422,9 @@ TestCase {
         compare(settings.uriField.text, uri, "the address in the field")
         verify(settings.errorLabel.text !== "", "with its reason")
         compare(main.replayPending, "", "nothing left waiting")
+        // Back returns to Recordings, as Other address returns to Dash
+        verify(main.goBack(), "Back is the app's")
+        compare(main.currentPage, main.recordingsPage, "back to Recordings")
     }
 
     // One primary on Dash: while its connect list shows, the header's
@@ -1691,20 +1710,20 @@ TestCase {
         tryVerify(() => Bridge.connected, 5000, "the chosen address connects")
         compare(Bridge.currentUri, "mock://older")
         compare(JSON.stringify(settings.recentUris), JSON.stringify(
-                    ["mock://older", "mock://newest", "elm327://bt:00:11:22:33:44:55"]),
-                "what connected goes first")
+                    ["mock://newest", "elm327://bt:00:11:22:33:44:55", "mock://older"]),
+                "the mock is never kept: the list as it was")
         compare(find(settings, "uriField").text, "mock://older", "Settings shows it")
         const dash = find(main.contentItem, "dashboardPage")
         tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "a session ends the list")
 
-        // The list comes back with what just connected chosen
+        // The list comes back as it was, the tapped row still chosen
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list returns")
         const again = findChild(dash, "dashConnectList")
-        tryVerify(() => findChild(again, "connectRow_0") !== null, 2000, "its rows")
-        verify(find(again, "connectRow_0").checked, "the newest is chosen again")
-        compare(find(find(again, "connectRow_0"), "connectRowAddress").text, "mock://older")
+        tryVerify(() => findChild(again, "connectRow_2") !== null, 2000, "its rows")
+        verify(find(again, "connectRow_2").checked, "the tap still stands")
+        compare(find(find(again, "connectRow_2"), "connectRowAddress").text, "mock://older")
     }
 
     // Nothing in the list takes a tap while a session starts or ends
@@ -1962,5 +1981,23 @@ TestCase {
                + Math.round(traffic.width) + " px")
         verify(traffic.mapToItem(page, traffic.contentWidth, 0).x
                <= button.mapToItem(page, 0, 0).x + 0.5, "it ends before the button")
+    }
+
+    // The minimum time between a log's sweeps is kept between runs: written
+    // as it changes, and the next Main gives it to the bridge
+    function test_theMinimumTimeBetweenSweepsIsKept() {
+        Bridge.minSweepMs = 0
+        const first = createTemporaryObject(mainComponent, testCase)
+        verify(first)
+        Bridge.minSweepMs = 500
+        tryVerify(() => storedUi("minSweepMs") === 500, 2000, "written as it changes")
+        first.destroy()
+        wait(0)
+        Bridge.minSweepMs = 0
+        const next = createTemporaryObject(mainComponent, testCase)
+        verify(next)
+        compare(Bridge.minSweepMs, 500, "the next run starts with it")
+        Bridge.minSweepMs = 0
+        tryVerify(() => storedUi("minSweepMs") === 0, 2000, "and Off is kept too")
     }
 }

@@ -161,6 +161,15 @@ phone on `?profile=raw` from 22:36:52, the VX on
   VX's. The 35 the VX holds and the phone doesn't are its multi-frame
   replies.
 
+*Note of 2026-11-09:* `pair_utc.py` is a local script, not in the
+repository. It reads each recording's UTC start and its frames' host
+times, takes each `0x7E8` message whole (a J2534 recording's ISO 15765
+messages, an ELM327 session's reassembled rows), pairs the two
+recordings' messages in order by their bytes, each looking ahead at most
+50 messages, skipping one that only one side has, and prints the
+difference of their UTC times for Single Frame and segmented replies
+apart.
+
 The difference of their UTC times, a median of 745 ms (p10 732, p90
 768), is mostly the two machines' clocks: the phone's and the laptop's
 agreed only to the second. It says nothing of either adapter's delivery.

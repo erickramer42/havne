@@ -23,7 +23,7 @@ stays with its author, never here.
 The app takes a plugin in its packed form, one file named
 `<id>.havne-plugin.json`: the manifest with each data file inlined
 under `files` by its relative name, and no fixtures (ADR-0052 section
-2). In Settings' Vehicle section, **Import a plugin** reads it (a
+2). On Settings' Signals page, **Import a plugin** reads it (a
 phone's `content://` file too) and keeps a copy named by its SHA-256
 in the app's own folder, beside the signal files' copies, which is
 loaded at each start. Plugins are the app's, not one vehicle's: every

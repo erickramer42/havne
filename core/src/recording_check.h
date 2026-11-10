@@ -321,10 +321,9 @@ public:
         const bool extended = (flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
         const bool wire = isotp_ && iso15765_id(id, extended) &&
                           (flags & ECUIO_FRAME_FLAG_REASSEMBLED) == 0;
-        /* On the wire a consecutive frame or a flow control is part of a
-         * message: the ID's rate is its messages', as an adapter that
-         * reassembles delivers them, the recordings the defaults were set
-         * against */
+        /* On the wire a consecutive or flow control frame is part of a
+         * message: the ID's rate is its messages', as a reassembling
+         * adapter delivers them (what the defaults were set against) */
         const bool message_part =
             wire && length > 0 &&
             ((data[0] >> 4) == 0x2 || (data[0] >> 4) == 0x3);

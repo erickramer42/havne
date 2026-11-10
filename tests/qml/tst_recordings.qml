@@ -26,6 +26,8 @@ TestCase {
     }
 
     function cleanup() {
+        Bridge.unitSystem = 0
+        Theme.developerMode = false
         Bridge.recording = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -56,9 +58,7 @@ TestCase {
         title: "2026-11-03 10:01:30 · Late", uri: "replay://y?profile=obd2",
         folder: Harness.recordingFixtures + "/pull-late", source: "", profile: "obd2" })
 
-    // A recording that opens moves the page's items at the layout's next
-    // polish, a frame later; a case whose checks all pass at once would
-    // otherwise press where an item was before it opened
+    // Opens pull-early and waits for its viewer
     function openEarlyViewer() {
         const page = createPage()
         page.open(earlyRow)
@@ -66,7 +66,10 @@ TestCase {
         return page
     }
 
-    // Opens pull-early with pull-late listed beside it
+    // Opens pull-early with pull-late listed beside it. A recording that
+    // opens moves the page's items at the layout's next polish, a frame
+    // later; a case whose checks all pass at once would otherwise press
+    // where an item was before it opened
     function openEarly() {
         const page = createPage()
         page.recordings = [lateRow, earlyRow]
@@ -456,6 +459,38 @@ TestCase {
         verify(!page.viewing, "Replay doesn't open the viewer")
     }
 
+    // Replay off says what to do first: stop the relay, or disconnect;
+    // while a session starts or ends it's plain Replay, off
+    function test_replaySaysWhatStopsIt() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        const button = find(list.itemAtIndex(0), "replayButton")
+        verify(button.enabled)
+        compare(button.text, "Replay")
+
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        tryVerify(() => !button.enabled, 2000, "off while relaying")
+        compare(button.text, "Stop the relay to replay")
+        Relay.stop()
+        tryVerify(() => button.enabled, 2000, "on again")
+
+        Bridge.connectSessionAsync("mock://replay-words")
+        verify(Bridge.connecting, "the connect is under way")
+        verify(!button.enabled)
+        compare(button.text, "Replay", "nothing to disconnect yet")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        compare(button.text, "Disconnect to replay")
+        Bridge.disconnectSession()
+        verify(Bridge.disconnecting, "the teardown is under way")
+        verify(!button.enabled)
+        compare(button.text, "Replay", "already disconnecting")
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(button.enabled, "on again")
+        compare(button.text, "Replay")
+    }
+
     // The viewer's Replay view hands on the part in view as a stretch of
     // the row's URI, in the recording's seconds; the whole recording in
     // view, the row's URI alone
@@ -487,11 +522,6 @@ TestCase {
         verify(button.enabled, "on again")
     }
 
-    // Open shows the recording: its signal plotted by default, the chart's
-    // series over the whole recording, the check's findings listed
-    // Save report: the whole recording's (the zoom never narrows it), on
-    // the view's thread, the picked vehicle's baseline named, the note and
-    // one log line when it ends
     // The Export panel over an opened recording, its sizes in
     function openExport(page) {
         find(page, "exportButton").clicked()
@@ -530,7 +560,7 @@ TestCase {
         restoreExportChoices(panel)
         sizesIn(panel)
         const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
-        verify(/^[\d,. ]+ rows, [\d.]+ (B|KB|MB)$/.test(sweep.text), sweep.text)
+        verify(/^\d[\d,.'\u2019\s]* rows, [\d.,]+ (B|KB|MB)$/.test(sweep.text), sweep.text) // any locale's
         const grid = findChild(find(panel, "exportRows_250"), "intervalSize")
         verify(/ rows, /.test(grid.text), grid.text)
         verify(sweep.text !== grid.text, sweep.text + " and " + grid.text)
@@ -548,6 +578,25 @@ TestCase {
         verify(!find(panel, "exportGo").enabled, "not with a bad interval")
         compare(find(panel, "exportCustomProblem").text, "ms, 1 to 86400000")
         restoreExportChoices(panel)
+    }
+
+    // A row reads in one locale: a comma-decimal one groups the count
+    // with a point and writes the size with a comma
+    function test_theExportSizeIsInTheRowsLocale() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        panel.numberLocale = Qt.locale("de_DE")
+        compare(panel.bytesText(999), "999 B")
+        compare(panel.bytesText(12345), "12,3 KB")
+        compare(panel.bytesText(1234567), "1,2 MB")
+        compare(panel.bytesText(2500000000), "2,5 GB")
+        sizesIn(panel)
+        const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
+        verify(/^\d[\d.]* rows?, (\d+ B|\d+,\d (KB|MB))$/.test(sweep.text), sweep.text)
+        panel.sizes = [{ rowMs: 0, rows: 18402, bytes: 1234567 }]
+        compare(panel.sizeOf(0), "18.402 rows, 1,2 MB", "the count grouped as the size is written")
+        panel.numberLocale = Qt.locale()
     }
 
     function test_theRowIntervalIsRememberedAndTheRestStartsOver() {
@@ -583,7 +632,7 @@ TestCase {
         const url = "file:///" + scratchFolder("wide").replace(/^file:\/+/, "") + "/early-wide.csv"
         verify(panel.exportTo(url))
         const note = find(panel, "exportNote")
-        tryVerify(() => note.text.indexOf("Saved: ") === 0, 10000, note.text)
+        tryVerify(() => note.text.indexOf("Saved: ") === 0, 10000, "the export ends saved")
         verify(/ rows of \d+ signals?, left out: 1 text value$/.test(note.text), note.text)
         const text = Harness.readScratchFile(url)
         verify(text.indexOf("Time (ms),") === 0, text.substring(0, 40))
@@ -599,13 +648,34 @@ TestCase {
         verify(page.plottedNames.length > 0, "some plotted")
         const plotted = find(panel, "exportColumns_plotted")
         compare(plotted.text, "The " + page.plottedNames.length + " plotted")
+        // One plotted, so its CSV differs from the log's own
+        const plottedAtFirst = page.plottedNames.slice()
+        verify(plottedAtFirst.length >= 2, "two or more plotted to start")
+        const first = plottedAtFirst[0]
+        const one = {}
+        for (const s of panel.view.signalList)
+            one[s.index] = s.name === first
+        page.plotted = one
+        tryVerify(() => page.plottedNames.length === 1, 2000, "one plotted")
         sizesIn(panel)
+        const own = panel.sizes.find(s => s.rowMs === 0).bytes
         panel.columnChoice = "plotted"
         verify(panel.usePlotted)
-        compare(panel.columnNames(), page.plottedNames)
-        // The sizes are asked again for the columns
-        tryVerify(() => panel.sizes.length === 0 || panel.sizes.length >= 3, 2000)
+        compare(panel.columnNames(), [first])
+        // The sizes are asked again for the columns, the old ones gone at once
+        compare(panel.sizes.length, 0, "no size for the other columns")
         sizesIn(panel)
+        const oneBytes = panel.sizes.find(s => s.rowMs === 0).bytes
+        verify(oneBytes !== own, "the plotted column's own size: " + own + " then " + oneBytes)
+        // Another plotted while they're chosen: asked again
+        const two = {}
+        for (const s of panel.view.signalList)
+            two[s.index] = s.name === first || s.name === plottedAtFirst[1]
+        page.plotted = two
+        tryVerify(() => page.plottedNames.length === 2, 2000, "two plotted")
+        compare(panel.sizes.length, 0, "no size for the old plotted set")
+        sizesIn(panel)
+        verify(panel.sizes.find(s => s.rowMs === 0).bytes !== oneBytes, "two columns' size")
         // Nothing plotted, nothing to offer: the log's own again
         const none = {}
         for (const s of panel.view.signalList)
@@ -614,6 +684,11 @@ TestCase {
         tryVerify(() => !panel.plottedOffered, 2000)
         verify(!panel.usePlotted, "back to the log's own")
         compare(panel.columnNames(), [])
+        // Other units, other sizes asked for, with the log's own columns
+        sizesIn(panel)
+        Bridge.unitSystem = 1 - Bridge.unitSystem
+        compare(panel.sizes.length, 0, "no size in the other units")
+        sizesIn(panel)
         restoreExportChoices(panel)
     }
 
@@ -676,11 +751,15 @@ TestCase {
         compare(find(panel, "exportGo").text, "Choose a folder...")
         verify(panel.exportTo(scratchFolder("copy")))
         const note = find(panel, "exportNote")
-        tryVerify(() => note.text.indexOf("Saved as ") === 0, 10000, note.text)
+        tryVerify(() => note.text.indexOf("Saved as ") === 0, 10000, "the copy ends saved")
         verify(/^Saved as recording(-\d+)?: \d+ files?, /.test(note.text), note.text)
         panel.format = "pcapng"
         verify(panel.exportTo("file:///" + scratchFolder("bad").replace(/^file:\/+/, "") + "/no-such/out.pcapng"))
-        tryVerify(() => note.text.indexOf("Not exported: ") === 0, 10000, note.text)
+        tryVerify(() => note.text.indexOf("Not exported: ") === 0, 10000, "the export ends refused")
+        compare(note.color, Theme.danger)
+        // A start the exporter refuses says so too
+        verify(!panel.exportTo(""))
+        compare(note.text, "Not exported: the export couldn't start")
         compare(note.color, Theme.danger)
     }
 
@@ -716,6 +795,25 @@ TestCase {
         restoreExportChoices(panel)
     }
 
+    // A finished export for a recording the viewer has left says nothing
+    // here: Back and another recording opened before it ended
+    function test_aLateExportForAnotherRecordingLeavesTheNote() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        const note = find(panel, "exportNote")
+        const exporter = find(panel, "exporter")
+        const result = folder => ({ ok: true, folder: folder, name: "", summary: "1 row",
+                                    line: "Exported: a test's line", words: "" })
+        const before = note.text
+        exporter.finished(result(panel.view.folder + "-another"))
+        compare(note.text, before, "another recording's export")
+        exporter.finished(result(panel.view.folder))
+        compare(note.text, "Saved: 1 row", "this one's")
+    }
+
+    // Save report: the whole recording's (the zoom never narrows it), on
+    // the view's thread, the picked vehicle's baseline named, the note and
+    // one log line when it ends
     function test_saveReportWritesTheWholeRecording() {
         const page = openFindings()
         const button = find(page, "saveReport")
@@ -817,7 +915,7 @@ TestCase {
         const page = openFindings()
         mouseClick(find(page, "detailView_frames"))
         const words = find(page, "framesWords")
-        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000, words.text)
+        tryVerify(() => /^\d+ frames? in view$/.test(words.text), 10000, "the frames in view are counted")
         verify(!find(page, "viewerFrameIds").visible, "the table first")
 
         mouseClick(find(page, "framesTable_byId"))
@@ -1090,6 +1188,8 @@ TestCase {
         }
     }
 
+    // Open shows the recording: its signal plotted by default, the chart's
+    // series over the whole recording, the check's findings listed
     function test_openShowsTheViewer() {
         const page = openFindings()
         compare(find(page, "openedTitle").text, findingsRow.title)

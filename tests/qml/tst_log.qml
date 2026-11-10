@@ -115,6 +115,27 @@ TestCase {
         compare(list.count, 0, "hidden again: no rows")
     }
 
+    // A hidden table keeps its place: paused and scrolled, it shows the same
+    // first row when shown again, and doesn't follow
+    function test_aHiddenTableKeepsItsPlace() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
+        Bridge.logPaused = true
+        list.follow = false
+        list.positionViewAtIndex(20, ListView.Beginning)
+        tryCompare(list, "keptTop", 20, 2000, "noted while shown")
+        find(page, "view_activity").clicked()
+        compare(list.count, 0, "hidden: no rows")
+        find(page, "view_frames").clicked()
+        tryVerify(() => list.count > 0 && list.indexAt(1, list.contentY + 1) === 20, 2000,
+                  "the same first row")
+        verify(!list.follow, "and it doesn't follow")
+    }
+
     // The list is one named node; its rows' labels are kept out of the tree
     function test_theFrameRowsLabelsAreIgnored() {
         Theme.developerMode = true

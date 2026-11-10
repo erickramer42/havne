@@ -1121,6 +1121,8 @@ TestCase {
         const reset = findChild(page, "resetPeaks"), edit = findChild(page, "dashEdit")
         const night = nightSwitchOf(page), start = findChild(page, "toolRowStart")
         const row = reset.parent
+        // The session's shorter Drive words lay the row out again
+        settleToolRow(row)
         verify(!row.children[0].visible, "no title: the tab bar names the page")
         verify(!findChild(page, "linkLabel"), "no link state: the top bar has it")
         verify(!findChild(page, "linkInRow").active, "no link state in the row")
@@ -1370,6 +1372,45 @@ TestCase {
         page.width = 1000
         tryCompare(label, "text", "Live · mock://demo", 3000)
         compare(label.opacity, 1)
+    }
+
+    function settleToolRow(row) {
+        tryVerify(() => !isPolishScheduled(row) && !isPolishScheduled(row.parent), 3000,
+                  "the tool row laid out")
+    }
+
+    // At every width around the one where Reset peaks gives way, the row
+    // ends inside its bar and keeps Reset peaks while it fits, whatever
+    // the font's widths
+    function test_theToolRowFitsItsBarAtEveryWidth_data() {
+        return [{ tag: "no session", uri: "" }, { tag: "a session", uri: "mock://demo" }]
+    }
+    function test_theToolRowFitsItsBarAtEveryWidth(data) {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, null, true)
+        if (data.uri !== "")
+            connect(data.uri)
+        tryVerify(() => findChild(page, "toolRowNight").item, 3000, "the Night switch")
+        const reset = findChild(page, "resetPeaks"), row = reset.parent, bar = row.parent
+        settleToolRow(row)
+        const around = Math.round(row.toolsWidth + page.width - bar.width)
+        let shown = 0, dropped = 0
+        for (let w = around - 16; w <= around + 16; ++w) {
+            page.width = w
+            settleToolRow(row)
+            const ends = Array.from(row.children).filter(c => c.visible).map(c => c.x + c.width)
+            const end = row.x + Math.max(...ends)
+            verify(end <= bar.width + 0.5, "at " + w + " the row ends at " + end + " of " + bar.width
+                   + (reset.visible ? ", Reset peaks shown" : ""))
+            if (reset.visible) {
+                ++shown
+            } else {
+                // and gives way only when it wouldn't fit
+                const need = row.implicitWidth + row.spacing + Math.ceil(reset.implicitWidth)
+                verify(need > bar.width + 0.5, "at " + w + " Reset peaks fits: " + need + " of " + bar.width)
+                ++dropped
+            }
+        }
+        verify(shown > 0 && dropped > 0, "the sweep crosses the width: " + shown + " shown, " + dropped + " dropped")
     }
 
     // A row too narrow for every tool drops Reset peaks, and edit mode's

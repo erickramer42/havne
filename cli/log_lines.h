@@ -261,11 +261,10 @@ inline void log_end_line(Line& l, const char* reason, const char* folder,
     l.ch('}');
 }
 
-// The loop's end, in the order that matters: an interrupt first, then
-// the recorder failing (the log is what the command is for, so a disk
-// that fills ends it), a replay's last frame, the seconds asked; nullptr
-// while none holds. A session whose link is lost or dead keeps the log
-// going: its health lines say so and the recorder holds the gap, so an
+// The loop's end, in the order that matters: an interrupt, the recorder
+// failing (the log is the command's point), a replay's last frame, the
+// seconds asked; nullptr while none holds. A lost or dead link doesn't
+// end it: the health lines say so and the recorder holds the gap, so an
 // unattended log survives a dropout.
 inline const char* log_end_reason(bool interrupted, bool recording_failed,
                                   bool replay_ended, bool seconds_over)

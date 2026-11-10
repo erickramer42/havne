@@ -146,7 +146,10 @@ ColumnLayout {
         visible: Theme.clampNight(Theme.night) === "schedule"
         spacing: Theme.spacing
         property string problem: ""
-        // A field's text on leaving it: stored, or said why not
+        // Its words go with it: they're about a time typed here
+        onVisibleChanged: if (!visible) problem = ""
+        // A field's text on leaving it: stored, or said why not; either way
+        // the field shows the stored time again, bound to it
         function commit(isFrom, text) {
             const other = isFrom ? Theme.nightUntil : Theme.nightFrom
             if (Theme.minutesOf(text) < 0) {
@@ -160,6 +163,10 @@ ColumnLayout {
                 else
                     Theme.nightUntil = text
             }
+            if (isFrom)
+                fromField.text = Qt.binding(() => Theme.nightFrom)
+            else
+                untilField.text = Qt.binding(() => Theme.nightUntil)
         }
         RowLayout {
             spacing: Theme.spacing

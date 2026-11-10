@@ -97,10 +97,9 @@ inline bool parse_count(const char* p, size_t n, uint64_t* out)
     return true;
 }
 
-/* strtod in the C locale, whatever the process's LC_NUMERIC (a Qt
- * program sets it from the environment, a comma in German): the locale
- * made once and read by every thread, which localeconv and setlocale
- * aren't safe for */
+/* strtod in the C locale, whatever the process's LC_NUMERIC (Qt sets it
+ * from the environment, a comma in German): the locale is made once and
+ * shared, since localeconv and setlocale aren't thread-safe */
 inline double c_strtod(const char* text)
 {
 #ifdef _WIN32
@@ -114,14 +113,13 @@ inline double c_strtod(const char* text)
 #endif
 }
 
-/* The double nearest the decimal text [p, p + n), which parse_number has
- * already judged a number in its grammar: strtod, correctly rounded, in
- * the C locale (c_strtod), on the same value written plainly, "0." then
- * the significant digits, "e" and one exponent, so no library sees a
- * fraction's leading zeros against an exponent past its range (MSVC's
- * gives infinity for 0.0...01e1000000). Digits past 800 are one nonzero
- * digit at most: a double's nearest needs no more than about 770, and a
- * digit kept past them keeps a tie from reading as exact. */
+/* The double nearest the decimal text [p, p + n), already judged a number
+ * by parse_number: c_strtod (correctly rounded) on the value rewritten as
+ * "0." and the significant digits, "e", one exponent, so no library sees
+ * leading zeros against an exponent past its range (MSVC gives infinity
+ * for 0.0...01e1000000). Digits past 800 are one nonzero digit at most:
+ * the nearest double needs about 770, and one kept past them stops a tie
+ * reading as exact. */
 inline double nearest_double(const char* p, size_t n)
 {
     size_t i = 0;
@@ -189,11 +187,9 @@ inline double nearest_double(const char* p, size_t n)
     return c_strtod(text.c_str());
 }
 
-/* A value as signals.csv holds it: 12 significant digits (the app's 'g',
- * 12), with a '.' whatever the process's locale: a Qt program sets
- * LC_NUMERIC from the environment, where the decimal point may be a
- * comma. The recorder writes it and the reader decoding frames.csv forms
- * it, so both read back the same double. A value that isn't finite is
+/* A value as signals.csv holds it: 12 significant digits ('g', 12) with
+ * a '.' whatever the locale. The recorder and the frames reader both
+ * form it, so both read back the same double. A value that isn't finite is
  * nan, inf or -inf, the words parse_number takes, on every C library
  * (MSVC's %g writes -nan(ind), which none reads). */
 inline void append_value(std::string& out, double v)
@@ -303,10 +299,9 @@ inline bool parse_number(const char* p, size_t n, double* out)
     if (i != n) {
         return false;
     }
-    /* The kept digits are under 1e19 and the dropped ones under one of
-     * their last place, so past these the value is past a double's range
-     * or under half its least: infinite or 0 at once, whatever the
-     * digits (a list of 1e-999999 costs what ordinary numbers do) */
+    /* The kept digits are under 1e19, the dropped ones under one of their
+     * last place: past these the value is infinite or 0 at once, whatever
+     * the digits (1e-999999 costs what ordinary numbers do) */
     if (!capped && (mantissa == 0 || exponent < -343)) {
         *out = negative ? -0.0 : 0.0;
         return true;

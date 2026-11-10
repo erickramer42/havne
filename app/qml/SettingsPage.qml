@@ -890,8 +890,8 @@ Pane {
             backLeaves = false
     }
 
-    // Back from Connection opened through Dash's "Other address...": Main
-    // goes back to that page instead of this list
+    // Back from Connection opened through Dash's "Other address..." or a
+    // refused Replay: Main goes back to that page instead of this list
     property bool backLeaves: false
     onPageKeyChanged: if (pageKey !== "connection") backLeaves = false
     // The back key repeats the back arrow, and answers whether it had a page to close
@@ -1206,18 +1206,23 @@ Pane {
     // The addresses that connected, newest first, for Dash's connect list
     readonly property int maxRecentUris: 5
     property var recentUris: []
+    // A replay or the mock is never kept: Recordings is a replay's way back
+    function keptUri(uri) {
+        const u = String(uri).trim().toLowerCase()
+        return !u.startsWith("replay://") && !u.startsWith("mock://")
+    }
     // The stored list, or `lastUri` alone when it holds none; a damaged
-    // list reads as none, and anything but a non-empty string is left out
+    // list reads as none, and anything but a non-empty kept string is left out
     function parseRecentUris(text, lastUri) {
         let list = []
         try {
             const read = JSON.parse(text)
             if (Array.isArray(read))
-                list = read.filter(u => typeof u === "string" && u !== "")
+                list = read.filter(u => typeof u === "string" && u !== "" && keptUri(u))
         } catch (e) {
             // none, until the next connect writes one
         }
-        if (list.length === 0 && lastUri !== "")
+        if (list.length === 0 && lastUri !== "" && keptUri(lastUri))
             list = [lastUri]
         return list.slice(0, maxRecentUris)
     }
@@ -1270,11 +1275,16 @@ Pane {
         loadPlugins()
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens
+        // A replay or mock address an earlier version stored is dropped
+        if (!keptUri(sessionSettings.uri))
+            sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
         // it back
         if (uriField.text === "")
             uriField.text = sessionSettings.uri
         recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
+        if (JSON.stringify(recentUris) !== sessionSettings.recentUris)
+            sessionSettings.recentUris = JSON.stringify(recentUris)
         Bridge.recording = sessionSettings.recording
     }
 
@@ -1289,9 +1299,11 @@ Pane {
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
             if (error === "") {
-                sessionSettings.uri = uri
-                page.recentUris = page.withRecentUri(page.recentUris, uri)
-                sessionSettings.recentUris = JSON.stringify(page.recentUris)
+                if (page.keptUri(uri)) {
+                    sessionSettings.uri = uri
+                    page.recentUris = page.withRecentUri(page.recentUris, uri)
+                    sessionSettings.recentUris = JSON.stringify(page.recentUris)
+                }
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
                 // for an adapter's session only (ADR-0027 section 1, section 2)

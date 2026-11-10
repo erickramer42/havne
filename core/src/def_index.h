@@ -89,10 +89,10 @@ inline void ecuio_def_index_build(ecuio_def_index& index,
     }
 }
 
-/* The places in the set of the defs that can apply to frame, in the
- * set's order, written to out, which has room for the set's count;
- * returns how many. Every def ecuio_def_applies_to_frame takes is among
- * them, and of a validated set no other. */
+/* The places of the defs that can apply to frame, in set order, written
+ * to out (room for the set's count); returns how many. Every def
+ * ecuio_def_applies_to_frame takes is among them, and of a validated set
+ * no other. */
 inline uint32_t ecuio_def_index_find(const ecuio_def_index& index,
                                      const ecuio_frame_t& frame, uint32_t* out)
 {

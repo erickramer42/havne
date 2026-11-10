@@ -223,7 +223,9 @@ TestCase {
             const child = item.children[i]
             if (!child.visible)
                 continue
-            if (child.down !== undefined && child.checkable !== undefined)
+            // A button, or a ComboBox, which has no checkable
+            if (child.down !== undefined
+                    && (child.checkable !== undefined || child.popup !== undefined))
                 out.push(child)
             buttonsUnder(child, out)
         }
@@ -231,7 +233,7 @@ TestCase {
     }
 
     // Density on a phone (qml.md): every page of Settings at 384 x 832,
-    // 100 %, has buttons a touch's size and nothing past 320 px
+    // 100 %, has buttons and choice boxes a touch's size and nothing past 320 px
     function test_everyPageMeetsAPhonesDensity_data() {
         return [
             { tag: "list", key: "", obj: "settingsListPage" },
@@ -413,37 +415,78 @@ TestCase {
         verify(find(find(page, "settingsDisplayPage"), "settingsBack").visible)
     }
 
-    // The rows of a page's buttons, by their top edge: [[button, ...], ...]
+    // The rows of a page's buttons, top to bottom, each in the order given:
+    // [[button, ...], ...]. A button is in a row when its height overlaps the
+    // row's by more than half of it, since buttons of other heights centered
+    // in one row have other tops (the fonts set the heights)
     function rowsOf(buttons, within) {
-        const rows = new Map()
+        const rows = []
         for (const b of buttons) {
-            const y = Math.round(b.mapToItem(within, 0, 0).y)
-            if (!rows.has(y))
-                rows.set(y, [])
-            rows.get(y).push(b)
+            const top = b.mapToItem(within, 0, 0).y
+            const bottom = top + b.height
+            const row = rows.find(r => Math.min(r.bottom, bottom) - Math.max(r.top, top) > b.height / 2)
+            if (row) {
+                row.items.push(b)
+                row.top = Math.min(row.top, top)
+                row.bottom = Math.max(row.bottom, bottom)
+            } else {
+                rows.push({ top: top, bottom: bottom, items: [b] })
+            }
         }
-        return Array.from(rows.keys()).sort((a, b) => a - b).map(y => rows.get(y))
+        return rows.sort((p, q) => p.top - q.top).map(r => r.items)
+    }
+
+    // rowsOf's rule: two heights centered in a row are one row, two stacked
+    // are two
+    Component {
+        id: rowOfTwoComponent
+        Row {
+            Rectangle { objectName: "low"; width: 60; height: 36; anchors.verticalCenter: parent.verticalCenter }
+            Rectangle { objectName: "high"; width: 60; height: 48; anchors.verticalCenter: parent.verticalCenter }
+        }
+    }
+    Component {
+        id: columnOfTwoComponent
+        Column {
+            Rectangle { objectName: "first"; width: 60; height: 36 }
+            Rectangle { objectName: "second"; width: 60; height: 48 }
+        }
+    }
+    function test_rowsOfGroupsByOverlapNotByTop() {
+        const row = createTemporaryObject(rowOfTwoComponent, testCase)
+        const low = find(row, "low"), high = find(row, "high")
+        verify(low.mapToItem(row, 0, 0).y !== high.mapToItem(row, 0, 0).y, "their tops differ")
+        const one = rowsOf([low, high], row)
+        compare(one.length, 1, "one row")
+        verify(one[0][0] === low && one[0][1] === high, "in the order given")
+        const column = createTemporaryObject(columnOfTwoComponent, testCase)
+        const first = find(column, "first"), second = find(column, "second")
+        const two = rowsOf([second, first], column)
+        compare(two.length, 2, "two rows")
+        verify(two[0][0] === first && two[1][0] === second, "top first")
     }
 
     // A phone's page scrolled: the title row stays at the top, its back
     // arrow quiet at the left edge, and the content runs under it
     function test_theTitleRowStaysWhileThePageScrolls() {
         const page = createPage(true)
+        // Short, so the page scrolls past its title row whatever the fonts' heights
         page.width = 384
-        page.height = 400
+        page.height = 240
         page.open("connection")
         const flick = find(page, "settingsConnectionPage")
         const header = find(flick, "settingsConnectionPageHeader")
         const back = find(flick, "settingsBack")
         const column = find(flick, "settingsConnectionPageColumn")
         waitForPolish(column)
-        verify(flick.contentHeight > flick.height + 150, "the page scrolls: " + flick.contentHeight)
+        verify(flick.contentHeight - flick.height > header.height + 10,
+               "the page scrolls past the title row: " + flick.contentHeight + " in " + flick.height)
         verify(back.visible && back.quiet, "a quiet back control")
         compare(back.mapToItem(flick, 0, 0).x, Theme.pageMargin, "at the left edge")
         compare(back.Accessible.name, "Back to Settings")
         compare(header.mapToItem(flick, 0, 0).y, 0, "the title row at the top")
         verify(column.mapToItem(flick, 0, 0).y >= header.height, "the content starts under it")
-        flick.contentY = 150
+        flick.contentY = Math.min(150, flick.contentHeight - flick.height)
         compare(header.mapToItem(flick, 0, 0).y, 0, "still at the top, scrolled")
         verify(column.mapToItem(flick, 0, 0).y < 0, "the content scrolled under it")
         back.clicked()
@@ -752,17 +795,26 @@ TestCase {
         compare(Theme.nightUntil, "07:00", "a bad time is refused")
         compare(problem.text, "Not a time")
         verify(problem.visible)
+        compare(until.text, "07:00", "the field shows the stored time again")
         until.text = "20:30"
         until.editingFinished()
         compare(Theme.nightUntil, "07:00", "an equal pair is refused")
         compare(problem.text, "From and Until are the same time")
+        compare(until.text, "07:00")
         until.text = "06:15"
         until.editingFinished()
         compare(Theme.nightUntil, "06:15")
         compare(problem.visible, false, "the words go with a good time")
         compare(find(page, "nightWords").text, "Scheduled 20:30 to 06:15")
+        Theme.nightUntil = "05:45"
+        compare(until.text, "05:45", "and follows it after an edit")
+        until.text = "99:99"
+        until.editingFinished()
+        verify(problem.visible)
         find(page, "night_off").clicked()
         compare(sched.visible, false, "hidden again")
+        find(page, "night_schedule").clicked()
+        compare(problem.visible, false, "the words went with the schedule")
     }
 
     // The list's row says the night state
@@ -1275,18 +1327,23 @@ TestCase {
     // A restart gets back the last URI that connected and the Record
     // switch. Recording is switched on only after the connects, so no
     // session here records
+    // The mock is never kept, so the URI half needs the fake DLL
     function test_theLastConnectedUriAndTheRecordSwitchComeBack() {
+        const fake = Harness.fakeDllPath === "" ? ""
+                   : "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
         let page = createPage()
         const error = find(page, "errorLabel")
-        find(page, "uriField").text = "mock://demo?profile=raw"
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "the URI connects")
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        if (fake !== "") {
+            find(page, "uriField").text = fake + "&profile=raw"
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, "the URI connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
 
-        find(page, "uriField").text = "mock://demo?profile=uds-generic"
-        press(page, "connectButton")
-        tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+            find(page, "uriField").text = fake + "&profile=uds-generic"
+            press(page, "connectButton")
+            tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+        }
         Bridge.recording = true
         verify(find(page, "recordBox").checked)
 
@@ -1296,9 +1353,11 @@ TestCase {
         Bridge.recording = false   // a fresh bridge starts with it off
 
         page = createPage()
-        compare(find(page, "uriField").text, "mock://demo?profile=raw",
-                "the URI that connected, not the refused one")
-        verify(find(page, "profile_raw").checked, "read back into the row")
+        if (fake !== "") {
+            compare(find(page, "uriField").text, fake + "&profile=raw",
+                    "the URI that connected, not the refused one")
+            verify(find(page, "profile_raw").checked, "read back into the row")
+        }
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
     }
@@ -1336,37 +1395,72 @@ TestCase {
     }
 
     function test_aFirstRunWithAnOlderUriSeedsTheList() {
-        stored.setValue("uri", "mock://demo?profile=raw")
+        stored.setValue("uri", "elm327://COM1?profile=obd2")
         stored.sync()
         const page = createPage()
-        sameList(page.recentUris, ["mock://demo?profile=raw"], "what session/uri holds")
+        sameList(page.recentUris, ["elm327://COM1?profile=obd2"], "what session/uri holds")
     }
 
     // Only a connect that succeeded is written, the newest first, and the
     // list survives a restart
     function test_onlyASuccessfulConnectWritesTheRecentUris() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+        const raw = fake + "&profile=raw"
         let page = createPage()
         sameList(page.recentUris, [], "nothing yet")
         const field = find(page, "uriField")
-        for (const uri of ["mock://demo", "mock://demo?profile=raw", "mock://demo"]) {
+        for (const uri of [fake, raw, fake]) {
             field.text = uri
             press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 5000, uri + " connects")
+            tryVerify(() => Bridge.connected, 10000, uri + " connects")
             Bridge.disconnectSession()
             tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         }
-        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "newest first, once")
+        sameList(page.recentUris, [fake, raw], "newest first, once")
 
-        field.text = "mock://demo?profile=uds-generic"
+        field.text = fake + "&profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
-        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "a refusal writes nothing")
+        sameList(page.recentUris, [fake, raw], "a refusal writes nothing")
 
         // The page's store writes when the page goes, as at a quit
         page.destroy()
         wait(10)
         page = createPage()
-        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "kept between runs")
+        sameList(page.recentUris, [fake, raw], "kept between runs")
+    }
+
+    // A replay or the mock is never kept (Recordings is a replay's way
+    // back), and one an earlier version stored is dropped as it's read
+    function test_aReplayOrTheMockIsNeverKept() {
+        const kept = "elm327://COM1?profile=obd2"
+        const replay = "replay://" + Harness.replayFixtures + "/2026-10-25-engine-start?speed=max"
+        stored.setValue("uri", replay)
+        stored.setValue("recentUris", JSON.stringify([replay, kept, " MOCK://demo"]))
+        stored.sync()
+        let page = createPage()
+        compare(find(page, "uriField").text, "", "the stored replay isn't the field's")
+        sameList(page.recentUris, [kept], "nor in the list")
+        sameList(page.parseRecentUris("[]", "mock://demo"), [], "the mock seeds nothing")
+        verify(page.keptUri("socketcan://can0") && page.keptUri("j2534://Fake"), "an adapter is kept")
+
+        const field = find(page, "uriField")
+        for (const uri of ["mock://demo", replay]) {
+            field.text = uri
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, uri + " connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        }
+        sameList(page.recentUris, [kept], "a connect to either writes nothing")
+
+        page.destroy()
+        wait(10)
+        stored.sync()
+        compare(stored.value("uri"), "", "the stored replay is gone")
+        compare(stored.value("recentUris"), JSON.stringify([kept]), "and the list without either")
     }
 
     // The bridge's URI can differ from the request: a connect from this
@@ -2697,8 +2791,6 @@ TestCase {
         compare(find(page, "uriField").text, uri, "Default at the session's end")
     }
 
-    // While a vendor's open blocks, nothing may rewrite the URI field or
-    // start another connect: the device rows lock like every other control
     // ADR-0056 section 4: the row lists Off and the bridge's choices,
     // shows the bridge's and sets it, and says what it is for
     function test_theMinimumTimeBetweenSweepsIsARowOfChoices() {
@@ -2725,6 +2817,8 @@ TestCase {
         compare(choice.currentIndex, 0)
     }
 
+    // While a vendor's open blocks, nothing may rewrite the URI field or
+    // start another connect: the device rows lock like every other control
     function test_controlsLockWhileAConnectIsInFlight() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")

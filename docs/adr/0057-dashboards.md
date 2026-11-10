@@ -83,7 +83,7 @@ What the code gives this decision:
 - **A `Popup` doesn't fit the zoom** (it draws in the unscaled
   overlay); every in-page question so far is a panel inside the page's
   `Flickable`.
-- **The density rules** (`.claude/rules/qml.md`): 48 dp targets on a
+- **The density rules:** 48 dp targets on a
   phone (`Theme.touchTarget`), 8 dp between them, at most three buttons
   in a phone's row, nothing past the edge at 320 dp.
 
@@ -428,27 +428,27 @@ Home's logo) are the themes item's.
 Each step is handed over on its own branch with its tests and mutants;
 the model named is the one sized for it.
 
-1. **Core** (Opus): `ecuio_signal_file_key` and `ecuio_def_range`,
+1. **Core:** `ecuio_signal_file_key` and `ecuio_def_range`,
    their tests, `test_c_abi`, the exports check, the regenerated
    `_ecuio.py`.
-2. **The bridge and the hub** (Opus): `RefRole`, `RangeLowRole`,
+2. **The bridge and the hub:** `RefRole`, `RangeLowRole`,
    `RangeHighRole`, `profileSignals(uri)`; `SignalHub` by reference
    with its wider `Entry`; `gaugeSignals` as reference lists. The
    Dashboard reads through it and looks the same.
-3. **The rules** (Opus): `DashboardBook.qml` with the built-in layout
+3. **The rules:** `DashboardBook.qml` with the built-in layout
    per form (today's gauges, in today's order, at spans that keep their
    proportions) and every function of section 7; `tst_dashboardbook`.
-4. **The renderer** (Sonnet, to this ADR): `DashboardPage.qml` draws a
+4. **The renderer**, to this ADR: `DashboardPage.qml` draws a
    form's pages from a document (no editing yet): the grid, the phone's
    swipe, the desktop's buttons and keys, section 3's states and notes,
    the saved last page. `tst_dashboard` keeps its cases over the
    built-in layout.
-5. **The new kinds and options** (Sonnet): `segments`, `seven-segment`,
+5. **The new kinds and options:** `segments`, `seven-segment`,
    `sparkline`; `vertical` and `marks` on the bar; `peak` on every kind.
-6. **Edit mode** (Sonnet for the controls, the rules being step 3's):
+6. **Edit mode** (the rules being step 3's):
    Edit and Done, Add, the cell's panel, remove, the pages' controls,
    Reset, the save to `Settings` and the restart test.
-7. **The gauge roles in `Theme`** (Sonnet, with the themes item).
+7. **The gauge roles in `Theme`**, with the themes item.
 8. **The done-when run** on the test phone and the desktop: a page built
    from the library survives a restart; the run sheet names the build.
 
@@ -1246,3 +1246,70 @@ open, for instance beside a floating overlay app, so placement doesn't
 pack the next gauges into it. Its panel has the size, the order, Copy
 and Paste after. Outside edit mode it has nothing to hold, so section
 4's gesture starts on it only in edit mode.
+
+## Appendix: the phone's panel, the gauges under the S2 look and the fit, as built (2026-11-09)
+
+The appendix "six columns, the panel, one gesture, copy and paste" says
+its sections 3 to 5 are decided and not built. All six of its sections
+are built: section 4's hold without a haptic and section 5's one slot,
+as their notes say.
+
+**The panel (section 3).** On the phone form the cells meet: the grid's
+gap is 0, and the grid draws one `Theme.surface` panel with a
+`Theme.hairline` edge and radius `Theme.radiusCard` (6), and a hairline
+between neighboring cells. `DashboardBook.seams(placed, boxes, columns)`
+gives the lines: between two different cells with at least one drawn,
+none past a blank or an empty square, one line along a boundary. A cell
+draws no fill, border or radius of its own; a held cell fills with
+`surface`, so it covers what it crosses. A hairline is a whole number of
+the display's pixels. The desktop keeps a card for each gauge. In the
+drive view ([ADR-0059](0059-drive-view.md)) the panel reaches the
+screen's edges with the same lines.
+
+**No empty strips.** Outside edit mode and while no cell is held, a
+gauge's drawn height runs down over the empty squares under it, as far
+as every column it spans stays empty, within the panel's rows, and a
+gauge alone in its rows runs right to the panel's edge
+(`DashboardBook.stretched(placed, boxes, columns)`). A blank cell
+doesn't stretch, and nothing stretches over one. The stored document
+keeps its `w` and `h`; edit mode and a held cell show the true sizes.
+
+**The built-in phone page's heights** are multiples of
+`phoneSpanScale` (3), the Height control's step: the shift lights 12 x 3,
+the dial 4 x 18 with three digital tiles at 2 x 6 beside it, the trace
+6 x 9, and three digital tiles at 2 x 6 across, so the page keeps its 36
+rows. Saved layouts don't change.
+
+**Digits.** A Digits card stacks when that draws its digits at least a
+fifth larger: the digits take the card's width, centered, with the unit
+centered under them; a short card keeps the unit beside, as section 1's
+table has it. With its `digits` option unset, a card's count comes from
+its range (`DashboardBook.digitsFor(from, to, decimals)`): what a value
+10 % past either end needs at the card's decimals, a minus counting as a
+digit, from 3 to 8, and 4 without a finite range, so a brief overshoot
+still draws. The option, 1 to 8, still wins. The appendix "the new kinds
+and the theme roles as built" gives the option a default of 4; that
+holds only without a finite range. A card's decimals come from the
+signal once a session runs, so an unset card's count can change by one
+at connect.
+
+**The gauges' drawing.** The appendix "the new kinds and the theme roles
+as built" lists `gaugeFace` and `gaugeShade`, and section 9 lists
+`gaugeFace`. Neither role is in `Theme`. A dial has no bezel and no
+face: its ticks, zones and needle draw on what is behind them, a card on
+the desktop and the panel on the phone. Its drawing grows by up to 6 %
+into the margin the bezel held, and less on a small dial, so the
+progress arc's glow stays inside the item at every size. The needle is
+one flat tapered shape in `gaugeNeedle` with no shadow, and the hub is
+`elevatedLight` with a `gaugeNeedle` pin. A bar's and the cells' lit
+segments are one flat color. The Digital and Sparkline traces are the
+line alone, with no fill under it. The danger mark's point is `surface`.
+
+**The card and the type.** A desktop card is flat: `Theme.surface`, a
+`Theme.hairline` border (the outline at 55 % over the surface) and
+radius `Theme.radiusCard` (6); controls take `Theme.radius` (4). The
+type is Barlow, bundled with its license (`THIRD_PARTY_NOTICES`), and
+readings at 17 sp and above take Barlow Semi Condensed Bold with
+fixed-width digits (`Theme.valueFamily`, `Theme.valueFeatures`). A
+bundled face draws the same on every platform, and Barlow gives the app
+an automotive feel.

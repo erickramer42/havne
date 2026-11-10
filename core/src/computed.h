@@ -87,10 +87,9 @@ inline bool ecuio_computed_check(const ecuio_computed_t& program)
     return depth == 1;
 }
 
-/* Runs a checked program over its inputs' values: true with *out
- * written, or false for a result that isn't finite (a division by zero
- * gives one), which gives no value. The stack's bounds are checked again,
- * so a program that never passed the checker can't reach past it. */
+/* Runs a checked program: true with *out written, false for a non-finite
+ * result (no value). Stack bounds are checked again, so an unchecked
+ * program can't reach past it. */
 inline bool ecuio_computed_run(const ecuio_computed_t& program,
                                const double inputs[ECUIO_COMPUTED_MAX_INPUTS],
                                double* out)
@@ -138,9 +137,8 @@ inline bool ecuio_computed_run(const ecuio_computed_t& program,
             r = a / b;
             break;
         }
-        /* A step that isn't finite (a division by zero, an overflow)
-         * gives no value, even where a later step would make it finite
-         * again: 1 / (1 / 0) is no value, not 0 */
+        /* A non-finite step gives no value even if a later one would make it
+         * finite again: 1 / (1 / 0) is no value, not 0 */
         if (!isfinite(r)) {
             return false;
         }
