@@ -1,5 +1,5 @@
 // File/layer: tests/test_candump_import.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: CandumpTest, ImportTest (test_core)
+// Testing: UNIT: CandumpTest, ImportTest, ImportCancelTest (test_core)
 //
 // candump.h's line parser, and ecuio_import's candump log in as a
 // recording: its frames.csv and events.log, the report, each refusal, and
@@ -8,6 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -15,6 +18,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "candump.h"
@@ -699,6 +704,228 @@ TEST(ImportTest, OutOfMemoryAnywhereLeavesNoFolderBehind)
         fs::remove_all(f.path / "rec", ec);
     }
     EXPECT_GT(refused, 0u);
+}
+
+// ---- a cancel (ecuio_import_with) ----
+
+/* Counts its asks and stops the import at the stop_at-th (0: never) */
+struct Asks {
+    unsigned long count = 0;
+    unsigned long stop_at = 0;
+};
+
+int ask(void* user)
+{
+    auto* a = static_cast<Asks*>(user);
+    ++a->count;
+    return a->stop_at != 0 && a->count >= a->stop_at ? 1 : 0;
+}
+
+/* A candump log of n frames on can0, 10 ms apart */
+std::string candump_of(int n)
+{
+    std::string log;
+    char line[96];
+    for (int i = 0; i < n; ++i) {
+        std::snprintf(line, sizeof line,
+                      "(%d.%06d) can0 7E8#04410C1AF8000000\n",
+                      1700000000 + i / 100, (i % 100) * 10000);
+        log += line;
+    }
+    return log;
+}
+
+/* A CSV of n rows, a second apart, for kCsvMap */
+std::string csv_of(int n)
+{
+    std::string text = "t,Engine Speed\n";
+    char row[48];
+    for (int i = 0; i < n; ++i) {
+        std::snprintf(row, sizeof row, "%d,%d\n", i, 800 + i % 100);
+        text += row;
+    }
+    return text;
+}
+
+const char* const kCsvMap =
+    R"({"havne_column_map": 1, "time": {"column": "t", "unit": "s"},)"
+    R"( "signals": [{"column": "Engine Speed", "name": "RPM", "unit": "rpm"}]})";
+
+/* in imported to f's <name>, a CSV or a candump log, through
+ * ecuio_import_with when asks is given, else ecuio_import */
+ecuio_status_t import_as(const Folder& f, bool csv, const std::string& in,
+                         const std::string& name, Asks* asks,
+                         ecuio_import_report_t* report = nullptr)
+{
+    const std::string out = f.utf8(name);
+    ecuio_import_options_t o{};
+    o.format = csv ? ECUIO_IMPORT_CSV : ECUIO_IMPORT_CANDUMP;
+    o.in_path_utf8 = in.c_str();
+    o.out_folder_utf8 = out.c_str();
+    o.column_map_utf8 = csv ? kCsvMap : nullptr;
+    return asks != nullptr ? ecuio_import_with(&o, ask, asks, report)
+                           : ecuio_import(&o, report);
+}
+
+/* Each file of the folder an import wrote, by name */
+std::vector<std::pair<std::string, std::string>> written_at(const fs::path& p)
+{
+    std::vector<std::pair<std::string, std::string>> out;
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(p, ec)) {
+        out.emplace_back(e.path().filename().generic_u8string(),
+                         read_file(e.path()));
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+struct Source {
+    const char* name;
+    bool csv;
+    std::string text;
+};
+
+/* A short and a long file of each format, the long ones past the bytes
+ * between two asks in each pass */
+std::vector<Source> sources()
+{
+    return {{"candump", false, candump_of(3)},
+            {"candump, long", false, candump_of(6000)},
+            {"csv", true, csv_of(3)},
+            {"csv, long", true, csv_of(20000)}};
+}
+
+/* A cancel that never stops changes nothing: the same folder as
+ * ecuio_import's, a NULL cancel is ecuio_import, and a short file is
+ * asked once as each of its two passes begins */
+TEST(ImportCancelTest, ACancelThatNeverStopsImportsTheSameRecording)
+{
+    for (const Source& s : sources()) {
+        SCOPED_TRACE(s.name);
+        Folder f;
+        const std::string in = f.write("in", s.text);
+        ASSERT_EQ(import_as(f, s.csv, in, "plain", nullptr), ECUIO_OK)
+            << ecuio_last_error_detail();
+        Asks asks;
+        ASSERT_EQ(import_as(f, s.csv, in, "asked", &asks), ECUIO_OK)
+            << ecuio_last_error_detail();
+        if (s.text.size() < 65536) {
+            EXPECT_EQ(asks.count, 2u) << "an ask as each pass begins";
+        }
+        const auto files = written_at(f.path / "plain");
+        ASSERT_FALSE(files.empty());
+        EXPECT_EQ(written_at(f.path / "asked"), files);
+
+        const std::string out = f.utf8("null");
+        ecuio_import_options_t o{};
+        o.format = s.csv ? ECUIO_IMPORT_CSV : ECUIO_IMPORT_CANDUMP;
+        o.in_path_utf8 = in.c_str();
+        o.out_folder_utf8 = out.c_str();
+        o.column_map_utf8 = s.csv ? kCsvMap : nullptr;
+        ASSERT_EQ(ecuio_import_with(&o, nullptr, nullptr, nullptr), ECUIO_OK);
+        EXPECT_EQ(written_at(f.path / "null"), files);
+    }
+}
+
+/* A stop at each ask in turn: CANCELED with its words and the report
+ * zeroed, no ask after the one that stopped it, and nothing at the name
+ * or beside it, whether the partial folder was made yet or not */
+TEST(ImportCancelTest, AStopAtEachAskInTurnLeavesNothingBehind)
+{
+    for (const Source& s : sources()) {
+        SCOPED_TRACE(s.name);
+        Folder f;
+        const std::string in = f.write("in", s.text);
+        Asks all;
+        ASSERT_EQ(import_as(f, s.csv, in, "counted", &all), ECUIO_OK);
+        ASSERT_GE(all.count, 2u);
+        for (unsigned long n = 1; n <= all.count; ++n) {
+            Asks asks;
+            asks.stop_at = n;
+            ecuio_import_report_t r{};
+            r.frames = 7;
+            ASSERT_EQ(import_as(f, s.csv, in, "stopped", &asks, &r),
+                      ECUIO_ERR_CANCELED)
+                << "at " << n;
+            EXPECT_STREQ(ecuio_last_error_detail(), "the import was canceled");
+            EXPECT_EQ(asks.count, n) << "asked again after it stopped";
+            EXPECT_EQ(r.frames | r.lines | r.values, 0u) << "at " << n;
+            ASSERT_NO_FATAL_FAILURE(expect_nothing_left(f, "stopped"));
+        }
+    }
+}
+
+/* Each pass is asked as its bytes are read, not only as it begins: a
+ * file of a few hundred KB adds an ask each 64 KiB of each pass (the
+ * import's own rule; the header promises no interval) */
+TEST(ImportCancelTest, EachPassIsAskedAsItsBytesAreRead)
+{
+    for (const bool csv : {false, true}) {
+        SCOPED_TRACE(csv ? "csv" : "candump");
+        Folder f;
+        const std::string text = csv ? csv_of(40000) : candump_of(10000);
+        const std::string in = f.write("in", text);
+        Asks asks;
+        ASSERT_EQ(import_as(f, csv, in, "out", &asks), ECUIO_OK)
+            << ecuio_last_error_detail();
+        const unsigned long per_pass =
+            static_cast<unsigned long>(text.size() / 65536);
+        ASSERT_GE(per_pass, 3u) << text.size();
+        EXPECT_GE(asks.count, 2 + 2 * per_pass) << text.size() << " bytes";
+    }
+}
+
+/* What another thread's stop reaches: the import it asks */
+struct ThreadStop {
+    std::atomic<bool> stop{false};
+    std::atomic<unsigned long> asks{0};
+};
+
+int thread_ask(void* user)
+{
+    auto* s = static_cast<ThreadStop*>(user);
+    s->asks.fetch_add(1);
+    return s->stop.load() ? 1 : 0;
+}
+
+/* A stop set from another thread mid-import: CANCELED soon after, short
+ * of the whole run, nothing left behind */
+TEST(ImportCancelTest, AStopFromAnotherThreadEndsALongImport)
+{
+    Folder f;
+    const std::string in = f.write("in", candump_of(200000));
+    Asks whole;
+    ASSERT_EQ(import_as(f, false, in, "whole", &whole), ECUIO_OK);
+
+    ThreadStop shared;
+    const std::string out = f.utf8("stopped");
+    ecuio_import_options_t o{};
+    o.format = ECUIO_IMPORT_CANDUMP;
+    o.in_path_utf8 = in.c_str();
+    o.out_folder_utf8 = out.c_str();
+    ecuio_status_t rc = ECUIO_OK;
+    std::string detail;
+    std::thread importer([&] {
+        rc = ecuio_import_with(&o, thread_ask, &shared, nullptr);
+        detail = ecuio_last_error_detail();
+    });
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (shared.asks.load() < 3 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const auto stopped = std::chrono::steady_clock::now();
+    shared.stop.store(true);
+    importer.join();
+    const auto took = std::chrono::steady_clock::now() - stopped;
+
+    EXPECT_EQ(rc, ECUIO_ERR_CANCELED) << detail;
+    EXPECT_EQ(detail, "the import was canceled");
+    EXPECT_LT(shared.asks.load(), whole.count) << "it ran to its end";
+    EXPECT_LT(took, std::chrono::seconds(2));
+    expect_nothing_left(f, "stopped");
 }
 
 } // namespace
