@@ -20,6 +20,7 @@
 
 #include "packed_plugin.h"
 #include "pluginstore.h"
+#include "recordingexport.h"
 #include "signalstore.h"
 
 #include <cstdio>
@@ -172,6 +173,24 @@ public:
         QKeyEvent release(QEvent::KeyRelease, Qt::Key_Back, Qt::NoModifier);
         QCoreApplication::sendEvent(target, &release);
         return press.isAccepted();
+    }
+
+    // An Export panel's exporter (its "exporter" child) holds each worker it
+    // starts at core's first ask up to ms, as a long export would; 0 ends it
+    Q_INVOKABLE void holdExports(QObject* exporter, int ms)
+    {
+        if (auto* e = qobject_cast<RecordingExport*>(exporter)) {
+            e->setHoldForTesting(ms > 0
+                                     ? RecordingExport::HoldForTesting::FirstAsk
+                                     : RecordingExport::HoldForTesting::None,
+                                 ms);
+        }
+    }
+    // The workers that exporter has held so far; -1 for anything else
+    Q_INVOKABLE int heldExports(QObject* exporter) const
+    {
+        const auto* e = qobject_cast<RecordingExport*>(exporter);
+        return e != nullptr ? e->heldForTesting() : -1;
     }
 
     // The running recording's next write fails, as on a full disk

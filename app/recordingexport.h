@@ -8,9 +8,9 @@
 // (ecuio_export_estimate), each on a thread of its own. Core writes paths and
 // refuses one that exists, while a picker hands back a content:// URI on
 // Android, so a file is written into a temporary folder and copied to the
-// place picked. The object's end stops both through core's cancel
-// (ecuio_export_with) and the copy's own check, so quitting mid-export, or
-// Android closing the app, waits only for the next ask.
+// place picked. cancel() stops an export, a newer sizing the one running,
+// and the object's end both, each through core's cancel (ecuio_export_with)
+// and the copy's own check, so a stop waits only for the next ask.
 
 #pragma once
 
@@ -63,13 +63,14 @@ public:
 
     // Sizes the wide CSV for each of rowMs (0 a row a sweep, at most 64), the
     // columns named (none: core's rule). One runs at a time: a newer call
-    // replaces one still waiting, and a call made while one runs drops that
-    // one's answer. False for an empty folder or list. estimated() follows,
-    // on this thread, with { ok, words, columns, sizes: [{ rowMs, rows, bytes
-    // }] }
+    // replaces one still waiting and stops one running at core's next ask,
+    // dropping its answer. False for an empty folder or list. estimated()
+    // follows, on this thread, with { ok, words, columns, sizes: [{ rowMs,
+    // rows, bytes }] }
     Q_INVOKABLE bool estimate(const QString& folder, const QVariantList& rowMs,
                               int units, const QStringList& columns);
-    // Forgets an estimate waiting or running: no estimated() for it
+    // Forgets an estimate waiting, and stops one running: no estimated() for
+    // either
     Q_INVOKABLE void dropEstimate();
 
     // Starts the export options describes: { folder, format (Format),
@@ -81,6 +82,11 @@ public:
     // core's refusal or the app's, summary and line what was written, none
     // holding a path
     Q_INVOKABLE bool start(const QVariantMap& options, const QUrl& target);
+    // Stops the export under way at core's next ask, or its copy between
+    // chunks; what it had begun is removed, a picked document too.
+    // finished() follows with { ok false, canceled true, words, folder,
+    // line }. Nothing when none runs, or once it has written everything.
+    Q_INVOKABLE void cancel();
 
     // A local target written as a content:// one is, so a test reaches that
     // path
@@ -122,6 +128,10 @@ private:
     std::thread m_estimateWorker;
     // Set once, by the destructor; read by the workers
     std::atomic<bool> m_stopping{false};
+    // Each worker's own stop: cancel()'s, and a superseded sizing's; cleared
+    // as its next worker launches
+    std::atomic<bool> m_cancelExport{false};
+    std::atomic<bool> m_cancelEstimate{false};
     std::optional<EstimateJob> m_waitingEstimate;
     quint64 m_estimateGeneration = 0;
     quint64 m_waitingGeneration = 0;
