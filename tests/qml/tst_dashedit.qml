@@ -584,18 +584,22 @@ TestCase {
         compare(page.panel, "", "Add opens nothing")
     }
 
-    // The pages' row: add, rename, move, remove (never the last)
+    // The pages' row: rename, move, remove (never the last); on the
+    // desktop a page is added from the strip's "+" tab, and the tabs follow
     function test_thePagesControls() {
         const page = pageOf({}, docOf([cellOf("A")]))
         page.startEditing()
         verify(!find(page, "dashMoreRow").visible)
+        compare(find(page, "dashMore").text, "Page")
         click(page, "dashMore")
         verify(find(page, "dashMoreRow").visible)
+        verify(!find(page, "moreAddPage").visible, "the desktop's row has no Add page")
         verify(!find(page, "moreRemovePage").enabled, "never the last page")
-        click(page, "moreAddPage")
+        click(page, "dashPageAdd")
         compare(page.doc.pages.length, 2)
         compare(page.doc.pages[1].name, "Page 2")
         compare(page.pageIndex, 1, "the new page shows")
+        verify(find(page, "dashPageTab_1").checked, "its tab is the shown one")
         type(find(page, "moreRename"), "Temps")
         compare(page.doc.pages[1].name, "Temps")
         compare(find(page, "moreRename").text, "Temps")
@@ -603,6 +607,8 @@ TestCase {
         click(page, "moreLeft")
         compare(page.doc.pages.map(p => p.name), ["Temps", "Test"])
         compare(page.pageIndex, 0, "the page moved shows")
+        compare(find(page, "dashPageTab_0").text, "Temps", "its tab moved with it")
+        verify(find(page, "dashPageTab_0").checked)
         compare(find(page, "moreRename").text, "Temps")
         verify(!find(page, "moreLeft").enabled)
         click(page, "moreRight")
@@ -622,9 +628,11 @@ TestCase {
         verify(!find(page, "dashRemovePageConfirm").visible)
         compare(page.doc.pages.map(p => p.name), ["Test"])
         compare(page.pageIndex, 0)
+        verify(find(page, "dashPageTab_0").checked, "the tab now at the index is shown")
+        verify(!findChild(page, "dashPageTab_1"), "one tab left")
         compare(storedText(page), DashboardBook.serialize(page.doc))
         // A page change drops the selection
-        click(page, "moreAddPage")
+        click(page, "dashPageAdd")
         page.goTo(0)
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
@@ -896,7 +904,7 @@ TestCase {
         const first = pageOf({}, null)
         first.startEditing()
         click(first, "dashMore")
-        click(first, "moreAddPage")
+        click(first, "dashPageAdd")
         type(find(first, "moreRename"), "Built")
         click(first, "dashMore")
         compare(first.pageIndex, 1, "the new page shows")
@@ -1679,7 +1687,7 @@ TestCase {
         const gap = page.cellGap
         const col = (view.gridWidth - (data.before - 1) * gap) / data.before
         const tallest = cells.reduce((m, c) => Math.max(m, c.h), 1)
-        const cap = (Math.max(160, view.height - page.topGap - page.margin) + gap) / tallest
+        const cap = (Math.max(160, view.height - page.gridTop - page.margin) + gap) / tallest
         const pitch = Math.max(1, Math.min((col + gap) / 4, cap))
         compare(cap < (col + gap) / 4, data.capped, "the case means what it says")
         const was = DashboardBook.place(cells, data.before)
@@ -1796,7 +1804,7 @@ TestCase {
                    "after the controls, with a short gap: " + where)
         }
         verify(reset.mapToItem(page, reset.width, 0).x <= page.width + 0.5, "inside the page")
-        click(page, "moreAddPage")
+        click(page, data.form === "phone" ? "moreAddPage" : "dashPageAdd")
         verify(find(page, "moreLeft").visible && find(page, "moreRight").visible,
                "two pages: the move buttons show")
     }
@@ -1901,5 +1909,18 @@ TestCase {
         }
         verify(find(page, "dashCell_0_0").height < Theme.touchTarget,
                "the lights are shorter than a touch: " + find(page, "dashCell_0_0").height)
+    }
+
+    // The phone has no strip: its Page row keeps Add page
+    function test_thePhoneKeepsAddPageInTheRow() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(!findChild(page, "dashPageStrip"), "no strip on the phone")
+        compare(find(page, "dashMore").text, "Page")
+        click(page, "dashMore")
+        verify(find(page, "moreAddPage").visible, "Add page in the row")
+        click(page, "moreAddPage")
+        compare(page.doc.pages.length, 2)
+        compare(page.pageIndex, 1, "the new page shows")
     }
 }

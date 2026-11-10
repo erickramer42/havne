@@ -25,13 +25,19 @@ Page {
     // among them (header.holdsResetPeaks)
     readonly property real toolRowFull: 272
     readonly property real gap: compact ? 10 : 16
-    // The phone's gauges are one panel (ADR-0057's appendix, section 3):
-    // the cells meet, the grid draws the surface, the edge and the
-    // hairlines between neighbors, and no cell paints its own
-    readonly property bool joined: phoneForm
+    // The gauges are one panel on both forms (ADR-0057's appendix,
+    // section 3): the cells meet, the grid draws the surface, the edge and
+    // the hairlines between neighbors, and no cell paints its own
+    readonly property bool joined: true
     readonly property real cellGap: joined ? 0 : gap
-    // The space above the header and above the panel
-    readonly property real topGap: driving ? 0 : joined ? 12 : margin
+    // The space above the header
+    readonly property real topGap: driving ? 0 : phoneForm ? 12 : margin
+    // The desktop's page strip shows, and its shown tab meets the panel:
+    // not with an edit panel open, which sits a gap under the strip
+    readonly property bool stripShown: stripHost.visible
+    readonly property bool stripMeetsPanel: !phoneForm && stripShown && panel === "" && !driving
+    // The space above the panel, or above an edit panel over it
+    readonly property real gridTop: stripMeetsPanel ? 0 : topGap
     // The panel's distance from the page's sides; none in the drive view
     readonly property real panelMargin: driving ? 0 : margin
     // One pixel of the display in the layout's units, and a hairline
@@ -577,6 +583,10 @@ Page {
         addKind = ""
         if (swipe.count > pageIndex && swipe.currentIndex !== pageIndex)
             swipe.setCurrentIndex(pageIndex)
+        // A tab with the focus hands it on, so the ring is on the page shown
+        const strip = stripHost.item as DashPageStrip
+        if (strip && strip.holdsFocus())
+            strip.focusTab(pageIndex)
         if (!restored) return
         if (form === "phone") store.phonePage = pageIndex
         else store.desktopPage = pageIndex
@@ -1812,14 +1822,15 @@ Page {
 
     // ---- The header: on the desktop the title, the link state and the
     // tools, on the phone the tools alone (the tab bar names the page and
-    // the top bar has the link state); the desktop's page buttons; why
-    // the stored layout isn't shown
+    // the top bar has the link state); why the stored layout isn't shown;
+    // last, the desktop's page strip, on the panel's upper edge
 
     ColumnLayout {
         id: topBar
         readonly property real revealedY: root.driveHeaderHeight + root.gap / 2
         visible: !root.driving || root.barsShown > 0
-        z: root.driving ? 2 : 0
+        // Over the pages, so the shown tab covers the panel's top line
+        z: root.driving ? 2 : 1
         x: (root.width - width) / 2
         // In the drive view it comes down from under the header's edge
         y: root.driving ? revealedY - (1 - root.barsShown) * (revealedY + height + root.gap) : root.topGap
@@ -1984,7 +1995,7 @@ Page {
                 compact: root.form === "phone"
                 checkable: true
                 checked: root.moreShown
-                text: qsTr("Pages")
+                text: qsTr("Page")
                 onClicked: {
                     root.moreShown = !root.moreShown
                     root.confirmReset = false
@@ -2020,9 +2031,11 @@ Page {
                                             ? root.pages[root.pageIndex].name : "")
                 }
             }
+            // The phone's only way to a new page; the desktop's is the strip's "+"
             ThemedButton {
                 id: moreAddPage
                 objectName: "moreAddPage"
+                visible: root.phoneForm
                 enabled: DashboardBook.canAddPage(root.doc)
                 text: qsTr("Add page")
                 onClicked: root.addPage()
@@ -2055,9 +2068,9 @@ Page {
                 objectName: "moreResetGap"
                 // The bar's width and the controls' own, never the flow's: a
                 // hidden flow sizes itself from its children, and would loop
-                readonly property real used: pageName.width + moreAddPage.width + moreRemovePage.width
+                readonly property real used: pageName.width + moreRemovePage.width + moreRow.spacing
+                    + (moreAddPage.visible ? moreAddPage.width + moreRow.spacing : 0)
                     + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
-                    + 2 * moreRow.spacing
                 readonly property real tail: moreReset.width
                     + (moreResetPeaks.visible ? moreResetPeaks.width + moreRow.spacing : 0)
                 width: Math.max(16, topBar.width - used - tail - 2 * moreRow.spacing)
@@ -2138,26 +2151,6 @@ Page {
             }
         }
 
-        Flow {
-            objectName: "dashPageButtons"
-            Layout.fillWidth: true
-            visible: root.form === "desktop" && root.pages.length > 1
-            spacing: 6
-            Repeater {
-                model: root.pages.length
-                ThemedButton {
-                    required property int index
-                    objectName: "dashPageButton_" + index
-                    compact: true
-                    checkable: true
-                    checked: index === root.pageIndex
-                    text: root.pages[index] && root.pages[index].name
-                          ? root.pages[index].name : qsTr("Page %1").arg(index + 1)
-                    onClicked: root.goTo(index)
-                }
-            }
-        }
-
         RowLayout {
             objectName: "dashProblem"
             Layout.fillWidth: true
@@ -2185,10 +2178,32 @@ Page {
                 onClicked: root.problemDismissed = true
             }
         }
+
+        // The desktop's pages as tabs, with two or more or in edit mode;
+        // last in the column, so the panel starts at its foot
+        Loader {
+            id: stripHost
+            objectName: "dashPageStripHost"
+            Layout.fillWidth: true
+            Layout.preferredHeight: item ? (item as DashPageStrip).implicitHeight : 0
+            active: !root.phoneForm
+            visible: active && (root.pages.length > 1 || root.editing)
+            sourceComponent: Component {
+                DashPageStrip {
+                    pages: root.pages
+                    current: root.pageIndex
+                    editing: root.editing
+                    canAddPage: DashboardBook.canAddPage(root.doc)
+                    hairlineWidth: root.hairlineWidth
+                    onPageChosen: (i) => root.goTo(i)
+                    onAddRequested: root.addPage()
+                }
+            }
+        }
     }
 
     // ---- The pages: one SwipeView, swiped on the phone form, moved by
-    // the buttons and keys on the desktop form
+    // the strip's tabs and the keys on the desktop form
 
     SwipeView {
         id: swipe
@@ -2267,7 +2282,7 @@ Page {
                 // which the page scrolls instead
                 readonly property real pitch: Math.max(1, Math.min(
                     (columnWidth + root.cellGap) / 4,
-                    (Math.max(160, height - root.topGap - root.panelMargin) + root.cellGap) / tallest))
+                    (Math.max(160, height - root.gridTop - root.panelMargin) + root.cellGap) / tallest))
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
                 // The drop's places are measured on this grid
                 onColumnsChanged: root.cancelHold()
@@ -2359,7 +2374,7 @@ Page {
                     id: panelHost
                     objectName: "dashPanel"
                     x: (pageView.width - width) / 2
-                    y: root.topGap
+                    y: root.gridTop
                     width: pageView.gridWidth
                     active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
@@ -2384,7 +2399,7 @@ Page {
                     id: grid
                     // On whole pixels of the display, so the seams snapped inside it are
                     x: root.snap((pageView.width - width) / 2)
-                    y: root.snap(swipe.y + root.topGap + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
+                    y: root.snap(swipe.y + root.gridTop + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
                     width: pageView.gridWidth
                     height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
 
@@ -2396,6 +2411,8 @@ Page {
                         visible: root.joined && pageView.rows > 0
                         color: Theme.surface
                         radius: root.driving ? 0 : Theme.radiusCard
+                        // Under the first tab while it's shown: its sheet runs straight in
+                        topLeftRadius: root.stripMeetsPanel && root.pageIndex === 0 ? 0 : radius
                         border.color: Theme.hairline
                         border.width: root.driving ? 0 : root.hairlineWidth
                     }
