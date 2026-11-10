@@ -11546,6 +11546,20 @@ TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
     EXPECT_EQ(applied, 3);
 }
 
+// A light look's page gets dark bar icons and the Light scheme; Dark and
+// the night palettes keep light ones. The line is HSL lightness 0.5
+TEST(BridgeTest, WindowThemeLightBarsFollowTheBackground)
+{
+    for (const char* dark : {"#141416", "#0d0a07", "#080404", "#7f7f7f"}) {
+        EXPECT_FALSE(WindowTheme::lightBars(QColor(QLatin1String(dark))))
+            << dark;
+    }
+    for (const char* light : {"#f3f3f1", "#ffffff", "#808080"}) {
+        EXPECT_TRUE(WindowTheme::lightBars(QColor(QLatin1String(light))))
+            << light;
+    }
+}
+
 // A property the theme lacks, or does not notify, is a warning: a rename
 // would otherwise leave the window not following the theme
 TEST(BridgeTest, WindowThemeWarnsOfAColorItCannotFollow)
