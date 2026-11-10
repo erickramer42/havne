@@ -5,15 +5,16 @@ pragma Singleton
 import QtCore
 import QtQuick
 
-// Central palette: three palettes (dark, nightAmber, nightRed), the one in
-// `active` read through the roles below. main.cpp colors the platform's own
-// window (Android's background, Windows' title bar) from bg, surface and
-// text when the palette changes. Dark is the default. The two night
-// palettes (amber and orange, or red, on near black) keep the light low for
-// a car's cabin after dark; red is the danger color there too, so danger is
+// Central palette: four palettes, the one in `active` read through the
+// roles below. Two are looks: Dark, the default, and Daylight, dark text on
+// white for a screen read in sun. The two night palettes (amber and orange,
+// or red, on near black) override either look and keep the light low for a
+// car's cabin after dark; red is the danger color there too, so danger is
 // told from the rest by more than hue (GaugeBase: a mark beside the readout
 // and a heavier zone stroke). In them nothing outshines the text: no trace
-// and no readout is brighter than it.
+// and no readout is brighter than it. main.cpp colors the platform's own
+// window (Android's background, Windows' title bar) from bg, surface and
+// text when the palette changes.
 // Text holds 4.5:1 or more against the surfaces it sits on in each theme,
 // except text on the selected-row color (primary), held to Dark's own 4.2:1
 // (a lighter primary would be a bright row in a dark cabin); the readouts,
@@ -23,7 +24,7 @@ QtObject {
     id: theme
     // ---- The look, Night and its style (ADR-0058). Three controls give
     // the palette on screen, `active`, which every role reads through:
-    // the look (Dark, the only one so far), Night (off, on, or on a
+    // the look (Dark or Daylight), Night (off, on, or on a
     // schedule) and the style Night takes (amber or red). All are kept
     // between runs under the `ui` settings and read here, when the
     // singleton is made, so the first frame already has the palette. A
@@ -49,10 +50,13 @@ QtObject {
     readonly property string active: nightActive ? (clampStyle(nightStyle) === "red" ? "nightRed" : "nightAmber")
                                                  : clampLook(look)
 
-    readonly property var lookNames: ["dark"]
+    readonly property var lookNames: ["dark", "daylight"]
     readonly property var nightModes: ["off", "on", "schedule"]
     readonly property var nightStyles: ["amber", "red"]
-    readonly property var paletteNames: ["dark", "nightAmber", "nightRed"]
+    // Every palette, appended to so an index keeps its palette; the night
+    // ones are those Night shows over the look
+    readonly property var paletteNames: ["dark", "nightAmber", "nightRed", "daylight"]
+    readonly property var nightPalettes: ["nightAmber", "nightRed"]
     function clampLook(name) { return lookNames.indexOf(name) >= 0 ? name : "dark" }
     function clampNight(name) { return nightModes.indexOf(name) >= 0 ? name : "off" }
     function clampStyle(name) { return nightStyles.indexOf(name) >= 0 ? name : "amber" }
@@ -146,7 +150,10 @@ QtObject {
     function scheduleWords() {
         return nightOverride !== "" ? nightWords() : qsTr("Scheduled %1 to %2").arg(nightFrom).arg(nightUntil)
     }
-    // Settings' list row
+    // Settings' list row: the look named only when it isn't the default
+    function lookSummary() {
+        return clampLook(look) === "daylight" ? qsTr("Daylight") : ""
+    }
     function nightSummary() {
         const mode = clampNight(night)
         if (mode === "off")
@@ -289,6 +296,29 @@ QtObject {
             gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
             series: ["#ee9a7c", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
                      "#ff8000", "#e08a4a", "#d1431f", "#b86253", "#d9a3a3"]
+        },
+        daylight: {
+            // Paper: near-black on off-white, the panel white; the accent is
+            // the text color as a fill, as in Dark. No yellow reaches 4.5:1
+            // on white, so the warning is a dark amber
+            bg: "#f3f3f1", surface: "#ffffff", elevated: "#e4e4e8", elevatedLight: "#d3d3da",
+            outline: "#5f5f6a",
+            primary: "#141416", textOnPrimary: "#f3f3f1", text: "#141416", textDim: "#5b5b66",
+            success: "#1b7a3e", warning: "#8c5a00", danger: "#b9262b", info: "#2458b8",
+            gaugeValue: "#141416",
+            gaugeReadout: "#141416", gaugeNeedle: "#d2232a", gaugeTick: "#141416",
+            gaugeWarn: "#8c5a00", gaugeDanger: "#b9262b",
+            // Dark's hue families, row for row, deepened to read on white
+            series: ["#1f5fc8",   // blue
+                     "#1e7d3f",   // green
+                     "#0f7f84",   // aqua
+                     "#8a6d00",   // ochre, for Dark's yellow
+                     "#8a3fa8",   // reddish purple
+                     "#b85c00",   // orange
+                     "#3c3c44",   // graphite, for Dark's near-white
+                     "#5b48c9",   // violet
+                     "#4f7a0a",   // olive, for Dark's lime
+                     "#a81f8c"]   // fuchsia
         }
     })
     readonly property var colors: palettes[active]
@@ -299,7 +329,7 @@ QtObject {
     readonly property color elevatedLight:  colors.elevatedLight
     readonly property color outline:        colors.outline
     readonly property color primary:        colors.primary
-    // The label on a primary fill: the page color in Dark (primary is the
+    // The label on a primary fill: the page color in a look (primary is the
     // text color there), the text color at night (the fill stays dim)
     readonly property color textOnPrimary:      colors.textOnPrimary
     readonly property color text:           colors.text
@@ -434,9 +464,10 @@ QtObject {
                                          : "monospace"
 
     // Chart trace colors, per palette (each palette's `series`): one per hue
-    // family on Dark so traces stay distinct on the dark surface, warm in
-    // the night palettes, none brighter than their text. LiveView keys them by model row. Dark has no red:
-    // it is the danger color, so a trace drawn in it would read as an alarm.
+    // family in a look so traces stay distinct on its surface, warm in the
+    // night palettes, none brighter than their text. LiveView keys them by
+    // model row. A look has no red: it is the danger color, so a trace drawn
+    // in it would read as an alarm.
     readonly property var seriesColors: colors.series
     // A trace's style by its row (Live's model row, a recording's signal
     // index): rows past the palette reuse its colors with a dashed trace,

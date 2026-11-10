@@ -48,13 +48,17 @@ TestCase {
         verify(Qt.colorEqual(actual, expected), what + ": " + actual + ", expected " + expected)
     }
     function usePalette(name) {
-        Theme.night = name === "dark" ? "off" : "on"
-        if (name !== "dark")
+        const night = Theme.nightPalettes.indexOf(name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
             Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = name
     }
     function cleanup() {
         Theme.night = "off"
         Theme.nightStyle = "amber"
+        Theme.look = "dark"
     }
 
     function test_aFieldDrawsTheCardsControlsInEveryPalette_data() {
