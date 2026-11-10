@@ -1961,6 +1961,8 @@ QVariantMap SessionBridge::gaugeSignals() const
          ids(ECUIO_MOCK_SIG_THROTTLE_ID, ECUIO_OBD2_SIG_THROTTLE_ID)},
         {QStringLiteral("load"),
          ids(ECUIO_MOCK_SIG_LOAD_ID, ECUIO_OBD2_SIG_ENGINE_LOAD_ID)},
+        {QStringLiteral("battery"),
+         ids(ECUIO_MOCK_SIG_BATTERY_V_ID, ECUIO_OBD2_SIG_BATTERY_V_ID)},
     };
 }
 

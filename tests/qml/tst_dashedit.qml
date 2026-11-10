@@ -284,6 +284,31 @@ TestCase {
         compare(page.doc.pages[0].cells[1].options.to, 260)
     }
 
+    // A battery cell made on either built-in set refers to both. The IDs
+    // are signal_sets.h's, not Bridge.gaugeSignals', so a wrong one there
+    // fails
+    function test_aBatteryCellReadsOnEitherSet_data() {
+        return [{ tag: "obd2", uri: "mock://?profile=obd2", refs: ["id:7008", "id:14001"] },
+                { tag: "mock", uri: "mock://demo", refs: ["id:14001", "id:7008"] }]
+    }
+    function test_aBatteryCellReadsOnEitherSet(data) {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        page.pickKind("digital")
+        page.offlineUri = data.uri
+        const panel = find(page, "dashSignalPanel")
+        const findField = find(panel, "filterText")
+        findField.text = "battery"
+        findField.textEdited()
+        tryVerify(() => findChild(panel, "pickSignal_" + data.refs[0]) !== null, 3000,
+                  "the set's battery row, offered")
+        click(page, "pickSignal_" + data.refs[0])
+        const made = page.doc.pages[0].cells[1]
+        compare(made.label, "Battery Voltage")
+        compare(made.unit, "V")
+        compare(JSON.stringify(made.refs), JSON.stringify(data.refs), "with its counterpart")
+    }
+
     // Change signal: the bar narrows the rows; the cell takes the row's
     // name, decoded unit, default range and counterpart's ref, its kind,
     // size and peak hold stay, and its zones, scale, words and decimals
