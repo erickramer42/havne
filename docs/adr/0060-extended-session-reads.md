@@ -175,9 +175,17 @@ publish that support already does carries it.
 - **Python:** the regenerated `_ecuio.py` carries the fields;
   `Session.channel_support()` returns them as it returns the struct
   today, and `havne` gains the `ECUIO_SESSION_STATE_*` names.
-- **The app (a gap):** the URI passes through Settings' field as any
-  key does, but the activity log doesn't yet name a module's session or
-  its refusal; that line is a follow-up on the roadmap.
+- **The app:** the URI passes through Settings' field as any key does.
+  The activity log gives each module's session a line of its own when
+  its state, code or counts change (the CLI's `session` rule): "ECU
+  0x7E8: reading in the extended session (50 03)", "ECU 0x7E9: refused
+  the extended session (subFunctionNotSupported, 7F 10 12): reading in
+  the default session", and one each for a re-entry, no answer and an
+  abandoned session. Each support line ends with the session in force
+  ("; extended session" or "; default session"), and Disconnect names
+  each module that entered as "returned to the default session (10 01)".
+  A recording keeps every one of them as a note. Without `?session=`
+  none of them is written.
 
 ### 7. The simulated ECU and the fakes
 

@@ -17,9 +17,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `?session=03` to the address, and Havne asks each module to enter it
   before reading, keeps it there while it reads, and returns it to the
   default session at the end. A module that refuses is read in the
-  default session, and `havne-cli`'s new `session` line and the Python
-  bindings say which session each module was read in. Only reads are
-  sent in it ([ADR-0060](docs/adr/0060-extended-session-reads.md)).
+  default session, and the Log page, `havne-cli`'s new `session` line
+  and the Python bindings say which session each module was read in.
+  Only reads are sent in it
+  ([ADR-0060](docs/adr/0060-extended-session-reads.md)).
 
 ## [0.7.0] - 2026-11-08
 
