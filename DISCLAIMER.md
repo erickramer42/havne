@@ -46,6 +46,17 @@ no trouble codes stored, through an OBDLink MX+, with the engine
 stopped and with it running; erasing a stored code has run only
 against Havne's fakes and its simulated vehicle.**
 
+Only when a session's address asks for it (`?session=03`, with the
+`uds-generic` profile), Havne first asks each ECU it reads to enter the
+extended diagnostic session (UDS `10 03`), keeps it there with tester
+present (`3E 00`) while it reads, and returns it to the default session
+(`10 01`) when the session closes
+([ADR-0060](docs/adr/0060-extended-session-reads.md)). It sends no
+write, routine or security-access request in that session. An ECU may
+refuse the session (Havne then reads it in the default one), and some
+behave differently while a tester holds them in it, so run it parked.
+**It has run only against Havne's fakes and its simulated vehicle.**
+
 It reaches a vehicle through:
 
 - a **J2534 Pass-Thru** adapter, on Windows only;

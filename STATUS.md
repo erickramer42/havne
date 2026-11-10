@@ -182,6 +182,13 @@ background too ([roadmap](#roadmap)).
     back before polling what it found: about 30 DIDs a second on the
     test car through both adapters, a 1,024-DID block in about 30 s
     ([ADR-0020](docs/adr/0020-uds-generic.md)'s appendices).
+    With `?session=03` it reads in the extended diagnostic session:
+    `10 03` to each module first, tester present in quiet gaps, `10 01`
+    at the close; a module that refuses is read in the default session
+    with its code named, and each module's report, `havne-cli`'s
+    `session` line and Python say which session it was read in
+    ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run only
+    against the fakes and the simulated ECU so far.
   - **Your own signals** ([ADR-0051](docs/adr/0051-signal-files.md)):
     signal files, JSON that core reads from bytes and refuses at load
     where it's wrong, holding Service 01 PIDs and Service 22 DIDs on up
