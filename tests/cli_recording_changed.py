@@ -7,20 +7,23 @@
 #
 #   python tests/cli_recording_changed.py <havne-cli>
 #
-# A scratch recording of 2000 rows a millisecond apart plays at speed 1;
-# half a second in, the file is cut to its first 100 rows, behind the
-# worker. The stream must exit 0 within 10 s with a health line of code
-# 16 and, last, an end line whose reason is "recording-changed", short of
-# the 2000 frames. Frames the worker sent before it stopped may follow the
-# health line.
+# A scratch recording of 30000 rows a millisecond apart plays at speed 1;
+# once the stream has printed its first frame (attach has read the whole
+# file), the file is cut to its first 100 rows. The worker reads through
+# stdio's buffer, so it meets the cut at its next read, well inside the
+# 30 s it has left; a cut timed by a sleep can land before attach or
+# after the worker's last read on a loaded runner. The stream must exit
+# 0 within 10 s with a health line of code 16 and, last, an end line whose
+# reason is "recording-changed", short of the 30000 frames. Frames the
+# worker sent before it stopped may follow the health line.
 
 import os
 import subprocess
 import sys
 import tempfile
-import time
+import threading
 
-ROWS = 2000
+ROWS = 30000
 KEPT = 100
 HEADER = "host_us,timestamp_us,id,flags,data\n"
 
@@ -41,16 +44,44 @@ def main():
         uri = "replay://" + folder.replace("\\", "/")
         p = subprocess.Popen([cli, "stream", uri], stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
-        time.sleep(0.5)
+        # Both pipes read as they come, so neither fills
+        out_lines, err_chunks = [], []
+        first_frame = threading.Event()
+
+        def read_out():
+            for line in p.stdout:
+                out_lines.append(line)
+                if line.startswith(b'{"type":"frame"'):
+                    first_frame.set()
+            first_frame.set()  # a stream with no frame is judged at its end
+
+        readers = [threading.Thread(target=read_out),
+                   threading.Thread(target=lambda: err_chunks.extend(p.stderr))]
+        for r in readers:
+            r.start()
+
+        def ended():
+            for r in readers:
+                r.join()
+            return b"".join(out_lines), b"".join(err_chunks)
+
+        if not first_frame.wait(15):
+            p.kill()
+            p.wait()
+            ended()
+            print("FAIL  no frame in 15 s")
+            return 1
         with open(csv, "r+b") as f:
             f.truncate(kept)
         try:
-            out, err = p.communicate(timeout=10)
+            p.wait(timeout=10)
         except subprocess.TimeoutExpired:
             p.kill()
-            p.communicate()
+            p.wait()
+            ended()
             print("FAIL  still running 10 s after the recording was cut")
             return 1
+        out, err = ended()
     finally:
         try:
             os.remove(csv)
