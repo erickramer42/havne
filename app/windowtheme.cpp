@@ -25,11 +25,10 @@
 
 #ifdef Q_OS_ANDROID
 // Android's own window, behind Qt's, follows the phone's day/night theme
-// (QtActivity's DayNight): light on a light phone. After a rotation, the
-// screen Qt's window didn't reach showed white, and three-button
-// navigation sat on a light scrim (docs/bench-sessions/2026-10-28-android-3.md).
-// Dark like the app instead (the theme's bg), no scrim, the navigation
-// buttons drawn light.
+// (QtActivity's DayNight): light on a light phone, so after a rotation the
+// uncovered screen showed white and three-button navigation sat on a light
+// scrim (docs/bench-sessions/2026-10-28-android-3.md). It is made dark like
+// the app (the theme's bg), no scrim, the navigation buttons drawn light.
 static void darkenAndroidWindow(const QColor& bg)
 {
     using QNativeInterface::QAndroidApplication;

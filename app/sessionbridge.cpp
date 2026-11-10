@@ -1464,10 +1464,9 @@ SessionBridge::SessionBridge(QObject* parent)
         pollChannelDiagnostics();
         pollReplayEnd();
         pollSleep();
-        // Must fire even when nothing arrived this window: dimming exists
-        // for rows that STOPPED updating. 100 ms is well
-        // inside the 3 s dim threshold and the span emission is one
-        // signal for the whole model.
+        // Fires even when nothing arrived this window: dimming exists for
+        // rows that stopped updating. 100 ms is well inside the 3 s dim
+        // threshold, and the emission is one signal for the whole model.
         m_signalModel->refreshAges();
         // Drop count at tick rate rather than per frame; onFrame also
         // queues a report as it drops (at most one pending).
@@ -1501,12 +1500,11 @@ SessionBridge::~SessionBridge()
     // A Read once's session closes within its wait; its queued result is
     // dropped with `this`, and core must outlive it
     m_readOnce.join();
-    // Async connect worker first: it calls core and posts a queued
-    // completion against `this`. Join before tearing the session or
-    // shutting core down. Worst case bounded by the surrogate handshake
-    // timeout (~8 s) at app exit with a wedged vendor: acceptable for
-    // shutdown, unacceptable for the UI thread mid-session (which is
-    // why connect is async at all).
+    // The async connect worker calls core and posts a queued completion
+    // against `this`: join it before tearing the session or core down.
+    // With a wedged vendor that waits up to the surrogate handshake
+    // timeout (~8 s): fine at exit, not on the UI thread mid-session,
+    // hence the async connect.
     if (m_connectThread.joinable()) {
         m_connectThread.join();
     }
@@ -2429,7 +2427,7 @@ QVariantMap SessionBridge::recordingRow(const QString& folder) const
     return row;
 }
 
-// Pure-core half: safe on ANY thread. Creates and registers, the slow
+// Pure-core half: safe on any thread. Creates and registers, the slow
 // part (DLL load, PassThruOpen), but doesn't start: until the GUI thread
 // has taken the session, no worker may call onFrame with `this`. On
 // failure, cleans up fully (core API, mutex-safe off-thread) and returns
@@ -2502,10 +2500,9 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     return {};
 }
 
-// GUI-thread half: state application after a successful connect,
-// ending with the "Connected:" and "Session:" log lines. Factored out of
-// connectSession so the sync and async paths apply IDENTICAL state
-// (parity by construction, not by care).
+// GUI-thread half: the state a successful connect applies, ending with the
+// "Connected:" and "Session:" log lines; the sync and async paths share it,
+// so they apply the same state.
 void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
     // Before any emit: each runs handlers synchronously, and a connect one
@@ -2660,9 +2657,9 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         m_pendingSession.store(session);
 
         QMetaObject::invokeMethod(this, [this, uri, core_err]() {
-            // JOIN FIRST, then clear the flag, then emit: assigning to a
+            // Join first, then clear the flag, then emit: assigning to a
             // joinable std::thread terminates the process, and a QML
-            // handler can run SYNCHRONOUSLY inside connectingChanged.
+            // handler can run synchronously inside connectingChanged.
             // connecting clears only once the session is applied, so a
             // handler always sees connecting or connected: a connect it
             // starts is refused, never a second session over this one.
@@ -2760,7 +2757,7 @@ void SessionBridge::disconnectSession()
         QMetaObject::invokeMethod(
             this,
             [this, uri, timing, rows]() {
-                // JOIN FIRST, then close the recording, then clear the
+                // Join first, then close the recording, then clear the
                 // flag and emit, as the connect completion does: a QML
                 // handler inside disconnectingChanged may start the next
                 // connect, which must find this session's recorder gone.
@@ -3292,9 +3289,9 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
         bool expected = false;
         if (self->m_dropNotifyPending.compare_exchange_strong(expected, true)) {
             QMetaObject::invokeMethod(self, [self]() {
-                // Clear the flag FIRST: if new drops arrive while we process,
-                // a fresh notification is allowed to be queued and will read
-                // a newer value. Reset-after-read could suppress a drop report.
+                // Clear the flag first: drops arriving meanwhile may queue a
+                // fresh notification that reads a newer value; reset-after-read
+                // could suppress a drop report.
                 self->m_dropNotifyPending.store(false, std::memory_order_release);
                 self->notifyDropped();
             }, Qt::QueuedConnection);
@@ -3302,19 +3299,18 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
         return;
     }
 
-    // ecuio_frame_t holds its payload INLINE (data[ECUIO_FRAME_DATA_MAX]):
-    // this struct copy is a deep copy of the payload; no dangling pointer
-    // is possible.
+    // ecuio_frame_t holds its payload inline (data[ECUIO_FRAME_DATA_MAX]),
+    // so this struct copy is a deep copy: no dangling pointer is possible.
     const ecuio_frame_t copy = *frame;
     // Stamped here, as it arrives, not when the GUI thread gets to it:
     // the frame's wait for the GUI thread starts here
     const auto arrived = HostClock::now();
     self->m_inFlightFrames.fetch_add(1, std::memory_order_relaxed);
 
-    // Lifetime contract: invoking with `self` as context object means the
-    // queued lambda is dropped if the bridge is destroyed before it runs.
-    // DO NOT change to a context-free postEvent pattern without revisiting
-    // destruction ordering.
+    // Lifetime contract: with `self` as the context object, the queued
+    // lambda is dropped if the bridge is destroyed before it runs. Don't
+    // change it to a context-free postEvent without revisiting the
+    // destruction order.
     QMetaObject::invokeMethod(self, [self, copy, arrived]() {
         self->m_inFlightFrames.fetch_sub(1, std::memory_order_relaxed);
         self->handleFrameInternal(&copy, arrived);
@@ -3731,9 +3727,8 @@ void SessionBridge::pollLinkHealth()
     m_linkErrorCode = last_error;
     m_errorEpisodes = episodes;
 
-    /* Transitions land in the activity log with ZERO QML work: this
-     * alone turns "connected with frozen values" into a named fault
-     * in the existing log surface. */
+    /* Transitions land in the activity log with no QML work, which turns
+     * "connected with frozen values" into a named fault there. */
     if (prev != ECUIO_OK && last_error == ECUIO_OK) {
         logUnnoted(QStringLiteral("Link: recovered"));
     } else if (last_error == ECUIO_ERR_VEHICLE_TIMEOUT) {
