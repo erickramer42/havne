@@ -290,7 +290,7 @@ QtObject {
             gaugeCell("digital", 2, 6, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
                       { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
             gaugeCell("digital", 6, 9, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                      { from: 0, to: 300, description: qsTr("Mass air flow"), accent: "info" }),
+                      { from: 0, to: 300, description: qsTr("Mass air flow") }),
             gaugeCell("digital", 2, 6, qsTr("IAT"), ["id:5001", "id:7005"], degC,
                       { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                         description: qsTr("Intake air temperature") }),
@@ -313,8 +313,7 @@ QtObject {
                         caption: qsTr("\u00D71000 r/min"), peak: true, progress: true }),
             // No caption: the dial shows its unit
             gaugeCell("analog", 2, 8, qsTr("Vehicle speed"), ["id:3001", "id:7004"], "km/h",
-                      { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true,
-                        peakLabel: qsTr("TOP") }),
+                      { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true }),
             gaugeCell("ring", 1, 4, qsTr("Coolant"), ["id:2001", "id:7002"], degC,
                       { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
             gaugeCell("ring", 1, 4, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
@@ -323,7 +322,7 @@ QtObject {
                       { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                         description: qsTr("Intake air temperature") }),
             gaugeCell("digital", 1, 4, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                      { from: 0, to: 300, description: qsTr("Mass air flow"), accent: "info" }),
+                      { from: 0, to: 300, description: qsTr("Mass air flow") }),
             gaugeCell("bar", 2, 2, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
                       { from: 0, to: 100, accent: "success" }),
             gaugeCell("bar", 2, 2, qsTr("Engine load"), ["id:6001", "id:7001"], "%",
@@ -420,13 +419,22 @@ QtObject {
 
     // A joined panel's boxes as drawn outside edit mode: each gauge runs
     // down over the empty squares under it, as far as every column it spans
-    // stays empty, within the panel's rows. A blank cell doesn't stretch and
-    // nothing stretches over one. For display only: the layout is untouched
-    function stretched(placed, boxes) {
+    // stays empty, within the panel's rows; a gauge alone in its rows then
+    // runs right to the panel's edge (the last cell alone in its row takes
+    // the row), so no outlined empty square is left beside it. A cell
+    // sharing its rows keeps its width: a held cell shows the true sizes,
+    // and a lift that moved it sideways would land elsewhere. A blank cell
+    // doesn't stretch and nothing stretches over one. For display only:
+    // the layout is untouched. `columns` is the grid's; left out, the
+    // boxes' right edge stands in
+    function stretched(placed, boxes, columns) {
         const taken = []   // taken[y][x]
         let rows = 0
+        let cols = isFinite(columns) ? Math.max(1, Math.floor(columns)) : 0
         for (const b of boxes) {
             rows = Math.max(rows, b.y + b.h)
+            if (!isFinite(columns))
+                cols = Math.max(cols, b.x + b.w)
             for (let y = b.y; y < b.y + b.h; ++y) {
                 taken[y] = taken[y] || []
                 for (let x = b.x; x < b.x + b.w; ++x)
@@ -440,13 +448,36 @@ QtObject {
             }
             return true
         }
-        return boxes.map((b, i) => {
+        const down = boxes.map((b, i) => {
             let h = b.h
             if (placed[i].kind !== "blank") {
                 while (b.y + h < rows && emptyRow(b, b.y + h))
                     ++h
             }
             return { x: b.x, y: b.y, w: b.w, h: h }
+        })
+        // The squares the gauges then cover: a cell is alone in its rows
+        // against what its neighbors draw, not what they were placed at
+        const drawn = []   // drawn[y][x]
+        for (const b of down) {
+            for (let y = b.y; y < b.y + b.h; ++y) {
+                drawn[y] = drawn[y] || []
+                for (let x = b.x; x < b.x + b.w; ++x)
+                    drawn[y][x] = true
+            }
+        }
+        const aloneInRows = (b) => {
+            for (let y = b.y; y < b.y + b.h; ++y) {
+                for (let x = 0; x < cols; ++x) {
+                    if (drawn[y] && drawn[y][x] && (x < b.x || x >= b.x + b.w))
+                        return false
+                }
+            }
+            return true
+        }
+        return down.map((b, i) => {
+            const w = placed[i].kind !== "blank" && aloneInRows(b) ? cols - b.x : b.w
+            return { x: b.x, y: b.y, w: w, h: b.h }
         })
     }
 

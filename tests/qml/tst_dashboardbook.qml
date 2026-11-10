@@ -139,13 +139,14 @@ TestCase {
         compare(c[1].options, { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
                                 labelDivisor: 1000, dangerFrom: 6800,
                                 caption: "\u00D71000 r/min", peak: true, progress: true })
-        compare(c[2].options, { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true,
-                                peakLabel: "TOP" })
+        // No peakLabel of its own: both dials say "Peak"
+        compare(c[2].options, { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true })
         compare(c[3].options, { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 })
         compare(c[4].options, { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 })
         compare(c[5].options, { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                                 description: "Intake air temperature" })
-        compare(c[6].options, { from: 0, to: 300, description: "Mass air flow", accent: "info" })
+        // No accent: blue means cold, nothing else
+        compare(c[6].options, { from: 0, to: 300, description: "Mass air flow" })
         compare(c[7].options, { from: 0, to: 100, accent: "success" })
         compare(c[8].options, { from: 0, to: 100 })
     }
@@ -1090,37 +1091,63 @@ TestCase {
             compare(c.h % DashboardBook.phoneSpanScale, 0, c.label + " at " + c.h)
     }
 
-    // Each cell's drawn height on four columns, placed in order
+    // Each cell's drawn height and width on four columns, placed in order:
+    // down over the empty squares under it, then, alone in its rows, right
+    // to the edge
     function test_stretched_data() {
         const c = (w, h) => ({ w: w, h: h })
         const blank = (w, h) => ({ kind: "blank", w: w, h: h, refs: [] })
         return [
-            { tag: "a shorter cell beside a taller one", cells: [c(2, 2), c(2, 3)], heights: [3, 3] },
-            { tag: "equal heights stay", cells: [c(2, 2), c(2, 2)], heights: [2, 2] },
-            { tag: "one cell stays", cells: [c(4, 2)], heights: [2] },
-            { tag: "stops at the next cell", cells: [c(2, 1), c(2, 4), c(2, 1)], heights: [1, 4, 3] },
-            { tag: "beside a blank that runs longer", cells: [c(2, 1), blank(2, 3)], heights: [3, 3] },
-            { tag: "a blank doesn't stretch", cells: [blank(2, 1), c(2, 3)], heights: [1, 3] },
+            { tag: "a shorter cell beside a taller one", cells: [c(2, 2), c(2, 3)],
+              heights: [3, 3], widths: [2, 2] },
+            { tag: "equal heights stay", cells: [c(2, 2), c(2, 2)], heights: [2, 2], widths: [2, 2] },
+            { tag: "one cell stays", cells: [c(4, 2)], heights: [2], widths: [4] },
+            { tag: "stops at the next cell", cells: [c(2, 1), c(2, 4), c(2, 1)],
+              heights: [1, 4, 3], widths: [2, 2, 2] },
+            { tag: "beside a blank that runs longer", cells: [c(2, 1), blank(2, 3)],
+              heights: [3, 3], widths: [2, 2] },
+            { tag: "a blank doesn't stretch", cells: [blank(2, 1), c(2, 3)],
+              heights: [1, 3], widths: [2, 2] },
             { tag: "never over a blank",
-              cells: [c(2, 1), c(2, 4), blank(2, 1), c(2, 1)], heights: [1, 4, 1, 2] },
-            { tag: "only as far as every column is empty",
-              cells: [c(4, 1), c(1, 3), c(3, 1), c(1, 1)], heights: [1, 3, 1, 2] },
-            { tag: "a cell with no kind is a gauge", cells: [{ w: 2, h: 1 }, c(2, 2)], heights: [2, 2] },
+              cells: [c(2, 1), c(2, 4), blank(2, 1), c(2, 1)], heights: [1, 4, 1, 2],
+              widths: [2, 2, 2, 2] },
+            { tag: "only as far as every column is empty; beside another it keeps its width",
+              cells: [c(4, 1), c(1, 3), c(3, 1), c(1, 1)], heights: [1, 3, 1, 2], widths: [4, 1, 3, 1] },
+            { tag: "a cell with no kind is a gauge", cells: [{ w: 2, h: 1 }, c(2, 2)],
+              heights: [2, 2], widths: [2, 2] },
             { tag: "a later column taken stops it", cells: [c(2, 1), c(1, 1)], heights: [1, 1],
-              boxes: [{ x: 0, y: 0, w: 2, h: 1 }, { x: 1, y: 1, w: 1, h: 1 }] }
+              widths: [4, 3],
+              boxes: [{ x: 0, y: 0, w: 2, h: 1 }, { x: 1, y: 1, w: 1, h: 1 }] },
+            { tag: "the last cell alone in its row takes the row", cells: [c(4, 1), c(2, 1)],
+              heights: [1, 1], widths: [4, 4] },
+            { tag: "a blank beside it stops the row", cells: [c(4, 1), c(2, 1), blank(1, 1)],
+              heights: [1, 1, 1], widths: [4, 2, 1] },
+            { tag: "a cell running down beside it stops the row",
+              cells: [c(4, 1), c(1, 1), c(3, 1), c(1, 1)], heights: [1, 1, 2, 1], widths: [4, 1, 3, 1] },
+            { tag: "alone in its row between two full rows, it takes the row",
+              cells: [c(4, 1), c(1, 1), c(4, 1)], heights: [1, 1, 1], widths: [4, 4, 4] }
         ]
     }
     function test_stretched(data) {
         const boxes = data.boxes || DashboardBook.place(data.cells, 4)
         const before = JSON.stringify(boxes)
-        const out = DashboardBook.stretched(data.cells, boxes)
+        const out = DashboardBook.stretched(data.cells, boxes, 4)
         compare(JSON.stringify(boxes), before, "the input is left alone")
         compare(out.map(b => b.h), data.heights)
+        compare(out.map(b => b.w), data.widths)
         boxes.forEach((b, i) => {
             compare(out[i].x, b.x, "x stays")
             compare(out[i].y, b.y, "y stays")
-            compare(out[i].w, b.w, "width stays")
         })
+    }
+
+    // The grid's columns bound the stretch to the right; without them the
+    // boxes' own right edge does
+    function test_stretchedStopsAtTheGridsColumns() {
+        const cells = [{ w: 2, h: 1 }]
+        const boxes = DashboardBook.place(cells, 6)
+        compare(DashboardBook.stretched(cells, boxes, 6)[0].w, 6)
+        compare(DashboardBook.stretched(cells, boxes)[0].w, 2)
     }
 
     function test_digitsFor_data() {

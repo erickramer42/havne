@@ -911,7 +911,7 @@ TestCase {
         const gone = gaugeOf(findChild(page, "dashCell_0_" + (doc.pages[0].cells.length - 1)))
         compare(Bridge.connectSession("j2534://" + Harness.fakeDllPath + "?profile="
                                       + r.profile + "&identify=0&diagnose=0"), "")
-        tryCompare(all["Oil temp"], "note", "not supported by this car", 5000)
+        tryCompare(all["Oil temp"], "note", "not sent by this ECU", 5000)
         tryCompare(gone, "note", "refused (7F 22 31)", 5000)
         tryVerify(() => all["Coolant"].hasValue, 5000, "the rest read")
     }
@@ -1337,5 +1337,49 @@ TestCase {
             fuzzyCompare(at, Math.round(at), 1e-6, "a line on a whole pixel: " + at)
         }
         Theme.zoom = 1
+    }
+
+    Component { id: spyComponent; SignalSpy {} }
+
+    // The desktop's link state drops the address where its row leaves it
+    // no room (a narrow window): the header carries the address
+    function test_theLinkStateDropsTheAddressInANarrowRow() {
+        const page = pageOf({ form: "desktop", width: 1000, height: 600 }, null, true)
+        connect("mock://demo")
+        const loader = findChild(page, "linkInRow")
+        tryVerify(() => loader.item, 3000, "the link state")
+        const label = findChild(page, "linkLabel")
+        tryCompare(label, "text", "Live · mock://demo", 5000)
+        verify(label.roomForAddress)
+        page.width = 300
+        tryVerify(() => label.width < 150, 3000, "a narrow label: " + label.width)
+        compare(label.text, "Live")
+        page.width = 1000
+        tryCompare(label, "text", "Live · mock://demo", 3000)
+    }
+
+    // A row too narrow for every tool drops Reset peaks, and edit mode's
+    // bar offers it instead
+    function test_aNarrowToolRowMovesResetPeaksIntoEditsBar() {
+        const page = pageOf({ form: "desktop", width: 1000, height: 600 }, null, true)
+        const reset = findChild(page, "resetPeaks"), inBar = findChild(page, "editResetPeaks")
+        const header = reset.parent
+        verify(waitForPolish(page), "laid out")
+        verify(header.width >= page.toolRowFull, "a wide row: " + header.width)
+        verify(reset.visible, "Reset peaks in the row")
+        page.startEditing()
+        verify(!inBar.visible, "and not in the bar")
+        page.stopEditing()
+        page.width = 240
+        tryVerify(() => header.width < page.toolRowFull, 3000, "a narrow row: " + header.width)
+        verify(!reset.visible, "Reset peaks gives way")
+        page.startEditing()
+        verify(inBar.visible, "the bar offers it")
+        verify(inBar.flat, "quiet, as in the row")
+        compare(inBar.text, "Reset peaks")
+        const spy = createTemporaryObject(spyComponent, testCase,
+                                          { target: page, signalName: "peaksResetRequested" })
+        inBar.clicked()
+        compare(spy.count, 1, "and it resets the peaks")
     }
 }

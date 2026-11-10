@@ -207,6 +207,15 @@ TestCase {
         }
     }
 
+    // Night Red has one red: success takes the dim tone, so danger alone
+    // is full red
+    function test_nightRedKeepsFullRedForDangerAlone() {
+        usePalette("nightRed")
+        verify(Qt.colorEqual(Theme.success, Theme.textDim), "success is the dim tone: " + Theme.success)
+        verify(Qt.colorEqual(Theme.danger, "#ff3030"), "danger is full red: " + Theme.danger)
+        verify(!Qt.colorEqual(Theme.success, Theme.danger))
+    }
+
     // WCAG contrast of a text color on a background
     function lum(c) {
         const f = x => x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)

@@ -9,7 +9,7 @@ pragma ComponentBehavior: Bound
 
 // Motorsport shift-light strip driven by RPM. `from` is where the
 // first LED lights, `to` the shift point; at or past `to` every LED
-// flashes in Theme.info.
+// flashes, each in its stage's color.
 GaugeBase {
     id: gauge
 
@@ -48,7 +48,8 @@ GaugeBase {
                                            : Theme.gaugeDanger
                 readonly property bool lit: gauge.shiftNow ? gauge.flashOn
                                                            : gauge.fraction >= pos - 1e-6
-                readonly property color glow: gauge.shiftNow ? Theme.info : hue
+                // A lit light keeps its stage's color, flashing or not
+                readonly property color glow: hue
 
                 width: gauge.led; height: gauge.led
 

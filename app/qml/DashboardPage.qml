@@ -21,6 +21,9 @@ Page {
 
     readonly property bool compact: width < 600
     readonly property real margin: Theme.pageMargin
+    // The tool row's width from which it holds every tool, Reset peaks
+    // among them (header.holdsResetPeaks)
+    readonly property real toolRowFull: 272
     readonly property real gap: compact ? 10 : 16
     // The phone's gauges are one panel (ADR-0057's appendix, section 3):
     // the cells meet, the grid draws the surface, the edge and the
@@ -737,7 +740,9 @@ Page {
             let words = ""
             if (!Bridge.connected) words = qsTr("no session")
             else if (entry === null) words = qsTr("not in this profile: %1").arg(label)
-            else if (entry.hidden) words = qsTr("not supported by this car")
+            // Live's rule (hiddenCount): the ECU reported it unsupported, or
+            // never answered it
+            else if (entry.hidden) words = qsTr("not sent by this ECU")
             else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
             else if (!entry.hasValue) words = qsTr("waiting for data")
             return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
@@ -853,6 +858,9 @@ Page {
             id: gauge
             objectName: "gauge"
             anchors.fill: parent
+            // Editable, the gauge leaves Remove's corner free, so the
+            // button covers no title
+            anchors.rightMargin: card.editable ? Theme.touchTarget - card.padding + 2 : 0
             asynchronous: card.later
             sourceComponent: root.kindComponent(card.kind)
             onLoaded: {
@@ -1129,20 +1137,21 @@ Page {
                         onValueModified: root.setOptions({ decimals: value })
                     }
 
-                    Caption { text: qsTr("Width") }
+                    // The span, in the grid's units, which the words name
+                    Caption { text: qsTr("Columns") }
                     SpinBox {
                         objectName: "panelW"
-                        Accessible.name: qsTr("Width")
+                        Accessible.name: qsTr("Columns")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 1
                         to: DashboardBook.maxColumns
                         value: panelCard.cell ? panelCard.cell.w : 1
                         onValueModified: root.resize(value, panelCard.cell.h)
                     }
-                    Caption { text: qsTr("Height") }
+                    Caption { text: qsTr("Rows") }
                     SpinBox {
                         objectName: "panelH"
-                        Accessible.name: qsTr("Height")
+                        Accessible.name: qsTr("Rows")
                         Layout.preferredHeight: Theme.touchTarget
                         // A stored h under the phone's step stays reachable
                         from: root.phoneForm && panelCard.cell
@@ -1155,12 +1164,10 @@ Page {
                             : value)
                     }
 
-                    Caption {
-                        visible: root.peakKinds.indexOf(panelCard.kind) >= 0
-                        text: qsTr("Peak hold")
-                    }
-                    Switch {
+                    // A checkbox, as every other yes-or-no in the app
+                    ThemedCheckBox {
                         objectName: "panelPeak"
+                        text: qsTr("Peak hold")
                         Accessible.name: qsTr("Peak hold")
                         visible: root.peakKinds.indexOf(panelCard.kind) >= 0
                         implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
@@ -1594,11 +1601,13 @@ Page {
                 objectName: "linkLabel"
                 Layout.fillWidth: true
                 elide: Text.ElideMiddle
-                // Short statuses come from Theme.linkLabel; "ok" keeps
-                // the richer URI text. Long-form detail (episode
-                // counts, error codes) stays in LiveView's banner.
+                // Short statuses come from Theme.linkLabel; "ok" adds the
+                // address where the row leaves room for it (the header
+                // shows it anyway). Long-form detail (episode counts,
+                // error codes) stays in LiveView's banner.
+                readonly property bool roomForAddress: width >= 150
                 text: Bridge.linkState === "ok"
-                      ? qsTr("Live · %1").arg(Bridge.uriLabel)
+                      ? (roomForAddress ? qsTr("Live · %1").arg(Bridge.uriLabel) : qsTr("Live"))
                       : Theme.linkLabel(Bridge.linkState)
                 font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)
@@ -1737,7 +1746,8 @@ Page {
                 visible: active
                 sourceComponent: linkState
             }
-            // Drive, at the start of the phone's row. Its tools sit at the right
+            // Drive, at the start of the phone's row. Its tools sit at the
+            // right. With no session it stays, and says what it waits for
             ThemedButton {
                 objectName: "dashDrive"
                 flat: true
@@ -1745,8 +1755,10 @@ Page {
                 Layout.minimumWidth: Theme.touchTarget
                 visible: root.phoneForm
                 enabled: Bridge.connected && !root.editing
-                text: root.driving ? qsTr("Exit drive") : qsTr("Drive")
-                Accessible.name: root.driving ? qsTr("Leave the drive view")
+                text: !Bridge.connected ? qsTr("Connect first")
+                    : root.driving ? qsTr("Exit drive") : qsTr("Drive")
+                Accessible.name: !Bridge.connected ? qsTr("Connect a session to show the gauges full screen")
+                               : root.driving ? qsTr("Leave the drive view")
                                               : qsTr("Show the gauges full screen")
                 onClicked: root.driving ? root.leaveDrive(true) : root.enterDrive()
             }
@@ -1755,10 +1767,15 @@ Page {
                 Layout.fillWidth: true
                 visible: root.phoneForm
             }
+            // A row too narrow for every tool (a small window, a phone
+            // zoomed far in) drops Reset peaks, which edit mode's bar then
+            // offers (editResetPeaks)
+            readonly property bool holdsResetPeaks: width >= root.toolRowFull
             ThemedButton {
                 objectName: "resetPeaks"
                 flat: true
                 compact: root.compact || root.phoneForm
+                visible: header.holdsResetPeaks
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
             }
@@ -1852,20 +1869,40 @@ Page {
                     root.confirmRemovePage = false
                 }
             }
+            // Reset peaks, when the tool row has no room for it
+            ThemedButton {
+                objectName: "editResetPeaks"
+                flat: true
+                compact: root.form === "phone"
+                visible: !header.holdsResetPeaks
+                text: qsTr("Reset peaks")
+                onClicked: root.resetPeaks()
+            }
             Item { Layout.fillWidth: true }
         }
 
-        // The pages' controls and Reset, in the page (never a menu)
+        // The pages' controls, in the page (never a menu), and Reset apart
+        // from them: it replaces every page, so it isn't one of the page's
+        // own controls. Wide, a gap pushes Reset to the row's end; narrow
+        // (a phone), where the controls wrap, the gap is a short one and
+        // Reset is the last of them. The gap's width is worked out from the
+        // bar's width and the controls' own, never the flow's: a hidden
+        // flow sizes itself from its children, and a child sized from it
+        // would loop. The layout takes the flow's unwrapped content as its
+        // least width unless told otherwise; 0 lets it wrap on a phone
         Flow {
+            id: moreRow
             objectName: "dashMoreRow"
             readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 1
             visible: root.editing && root.moreShown && !root.confirmReset && !root.confirmRemovePage
             spacing: 8
             TextField {
                 id: pageName
                 objectName: "moreRename"
-                width: Math.min(220, parent.width)
+                width: Math.min(220, topBar.width)
                 height: Theme.touchTarget
                 maximumLength: DashboardBook.maxLabel
                 text: root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : ""
@@ -1878,32 +1915,50 @@ Page {
                 }
             }
             ThemedButton {
+                id: moreAddPage
                 objectName: "moreAddPage"
                 enabled: DashboardBook.canAddPage(root.doc)
                 text: qsTr("Add page")
                 onClicked: root.addPage()
             }
+            // Nothing to move with one page
             ThemedButton {
+                id: moreLeft
                 objectName: "moreLeft"
+                visible: root.pages.length > 1
                 enabled: root.pageIndex > 0
                 text: qsTr("Move page left")
                 onClicked: root.movePage(-1)
             }
             ThemedButton {
+                id: moreRight
                 objectName: "moreRight"
+                visible: root.pages.length > 1
                 enabled: root.pageIndex < root.pages.length - 1
                 text: qsTr("Move page right")
                 onClicked: root.movePage(1)
             }
             ThemedButton {
+                id: moreRemovePage
                 objectName: "moreRemovePage"
                 enabled: DashboardBook.canRemovePage(root.doc)
                 text: qsTr("Remove page")
                 onClicked: root.confirmRemovePage = true
             }
+            Item {
+                objectName: "moreResetGap"
+                readonly property real used: pageName.width + moreAddPage.width + moreRemovePage.width
+                    + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
+                    + 2 * moreRow.spacing
+                width: Math.max(16, topBar.width - used - moreReset.width - 2 * moreRow.spacing)
+                height: 1
+            }
             ThemedButton {
+                id: moreReset
                 objectName: "moreReset"
+                flat: true
                 text: qsTr("Reset")
+                Accessible.name: qsTr("Replace this form's pages with the built-in layout")
                 onClicked: root.confirmReset = true
             }
         }
@@ -2082,7 +2137,7 @@ Page {
                 readonly property var boxes: {
                     const b = DashboardBook.place(placed, columns)
                     return root.joined && !root.editing && root.held < 0
-                        ? DashboardBook.stretched(placed, b) : b
+                        ? DashboardBook.stretched(placed, b, columns) : b
                 }
                 readonly property var seams: root.joined
                     ? DashboardBook.seams(placed, boxes, columns) : []

@@ -98,8 +98,11 @@ TestCase {
 
         const dashboard = showPage(main, "dashboardPage")
         sameColor(find(dashboard, "linkDot").color, tone, "Dashboard dot")
+        // The address only where the label's row leaves room for it
         const dashboardLabel = find(dashboard, "linkLabel")
-        compare(dashboardLabel.text, state === "ok" ? "Live · " + shown : label, "Dashboard label")
+        compare(dashboardLabel.text,
+                state === "ok" ? (dashboardLabel.roomForAddress ? "Live · " + shown : "Live") : label,
+                "Dashboard label")
         sameColor(dashboardLabel.color, tone, "Dashboard label")
 
         const live = showPage(main, "livePage")

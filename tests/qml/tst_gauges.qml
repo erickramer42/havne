@@ -402,6 +402,27 @@ TestCase {
         compare(g.majorCount, 9, "an exact multiple keeps its last tick")
     }
 
+    // Past the shift point every light flashes in its own stage's color
+    function test_theLitShiftLightsKeepTheirStagesColor() {
+        const bar = createTemporaryObject(shiftC, testCase.parent)
+        const slots = []
+        const walk = (item) => {
+            for (let i = 0; i < item.children.length; ++i) {
+                if (item.children[i].objectName === "slot")
+                    slots.push(item.children[i])
+                walk(item.children[i])
+            }
+        }
+        walk(bar)
+        verify(slots.length > 0, "the lights")
+        bar.hasValue = true
+        bar.value = 120
+        tryVerify(() => bar.shiftNow, 3000, "past the shift point")
+        for (const s of slots)
+            verify(Qt.colorEqual(s.glow, s.hue), "a light in its stage's color: " + s.glow + " for " + s.hue)
+        verify(!Qt.colorEqual(slots[0].glow, Theme.info), "never the cold blue")
+    }
+
     // The shift lights flash at 3 Hz or under
     function test_theShiftLightsFlashAtThreeHertzOrUnder() {
         const g = createTemporaryObject(shiftC, testCase.parent)

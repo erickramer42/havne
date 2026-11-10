@@ -1596,13 +1596,17 @@ TestCase {
         const pitch = Math.max(1, Math.min((col + gap) / 4, cap))
         compare(cap < (col + gap) / 4, data.capped, "the case means what it says")
         const was = DashboardBook.place(cells, data.before)
+        // Drawn widths: a cell alone in its rows runs to the panel's edge
+        const drawn = DashboardBook.stretched(cells, was, data.before)
+        if (!data.capped)
+            verify(drawn[6].w > was[6].w, "the last cell, alone in its rows, takes the row")
         for (let i = 0; i < cells.length; ++i) {
             const c = find(page, "dashCell_0_" + i)
             const b = was[i]
             tryVerify(() => c.width > 0, 3000, "cell " + i + " laid out")
             fuzzyCompare(c.x, b.x * (col + gap), 1e-6, "cell " + i + " x")
             fuzzyCompare(c.y, b.y * pitch, 1e-6, "cell " + i + " y")
-            fuzzyCompare(c.width, b.w * col + (b.w - 1) * gap, 1e-6, "cell " + i + " width")
+            fuzzyCompare(c.width, drawn[i].w * col + (drawn[i].w - 1) * gap, 1e-6, "cell " + i + " width")
             fuzzyCompare(c.height, data.heights[i] * pitch - gap, 1e-6, "cell " + i + " height")
         }
         compare(page.problem, "", "it reads")
@@ -1624,5 +1628,83 @@ TestCase {
         verify(!sampler(1).running, "the other page's tile does not")
         page.goTo(1)
         tryVerify(() => sampler(1).running && !sampler(0).running, 3000, "and it follows the page")
+    }
+
+    // Edit mode's Remove sits in a corner the gauge leaves free, so it
+    // covers no title
+    function test_removeCoversNoTitle() {
+        const page = pageOf({}, docOf([cellOf("A", "digital")]))
+        const cell = find(page, "dashCell_0_0")
+        const gauge = find(cell, "gauge")
+        tryVerify(() => gauge.width > 100, 3000, "laid out")
+        const before = gauge.width
+        page.startEditing()
+        const remove = find(cell, "cellRemove")
+        tryVerify(() => gauge.width < before, 3000, "the gauge makes room")
+        verify(gauge.mapToItem(cell, gauge.width, 0).x <= remove.mapToItem(cell, 0, 0).x + 0.5,
+               "the gauge ends where Remove starts")
+        page.stopEditing()
+        tryCompare(gauge, "width", before, 3000, "and takes the room back")
+    }
+
+    // The panel names the span in the grid's units, and Peak hold is a
+    // checkbox like every other yes-or-no in the app
+    function test_thePanelNamesColumnsRowsAndPeakHold() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(find(page, "panelW").Accessible.name, "Columns")
+        compare(find(page, "panelH").Accessible.name, "Rows")
+        const peak = find(page, "panelPeak")
+        verify(peak.visible)
+        compare(peak.text, "Peak hold")
+        verify(/^ThemedCheckBox/.test(String(peak)), "a checkbox: " + String(peak))
+        verify(peak.height >= Theme.touchTarget - 0.5, "a touch's size: " + peak.height)
+    }
+
+    // The Pages row: Reset quiet and apart at its end (wide), or the last
+    // of the wrapped controls after a short gap (a phone); the move
+    // buttons only with pages to move among
+    function test_resetStandsApartAndMoveHidesWithOnePage_data() {
+        return [{ tag: "wide", form: "desktop", width: 1000, height: 800 },
+                { tag: "a phone", form: "phone", width: 384, height: 832 }]
+    }
+    function test_resetStandsApartAndMoveHidesWithOnePage(data) {
+        const page = pageOf({ form: data.form, width: data.width, height: data.height }, docOf([cellOf("A")]))
+        page.startEditing()
+        click(page, "dashMore")
+        const row = find(page, "dashMoreRow")
+        const reset = find(page, "moreReset")
+        const remove = find(page, "moreRemovePage")
+        verify(row.visible)
+        verify(!find(page, "moreLeft").visible && !find(page, "moreRight").visible, "nothing to move")
+        verify(reset.quiet, "Reset is quiet")
+        compare(reset.Accessible.name, "Replace this form's pages with the built-in layout")
+        // The row is laid out at the layouts' next polish, after it shows
+        tryVerify(() => Math.abs(row.width - (page.width - 2 * page.margin)) < 1, 3000,
+                  "the row has the page's width: " + row.width + " of " + page.width + "; its parent "
+                  + String(row.parent).replace(/\(0x[0-9a-f]+\)/, "") + " is " + row.parent.width
+                  + " wide, x " + row.x + ", implicit " + row.implicitWidth + ", the gap "
+                  + find(row, "moreResetGap").width)
+        verify(waitForPolish(row), "laid out")
+        verify(waitForPolish(row), "the row laid out")
+        const where = "Reset at " + reset.x + "," + reset.y + ", Remove page ends at "
+                      + (remove.x + remove.width) + "," + (remove.y + remove.height) + " in a row of "
+                      + row.width
+        const shown = Array.from(row.children).filter(c => c.visible)
+        compare(shown[shown.length - 1], reset, "the last of the row")
+        compare(shown[shown.length - 2].objectName, "moreResetGap", "after a gap")
+        if (page.width >= 560) {
+            fuzzyCompare(reset.x + reset.width, row.width, 0.5, "at the row's end: " + where)
+            compare(Math.round(reset.y), Math.round(remove.y), "on the controls' row: " + where)
+            verify(reset.x - (remove.x + remove.width) >= 24 - 0.5, "apart from the page's controls: " + where)
+        } else {
+            verify(reset.y > remove.y - 0.5 || reset.x > remove.x + remove.width + 16 - 0.5,
+                   "after the controls, with a short gap: " + where)
+        }
+        verify(reset.mapToItem(page, reset.width, 0).x <= page.width + 0.5, "inside the page")
+        click(page, "moreAddPage")
+        verify(find(page, "moreLeft").visible && find(page, "moreRight").visible,
+               "two pages: the move buttons show")
     }
 }

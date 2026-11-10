@@ -998,7 +998,11 @@ TestCase {
         }
         tall(["dashDone", "dashAdd", "dashMore", "dashAddCell_0"])
         find(dash, "dashMore").clicked()
-        tall(["moreRename", "moreAddPage", "moreLeft", "moreRight", "moreRemovePage", "moreReset"])
+        // Move page left and right show only with pages to move among
+        tall(["moreRename", "moreAddPage", "moreRemovePage", "moreReset"])
+        dash.addPage()
+        tall(["moreLeft", "moreRight"])
+        dash.removePage()
         dash.confirmReset = true
         tall(["resetConfirm", "resetKeep"])
         dash.confirmReset = false

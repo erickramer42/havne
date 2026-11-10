@@ -169,6 +169,8 @@ TestCase {
         const drive = find(s.dash, "dashDrive")
         verify(drive.visible, "on the phone's row")
         compare(drive.enabled, false)
+        compare(drive.text, "Connect first", "and it says what it waits for")
+        compare(drive.Accessible.name, "Connect a session to show the gauges full screen")
         s.dash.enterDrive()
         compare(s.dash.driving, false, "and nothing else enters it")
     }
@@ -194,7 +196,10 @@ TestCase {
     function test_driveIsATouchsSize() {
         const s = driven()
         const drive = find(s.dash, "dashDrive")
-        verify(drive.width >= Theme.touchTarget - 0.5, "Drive is " + drive.width + " wide")
+        // The row lays its buttons out at the next polish after Drive's
+        // words change with the connect
+        tryVerify(() => drive.width >= Theme.touchTarget - 0.5, 2000,
+                  "Drive is " + drive.width + " wide (implicit " + drive.implicitWidth + ")")
         verify(drive.height >= Theme.touchTarget - 0.5, "Drive is " + drive.height + " tall")
     }
 

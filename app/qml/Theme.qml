@@ -281,7 +281,8 @@ QtObject {
         nightRed: {
             bg: "#080404", surface: "#130909", elevated: "#201010", elevatedLight: "#2b1616",
             outline: "#934a44", primary: "#7a241c", textOnPrimary: "#ff9484", text: "#ff9484", textDim: "#c46a5e",
-            success: "#e8584a", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
+            // Success takes the dim tone: in one red, only danger is full red
+            success: "#c46a5e", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
             gaugeValue: "#ff5a4a",
             gaugeReadout: "#ff9484", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
             gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
