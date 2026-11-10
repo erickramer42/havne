@@ -83,6 +83,24 @@ uint32_t monitor_check_ms()
     return (ms != 0) ? ms : ELM327_MONITOR_CHECK_MS;
 }
 
+/* A wait in the words the log and the detail print: "5 s", or "300 ms"
+ * for a test's shortened one */
+struct wait_words {
+    char text[24];
+};
+
+wait_words words_of(uint32_t ms)
+{
+    wait_words w{};
+    if (ms % 1000 == 0) {
+        snprintf(w.text, sizeof(w.text), "%u s",
+                 static_cast<unsigned>(ms / 1000));
+    } else {
+        snprintf(w.text, sizeof(w.text), "%u ms", static_cast<unsigned>(ms));
+    }
+    return w;
+}
+
 /* A reply the count digit cut after its First Frame goes on on the bus:
  * the adapter sent the flow control, and the ECU sends the rest and
  * takes no request meanwhile. Its channel is held this long for each
@@ -364,9 +382,8 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
                 .count();
         const uint32_t timeout = prompt_timeout_ms();
         if (quiet >= timeout) {
-            elm327_log_write(
-                t->log, "no line and no prompt for %u s (%s)",
-                static_cast<unsigned>(ELM327_PROMPT_TIMEOUT_MS / 1000), sent);
+            elm327_log_write(t->log, "no line and no prompt for %s (%s)",
+                             words_of(timeout).text, sent);
             return elm327_io::silent;
         }
         const uint32_t left = timeout - static_cast<uint32_t>(quiet);
@@ -451,9 +468,9 @@ ecuio_status_t refuse(transport* t, const char* cmd, const setup_answer& a,
         ecuio_detail_set("%s: the port failed during the adapter's setup",
                          t->port_name);
     } else if (a.io == elm327_io::silent) {
-        ecuio_detail_set(
-            "the adapter on %s didn't answer %s within %u s", t->port_name,
-            sent, static_cast<unsigned>(ELM327_PROMPT_TIMEOUT_MS / 1000));
+        ecuio_detail_set("the adapter on %s didn't answer %s within %s",
+                         t->port_name, sent,
+                         words_of(prompt_timeout_ms()).text);
     } else if (a.first[0] == '\0') {
         ecuio_detail_set("the adapter on %s answered %s with nothing, not %s",
                          t->port_name, sent, wanted);
@@ -1050,11 +1067,10 @@ monitor_end listen(transport* t, link_health& h)
         }
         const uint32_t check_ms = monitor_check_ms();
         if (now - last_line >= std::chrono::milliseconds(check_ms)) {
-            elm327_log_write(
-                t->log,
-                "no line for %u s: the monitor stops to "
-                "check the adapter",
-                static_cast<unsigned>(ELM327_MONITOR_CHECK_MS / 1000));
+            elm327_log_write(t->log,
+                             "no line for %s: the monitor stops to "
+                             "check the adapter",
+                             words_of(check_ms).text);
             end.io = stop_monitor(t, check_ms, on_line);
             if (reset) {
                 end.io = elm327_io::reset;
@@ -1063,9 +1079,8 @@ monitor_end listen(transport* t, link_health& h)
                 elm327_log_write(t->log, "the adapter answered the stop: AT MA "
                                          "again");
             } else if (end.io == elm327_io::silent) {
-                elm327_log_write(
-                    t->log, "no prompt within %u s of the stop",
-                    static_cast<unsigned>(ELM327_MONITOR_CHECK_MS / 1000));
+                elm327_log_write(t->log, "no prompt within %s of the stop",
+                                 words_of(check_ms).text);
             }
             break;
         }
