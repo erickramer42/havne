@@ -72,4 +72,18 @@ TestCase {
         verify(flick.contentHeight >= column.y + column.height,
                "the page scrolls to the column's end: " + flick.contentHeight)
     }
+
+    // The hint names every way in, not the first two the app had
+    function test_theHintNamesEveryWayIn() {
+        const page = createPage(1280, 720)
+        const hint = find(page, "homeHint")
+        verify(hint.visible, "shown with no session")
+        compare(hint.text, "Pick what to connect to in Settings: a J2534 interface, "
+                + "an ELM327 adapter over a serial port, Bluetooth or WiFi, or a SocketCAN bus")
+        Theme.developerMode = true
+        compare(hint.text, "Pick what to connect to in Settings: a J2534 interface, "
+                + "an ELM327 adapter over a serial port, Bluetooth or WiFi, a SocketCAN bus, "
+                + "or the mock://demo preset")
+        Theme.developerMode = false
+    }
 }

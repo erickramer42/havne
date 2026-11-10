@@ -365,6 +365,9 @@ TestCase {
         const label = findChild(row, "valueLabel")
         compare(label.text, "v" + Math.round(row.value), "the label, not the number")
         compare(label.text, row.label)
+        // The value face with tabular digits, as the gauges' readouts
+        compare(label.font.family, Theme.valueFamily)
+        compare(label.font.features.tnum, 1)
     }
 
     // The rows whose PID the ECU's bitmaps leave out are hidden, with
@@ -459,5 +462,16 @@ TestCase {
     function test_bannerText(data) {
         const page = createTemporaryObject(pageComponent, testCase)
         compare(page.bannerText(data.state, data.episodes, data.code), data.text)
+    }
+
+    // The empty state: plain words, and a Connect that isn't a second
+    // primary beside the header's
+    function test_theEmptyStateOffersAConnectInPlainWords() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        compare(page.statusText(), "Connect a session to read live values")
+        const button = findChild(page, "liveConnect")
+        verify(button && button.visible, "Connect… is offered")
+        verify(!button.highlighted, "secondary: the header holds the primary")
+        compare(button.text, "Connect…")
     }
 }

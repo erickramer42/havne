@@ -429,6 +429,12 @@ ColumnLayout {
     }
 
     // The columns: the log's own, or the signals ticked in the viewer
+    Label {
+        objectName: "exportColumnsLabel"
+        visible: panel.wideCsv && panel.hasValues && panel.plottedOffered
+        text: qsTr("Signals:")
+        color: Theme.textDim
+    }
     Rectangle {
         visible: panel.wideCsv && panel.hasValues && panel.plottedOffered
         implicitWidth: columnSwitch.implicitWidth + 4
@@ -472,6 +478,15 @@ ColumnLayout {
         text: qsTr("Raw, not scrubbed")
         checked: panel.raw
         onToggled: panel.raw = checked
+    }
+    Label {
+        objectName: "exportRawHint"
+        visible: Theme.developerMode
+        Layout.fillWidth: true
+        wrapMode: Text.WordWrap
+        color: Theme.textDim
+        font.pixelSize: Theme.fontCaption
+        text: qsTr("Scrubbed, the file leaves the vehicle's identification out; raw keeps it.")
     }
     Label {
         objectName: "exportRawWarning"

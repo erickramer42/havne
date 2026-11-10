@@ -1357,6 +1357,23 @@ TestCase {
         verify(settings.truncated, "Settings elides in a tab of " + settings.width)
     }
 
+    // A recording's Replay connects it in one tap and lands on Live, the
+    // address in Settings' field as a typed one would be
+    function test_replayConnectsInOneTapAndLandsOnLive() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.gotoPage(main.recordingsPage)
+        const row = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        verify(row.uri.startsWith("replay://"), "a replay address: " + row.uri)
+        main.replayRecording(row.uri)
+        tryVerify(() => Bridge.connected, 10000, "the replay connects")
+        compare(Bridge.currentUri, row.uri)
+        compare(main.currentPage, 2, "on Live")
+        compare(find(main.contentItem, "settingsPage").uriField.text, row.uri, "Settings shows it")
+    }
+
     // A Main on a phone's form at 384 x 832, laid out, with Android's text
     function phoneMain() {
         const main = createTemporaryObject(mainComponent, testCase)
@@ -1505,7 +1522,7 @@ TestCase {
         const address = find(main.contentItem, "linkPillAddress")
         const pill = find(main.contentItem, "linkPill")
         const row = find(main.contentItem, "headerRow")
-        compare(state.text, "Offline")
+        compare(state.text, "No session")
         verify(!address.visible, "no address without a session")
         verify(onGlass(pill, main).height >= 48 - 0.5,
                "a touch's size: " + onGlass(pill, main).height)
@@ -1568,6 +1585,7 @@ TestCase {
         compare(find(first, "connectRowKind").text, "Demo data")
         compare(find(second, "connectRowAddress").text, "elm327://bt:…:44:55", "the short form")
         compare(find(list, "connectGo").text, "Connect")
+        verify(find(list, "connectGo").highlighted, "a chosen row: Connect is the list's primary")
 
         const third = find(list, "connectRow_2")
         mouseClick(third)
@@ -1743,6 +1761,7 @@ TestCase {
         verify(findChild(list, "connectRow_0") === null, "no rows")
         const go = find(list, "connectGo")
         compare(go.text, "Connect…")
+        verify(!go.highlighted, "nothing to connect to: it opens Settings, so it isn't primary")
         mouseClick(go)
         tryCompare(main, "currentPage", main.settingsPage, 2000)
         tryCompare(settings, "shownKey", "connection", 2000)

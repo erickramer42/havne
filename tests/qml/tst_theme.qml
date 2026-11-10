@@ -50,7 +50,7 @@ TestCase {
     // The one word a tight header shows in the pill
     function test_linkShortLabel() {
         const words = { ok: "Live", fault: "Fault", requests: "Failing", quiet: "Quiet",
-                        stopped: "Stopped", disconnected: "Offline", degraded: "Degraded",
+                        stopped: "Stopped", disconnected: "No session", degraded: "Degraded",
                         "a later state": "Degraded" }
         for (const state of Object.keys(words))
             compare(Theme.linkShortLabel(state), words[state], state)

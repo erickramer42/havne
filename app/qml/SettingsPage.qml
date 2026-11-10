@@ -1051,7 +1051,7 @@ Pane {
             if (p.name === profileChoice)
                 return p.hint
         }
-        return qsTr("The URI names profile '%1'; core judges it at connect").arg(profileChoice)
+        return qsTr("The address names profile '%1'; core judges it at connect").arg(profileChoice)
     }
 
     // A URI as its base and its query's [key, value] pairs, in order

@@ -159,7 +159,7 @@ TEST(ViewerFramesTest, TheCapIsTheRowAfterTheLastThatFits)
         EXPECT_EQ(r.rows(), RecordingFrames::MaxRows);
         EXPECT_TRUE(r.error().isEmpty()) << "the cap's stop is not a failure";
         EXPECT_EQ(r.note().toStdString(),
-                  "the first 10,000 frames from 12.3 s: zoom in for the rest");
+                  "The first 10,000 frames from 12.3 s: zoom in for the rest");
         // The rows are the first from the left edge (host_us 12.3 s onward)
         EXPECT_EQ(timeOfRow(r, 0), 12300000u);
 
@@ -167,7 +167,7 @@ TEST(ViewerFramesTest, TheCapIsTheRowAfterTheLastThatFits)
         r.load(folder, -5000, kEverything);
         ASSERT_TRUE(waitFor([&] { return loaded(r); }));
         EXPECT_EQ(r.note().toStdString(),
-                  "the first 10,000 frames from 0.0 s: zoom in for the rest");
+                  "The first 10,000 frames from 0.0 s: zoom in for the rest");
         EXPECT_EQ(timeOfRow(r, 0), 100000u);
     }
 }

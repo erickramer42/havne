@@ -115,7 +115,7 @@ TestCase {
 
         const settings = showPage(main, "settingsPage")
         const status = find(settings, "sessionStatus")
-        compare(status.text, Bridge.connected ? "Connected: " + uri : "Not connected",
+        compare(status.text, Bridge.connected ? "Connected: " + uri : "No session",
                 "Settings status")
         sameColor(status.color, tone, "Settings status")
     }

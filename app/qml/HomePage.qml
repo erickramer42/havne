@@ -245,7 +245,7 @@ Rectangle {
             }
 
             ThemedButton {
-                text: Bridge.connected ? qsTr("End session")
+                text: Bridge.connected ? qsTr("Disconnect")
                     : Bridge.connecting ? qsTr("Connecting…")
                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                     : qsTr("Connect…")
@@ -257,11 +257,16 @@ Rectangle {
                                             : home.connectRequested()
             }
 
+            // Every way in, so a user with one of the others isn't sent away
             Text {
+                objectName: "homeHint"
                 visible: !Bridge.connected
                 text: Theme.developerMode
-                      ? qsTr("Choose a J2534 interface or a serial port, or the mock://demo preset, in Settings")
-                      : qsTr("Choose a J2534 interface or a serial port in Settings")
+                      ? qsTr("Pick what to connect to in Settings: a J2534 interface, an ELM327 "
+                             + "adapter over a serial port, Bluetooth or WiFi, a SocketCAN bus, "
+                             + "or the mock://demo preset")
+                      : qsTr("Pick what to connect to in Settings: a J2534 interface, an ELM327 "
+                             + "adapter over a serial port, Bluetooth or WiFi, or a SocketCAN bus")
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
                 Layout.alignment: Qt.AlignHCenter

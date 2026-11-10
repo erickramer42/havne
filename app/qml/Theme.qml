@@ -479,7 +479,7 @@ QtObject {
         case "requests":        return qsTr("Failing")
         case "quiet":           return qsTr("Quiet")
         case "stopped":         return qsTr("Stopped")
-        case "disconnected":    return qsTr("Offline")
+        case "disconnected":    return qsTr("No session")
         default:                return qsTr("Degraded")
         }
     }

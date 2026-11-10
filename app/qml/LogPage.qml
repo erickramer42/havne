@@ -172,8 +172,9 @@ Pane {
                 id: activityLog
                 objectName: "activityLog"
                 readOnly: true
-                wrapMode: TextArea.WrapAnywhere
-                font.family: Theme.monoFamily
+                // Prose lines: they wrap at words, in the text face (hex
+                // and raw frames are the frame table's, in mono)
+                wrapMode: TextArea.WordWrap
                 font.pixelSize: Theme.fontCaption
                 color: Theme.text
                 background: Rectangle {
@@ -260,7 +261,7 @@ Pane {
                     height: Theme.controlHeight
                     verticalAlignment: Text.AlignVCenter
                     text: qsTr("%1 selected").arg(Bridge.model.selectedCount)
-                    color: Theme.info
+                    color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                 }
                 // The selected rows to the clipboard, as they are: the
@@ -359,7 +360,7 @@ Pane {
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
                     text: qsTr("Showing %1 of %2").arg(Bridge.model.count).arg(Bridge.model.heldCount)
-                    color: Theme.info
+                    color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                 }
 

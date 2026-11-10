@@ -506,8 +506,11 @@ Page {
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
+        // A plotted signal with no samples has nothing to draw, so it's
+        // left out: with every plotted one empty, the chart says so
         const sigs = recording.signalList
-        const indexes = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
+        const indexes = sigs.filter(s => !s.isText && root.plotted[s.index] && s.samples > 0)
+                            .map(s => s.index)
         if (indexes.length === 0)
             return []
         const spanS = (viewT1 - viewT0) / 1000
@@ -753,6 +756,21 @@ Page {
             recording.openFrames(recording.folder, value)
     }
 
+    // A row's second line: the address it was recorded from and the
+    // profile it replays under, the profile only where the address
+    // doesn't name it already. A row without frames (a CSV import's
+    // values) has nothing to replay; a row that doesn't say has
+    function rowDetail(row) {
+        if (row.frames === false)
+            return qsTr("values alone: the recording has no frames to replay")
+        if (row.source === "")
+            return qsTr("replays as %1").arg(row.profile)
+        const m = /[?&]profile=([^&]*)/.exec(row.source)
+        if (m !== null && decodeURIComponent(m[1]) === row.profile)
+            return row.source
+        return qsTr("%1 · replays as %2").arg(row.source).arg(row.profile)
+    }
+
     function infoText() {
         const info = recording.info
         let text = qsTr("%1 long").arg(lengthText(recording.durationMs))
@@ -824,6 +842,18 @@ Page {
                                         && !chartMaximized
     readonly property var plottedNames: recording.signalList
         .filter(s => !s.isText && root.plotted[s.index] === true).map(s => s.name)
+    // The plotted signals the recording holds no values of, when none of
+    // the plotted has any: the chart then has nothing to draw and says so
+    readonly property var plottedNoValues: {
+        const plotted = recording.signalList.filter(s => !s.isText && root.plotted[s.index] === true)
+        return plotted.length > 0 && plotted.every(s => s.samples === 0) ? plotted.map(s => s.name) : []
+    }
+    function noValuesText(names) {
+        const list = names.length <= 2 ? names.join(qsTr(" and "))
+                   : names.slice(0, -1).join(", ") + qsTr(" and ") + names[names.length - 1]
+        return names.length === 1 ? qsTr("%1 has no values in this recording").arg(list)
+                                  : qsTr("%1 have no values in this recording").arg(list)
+    }
     function openExport() {
         exportOpen = true
         exportPanel.begin()
@@ -1306,16 +1336,9 @@ Page {
                         }
                         Label {
                             objectName: "recordingDetail"
-                            // A row without frames (a CSV import's values) has
-                            // nothing to replay; a row that doesn't say has
-                            text: recordingRow.modelData.frames === false
-                                  ? qsTr("values alone: the recording has no frames to replay")
-                                  : recordingRow.modelData.source !== ""
-                                  ? qsTr("%1 · replays as %2").arg(recordingRow.modelData.source)
-                                                              .arg(recordingRow.modelData.profile)
-                                  : qsTr("replays as %1").arg(recordingRow.modelData.profile)
+                            text: root.rowDetail(recordingRow.modelData)
                             color: Theme.textDim
-                            font.pointSize: 8
+                            font.pixelSize: Theme.fontCaption
                             elide: Text.ElideMiddle
                             Layout.fillWidth: true
                         }
@@ -1327,7 +1350,7 @@ Page {
                                  && recordingRow.modelData.folder === root.baselineFolder
                         text: qsTr("Baseline")
                         color: Theme.text
-                        font.pointSize: 8
+                        font.pixelSize: Theme.fontCaption
                         leftPadding: 6
                         rightPadding: 6
                         topPadding: 2
@@ -1336,7 +1359,7 @@ Page {
                             radius: Theme.radius
                             color: "transparent"
                             border.width: 1
-                            border.color: Theme.info
+                            border.color: Theme.textDim
                         }
                         Accessible.name: qsTr("%1's baseline").arg(root.pickedVehicle !== null
                                                                   ? root.pickedVehicle.label : "")
@@ -1344,11 +1367,12 @@ Page {
                     ThemedButton {
                         objectName: "replayButton"
                         visible: recordingRow.modelData.frames !== false
-                        text: qsTr("Replay")
+                        // One tap connects; during a session it says what to do first
+                        text: enabled ? qsTr("Replay") : qsTr("Disconnect to replay")
                         // Darker than its row, so it reads as a button there
                         baseColor: Theme.surface
                         enabled: !Bridge.connected && !Bridge.connecting
-                        Layout.maximumWidth: 96
+                        Layout.maximumWidth: enabled ? 96 : 160
                         Accessible.name: qsTr("Replay %1").arg(recordingRow.modelData.title)
                         onClicked: root.replayRequested(recordingRow.modelData.uri)
                     }
@@ -1375,16 +1399,14 @@ Page {
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
-            // The part in view replayed as a session: Settings' field
-            // filled as the list's Replay fills it, and Connect left to
-            // the user, so the name says where it goes; off while a
-            // session runs, as the list's is
+            // The part in view replayed as a session in one tap, as the
+            // list's Replay does; off while a session runs, as the list's is
             ThemedButton {
                 objectName: "replayView"
                 visible: recording.state === RecordingView.Open && recording.hasFrames
                 enabled: !(Bridge.connected || Bridge.connecting)
-                text: qsTr("Replay in Settings")
-                Accessible.name: qsTr("Put the part in view in Settings, to replay it as a session")
+                text: enabled ? qsTr("Replay") : qsTr("Disconnect to replay")
+                Accessible.name: qsTr("Replay the part in view as a session")
                 onClicked: root.replayRequested(root.stretchUri())
             }
         }
@@ -1451,8 +1473,10 @@ Page {
             ThemedButton {
                 objectName: "exportButton"
                 compact: Theme.compact
-                text: qsTr("Export...")
-                highlighted: root.exportOpen
+                text: qsTr("Export…")
+                // Selected while its panel is open: Save as... is the primary there
+                checkable: true
+                checked: root.exportOpen
                 onClicked: {
                     if (root.exportOpen)
                         root.closeExport()
@@ -1696,7 +1720,7 @@ Page {
                         SegmentButton {
                             tapHeight: root.segmentHeight
                             objectName: "framesTable_frames"
-                            text: qsTr("Frames")
+                            text: qsTr("List")
                             selected: !root.framesById
                             onClicked: root.framesById = false
                         }
@@ -1922,14 +1946,20 @@ Page {
                 Layout.maximumWidth: 120
                 onClicked: root.startFrameTest()
             }
+            // On a phone the hint wraps onto two caption lines where the
+            // row leaves it little width, instead of eliding to "Tap for …"
             Label {
                 objectName: "cursorTime"
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: Theme.compact ? 2 : 1
                 elide: Text.ElideRight
+                font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
                 color: Theme.textDim
                 text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
-                                                       : qsTr("Tap the chart for values"))
+                                                       : qsTr("Click the chart for values"))
                                       : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
             }
             ThemedButton {
@@ -1991,7 +2021,8 @@ Page {
                 y: 4
                 shownW: parent.width - 8 - chartFrame.stripWidth
                 shownH: parent.height - 8 - chartFrame.stripHeight
-                emptyText: qsTr("No signals plotted; tick a row to plot it")
+                emptyText: root.plottedNoValues.length > 0 ? root.noValuesText(root.plottedNoValues)
+                                                           : qsTr("No signals plotted; tick a row to plot it")
                 fetch: function(widthPx) { return root.series(widthPx) }
                 layoutOpts: ({
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
@@ -2009,8 +2040,8 @@ Page {
                         const left = Math.max(0, x0)
                         ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(l.plotW, x1) - left), 4)
                     }
-                    ctx.strokeStyle = Theme.info
-                    ctx.fillStyle = Theme.info
+                    ctx.strokeStyle = Theme.textDim
+                    ctx.fillStyle = Theme.textDim
                     ctx.lineWidth = 1
                     ctx.setLineDash([4, 3])
                     ctx.textAlign = "left"

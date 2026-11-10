@@ -53,6 +53,9 @@ TestCase {
         const page = create(logComponent)
         const log = find(page, "activityLog")
         compare(log.text, "Ready.")
+        // Prose: the text face, wrapped at words, never inside one
+        compare(log.wrapMode, TextEdit.WordWrap)
+        verify(log.font.family !== Theme.monoFamily, "not mono: " + log.font.family)
         compare(Bridge.connectSession("mock://demo"), "")
         verify(/\d\d:\d\d:\d\d\.\d\d\d  Connected: mock:\/\/demo/.test(log.text),
                "stamped like the surrogate's log: " + log.text)
@@ -241,10 +244,11 @@ TestCase {
         const row0 = list.itemAtIndex(0)
         mouseClick(row0, row0.width / 2, row0.height / 2)
         compare(Bridge.model.selectedCount, 1, "a tap selects the row")
-        verify(Qt.colorEqual(row0.color, Qt.alpha(Theme.info, 0.22)), "and marks it")
+        verify(Qt.colorEqual(row0.color, Qt.alpha(Theme.text, 0.12)), "and marks it in the text's tone")
         verify(bar.visible && !tools.visible, "the selection bar in the tools' place")
         verify(copy.visible && copy.enabled)
         compare(find(page, "selectedLabel").text, "1 selected")
+        verify(Qt.colorEqual(find(page, "selectedLabel").color, Theme.textDim), "a count, in the dim tone")
 
         const row2 = list.itemAtIndex(2)
         mouseClick(row2, row2.width / 2, row2.height / 2, Qt.LeftButton, Qt.ShiftModifier)

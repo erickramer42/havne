@@ -133,7 +133,7 @@ TestCase {
         verify(waitForPolish(page.Window.window), "the viewer laid out")
         compare(find(page, "signalRows").count, 3)
         compare(find(page, "checkSummary").text, "Frames check: the recording has no frames")
-        verify(!find(page, "replayView").visible, "no Replay in Settings")
+        verify(!find(page, "replayView").visible, "no Replay of the view")
         verify(!find(page, "decodeChoice").visible, "no frames to decode")
         compare(page.series(400).length, 3, "its numbers are plotted")
     }
@@ -474,12 +474,14 @@ TestCase {
         button.clicked()
         compare(replaySpy.signalArguments[2][0], findingsRow.uri + "&from=0&to=4")
         compare(replaySpy.count, 3)
-        compare(button.text, "Replay in Settings", "the name says where it goes")
+        compare(button.text, "Replay", "one tap replays the part in view")
+        compare(button.Accessible.name, "Replay the part in view as a session")
 
         // Off while a session runs, as the list's Replay is
         Bridge.connectSessionAsync("mock://replay-view")
         tryVerify(() => Bridge.connected, 10000, "the mock connects")
         verify(!button.enabled, "off while connected")
+        compare(button.text, "Disconnect to replay", "and it says why")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         verify(button.enabled, "on again")
@@ -836,7 +838,7 @@ TestCase {
         mouseClick(find(page, "detailView_frames"))
         verify(page.framesShown, "the press reached the switch")
         const words = find(page, "framesWords")
-        tryVerify(() => words.text === "the first 10,000 frames from 0.0 s: zoom in for the rest",
+        tryVerify(() => words.text === "The first 10,000 frames from 0.0 s: zoom in for the rest",
                   longWait, "the table's cap is said")
         compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
         page.setView(0, 2000)
@@ -1152,7 +1154,7 @@ TestCase {
     // The cursor reads each signal's value in force at its time
     function test_theCursorReadsTheValuesAtItsTime() {
         const page = openFindings()
-        compare(find(page, "cursorTime").text, "Tap the chart for values")
+        compare(find(page, "cursorTime").text, "Click the chart for values")
         const row = find(page, "signalRows").itemAtIndex(0)
         compare(find(row, "cursorValue").text, "—")
         page.setCursor(5000)
@@ -1626,6 +1628,8 @@ TestCase {
         tryVerify(() => list.itemAtIndex(1) !== null, 2000, "the rows have delegates")
         verify(find(list.itemAtIndex(1), "baselineBadge").visible)
         compare(find(list.itemAtIndex(1), "baselineBadge").text, "Baseline")
+        verify(Qt.colorEqual(find(list.itemAtIndex(1), "baselineBadge").background.border.color,
+                             Theme.textDim), "outlined in the dim tone")
         verify(!find(list.itemAtIndex(0), "baselineBadge").visible)
 
         // Another recording overlays it, aligned on the engine starts
@@ -1796,5 +1800,133 @@ TestCase {
         mouseClick(find(page, "backToList"))
         verify(!page.viewing)
         verify(find(page, "recordingList").visible)
+    }
+
+    // A row's detail is caption text, and says "replays as" only where
+    // the profile differs from the address's own
+    function test_aRowsDetailSaysReplaysAsOnlyWhereItDiffers() {
+        const page = createPage()
+        const row = (source, profile) => ({ title: "T", uri: "replay://x?profile=" + profile,
+                                            folder: Harness.recordingFixtures + "/findings",
+                                            source: source, profile: profile, frames: true })
+        page.recordings = [row("mock://x?profile=mock", "mock"), row("mock://x?profile=raw", "mock"),
+                           row("mock://x", "mock"), row("", "mock")]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(3) !== null, 2000, "the rows have delegates")
+        const detail = i => find(list.itemAtIndex(i), "recordingDetail")
+        compare(detail(0).text, "mock://x?profile=mock", "the same profile: the address alone")
+        compare(detail(1).text, "mock://x?profile=raw · replays as mock")
+        compare(detail(2).text, "mock://x · replays as mock", "no profile in the address: said")
+        compare(detail(3).text, "replays as mock")
+        compare(detail(0).font.pixelSize, Theme.fontCaption, "caption text, never under the floor")
+        compare(find(list.itemAtIndex(0), "replayButton").text, "Replay")
+    }
+
+    // The viewer's Export opens its panel and shows as selected while it
+    // is open, not as a second primary; its lower controls name what
+    // they choose
+    function test_exportShowsAsSelectedAndNamesItsChoices() {
+        const page = openFindings()
+        const button = find(page, "exportButton")
+        compare(button.text, "Export…")
+        verify(!button.checked && !button.highlighted, "closed: a plain button")
+        const panel = openExport(page)
+        verify(button.checked, "open: selected")
+        verify(!button.highlighted, "never primary: Save as… is the panel's")
+        verify(find(panel, "exportGo").highlighted)
+        const signals = find(panel, "exportColumnsLabel")
+        compare(signals.text, "Signals:")
+        compare(signals.visible, find(panel, "exportColumns_own").visible, "with the switch it names")
+        const was = Theme.developerMode
+        Theme.developerMode = true
+        const hint = find(panel, "exportRawHint")
+        verify(hint.visible, "the scrub's hint beside its box")
+        verify(hint.text.indexOf("identification") >= 0, hint.text)
+        Theme.developerMode = false
+        verify(!hint.visible)
+        Theme.developerMode = was
+        button.clicked()
+        tryVerify(() => !panel.visible, 2000, "closed again")
+        verify(!button.checked)
+    }
+
+    // The Frames view's table switch: List or By ID, under Values / Frames
+    function test_theFramesTableSwitchReadsListOrById() {
+        const page = openFindings()
+        mouseClick(find(page, "detailView_frames"))
+        verify(page.framesShown)
+        compare(find(page, "framesTable_frames").text, "List")
+        compare(find(page, "framesTable_byId").text, "By ID")
+    }
+
+    // On a phone with developer mode on (Frame test in the row) the
+    // toolbar's hint keeps its words, wrapping onto a second caption line
+    // instead of eliding
+    function test_theCursorHintKeepsItsWordsOnAPhone() {
+        const page = openFindings()
+        const hint = find(page, "cursorTime")
+        const was = Theme.developerMode
+        Theme.compact = true
+        Theme.dense = true
+        Theme.developerMode = true
+        try {
+            page.width = 384
+            verify(waitForPolish(page.Window.window), "laid out")
+            tryVerify(() => find(page, "frameTest").visible, 2000, "Frame test in the row")
+            compare(hint.text, "Tap for values")
+            tryVerify(() => !hint.truncated, 2000, "every word shows in " + hint.width + " px")
+            verify(hint.lineCount <= 2, hint.lineCount + " lines")
+            compare(hint.font.pixelSize, Theme.fontCaption)
+            // Where the row leaves it less than its words, it wraps onto a
+            // second line rather than eliding
+            compare(hint.wrapMode, Text.WordWrap, "wraps on a phone")
+            compare(hint.maximumLineCount, 2, "two lines at most")
+        } finally {
+            Theme.developerMode = was
+            Theme.compact = false
+            Theme.dense = false
+        }
+    }
+
+    // A ticked signal with no values in the recording: the chart says so
+    // instead of staying blank
+    function test_aPlottedSignalWithNoValuesIsSaidInTheChart() {
+        const page = createPage()
+        compare(page.noValuesText(["RPM"]), "RPM has no values in this recording")
+        compare(page.noValuesText(["RPM", "Speed"]), "RPM and Speed have no values in this recording")
+        compare(page.noValuesText(["RPM", "Speed", "Load"]),
+                "RPM, Speed and Load have no values in this recording")
+        // A values recording listing two signals, with rows for one: the
+        // harness's frames folder, its events.log and signals.csv written over
+        const folder = Harness.writeFramesRecording("no-values", 1, 10000)
+        verify(folder !== "")
+        verify(Harness.writeScratchFile("no-values/events.log",
+                   "ecuio session recording, format 2 (ADR-0049)\n"
+                   + "started  2026-11-03 09:00:00.000 (local time)\n"
+                   + "profile  test\n"
+                   + "signal  RPM,number,rpm,0,0\n"
+                   + "signal  Quiet,number,rpm,0,0\n"
+                   + "\n00:00:01.000  +1.000  end  test: 0 frames, 1 values, 0 records "
+                   + "dropped, 0 notes dropped\n").toString() !== "")
+        verify(Harness.writeScratchFile("no-values/signals.csv",
+                   "host_us,signal,value,unit\n100000,RPM,1000,rpm\n").toString() !== "")
+        page.open({ title: "Quiet", uri: "replay://x?profile=test", source: "", folder: folder,
+                    profile: "test" })
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        const chart = find(page, "chart")
+        const empty = page.shownSignals.find(s => s.name === "Quiet")
+        verify(empty !== undefined && empty.samples === 0, "a listed signal with no rows")
+        verify(page.plotted[empty.index] !== true, "not plotted on its own")
+        // RPM is plotted by default and draws, so the chart says nothing
+        // about Quiet until RPM is unticked: the words are for a chart
+        // with nothing to draw
+        page.togglePlotted(empty.index)
+        compare(page.plottedNoValues, [], "RPM still draws")
+        const rpm = page.shownSignals.find(s => s.name === "RPM")
+        page.togglePlotted(rpm.index)
+        tryCompare(chart, "emptyText", "Quiet has no values in this recording", 3000)
+        compare(page.series(400).length, 0, "nothing to draw, so the words show")
+        page.togglePlotted(empty.index)
+        compare(chart.emptyText, "No signals plotted; tick a row to plot it")
     }
 }

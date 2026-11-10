@@ -93,7 +93,7 @@ Page {
     function statusText() {
         if (Bridge.connecting) return qsTr("Connecting…")
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
-        if (!Bridge.connected) return qsTr("Connect a session to stream decoded values")
+        if (!Bridge.connected) return qsTr("Connect a session to read live values")
         if (Bridge.liveSignalModel.shownCount === 0)
             return qsTr("This profile decodes no signals; its frames are on the Log page")
         // Refusals past an ECU's report list leave their rows blank: say
@@ -191,9 +191,10 @@ Page {
                 text: root.statusText()
                 color: Theme.textDim
             }
+            // Secondary: the header's Connect... is the window's primary
             ThemedButton {
+                objectName: "liveConnect"
                 visible: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
-                highlighted: true
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
             }
@@ -355,7 +356,10 @@ Page {
                         elide: Text.ElideRight
                         color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
                         font.pixelSize: Theme.fontEmphasis
-                        font.family: Theme.monoFamily   // fixed-width digits, no jitter
+                        // The value face, its digits tabular, so a reading
+                        // doesn't jitter as its digits change
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         opacity: signalDelegate.hasValue
                                  && signalDelegate.ageMs > root.staleMs
                                      ? 0.45 : 1.0

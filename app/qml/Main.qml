@@ -162,10 +162,13 @@ ApplicationWindow {
         openConnect()
         settingsView.backLeaves = true
     }
-    // A recording's Replay: its URI in Settings' field, ready to connect
+    // A recording's Replay connects it in one tap and lands on Live; the
+    // address goes through Settings' field, as a typed one would, so the
+    // page shows what runs and its refusals read as the field's
     function replayRecording(uri) {
         settingsView.pickRecording(uri)
-        gotoPage(settingsPage)
+        settingsView.requestConnect(uri)
+        gotoPage(2)
     }
     // A log's time as m:ss, or h:mm:ss past an hour; 0:00 for a value
     // that isn't a time

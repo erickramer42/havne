@@ -27,7 +27,7 @@ ColumnLayout {
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
-                         + "put its URI in the field above, then Connect")
+                         + "put its address in the field above, then Connect")
                         .arg(root.host.j2534Devices.length).arg(root.host.serialPorts.length)
                         .arg((root.host.canInterfaces.length > 0
                               ? qsTr(", CAN interfaces: %1").arg(root.host.canInterfaces.length)

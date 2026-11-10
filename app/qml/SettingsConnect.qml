@@ -23,7 +23,7 @@ ColumnLayout {
               ? qsTr("Connected: %1").arg(Bridge.currentUri)
               : Bridge.connecting ? qsTr("Connecting…")
               : Bridge.disconnecting ? qsTr("Disconnecting…")
-              : qsTr("Not connected")
+              : qsTr("No session")
         color: Theme.linkColor(Bridge.linkState)
         // A long URI breaks anywhere: unwrapped, it widened the
         // page past a phone's edge once connected
@@ -44,7 +44,7 @@ ColumnLayout {
             // asks it; under the obd2 default it also decodes.
             // A WiFi adapter is typed: nothing lists it (ADR-0026's
             // appendix "WiFi over TCP")
-            placeholderText: qsTr("URI, e.g. mock://demo, elm327://COM5, "
+            placeholderText: qsTr("Address, e.g. mock://demo, elm327://COM5, "
                                   + "elm327://192.168.0.10:35000 or "
                                   + "j2534://Vendor?profile=raw&poll=0x0C")
             enabled: root.host.idle

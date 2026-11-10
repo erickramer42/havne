@@ -163,7 +163,7 @@ Rectangle {
             // flags under it
             height: narrow ? Math.max(26, payloadColumn.implicitHeight + 8) : 26
             radius: 4
-            color: frameRow.model.selected ? Qt.alpha(Theme.info, 0.22) : "transparent"
+            color: frameRow.model.selected ? Qt.alpha(Theme.text, 0.12) : "transparent"
 
             required property var model    // role access
             required property int  index

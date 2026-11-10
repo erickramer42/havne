@@ -161,9 +161,11 @@ Rectangle {
                 text: qsTr("Other address…")
                 onClicked: list.otherAddress()
             }
+            // Primary with a row to connect; with none it opens Settings,
+            // a secondary step
             ThemedButton {
                 objectName: "connectGo"
-                highlighted: true
+                highlighted: list.chosen !== ""
                 // A relay holds the adapter (ADR-0047); Settings' page doesn't connect
                 enabled: !list.busy && (list.chosen === "" || !Relay.running)
                 text: Bridge.connecting ? qsTr("Connecting…")
