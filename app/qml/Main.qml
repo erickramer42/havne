@@ -179,7 +179,13 @@ ApplicationWindow {
             if (root.replayPending === "" || uri !== root.replayPending)
                 return
             root.replayPending = ""
-            root.gotoPage(error === "" ? root.livePage : root.settingsPage)
+            if (error === "") {
+                root.gotoPage(root.livePage)
+                return
+            }
+            root.gotoPage(root.settingsPage)
+            // Back from the refusal returns to Recordings, as from Other address
+            settingsView.backLeaves = true
         }
     }
     // A log's time as m:ss, or h:mm:ss past an hour; 0:00 for a value

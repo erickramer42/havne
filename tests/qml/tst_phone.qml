@@ -1422,6 +1422,9 @@ TestCase {
         compare(settings.uriField.text, uri, "the address in the field")
         verify(settings.errorLabel.text !== "", "with its reason")
         compare(main.replayPending, "", "nothing left waiting")
+        // Back returns to Recordings, as Other address returns to Dash
+        verify(main.goBack(), "Back is the app's")
+        compare(main.currentPage, main.recordingsPage, "back to Recordings")
     }
 
     // One primary on Dash: while its connect list shows, the header's

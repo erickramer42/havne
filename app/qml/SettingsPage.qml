@@ -890,8 +890,8 @@ Pane {
             backLeaves = false
     }
 
-    // Back from Connection opened through Dash's "Other address...": Main
-    // goes back to that page instead of this list
+    // Back from Connection opened through Dash's "Other address..." or a
+    // refused Replay: Main goes back to that page instead of this list
     property bool backLeaves: false
     onPageKeyChanged: if (pageKey !== "connection") backLeaves = false
     // The back key repeats the back arrow, and answers whether it had a page to close
