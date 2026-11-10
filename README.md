@@ -38,22 +38,16 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **`havne-cli` and Python:** any session as JSON lines or iterators, recordings viewed and exported offline, the simulated car served as an ELM327 adapter ([ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md)).
 - **A simulated vehicle:** a modeled car through a cold start, pulls onto the limiter and a quarter mile, so every page runs with no hardware.
 
-| Live view | Link health |
-|---|---|
-| [![Live view: a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Live view with every request failing: an amber banner](docs/images/link-health.png)](docs/images/link-health.png) |
-| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+| Dashboard | Live | Dashboard at night |
+|---|---|---|
+| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](docs/images/phone-dashboard-dark.png)](docs/images/phone-dashboard-dark.png) | [![Live on the test phone on the limiter, each reading with its value and a minute of the chart](docs/images/phone-live.png)](docs/images/phone-live.png) | [![The phone layout's Dashboard with Night on in red](docs/images/phone-dashboard-night.png)](docs/images/phone-dashboard-night.png) |
+| The phone layout in a 2nd-gear pull, the shift lights filling | Live on the test phone, on the rev limiter | Night in red, for a dark cabin |
 
-![The Diagnostics page on the simulated vehicle](docs/images/diagnostics.png)
+![Live on the desktop: rpm, speed, MAF and lambda through a 3rd-gear pull onto the limiter](docs/images/live.png)
 
-*Diagnostics: the inspection verdict, each code with its SAE J2012 title, the readiness monitors.*
+*Live on the desktop: a 3rd-gear pull onto the limiter, lambda swinging lean on each fuel cut.*
 
-![The Log page in developer mode: activity, then raw frames](docs/images/log.gif)
-
-*The Log page in developer mode: each session, then the frames.*
-
-![The Recordings page: two runs overlaid](docs/images/recordings.png)
-
-*Recordings: a warm loop's pull with the cold start's overlaid, aligned on a marker.*
+Every page on the desktop and the phone, in each theme: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 
@@ -146,6 +140,7 @@ v0.7.0, the dashboard and the UI, is the latest release. Next:
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
+| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in each theme |
 | [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |
