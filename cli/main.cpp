@@ -354,10 +354,11 @@ int ended(Output& out, int code)
     return out.ok() ? code : kExitFailed;
 }
 
-// export's cancel (ecuio_export_with) and its column check's: Ctrl+C or
-// SIGTERM stops it, and core removes what it had begun.
-// HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the run's first ask that
-// long, naming whose it is on stderr, so a test's interrupt lands there
+// export's cancel (ecuio_export_with), its column check's and import's
+// (ecuio_import_with): Ctrl+C or SIGTERM stops it, and core removes what
+// it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the run's
+// first ask that long, an import's too, naming whose it is on stderr, so
+// a test's interrupt lands there
 int interrupted_at(bool* asked, const char* where)
 {
     if (!*asked) {
@@ -381,14 +382,20 @@ int export_interrupted(void* user)
     return interrupted_at(static_cast<bool*>(user), "export");
 }
 
+int import_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "import");
+}
+
 // The column check's open (ecuio_open_progress_t) asks as the export does
 int open_interrupted(uint64_t, uint64_t, void* user)
 {
     return interrupted_at(static_cast<bool*>(user), "column check");
 }
 
-// An export or its sizing stopped by an interrupt: the end line the other
-// commands write on one, and exit 1, as clear's, since nothing was written
+// An export, its sizing or an import stopped by an interrupt: the end
+// line the other commands write on one, and exit 1, as clear's, since
+// nothing was written
 int ended_interrupted(Output& out)
 {
     char buf[64];
@@ -4735,6 +4742,9 @@ int run(int argc, char** argv)
             return print_guessed_map(im);
         }
         Output out;
+        // Before the guess, so a Ctrl+C during it stops the import at its
+        // first ask
+        install_handlers();
         write_start(out);
         // A CSV's column map: core takes its text, up to the JSON reader's
         // 1 MiB, and refuses a larger one in its own words
@@ -4778,7 +4788,12 @@ int run(int argc, char** argv)
             im.options.column_map_utf8 = map.c_str();
         }
         ecuio_import_report_t report{};
-        const ecuio_status_t rc = ecuio_import(&im.options, &report);
+        bool asked = false;
+        const ecuio_status_t rc =
+            ecuio_import_with(&im.options, import_interrupted, &asked, &report);
+        if (rc == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
+        }
         if (rc != ECUIO_OK) {
             write_error(out, rc);
             return ended(out, kExitConnect);
