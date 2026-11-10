@@ -985,6 +985,12 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   `BridgeTest.ARowsRangeIsShownInTheUnitSystem` checks the three
   decoded keys under both unit systems.
 
+*Note of 2026-11-10:* the cell's panel ends with Remove, which asks first
+("Remove <name> from this page?"), in edit mode and from a hold's menu
+outside it. Edit mode's remove box keeps its one tap and draws as a
+button. Every gauge kind says "no new data" while its value is stale,
+beside the 45 % dimming; the Number gauge's status dot is gone.
+
 ## Appendix: the edit-mode mark for unfilled cells (2026-11-08)
 
 Section 3 says a cell in state 2 or 3 carries a mark in edit mode. The

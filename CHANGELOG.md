@@ -26,6 +26,17 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   with the key on, a dip while the engine cranks, and the alternator's
   14.1-14.6 V once it runs. It has the same name and unit as obd2's Battery
   Voltage, so a Dashboard cell set up on one reads on the other.
+- Dashboard: the gauge's panel (a long press, or a tap in edit mode) has
+  Remove, which asks before it removes the gauge.
+- Dashboard: a gauge whose value has stopped updating says "no new data"
+  beside its dimmed value.
+
+### Changed
+
+- Dashboard: edit mode's remove box draws as a button, and stays inside a
+  short cell such as the shift lights.
+- Dashboard: the Number gauge has no status dot; a value that stops
+  updating dims and says so, as on every other kind.
 
 ### Fixed
 
