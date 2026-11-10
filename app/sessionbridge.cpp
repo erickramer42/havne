@@ -2761,8 +2761,11 @@ void SessionBridge::disconnectSession()
                     emit logMessage(timingLine);
                 }
                 emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
-                // Kept open until here, so it brackets the whole teardown
-                stopRecording(QStringLiteral("disconnected"));
+                // Kept open until here, so it brackets the whole teardown.
+                // Only the user's Disconnect gets here: the Dashboard needs
+                // no reason, the recording's end note keeps it
+                stopRecording(QStringLiteral("disconnected"), false,
+                              QStringLiteral("Log ended"));
                 m_disconnecting = false;
                 emit disconnectingChanged();
             },
@@ -3022,7 +3025,8 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
     if (rc != ECUIO_OK) {
         // The folder is this call's own, made by the open above; a
         // session never attached wrote it no frame, so nothing is lost
-        const QString folder = folderOf(recorder);
+        const QString folder =
+            m_failRecorderFolderForTesting ? QString() : folderOf(recorder);
         (void)ecuio_recorder_close(recorder,
                                    "the session couldn't be recorded");
         if (!folder.isEmpty() && !holdsFrames(folder)) {
@@ -3036,7 +3040,8 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
 void SessionBridge::adoptRecorder(ecuio_recorder_t* recorder)
 {
     m_recorder = recorder;
-    m_recordingFolder = folderOf(recorder);
+    m_recordingFolder =
+        m_failRecorderFolderForTesting ? QString() : folderOf(recorder);
     if (m_markCount != 0) {
         m_markCount = 0;
         emit markCountChanged();
@@ -3144,7 +3149,8 @@ void SessionBridge::countLogBytes()
     m_logBytes = bytes;
 }
 
-void SessionBridge::stopRecording(const QString& why, bool byUser)
+void SessionBridge::stopRecording(const QString& why, bool byUser,
+                                  const QString& told)
 {
     if (m_recorder == nullptr) {
         return;
@@ -3179,7 +3185,8 @@ void SessionBridge::stopRecording(const QString& why, bool byUser)
     // An end the user didn't ask for is told on the Dashboard; Stop
     // log's isn't, the viewer opens on it
     if (!byUser) {
-        setLogNotice(QStringLiteral("Log ended: %1").arg(why));
+        setLogNotice(told.isEmpty() ? QStringLiteral("Log ended: %1").arg(why)
+                                    : told);
     }
     emit logStateChanged();
     emit logProgressChanged();
