@@ -9,7 +9,9 @@
 // diagnostics are the mock's (mock_ecu.h's tables, the fakes' codes,
 // monitors and freeze frame) in both; identification is the VIN the URI
 // gives and an ECU name. modules=2 adds a second module's answers, its
-// own made-up DIDs (the appendix of 2026-11-04). replay://: a
+// own made-up DIDs (the appendix of 2026-11-04). The engine ECU also has
+// an extended session (ADR-0060): 10 03 enters it, 3E 00 keeps it, S3 of
+// silence leaves it, and DIDs D200-D203 answer only in it. replay://: a
 // recording's replies at the ECU's time since it started
 // (sim_recording.h). Faults break every Nth reply, as ADR-0041 section
 // 4's ECU does, and pending puts a reply off behind a 7F <service> 78.
@@ -97,6 +99,23 @@ constexpr ecuio_sim_module_did ECUIO_SIM_MODULE_DIDS[] = {
     {0xD102, 12, {'T', 'C', 'M', '-', 'H', 'a', 'v', 'n', 'e', 'S', 'i', 'm'}},
 };
 
+/* The engine ECU's DIDs that answer only in its extended session
+ * (ADR-0060): D200 to D203, two made-up bytes each (no maker's) */
+struct ecuio_sim_extended_did {
+    uint16_t did;
+    uint8_t data[2];
+};
+constexpr ecuio_sim_extended_did ECUIO_SIM_EXTENDED_DIDS[] = {
+    {0xD200, {0x1A, 0x2C}},
+    {0xD201, {0x00, 0x64}},
+    {0xD202, {0x03, 0xE8}},
+    {0xD203, {0xFF, 0x01}},
+};
+
+/* ISO 14229-2's S3: an ECU in the extended session that hears no request
+ * this long returns to the default session */
+constexpr int64_t ECUIO_SIM_S3_US = 5000000;
+
 /* The longest reply: a recording's, ISO-TP's longest message (the mock's
  * is a pack of six PIDs, the longest PID 13 bytes) */
 constexpr uint32_t ECUIO_SIM_REPLY_MAX = ECUIO_SIM_RECORDING_REPLY_MAX;
@@ -156,6 +175,13 @@ inline void ecuio_sim_tick(ecuio_sim_ecu& e)
         e.engine_s = was ? e.engine_s + ecuio_mock::kTickS : 0.0f;
     }
 }
+
+/* One node's diagnostic session (ADR-0060): extended since a 10 03 and
+ * until S3 of silence, or a 10 01; the ECU's own clock times it */
+struct ecuio_sim_session {
+    bool extended = false;
+    int64_t heard_us = 0; /* the ECU's time of the last request heard */
+};
 
 namespace ecuio_sim_detail {
 
@@ -355,13 +381,61 @@ inline uint32_t refuse(uint8_t service, uint8_t nrc, uint8_t* out)
 
 } // namespace ecuio_sim_detail
 
+/* A physical request at the ECU's time now_us: S3 lapses the session
+ * first, then the request counts as heard. Services 10 and 3E are
+ * answered here (handled true; the length, 0 for none): 10 03 enters the
+ * extended session when has_extended (else 7F 10 12), 10 01 leaves it,
+ * any other 10 is 7F 10 12; 3E 00 is 7E 00, 3E 80 is silent, any other
+ * 3E 7F 3E 12; a wrong length 7F <service> 13. Another service: handled
+ * false, the caller's answer. A functional request never reaches this:
+ * session control to 0x7DF goes unanswered and enters nothing. */
+inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
+                                         bool has_extended, int64_t now_us,
+                                         const uint8_t* req, uint32_t len,
+                                         uint8_t* out, bool* handled)
+{
+    using namespace ecuio_sim_detail;
+    if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
+        s.extended = false;
+    }
+    s.heard_us = now_us;
+    *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E);
+    if (!*handled) {
+        return 0;
+    }
+    if (len != 2) {
+        return refuse(req[0], 0x13, out);
+    }
+    if (req[0] == 0x3E) {
+        if (req[1] == 0x80) {
+            return 0;
+        }
+        if (req[1] != 0x00) {
+            return refuse(0x3E, 0x12, out);
+        }
+        out[0] = 0x7E;
+        out[1] = 0x00;
+        return 2;
+    }
+    if (req[1] == 0x01 || (req[1] == 0x03 && has_extended)) {
+        s.extended = req[1] == 0x03;
+        /* the session, then P2 = 50 ms and P2* = 5 s in 10 ms units */
+        const uint8_t ok[6] = {0x50, req[1], 0x00, 0x32, 0x01, 0xF4};
+        std::memcpy(out, ok, sizeof ok);
+        return sizeof ok;
+    }
+    return refuse(0x10, 0x12, out);
+}
+
 /* The ECU's reply to req (len bytes, the service byte first) into out
  * (ECUIO_SIM_REPLY_MAX bytes), its length; 0 for none. functional: the
  * request came on 0x7DF, where ISO 14229-1 has an ECU keep its negative
- * replies 11, 12 and 31 to itself. The mock's ECU clears on a 04; a
- * recording answers from its replies at the ECU's time. */
+ * replies 11, 12 and 31 to itself. extended: the node is in the extended
+ * session, where D200-D203 answer (else 7F 22 31). The mock's ECU clears
+ * on a 04; a recording answers from its replies at the ECU's time. */
 inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
-                                 uint32_t len, bool functional, uint8_t* out)
+                                 uint32_t len, bool functional, uint8_t* out,
+                                 bool extended = false)
 {
     using namespace ecuio_sim_detail;
     if (len == 0) {
@@ -434,6 +508,19 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
         }
     } else if (service == 0x22) {
         n = refuse(0x22, 0x31, out);
+        if (extended && len == 3) {
+            const uint16_t did = static_cast<uint16_t>((req[1] << 8) | req[2]);
+            for (const ecuio_sim_extended_did& d : ECUIO_SIM_EXTENDED_DIDS) {
+                if (d.did == did) {
+                    out[0] = 0x62;
+                    out[1] = req[1];
+                    out[2] = req[2];
+                    std::memcpy(out + 3, d.data, sizeof d.data);
+                    n = 3 + sizeof d.data;
+                    break;
+                }
+            }
+        }
     } else {
         n = refuse(service, 0x11, out);
     }

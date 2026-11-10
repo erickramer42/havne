@@ -6,7 +6,8 @@
 // adapter's framing (J2534's 4-byte CAN ID, the ELM327's lines and PCI
 // bytes) is each fake's own. Its diagnostics (stored, pending and
 // permanent DTCs, a freeze frame, readiness) are one state per process
-// that Service 04 clears: diagnostics() below.
+// that Service 04 clears: diagnostics() below. Its diagnostic session
+// (ADR-0060) is per reply ID: see answer_for().
 
 #ifndef ECUIO_TESTS_FAKE_ECU_H
 #define ECUIO_TESTS_FAKE_ECU_H
@@ -826,10 +827,68 @@ inline bool set_module_dids(const char* spec)
     return true;
 }
 
+/* ---- Diagnostic sessions (ADR-0060) ----
+ * The engine ECU (any reply ID not in the module table) has an extended
+ * session: 10 03 enters it, 10 01 leaves it, and kExtDid answers only in
+ * it. A module has none: 10 03 gets 7F 10 session_nrc() (0x12 by
+ * default). There is no S3 timer here: the fakes keep no clock of the
+ * session's, and the simulated ECU covers the lapse. The state is a
+ * small table of the reply IDs in the extended session, allocation-free
+ * for the ELM327 fake's worker. */
+constexpr uint16_t kExtDid = 0xD200;
+constexpr unsigned char kExtDidValue[2] = {0x1A, 0x2C}; /* made up */
+constexpr uint32_t kSessionSlots = 8;
+
+/* The code a module's 7F 10 carries: 0 is the default, 0x12; the fake
+ * DLL sets it from ECUIO_FAKE_SESSION_NRC on each write */
+inline std::atomic<unsigned>& session_nrc()
+{
+    static std::atomic<unsigned> code{0};
+    return code;
+}
+
+inline std::atomic<uint32_t> (&extended_ids()) [kSessionSlots] {
+    static std::atomic<uint32_t> ids[kSessionSlots] = {};
+    return ids;
+}
+
+inline bool in_extended(uint32_t rx)
+{
+    for (auto& s : extended_ids()) {
+        if (s.load() == rx) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline void set_extended(uint32_t rx, bool on)
+{
+    if (on == in_extended(rx)) {
+        return;
+    }
+    for (auto& s : extended_ids()) {
+        uint32_t want = on ? 0 : rx;
+        if (s.compare_exchange_strong(want, on ? rx : 0)) {
+            return;
+        }
+    }
+}
+
+/* Every ECU back in the default session */
+inline void reset_sessions()
+{
+    for (auto& s : extended_ids()) {
+        s.store(0);
+    }
+}
+
 /* The answer of the ECU replying on rx: a module's from its rows, any
  * other ECU's from answer() above. unsupported_nrc as answer()'s: -1
  * keeps a module's codes (31 for a DID, 11 for a service), 0 answers
- * nothing, any other value is the code. False when nothing answers. */
+ * nothing, any other value is the code. 10 and 3E (two bytes) are the
+ * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none.
+ * False when nothing answers. */
 inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
                        long unsupported_nrc, unsigned char* out,
                        size_t* out_len)
@@ -853,7 +912,41 @@ inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
             return true;
         }
     }
+    if (req_len == 2 && req[0] == 0x3E) {
+        if (req[1] != 0x00) {
+            return false;
+        }
+        out[0] = 0x7E;
+        out[1] = 0x00;
+        *out_len = 2;
+        return true;
+    }
+    if (req_len == 2 && req[0] == 0x10) {
+        if (req[1] == 0x01 || (req[1] == 0x03 && !module)) {
+            set_extended(rx, req[1] == 0x03);
+            const unsigned char ok[6] = {0x50, req[1], 0x00, 0x32, 0x01, 0xF4};
+            memcpy(out, ok, sizeof ok);
+            *out_len = sizeof ok;
+            return true;
+        }
+        const unsigned code = session_nrc().load();
+        out[0] = 0x7F;
+        out[1] = 0x10;
+        out[2] = code != 0 ? static_cast<unsigned char>(code) : 0x12;
+        *out_len = 3;
+        return true;
+    }
     if (!module) {
+        if (req_len == 3 && req[0] == 0x22 &&
+            static_cast<uint16_t>((req[1] << 8) | req[2]) == kExtDid &&
+            in_extended(rx)) {
+            out[0] = 0x62;
+            out[1] = req[1];
+            out[2] = req[2];
+            memcpy(out + 3, kExtDidValue, sizeof kExtDidValue);
+            *out_len = 3 + sizeof kExtDidValue;
+            return true;
+        }
         return answer(req, req_len, unsupported_nrc, out, out_len);
     }
     if (req_len == 0 || unsupported_nrc == 0) {

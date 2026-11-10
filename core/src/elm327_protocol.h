@@ -522,7 +522,8 @@ inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
 
 /* The response-count digit for a request (ADR-0026 section 3; the datasheet
  * from v1.3, which counts lines): 1 to a physical ID, so one ECU answers
- * in one line, for a Service 01 request whose PID is in one, and for a
+ * in one line, for a Service 01 request whose PID is in one, for tester
+ * present (10 xx has none: an ECU may hold it pending), and for a
  * one-DID 0x22 request whose DID isn't in long_dids (ADR-0020's appendix
  * of 2026-11-01: a scanned DID is mostly refused in one line, and the
  * digit spares the adapter's wait after it); 0, no digit, otherwise. A
@@ -541,6 +542,9 @@ inline uint8_t elm327_response_count(const uint8_t* bytes, size_t n,
     }
     if (n == 2 && bytes[0] == 0x01 && elm327_one_frame(one, bytes[1])) {
         return 1;
+    }
+    if (n == 2 && bytes[0] == 0x3E && bytes[1] == 0x00) {
+        return 1; /* tester present (ADR-0060): 7E 00, never pending */
     }
     if (n == 3 && bytes[0] == 0x22 &&
         !elm327_long_did(long_dids,

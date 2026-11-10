@@ -1388,6 +1388,189 @@ TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
     }
 }
 
+namespace {
+
+/* The fakes' ECUs back in the default session before and after a case
+ * (the state is per process), and the module table empty */
+struct SessionsReset {
+    SessionsReset() { fake_ecu::reset_sessions(); }
+    ~SessionsReset()
+    {
+        fake_ecu::set_module_dids(nullptr);
+        fake_ecu::reset_sessions();
+    }
+};
+
+/* Each session-control command the adapter saw, with the header (the
+ * last AT SH) it went out under */
+struct SessionCommand {
+    std::string command;
+    std::string header;
+};
+
+std::vector<SessionCommand>
+session_commands(const std::vector<std::string>& sent)
+{
+    std::vector<SessionCommand> out;
+    std::string header;
+    for (const std::string& c : sent) {
+        if (c.rfind("ATSH", 0) == 0) {
+            header = c;
+        } else if (c == "1003" || c == "1001") {
+            out.push_back({c, header});
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+/* ADR-0060: ?session=03 sends 10 03 before any request, the engine ECU
+ * answers D200 only in the session it entered, and the close's last
+ * command is 10 01 */
+TEST_F(Elm327SessionTest, AnExtendedSessionIsEnteredFirstAndLeftAtClose)
+{
+    SessionsReset reset;
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C,D200&session=03"
+                           "&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> d200 = {0x62, 0xD2, 0x00, 0x1A, 0x2C};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            for (const Capture::Frame& f : s.cap.frames) {
+                if (f.id == 0x7E8u && f.data == d200) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        5000))
+        << "D200 answers only in the extended session";
+    ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    const std::vector<std::string> sent = fake_commands();
+    std::string first;
+    for (const std::string& c : sent) {
+        if (c.rfind("AT", 0) != 0 && c.rfind("ST", 0) != 0) {
+            first = c;
+            break;
+        }
+    }
+    EXPECT_EQ(first, "1003") << "the first request";
+    ASSERT_FALSE(sent.empty());
+    EXPECT_EQ(sent.back(), "1001") << "the close's last command";
+    EXPECT_EQ(fake_count("1003"), 1u);
+    EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
+}
+
+/* Without ?session=03 the engine ECU stays in the default session: D200
+ * is refused (7F 22 31), never answered, while 1E1C reads */
+TEST_F(Elm327SessionTest, WithoutASessionD200IsRefused)
+{
+    SessionsReset reset;
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C,D200&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> engine = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int a = 0;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a += f.id == 0x7E8u && f.data == engine;
+            }
+            return a >= 3;
+        },
+        5000));
+    EXPECT_EQ(fake_count("1003"), 0u);
+    std::lock_guard<std::mutex> g(s.cap.m);
+    for (const Capture::Frame& f : s.cap.frames) {
+        EXPECT_FALSE(f.data.size() >= 3 && f.data[0] == 0x62 &&
+                     f.data[1] == 0xD2)
+            << "D200 answered in the default session";
+    }
+}
+
+/* A module that refuses 10 03 goes on reading in the default session,
+ * and the close sends 10 01 to the engine ECU alone */
+TEST_F(Elm327SessionTest, AModuleThatRefusesTheSessionIsReadInTheDefaultOne)
+{
+    SessionsReset reset;
+    ASSERT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12"));
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=D200,7E9:D801"
+                           "&session=03&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const std::vector<uint8_t> d200 = {0x62, 0xD2, 0x00, 0x1A, 0x2C};
+    const std::vector<uint8_t> mod = {0x62, 0xD8, 0x01, 0x00, 0x12};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            bool a = false;
+            bool b = false;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a = a || (f.id == 0x7E8u && f.data == d200);
+                b = b || (f.id == 0x7E9u && f.data == mod);
+            }
+            return a && b;
+        },
+        5000))
+        << "the engine ECU's D200 and the module's D801 both read";
+    ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    const std::vector<SessionCommand> cmds = session_commands(fake_commands());
+    int entered_engine = 0;
+    int entered_module = 0;
+    int left = 0;
+    for (const SessionCommand& c : cmds) {
+        if (c.command == "1003") {
+            entered_engine += c.header == "ATSH7E0";
+            entered_module += c.header == "ATSH7E1";
+        } else {
+            ++left;
+            EXPECT_EQ(c.header, "ATSH7E0")
+                << "10 01 goes to the ECU in the session alone";
+        }
+    }
+    EXPECT_EQ(entered_engine, 1);
+    EXPECT_GE(entered_module, 1) << "each channel tries the session";
+    EXPECT_EQ(left, 1);
+}
+
+/* ?session= and ?keepalive_ms= are refused where the engine can't use
+ * them, each with its reason */
+TEST_F(Elm327SessionTest, TheSessionKeysAreRefusedWhereTheyCannotApply)
+{
+    struct Case {
+        const char* query;
+        const char* detail;
+    };
+    const Case cases[] = {
+        {"?profile=obd2&session=03",
+         "?session=03 belongs to profile=uds-generic, the profile that reads "
+         "DIDs"},
+        {"?profile=uds-generic&did=1E1C&keepalive_ms=1000",
+         "?keepalive_ms= keeps the extended session alive: it needs "
+         "?session=03"},
+        {"?profile=uds-generic&did=1E1C&session=02",
+         "?session= needs 01 (the default session) or 03 (the extended one), "
+         "not '02'"},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.query);
+        Session s;
+        EXPECT_EQ(s.create(uri(c.query)), ECUIO_ERR_BAD_URI);
+        EXPECT_STREQ(ecuio_last_error_detail(), c.detail);
+    }
+}
+
 /* Two ECUs asked through one adapter, each at the engine's floor (20 ms
  * send to send on each channel): the fake answers at once, so the
  * worker's wait while no command is out sets the pace; never faster than
@@ -2531,7 +2714,8 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?serial= needs a serial rate from 300 to 4000000, not '9'"},
         {uri("?flags=0"), ECUIO_ERR_BAD_URI,
          "elm327:// takes no query key 'flags', only baud, serial, filter, "
-         "txid, poll, probe, identify, diagnose, pack, scan, profile and did"},
+         "txid, poll, probe, identify, diagnose, pack, scan, profile, did, "
+         "session and keepalive_ms"},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "
