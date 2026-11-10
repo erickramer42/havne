@@ -5,8 +5,10 @@
 # A session (core.h) and what a script reads from it: frames and values
 # through pull queues (queue.h, ADR-0053 section 4), never a callback, so
 # no Python runs on core's worker; its report, identity and support; a
-# recording of it (recording.h). Session is a context manager: leaving it
-# closes the session, then its streams and the recorders it opened.
+# recording of it (recording.h); its health report as it stands
+# (health.py), from the newest value of each signal a values stream has
+# read. Session is a context manager: leaving it closes the session, then
+# its streams and the recorders it opened.
 #
 # A session left unclosed is closed in that order when it's collected, or
 # at the interpreter's exit (weakref.finalize), so a notebook cell run
@@ -18,11 +20,14 @@
 import ctypes
 import logging
 import threading
+import time
 import weakref
 from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8, with_profile
+from .export import _whole, checked
+from .health import _report, options_for
 
 log = logging.getLogger("havne")
 
@@ -58,7 +63,10 @@ class Stream:
     session's close. `dropped` is the running total of entries a full queue
     dropped; each time it grows the "havne" logger says so once. One
     thread reads a stream at a time; close() from another thread waits for
-    the read under way, at most its timeout."""
+    the read under way, at most its timeout. A values stream keeps the
+    newest number or enumeration value of each signal its read() returned,
+    and when (time.monotonic_ns), for Session.health_report; text and hex
+    values are never kept."""
 
     BATCH = 256
 
@@ -68,6 +76,10 @@ class Stream:
         self.ended = None   # "stream ended" or "session closed" once it has
         self._session = session
         self._queue = _Queue()
+        # Apart from the queue's lock, which a read holds up to its
+        # timeout: a report never waits out a read
+        self._held = {}
+        self._held_lock = threading.Lock()
         check(lib.ecuio_queue_open(session._handle(), kind, capacity,
                                    ctypes.byref(self._queue.q)),
               "ecuio_queue_open")
@@ -93,7 +105,13 @@ class Stream:
                 self.ended = "session closed"
             else:
                 check(rc, self._read.__name__)
+            now = time.monotonic_ns()
             entries = [self._entry(self._buf[i]) for i in range(count.value)]
+        if self.kind == e.ECUIO_QUEUE_VALUES and entries:
+            with self._held_lock:
+                for v in entries:
+                    if v.kind not in TEXT_KINDS:
+                        self._held[v.signal_id] = (v.value, now)
         if dropped.value > self.dropped:
             what = "frames" if self.kind == e.ECUIO_QUEUE_FRAMES else "values"
             log.warning("havne: %d %s dropped so far: the script reads slower than "
@@ -104,6 +122,11 @@ class Stream:
     def __iter__(self):
         while not self.ended:
             yield from self.read(0.1)
+
+    def _newest(self):
+        """{signal id: (value, monotonic_ns of the read that returned it)}"""
+        with self._held_lock:
+            return dict(self._held)
 
     def close(self):
         self._queue.close()
@@ -247,6 +270,21 @@ class Session:
         self._recorders.append(r)
         return r
 
+    def _signal_id(self, s, where):
+        """A signal's id from its name or id: a name the set lacks is a
+        KeyError, an id that isn't an int (a bool isn't) or is outside
+        0-65535 a ValueError"""
+        if isinstance(s, str):
+            found = [sid for sid, (name, _) in self._names.items() if name == s]
+            if not found:
+                raise KeyError(f"no signal named {s!r} in {where}")
+            return found[-1]
+        if isinstance(s, bool) or not isinstance(s, int):
+            raise ValueError(f"a signal id is an int, not {s!r}")
+        if not 0 <= s <= 0xFFFF:
+            raise ValueError(f"a signal id is 0-65535, not {s}")
+        return s
+
     def set_focus(self, signals, min_sweep_ms=0):
         """Asks only the requests that carry these signals, until called
         again (ADR-0056 section 2): ids or names of the session's set, in
@@ -265,19 +303,7 @@ class Session:
         if (isinstance(min_sweep_ms, bool) or not isinstance(min_sweep_ms, int)
                 or not 0 <= min_sweep_ms <= 0xFFFFFFFF):
             raise ValueError(f"min_sweep_ms is a whole number, not {min_sweep_ms!r}")
-        by_name = {name: sid for sid, (name, unit) in self._names.items()}
-        ids = []
-        for s in signals:
-            if isinstance(s, str):
-                if s not in by_name:
-                    raise KeyError(f"no signal named {s!r} in the session's set")
-                ids.append(by_name[s])
-            elif isinstance(s, bool) or not isinstance(s, int):
-                raise ValueError(f"a signal id is an int, not {s!r}")
-            elif not 0 <= s <= 0xFFFF:
-                raise ValueError(f"a signal id is 0-65535, not {s}")
-            else:
-                ids.append(s)
+        ids = [self._signal_id(s, "the session's set") for s in signals]
         picks = (ctypes.c_uint16 * len(ids))(*ids) if ids else None
         check(lib.ecuio_session_set_focus_with(self._handle(), picks, len(ids),
                                                min_sweep_ms, 0),
@@ -346,6 +372,77 @@ class Session:
                                                        report.generation, flags),
               "ecuio_session_clear_diagnostics_with")
         return report.generation
+
+    def reports_settled(self):
+        """Whether every channel's diagnostics are complete or were never
+        asked, and its identification is complete or has no items: the
+        first half of what havne-cli health waits for, enough for a
+        script's own loop. True for a session with no channels."""
+        info = self.info
+        for c in range(min(info.channel_count, e.ECUIO_SESSION_INFO_MAX_CHANNELS)):
+            d, ident = self.diagnostics(c), self.identity(c)
+            diag = bool(d.flags & e.ECUIO_DIAG_COMPLETE) or not d.flags & e.ECUIO_DIAG_ASKED
+            if not diag or not (ident.flags & e.ECUIO_IDENTITY_COMPLETE or ident.items == 0):
+                return False
+        return True
+
+    def _health_values(self, values, now_ns):
+        """The key values for a report: the caller's (signal, value, age_us)
+        triples, else the newest of each signal the values streams have
+        read, each aged from its read. Returns a ctypes array and its count"""
+        if values is None:
+            newest = {}
+            for st in self._streams:
+                if st.kind == e.ECUIO_QUEUE_VALUES:
+                    for sid, held in st._newest().items():
+                        if sid not in newest or held[1] > newest[sid][1]:
+                            newest[sid] = held
+            given = [(sid, v, max(0, (now_ns - at) // 1000)) for sid, (v, at) in newest.items()]
+        else:
+            given = []
+            for item in values:
+                if not isinstance(item, (tuple, list)) or len(item) != 3:
+                    raise TypeError("a value is (signal, value, age_us)")
+                signal, value, age = item
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise TypeError(f"a value is a number, not {value!r}")
+                given.append((self._signal_id(signal, "the session's set"), float(value),
+                              _whole("age_us", age)))
+            if len({g[0] for g in given}) != len(given):
+                raise ValueError("a signal is given twice in values")
+        array = (e.ecuio_health_value_t * len(given))()
+        for slot, (sid, value, age) in zip(array, given):
+            slot.def_id, slot.value, slot.age_us = sid, value, age
+        return array, len(given)
+
+    def health_report(self, out, format, *, units="metric", baseline=None, values=None,
+                      utc_us=None, latest_model_year=None):
+        """The health report of the connected session as it stands, written
+        to the file out as format, "json" or "text" (ecuio_health_export):
+        whatever its diagnostics and identification hold now, with no wait
+        (reports_settled() says when they are in; the report's `settled` is
+        its answer at the write). The key values are the newest number or
+        enumeration value of each signal a values stream of the session
+        has returned from read() (or been iterated), each aged from that
+        read; a session with no values stream, or one never read, has none
+        and the report says so. values replaces them: an iterable of
+        (signal, value, age_us), the signal an id or a name of the
+        session's set. baseline, utc_us, latest_model_year and units are
+        health_report's. A session has no range and nothing to cancel:
+        core never asks during its report. Returns a HealthReport; a
+        failed scrub check raises CheckFailed, writing nothing."""
+        o, baseline, _, _ = options_for(out, format, units, baseline, utc_us,
+                                        latest_model_year)
+        held, count = self._health_values(values, time.monotonic_ns())
+        o.session = self._handle()
+        if count:
+            o.values = held
+            o.value_count = count
+        settled = self.reports_settled()
+        report = e.ecuio_health_report_t()
+        rc = lib.ecuio_health_export(ctypes.byref(o), ctypes.byref(report))
+        checked(rc, "ecuio_health_export", report.failed_class)
+        return _report(str(out), format, "session", report, baseline, settled)
 
     def close(self):
         """Closes the session (its worker stops), then its streams and the
