@@ -111,10 +111,11 @@ TestCase {
                 { tag: "sparkline", c: sparkC, narrow: 190 }]
     }
     function test_aStaleValueSaysSo(data) {
-        for (const width of [undefined, data.narrow]) {
-            const props = { label: "Coolant", unit: "mph", hasValue: true, value: 50 }
-            if (width !== undefined)
-                props.width = width
+        // 400 holds the word whole in any face (CI's DejaVu Sans is wider
+        // than Windows' sans); the narrow width only keeps it in the card
+        const wide = 400
+        for (const width of [wide, data.narrow]) {
+            const props = { label: "Coolant", unit: "mph", hasValue: true, value: 50, width: width }
             if (data.height !== undefined)
                 props.height = data.height
             const g = make(data.c, props)
@@ -123,7 +124,7 @@ TestCase {
             g.stale = true
             compare(n.text, "no new data")
             verify(g.Accessible.name.endsWith(", no new data"), g.Accessible.name)
-            if (width === undefined) {
+            if (width === wide) {
                 verify(n.visible, "shown when there's room")
                 verify(!n.truncated, "whole when there's room")
             }
