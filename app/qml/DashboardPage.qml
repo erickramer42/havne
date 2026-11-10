@@ -1642,6 +1642,7 @@ Page {
     readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
     signal connectToUri(string uri)
     signal otherAddressRequested()
+    signal logRequested()
     onConnectUrisChanged: connectTapped = ""
     onConnectVehicleUriChanged: connectTapped = ""
     Connections {
@@ -1660,6 +1661,7 @@ Page {
                 root.connectToUri(uri)
             }
             onOtherAddress: root.otherAddressRequested()
+            onShowLog: root.logRequested()
         }
     }
 

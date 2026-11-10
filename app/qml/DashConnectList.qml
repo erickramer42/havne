@@ -21,6 +21,7 @@ Rectangle {
     signal picked(int index)
     signal connectTo(string uri)
     signal otherAddress()
+    signal showLog()
 
     // Every row and button a touch's size (ThemedButton reads this)
     readonly property real touchMin: Theme.touchTarget
@@ -137,17 +138,29 @@ Rectangle {
             }
         }
 
-        // The bridge's words for a connect that failed; the Log has them too
-        Label {
-            objectName: "connectError"
+        // The bridge's words for a connect that failed, and the Log beside
+        // them, which has the rest
+        RowLayout {
             visible: list.errorText !== ""
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            maximumLineCount: 3
-            elide: Text.ElideRight
-            font.pixelSize: Theme.fontCaption
-            color: Theme.danger
-            text: list.errorText
+            spacing: 8
+            Label {
+                objectName: "connectError"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+                font.pixelSize: Theme.fontCaption
+                color: Theme.danger
+                text: list.errorText
+            }
+            ThemedButton {
+                objectName: "connectShowLog"
+                flat: true
+                text: qsTr("Show log")
+                Layout.alignment: Qt.AlignTop
+                onClicked: list.showLog()
+            }
         }
 
         RowLayout {
