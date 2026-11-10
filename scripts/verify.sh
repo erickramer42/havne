@@ -54,7 +54,8 @@
 # Anything less than the full run prints what it skipped and ends with a
 # "not a full verify" line, and says whether clang-tidy applies. A full
 # run that ran every step writes Testing/verify/full-run.stamp (HEAD's
-# SHA and whether the tree stayed clean), which a PR's preflight reads.
+# SHA, whether the tree stayed clean, and the main ctest step's passed,
+# skipped and total), which a PR's preflight reads.
 #
 # The trees must already be configured (docs/development.md).
 set -u
@@ -280,14 +281,21 @@ warnings() {
     grep -E 'warning [A-Z]+[0-9]+|warning:' "$LOGDIR/$1.log" | sort -u | wc -l | tr -d ' '
 }
 
-# Summarizes a ctest log: "<passed>/<total> passed, <n> skipped".
-ctest_summary() {
+# A ctest log's counts: "<passed> <total> <skipped>"
+ctest_counts() {
     local log=$1 total failed skipped
     total=$(grep -oE 'out of [0-9]+' "$log" | tail -n 1 | grep -oE '[0-9]+')
     failed=$(grep -oE '[0-9]+ tests? failed' "$log" | tail -n 1 | grep -oE '^[0-9]+')
     skipped=$(grep -cE '^[[:space:]]+[0-9]+ - .*\(Skipped\)$' "$log")
     total=${total:-0}; failed=${failed:-0}
-    echo "$((total - failed))/$total passed, $skipped skipped"
+    echo "$((total - failed)) $total $skipped"
+}
+
+# Summarizes a ctest log: "<passed>/<total> passed, <n> skipped".
+ctest_summary() {
+    local passed total skipped
+    read -r passed total skipped <<< "$(ctest_counts "$1")"
+    echo "$passed/$total passed, $skipped skipped"
 }
 
 # The cases a ctest log lists as skipped, one name a line
@@ -383,8 +391,12 @@ if [ "$full" = 1 ]; then
     clean=1
     { [ -n "$dirty_start" ] || [ -n "$(git status --porcelain)" ] \
         || [ "$(git rev-parse HEAD)" != "$head_start" ]; } && clean=0
-    printf 'sha=%s\nclean=%s\ndate=%s\n' "$head_start" "$clean" \
-        "$(date '+%Y-%m-%d %H:%M:%S %z')" > "$STAMP"
+    # The main ctest step's counts, so a preflight can see a tree that
+    # registered fewer tests than a release had
+    read -r passed total skipped <<< "$(ctest_counts "$LOGDIR/ctest.log")"
+    printf 'sha=%s\nclean=%s\ndate=%s\npassed=%s\nskipped=%s\ntotal=%s\n' \
+        "$head_start" "$clean" "$(date '+%Y-%m-%d %H:%M:%S %z')" \
+        "$passed" "$skipped" "$total" > "$STAMP"
     if [ "$clean" = 1 ]; then note stamp "${head_start:0:7}, tree clean"
     else note stamp "${head_start:0:7}, tree not clean: no use to a PR's preflight"; fi
 fi
