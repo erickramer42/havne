@@ -4754,8 +4754,8 @@ TEST(BridgeTest, LiveListFollowsItsFilter)
     const int rows = model.rowCount();
     ASSERT_EQ(live.rowCount(), rows);
     EXPECT_EQ(live.shownCount(), rows);
-    EXPECT_EQ(live.groups(), (QVariantList{1, 2, 4, 6}))
-        << "Engine, Air, Oxygen sensors, Vehicle";
+    EXPECT_EQ(live.groups(), (QVariantList{1, 2, 4, 6, 7}))
+        << "Engine, Air, Oxygen sensors, Vehicle, Electrical";
     const auto names = [&live]() {
         QStringList n;
         for (int r = 0; r < live.rowCount(); ++r) {
