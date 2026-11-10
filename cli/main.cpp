@@ -647,12 +647,12 @@ void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
-// A scan line per ECU whose DID scan moved (cli/scan_line.h), every
-// change when final; the channels' reports into reports[], for
-// --until-scanned
+// A session line per ECU whose session changed and a scan line per ECU
+// whose DID scan moved (cli/scan_line.h), every change when final; the
+// channels' reports into reports[], for --until-scanned
 void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
-               cli::ScanSeen* seen, ecuio_channel_support_t* reports,
-               bool final = false)
+               cli::ScanSeen* seen, cli::SessionSeen* sessions,
+               ecuio_channel_support_t* reports, bool final = false)
 {
     const uint64_t now = ecuio_clock_us();
     for (uint32_t c = 0; c < channels; ++c) {
@@ -660,6 +660,12 @@ void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
         if (ecuio_session_get_channel_support(session, c, &s) != ECUIO_OK) {
             s = ecuio_channel_support_t{};
             continue;
+        }
+        if (cli::session_due(s, sessions[c])) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::session_line(l, s);
+            write_line(out, l);
         }
         if (cli::scan_due(s, seen[c], now, final)) {
             char buf[512];
@@ -2525,8 +2531,9 @@ int run_stream(const StreamArgs& args)
     poll_identity(out, session, channels, identity_generations);
     poll_diagnostics(out, session, channels, diag_generations);
     cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     ecuio_channel_support_t scan_reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    poll_scan(out, session, channels, scan_seen, scan_reports);
+    poll_scan(out, session, channels, scan_seen, session_seen, scan_reports);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     std::vector<uint16_t> absent_read(
@@ -2613,7 +2620,8 @@ int run_stream(const StreamArgs& args)
 
         poll_identity(out, session, channels, identity_generations);
         poll_diagnostics(out, session, channels, diag_generations);
-        poll_scan(out, session, channels, scan_seen, scan_reports);
+        poll_scan(out, session, channels, scan_seen, session_seen,
+                  scan_reports);
         poll_absent(out, session, absent_read, absent_last);
         if (args.values) {
             poll_refused(out, set, scan_reports, channels, refused_last,
@@ -2672,7 +2680,8 @@ int run_stream(const StreamArgs& args)
     char buf[512];
     cli::Line l(buf, sizeof buf);
     if (!out.failed) {
-        poll_scan(out, session, channels, scan_seen, scan_reports, true);
+        poll_scan(out, session, channels, scan_seen, session_seen, scan_reports,
+                  true);
         poll_timing(out, session, info, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
