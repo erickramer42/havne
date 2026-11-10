@@ -679,6 +679,29 @@ TestCase {
         compare(back(s), false, "nowhere to go back to")
     }
 
+    // Edit mode is Dash's own view: Back closes a gauge's panel, then
+    // leaves edit mode, then leaves the app
+    function test_backClosesThePanelThenEditModeThenLeaves() {
+        const s = driven()
+        verify(s.dash.shownCells.length > 0, "a gauge to edit")
+        s.dash.startEditing()
+        s.dash.select(0)
+        compare(s.dash.panel, "cell", "its panel is open")
+        compare(back(s), true, "taken")
+        compare(s.dash.panel, "", "the panel closes first")
+        verify(s.dash.editing, "edit mode stays")
+        compare(s.dash.selected, 0, "and the gauge stays selected")
+        compare(back(s), true, "taken")
+        verify(!s.dash.editing, "then edit mode ends")
+        compare(back(s), false, "then the system's")
+
+        // A panel outside edit mode closes alone
+        s.dash.select(0)
+        compare(back(s), true)
+        compare(s.dash.panel, "")
+        compare(back(s), false)
+    }
+
     // ---- Remembered once connected (section 7)
 
     function test_aConnectEntersWithDashShowing() {

@@ -126,7 +126,7 @@ ApplicationWindow {
     // system, which goes to the launcher and keeps the session
     function goBack() {
         if (currentPage === dashboardPage)
-            return dashboardView.driveBack()
+            return dashboardView.goBack()
         if (currentPage === settingsPage) {
             if (!settingsView.backLeaves)
                 return settingsView.closeShown()

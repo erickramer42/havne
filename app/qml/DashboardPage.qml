@@ -331,6 +331,21 @@ Page {
             barsUp = true
         return true
     }
+    // Android's Back on Dash: the drive view, a gauge's panel, then edit
+    // mode; false leaves it to the system
+    function goBack() {
+        if (driveBack())
+            return true
+        if (panel !== "") {
+            closePanel()
+            return true
+        }
+        if (editing) {
+            stopEditing()
+            return true
+        }
+        return false
+    }
     function raiseBars(attention) {
         if (!driving)
             return
