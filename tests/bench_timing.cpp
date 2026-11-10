@@ -20,7 +20,7 @@
 // its 4 ms read 16.4; at 1 ms it reads 4.6 to 5.1, a timed wait still
 // running up to a millisecond long. The worker adds none of it: with a
 // fake spinning to its reply time, at the default step, ELM327 read 4.0
-// to 4.1 ms (2026-11-01).
+// to 4.1 ms.
 //
 // Run: build/tests/Release/bench_timing.exe [seconds per transport, default 60]
 

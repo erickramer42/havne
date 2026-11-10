@@ -100,8 +100,9 @@
 //    and an empty read with ERR_BUFFER_EMPTY; after each accepted
 //    write a TX indication (RxStatus 0x09, the 4-byte CAN ID), and the
 //    reply 4 ms later; a read with a timeout of 0 held 50 ms, as a
-//    50 ms timeout would (the car, 2026-11-04), and one asked to wait
-//    less than 10 ms held 10 ms (the car, 2026-11-05). ECUIO_FAKE_NO_ACK=1
+//    50 ms timeout would (docs/bench-sessions/2026-11-04-two-ecu-car.md),
+//    and one asked to wait less than 10 ms held 10 ms
+//    (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md). ECUIO_FAKE_NO_ACK=1
 //    adds the bus with no other node: three writes accepted per connect, then each blocks about
 //    500 ms and fails ERR_FAILED, echoed with RxStatus 0x201.
 //  * A queued message has an arrival time; reads see only those that
@@ -154,13 +155,14 @@ int g_handle = 0;                       /* 1 between Open and Close */
 FrameSlot g_queue[FAKE_QUEUE_DEPTH];    /* in arrival order */
 unsigned long g_queue_len = 0;
 
-/* The VX as measured on 2026-10-22: its reply latency is the engine
- * ECU's median from indication to reply; with nothing on the bus to
+/* The VX as measured (docs/bench-sessions/2026-10-22.md): its reply
+ * latency is the engine ECU's median from indication to reply; with
+ * nothing on the bus to
  * acknowledge, it accepted three writes per connect, then blocked
  * each later one 500-515 ms and failed it. */
 constexpr unsigned long kVxReplyDelayMs = 4;
 /* A VX read with a timeout of 0 holds about 50 ms, whenever its reply
- * arrives: in the test car's frame log of 2026-11-04 a reply read that
+ * arrives: in the test car's frame log a reply read that
  * way reached the host a median 63 ms after its write, with the reply
  * on the adapter's clock a median 11.1 ms after its request's TX
  * indication (docs/bench-sessions/2026-11-04-two-ecu-car.md) */

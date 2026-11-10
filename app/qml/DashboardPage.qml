@@ -1804,10 +1804,21 @@ Page {
             // far in, or no session, whose Drive words are longer) drops Reset
             // peaks, which edit mode's Pages row then offers (moreResetPeaks).
             // Judged against the bar's width (the row can't shrink under its
-            // tools) and the tools' own widths, never the row's: no loop
-            readonly property real toolsWidth: (driveButton.visible ? driveButton.implicitWidth + spacing : 0)
-                + resetPeaksButton.implicitWidth + spacing + editButton.implicitWidth
-                + (nightLoader.active ? spacing + nightLoader.implicitWidth : 0)
+            // tools) and the tools' own widths, never the row's: no loop.
+            // The layout rounds each width up to a whole pixel, and each item
+            // shown ahead of the tools (the fills too) takes a spacing
+            readonly property real toolsWidth: {
+                let ahead = 0
+                for (const item of children) {
+                    if (item === resetPeaksButton)
+                        break
+                    if (item.visible)
+                        ahead += spacing + (item === driveButton ? Math.ceil(item.implicitWidth) : 0)
+                }
+                return ahead + Math.ceil(resetPeaksButton.implicitWidth) + spacing
+                    + Math.ceil(editButton.implicitWidth)
+                    + (nightLoader.active ? spacing + Math.ceil(nightLoader.implicitWidth) : 0)
+            }
             readonly property bool holdsResetPeaks: topBar.width >= Math.max(root.toolRowFull, toolsWidth)
             ThemedButton {
                 id: resetPeaksButton
