@@ -637,3 +637,75 @@ Section 7's import reaches the app, so a set needs no `havne-cli`:
 Tested at the bridge (`ObdbImportTest`, `BridgeTest.Obdb*`, on
 `tests/fixtures/obdb/`) and in QML (`QmlTest.settings`,
 `QmlTest.vehiclebook`).
+
+## Appendix: a signal's gauge (2026-11-09)
+
+A number or computed signal can name the range a dial shows and the
+levels it warns at:
+
+```json
+"gauge": { "min": 40, "max": 130, "warn_low": 60, "warn_high": 110 }
+```
+
+- **No format bump.** `havne_signals` stays 1. The key is optional, so
+  every existing file loads unchanged, and an older Havne refuses only a
+  file that uses it, through the strict rule of section 2 ("unknown key
+  'gauge'"). `x-gauge`, a tool's own key, stays ignored. A plugin's format
+  doesn't change: a data file is this format, and a plugin that uses the
+  key names the release that reads it in `requires.core`, so an older
+  core gives the version rather than the unknown key. A recording made
+  through such a file keeps the key in its `signals.json` (below), so an
+  older Havne refuses that recording's scrubbed export too, its
+  `signals.json` being a file it can't load.
+- **Where it is taken.** On `number` and `computed` signals. A text, hex
+  or enum signal has no needle, and its keys don't include this one.
+- **What is refused** (section 3, with the line and column): `min` and
+  `max` missing; `min` not below `max`; a level outside `[min, max]`;
+  `warn_low` not below `warn_high`; a range sharing nothing with
+  `ecuio_def_range`'s span, which names the signal's unit as the likely
+  cause. A range wider than the field or overlapping it is a choice. A
+  computed signal has no span, so nothing is judged against one. JSON has
+  no NaN or Infinity and the reader refuses a number past the double
+  range, so every number that arrives is finite.
+- **The unit.** The numbers are the signal's own: what a value has after
+  `scale` and `offset`. Core stores them as written and converts nothing;
+  a front end goes through `ecuio_display_convert` as for the value. Every
+  row of ADR-0022's table has a positive scale, so a converted range
+  stays in order.
+- **The ABI is additive.** `ecuio_signal_file_gauge(file, def)` and
+  `ecuio_signal_gauge_t` (48 bytes: four doubles, `flags` with
+  `ECUIO_GAUGE_WARN_LOW` and `_WARN_HIGH`, `reserved[3]`). It finds a def
+  by address, as `ecuio_signal_file_key` does, and borrows: NULL for a
+  def with none, a base set's def, another set's or a copy. A plugin
+  variant reaches it through `ecuio_plugin_variant_file`.
+  `ecuio_plugin_requires_core(plugin, &major, &minor, &patch)` gives the
+  manifest's `requires.core`; an accessor rather than a field, so
+  `ecuio_plugin_info_t` keeps its 8 reserved bytes. The CMake
+  package's `SameMinorVersion` gives any 0.7.x to
+  `find_package(ecuio 0.7)`, so a consumer that needs 0.7.2's calls
+  asks `find_package(ecuio 0.7.2)`.
+- **Why not in the def.** The def's `reserved[4]` would hold four floats
+  and a new flag, but it is the def's last free room, a float32 turns 0.1
+  into 0.100000001, and the validator would change for a display hint.
+  The set's `reserved[4]` holds no pointer on 64-bit, as section 6 says.
+  The cost: only a file's or a plugin variant's defs have a gauge, not a
+  built-in set's.
+- **What decodes doesn't change.** The set's bytes are the same with or
+  without a gauge, so a recording decodes alike. A plugin variant's
+  merged text copies each signal's JSON whole, so a recording's
+  `signals.json` keeps the key, and a later file replacing a signal by
+  key replaces its gauge with it.
+- **`havne-cli`, schema 1's growth (ADR-0031 section 3).** A `gauge`
+  object `{min, max, warn_low, warn_high}` on the `signal_def` lines of
+  `signals check` and `plugins check` and on the `signals` line of
+  `stream`, only for a def that has one and with only the levels given,
+  in the signal's unit as those lines already are. `plugins check`
+  writes a `requires_core` line {declared, needs, warning} before its
+  `checked` line when a data file uses the key and `requires.core` names
+  a release older than 0.7.2, since a core between the two passes the
+  manifest and then refuses the data files.
+- **Python:** `SignalFile.gauge(key)` and `Plugin.gauge(key, variant)`, a
+  `havne.Gauge` named tuple (a level not given is None) or None.
+- **Not done here:** a dial starting from it (the app's bridge and QML),
+  and OBDb's `min` and `max`, which section 7's appendix settles as limits
+  on a value, kept as notes.
