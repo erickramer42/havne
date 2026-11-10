@@ -109,7 +109,7 @@ TestCase {
         return [{ tag: "homePage" }, { tag: "dashboardPage" },
                 { tag: "dashboardPhone" }, { tag: "dashboardPhoneCell" },
                 { tag: "dashboardPhoneAdd" }, { tag: "dashboardPhoneSignal" },
-                { tag: "dashboardPhoneReset" }, { tag: "dashboardPhoneRemove" },
+                { tag: "dashboardPhoneReset" }, { tag: "dashboardPhoneUndo" },
                 { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
@@ -135,7 +135,7 @@ TestCase {
         const importing = data.tag.startsWith("recordingsImport")
         // dashboardPage is the desktop form at a phone's width;
         // dashboardPhone* the phone's, in edit mode with each of its
-        // panels (none of which stores anything)
+        // panels, and outside it with the undo line (nothing left stored)
         const dashPhone = data.tag.startsWith("dashboardPhone")
         const name = data.tag === "logFrames" ? "logPage"
                    : viewer || importing ? "recordingsPage"
@@ -157,9 +157,11 @@ TestCase {
             } else if (data.tag === "dashboardPhoneReset") {
                 page.moreShown = true
                 page.confirmReset = true
-            } else if (data.tag === "dashboardPhoneRemove") {
-                page.select(1)
-                page.confirmRemoveCell = true
+            } else if (data.tag === "dashboardPhoneUndo") {
+                page.stopEditing()
+                page.removeCell(1)
+                page.undo()
+                verify(find(page, "dashUndoLineUndo").visible, "the line with its Undo")
             }
         }
         if (data.tag === "logFrames")
@@ -1126,8 +1128,8 @@ TestCase {
             Bridge.disconnectSession()
     }
 
-    // Edit mode's controls on the phone: each a touch target, the bar at
-    // most three buttons
+    // Edit mode's controls on the phone: each a touch target, the bar
+    // five buttons
     function test_thePhonesEditControlsAreTouchTargets() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -1146,8 +1148,8 @@ TestCase {
                    n + " is " + find(dash, n).height + " px tall")
         dash.startEditing()
         const bar = find(dash, "dashEditBar")
-        compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").length, 3,
-                "three on the bar")
+        compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").length, 5,
+                "five on the bar")
         const tall = names => {
             waitForRendering(main.contentItem)
             for (const n of names) {
@@ -1157,7 +1159,7 @@ TestCase {
                        n + " is " + item.height + " px tall")
             }
         }
-        tall(["dashDone", "dashAdd", "dashMore", "dashAddCell_0"])
+        tall(["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone", "dashAddCell_0"])
         find(dash, "dashMore").clicked()
         // Move page left and right show only with pages to move among
         tall(["moreRename", "moreAddPage", "moreRemovePage", "moreReset"])
@@ -1175,17 +1177,59 @@ TestCase {
         tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
               "panelDecimals", "panelW", "panelH", "panelPeak", "panelEarlier", "panelLater",
               "panelStart", "panelEnd", "panelCopy", "panelPaste", "panelRemove"])
-        dash.confirmRemoveCell = true
-        tall(["panelRemoveConfirm", "panelRemoveKeep"])
-        dash.confirmRemoveCell = false
         dash.copySelected()
-        tall(["dashPaste"])
-        compare(pastTheEdge(find(dash, "dashEditBar"), main.contentItem, []).length, 0,
-                "Paste fits the edit bar")
+        tall(["dashAddCell_0", "dashPasteCell_0"])
         dash.startAdd()
         tall(["addClose", "addKind_analog", "addKind_digital"])
         dash.pickKind("analog")
         tall(["signalBack", "pickSignal_" + Bridge.gaugeSignals["rpm"][0]])
+        dash.stopEditing()
+    }
+
+    // The edit bar holds its five controls at a phone's widths, at the test
+    // font and at 1.3 of it, each on one line; the "+" cell's halves are a
+    // touch's size
+    function test_theEditBarFitsAPhone_data() {
+        const rows = []
+        for (const w of [320, 364, 384])
+            for (const scale of [1, 1.3])
+                rows.push({ tag: w + " at " + scale, w: w, scale: scale })
+        return rows
+    }
+    function test_theEditBarFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
+        dash.startEditing()
+        dash.copied = { form: "phone", cell: { kind: "blank", w: 3, h: 6, refs: [] } }
+        const names = ["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone"]
+        for (const n of names) {
+            const words = find(dash, n).contentItem
+            words.font.pixelSize = Math.round(Theme.fontBody * data.scale)
+        }
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const bar = find(dash, "dashEditBar")
+        const out = pastTheEdge(bar, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        for (const n of names) {
+            const b = find(dash, n)
+            compare(b.contentItem.lineCount, 1, n + " on one line")
+            verify(b.contentItem.contentWidth <= b.width + 0.5, n + " keeps its words")
+        }
+        compare(find(dash, "dashAdd").text, "Add")
+        compare(find(dash, "dashAdd").Accessible.name, "Add a gauge")
+        for (const n of ["dashAddCell_0", "dashPasteCell_0"]) {
+            const half = find(dash, n)
+            verify(half.visible, n + " shows")
+            verify(half.width >= Theme.touchTarget - 0.5 && half.height >= Theme.touchTarget - 0.5,
+                   n + " is " + half.width + " x " + half.height)
+        }
         dash.stopEditing()
     }
 

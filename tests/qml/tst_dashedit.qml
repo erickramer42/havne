@@ -68,6 +68,14 @@ TestCase {
         return page
     }
 
+    // A page showing `doc` with its text stored, as the app has it after an
+    // edit, so an undo stores the text it had
+    function storedPageOf(props, doc) {
+        const page = pageOf(props, doc)
+        find(page, "dashStore")[page.form === "phone" ? "phone" : "desktop"] = DashboardBook.serialize(doc)
+        return page
+    }
+
     // A one-page document of these cells
     function docOf(cells) {
         const d = DashboardBook.builtIn("desktop")
@@ -1345,7 +1353,7 @@ TestCase {
         const a = cellOf("A", "digital")
         const page = pageOf({}, docOf([a, cellOf("B")]))
         page.startEditing()
-        verify(!find(page, "dashPaste").visible, "nothing to paste yet")
+        verify(!find(page, "dashPasteCell_0").visible, "nothing to paste yet")
         press(find(page, "dashCell_0_0"))
         verify(!find(page, "panelPaste").enabled, "nothing to paste yet")
         click(page, "panelCopy")
@@ -1368,7 +1376,7 @@ TestCase {
         click(page, "panelCopy")
         type(find(page, "panelLabel"), "Changed")
         compare(labels(page), ["Changed", "B"])
-        click(page, "dashPaste")
+        click(page, "dashPasteCell_0")
         compare(labels(page), ["Changed", "B", "A"], "Paste appends what was copied")
     }
 
@@ -1391,7 +1399,7 @@ TestCase {
         click(page, "panelCopy")
         page.goTo(1)
         tryCompare(page, "pageIndex", 1)
-        click(page, "dashPaste")
+        click(page, "dashPasteCell_1")
         compare(page.doc.pages[1].cells.map(c => c.label), ["A"])
     }
 
@@ -1403,7 +1411,7 @@ TestCase {
         page.startEditing()
         page.select(0)
         page.copySelected()
-        verify(!find(page, "dashPaste").enabled, "the bar's is off")
+        verify(!find(page, "dashPasteCell_0").visible, "no + cell to paste into")
         verify(!find(page, "panelPaste").enabled, "the menu's is off")
         page.pasteAfter(0)
         compare(page.doc.pages[0].cells.length, DashboardBook.maxCells)
@@ -1414,7 +1422,8 @@ TestCase {
         page.startEditing()
         page.select(0)
         page.copied = { form: "phone", cell: cellOf("Other") }
-        verify(!find(page, "dashPaste").enabled, "the bar's is off")
+        verify(find(page, "dashPasteCell_0").visible, "the + cell splits")
+        verify(!find(page, "dashPasteCell_0").enabled, "its Paste is off")
         verify(!find(page, "panelPaste").enabled, "the menu's is off")
         page.pasteAfter(0)
         compare(labels(page), ["A", "B"])
@@ -1809,15 +1818,17 @@ TestCase {
                "two pages: the move buttons show")
     }
 
-    // The cell's panel removes its cell after a question, in edit mode and
-    // from the hold's menu outside it; Keep leaves everything as it was
-    function test_thePanelsRemoveAsksFirst_data() {
+    // The cell's panel removes its cell at once, in edit mode and from the
+    // hold's menu outside it, and Undo brings it back: the bar's in edit
+    // mode, the line's outside it
+    function test_thePanelsRemoveIsUndone_data() {
         return [{ tag: "desktop in edit mode", phone: false, edit: true },
                 { tag: "phone, the hold's menu", phone: true, edit: false }]
     }
-    function test_thePanelsRemoveAsksFirst(data) {
-        const page = pageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
-                            docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+    function test_thePanelsRemoveIsUndone(data) {
+        const page = storedPageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
+                                  docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        const before = storedText(page)
         const cell = find(page, "dashCell_0_1")
         if (data.edit) {
             page.startEditing()
@@ -1828,51 +1839,27 @@ TestCase {
         }
         compare(page.panel, "cell")
         const remove = find(page, "panelRemove")
-        verify(remove.visible, "Remove is on the panel")
         compare(remove.Accessible.name, "Remove B")
-        verify(!find(page, "panelRemoveAsk").visible, "no question yet")
-
+        verify(!findChild(page, "panelRemoveAsk"), "no question")
         click(page, "panelRemove")
-        verify(find(page, "panelRemoveAsk").visible, "it asks")
-        verify(!remove.visible, "in Remove's place")
-        compare(find(page, "panelRemoveQuestion").text, "Remove B from this page?")
-        compare(labels(page), ["A", "B", "C"], "nothing removed yet")
-        click(page, "panelRemoveKeep")
-        verify(!find(page, "panelRemoveAsk").visible)
-        verify(remove.visible)
-        compare(labels(page), ["A", "B", "C"], "Keep keeps it")
-        compare(page.panel, "cell", "the panel stays")
-
-        click(page, "panelRemove")
-        click(page, "panelRemoveConfirm")
         compare(labels(page), ["A", "C"])
         compare(page.panel, "", "the panel goes with its cell")
         compare(page.selected, -1)
         compare(page.editing, data.edit, "edit mode is as it was")
         compare(storedText(page), DashboardBook.serialize(page.doc), "and it's stored")
+        click(page, data.edit ? "dashUndo" : "dashUndoLineUndo")
+        compare(labels(page), ["A", "B", "C"], "back")
+        compare(storedText(page), before, "and stored as it was")
     }
 
-    // The question is about one cell: another cell, a closed panel or
-    // Done takes it away; a cell with no label is named by its kind
-    function test_theRemoveQuestionGoesWithItsCell() {
-        const page = pageOf({}, docOf([cellOf("A"), cellOf("", "blank"), cellOf("C")]))
+    // A cell with no label is named by its kind, on Remove and in the step's words
+    function test_aCellWithNoLabelIsNamedByItsKind() {
+        const page = storedPageOf({}, docOf([cellOf("A"), cellOf("", "blank"), cellOf("C")]))
         page.startEditing()
-        press(find(page, "dashCell_0_0"))
-        click(page, "panelRemove")
-        verify(page.confirmRemoveCell)
-        press(find(page, "dashCell_0_2"))
-        compare(page.selected, 2)
-        verify(!page.confirmRemoveCell, "another cell asks nothing")
-        click(page, "panelRemove")
-        click(page, "panelClose")
-        verify(!page.confirmRemoveCell, "closing the panel drops it")
         press(find(page, "dashCell_0_1"))
-        click(page, "panelRemove")
-        compare(find(page, "panelRemoveQuestion").text, "Remove Blank from this page?")
         compare(find(page, "panelRemove").Accessible.name, "Remove Blank")
-        page.stopEditing()
-        verify(!page.confirmRemoveCell, "Done drops it")
-        compare(labels(page), ["A", "", "C"])
+        click(page, "panelRemove")
+        compare(find(page, "dashUndo").Accessible.name, "Undo: removed Blank")
     }
 
     // Edit mode's Remove is a touch's size and draws a raised square with
@@ -1922,5 +1909,387 @@ TestCase {
         click(page, "moreAddPage")
         compare(page.doc.pages.length, 2)
         compare(page.pageIndex, 1, "the new page shows")
+    }
+
+    // ---- Undo (ADR-0057's appendix "undo in edit mode as built")
+
+    // Two pages: three cells and a tall one, then one
+    function twoPages() {
+        const d = docOf([cellOf("A"), cellOf("B"),
+                         { kind: "bar", w: 2, h: 2, label: "C", refs: ["id:1001"], unit: "RPM",
+                           options: { from: 0, to: 8000 } },
+                         { kind: "digital", w: 1, h: 20, label: "T", refs: ["id:1001"], unit: "RPM",
+                           options: { from: 0, to: 8000 } }])
+        d.pages[0].name = "One"
+        d.pages.push({ name: "Two", cells: [cellOf("D")] })
+        return d
+    }
+    readonly property var speedRow: ({ ref: "id:1001", name: "Speed", decodedUnit: "km/h",
+                                       decodedLow: 0, decodedHigh: 255, isText: false, isEnum: false })
+
+    // Each kind of step, made as the page's own controls make it, is undone
+    // (the document, the stored text and the page shown) and then redone
+    function test_undoRestoresEachStep_data() {
+        return [
+            { tag: "add a blank", words: "added Blank", make: p => { p.startAdd(); p.pickKind("blank") } },
+            { tag: "add a signal", words: "added Speed",
+              make: p => { p.addKind = "digital"; p.pickSignal(speedRow) } },
+            { tag: "remove", words: "removed B", make: p => p.removeCell(1) },
+            { tag: "move earlier", words: "moved B", make: p => { p.select(1); p.moveTo(0) } },
+            { tag: "move later", words: "moved B", make: p => { p.select(1); p.moveTo(2) } },
+            { tag: "to the start", words: "moved C", make: p => { p.select(2); p.moveTo(0) } },
+            { tag: "to the end", words: "moved A", make: p => { p.select(0); p.moveTo(3) } },
+            { tag: "drop", words: "moved A", make: p => {
+                p.held = 0
+                p.dropAt = 2
+                find(p, "dashPage_0").letGo(false)
+            } },
+            { tag: "resize", words: "resized A", make: p => { p.select(0); p.resize(3, 4) } },
+            { tag: "resize a tall cell", words: "resized T", make: p => { p.select(3); p.resize(1, 19) } },
+            { tag: "a stepped option", words: "changed A's decimals",
+              make: p => { p.select(0); p.setOptions({ decimals: 2 }) } },
+            { tag: "a typed option", words: "changed A's range",
+              make: p => { p.select(0); p.setOptions({ from: 100 }) } },
+            { tag: "zones", words: "changed A's zones",
+              make: p => { p.select(0); p.setOptions({ warnFrom: 6000 }) } },
+            { tag: "the label", words: "changed A's label", make: p => { p.select(0); p.setLabel("Z") } },
+            { tag: "another signal", words: "changed A's signal",
+              make: p => { p.select(0); p.addKind = ""; p.pickSignal(speedRow) } },
+            { tag: "paste", words: "pasted A",
+              make: p => { p.select(0); p.copySelected(); p.pasteAfter(0) } },
+            { tag: "add a page", words: "added a page", pageAfter: 2, make: p => p.addPage() },
+            { tag: "rename the page", words: "renamed the page", make: p => p.renamePage("New") },
+            { tag: "move the page", words: "moved the page", pageAfter: 1, make: p => p.movePage(1) },
+            { tag: "remove a page", words: "removed the page Two", page: 1,
+              make: p => { p.goTo(1); p.removePage() } },
+            { tag: "reset", words: "reset the layout", make: p => p.resetForm() }
+        ]
+    }
+    function test_undoRestoresEachStep(data) {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        const startText = storedText(page)
+        const startDoc = DashboardBook.serialize(page.doc)
+        data.make(page)
+        const afterText = storedText(page)
+        const afterDoc = DashboardBook.serialize(page.doc)
+        verify(afterDoc !== startDoc, "the step changed the document")
+        compare(page.undoStack.length, 1, "one step")
+        compare(page.undoWords, data.words)
+        verify(page.undoLine === "", "edit mode shows no line for a step")
+
+        click(page, "dashUndo")
+        compare(DashboardBook.serialize(page.doc), startDoc, "undone")
+        compare(storedText(page), startText, "the text from before is stored")
+        compare(page.pageIndex, data.page ?? 0, "the step's page shows")
+        compare(page.undoLine, "Undid: " + data.words)
+        verify(!page.canUndo)
+
+        click(page, "dashRedo")
+        compare(DashboardBook.serialize(page.doc), afterDoc, "redone")
+        compare(storedText(page), afterText, "the text after it is stored")
+        compare(page.pageIndex, data.pageAfter ?? 0, "the page after it shows")
+        compare(page.undoLine, "Redid: " + data.words)
+        verify(page.canUndo && !page.canRedo)
+    }
+
+    // A field still open commits as its own step, which Undo then takes
+    // back: the step before it stays
+    function test_anOpenFieldCommitsBeforeAnUndo() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.select(0)
+        page.resize(3, 4)
+        const field = find(page, "panelLabel")
+        field.forceActiveFocus()
+        field.text = "Typed"
+        page.undo()
+        compare(labels(page), ["A", "B", "C", "T"], "the label committed, then undone")
+        compare(page.doc.pages[0].cells[0].w, 3, "the resize stays")
+        compare(page.undoWords, "resized A")
+        compare(page.redoWords, "changed A's label")
+    }
+
+    function test_aNewStepClearsRedo() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.removeCell(0)
+        page.undo()
+        verify(page.canRedo)
+        page.removeCell(1)
+        verify(!page.canRedo, "a new step after an undo")
+        compare(labels(page), ["A", "C", "T"])
+    }
+
+    // A SpinBox stepped is one undo; another cell, quiet past the group's
+    // time or a typed field's commits end the run
+    function test_aRunOfStepsIsOneUndo() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.select(0)
+        const start = storedText(page)
+        for (let v = 1; v <= 5; ++v)
+            spin(find(page, "panelDecimals"), v)
+        compare(page.undoStack.length, 1, "five steps, one run")
+        compare(page.doc.pages[0].cells[0].options.decimals, 5)
+        page.undo()
+        compare(storedText(page), start, "one Undo back to the start")
+        compare(page.selected, 0, "the panel stays on its cell")
+
+        spin(find(page, "panelDecimals"), 1)
+        page.select(1)
+        spin(find(page, "panelDecimals"), 1)
+        page.select(0)
+        spin(find(page, "panelDecimals"), 2)
+        compare(page.undoStack.length, 3, "a step on another cell between them")
+
+        page.stopEditing()
+        page.startEditing()
+        page.select(0)
+        // From 3: the cell's decimals are 2 here, and a run back to them leaves nothing
+        for (let v = 3; v <= 7; ++v) {
+            if (v === 5)
+                page.lastAt -= page.groupMs + 1
+            spin(find(page, "panelDecimals"), v)
+        }
+        compare(page.undoStack.length, 2, "quiet past the group's time")
+
+        page.stopEditing()
+        page.startEditing()
+        page.select(0)
+        type(find(page, "panelFrom"), "100")
+        type(find(page, "panelFrom"), "200")
+        compare(page.undoStack.length, 2, "a typed field commits once each time")
+    }
+
+    // A run back where it began leaves no step, since its Undo would change nothing
+    function test_aRunThatEndsWhereItBeganLeavesNothing() {
+        const a = cellOf("A")
+        a.options.decimals = 2
+        const page = storedPageOf({}, docOf([a, cellOf("B")]))
+        page.startEditing()
+        page.select(0)
+        spin(find(page, "panelDecimals"), 3)
+        verify(page.canUndo)
+        spin(find(page, "panelDecimals"), 2)
+        verify(!page.canUndo, "back where it began")
+        spin(find(page, "panelDecimals"), 3)
+        compare(page.undoStack.length, 1, "a later step starts a run of its own")
+    }
+
+    // Standing up changes the span and the option in one write: one Undo
+    function test_standingUpIsOneStep() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        press(find(page, "dashCell_0_2"))
+        const start = storedText(page)
+        click(page, "panelVertical")
+        const c = page.doc.pages[0].cells[2]
+        compare([c.w, c.h, c.options.vertical], [1, 4, true])
+        compare(page.undoStack.length, 1)
+        compare(page.undoWords, "changed C's standing up")
+        page.undo()
+        compare(storedText(page), start, "the span and the option both back")
+    }
+
+    // Done ends the history; a change from the menu outside edit mode is
+    // a step, which Edit then Undo takes back
+    function test_doneEndsTheHistory() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.removeCell(0)
+        page.removeCell(0)
+        page.undo()
+        verify(page.canUndo && page.canRedo)
+        click(page, "dashDone")
+        verify(!page.canUndo && !page.canRedo, "Done empties both")
+        compare(page.undoLine, "", "and the line")
+
+        page.select(0)
+        click(page, "panelLater")
+        compare(labels(page), ["C", "B", "T"])
+        click(page, "panelClose")
+        click(page, "dashEdit")
+        click(page, "dashUndo")
+        compare(labels(page), ["B", "C", "T"], "the menu's step undone after Edit")
+    }
+
+    function test_theHistoryKeepsFifty() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        for (let i = 1; i <= 51; ++i)
+            page.renamePage("N" + i)
+        compare(page.undoStack.length, page.undoLimit)
+        for (let i = 0; i < 50; ++i)
+            page.undo()
+        compare(page.doc.pages[0].name, "N1", "back to the first rename, not before it")
+        verify(!page.canUndo)
+    }
+
+    // On a fresh install nothing is stored: undoing the first change stores
+    // nothing again, so a later version's built-in layout still reaches it
+    function test_undoingTheFirstChangeStoresNothing() {
+        const page = pageOf({})
+        compare(storedText(page), "")
+        const builtIn = DashboardBook.serialize(page.doc)
+        page.startEditing()
+        page.removeCell(0)
+        verify(storedText(page) !== "")
+        page.undo()
+        compare(storedText(page), "", "nothing stored")
+        compare(DashboardBook.serialize(page.doc), builtIn, "the built-in layout shows")
+        page.redo()
+        compare(storedText(page), DashboardBook.serialize(page.doc), "the change stored again")
+    }
+
+    // The cell panel follows its cell through an undo, and closes rather
+    // than show another cell at its old index
+    function test_theSelectionFollowsAnUndo() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.select(1)
+        page.resize(3, 4)
+        page.undo()
+        compare([page.panel, page.selected], ["cell", 1], "an undone resize keeps the panel")
+
+        page.select(0)
+        page.moveTo(2)
+        compare(page.selected, 2)
+        page.undo()
+        compare([page.panel, page.selected], ["cell", 0], "an undone move follows its cell")
+        page.redo()
+        compare([page.panel, page.selected], ["cell", 2], "and a redone one")
+
+        page.select(2)
+        page.removeCell(0)
+        compare(page.selected, 1)
+        page.undo()
+        compare([page.panel, page.selected], ["", -1], "an undone Remove of another cell closes it")
+
+        page.startAdd()
+        page.pickKind("blank")
+        compare(page.panel, "cell")
+        page.undo()
+        compare([page.panel, page.selected], ["", -1], "an undone Add closes it")
+
+        page.startAdd()
+        page.undo()
+        compare(page.panel, "", "an undo closes Add's panel")
+    }
+
+    // Outside edit mode a step shows the line with Undo, which a press
+    // takes; it hides after its time. In edit mode only an undo or a redo
+    // shows it, with the keys on the desktop
+    function test_theLineOutsideEditMode() {
+        const page = storedPageOf({ undoLineMs: 300 }, twoPages())
+        const line = find(page, "dashUndoLine")
+        page.select(0)
+        click(page, "panelLater")
+        verify(line.visible)
+        compare(find(page, "dashUndoLineText").text, "Moved A")
+        verify(!find(page, "dashUndoLineKeys").visible, "no keys outside edit mode")
+        compare(find(page, "dashUndoLineUndo").Accessible.name, "Undo: moved A")
+        click(page, "dashUndoLineUndo")
+        compare(labels(page), ["A", "B", "C", "T"])
+        compare(find(page, "dashUndoLineText").text, "Undid: moved A")
+        tryVerify(() => !line.visible, 3000, "the line hides after its time")
+
+        page.startEditing()
+        page.removeCell(0)
+        verify(!line.visible, "a step in edit mode shows none")
+        click(page, "dashUndo")
+        verify(line.visible)
+        verify(!find(page, "dashUndoLineUndo").visible, "the bar has Undo")
+        const keys = find(page, "dashUndoLineKeys")
+        verify(keys.visible && keys.text.indexOf("Z") >= 0, "the keys: " + keys.text)
+    }
+
+    // Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y on the desktop form, in edit mode or
+    // out of it; never on the phone form or in a field with the focus
+    function test_theKeys() {
+        const page = storedPageOf({}, twoPages())
+        page.forceActiveFocus()
+        page.startEditing()
+        page.removeCell(0)
+        keyClick("z", Qt.ControlModifier)
+        compare(labels(page), ["A", "B", "C", "T"], "Ctrl+Z")
+        keyClick("z", Qt.ControlModifier | Qt.ShiftModifier)
+        compare(labels(page), ["B", "C", "T"], "Ctrl+Shift+Z")
+        keyClick("z", Qt.ControlModifier)
+        keyClick("y", Qt.ControlModifier)
+        compare(labels(page), ["B", "C", "T"], "Ctrl+Y")
+        page.stopEditing()
+
+        page.select(0)
+        page.moveTo(1)
+        page.closePanel()
+        keyClick("z", Qt.ControlModifier)
+        compare(labels(page), ["B", "C", "T"], "outside edit mode")
+
+        page.startEditing()
+        page.removeCell(0)
+        page.select(0)
+        const field = find(page, "panelLabel")
+        field.forceActiveFocus()
+        verify(page.typing)
+        keyClick("z", Qt.ControlModifier)
+        compare(labels(page), ["C", "T"], "the field keeps its own")
+        field.focus = false
+        page.stopEditing()
+
+        const phone = storedPageOf({ form: "phone", width: 384, height: 832 }, twoPages())
+        page.visible = false
+        phone.forceActiveFocus()
+        phone.removeCell(0)
+        verify(phone.canUndo)
+        keyClick("z", Qt.ControlModifier)
+        compare(labels(phone), ["B", "C", "T"], "no keys on the phone form")
+    }
+
+    // The bar: Undo, Redo, Add, Page and Done; Undo and Redo shown but off
+    // with nothing to take, named for their step; "Add" on a narrow page
+    function test_theBarsOrder() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        const bar = find(page, "dashEditBar")
+        compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").map(c => c.objectName),
+                ["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone"])
+        const undo = find(page, "dashUndo")
+        const redo = find(page, "dashRedo")
+        verify(undo.visible && !undo.enabled && redo.visible && !redo.enabled, "shown and off")
+        compare(redo.opacity, 0.45)
+        compare(undo.Accessible.name, "Undo")
+        page.removeCell(0)
+        compare(undo.Accessible.name, "Undo: removed A")
+        click(page, "dashUndo")
+        compare(redo.Accessible.name, "Redo: removed A")
+        compare(find(page, "dashAdd").text, "Add gauge")
+
+        const narrow = storedPageOf({ form: "phone", width: 384, height: 832 }, twoPages())
+        narrow.startEditing()
+        const add = find(narrow, "dashAdd")
+        compare(add.text, "Add")
+        compare(add.Accessible.name, "Add a gauge")
+    }
+
+    // Paste is the "+" cell's second half while a copy exists, and appends
+    function test_pasteIsInThePlusCell() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        verify(!findChild(page, "dashPaste"), "not on the bar")
+        const box = find(page, "dashAddCellBox_0")
+        const plus = find(page, "dashAddCell_0")
+        const paste = find(page, "dashPasteCell_0")
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(!paste.visible, "nothing copied")
+        compare(plus.width, box.width, "the + fills the cell")
+        page.select(0)
+        page.copySelected()
+        page.closePanel()
+        verify(paste.visible && paste.enabled)
+        verify(plus.width < box.width && paste.x >= plus.width, "split in two")
+        click(page, "dashPasteCell_0")
+        compare(labels(page), ["A", "B", "C", "T", "A"], "appended")
+        compare(page.undoWords, "pasted A")
     }
 }
