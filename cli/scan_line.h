@@ -181,10 +181,9 @@ inline bool scans_any(const ecuio_channel_support_t* s, uint32_t count)
 }
 
 // --until-scanned: every channel with a scan has completed it, each DID
-// found or refused (one that went unanswered waits for a rescan, so a
-// sweep caps the wait with --seconds). False while none has one: a
-// session that scans nothing has nothing to wait for, which the caller
-// says apart.
+// found or refused (an unanswered one waits for a rescan, so --seconds
+// caps the wait). False while no channel has a scan: a session that
+// scans nothing has nothing to wait for, which the caller says apart.
 inline bool scans_complete(const ecuio_channel_support_t* s, uint32_t count)
 {
     bool any = false;
