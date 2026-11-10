@@ -355,11 +355,12 @@ int ended(Output& out, int code)
     return out.ok() ? code : kExitFailed;
 }
 
-// export's cancel (ecuio_export_with), its column check's and import's
-// (ecuio_import_with): Ctrl+C or SIGTERM stops it, and core removes what
-// it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the run's
-// first ask that long, an import's too, naming whose it is on stderr, so
-// a test's interrupt lands there
+// export's cancel (ecuio_export_with), its column check's, import's
+// (ecuio_import_with) and a recording's health report's
+// (ecuio_health_export_with): Ctrl+C or SIGTERM stops it, and core removes
+// what it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the
+// run's first ask that long, naming whose it is on stderr, so a test's
+// interrupt lands there
 int interrupted_at(bool* asked, const char* where)
 {
     if (!*asked) {
@@ -388,15 +389,20 @@ int import_interrupted(void* user)
     return interrupted_at(static_cast<bool*>(user), "import");
 }
 
+int health_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "health report");
+}
+
 // The column check's open (ecuio_open_progress_t) asks as the export does
 int open_interrupted(uint64_t, uint64_t, void* user)
 {
     return interrupted_at(static_cast<bool*>(user), "column check");
 }
 
-// An export, its sizing or an import stopped by an interrupt: the end
-// line the other commands write on one, and exit 1, as clear's, since
-// nothing was written
+// An export, its sizing, an import or a recording's health report stopped
+// by an interrupt: the end line the other commands write on one, and
+// exit 1, as clear's, since nothing was written
 int ended_interrupted(Output& out)
 {
     char buf[64];
@@ -3200,15 +3206,22 @@ int write_health_result(Output& out, const cli::HealthArgs& a,
     return ended(out, kExitOk);
 }
 
-// A recording's report: core reads the folder, the CLI gives the time
+// A recording's report: core reads the folder, the CLI gives the time; a
+// Ctrl+C stops the read at core's next ask, nothing written
 int run_health_recording(cli::HealthArgs& a)
 {
     Output out;
+    install_handlers();
     write_start(out);
     a.options.utc_us = utc_now_us();
     a.options.latest_model_year = latest_model_year();
     ecuio_health_report_t r{};
-    const ecuio_status_t rc = ecuio_health_export(&a.options, &r);
+    bool asked = false;
+    const ecuio_status_t rc =
+        ecuio_health_export_with(&a.options, health_interrupted, &asked, &r);
+    if (rc == ECUIO_ERR_CANCELED) {
+        return ended_interrupted(out);
+    }
     return write_health_result(out, a, rc, r, true);
 }
 

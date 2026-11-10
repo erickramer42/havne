@@ -1735,3 +1735,10 @@ Ctrl+C with the interrupted end line and exit 1. Python's `import_csv`
 and `import_candump` take `cancel=`, and a Ctrl+C on the main thread
 stops core at its next ask and is raised again as `KeyboardInterrupt`.
 `ecuio_import_csv_guess` takes no cancel: it reads at most 1.25 MiB.
+
+*Note of 2026-11-10:* `havne-cli health` over a recording stops the same
+way: the handlers go in before the read, `ecuio_health_export_with` asks
+the interrupt, and a stop is the interrupted end line and exit 1 with
+nothing at the path. `HAVNE_CLI_EXPORT_HOLD_MS` names its first ask the
+health report's. A session's report already ended on Ctrl+C through its
+wait.

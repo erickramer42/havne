@@ -41,10 +41,11 @@
 # refused until --time-unit gives one, and a file with no header is
 # refused, each exit 3 with words and nothing made. interrupt: an
 # export to pcapng, a folder copy, a CSV's sizing, a wide CSV and its
-# sizing during their named columns' check, and an import of a candump
-# log and of a CSV, each held at its first ask (HAVNE_CLI_EXPORT_HOLD_MS,
-# which names that ask on stderr: the wide CSVs' must be the check's, an
-# import's the import's) and stopped by Ctrl+Break or SIGINT once held,
+# sizing during their named columns' check, an import of a candump log
+# and of a CSV, and a recording's health report, each held at its first
+# ask (HAVNE_CLI_EXPORT_HOLD_MS, which names that ask on stderr: the wide
+# CSVs' must be the check's, an import's the import's, the report's the
+# health report's) and stopped by Ctrl+Break or SIGINT once held,
 # end within a few seconds with an interrupted end line and exit 1,
 # nothing at the file or folder named and no partial beside it; exit 77
 # where there's no console to send the event through.
@@ -717,8 +718,8 @@ HELD_WAIT_S = 30
 
 def interrupted(cli, args, where):
     """args run held at the first ask, which must be where's (b"export",
-    b"column check" or b"import"), then interrupted: None, a failure's
-    words, or "skip" with no console"""
+    b"column check", b"import" or b"health report"), then interrupted:
+    None, a failure's words, or "skip" with no console"""
     env = dict(os.environ)
     env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
     kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
@@ -759,7 +760,8 @@ def interrupted(cli, args, where):
             lines[-1] != {"type": "end", "reason": "interrupted"}:
         return (f"exit {p.returncode}, lines {lines}, "
                 f"{err.decode('utf-8', 'replace')}")
-    if any(l["type"] in ("exported", "estimate", "imported", "error")
+    if any(l["type"] in ("exported", "estimate", "imported", "health",
+                         "health_failed", "error")
            for l in lines):
         return f"an interrupted run says more than its end: {lines}"
     print(f"ok    {case_name(args)}: interrupted, ended {took:.2f} s after it")
@@ -767,9 +769,9 @@ def interrupted(cli, args, where):
 
 
 def case_name(args):
-    """An export's options, or the import's kind"""
-    return " ".join(args[args.index("--format"):]) if "--format" in args \
-        else " ".join(args[:2])
+    """The command and its options, or the import's kind"""
+    return args[0] + " " + " ".join(args[args.index("--format"):]) \
+        if "--format" in args else " ".join(args[:2])
 
 
 def interrupt(cli, recording):
@@ -803,6 +805,9 @@ def interrupt(cli, recording):
              os.path.join(root, "out.csv"), b"column check"),
             (["export", recording, "--format", "csv", "--estimate",
               "--signal", "Engine RPM"], None, b"column check"),
+            (["health", recording, os.path.join(root, "report.json"),
+              "--format", "json"], os.path.join(root, "report.json"),
+             b"health report"),
         ]
         failed = 0
         for args, made, where in cases:
@@ -818,8 +823,8 @@ def interrupt(cli, recording):
                 failed += 1
     if failed:
         return 1
-    print("ok    an interrupt stops an export, its sizing and an import, "
-          "leaving nothing")
+    print("ok    an interrupt stops an export, its sizing, an import and a "
+          "recording's health report, leaving nothing")
     return 0
 
 
