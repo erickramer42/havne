@@ -254,6 +254,7 @@ Page {
     property real driveInsetTop: 0
     property real driveInsetBottom: 0
     property string driveLogTime: ""
+    property string driveLogSize: ""   // "" until the header shows one
     // The window made full screen; a test's stand-in keeps it off the desktop
     property var driveWindow: Window.window
 
@@ -1689,7 +1690,7 @@ Page {
             Label {
                 objectName: "driveStatusDetail"
                 readonly property string detail:
-                    Bridge.logActive ? qsTr("%1 MB").arg((Bridge.logBytes / (1024 * 1024)).toFixed(1))
+                    Bridge.logActive ? root.driveLogSize
                   : !Bridge.recordingActive || Bridge.markCount === 0 ? ""
                   : Bridge.markCount === 1 ? qsTr("1 mark")
                   : qsTr("%1 marks").arg(Bridge.markCount)

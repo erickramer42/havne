@@ -299,7 +299,12 @@ TestCase {
         compare(find(s.dash, "driveStatusRun").text, qsTr("Log"))
         verify(find(s.dash, "driveStatusTime").visible, "the elapsed time")
         compare(find(s.dash, "driveStatusTime").text, s.main.logTimeText(Bridge.logElapsedMs))
-        verify(find(s.dash, "driveStatusDetail").text.endsWith(" MB"), "and the size")
+        // The size as the header gives it, none under 0.1 MB
+        const detail = find(s.dash, "driveStatusDetail")
+        compare(detail.detail, s.main.logSizeText(Bridge.logBytes))
+        compare(detail.visible, detail.detail !== "")
+        compare(s.main.logSizeText(104857), "", "none under 0.1 MB")
+        compare(s.main.logSizeText(104858), "0.1 MB")
         Bridge.stopLog()
         tryCompare(Bridge, "logActive", false, 5000)
     }

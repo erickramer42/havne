@@ -197,10 +197,14 @@ ApplicationWindow {
     readonly property bool logReadoutOneLine: headerRow.width >= 560
     function logReadoutText(ms, bytes, oneLine) {
         const time = logTimeText(ms)
-        if (!(bytes >= logSizeShownBytes))
+        const size = logSizeText(bytes)
+        if (size === "")
             return time
-        const size = qsTr("%1 MB").arg((bytes / (1024 * 1024)).toFixed(1))
         return oneLine ? qsTr("%1 · %2").arg(time).arg(size) : time + "\n" + size
+    }
+    // The log's size from 0.1 MB on, "" under it; the drive view's line too
+    function logSizeText(bytes) {
+        return bytes >= logSizeShownBytes ? qsTr("%1 MB").arg((bytes / (1024 * 1024)).toFixed(1)) : ""
     }
     // After Stop log the log opens in the viewer (ADR-0056 section 1); a
     // log the session's end or a failed write closed leaves the page as
@@ -642,6 +646,7 @@ ApplicationWindow {
                         driveInsetTop: zoomRoot.insetTop
                         driveInsetBottom: zoomRoot.insetBottom
                         driveLogTime: root.logTimeText(Bridge.logElapsedMs)
+                        driveLogSize: root.logSizeText(Bridge.logBytes)
                     }
                     LiveViewPage {
                         objectName: "livePage"
