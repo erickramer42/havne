@@ -118,12 +118,12 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.7.0, the dashboard and the UI, is the latest release. Next:
+v0.7.1, a more modern look, phone first, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.1 | A more modern look, phone first: Night, the new look, the phone's tabs, panel and drive view, the viewer's Export |
-| v0.7.2-v0.10.0 | The Dashboard and signals finished; the analysis viewer; triggered logging and alerts; discovery of every module; the scan tool |
+| v0.7.2 | The Dashboard and signals finished: the desktop's panel, undo, a Daylight look, gauge ranges from signal files, a short user guide |
+| v0.7.3-v0.10.0 | The analysis viewer; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.

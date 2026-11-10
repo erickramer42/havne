@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-08, **Version:** v0.7.0,
+**Updated:** 2026-11-10, **Version:** v0.7.1,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,8 +14,11 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.7.0, the dashboard and the UI, is
-out** (its section below). The Dashboard is built by hand
+**Current phase: v0.7.1, a more modern look, phone first, is
+out** (its section below): Night as its own control, the S2 look, the
+phone's five tabs, joined panel and drive view, the viewer's Export, the
+log's minimum time between sweeps and reads in the extended session.
+v0.7.0, the dashboard and the UI, is out: the Dashboard is built by hand
 from eight kinds of gauge and saved per phone and desktop, with Night
 off, on or scheduled in an amber or a red style; Settings is a list of
 pages; an analysis log
@@ -456,7 +459,7 @@ background too ([roadmap](#roadmap)).
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
   without tshark installed), plus the
-  cross-arch subset (102/102); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (103/103); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
@@ -590,7 +593,7 @@ an issue is resolved it is removed, and its number is not reused.
 | Version | Scope | Status |
 |---|---|---|
 | v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | Released |
-| v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | In progress |
+| v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
 | v0.7.2-v0.10.0 | v0.7.2, finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Daylight look, a signal file's dial range and warning levels. v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, Live's pause. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
