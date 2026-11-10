@@ -663,3 +663,62 @@ the simulated ECU or a committed synthetic recording, never a car.
   N_Bs timeout and the sim's reset on a timed-out reply (2); the
   scan's completion, its ECUs' prefixes and reply IDs, the probe, the
   vcan refusal and both stops (8).
+
+## Appendix: exports and the health report from Python (2026-11-10)
+
+Section 5's reach grows by what `havne-cli export` and `health` do
+([ADR-0054](0054-exports-and-imports.md)), over the calls `_ecuio.py`
+already declares. Nothing in core changes.
+
+- **A function for each format, as import has:** `export_pcapng`,
+  `export_csv` and `export_folder` take a recording's folder and the file
+  (or folder) to write, and return an `Exported`: the path, the format,
+  whether it's scrubbed, core's counts, and what a scrubbed export left
+  out by class (`LeftOut`, under `havne-cli`'s words). The file is the
+  one `havne-cli export` writes for the same options, byte for byte.
+  Core's export reads the folder itself, so these are not `Recording`
+  methods; `Recording.folder` hands an open reader's folder on.
+- **Scrubbed unless asked:** `raw=True` is ADR-0054 section 1's
+  explicit choice; nothing else writes a recording as it is.
+- **The range is host_us:** `from_us` and `to_us`, both included, as
+  the reader's calls take them, so a threshold's crossing or a marker's
+  time goes straight in; `to_us=None` is the recording's end, and `0` is
+  refused rather than read as the end. `havne-cli` takes seconds.
+- **The CSV's shape** ([ADR-0056](0056-analysis-log.md) sections 4 and
+  5): `layout` (`"wide"` or `"long"`), `signals` (the columns by name,
+  in order; none takes the recording's focus, else every number
+  signal), `row_ms` (0 for one row per sweep, else a grid) and `units`.
+  A named signal the recording has no values for is an empty column, as
+  in core, and `Exported.missing` names it: the reader's open finds it
+  before the export, as `havne-cli` does, under the same cancel.
+- **The sizing** is `estimate_csv`, with `export_csv`'s keywords and
+  one to 64 row intervals in a pass: an `Estimate` of the columns and,
+  for each interval, the rows and the file's exact bytes.
+- **The health report:** `health_report(folder, out, format)` for a
+  recording, with the exports' range, `units` and the vehicle's
+  `baseline`; `Session.health_report(out, format)` for a connected
+  session, as it stands, with no wait (the app's rule;
+  `Session.reports_settled()` tells a script's own loop when the
+  diagnostics and identification are in). A session's key values are
+  the newest number or enumeration value the script has read from each
+  of its values streams, aged from that read, or the caller's own
+  through `values=`; a session nothing was read from has none, and the
+  report says so. The report's time and the latest model year default to
+  the clock's and can be given, so the same inputs give the same bytes.
+- **Refusals:** core's are `havne.Error`, as everywhere. A failed scrub
+  check is `havne.CheckFailed`, an `Error` whose `failed_class` is the
+  class's word, never the value. A wrong argument is a `ValueError` or
+  `TypeError` before core is called.
+- **The cancel** is the imports': `cancel=` on each export, the sizing
+  and a recording's report; an exception it raises, or a Ctrl+C on the
+  main thread, stops core at its next ask and is raised again once core
+  has removed what it had begun. A session's report takes none, since
+  core never asks during one. The cancel and the handler cover the
+  reader's open that finds missing columns too (`_asks.py`).
+- **Not wrapped:** `ecuio_scrub_frames` (frames in memory), through
+  `havne.c`. No option replaces a file that exists: core refuses it,
+  and so does the package.
+- **Tests:** `PythonTest.test_export` and `PythonTest.test_health`:
+  each export, the sizing and a recording's report against
+  `havne-cli`'s own file, byte for byte, and its line's counts; the
+  cancel's cases as the imports'; each refusal; a replay session's report.

@@ -1742,3 +1742,8 @@ the interrupt, and a stop is the interrupted end line and exit 1 with
 nothing at the path. `HAVNE_CLI_EXPORT_HOLD_MS` names its first ask the
 health report's. A session's report already ended on Ctrl+C through its
 wait.
+
+*Note of 2026-11-10:* Python wraps the exports, the sizing and the
+health report, each with the imports' `cancel=` and Ctrl+C
+([ADR-0053](0053-python-bindings.md)'s appendix "exports and the health
+report from Python").

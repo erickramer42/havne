@@ -30,6 +30,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   Remove, which asks before it removes the gauge.
 - Dashboard: a gauge whose value has stopped updating says "no new data"
   beside its dimmed value.
+- Python: `havne.export_pcapng`, `export_csv`, `export_folder`,
+  `estimate_csv` and `health_report` write what `havne-cli export` and
+  `health` write, and `Session.health_report` writes a connected car's
+  report. Each long call stops on `cancel=` or Ctrl+C with nothing left
+  behind.
 
 ### Changed
 
