@@ -544,8 +544,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   below that a tab bar of five (Dash, Live, Codes, Recs, Settings): the
   Log opens from the status in the top bar. On a phone, Android's Back
   takes one route across the pages ([ADR-0059](adr/0059-drive-view.md)).
-- **`Theme`** resolves one of three palettes (`dark`, `nightAmber`,
-  `nightRed`) from three kept controls: the look, Night (off, on or
+- **`Theme`** resolves one of four palettes (the looks `dark` and
+  `daylight`, and `nightAmber` and `nightRed`) from three kept controls: the look, Night (off, on or
   scheduled) and its style ([ADR-0058](adr/0058-night-mode.md)). It
   holds the gauges' color roles, the chart's series colors, the type
   (Barlow, and Barlow Semi Condensed for readings), the monospace family

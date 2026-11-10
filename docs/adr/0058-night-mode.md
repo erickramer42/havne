@@ -561,3 +561,21 @@ Amber and 2.0:1 in Red.
   title row's spare width in section 6; and the remark that the searched
   trace sets read olive or muddy, a judgment of the hex values, not a
   phone check. Neither estimate changes a number a test asserts.
+
+## Appendix: Daylight, the second look (2026-11-10)
+
+Decision 3's condition is met: `lookNames` holds Dark and Daylight, so
+Settings' Display page shows a Look row (Dark, Daylight) above Night, and
+the list's Display row names the look when it isn't Dark. Daylight is
+"Paper": near-black text (`#141416`) on an off-white page (`#f3f3f1`)
+with white panels; the warning is a dark amber (`#8c5a00`), since no
+yellow reaches 4.5:1 on white, and the trace palette keeps Dark's ten hue
+families, deepened to 4.1:1 or more on the page. Night wins over either
+look; nothing in the schedule, the switch or the stored keys changes.
+`Theme.nightPalettes` names the night palettes, which the night-only rules
+(warm hues, no trace brighter than the text, the label on a primary fill)
+key on. Every palette also holds success and info at 4.5:1 on a panel,
+and the dim text at 4.5:1 on a secondary fill. The platform window
+follows the look: the color scheme is Light under a background lighter
+than half (Windows 10's title bar, which refuses a caption color, takes
+it), and Android's status and navigation icons turn dark.
