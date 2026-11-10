@@ -324,6 +324,72 @@ int main(void)
             return 1;
         }
     }
+    {
+        /* A gauge read from C: a def with one, a def without, a NULL def;
+         * then a packed plugin's requires.core, its patch past a byte */
+        static const char kGauged[] =
+            "{\"havne_signals\":1,\"name\":\"C gauges\","
+            "\"source\":{\"name\":\"Havne's tests\"},"
+            "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],\"signals\":["
+            "{\"key\":\"volts\",\"name\":\"Module Volts\","
+            "\"read\":{\"service\":\"01\",\"number\":\"42\"},"
+            "\"field\":{\"byte\":0,\"bits\":16},\"scale\":0.001,\"unit\":\"V\","
+            "\"gauge\":{\"min\":10,\"max\":16,\"warn_low\":11.5,"
+            "\"warn_high\":15.25}},"
+            "{\"key\":\"load\",\"name\":\"Load Share\","
+            "\"read\":{\"service\":\"01\",\"number\":\"04\"},"
+            "\"field\":{\"byte\":0,\"bits\":8},\"unit\":\"%\"}]}";
+        static const char kPacked[] =
+            "{\"havne_plugin\":1,\"id\":\"c-abi\",\"name\":\"C ABI\","
+            "\"version\":\"1.0.0\",\"requires\":{\"core\":\"0.5.258\"},"
+            "\"source\":{\"name\":\"Havne's tests\"},\"tiers\":[\"data\"],"
+            "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],"
+            "\"variants\":[{\"id\":\"base\",\"files\":[\"a.json\"]}],"
+            "\"files\":{\"a.json\":{\"havne_signals\":1,\"signals\":["
+            "{\"key\":\"rpm\",\"name\":\"Engine Speed\",\"ecu\":\"pcm\","
+            "\"read\":{\"service\":\"22\",\"number\":\"F40C\"},"
+            "\"field\":{\"byte\":0,\"bits\":16},\"unit\":\"rpm\"}]}}}";
+        ecuio_signal_file_t* file = NULL;
+        ecuio_plugin_t* plugin = NULL;
+        const ecuio_signal_gauge_t* gauge = NULL;
+        const ecuio_signal_def_t* volts = NULL;
+        const ecuio_signal_def_t* load = NULL;
+        uint16_t major = 1;
+        uint16_t minor = 1;
+        uint16_t patch = 1;
+        if (ecuio_signal_file_load(kGauged, sizeof kGauged - 1, &file) !=
+            ECUIO_OK) {
+            return 1;
+        }
+        volts = ecuio_signal_file_find(file, "volts");
+        load = ecuio_signal_file_find(file, "load");
+        gauge = ecuio_signal_file_gauge(file, volts);
+        if (volts == NULL || load == NULL || gauge == NULL ||
+            gauge->min != 10.0 || gauge->max != 16.0 ||
+            gauge->warn_low != 11.5 || gauge->warn_high != 15.25 ||
+            gauge->flags != (ECUIO_GAUGE_WARN_LOW | ECUIO_GAUGE_WARN_HIGH) ||
+            gauge->reserved[0] != 0u || gauge->reserved[1] != 0u ||
+            gauge->reserved[2] != 0u ||
+            ecuio_signal_file_gauge(file, load) != NULL ||
+            ecuio_signal_file_gauge(file, NULL) != NULL) {
+            ecuio_signal_file_free(file);
+            return 1;
+        }
+        ecuio_signal_file_free(file);
+        if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,
+                              &plugin) != ECUIO_OK) {
+            return 1;
+        }
+        if (ecuio_plugin_requires_core(plugin, &major, &minor, &patch) !=
+                ECUIO_OK ||
+            major != 0u || minor != 5u || patch != 258u) {
+            ecuio_plugin_free(plugin);
+            return 1;
+        }
+        if (ecuio_plugin_free(plugin) != ECUIO_OK) {
+            return 1;
+        }
+    }
     if (strcmp(ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_DIAGNOSTICS),
                "Diagnostics") != 0) {
         return 1;
