@@ -350,6 +350,13 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?diagnose=no",
         "?pack=",
         "?pack=on",
+        "?gap=",
+        "?gap=-1",
+        "?gap=1001",
+        "?gap=0x5",
+        "?gap=1.5",
+        "?gap=5ms",
+        "?gap= 5",
         /* uds-generic (ADR-0020): its DIDs come from ?did=, which no
          * other profile takes */
         "?did=1E1C",
@@ -401,7 +408,7 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "j2534:// takes no query key 'band', only baud, flags, "
                  "filter, txid, poll, probe, identify, diagnose, pack, scan, "
-                 "profile, did, "
+                 "gap, profile, did, "
                  "session and keepalive_ms");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
@@ -413,12 +420,18 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "?diagnose= needs 0 or 1, not 'yes'");
+    snprintf(uri, sizeof(uri), "j2534://%s?gap=1001", FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?gap= needs a time in ms from 0 to 1000, not '1001'");
 
-    /* Both values are taken, with any profile. */
+    /* Both values are taken, with any profile, and every gap from 0 to
+     * the most. */
     for (const char* q :
          {"?profile=raw&probe=0", "?probe=1", "?probe=0&probe=1",
           "?profile=raw&identify=0", "?identify=1&probe=0",
-          "?profile=raw&diagnose=0", "?diagnose=1"}) {
+          "?profile=raw&diagnose=0", "?diagnose=1", "?gap=0", "?gap=1000",
+          "?profile=raw&gap=20"}) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
         EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << "query: " << q;
     }

@@ -695,6 +695,98 @@ TEST(RequestEngineTest, UnsentRequestLeavesNothingOutstanding) {
     EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_GAP_US), 1);
 }
 
+/* The floor runs from the write's start, which the driver gives: a
+ * write that took 3 ms doesn't add them to the floor. The wait still
+ * runs from the write's return. */
+TEST(RequestEngineTest, TheFloorRunsFromTheWritesStart)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+    ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 1 * kMs), true, 4 * kMs,
+                      1 * kMs);
+    EXPECT_FALSE(ecuio_engine_expire(&e, 0, 4 * kMs + ECUIO_ENGINE_WAIT_US - 1))
+        << "the wait runs from the return";
+    const uint8_t reply[4] = {0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply, 4, 8 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 1 * kMs + ECUIO_ENGINE_GAP_US - 1), -1);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 1 * kMs + ECUIO_ENGINE_GAP_US), 1)
+        << "the floor ran from the return";
+}
+
+/* With no start given, or one after the return, the floor runs from the
+ * return. */
+TEST(RequestEngineTest, WithoutAStartTheFloorRunsFromTheReturn)
+{
+    for (const int64_t start : {int64_t{-1}, int64_t{9 * kMs}}) {
+        SCOPED_TRACE(start);
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+        ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 0), false, 4 * kMs,
+                          start);
+        EXPECT_EQ(ecuio_engine_due(&e, 0, 4 * kMs + ECUIO_ENGINE_GAP_US - 1),
+                  -1);
+        EXPECT_EQ(ecuio_engine_due(&e, 0, 4 * kMs + ECUIO_ENGINE_GAP_US), 1);
+    }
+}
+
+/* The driver's floor (?gap=) replaces the default: 5 ms, and 0, where
+ * the next request is due as soon as the reply is in. */
+TEST(RequestEngineTest, TheDriversGapIsTheFloor)
+{
+    for (const int64_t gap : {int64_t{5 * kMs}, int64_t{0}}) {
+        SCOPED_TRACE(gap);
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+        e.gap_us = gap;
+        ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 0), true, 0, 0);
+        EXPECT_EQ(ecuio_engine_due(&e, 0, gap), -1) << "one outstanding";
+        const uint8_t reply[4] = {0x41, 0x0C, 0x1F, 0x40};
+        ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply, 4, 0, nullptr),
+                  ecuio_reply::positive);
+        if (gap > 0) {
+            EXPECT_EQ(ecuio_engine_due(&e, 0, gap - 1), -1);
+            EXPECT_EQ(ecuio_engine_next_event_us(&e, gap - 1 * kMs), 1 * kMs);
+        }
+        EXPECT_EQ(ecuio_engine_due(&e, 0, gap), 1);
+    }
+}
+
+/* A reply may come while a request is out, or after its wait ended until
+ * a positive reply puts the channel back in step; otherwise none can, on
+ * any channel. */
+TEST(RequestEngineTest, AReplyIsAwaitedWhileOutAndOutOfStep)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 2);
+    const uint8_t a[2] = {0x01, 0x0C}, b[2] = {0x01, 0x0D};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, a, 2), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 1, b, 2), ecuio_engine_add_result::added);
+    EXPECT_FALSE(ecuio_engine_awaiting(&e)) << "nothing asked yet";
+
+    ecuio_engine_sent(&e, 1, ecuio_engine_due(&e, 1, 0), true, 0, 0);
+    EXPECT_TRUE(ecuio_engine_awaiting(&e)) << "channel 1's request is out";
+    const uint8_t reply_b[3] = {0x41, 0x0D, 0x32};
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 1, reply_b, 3, 4 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_FALSE(ecuio_engine_awaiting(&e)) << "every reply in";
+
+    ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 5 * kMs), true, 5 * kMs,
+                      5 * kMs);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, 5 * kMs + ECUIO_ENGINE_WAIT_US));
+    EXPECT_EQ(e.chans[0].outstanding, -1);
+    EXPECT_TRUE(ecuio_engine_awaiting(&e)) << "its reply may come late";
+    const uint8_t reply_a[4] = {0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply_a, 4, 200 * kMs, nullptr),
+              ecuio_reply::none)
+        << "a late reply answers nothing";
+    ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 200 * kMs), true,
+                      200 * kMs, 200 * kMs);
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply_a, 4, 204 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_FALSE(ecuio_engine_awaiting(&e)) << "back in step";
+}
+
 /* The next event is the nearest of every channel's: a wait ending, or
  * an idle channel's floor; a channel with no requests has none. */
 TEST(RequestEngineTest, NextEventIsTheNearestAcrossChannels) {

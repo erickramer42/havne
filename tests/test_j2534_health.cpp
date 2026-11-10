@@ -924,17 +924,17 @@ TEST_F(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
 /* ====================================================================
  * The request engine (ADR-0015): one request outstanding per channel,
  * the next sent when the reply is in, or when the 100 ms wait runs out,
- * and never sooner than the 20 ms floor after the last. The passive
- * drain is here too.
+ * and never sooner than the floor after the last write's start (5 ms
+ * through J2534, or ?gap='s). The passive drain is here too.
  * ==================================================================== */
 
-/* The fake answers at once, so a second of obd2 brings about 50
- * requests, one per floor, against the 10 a fixed 100 ms slot sent. The
- * floor caps it: without one, an instant answer would bring the next
- * request at once. */
+/* The fake answers at once, so a second of obd2 at a 20 ms floor
+ * (?gap=20) brings about 50 requests, one per floor, against the 10 a
+ * fixed 100 ms slot sent. The floor caps it: without one, an instant
+ * answer would bring the next request at once. */
 TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
 {
-    ASSERT_NO_FATAL_FAILURE(start_session(""));
+    ASSERT_NO_FATAL_FAILURE(start_session("?gap=20"));
     ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
 
     const uint32_t n = writes_during(page, 1000);
@@ -947,7 +947,7 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
     EXPECT_EQ(ec, 0u);
 }
 
-/* Two ECUs, each asked at the engine's floor (20 ms send to send), not at
+/* Two ECUs, each asked at a 20 ms floor (?gap=20) send to send, not at
  * two of Windows' 15.6 ms timer steps: the fake answers at once and its
  * empty reads return at once, so the worker's waits set the pace, which
  * end on time only on its high-resolution timer (precise_wait.h). On a
@@ -957,7 +957,8 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
 TEST_F(J2534HealthTest, ATwoEcuSessionAsksAtTheEnginesFloor)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(
-        "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0"));
+        "?profile=uds-generic&did=1E1C,7E9:1E1C&identify=0&diagnose=0"
+        "&gap=20"));
     ASSERT_TRUE(wait_for_frames(6, 2000)) << "replies didn't arrive";
 
     /* Judged by the fake's stamps on its recorded writes, not a count in
@@ -1004,6 +1005,93 @@ TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
         << "replies waited for the read to end";
     EXPECT_EQ(delivered.after_next_write.load(), 0)
         << "replies landed after the next request";
+}
+
+namespace {
+
+/* The median time between the starts of the fake's recorded writes, by
+ * its own stamps, once it holds kWriteDepth of them; 0 if it never does */
+uint32_t median_write_period_us(fake_control::Page* page)
+{
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (fake_control::writes(page) < fake_control::kWriteDepth &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (fake_control::writes(page) < fake_control::kWriteDepth) {
+        return 0;
+    }
+    std::vector<uint32_t> periods;
+    uint32_t last = 0;
+    for (uint32_t i = 0; i < fake_control::kWriteDepth; ++i) {
+        fake_control::Write w{};
+        if (!fake_control::recorded_write(page, i, &w)) {
+            return 0;
+        }
+        if (i > 0) {
+            periods.push_back(w.us - last);
+        }
+        last = w.us;
+    }
+    std::sort(periods.begin(), periods.end());
+    return periods[periods.size() / 2];
+}
+
+} // namespace
+
+/* Without ?gap=, J2534's floor is 5 ms: the fake answers at once, so the
+ * floor sets the pace. 20 ms, the engine's own default, reads about
+ * 21 ms; the ceiling is loose, four times the floor. */
+TEST_F(J2534HealthTest, TheFloorIsFiveMillisecondsWithoutAGap)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        start_session("?profile=raw&filter=0x7E8&poll=0x0C"));
+    const uint32_t median = median_write_period_us(page);
+    RecordProperty("period_median_us", static_cast<int>(median));
+    ASSERT_GT(median, 0u) << "the writes weren't recorded";
+    EXPECT_GE(median, 4500u) << "requests came faster than the floor";
+    EXPECT_LE(median, 20000u) << "the floor isn't 5 ms";
+}
+
+/* ?gap= sets the floor, judged from below; a 40 ms floor timed from the
+ * write's return would read about the same, so that rule is
+ * RequestEngineTest.TheFloorRunsFromTheWritesStart's. */
+TEST_F(J2534HealthTest, TheFloorIsTheGapKeys)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        start_session("?profile=raw&filter=0x7E8&poll=0x0C&gap=40"));
+    const uint32_t median = median_write_period_us(page);
+    RecordProperty("period_median_us", static_cast<int>(median));
+    ASSERT_GT(median, 0u) << "the writes weren't recorded";
+    EXPECT_GE(median, 38500u) << "requests came faster than ?gap=";
+    EXPECT_LE(median, 160000u);
+}
+
+/* Through the VX a read asked to wait under 10 ms holds 10 ms, so a
+ * worker reading out a floor's wait paced every request by the hold. With
+ * every reply in, the worker waits on its own timer and asks the vendor
+ * for nothing: at a 100 ms floor each request takes its write's
+ * indication and its reply, two or three reads, where reading out the
+ * floor took about ten more. Counted by the fake, so load can only lower
+ * the reads. */
+TEST_F(J2534HealthTest, VxTheFloorsWaitReadsNothing)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(
+        start_session("?profile=raw&filter=0x7E8&poll=0x0C&gap=100"));
+    ASSERT_TRUE(wait_for_frames(2, 2000)) << "replies didn't arrive";
+
+    const uint32_t writes_before = fake_control::writes(page);
+    const uint32_t reads_before = fake_control::reads(page);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    const uint32_t writes = fake_control::writes(page) - writes_before;
+    const uint32_t reads = fake_control::reads(page) - reads_before;
+    RecordProperty("writes", static_cast<int>(writes));
+    RecordProperty("reads", static_cast<int>(reads));
+    ASSERT_GE(writes, 5u) << "requests stopped";
+    EXPECT_LE(writes, 11u) << "requests came faster than ?gap=";
+    EXPECT_LE(reads, 4 * writes) << "the worker read out the floor's wait";
 }
 
 namespace {
