@@ -223,7 +223,9 @@ TestCase {
             const child = item.children[i]
             if (!child.visible)
                 continue
-            if (child.down !== undefined && child.checkable !== undefined)
+            // A button, or a ComboBox, which has no checkable
+            if (child.down !== undefined
+                    && (child.checkable !== undefined || child.popup !== undefined))
                 out.push(child)
             buttonsUnder(child, out)
         }
@@ -231,7 +233,7 @@ TestCase {
     }
 
     // Density on a phone (qml.md): every page of Settings at 384 x 832,
-    // 100 %, has buttons a touch's size and nothing past 320 px
+    // 100 %, has buttons and choice boxes a touch's size and nothing past 320 px
     function test_everyPageMeetsAPhonesDensity_data() {
         return [
             { tag: "list", key: "", obj: "settingsListPage" },
@@ -2697,8 +2699,6 @@ TestCase {
         compare(find(page, "uriField").text, uri, "Default at the session's end")
     }
 
-    // While a vendor's open blocks, nothing may rewrite the URI field or
-    // start another connect: the device rows lock like every other control
     // ADR-0056 section 4: the row lists Off and the bridge's choices,
     // shows the bridge's and sets it, and says what it is for
     function test_theMinimumTimeBetweenSweepsIsARowOfChoices() {
@@ -2725,6 +2725,8 @@ TestCase {
         compare(choice.currentIndex, 0)
     }
 
+    // While a vendor's open blocks, nothing may rewrite the URI field or
+    // start another connect: the device rows lock like every other control
     function test_controlsLockWhileAConnectIsInFlight() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")

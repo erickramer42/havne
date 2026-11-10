@@ -69,11 +69,16 @@ ColumnLayout {
     readonly property int units: Bridge.unitSystem
     onUnitsChanged: askSizes()
     onWideCsvChanged: askSizes()
-    onUsePlottedChanged: sizeTimer.restart()
+    onUsePlottedChanged: newColumns()
     onCustomMsChanged: sizeTimer.restart()
     onPlottedNamesChanged: {
         if (usePlotted)
-            sizeTimer.restart()
+            newColumns()
+    }
+    // Other columns: every interval's size goes until the new ones come
+    function newColumns() {
+        sizes = []
+        sizeTimer.restart()
     }
 
     // The panel as it opens
@@ -160,15 +165,14 @@ ColumnLayout {
             columns: wideCsv ? columnNames() : [],
             raw: rawOn
         }, url)
-        if (started) {
-            failed = false
-            note = qsTr("Exporting...")
-        }
+        failed = !started
+        note = started ? qsTr("Exporting...") : qsTr("Not exported: the export couldn't start")
         return started
     }
 
     RecordingExport {
         id: exporter
+        objectName: "exporter"
         onEstimated: result => {
             if (result.ok)
                 panel.sizes = result.sizes

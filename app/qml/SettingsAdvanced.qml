@@ -49,6 +49,10 @@ ColumnLayout {
         ComboBox {
             id: minSweepChoice
             objectName: "minSweepChoice"
+            // A touch's height, as Settings' buttons take (SettingsSubpage's touchMin)
+            implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                     implicitContentHeight + topPadding + bottomPadding,
+                                     implicitIndicatorHeight + topPadding + bottomPadding, Theme.touchTarget)
             Accessible.name: qsTr("Minimum time between a log's sweeps")
             model: Bridge.minSweepChoices.map(ms => ms === 0 ? qsTr("Off") : qsTr("%1 ms").arg(ms))
             currentIndex: Bridge.minSweepChoices.indexOf(Bridge.minSweepMs)
