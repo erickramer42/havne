@@ -2195,8 +2195,11 @@ Page {
                     root.commitTyping()
                     const at = grid.mapFromItem(null, scene.x, scene.y)
                     const b = DashboardBook.place(placed, columns)[i]
-                    grab = Qt.point(at.x - boxLeft(b), at.y - boxTop(b))
                     heldSize = Qt.size(boxWidth(b), boxHeight(b))
+                    // A press on the stretched part lifts the cell under
+                    // the finger at its true size, not past its edge
+                    grab = Qt.point(Math.max(0, Math.min(at.x - boxLeft(b), heldSize.width)),
+                                    Math.max(0, Math.min(at.y - boxTop(b), heldSize.height)))
                     pressedAt = scene
                     finger = scene
                     dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(

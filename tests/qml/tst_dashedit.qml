@@ -999,6 +999,29 @@ TestCase {
         compare(page.selected, data.edit ? 1 : -1, "only edit mode keeps a selection")
     }
 
+    // A cell drawn stretched lifts at its true size with the finger on it:
+    // a lone cell fills its row on the joined panel, and a hold at its
+    // middle is past its true width
+    function test_aStretchedCellLiftsUnderTheFinger() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A")]))
+        const a = find(page, "dashCell_0_0")
+        tryVerify(() => a.width > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
+        const wide = a.width
+        const from = centerOf(page, a)   // where the hold presses
+        hold(page, a)
+        verify(a.width < wide, "the true size while held: " + a.width + " of " + wide)
+        const x = from.x + 4 * Application.styleHints.startDragDistance
+        mouseMove(page, x, from.y, -1, Qt.LeftButton)
+        tryVerify(() => a.carried, 2000, "the cell follows the finger")
+        // Its edges as drawn: a lifted cell is scaled up a little
+        const left = a.mapToItem(page, 0, 0).x
+        const right = a.mapToItem(page, a.width, 0).x
+        verify(x >= left - 0.5 && x <= right + 0.5,
+               "the finger at " + x + " is on the cell, " + left + " to " + right)
+        mouseRelease(page, x, from.y)
+    }
+
     // A press let go before the hold is a tap
     function test_aTapIsNotAHold() {
         const page = pageOf({}, docOf([cellOf("A")]))
