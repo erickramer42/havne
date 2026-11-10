@@ -1398,9 +1398,10 @@ TestCase {
         const settings = find(main.contentItem, "settingsPage")
         const uri = "replay://" + Harness.recordingFixtures + "/no-such-recording?profile=obd2"
         main.replayRecording(uri)
-        tryVerify(() => settings.errorLabel.visible, 10000, "the refusal shows")
+        tryVerify(() => settings.errorLabel.text !== "", 10000, "the refusal arrives")
         verify(!Bridge.connected, "nothing connected")
         compare(main.currentPage, main.settingsPage, "on Settings, not Live")
+        verify(settings.errorLabel.visible, "the refusal shows")
         compare(settings.shownKey, "connection", "the Connection page")
         compare(settings.uriField.text, uri, "the address in the field")
         verify(settings.errorLabel.text !== "", "with its reason")
@@ -1437,11 +1438,28 @@ TestCase {
         main.width = 320
         main.height = 800
         main.font.pixelSize = 16
+        const pill = find(main.contentItem, "linkPill")
+        const word = find(main.contentItem, "linkPillText")
+        const rate = find(main.contentItem, "frameRate")
+        const was = Theme.developerMode
+        Theme.developerMode = true
+        try {
+            verify(waitForPolish(main), "laid out at 100 %")
+            verify(!word.truncated, "at 100 % the word is whole")
+            verify(!rate.visible, "the frame rate gives way in a row this narrow")
+            main.width = 384
+            // The row follows the window a resize event later
+            tryVerify(() => rate.visible, 2000, "and shows at 384")
+            verify(waitForPolish(main), "laid out at 384")
+            verify(rate.x >= word.mapToItem(rate.parent, word.width, 0).x + 8 - 0.5,
+                   "apart from the word")
+            main.width = 320
+        } finally {
+            Theme.developerMode = was
+        }
         Theme.zoom = 2
         verify(waitForPolish(main), "laid out")
         waitForRendering(main.contentItem)
-        const pill = find(main.contentItem, "linkPill")
-        const word = find(main.contentItem, "linkPillText")
         verify(word.width <= pill.width + 0.5, "the word inside the pill")
         verify(word.contentWidth <= word.width + 0.5 || word.truncated, "painted inside its box or elided")
         verify(pill.mapToItem(main.contentItem, pill.width, 0).x <= main.contentItem.width + 0.5,

@@ -443,12 +443,13 @@ ApplicationWindow {
                                     radius: 4
                                     color: pill.tone
                                 }
-                                // With an address the address gives way and the word
-                                // keeps its width; alone, the word elides
+                                // The address gives way first; the word only alone in a
+                                // row under 240 units (a narrow phone at the top zoom)
                                 Label {
                                     objectName: "linkPillText"
                                     Layout.fillWidth: true
-                                    Layout.minimumWidth: pill.address !== "" ? implicitWidth : 0
+                                    Layout.minimumWidth: pill.address !== "" || headerRow.width >= 240
+                                                         ? implicitWidth : 0
                                     Layout.maximumWidth: implicitWidth
                                     elide: Text.ElideRight
                                     font.pixelSize: Theme.fontCaption
@@ -480,10 +481,12 @@ ApplicationWindow {
                         }
 
                         // Developer mode: the window's frames drawn a second, in
-                        // the bar so it covers no page (root.framesPerSecond)
+                        // the bar so it covers no page (root.framesPerSecond); not
+                        // in a row too narrow to hold it beside the pill's word
                         Label {
+                            id: frameRate
                             objectName: "frameRate"
-                            visible: Theme.developerMode
+                            visible: Theme.developerMode && headerRow.width >= 340
                             font.pixelSize: Theme.fontCaption
                             font.features: Theme.valueFeatures
                             color: Theme.textDim

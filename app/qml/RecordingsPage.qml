@@ -771,8 +771,11 @@ Page {
             return qsTr("values alone: the recording has no frames to replay")
         if (row.source === "")
             return qsTr("replays as %1").arg(row.profile)
+        // The address's own profile, or its scheme's default (mock:// is mock)
         const m = /[?&]profile=([^&]*)/.exec(row.source)
-        if (m !== null && decodeURIComponent(m[1]) === row.profile)
+        const own = m !== null ? decodeURIComponent(m[1])
+                  : row.source.toLowerCase().startsWith("mock://") ? "mock" : ""
+        if (own === row.profile)
             return row.source
         return qsTr("%1 · replays as %2").arg(row.source).arg(row.profile)
     }

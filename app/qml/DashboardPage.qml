@@ -1591,15 +1591,21 @@ Page {
         id: linkState
         RowLayout {
             spacing: 10
+            // Under 60 px the label would read "N...n": the dot and the label
+            // fade (opacity, so the layout still holds them) and the header's
+            // pill carries the state alone
             Rectangle {
                 objectName: "linkDot"
                 implicitWidth: 8; implicitHeight: 8   // layout-managed
                 radius: 4
                 color: Theme.linkColor(Bridge.linkState)
+                opacity: linkLabel.opacity
             }
             Label {
+                id: linkLabel
                 objectName: "linkLabel"
                 Layout.fillWidth: true
+                opacity: width >= 60 ? 1 : 0
                 elide: Text.ElideMiddle
                 // Short statuses come from Theme.linkLabel; "ok" adds the
                 // address where the row leaves room for it (the header

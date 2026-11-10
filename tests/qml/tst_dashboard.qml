@@ -1342,7 +1342,8 @@ TestCase {
     Component { id: spyComponent; SignalSpy {} }
 
     // The desktop's link state drops the address where its row leaves it
-    // no room (a narrow window): the header carries the address
+    // no room (a narrow window): the header carries the address. Under 60
+    // px the dot and the label fade rather than read "L...e"
     function test_theLinkStateDropsTheAddressInANarrowRow() {
         const page = pageOf({ form: "desktop", width: 1000, height: 600 }, null, true)
         connect("mock://demo")
@@ -1351,11 +1352,24 @@ TestCase {
         const label = findChild(page, "linkLabel")
         tryCompare(label, "text", "Live · mock://demo", 5000)
         verify(label.roomForAddress)
-        page.width = 300
-        tryVerify(() => label.width < 150, 3000, "a narrow label")
+        // The label takes what the title and the tools leave: widen from
+        // 380 until it holds a word but not the address
+        let w = 360
+        do {
+            page.width = (w += 20)
+            wait(50)
+        } while (w < 800 && !(label.width >= 60 && label.width < 150))
+        verify(label.width >= 60 && label.width < 150, "a narrow label with room for a word at " + w
+               + ": " + label.width)
         compare(label.text, "Live")
+        compare(label.opacity, 1, "shown")
+        page.width = 300
+        tryVerify(() => label.width < 60, 3000, "no room for a word")
+        compare(label.opacity, 0, "faded")
+        compare(findChild(page, "linkDot").opacity, 0, "the dot with it")
         page.width = 1000
         tryCompare(label, "text", "Live · mock://demo", 3000)
+        compare(label.opacity, 1)
     }
 
     // A row too narrow for every tool drops Reset peaks, and edit mode's

@@ -104,8 +104,8 @@ TestCase {
         tryVerify(() => list.count === Math.min(before + 1, page.recordingsListed), 10000,
                   "the recording that ended is listed")
         tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        compare(find(list.itemAtIndex(0), "recordingDetail").text,
-                "mock://recordings-page · replays as mock")
+        compare(find(list.itemAtIndex(0), "recordingDetail").text, "mock://recordings-page",
+                "a mock address replays as mock: the address alone")
         verify(page.recordings[0].folder !== "", "a row knows its folder")
     }
 
@@ -1810,14 +1810,17 @@ TestCase {
                                             folder: Harness.recordingFixtures + "/findings",
                                             source: source, profile: profile, frames: true })
         page.recordings = [row("mock://x?profile=mock", "mock"), row("mock://x?profile=raw", "mock"),
-                           row("mock://x", "mock"), row("", "mock")]
+                           row("mock://x", "mock"), row("", "mock"), row("mock://x", "raw"),
+                           row("elm327://COM3", "obd2")]
         const list = find(page, "recordingList")
-        tryVerify(() => list.itemAtIndex(3) !== null, 2000, "the rows have delegates")
+        tryVerify(() => list.itemAtIndex(5) !== null, 2000, "the rows have delegates")
         const detail = i => find(list.itemAtIndex(i), "recordingDetail")
         compare(detail(0).text, "mock://x?profile=mock", "the same profile: the address alone")
         compare(detail(1).text, "mock://x?profile=raw · replays as mock")
-        compare(detail(2).text, "mock://x · replays as mock", "no profile in the address: said")
+        compare(detail(2).text, "mock://x", "a mock address replays as mock: nothing to say")
         compare(detail(3).text, "replays as mock")
+        compare(detail(4).text, "mock://x · replays as raw", "a mock address under another profile: said")
+        compare(detail(5).text, "elm327://COM3 · replays as obd2", "an adapter's address without one: said")
         compare(detail(0).font.pixelSize, Theme.fontCaption, "caption text, never under the floor")
         compare(find(list.itemAtIndex(0), "replayButton").text, "Replay")
     }
