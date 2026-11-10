@@ -108,7 +108,13 @@ typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bit
 typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
 typedef char abi_support_scan_check[(offsetof(ecuio_channel_support_t, scan_total) == 120) ? 1 : -1];
 typedef char abi_support_pids_check[(offsetof(ecuio_channel_support_t, pids_supported) == 132) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 136) ? 1 : -1];
+typedef char abi_support_session_check[(offsetof(ecuio_channel_support_t, session_asked) == 136) ? 1 : -1];
+typedef char abi_support_session_in_force_check[(offsetof(ecuio_channel_support_t, session) == 137) ? 1 : -1];
+typedef char abi_support_session_state_check[(offsetof(ecuio_channel_support_t, session_state) == 138) ? 1 : -1];
+typedef char abi_support_session_nrc_check[(offsetof(ecuio_channel_support_t, session_nrc) == 139) ? 1 : -1];
+typedef char abi_support_session_entries_check[(offsetof(ecuio_channel_support_t, session_entries) == 140) ? 1 : -1];
+typedef char abi_support_session_lost_check[(offsetof(ecuio_channel_support_t, session_lost) == 142) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 144) ? 1 : -1];
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];

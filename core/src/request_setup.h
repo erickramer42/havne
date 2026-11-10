@@ -36,7 +36,7 @@ constexpr uint32_t ECUIO_CAN_ID_MAX = 0x1FFFFFFFu; /* 29-bit */
 constexpr uint32_t ECUIO_CAN_ID_11BIT_MAX = 0x7FFu;
 
 /* The request keys' values: filter, txid, poll, probe, identify,
- * diagnose and pack. */
+ * diagnose, pack, scan, session and keepalive_ms. */
 struct request_params {
     uint32_t rx_id = 0; /* 0 = no ?filter= override */
     uint32_t tx_id = 0; /* 0 = unset: profile's tx, else 0x7E0 */
@@ -48,6 +48,8 @@ struct request_params {
     bool diagnose = true; /* ?diagnose=0 turns it off */
     bool pack = true;     /* ?pack=0 turns it off */
     bool scan_first = false; /* ?scan=first: the DID scan before the rotation */
+    uint8_t session = ECUIO_SESSION_DEFAULT; /* ?session=03 (ADR-0060) */
+    uint32_t keepalive_ms = 0; /* ?keepalive_ms=; 0 = the engine's default */
 };
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
@@ -116,6 +118,11 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *   scan     turns or first: uds-generic's DID scan taking turns with
  *            the rotation (the default), or asked back to back with the
  *            rotation waiting until it ends (ADR-0020)
+ *   session  01 or 03: uds-generic reads in the default session (01, the
+ *            default: no session request at all) or enters the extended
+ *            one first (ADR-0060); never 02
+ *   keepalive_ms 500 to 4500: tester present after that long without a
+ *            request, with ?session=03 only (default 2000)
  * False when q is another key. A bad value leaves p alone and sets
  * *wanted to what it should have been; the caller words the detail. */
 inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
@@ -164,6 +171,25 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
             p->scan_first = false;
         } else {
             *wanted = "turns or first";
+        }
+        return true;
+    }
+    if (q.is("session")) {
+        if (!ecuio_parse_number(q.val, q.val_len, &v) ||
+            (v != ECUIO_SESSION_DEFAULT && v != ECUIO_SESSION_EXTENDED)) {
+            *wanted = "01 (the default session) or 03 (the extended one)";
+        } else {
+            p->session = static_cast<uint8_t>(v);
+        }
+        return true;
+    }
+    if (q.is("keepalive_ms")) {
+        if (!ecuio_parse_number(q.val, q.val_len, &v) ||
+            v < ECUIO_ENGINE_KEEPALIVE_MIN_US / 1000 ||
+            v > ECUIO_ENGINE_KEEPALIVE_MAX_US / 1000) {
+            *wanted = "a time from 500 to 4500 ms";
+        } else {
+            p->keepalive_ms = static_cast<uint32_t>(v);
         }
         return true;
     }
@@ -315,7 +341,8 @@ inline void ecuio_focus_askable(const ecuio_signal_set_t* set,
  * get theirs from the set; ?poll= may take ?filter= or the profile's
  * declared channels. BAD_URI with the detail set when they have none,
  * or for ?scan=first outside uds-generic, which alone scans, before any
- * hardware is touched. */
+ * hardware is touched. ?session=03 (ADR-0060) belongs to uds-generic too,
+ * and ?keepalive_ms= to it. */
 inline ecuio_status_t
 ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      const request_params& params, const uint32_t* rx_ids,
@@ -329,6 +356,23 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
         return ECUIO_ERR_BAD_URI;
     }
     e->scan_first = params.scan_first;
+    if (params.session == ECUIO_SESSION_EXTENDED && session->uds == nullptr) {
+        ecuio_detail_set("?session=03 belongs to profile=uds-generic, the "
+                         "profile that reads DIDs");
+        return ECUIO_ERR_BAD_URI;
+    }
+    if (params.keepalive_ms != 0 && params.session != ECUIO_SESSION_EXTENDED) {
+        ecuio_detail_set("?keepalive_ms= keeps the extended session alive: "
+                         "it needs ?session=03");
+        return ECUIO_ERR_BAD_URI;
+    }
+    if (params.session == ECUIO_SESSION_EXTENDED) {
+        const int64_t keepalive_us =
+            params.keepalive_ms != 0
+                ? static_cast<int64_t>(params.keepalive_ms) * 1000
+                : ECUIO_ENGINE_KEEPALIVE_US;
+        (void)ecuio_engine_session(e, ECUIO_SESSION_EXTENDED, keepalive_us);
+    }
     if (params.has_poll) {
         const uint8_t req[2] = {0x01, params.poll_pid};
         (void)ecuio_engine_add(

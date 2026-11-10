@@ -6957,3 +6957,196 @@ TEST(RequestEngineTest, AFocusMovesOnlyTheChangedChannelsGenerations)
     EXPECT_GT(e.chans[0].generation, g0_focused);
     EXPECT_EQ(e.chans[1].generation, g1);
 }
+
+/* ---------- Diagnostic sessions (ADR-0060) ---------- */
+
+// The engine ECU's D200-D203 answer in the extended session alone; the
+// default session refuses them 7F 22 31
+TEST(SimEcuTest, TheExtendedDidsAnswerOnlyInTheExtendedSession)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    const std::vector<uint8_t> refused = {0x7F, 0x22, 0x31};
+    const auto ask_in = [&](std::initializer_list<uint8_t> req, bool ext) {
+        const std::vector<uint8_t> q(req);
+        uint8_t out[ECUIO_SIM_REPLY_MAX];
+        const uint32_t n = ecuio_sim_answer(
+            e, q.data(), static_cast<uint32_t>(q.size()), false, out, ext);
+        return std::vector<uint8_t>(out, out + n);
+    };
+    for (uint8_t i = 0; i < 4; ++i) {
+        SCOPED_TRACE(static_cast<int>(i));
+        EXPECT_EQ(ask_in({0x22, 0xD2, i}, false), refused);
+        const std::vector<uint8_t> got = ask_in({0x22, 0xD2, i}, true);
+        ASSERT_EQ(got.size(), 5u);
+        EXPECT_EQ(got[0], 0x62);
+        EXPECT_EQ(got[2], i);
+        EXPECT_EQ(got[3], ECUIO_SIM_EXTENDED_DIDS[i].data[0]);
+    }
+    EXPECT_EQ(ask_in({0x22, 0xD2, 0x04}, true), refused) << "past D203";
+    EXPECT_EQ(ask_in({0x22, 0xD1, 0x00}, true), refused)
+        << "the module's DID isn't the engine ECU's";
+}
+
+// 10 and 3E as the sim answers them: the session entered, kept by 3E,
+// left by 10 01 or by S3 of silence on the ECU's own time; a node
+// without an extended session refuses 10 03 with 12 and still answers
+// 3E 00
+TEST(SimEcuTest, SessionControlEntersKeepsAndLeaves)
+{
+    ecuio_sim_session s;
+    uint8_t out[8];
+    bool handled = false;
+    const auto call = [&](bool has, int64_t t,
+                          std::initializer_list<uint8_t> req) {
+        const std::vector<uint8_t> q(req);
+        const uint32_t n = ecuio_sim_session_answer(
+            s, has, t, q.data(), static_cast<uint32_t>(q.size()), out,
+            &handled);
+        return std::vector<uint8_t>(out, out + n);
+    };
+    const int64_t s3 = ECUIO_SIM_S3_US;
+    EXPECT_EQ(call(true, 0, {0x10, 0x03}),
+              (std::vector<uint8_t>{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_TRUE(handled);
+    EXPECT_TRUE(s.extended);
+    EXPECT_EQ(call(true, 1000000, {0x3E, 0x00}),
+              (std::vector<uint8_t>{0x7E, 0x00}));
+    EXPECT_TRUE(call(true, 2000000, {0x3E, 0x80}).empty())
+        << "the suppress bit: no reply";
+    EXPECT_TRUE(handled);
+    EXPECT_TRUE(s.extended) << "and the session kept";
+    EXPECT_EQ(call(true, 3000000, {0x10, 0x02}),
+              (std::vector<uint8_t>{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(call(true, 3000000, {0x10}),
+              (std::vector<uint8_t>{0x7F, 0x10, 0x13}));
+    // each request restarts S3
+    call(true, 3000000 + s3 - 1, {0x3E, 0x00});
+    EXPECT_TRUE(s.extended);
+    // S3 of silence: back in the default session before the request
+    const int64_t quiet = 3000000 + s3 - 1 + s3;
+    EXPECT_TRUE(call(true, quiet, {0x22, 0xD2, 0x00}).empty());
+    EXPECT_FALSE(handled) << "a service that isn't the session's";
+    EXPECT_FALSE(s.extended);
+    call(true, quiet, {0x10, 0x03});
+    EXPECT_TRUE(s.extended);
+    EXPECT_EQ(call(true, quiet, {0x10, 0x01}),
+              (std::vector<uint8_t>{0x50, 0x01, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_FALSE(s.extended);
+
+    EXPECT_EQ(call(false, 0, {0x10, 0x03}),
+              (std::vector<uint8_t>{0x7F, 0x10, 0x12}));
+    EXPECT_FALSE(s.extended);
+    EXPECT_EQ(call(false, 0, {0x3E, 0x00}), (std::vector<uint8_t>{0x7E, 0x00}));
+}
+
+// Session control to the functional ID: unanswered, whatever it says
+TEST(SimEcuTest, SessionControlToTheFunctionalIdIsUnanswered)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    EXPECT_TRUE(ask(e, {0x10, 0x03}, true).empty());
+    EXPECT_TRUE(ask(e, {0x3E, 0x00}, true).empty());
+    EXPECT_TRUE(ask(e, {0x22, 0xD2, 0x00}, true).empty())
+        << "a functional refusal is unsaid";
+}
+
+// Through the unbound sim's nodes: the engine node enters, answers D200
+// and leaves by S3 on the caller's clock; module 2 has no session
+TEST(SimAskTest, TheEngineNodeHasAnExtendedSessionAndTheModuleHasNone)
+{
+    Unbound u("mock://ask?values=canned&modules=2");
+    ASSERT_NE(u.sim, nullptr);
+    const Bytes refused{0x7F, 0x22, 0x31};
+    const Bytes entered{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+    int64_t t = 0;
+    const auto only = [&](uint32_t id, std::initializer_list<uint8_t> req) {
+        const auto r = sim_ask(u.sim, id, req, t);
+        return r.empty() ? Bytes{} : reply_bytes(r[0]);
+    };
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}), refused);
+    EXPECT_EQ(only(0x7E0, {0x10, 0x03}), entered);
+    t += 100000;
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}),
+              (Bytes{0x62, 0xD2, 0x00, 0x1A, 0x2C}));
+    EXPECT_EQ(only(0x7E0, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_TRUE(only(0x7E0, {0x3E, 0x80}).empty());
+    t += ECUIO_SIM_S3_US - ECUIO_SIM_TICK_US;
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x01}),
+              (Bytes{0x62, 0xD2, 0x01, 0x00, 0x64}))
+        << "heard 3E 80 just inside S3";
+    t += ECUIO_SIM_S3_US + ECUIO_SIM_TICK_US;
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x01}), refused)
+        << "S3 of silence returns it to the default session";
+    EXPECT_EQ(only(0x7E0, {0x10, 0x03}), entered);
+    EXPECT_EQ(only(0x7E0, {0x10, 0x01}),
+              (Bytes{0x50, 0x01, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}), refused);
+    EXPECT_EQ(only(0x7E0, {0x10, 0x02}), (Bytes{0x7F, 0x10, 0x12}));
+
+    EXPECT_EQ(only(0x7E1, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(only(0x7E1, {0x22, 0xD1, 0x00}), (Bytes{0x62, 0xD1, 0x00, 0x82}));
+    EXPECT_EQ(only(0x7E1, {0x22, 0xD2, 0x00}), refused)
+        << "D200 is the engine ECU's, and only in its session";
+    EXPECT_EQ(only(0x7E1, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_TRUE(sim_ask(u.sim, 0x7DF, {0x10, 0x03}, t).empty());
+    EXPECT_EQ(only(0x7E0, {0x22, 0xD2, 0x00}), refused)
+        << "the functional ID entered nothing";
+}
+
+// A profile's nodes have no extended session
+TEST(SimAskTest, AProfilesNodesHaveNoExtendedSession)
+{
+    Unbound u("mock://ask?values=canned&profile=obd2");
+    ASSERT_NE(u.sim, nullptr);
+    const auto r = sim_ask(u.sim, 0x7E0, {0x10, 0x03});
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(reply_bytes(r[0]), (Bytes{0x7F, 0x10, 0x12}));
+}
+
+// The fakes' engine ECU enters and leaves its extended session per reply
+// ID and answers D200 only in it; a module has none and its refusal code
+// is the knob's
+TEST_F(FakeEcuTest, TheEngineEcuHasAnExtendedSessionAndAModuleNone)
+{
+    struct Restore {
+        ~Restore()
+        {
+            fake_ecu::set_module_dids(nullptr);
+            fake_ecu::reset_sessions();
+            fake_ecu::session_nrc() = 0;
+        }
+    } restore;
+    fake_ecu::reset_sessions();
+    const auto ask = [](uint32_t rx, Bytes req) {
+        uint8_t out[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        if (!fake_ecu::answer_for(rx, req.data(), req.size(), -1, out, &n)) {
+            return Bytes{};
+        }
+        return Bytes(out, out + n);
+    };
+    const Bytes d200{0x22, 0xD2, 0x00};
+    const Bytes ok3{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x03}), ok3);
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x62, 0xD2, 0x00, 0x1A, 0x2C}));
+    EXPECT_EQ(ask(0x7E9, d200), (Bytes{0x7F, 0x22, 0x31}))
+        << "the session is the ECU's own, by its reply ID";
+    EXPECT_EQ(ask(0x7E8, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_TRUE(ask(0x7E8, {0x3E, 0x80}).empty());
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x01}),
+              (Bytes{0x50, 0x01, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x7F, 0x22, 0x31}));
+    ask(0x7E8, {0x10, 0x03});
+    fake_ecu::reset_sessions();
+    EXPECT_EQ(ask(0x7E8, d200), (Bytes{0x7F, 0x22, 0x31}));
+
+    ASSERT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12"));
+    EXPECT_EQ(ask(0x7E9, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(ask(0x7E9, {0x22, 0xD8, 0x01}),
+              (Bytes{0x62, 0xD8, 0x01, 0x00, 0x12}))
+        << "its DIDs answer in the default session";
+    EXPECT_EQ(ask(0x7E9, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    fake_ecu::session_nrc() = 0x22;
+    EXPECT_EQ(ask(0x7E9, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x22}));
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x03}), ok3) << "the knob is a module's code";
+}

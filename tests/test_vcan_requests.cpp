@@ -1537,6 +1537,63 @@ TEST_F(SimBusTest, OneSessionAsksBothModules)
     EXPECT_EQ(e, ECUIO_OK);
 }
 
+/* ADR-0060 over socketcan://: the engine ECU enters the extended session
+ * and answers D200, which it keeps to it; the second module has none,
+ * refuses 10 03 with 12 and is read in the default session; the close
+ * returns only the engine ECU to the default session */
+TEST_F(SimBusTest, AnExtendedSessionScanReadsEachModuleInItsOwnSession)
+{
+    Sim sim("mock://sim?modules=2");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    vcan_bus::Fd raw = vcan_bus::open_raw();
+    ASSERT_GE(raw.get(), 0);
+    Values values;
+    Session s("?profile=uds-generic&did=D200:u16,7E9:D100:u8&session=03"
+              "&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    values.listen(s.get());
+    const uint16_t ext = ECUIO_UDS_GENERIC_SIG_ID_BASE;
+    const uint16_t fluid = ext + 1;
+    ASSERT_TRUE(
+        wait_for([&] { return values.has(ext) && values.has(fluid); }, 5000ms))
+        << "requests " << sim.stats().requests;
+    EXPECT_EQ(values.number_of(fluid), 130.0) << "D100's byte, 0x82";
+    ecuio_channel_support_t engine{}, module{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &engine) ==
+                       ECUIO_OK &&
+                   ecuio_session_get_channel_support(s.get(), 1, &module) ==
+                       ECUIO_OK &&
+                   engine.session_state == ECUIO_SESSION_STATE_ENTERED &&
+                   module.session_state == ECUIO_SESSION_STATE_REFUSED;
+        },
+        5000ms))
+        << "engine " << int(engine.session_state) << ", module "
+        << int(module.session_state);
+    EXPECT_EQ(engine.session, 0x03);
+    EXPECT_NE(engine.flags & ECUIO_SUPPORT_EXTENDED, 0u);
+    EXPECT_EQ(module.session, 0x01);
+    EXPECT_EQ(module.session_nrc, 0x12);
+    EXPECT_EQ(module.flags & ECUIO_SUPPORT_EXTENDED, 0u);
+    /* the close: 02 10 01 on 0x7E0 only; what the session sent before it
+     * is read off first, so the socket's queue has room */
+    can_frame f{};
+    while (vcan_bus::read_for(raw.get(), &f, sizeof f, 0) > 0) {
+    }
+    ecuio_session_close(s.get());
+    bool engine_left = false;
+    bool module_left = false;
+    while (vcan_bus::read_for(raw.get(), &f, sizeof f, 300) > 0) {
+        const bool leave = f.can_dlc >= 3 && f.data[0] == 0x02 &&
+                           f.data[1] == 0x10 && f.data[2] == 0x01;
+        engine_left = engine_left || (leave && f.can_id == 0x7E0u);
+        module_left = module_left || (leave && f.can_id == 0x7E1u);
+    }
+    EXPECT_TRUE(engine_left);
+    EXPECT_FALSE(module_left) << "the module never entered it";
+}
+
 /* Without modules=2 nothing answers on 0x7E9: the default stays the
  * engine ECU alone */
 TEST_F(SimBusTest, TheSecondModuleIsOptIn)

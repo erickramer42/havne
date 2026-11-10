@@ -465,6 +465,29 @@ ecuio_status_t ecuio_session_get_replay_faults(
                                                           one PID per request
                                                           until the link
                                                           recovers */
+#define ECUIO_SUPPORT_EXTENDED           0x00000020u   /* the channel reads in
+                                                          the extended session
+                                                          (ADR-0060) */
+
+/* session_state: a channel's session (ADR-0060), with ?session=03 */
+#define ECUIO_SESSION_STATE_NOT_ASKED    0u   /* no session asked: default */
+#define ECUIO_SESSION_STATE_ENTERING     1u   /* 10 03 due or out */
+#define ECUIO_SESSION_STATE_ENTERED      2u   /* 50 03: read in it */
+#define ECUIO_SESSION_STATE_REFUSED      3u   /* 7F 10 <nrc>: read in
+                                                 default, session_nrc
+                                                 its code */
+#define ECUIO_SESSION_STATE_UNANSWERED   4u   /* no answer: read in default,
+                                                 asked again when the link
+                                                 recovers */
+#define ECUIO_SESSION_STATE_ABANDONED    5u   /* lost too often (7E or 7F
+                                                 to its reads,
+                                                 ECUIO_SESSION_LOSSES_MAX
+                                                 times within
+                                                 ECUIO_SESSION_LOSS_WINDOW_MS):
+                                                 read in default,
+                                                 session_nrc the last code */
+#define ECUIO_SESSION_LOSSES_MAX         3u
+#define ECUIO_SESSION_LOSS_WINDOW_MS     60000u
 
 /* reason: why a request left the rotation */
 #define ECUIO_DROP_BITMAP                1u   /* its PID's bit is clear */
@@ -521,7 +544,17 @@ typedef struct ecuio_channel_support {
     uint16_t pids_through;    /* the last PID the answered bitmaps cover,
                                  0x20 * (i + 1) for ranges' highest bit
                                  i; 0 with none answered */
-    uint32_t reserved[4];     /* zero; ABI growth space */
+    /* The session (ADR-0060): what the URI asked, and what this channel
+     * reads in. 0 for both before its first report. */
+    uint8_t session_asked;    /* 0 none (the default), 3 (?session=03) */
+    uint8_t session;          /* in force: 1 default, 3 extended */
+    uint8_t session_state;    /* ECUIO_SESSION_STATE_* */
+    uint8_t session_nrc;      /* REFUSED or ABANDONED: the code */
+    uint16_t session_entries; /* each 50 03, saturating at 65535 */
+    uint16_t session_lost;    /* each time the session was entered again
+                                 (a 7E or 7F, a timeout, S3, a link
+                                 recovery), saturating at 65535 */
+    uint32_t reserved[2];     /* zero; ABI growth space */
 } ecuio_channel_support_t;
 
 #if defined(__cplusplus)
@@ -530,14 +563,18 @@ static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t s
 static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support scan offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support pids offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, reserved) == 136, "support reserved offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 144, "support reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support scan offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support pids offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 136, "support reserved offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 144, "support reserved offset is ABI");
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index

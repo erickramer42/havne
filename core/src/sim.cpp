@@ -83,6 +83,10 @@ struct sim_node {
     /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
      * ECU, everything on another module */
     bool from_set = false;
+    /* The diagnostic session (ADR-0060): only the engine ECU with no
+     * profile has an extended session; a profile's nodes and modules=2's
+     * module refuse 10 03 */
+    ecuio_sim_session session;
     isotp_rx rx;
     isotp_tx tx;
     sim_sending r;
@@ -148,9 +152,19 @@ void sent(ecuio_sim* s, const sim_sending& r)
 
 /* n's answer to a whole request, into out: the profile's DIDs, the
  * engine ECU's or modules=2's module's; 0 for none */
-uint32_t answer(ecuio_sim* s, const sim_node& n, const uint8_t* req,
-                uint32_t len, bool functional, uint8_t* out)
+uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
+                bool functional, uint8_t* out)
 {
+    const bool has_extended =
+        n.module == 0 && !n.from_set && s->ecu.recording == nullptr;
+    if (!functional && s->ecu.recording == nullptr) {
+        bool handled = false;
+        const uint32_t m = ecuio_sim_session_answer(
+            n.session, has_extended, s->ecu.time_us, req, len, out, &handled);
+        if (handled) {
+            return m;
+        }
+    }
     if (n.from_set && (n.module != 0 || (len > 0 && req[0] == 0x22))) {
         const ecuio_sim* self = s;
         return ecuio_sim_did_answer(
@@ -161,7 +175,8 @@ uint32_t answer(ecuio_sim* s, const sim_node& n, const uint8_t* req,
             out, ECUIO_SIM_REPLY_MAX);
     }
     if (n.module == 0) {
-        return ecuio_sim_answer(s->ecu, req, len, functional, out);
+        return ecuio_sim_answer(s->ecu, req, len, functional, out,
+                                n.session.extended);
     }
     return ecuio_sim_module_answer(req, len, functional, out);
 }

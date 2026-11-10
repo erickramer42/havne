@@ -238,6 +238,14 @@ ECUIO_SESSION_INFO_REQUESTS = 64
 ECUIO_SESSION_INFO_TEXT_LEN = 80
 ECUIO_SESSION_INFO_VBATT = 1
 ECUIO_SESSION_INFO_VERSIONS = 2
+ECUIO_SESSION_LOSSES_MAX = 3
+ECUIO_SESSION_LOSS_WINDOW_MS = 0xea60
+ECUIO_SESSION_STATE_ABANDONED = 5
+ECUIO_SESSION_STATE_ENTERED = 2
+ECUIO_SESSION_STATE_ENTERING = 1
+ECUIO_SESSION_STATE_NOT_ASKED = 0
+ECUIO_SESSION_STATE_REFUSED = 3
+ECUIO_SESSION_STATE_UNANSWERED = 4
 ECUIO_SET_MAX_TABLE = 0x10000
 ECUIO_SIGNAL_FILE_FORMAT = 1
 ECUIO_SIGNAL_FILE_MAX_BYTES = 0x100000
@@ -262,6 +270,7 @@ ECUIO_SIM_REPLY_PENDING = 1
 ECUIO_SIM_REPLY_STALLED = 8
 ECUIO_SIM_YIELDED = 2
 ECUIO_SUPPORT_COMPLETE = 2
+ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
 ECUIO_SUPPORT_PACKED = 8
 ECUIO_SUPPORT_PROBED = 1
@@ -654,7 +663,13 @@ ecuio_channel_support_t._fields_ = [
     ('scan_reserved', c_uint16),
     ('pids_supported', c_uint16),
     ('pids_through', c_uint16),
-    ('reserved', (c_uint32 * 4)),
+    ('session_asked', c_uint8),
+    ('session', c_uint8),
+    ('session_state', c_uint8),
+    ('session_nrc', c_uint8),
+    ('session_entries', c_uint16),
+    ('session_lost', c_uint16),
+    ('reserved', (c_uint32 * 2)),
 ]
 ecuio_check_finding_t._fields_ = [
     ('kind', c_uint32),

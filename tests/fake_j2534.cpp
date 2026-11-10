@@ -906,6 +906,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             !fake_ecu::set_module_dids(spec)) {
             fake_ecu::set_module_dids(nullptr);
         }
+        /* The code a module's 7F 10 carries (0, the default, is 0x12) */
+        char code[32] = {};
+        fake_ecu::session_nrc() =
+            fake_j2534::read_knob("ECUIO_FAKE_SESSION_NRC", code, sizeof(code))
+                ? static_cast<unsigned>(strtol(code, nullptr, 0))
+                : 0u;
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
@@ -946,7 +952,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* RESPONSE GENERATION.
      * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
-     * 0x09; Service 0x22 or 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
+     * 0x09 (or 0x10 and 0x3E, the session's, ADR-0060); Service 0x22 or
+     * 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
      * bytes: the adapter-framed logical message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
@@ -959,7 +966,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
         const bool request =
-            has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09)) ||
+            has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09 ||
+                                       req[4] == 0x10 || req[4] == 0x3E)) ||
                            (n >= 7 && n <= 11 && req[4] == 0x01) ||
                            (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
