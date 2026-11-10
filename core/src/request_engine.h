@@ -237,6 +237,8 @@ struct ecuio_request {
                            out (ADR-0056 section 2); back on a count of 0 */
     uint8_t slow_default; /* the class classify or judge_duplicates gave
                              it, which a focus's end restores */
+    uint8_t swept;        /* 1: counted in its channel's sweep under way (a
+                             focus's minimum time, ecuio_engine_count_sweep) */
 };
 
 struct ecuio_scan_entry {
@@ -317,9 +319,11 @@ struct ecuio_engine_channel {
     bool packed = false;        /* a pack was answered with several records */
     bool unpacked = false;      /* packing ended until a rescan */
     /* A focus's minimum time between sweeps (ecuio_engine_count_sweep):
-     * the rows asked since this sweep started, when it started, and the
-     * time before which the next one doesn't */
+     * the rows asked since this sweep started, those of them dropped
+     * since, when it started, and the time before which the next one
+     * doesn't */
     uint32_t sweep_asked = 0;
+    uint32_t sweep_dropped = 0;
     int64_t sweep_start_us = 0;
     int64_t next_sweep_us = 0;
 };
@@ -990,6 +994,10 @@ inline void ecuio_engine_drop(ecuio_request_engine* e, uint32_t i,
     if (r.parked == 0) {
         --ch.requests; /* a parked one was counted out already */
     }
+    if (r.swept != 0) {
+        ++ch.sweep_dropped; /* asked in this sweep: the sweep still ends
+                               once every row left has been asked */
+    }
     ++ch.generation;
 }
 
@@ -1014,6 +1022,19 @@ inline void ecuio_engine_recount(ecuio_request_engine* e)
     }
 }
 
+/* Channel c's next request starts a sweep: nothing counted in one */
+inline void ecuio_engine_clear_sweep(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ch.sweep_asked = 0;
+    ch.sweep_dropped = 0;
+    for (uint32_t i = 0; i < e->count; ++i) {
+        if (e->requests[i].channel == c) {
+            e->requests[i].swept = 0;
+        }
+    }
+}
+
 /* A focus was asked for: starts every channel's sweep over and sets its
  * minimum time between sweeps. A wait under way stands while the time is
  * the same, and ends with a new one, which judges only the sweeps after
@@ -1023,7 +1044,7 @@ inline void ecuio_engine_restart_sweeps(ecuio_request_engine* e,
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
-        ch.sweep_asked = 0;
+        ecuio_engine_clear_sweep(e, c);
         if (e->min_sweep_us != min_sweep_us) {
             ch.next_sweep_us = 0;
         }
@@ -1585,7 +1606,9 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
  * one class (a focus runs its picks fast), so as many as the rotation
  * holds have asked every pick; a pack that runs past that asks some
  * twice, and its surplus counts for nothing, since the wait can only
- * fall between two requests. */
+ * fall between two requests. A row asked and then dropped
+ * (ecuio_engine_drop) left ch.requests but stays in sweep_asked, so it
+ * counts in sweep_dropped too. */
 inline void ecuio_engine_count_sweep(ecuio_request_engine* e, uint32_t c,
                                      int32_t r, int64_t now_us)
 {
@@ -1596,9 +1619,17 @@ inline void ecuio_engine_count_sweep(ecuio_request_engine* e, uint32_t c,
     if (ch.sweep_asked == 0) {
         ch.sweep_start_us = now_us;
     }
-    ch.sweep_asked += (r == ECUIO_ENGINE_PACK) ? ch.pack_count : 1u;
-    if (ch.sweep_asked >= ch.requests) {
-        ch.sweep_asked = 0;
+    if (r == ECUIO_ENGINE_PACK) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            e->requests[ch.pack_rows[k]].swept = 1;
+        }
+        ch.sweep_asked += ch.pack_count;
+    } else if (r >= 0) {
+        e->requests[r].swept = 1;
+        ++ch.sweep_asked;
+    }
+    if (ch.sweep_asked >= ch.requests + ch.sweep_dropped) {
+        ecuio_engine_clear_sweep(e, c);
         ch.next_sweep_us = ch.sweep_start_us + e->min_sweep_us;
     }
 }
