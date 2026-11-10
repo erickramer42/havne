@@ -951,25 +951,134 @@ TestCase {
         compare(list.itemAtIndex(0).model.timestampUs, 5000000)
     }
 
-    // On a phone the strings that were cut at 384 dp are short forms, and
-    // the recording's name takes a line of its own
+    // On a phone the strings that were cut at 384 dp are short forms, the
+    // way back is a quiet arrow, and the name is the viewer's title
     function test_aPhoneGetsTheShortStrings() {
         const page = openFindings()
         const title = find(page, "openedTitle")
-        const compactTitle = find(page, "openedTitleCompact")
-        verify(title.visible && !compactTitle.visible, "the desktop's name sits in the row")
+        const back = find(page, "backToList")
+        const header = find(page, "recordingsHeader")
+        compare(title.text, findingsRow.title)
+        compare(title.elide, Text.ElideMiddle, "the folder's date at the end stays")
+        compare(back.text, "All recordings")
+        verify(header.visible, "the desktop keeps the page's heading")
         Theme.compact = true
         try {
             compare(find(page, "cursorTime").text, "Tap for values")
-            verify(!title.visible && compactTitle.visible, "a phone's name has its own line")
-            compare(compactTitle.text, findingsRow.title)
-            compare(compactTitle.elide, Text.ElideMiddle)
+            verify(title.visible, "the name in the title row")
+            compare(back.text, "←")
+            verify(back.flat, "quiet")
+            compare(back.Accessible.name, "All recordings")
+            verify(!header.visible, "the tab names the page")
             page.setCursor(5000)
             compare(find(page, "cursorTime").text, "At 5.0 s", "a cursor reads the same")
         } finally {
             Theme.compact = false
         }
-        verify(title.visible && !compactTitle.visible, "and back")
+        verify(header.visible && back.text === "All recordings", "and back")
+    }
+
+    // One order on both forms: the chart, its zoom row, the switch and the
+    // filter, the rows, then About this recording. On a phone Replay and
+    // Save report sit in About; on the desktop in the title row
+    function test_theViewersOrderIsChartRowsThenAbout_data() {
+        return [{ tag: "desktop", w: 1280, h: 720, phone: false },
+                { tag: "phone", w: 384, h: 832, phone: true }]
+    }
+    function test_theViewersOrderIsChartRowsThenAbout(data) {
+        const page = openFindings()
+        Theme.compact = data.phone
+        try {
+            page.width = data.w
+            page.height = data.h
+            verify(waitForPolish(page.Window.window), "laid out")
+            const yOf = name => {
+                const item = find(page, name)
+                verify(item.visible, name + " shows")
+                return item.mapToItem(page, 0, 0).y
+            }
+            const middleOf = name => {
+                const item = find(page, name)
+                return item.mapToItem(page, 0, item.height / 2).y
+            }
+            const order = ["openedTitle", "chartFrame", "chartSplitter", "zoomAll"]
+                .concat(data.phone ? ["detailView_values"] : [])
+                .concat(["recordingFilter", "signalRows", "aboutHeading", "recordingInfo",
+                         "decodeChoice", "compareChoice", "checkSummary"])
+            const ys = order.map(yOf)
+            for (let i = 1; i < order.length; ++i)
+                verify(ys[i] > ys[i - 1],
+                       order[i] + " (" + ys[i] + ") under " + order[i - 1] + " (" + ys[i - 1] + ")")
+            const save = yOf("saveReport")
+            const replay = yOf("replayView")
+            if (data.phone) {
+                verify(save > yOf("recordingInfo") && save < yOf("decodeChoice"), "Save report in About")
+                compare(replay, save, "Replay beside it")
+            } else {
+                verify(save < yOf("chartFrame") && replay < yOf("chartFrame"), "both in the title row")
+                const sw = find(page, "detailView_values")
+                verify(sw.visible && Math.abs(middleOf("detailView_values") - middleOf("recordingFilter")) < 3
+                       && sw.mapToItem(page, 0, 0).x < find(page, "recordingFilter").mapToItem(page, 0, 0).x,
+                       "the switch at the filter's left")
+            }
+        } finally {
+            Theme.compact = false
+            page.width = 900
+            page.height = 900
+        }
+    }
+
+    // The chart's height until the splitter sets one: 45 % of the page on
+    // the desktop, 40 % on a phone, never under 248 there (three panes of
+    // 72 and the time axis)
+    function test_theChartTakesAShareOfThePage_data() {
+        return [{ tag: "desktop", w: 1280, h: 720, phone: false, want: 0.45 * 720 },
+                { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 },
+                { tag: "short phone", w: 384, h: 500, phone: true, want: 248 }]
+    }
+    function test_theChartTakesAShareOfThePage(data) {
+        const page = openFindings()
+        const kept = page.chartHeight
+        page.chartHeight = -1
+        Theme.compact = data.phone
+        try {
+            page.width = data.w
+            page.height = data.h
+            const chart = find(page, "chartFrame")
+            tryVerify(() => Math.abs(chart.height - data.want) < 1, 2000,
+                      "the chart is " + data.want)
+            verify(Math.abs(chart.height - data.want) < 1, "the chart is " + chart.height)
+        } finally {
+            Theme.compact = false
+            page.chartHeight = kept
+            page.width = 900
+            page.height = 900
+        }
+    }
+
+    // The Export panel opens under the title row, so the page goes to its
+    // top, wherever it was scrolled
+    function test_theExportPanelOpensAtThePagesTop() {
+        const page = openFindings()
+        Theme.compact = true
+        try {
+            page.width = 384
+            page.height = 600
+            verify(waitForPolish(page.Window.window), "laid out")
+            const scroll = find(page, "recordingsScroll")
+            verify(scroll.contentHeight > scroll.height, "the page scrolls")
+            scroll.contentY = scroll.contentHeight - scroll.height
+            page.openExport()
+            compare(scroll.contentY, 0, "at the top")
+            const panel = find(page, "exportPanel")
+            verify(panel.visible, "the panel")
+            verify(panel.mapToItem(scroll, 0, 0).y < scroll.height / 2, "on the first screen")
+            page.closeExport()
+        } finally {
+            Theme.compact = false
+            page.width = 900
+            page.height = 900
+        }
     }
 
     // On a phone every button, box, choice and field the page shows, its
@@ -1796,6 +1905,10 @@ TestCase {
         tryVerify(() => list.itemAtIndex(1) !== null, 2000, "the row has a delegate")
         // The rate drop: 7.92 s for 1.4 s
         compare(find(list.itemAtIndex(1), "findingText").text, "0x3E9 slowed for 1.4 s")
+        // The list ends About, past the page's first screen
+        const scroll = find(page, "recordingsScroll")
+        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
+        verify(waitForPolish(page.Window.window), "scrolled")
         mouseClick(find(list.itemAtIndex(1), "findingRowArea"))
         compare(page.viewT0, 7620)
         compare(page.viewT1, 9620)

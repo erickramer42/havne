@@ -407,6 +407,55 @@ TestCase {
         bar.options.close()
     }
 
+    // The test phone upright: a recording opens onto its chart, under the
+    // title row, and the rows that drive it start on the first screen;
+    // what's on it is a touch's size
+    function test_theViewersDataIsOnTheFirstScreen() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        const kept = page.chartHeight
+        page.chartHeight = -1
+        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.itemAtIndex(0) !== null, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        try {
+            const scroll = find(page, "recordingsScroll")
+            compare(scroll.contentY, 0, "the page's top")
+            verify(!find(page, "recordingsHeader").visible, "no page heading while viewing")
+            const chart = find(page, "chartFrame")
+            const chartTop = chart.mapToItem(scroll, 0, 0).y
+            verify(chartTop <= 120, "the chart starts at " + chartTop)
+            verify(chart.height >= 248, "the chart is " + chart.height)
+            const first = rows.itemAtIndex(0)
+            const rowTop = first.mapToItem(scroll, 0, 0).y
+            const rowBottom = first.mapToItem(scroll, 0, first.height).y
+            verify(rowBottom <= scroll.height + 0.5,
+                   "the first row ends at " + rowBottom + " of " + scroll.height)
+            verify(rowTop > chartTop + chart.height, "under the chart")
+            for (const name of ["backToList", "exportButton", "zoomAll", "zoomOut", "zoomIn",
+                                "maximizeChart", "detailView_values", "detailView_frames"]) {
+                const item = find(page, name)
+                const top = item.mapToItem(main.contentItem, 0, 0).y
+                const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+                verify(item.visible && bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+                const right = item.mapToItem(main.contentItem, item.width, 0).x
+                verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+            }
+            const back = find(page, "backToList")
+            compare(back.Accessible.name, "All recordings")
+            verify(back.mapToItem(main.contentItem, 0, 0).x < 24, "the back arrow at the left edge")
+        } finally {
+            page.chartHeight = kept
+        }
+    }
+
     // The Import panel's preview on a phone: every control in it is a
     // touch's size (48 on the glass at any zoom, in the layout's units
     // Theme.touchTarget), and none is past the window's edge
@@ -791,9 +840,6 @@ TestCase {
         page.chartHeight = 300
         const chartSplitter = find(page, "chartSplitter")
         tryVerify(() => chartSplitter.visible, 2000, "the viewer's splitter shows")
-        // The name's own line on a phone pushes the splitter down: scroll to it
-        const scroll = find(page, "recordingsScroll")
-        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
         verify(waitForPolish(main), "laid out")
         tap(chartSplitter, chartSplitter.width / 2 - 15, chartSplitter.height / 2)
         tap(chartSplitter, chartSplitter.width / 2 + 15, chartSplitter.height / 2)
