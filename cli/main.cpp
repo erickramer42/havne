@@ -354,6 +354,53 @@ int ended(Output& out, int code)
     return out.ok() ? code : kExitFailed;
 }
 
+// export's cancel (ecuio_export_with) and its column check's: Ctrl+C or
+// SIGTERM stops it, and core removes what it had begun.
+// HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the run's first ask that
+// long, naming whose it is on stderr, so a test's interrupt lands there
+int interrupted_at(bool* asked, const char* where)
+{
+    if (!*asked) {
+        *asked = true;
+        const uint64_t hold_ms = env_ms("HAVNE_CLI_EXPORT_HOLD_MS", 0);
+        if (hold_ms > 0) {
+            std::fprintf(stderr, "havne-cli: holding the %s's first ask\n",
+                         where);
+            std::fflush(stderr);
+        }
+        const uint64_t until = ecuio_clock_us() + hold_ms * 1000ULL;
+        while (!g_interrupted.load() && ecuio_clock_us() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    return g_interrupted.load() ? 1 : 0;
+}
+
+int export_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "export");
+}
+
+// The column check's open (ecuio_open_progress_t) asks as the export does
+int open_interrupted(uint64_t, uint64_t, void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "column check");
+}
+
+// An export or its sizing stopped by an interrupt: the end line the other
+// commands write on one, and exit 1, as clear's, since nothing was written
+int ended_interrupted(Output& out)
+{
+    char buf[64];
+    cli::Line l(buf, sizeof buf);
+    l.raw("{\"type\":\"end\"");
+    l.key("reason");
+    l.string("interrupted", SIZE_MAX);
+    l.ch('}');
+    write_line(out, l);
+    return ended(out, kExitFailed);
+}
+
 // A recording's signal line (view's and info's), an enum's labels on it
 void write_signal_line(Output& out, const ecuio_recording_t* r,
                        uint32_t recording, uint32_t index,
@@ -2670,13 +2717,20 @@ int run_stream(const StreamArgs& args)
 
 // The named columns the recording has no values for, by the reader's
 // signal list (ecuio_recording_open lists the signals with a sample; a
-// pick the recording never answered isn't among them)
-std::vector<const char*> missing_columns(const cli::ExportArgs& ex)
+// pick the recording never answered isn't among them). False when an
+// interrupt stopped the open; a recording the reader refuses has none
+bool missing_columns(const cli::ExportArgs& ex, bool* asked,
+                     std::vector<const char*>* missing)
 {
+    missing->clear();
     ecuio_recording_t* r = nullptr;
-    if (ecuio_recording_open(ex.folder, nullptr, nullptr, &r) != ECUIO_OK ||
-        r == nullptr) {
-        return {};
+    const ecuio_status_t opened =
+        ecuio_recording_open(ex.folder, open_interrupted, asked, &r);
+    if (opened == ECUIO_ERR_CANCELED) {
+        return false;
+    }
+    if (opened != ECUIO_OK || r == nullptr) {
+        return true;
     }
     std::vector<std::string> recorded;
     ecuio_recording_info_t info;
@@ -2691,7 +2745,8 @@ std::vector<const char*> missing_columns(const cli::ExportArgs& ex)
         }
     }
     ecuio_recording_close(r);
-    return cli::missing_names(ex.signals, recorded);
+    *missing = cli::missing_names(ex.signals, recorded);
+    return true;
 }
 
 // The machine's CAN interfaces (ecuio/socketcan.h); none off Linux
@@ -4598,29 +4653,37 @@ int run(int argc, char** argv)
         }
         // A named column the recording has no values for stays empty
         // (a focus pick that never answered is a column of a log): each is
-        // said on stderr, so a typo isn't silent, and counted
-        const auto say_missing = [&ex] {
-            std::vector<const char*> missing;
-            if (ex.options.format == ECUIO_EXPORT_CSV &&
-                ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty()) {
-                missing = missing_columns(ex);
-                for (const char* name : missing) {
-                    std::fprintf(stderr,
-                                 "havne-cli: the recording has no values for "
-                                 "'%s': its column is empty\n",
-                                 name);
-                }
+        // said on stderr once the export is done, so a typo isn't silent,
+        // and counted. The check runs first, so an interrupt during it
+        // leaves nothing written
+        std::vector<const char*> missing;
+        const auto say_missing = [&missing] {
+            for (const char* name : missing) {
+                std::fprintf(stderr,
+                             "havne-cli: the recording has no values for "
+                             "'%s': its column is empty\n",
+                             name);
             }
             return missing.size();
         };
         Output out;
+        install_handlers();
         write_start(out);
+        bool asked = false;
+        if (ex.options.format == ECUIO_EXPORT_CSV &&
+            ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
+            !missing_columns(ex, &asked, &missing)) {
+            return ended_interrupted(out);
+        }
         if (ex.estimate) {
             const std::vector<uint32_t> rows = cli::estimate_intervals(ex);
             std::vector<ecuio_export_estimate_t> sized(rows.size());
-            const ecuio_status_t sizing = ecuio_export_estimate(
+            const ecuio_status_t sizing = ecuio_export_estimate_with(
                 &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
-                sized.data());
+                export_interrupted, &asked, sized.data());
+            if (sizing == ECUIO_ERR_CANCELED) {
+                return ended_interrupted(out);
+            }
             if (sizing != ECUIO_OK) {
                 write_error(out, sizing);
                 return ended(out, kExitConnect);
@@ -4632,7 +4695,11 @@ int run(int argc, char** argv)
             return ended(out, kExitOk);
         }
         ecuio_export_report_t report{};
-        const ecuio_status_t rc = ecuio_export(&ex.options, &report);
+        const ecuio_status_t rc =
+            ecuio_export_with(&ex.options, export_interrupted, &asked, &report);
+        if (rc == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
+        }
         BigLine b(cli::exported_line_bytes(ex));
         cli::Line& l = b.line;
         if (rc != ECUIO_OK) {

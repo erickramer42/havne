@@ -385,6 +385,15 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/findings
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.folder PROPERTIES TIMEOUT 60)
+        # An export to pcapng, a folder copy, a CSV's sizing, and a wide CSV
+        # and its sizing during their named columns' check, each interrupted
+        # mid-run: an interrupted end, nothing left behind
+        add_test(NAME CliTransferRunTest.interrupt
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    interrupt $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
+            TIMEOUT 90 SKIP_RETURN_CODE 77)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
