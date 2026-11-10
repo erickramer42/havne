@@ -560,7 +560,7 @@ TestCase {
         restoreExportChoices(panel)
         sizesIn(panel)
         const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
-        verify(/^\d[\d,.'\u2019\s]* rows, [\d.]+ (B|KB|MB)$/.test(sweep.text), sweep.text) // any locale's grouping
+        verify(/^\d[\d,.'\u2019\s]* rows, [\d.,]+ (B|KB|MB)$/.test(sweep.text), sweep.text) // any locale's
         const grid = findChild(find(panel, "exportRows_250"), "intervalSize")
         verify(/ rows, /.test(grid.text), grid.text)
         verify(sweep.text !== grid.text, sweep.text + " and " + grid.text)
@@ -578,6 +578,25 @@ TestCase {
         verify(!find(panel, "exportGo").enabled, "not with a bad interval")
         compare(find(panel, "exportCustomProblem").text, "ms, 1 to 86400000")
         restoreExportChoices(panel)
+    }
+
+    // A row reads in one locale: a comma-decimal one groups the count
+    // with a point and writes the size with a comma
+    function test_theExportSizeIsInTheRowsLocale() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        panel.numberLocale = Qt.locale("de_DE")
+        compare(panel.bytesText(999), "999 B")
+        compare(panel.bytesText(12345), "12,3 KB")
+        compare(panel.bytesText(1234567), "1,2 MB")
+        compare(panel.bytesText(2500000000), "2,5 GB")
+        sizesIn(panel)
+        const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
+        verify(/^\d[\d.]* rows?, (\d+ B|\d+,\d (KB|MB))$/.test(sweep.text), sweep.text)
+        panel.sizes = [{ rowMs: 0, rows: 18402, bytes: 1234567 }]
+        compare(panel.sizeOf(0), "18.402 rows, 1,2 MB", "the count grouped as the size is written")
+        panel.numberLocale = Qt.locale()
     }
 
     function test_theRowIntervalIsRememberedAndTheRestStartsOver() {
