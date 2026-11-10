@@ -109,7 +109,8 @@ TestCase {
         return [{ tag: "homePage" }, { tag: "dashboardPage" },
                 { tag: "dashboardPhone" }, { tag: "dashboardPhoneCell" },
                 { tag: "dashboardPhoneAdd" }, { tag: "dashboardPhoneSignal" },
-                { tag: "dashboardPhoneReset" }, { tag: "livePage" },
+                { tag: "dashboardPhoneReset" }, { tag: "dashboardPhoneRemove" },
+                { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
                 { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
@@ -156,6 +157,9 @@ TestCase {
             } else if (data.tag === "dashboardPhoneReset") {
                 page.moreShown = true
                 page.confirmReset = true
+            } else if (data.tag === "dashboardPhoneRemove") {
+                page.select(1)
+                page.confirmRemoveCell = true
             }
         }
         if (data.tag === "logFrames")
@@ -1042,7 +1046,10 @@ TestCase {
         dash.select(1)
         tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
               "panelDecimals", "panelW", "panelH", "panelPeak", "panelEarlier", "panelLater",
-              "panelStart", "panelEnd", "panelCopy", "panelPaste"])
+              "panelStart", "panelEnd", "panelCopy", "panelPaste", "panelRemove"])
+        dash.confirmRemoveCell = true
+        tall(["panelRemoveConfirm", "panelRemoveKeep"])
+        dash.confirmRemoveCell = false
         dash.copySelected()
         tall(["dashPaste"])
         compare(pastTheEdge(find(dash, "dashEditBar"), main.contentItem, []).length, 0,

@@ -1775,4 +1775,106 @@ TestCase {
         verify(find(page, "moreLeft").visible && find(page, "moreRight").visible,
                "two pages: the move buttons show")
     }
+
+    // The cell's panel removes its cell after a question, in edit mode and
+    // from the hold's menu outside it; Keep leaves everything as it was
+    function test_thePanelsRemoveAsksFirst_data() {
+        return [{ tag: "desktop in edit mode", phone: false, edit: true },
+                { tag: "phone, the hold's menu", phone: true, edit: false }]
+    }
+    function test_thePanelsRemoveAsksFirst(data) {
+        const page = pageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
+                            docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        const cell = find(page, "dashCell_0_1")
+        if (data.edit) {
+            page.startEditing()
+            press(cell)
+        } else {
+            hold(page, cell)
+            mouseRelease(cell)
+        }
+        compare(page.panel, "cell")
+        const remove = find(page, "panelRemove")
+        verify(remove.visible, "Remove is on the panel")
+        compare(remove.Accessible.name, "Remove B")
+        verify(!find(page, "panelRemoveAsk").visible, "no question yet")
+
+        click(page, "panelRemove")
+        verify(find(page, "panelRemoveAsk").visible, "it asks")
+        verify(!remove.visible, "in Remove's place")
+        compare(find(page, "panelRemoveQuestion").text, "Remove B from this page?")
+        compare(labels(page), ["A", "B", "C"], "nothing removed yet")
+        click(page, "panelRemoveKeep")
+        verify(!find(page, "panelRemoveAsk").visible)
+        verify(remove.visible)
+        compare(labels(page), ["A", "B", "C"], "Keep keeps it")
+        compare(page.panel, "cell", "the panel stays")
+
+        click(page, "panelRemove")
+        click(page, "panelRemoveConfirm")
+        compare(labels(page), ["A", "C"])
+        compare(page.panel, "", "the panel goes with its cell")
+        compare(page.selected, -1)
+        compare(page.editing, data.edit, "edit mode is as it was")
+        compare(storedText(page), DashboardBook.serialize(page.doc), "and it's stored")
+    }
+
+    // The question is about one cell: another cell, a closed panel or
+    // Done takes it away; a cell with no label is named by its kind
+    function test_theRemoveQuestionGoesWithItsCell() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("", "blank"), cellOf("C")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelRemove")
+        verify(page.confirmRemoveCell)
+        press(find(page, "dashCell_0_2"))
+        compare(page.selected, 2)
+        verify(!page.confirmRemoveCell, "another cell asks nothing")
+        click(page, "panelRemove")
+        click(page, "panelClose")
+        verify(!page.confirmRemoveCell, "closing the panel drops it")
+        press(find(page, "dashCell_0_1"))
+        click(page, "panelRemove")
+        compare(find(page, "panelRemoveQuestion").text, "Remove Blank from this page?")
+        compare(find(page, "panelRemove").Accessible.name, "Remove Blank")
+        page.stopEditing()
+        verify(!page.confirmRemoveCell, "Done drops it")
+        compare(labels(page), ["A", "", "C"])
+    }
+
+    // Edit mode's Remove is a touch's size and draws a raised square with
+    // an edge inside its cell, a short cell's too (the phone's touch size,
+    // which Theme.compact gives outside Main)
+    function test_theRemoveBoxReadsAsAButton() {
+        Theme.compact = true
+        try {
+            removeBoxOnThePhone()
+        } finally {
+            Theme.compact = false
+        }
+    }
+    function removeBoxOnThePhone() {
+        const lights = { kind: "shift-light", w: 12, h: 3, label: "Shift", refs: ["id:1001"],
+                         unit: "RPM", options: { from: 0, to: 8000 } }
+        const page = pageOf({ form: "phone", width: 384, height: 832 },
+                            docOf([lights, cellOf("B")]))
+        page.startEditing()
+        for (const name of ["dashCell_0_0", "dashCell_0_1"]) {
+            const cell = find(page, name)
+            const box = find(cell, "cellRemove")
+            const face = find(box, "cellRemoveFace")
+            tryVerify(() => cell.height > 0 && face.width > 0, 3000, name + " laid out")
+            verify(box.width >= Theme.touchTarget - 0.5 && box.height >= Theme.touchTarget - 0.5,
+                   name + "'s Remove is a touch's size: " + box.width + " x " + box.height)
+            compare(face.border.width, 1, name + "'s face has an edge")
+            verify(Qt.colorEqual(face.border.color, Theme.outline), "in the outline's color")
+            verify(Qt.colorEqual(face.color, Theme.elevated), "on a control's fill")
+            const top = face.mapToItem(cell, 0, 0)
+            const end = face.mapToItem(cell, face.width, face.height)
+            verify(top.x >= 0 && top.y >= 0 && end.x <= cell.width + 0.5 && end.y <= cell.height + 0.5,
+                   name + "'s face is inside its cell: " + JSON.stringify([top, end, cell.width, cell.height]))
+        }
+        verify(find(page, "dashCell_0_0").height < Theme.touchTarget,
+               "the lights are shorter than a touch: " + find(page, "dashCell_0_0").height)
+    }
 }
