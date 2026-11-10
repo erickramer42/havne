@@ -1,6 +1,7 @@
 // File/layer: core/src/import.cpp | C++17, Qt-free; a log from another tool
 //             as a recording (ADR-0054 sections 4 and 5)
-// Testing: UNIT: ImportTest, CsvImportTest, CsvGuessTest (test_core)
+// Testing: UNIT: ImportTest, CsvImportTest, CsvGuessTest, ImportCancelTest
+//          (test_core)
 //
 // ecuio_import: a candump log read twice, first to check every line and
 // list the interfaces (so a refusal comes before anything is written),
@@ -12,6 +13,10 @@
 // back as JSON, importing nothing.
 // The folder is written under a name of its own beside <folder>
 // (folder_files.h's partial_name) and renamed once whole.
+//
+// The caller's cancel (ecuio_import_with) is asked as each pass begins and
+// every kCancelBytes bytes read; a stop ends every read at once, and the
+// partial goes the way every failure takes.
 
 #include "candump.h"
 #include "csv_guess.h"
@@ -52,13 +57,45 @@ constexpr uint64_t kReorderUs = 100000;
 constexpr uint64_t kFramesMax = 100000000;
 constexpr size_t kInterfacesMax = 64;
 constexpr size_t kWriteChunk = 1u << 16;
+/* Bytes read between two asks of the caller's cancel */
+constexpr size_t kCancelBytes = 1u << 16;
+
+/* The caller's cancel: once it says stop, every read ends */
+struct stopper {
+    ecuio_cancel_t cancel = nullptr;
+    void* user = nullptr;
+    bool stopped = false;
+    size_t unread = 0;
+
+    /* Asked now; true once stopped */
+    bool now()
+    {
+        if (!stopped && cancel != nullptr && cancel(user) != 0) {
+            stopped = true;
+        }
+        return stopped;
+    }
+
+    /* A byte about to be read: asked every kCancelBytes */
+    bool byte()
+    {
+        if (stopped) {
+            return true;
+        }
+        if (++unread < kCancelBytes) {
+            return false;
+        }
+        unread = 0;
+        return now();
+    }
+};
 
 /* Lines of a file, each without its line end; a line past the format's
- * longest is read to its end and flagged */
+ * longest is read to its end and flagged. A stop ends the file there */
 class lines_of
 {
 public:
-    explicit lines_of(FILE* f) : f_(f) {}
+    lines_of(FILE* f, stopper& st) : f_(f), st_(st) {}
 
     /* The line last read had no line end: the file ends inside it, a
      * line cut short (ADR-0049 section 7's torn row) */
@@ -71,7 +108,7 @@ public:
         int c = 0;
         bool any = false;
         bool ended = false;
-        while ((c = std::fgetc(f_)) != EOF) {
+        while (!st_.byte() && (c = std::fgetc(f_)) != EOF) {
             any = true;
             if (c == '\n') {
                 ended = true;
@@ -87,11 +124,12 @@ public:
             line.pop_back();
         }
         cut_ = any && !ended;
-        return any;
+        return any && !st_.stopped;
     }
 
 private:
     FILE* f_;
+    stopper& st_;
     bool cut_ = false;
 };
 
@@ -188,9 +226,12 @@ bool fail(const char* fmt, const std::string& a = std::string())
 }
 
 /* Every line checked, the interfaces listed */
-bool read_survey(FILE* f, survey& s)
+bool read_survey(FILE* f, survey& s, stopper& st)
 {
-    lines_of lines(f);
+    if (st.now()) {
+        return false;
+    }
+    lines_of lines(f, st);
     std::string line;
     bool too_long = false;
     dump::line l;
@@ -227,6 +268,9 @@ bool read_survey(FILE* f, survey& s)
             s.interfaces.push_back(name);
         }
     }
+    if (st.stopped) {
+        return false;
+    }
     if (std::ferror(f) != 0) {
         return fail("the log can't be read");
     }
@@ -238,9 +282,12 @@ bool read_survey(FILE* f, survey& s)
  * (more, fewer, or the cut one ended since) are a log that changed. */
 bool write_frames(FILE* in, FILE* out, const survey& s,
                   const std::string& iface, ecuio_import_report_t& r,
-                  std::string* why)
+                  stopper& st, std::string* why)
 {
-    lines_of lines(in);
+    if (st.now()) {
+        return false;
+    }
+    lines_of lines(in, st);
     std::string line;
     bool too_long = false;
     dump::line l;
@@ -318,6 +365,9 @@ bool write_frames(FILE* in, FILE* out, const survey& s,
             rows.clear();
         }
     }
+    if (st.stopped) {
+        return false;
+    }
     if (line_no != s.lines || cut != s.cut) {
         *why = "the log changed while it was read";
         return false;
@@ -361,7 +411,7 @@ std::string events_log(const std::string& iface, bool cut,
 /* The import proper, its files under partial, which the caller removes
  * on failure */
 bool import_candump(const ecuio_import_options_t& o, const std::string& out,
-                    ecuio_import_report_t& r, std::string* made)
+                    ecuio_import_report_t& r, stopper& st, std::string* made)
 {
     std::string why;
     std::unique_ptr<FILE, file_closer> in(
@@ -370,7 +420,7 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
         return fail("the log can't be opened: %s", why);
     }
     survey s;
-    if (!read_survey(in.get(), s)) {
+    if (!read_survey(in.get(), s, st)) {
         return false;
     }
     r.lines = s.lines;
@@ -414,8 +464,8 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
         if (!frames) {
             return fail("frames.csv can't be written: %s", why);
         }
-        if (!write_frames(in.get(), frames.get(), s, iface, r, &why)) {
-            return fail("%s", why);
+        if (!write_frames(in.get(), frames.get(), s, iface, r, st, &why)) {
+            return st.stopped ? false : fail("%s", why);
         }
         if (std::fclose(frames.release()) != 0) {
             return fail("frames.csv can't be written: %s",
@@ -444,10 +494,15 @@ bool import_candump(const ecuio_import_options_t& o, const std::string& out,
 
 namespace csv = ecuio_csv_import;
 
+/* The file's bytes; a stop ends them there */
 struct file_source {
     FILE* f;
+    stopper& st;
     int get()
     {
+        if (st.byte()) {
+            return -1;
+        }
         const int c = std::fgetc(f);
         return c == EOF ? -1 : c;
     }
@@ -571,7 +626,7 @@ std::string csv_events_log(const csv::column_map& m, const csv::outcome& o)
 }
 
 bool import_csv(const ecuio_import_options_t& o, const std::string& out,
-                ecuio_import_report_t& r, std::string* made)
+                ecuio_import_report_t& r, stopper& st, std::string* made)
 {
     std::string why;
     csv::column_map m;
@@ -587,9 +642,16 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
     }
     csv::outcome first;
     {
-        file_source src{in.get()};
+        if (st.now()) {
+            return false;
+        }
+        file_source src{in.get(), st};
         csv::counting_sink count;
-        if (!csv::run(src, m, count, first, &why)) {
+        const bool ran = csv::run(src, m, count, first, &why);
+        if (st.stopped) {
+            return false;
+        }
+        if (!ran) {
             return fail("%s", why);
         }
         if (std::ferror(in.get()) != 0) {
@@ -622,8 +684,15 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
         }
         w.rows = std::string("\xEF\xBB\xBF") +
                  ecuio_recording_rows::kSignalsHeader + "\n";
-        file_source src{in.get()};
-        if (!csv::run(src, m, w, second, &why)) {
+        if (st.now()) {
+            return false;
+        }
+        file_source src{in.get(), st};
+        const bool ran = csv::run(src, m, w, second, &why);
+        if (st.stopped) {
+            return false;
+        }
+        if (!ran) {
             return fail("%s", why.empty()
                                   ? std::string("the file changed while "
                                                 "it was read")
@@ -667,6 +736,13 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
 
 extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
                                        ecuio_import_report_t* report)
+{
+    return ecuio_import_with(options, nullptr, nullptr, report);
+}
+
+extern "C" ecuio_status_t
+ecuio_import_with(const ecuio_import_options_t* options, ecuio_cancel_t cancel,
+                  void* user_data, ecuio_import_report_t* report)
 {
     if (report != nullptr) {
         *report = ecuio_import_report_t{};
@@ -721,8 +797,15 @@ extern "C" ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
             out.pop_back();
         }
         partial_guard g;
-        const bool ok = is_csv ? import_csv(*options, out, r, &g.made)
-                               : import_candump(*options, out, r, &g.made);
+        stopper st;
+        st.cancel = cancel;
+        st.user = user_data;
+        const bool ok = is_csv ? import_csv(*options, out, r, st, &g.made)
+                               : import_candump(*options, out, r, st, &g.made);
+        if (!ok && st.stopped) {
+            ecuio_detail_set("the import was canceled");
+            return ECUIO_ERR_CANCELED;
+        }
         if (!ok) {
             return ECUIO_ERR_LOAD_FAILED;
         }

@@ -40,13 +40,14 @@
 # (that map) before its own; a time of plain numbers with no unit is
 # refused until --time-unit gives one, and a file with no header is
 # refused, each exit 3 with words and nothing made. interrupt: an
-# export to pcapng, a folder copy, a CSV's sizing, and a wide CSV and its
-# sizing during their named columns' check, each held at its first ask
-# (HAVNE_CLI_EXPORT_HOLD_MS, which names that ask on stderr: the wide
-# CSVs' must be the check's) and stopped by Ctrl+Break or SIGINT once held, end within a few seconds with an
-# interrupted end line and exit 1, nothing at the file or folder named
-# and no partial beside it; exit 77 where there's no console to send the
-# event through.
+# export to pcapng, a folder copy, a CSV's sizing, a wide CSV and its
+# sizing during their named columns' check, and an import of a candump
+# log and of a CSV, each held at its first ask (HAVNE_CLI_EXPORT_HOLD_MS,
+# which names that ask on stderr: the wide CSVs' must be the check's, an
+# import's the import's) and stopped by Ctrl+Break or SIGINT once held,
+# end within a few seconds with an interrupted end line and exit 1,
+# nothing at the file or folder named and no partial beside it; exit 77
+# where there's no console to send the event through.
 
 import csv
 import json
@@ -715,9 +716,9 @@ HELD_WAIT_S = 30
 
 
 def interrupted(cli, args, where):
-    """args run held at the first ask, which must be where's (b"export" or
-    b"column check"), then interrupted: None, a failure's words, or "skip"
-    with no console"""
+    """args run held at the first ask, which must be where's (b"export",
+    b"column check" or b"import"), then interrupted: None, a failure's
+    words, or "skip" with no console"""
     env = dict(os.environ)
     env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
     kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
@@ -758,17 +759,38 @@ def interrupted(cli, args, where):
             lines[-1] != {"type": "end", "reason": "interrupted"}:
         return (f"exit {p.returncode}, lines {lines}, "
                 f"{err.decode('utf-8', 'replace')}")
-    if any(l["type"] in ("exported", "estimate", "error") for l in lines):
+    if any(l["type"] in ("exported", "estimate", "imported", "error")
+           for l in lines):
         return f"an interrupted run says more than its end: {lines}"
-    print(f"ok    {' '.join(args[args.index('--format'):])}: interrupted, "
-          f"ended {took:.2f} s "
-          f"after it")
+    print(f"ok    {case_name(args)}: interrupted, ended {took:.2f} s after it")
     return None
+
+
+def case_name(args):
+    """An export's options, or the import's kind"""
+    return " ".join(args[args.index("--format"):]) if "--format" in args \
+        else " ".join(args[:2])
 
 
 def interrupt(cli, recording):
     with tempfile.TemporaryDirectory(prefix="havne-cli-int-") as root:
+        log = os.path.join(root, "bus.log")
+        with open(log, "w", encoding="utf-8", newline="\n") as f:
+            f.write(LOG)
+        values = os.path.join(root, "values.csv")
+        with open(values, "w", encoding="utf-8", newline="\n") as f:
+            f.write("t,Engine Speed\n0,800\n1,810\n")
+        cmap = os.path.join(root, "map.json")
+        with open(cmap, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"havne_column_map": 1,
+                       "time": {"column": "t", "unit": "s"},
+                       "signals": [{"column": "Engine Speed", "name": "RPM",
+                                    "unit": "rpm"}]}, f)
         cases = [
+            (["import", "candump", log, os.path.join(root, "from-log")],
+             os.path.join(root, "from-log"), b"import"),
+            (["import", "csv", values, os.path.join(root, "from-csv"),
+              "--map", cmap], os.path.join(root, "from-csv"), b"import"),
             (["export", recording, os.path.join(root, "out.pcapng"),
               "--format", "pcapng"], os.path.join(root, "out.pcapng"),
              b"export"),
@@ -792,12 +814,12 @@ def interrupt(cli, recording):
                 why = (f"something was left at or beside "
                        f"{os.path.basename(made)}: {os.listdir(root)}")
             if why is not None:
-                print(f"FAIL  {' '.join(args[args.index('--format'):])}: "
-                      f"{why}")
+                print(f"FAIL  {case_name(args)}: {why}")
                 failed += 1
     if failed:
         return 1
-    print("ok    an interrupt stops an export and its sizing, leaving nothing")
+    print("ok    an interrupt stops an export, its sizing and an import, "
+          "leaving nothing")
     return 0
 
 

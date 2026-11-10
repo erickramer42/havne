@@ -2,8 +2,9 @@
 // Testing: BRIDGE: BridgeTest.Import* (test_bridge)
 //
 // The Recordings page's Import (app/recordingimport.{h,cpp}): a candump log
-// or a CSV through its column map made a recording by core's ecuio_import,
-// on a thread of its own, in a folder named as a recording is.
+// or a CSV through its column map made a recording by core's
+// ecuio_import_with, on a thread of its own, in a folder named as a
+// recording is; the importer's destruction stops one under way.
 
 #include <gtest/gtest.h>
 
@@ -22,6 +23,7 @@
 
 #include <functional>
 #include <memory>
+#include <utility>
 
 #include "recordingimport.h"
 #include "sessionbridge.h"
@@ -209,6 +211,42 @@ TEST(BridgeTest, ImportTakesACandumpLogsBus)
     EXPECT_EQ(i.result.value(QStringLiteral("frames")).toDouble(), 2.0)
         << "can1's alone";
     EXPECT_EQ(entries(root).size(), 2);
+}
+
+/* An import under way when the importer goes (the app quitting) stops at
+ * core's next ask: the destructor's wait ends with nothing made, where
+ * the same log imported whole makes its folder */
+TEST(BridgeTest, ImportStopsWhenTheImporterGoes)
+{
+    QTemporaryDir dir;
+    QByteArray log;
+    for (int i = 0; i < 300000; ++i) {
+        log += QStringLiteral("(1700000000.%1) can0 7E8#03410C1AF8AAAAAA\n")
+                   .arg(i * 3, 6, 10, QLatin1Char('0'))
+                   .toLatin1();
+    }
+    const QUrl file = fileUrl(write(dir, "long.log", log));
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    {
+        RecordingImport whole([root] { return root; });
+        const Imported i = import(whole, file, RecordingImport::Candump);
+        ASSERT_TRUE(ok(i)) << words(i).toStdString();
+        EXPECT_EQ(i.result.value(QStringLiteral("frames")).toDouble(),
+                  300000.0);
+    }
+    ASSERT_EQ(entries(root).size(), 1);
+
+    auto im = std::make_unique<RecordingImport>([root] { return root; });
+    bool finished = false;
+    QObject::connect(im.get(), &RecordingImport::finished,
+                     [&finished] { finished = true; });
+    ASSERT_TRUE(im->start(file, RecordingImport::Candump, {}, {}));
+    im.reset();
+    EXPECT_EQ(entries(root).size(), 1)
+        << "no second folder and no partial: "
+        << entries(root).join(QLatin1Char(' ')).toStdString();
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(finished) << "its end goes with it";
 }
 
 /* A name taken in this second: the next, "-2", as a recording's would */

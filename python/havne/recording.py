@@ -7,13 +7,16 @@
 # force at a time, and finding a threshold's crossing or a marker. Times
 # are the recording's host_us, microseconds from its start. import_csv and
 # import_candump make a recording's folder from a logger's file
-# (ADR-0054, ecuio_import); guess_csv_map guesses a CSV's column map from
-# its header (ecuio_import_csv_guess), which import_csv uses without one.
+# (ADR-0054, ecuio_import_with), stopped by a cancel or a Ctrl+C with
+# nothing left made; guess_csv_map guesses a CSV's column map from its
+# header (ecuio_import_csv_guess), which import_csv uses without one.
 # read_frames reads its frames.csv back as recorded (ADR-0049's appendix
 # "frames read back").
 
 import ctypes
 import json
+import signal
+import threading
 import weakref
 from collections import namedtuple
 
@@ -162,9 +165,58 @@ class Recording:
         return None if at.value == NONE else at.value
 
 
-def _import(options, folder):
+class _Asks:
+    """The cancel core asks during a long call: the caller's cancel, an
+    exception it raises, or a Ctrl+C on the main thread, each raised again
+    once core has removed what it had begun"""
+
+    def __init__(self, cancel):
+        if cancel is not None and not callable(cancel):
+            raise TypeError("cancel is a callable taking no arguments, or None")
+        self._cancel = cancel
+        self.failed = None
+        self.interrupted = False
+        self.callback = e.ecuio_cancel_t(self._ask)
+
+    def _ask(self, _user):
+        # An exception escaping a ctypes callback would leave its return
+        # value unset: it stops the call and is raised after it
+        try:
+            if self.interrupted or self.failed is not None:
+                return 1
+            return 1 if self._cancel is not None and self._cancel() else 0
+        except BaseException as exc:  # noqa: BLE001 (raised again by run)
+            self.failed = exc
+            return 1
+
+    def _on_sigint(self, _signum, _frame):
+        self.interrupted = True
+
+    def run(self, call):
+        """call(callback)'s status, or what stopped it raised"""
+        # Python's own handler would raise KeyboardInterrupt on the
+        # callback's entry, outside any try: a flag stands in for it
+        swapped = (threading.current_thread() is threading.main_thread()
+                   and signal.getsignal(signal.SIGINT) is signal.default_int_handler)
+        if swapped:
+            signal.signal(signal.SIGINT, self._on_sigint)
+        try:
+            status = call(self.callback)
+        finally:
+            if swapped:
+                signal.signal(signal.SIGINT, signal.default_int_handler)
+        if self.failed is not None:
+            raise self.failed
+        if self.interrupted:
+            raise KeyboardInterrupt
+        return status
+
+
+def _import(options, folder, cancel):
     report = e.ecuio_import_report_t()
-    check(lib.ecuio_import(ctypes.byref(options), ctypes.byref(report)), "ecuio_import")
+    asks = _Asks(cancel)
+    check(asks.run(lambda callback: lib.ecuio_import_with(
+        ctypes.byref(options), callback, None, ctypes.byref(report))), "ecuio_import_with")
     return Imported(folder, report.lines, report.frames, report.error_frames,
                     report.interfaces, report.values, report.columns_ignored,
                     report.utc_start_us or None, report.duration_us)
@@ -205,7 +257,7 @@ def guess_csv_map(path, time_unit=None):
     return GuessedMap(whole["map"], whole["notes"], report.flags, whole["columns"])
 
 
-def import_csv(path, folder, column_map=None, time_unit=None):
+def import_csv(path, folder, column_map=None, time_unit=None, cancel=None):
     """A logger's CSV at path made into a recording's folder (signals.csv
     and events.log) at folder, which must not exist yet, by column_map: a
     dict or its JSON text (ADR-0054's column map: the time column and each
@@ -213,7 +265,13 @@ def import_csv(path, folder, column_map=None, time_unit=None):
     guess_csv_map(path, time_unit) gives, taken as core wrote it; one whose
     time has no unit raises Error before anything is made. Returns an
     Imported; a refused file or map raises Error with core's words, leaving
-    nothing made."""
+    nothing made.
+    cancel, a callable taking no arguments, is asked on the calling
+    thread as core reads: true stops the import with Error
+    ECUIO_ERR_CANCELED. An exception it raises, or a Ctrl+C on the main
+    thread (KeyboardInterrupt), stops it at core's next ask and is raised
+    again. Stopped either way, nothing is left made; a Ctrl+C after the
+    import's last ask raises once the recording is whole."""
     if column_map is None:
         raw, report = _guessed(path, time_unit)
         if not report.flags & e.ECUIO_CSV_GUESS_TIME_UNIT_KNOWN:
@@ -238,20 +296,26 @@ def import_csv(path, folder, column_map=None, time_unit=None):
     o.in_path_utf8 = utf8(str(path))
     o.out_folder_utf8 = utf8(str(folder))
     o.column_map_utf8 = utf8(column_map)
-    return _import(o, str(folder))
+    return _import(o, str(folder), cancel)
 
 
-def import_candump(path, folder, interface=None):
+def import_candump(path, folder, interface=None, cancel=None):
     """A candump -L log at path made into a recording's folder (frames.csv
     and events.log) at folder, which must not exist yet; interface names
     the bus when the log holds several. Returns an Imported; a refused log
-    raises Error with core's words, leaving nothing made."""
+    raises Error with core's words, leaving nothing made.
+    cancel, a callable taking no arguments, is asked on the calling
+    thread as core reads: true stops the import with Error
+    ECUIO_ERR_CANCELED. An exception it raises, or a Ctrl+C on the main
+    thread (KeyboardInterrupt), stops it at core's next ask and is raised
+    again. Stopped either way, nothing is left made; a Ctrl+C after the
+    import's last ask raises once the recording is whole."""
     o = e.ecuio_import_options_t()
     o.format = e.ECUIO_IMPORT_CANDUMP
     o.in_path_utf8 = utf8(str(path))
     o.out_folder_utf8 = utf8(str(folder))
     o.interface_utf8 = None if interface is None else utf8(interface)
-    return _import(o, str(folder))
+    return _import(o, str(folder), cancel)
 
 
 def read_frames(folder, from_us=0, to_us=0, limit=None):

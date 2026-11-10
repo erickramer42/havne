@@ -528,7 +528,9 @@ int main(void)
         ecuio_scrub_frames(0, NULL, NULL, NULL, 0, NULL, &export_report) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_import_with(NULL, never_cancel, NULL, &import_report) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     /* Frames read back (ADR-0049's appendix): the summary's layout, zeroed
@@ -576,7 +578,9 @@ int main(void)
         ECUIO_HEALTH_TEXT != 2u || ECUIO_HEALTH_VIN_DECODED != 1u ||
         ECUIO_HEALTH_BASELINE_READ != 2u ||
         ecuio_health_export(NULL, &health_report) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_health_export_with(NULL, never_cancel, NULL, &health_report) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     if (ecuio_obdb_import("{}", 2, NULL, NULL, NULL, NULL, NULL) !=
