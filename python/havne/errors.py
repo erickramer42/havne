@@ -1,9 +1,10 @@
 # File/layer: python/havne/errors.py | Python 3.11+, the havne package
-# Testing: PythonTest.test_session, test_version
+# Testing: PythonTest.test_session, test_version, test_export
 #
 # What the package raises: core's refusals as Error, carrying the status's
 # number, its name (ECUIO_ERR_BAD_URI is "BAD_URI") and core's detail text,
-# and the two ways the library itself can fail to load.
+# a failed scrub check as CheckFailed (an Error naming the class), and the
+# two ways the library itself can fail to load.
 
 from . import _ecuio
 
@@ -31,6 +32,18 @@ class Error(Exception):
         self.call = call
         text = f"{call}: {words} ({self.name})" if call else f"{words} ({self.name})"
         super().__init__(f"{text}: {detail}" if detail else text)
+
+
+class CheckFailed(Error):
+    """An export or report whose scrub check found a class of what it
+    leaves out: nothing was written. failed_class is the class's word
+    ("identification", "unattributable", "text_values", "activity" or
+    "vin_shaped"; "unknown" for a class a newer core adds), never the
+    value found."""
+
+    def __init__(self, status, words, detail="", call="", failed_class="unknown"):
+        super().__init__(status, words, detail, call)
+        self.failed_class = failed_class
 
 
 class LibraryNotFound(ImportError):

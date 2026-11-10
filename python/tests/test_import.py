@@ -22,7 +22,7 @@ import pytest
 
 import havne
 from havne._core import lib
-from conftest import ROOT
+from conftest import ROOT, Asks, nothing_made, partials
 
 CSV = os.path.join(ROOT, "tests", "fixtures", "import", "csv")
 LOG = (
@@ -47,11 +47,6 @@ def test_an_obdb_import_through_the_declarations_is_freed_by_core():
         lib.ecuio_obdb_free(out)
     assert json.loads(converted)["havne_signals"] == 1
     havne.SignalFile(converted)
-
-
-def partials(folder, name):
-    """Entries of folder named <name>.partial-...: core's own file or folder left behind"""
-    return [e for e in os.listdir(folder) if e.startswith(name + ".partial-")]
 
 
 def column_map(name):
@@ -125,29 +120,6 @@ def csv_import(tmp_path, name, cancel):
 
 
 IMPORTS = [candump_import, csv_import]
-
-
-class Asks:
-    """A cancel counting its asks, stopping (True) or raising at the nth"""
-
-    def __init__(self, at=None, then=True):
-        self.asked = 0
-        self.at = at
-        self.then = then
-
-    def __call__(self):
-        self.asked += 1
-        if self.asked != self.at:
-            return False
-        if isinstance(self.then, BaseException):
-            raise self.then
-        if callable(self.then):
-            return self.then()
-        return self.then
-
-
-def nothing_made(tmp_path, name):
-    return not os.path.exists(tmp_path / name) and not partials(tmp_path, name)
 
 
 @pytest.mark.parametrize("run", IMPORTS)
