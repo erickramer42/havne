@@ -166,6 +166,55 @@ TestCase {
 
     // A URI isn't prose: no capital first letter, no predicted words
     // ("Replay://" is a scheme core doesn't know)
+    SignalSpy {
+        id: logSpy
+        signalName: "logRequested"
+    }
+
+    // On the tab-bar form the list ends with the Log, its summary the
+    // newest activity line; a tap asks Main for the Log page, no subpage
+    function test_aLogRowOpensTheLogOnThePhone() {
+        Theme.compact = true
+        const page = createPage(true)
+        page.width = 384
+        logSpy.target = page
+        logSpy.clear()
+        compare(page.pageList[page.pageList.length - 1].key, "log", "last, after Advanced")
+        // A new summary remakes the list's rows: each read finds the row again
+        const row = () => find(find(page, "settingsList"), "settingsRow_log")
+        verify(row().visible, "the row shows")
+        compare(find(row(), "settingsRowSummary").text, "Ready.", "the Log's first line until another")
+        Bridge.logEvent("Connect failed: no reply from the adapter")
+        tryVerify(() => find(row(), "settingsRowSummary").text
+                        === "Connect failed: no reply from the adapter", 2000, "the newest line")
+        tap(row())
+        compare(logSpy.count, 1, "the Log asked for")
+        compare(page.pageKey, "", "no subpage")
+        verify(find(page, "settingsListPage").visible, "the list stays")
+    }
+
+    // Beside the sidebar, which lists the Log, the row isn't there
+    function test_theLogRowIsHiddenBesideTheSidebar() {
+        const page = createPage(true)
+        verify(!Theme.compact, "the desktop form")
+        verify(page.pageList.every(p => p.key !== "log"), "no Log in the list")
+        compare(findChild(find(page, "settingsSideList"), "settingsRow_log"), null)
+    }
+
+    // A refusal's words have the Log beside them
+    function test_aRefusalOffersTheLog() {
+        const page = createPage()
+        logSpy.target = page
+        logSpy.clear()
+        const show = find(page, "errorShowLog")
+        verify(!show.visible, "no refusal, no Show log")
+        page.requestConnect("mock://demo?profile=no-such-profile")
+        tryVerify(() => find(page, "errorLabel").visible, 5000, "the refusal")
+        verify(show.visible, "Show log beside it")
+        tap(show)
+        compare(logSpy.count, 1, "the Log asked for")
+    }
+
     function test_theUriFieldTakesAUriNotProse() {
         const page = createPage()
         for (const name of ["uriField", "didField"]) {

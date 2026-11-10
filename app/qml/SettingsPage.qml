@@ -840,9 +840,24 @@ Pane {
                    + " · " + Theme.nightSummary() },
         { key: "advanced", title: qsTr("Advanced"),
           summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
-    ]
+    ].concat(Theme.compact ? [{ key: "log", title: qsTr("Log"), summary: lastActivity }] : [])
+
+    // The tab-bar form has no sidebar to list the Log: its row, last, opens
+    // the Log page itself, as does Show log beside a failed connect
+    signal logRequested()
+    // The newest activity line, the Log row's summary: the Log's first line
+    // until another comes
+    property string lastActivity: qsTr("Ready.")
+    Connections {
+        target: Bridge
+        function onLogMessage(message) { page.lastActivity = message }
+    }
 
     function open(key) {
+        if (key === "log") {
+            logRequested()
+            return
+        }
         pageKey = key
     }
     // Back from a page: the form returns to Signals, the rest to the list

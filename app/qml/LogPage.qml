@@ -74,6 +74,13 @@ Pane {
         function onLogMessage(message) { page.appendLog(message) }
     }
 
+    // The activity at its newest line: where Show log and Settings' Log row
+    // land, the developer's Frames view included
+    function showActivityEnd() {
+        page.view = "activity"
+        activityLog.cursorPosition = activityLog.length
+    }
+
     // The Frames view's selected rows to the clipboard, a header line
     // first and one tab-separated line each (FrameListModel::selectedText)
     function copySelectedFrames() {

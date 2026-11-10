@@ -1844,6 +1844,54 @@ TestCase {
         compare(list.chosen, "mock://third")
     }
 
+    // Settings' Log row opens the Log page itself, and Back returns to
+    // Settings' list
+    function test_backFromTheLogReturnsToSettings() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        main.gotoPage(main.settingsPage)
+        const row = find(find(settings, "settingsList"), "settingsRow_log")
+        tryVerify(() => row.visible && row.height > 0, 2000, "the Log row")
+        verify(waitForPolish(main), "laid out")
+        const at = row.mapToItem(main.contentItem, row.width / 2, row.height / 2)
+        verify(at.y > 0 && at.y < main.contentItem.height, "the row on the glass at " + at.y)
+        mouseClick(row)
+        tryCompare(main, "currentPage", main.logPage, 2000, "the Log")
+        verify(main.goBack(), "Back is taken")
+        compare(main.currentPage, main.settingsPage, "back on Settings")
+        compare(settings.pageKey, "", "its list")
+    }
+
+    // A failed connect on Dash's list offers the Log beside its words; the
+    // Log opens on its activity at the newest line, in developer mode too,
+    // and Back returns to Dash
+    function test_aFailedConnectOffersTheLog() {
+        const main = phoneMain()
+        Theme.developerMode = true
+        const log = find(main.contentItem, "logPage")
+        log.view = "frames"
+        try {
+            const list = connectListOn(main, ["mock://demo?profile=no-such-profile"])
+            const show = find(list, "connectShowLog")
+            verify(!show.visible, "no failure, no Show log")
+            mouseClick(find(list, "connectGo"))
+            tryVerify(() => show.visible, 5000, "Show log beside the bridge's words")
+            verify(show.height >= Theme.touchTarget - 0.5, "a touch's size: " + show.height)
+            const right = show.mapToItem(main.contentItem, show.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, "inside the glass: " + right)
+            mouseClick(show)
+            tryCompare(main, "currentPage", main.logPage, 2000, "the Log")
+            verify(!log.showingFrames, "the activity, not the frames")
+            const text = find(log, "activityLog")
+            compare(text.cursorPosition, text.length, "at its newest line")
+            verify(main.goBack(), "Back is taken")
+            compare(main.currentPage, main.dashboardPage, "back on Dash")
+        } finally {
+            Theme.developerMode = false
+            log.view = "activity"
+        }
+    }
+
     function test_aFailedConnectFromTheListSaysWhyAndChangesNothing() {
         const main = phoneMain()
         const settings = find(main.contentItem, "settingsPage")

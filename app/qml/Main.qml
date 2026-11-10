@@ -158,6 +158,12 @@ ApplicationWindow {
         settingsView.showAdapters()
         gotoPage(settingsPage)
     }
+    // Settings' Log row and Show log beside a failed connect: the Log at its
+    // newest line; Back returns to the page that asked
+    function openLog() {
+        logView.showActivityEnd()
+        gotoPage(logPage)
+    }
     // Dash's "Other address...": Back returns to Dash, not to Settings' list
     function openConnectFromDash() {
         openConnect()
@@ -646,6 +652,7 @@ ApplicationWindow {
                         connectVehicleUri: settingsView.vehicleUri
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
+                        onLogRequested: root.openLog()
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
                         driveHeaderHeight: headerBar.height
@@ -664,7 +671,10 @@ ApplicationWindow {
                         vehicles: settingsView.vehicles
                         onConnectRequested: root.openConnect()
                     }
-                    LogPage { objectName: "logPage" }
+                    LogPage {
+                        id: logView
+                        objectName: "logPage"
+                    }
                     RecordingsPage {
                         id: recordingsView
                         objectName: "recordingsPage"
@@ -676,6 +686,7 @@ ApplicationWindow {
                     SettingsPage {
                         id: settingsView
                         objectName: "settingsPage"
+                        onLogRequested: root.openLog()
                     }
                 }
             }
