@@ -24,8 +24,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   it needs Havne 0.7.2 or later.
 - The demo connection (`mock://`) reads a battery voltage: about 12.45 V
   with the key on, a dip while the engine cranks, and the alternator's
-  14.1-14.6 V once it runs. It has the same name and unit as obd2's Battery
-  Voltage, so a Dashboard cell set up on one reads on the other.
+  14.1-14.6 V once it runs. A Dashboard gauge added for Battery Voltage
+  on the demo or on an OBD-II connection reads on the other too. A battery
+  gauge added before 0.7.2 reads only on the connection it was added on,
+  until its signal is chosen again.
 - Dashboard: the gauge's panel (a long press, or a tap in edit mode) has
   Remove, which asks before it removes the gauge.
 - Dashboard: a gauge whose value has stopped updating says "no new data"
