@@ -35,6 +35,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false   // only between sessions
+        Harness.clearFakeKnobs()
     }
 
     function find(within, name) {
@@ -620,5 +621,25 @@ TestCase {
         pasted.paste()
         verify(pasted.text.indexOf("Ready.") >= 0 && pasted.text.indexOf("a line to copy") >= 0,
                "the whole log was copied: " + pasted.text)
+    }
+
+    // ADR-0060: each module's session reaches the activity log, a refusal
+    // with its code (the fake's module has no extended session)
+    function test_aModulesSessionIsInTheActivityLog() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        Harness.armFakeKnob("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12")
+        const page = create(logComponent)
+        const log = find(page, "activityLog")
+        compare(Bridge.connectSession("j2534://" + Harness.fakeDllPath
+                                      + "?profile=uds-generic&did=1E1C,7E9:D801"
+                                      + "&session=03&identify=0&diagnose=0"), "")
+        tryVerify(() => log.text.includes(
+                      "ECU 0x7E8: reading in the extended session (50 03)"),
+                  5000, "the engine ECU's session line")
+        tryVerify(() => log.text.includes(
+                      "ECU 0x7E9: refused the extended session (subFunctionNotSupported, "
+                      + "7F 10 12): reading in the default session"),
+                  5000, "the module's refusal")
     }
 }

@@ -3659,6 +3659,130 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* ADR-0060 in the app: with ?session=03 each module's session has a line
+ * of its own, once; the module with none is named with its refusal and
+ * read in the default session; the support lines end with the session in
+ * force; Disconnect names the module returned to the default session; a
+ * recording keeps every one of them as a note */
+TEST(BridgeTest, AnExtendedSessionNamesEachModulesSessionOnce)
+{
+    FakeEnvArm module("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12");
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("j2534://%1?profile=uds-generic&did=1E1C,D800-D803,"
+                       "7E9:D801&session=03&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QString entered =
+        QStringLiteral("ECU 0x7E8: reading in the extended session (50 03)");
+    const QString refused = QStringLiteral(
+        "ECU 0x7E9: refused the extended session (subFunctionNotSupported, "
+        "7F 10 12): reading in the default session");
+    ASSERT_TRUE(spinUntil(
+        [&]() { return log.contains(entered) && log.contains(refused); }, 5000))
+        << log.join('\n').toStdString();
+    spinLoop(300);
+    EXPECT_EQ(log.count(entered), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(log.count(refused), 1) << log.join('\n').toStdString();
+    const auto support = [&log](const QString& ecu) {
+        QStringList out;
+        for (const QString& l : log.filter(ecu)) {
+            if (l.contains(QStringLiteral(" requests")) ||
+                l.contains(QStringLiteral(" request,"))) {
+                out << l;
+            }
+        }
+        return out;
+    };
+    ASSERT_FALSE(support(QStringLiteral("ECU 0x7E8: ")).isEmpty());
+    ASSERT_FALSE(support(QStringLiteral("ECU 0x7E9: ")).isEmpty());
+    /* the range's steps report after the entry, so a repeat would show */
+    EXPECT_GE(log.mid(log.indexOf(entered))
+                  .filter(QStringLiteral("ECU 0x7E8: "))
+                  .size(),
+              3)
+        << log.join('\n').toStdString();
+    EXPECT_TRUE(support(QStringLiteral("ECU 0x7E8: "))
+                    .last()
+                    .endsWith(QStringLiteral("; extended session")))
+        << support(QStringLiteral("ECU 0x7E8: ")).last().toStdString();
+    for (const QString& l : support(QStringLiteral("ECU 0x7E9: "))) {
+        EXPECT_TRUE(l.endsWith(QStringLiteral("; default session")))
+            << l.toStdString();
+    }
+    const QString folder = bridge.recordingFolder();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QString returned =
+        QStringLiteral("ECU 0x7E8: returned to the default session (10 01)");
+    EXPECT_EQ(log.count(returned), 1) << log.join('\n').toStdString();
+    EXPECT_FALSE(
+        log.join('\n').contains(QStringLiteral("ECU 0x7E9: returned")));
+    const QByteArray events =
+        readFile(folder + QStringLiteral("/events.log")).replace("\r\n", "\n");
+    for (const QString& line : {entered, refused, returned}) {
+        EXPECT_TRUE(events.contains(("  note  " + line + "\n").toUtf8()))
+            << line.toStdString() << "\n"
+            << events.toStdString();
+    }
+}
+
+/* Without ?session=03 the same modules give no session line and no
+ * session part in their support lines (the module scans two DIDs, so it
+ * reports something) */
+TEST(BridgeTest, WithoutASessionNoSessionIsNamed)
+{
+    FakeEnvArm module("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12");
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("j2534://%1?profile=uds-generic&did=1E1C,7E9:D800-D801"
+                       "&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(spinUntil(
+        [&]() { return !log.filter(QStringLiteral("ECU 0x7E9: ")).isEmpty(); },
+        5000))
+        << log.join('\n').toStdString();
+    spinLoop(300);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QString all = log.join('\n');
+    EXPECT_FALSE(all.contains(QStringLiteral("session (")));
+    EXPECT_FALSE(all.contains(QStringLiteral("; extended session")));
+    EXPECT_FALSE(all.contains(QStringLiteral("; default session")));
+    EXPECT_FALSE(all.contains(QStringLiteral("returned to the default")));
+}
+
+/* A second connect from the same bridge names the session again: what was
+ * written is per connect */
+TEST(BridgeTest, AReconnectNamesTheSessionAgain)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri = QStringLiteral("j2534://%1?profile=uds-generic&did=1E1C"
+                                       "&session=03&identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    const QString entered =
+        QStringLiteral("ECU 0x7E8: reading in the extended session (50 03)");
+    for (int n = 1; n <= 2; ++n) {
+        ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+        ASSERT_TRUE(spinUntil([&]() { return log.count(entered) == n; }, 5000))
+            << "connect " << n << "\n"
+            << log.join('\n').toStdString();
+        ASSERT_TRUE(disconnectAndWait(bridge));
+    }
+}
+
 /* A session that opens but won't start (the adapter refuses the obd2
  * channel's filter) fails the connect with the cause, and the bridge
  * keeps no session: a second connect works once the refusal is gone. */
@@ -4903,6 +5027,95 @@ TEST(BridgeTest, LiveHidesAFieldTheRepliesComeWithout)
 
 /* The counts are core's (pids_supported, pids_through: PidSupportTest);
  * the line says them */
+/* Each session state's words (ADR-0060); none without a session asked,
+ * none while 10 03 is out */
+TEST(BridgeTest, ChannelSessionTextSaysEachState)
+{
+    ecuio_channel_support_t s{};
+    s.rx_id = 0x7E8;
+    s.session_state = ECUIO_SESSION_STATE_REFUSED; /* but none asked */
+    s.session_nrc = 0x12;
+    EXPECT_TRUE(SessionBridge::channelSessionText(s).isEmpty());
+    s.session_asked = 0x03;
+    s.session = 0x01;
+    EXPECT_EQ(
+        SessionBridge::channelSessionText(s).toStdString(),
+        "ECU 0x7E8: refused the extended session (subFunctionNotSupported, "
+        "7F 10 12): reading in the default session");
+    s.session_nrc = 0x99;
+    EXPECT_EQ(SessionBridge::channelSessionText(s).toStdString(),
+              "ECU 0x7E8: refused the extended session (7F 10 99): reading in "
+              "the default session");
+    s.session_state = ECUIO_SESSION_STATE_NOT_ASKED;
+    EXPECT_TRUE(SessionBridge::channelSessionText(s).isEmpty());
+    s.session_state = ECUIO_SESSION_STATE_ENTERING;
+    EXPECT_TRUE(SessionBridge::channelSessionText(s).isEmpty());
+    s.session_state = ECUIO_SESSION_STATE_ENTERED;
+    s.session = 0x03;
+    s.session_nrc = 0;
+    s.session_entries = 1;
+    EXPECT_EQ(SessionBridge::channelSessionText(s).toStdString(),
+              "ECU 0x7E8: reading in the extended session (50 03)");
+    s.session_entries = 2;
+    s.session_lost = 1;
+    EXPECT_EQ(SessionBridge::channelSessionText(s).toStdString(),
+              "ECU 0x7E8: left the extended session and entered it again "
+              "(1 time so far)");
+    s.session_lost = 2;
+    EXPECT_EQ(SessionBridge::channelSessionText(s).toStdString(),
+              "ECU 0x7E8: left the extended session and entered it again "
+              "(2 times so far)");
+    s.session_state = ECUIO_SESSION_STATE_UNANSWERED;
+    s.session = 0x01;
+    EXPECT_EQ(SessionBridge::channelSessionText(s).toStdString(),
+              "ECU 0x7E8: no answer to 10 03: reading in the default session, "
+              "asked again when the link recovers");
+    s.session_state = ECUIO_SESSION_STATE_ABANDONED;
+    s.session_nrc = 0x7F;
+    EXPECT_EQ(
+        SessionBridge::channelSessionText(s).toStdString(),
+        "ECU 0x7E8: kept leaving the extended session "
+        "(serviceNotSupportedInActiveSession, code 7F, 3 times within 60 s): "
+        "reading in the default session");
+    s.session_state = 9; /* a state this build doesn't know */
+    EXPECT_TRUE(SessionBridge::channelSessionText(s).isEmpty());
+
+    /* Disconnect's line: only for a module that entered */
+    ecuio_channel_support_t r{};
+    r.rx_id = 0x7E9;
+    r.session_asked = 0x03;
+    EXPECT_TRUE(SessionBridge::sessionReturnedText(r).isEmpty());
+    r.session_entries = 1;
+    EXPECT_EQ(SessionBridge::sessionReturnedText(r).toStdString(),
+              "ECU 0x7E9: returned to the default session (10 01)");
+    r.session_asked = 0;
+    EXPECT_TRUE(SessionBridge::sessionReturnedText(r).isEmpty());
+
+    /* The support line's last part, and its access refusal's words in
+     * the extended session */
+    ecuio_channel_support_t u{};
+    u.rx_id = 0x7E8;
+    u.requests = 1;
+    u.dropped = 1;
+    u.dropped_list[0] = {
+        {0x22, 0xD8, 0x01}, 3, ECUIO_DROP_ACCESS, 0x33, {0, 0}};
+    EXPECT_EQ(
+        SessionBridge::channelSupportText(u).toStdString(),
+        "ECU 0x7E8: 1 request, 1 dropped: 22 D8 01 (needs security access "
+        "or another session: 7F 22 33)");
+    u.session_asked = 0x03;
+    u.session = 0x03;
+    EXPECT_EQ(
+        SessionBridge::channelSupportText(u).toStdString(),
+        "ECU 0x7E8: 1 request, 1 dropped: 22 D8 01 (needs security access, "
+        "or a session Havne doesn't enter: 7F 22 33); extended session");
+    u.session = 0x01;
+    EXPECT_EQ(
+        SessionBridge::channelSupportText(u).toStdString(),
+        "ECU 0x7E8: 1 request, 1 dropped: 22 D8 01 (needs security access "
+        "or another session: 7F 22 33); default session");
+}
+
 TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
 {
     ecuio_channel_support_t car{};

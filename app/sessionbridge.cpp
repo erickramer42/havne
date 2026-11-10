@@ -9,6 +9,7 @@
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
+#include "scan_line.h"       /* cli/: when a module's session earns a line */
 #include "urlwrite.h"
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
@@ -2551,6 +2552,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (ecuio_channel_support_t& s : m_supportReports) {
         s = ecuio_channel_support_t{};
     }
+    for (SessionWritten& w : m_sessionWritten) {
+        w = SessionWritten{};
+    }
     if (!m_refusedUnnamed.isEmpty()) {
         m_refusedUnnamed.clear();
         emit refusedUnnamedChanged();
@@ -2693,6 +2697,13 @@ void SessionBridge::disconnectSession()
 
     const QString uri = m_currentUri;
     emit logMessage(QStringLiteral("Disconnecting: %1").arg(uri));
+    // The close sends 10 01 after the worker's last report (ADR-0060)
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        const QString line = sessionReturnedText(m_supportReports[c]);
+        if (!line.isEmpty()) {
+            emit logMessage(line);
+        }
+    }
 
     // Every flag before any emit: a QML handler can run synchronously
     // inside one, and must already see disconnecting with connected
@@ -3764,6 +3775,16 @@ void SessionBridge::pollChannelSupport()
         m_supportGeneration[c] = s.generation;
         m_supportReports[c] = s;
         changed = true;
+        // The session's change first (ADR-0060): it's why this report moved
+        SessionWritten& w = m_sessionWritten[c];
+        cli::SessionSeen seen{w.state, w.nrc, w.entries, w.lost, w.written};
+        if (cli::session_due(s, seen)) {
+            w = {seen.state, seen.nrc, seen.entries, seen.lost, seen.written};
+            const QString line = channelSessionText(s);
+            if (!line.isEmpty()) {
+                emit logMessage(line);
+            }
+        }
         emit logMessage(channelSupportText(s));
     }
     // Live says which signals their ECU refused, and with what (ADR-0051
@@ -3903,7 +3924,13 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
                     why = QStringLiteral("service not supported: ") + nrc;
                     break;
                 case ECUIO_DROP_ACCESS:
-                    why = QStringLiteral("needs security access or another session: ") + nrc;
+                    // in the extended session, "another session" is wrong
+                    why = (s.session == cli::kExtendedSession
+                               ? QStringLiteral("needs security access, or a "
+                                                "session Havne doesn't enter: ")
+                               : QStringLiteral("needs security access or "
+                                                "another session: ")) +
+                          nrc;
                     break;
                 default:
                     why = QStringLiteral("reason %1").arg(static_cast<uint>(d.reason));
@@ -3941,7 +3968,70 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
         }
         parts << scan;
     }
+    if (s.session_asked != 0) {
+        parts << (s.session == cli::kExtendedSession
+                      ? QStringLiteral("extended session")
+                      : QStringLiteral("default session"));
+    }
     return QStringLiteral("ECU %1: ").arg(hexId(s.rx_id)) + parts.join(QStringLiteral("; "));
+}
+
+/* A module's session change (ADR-0060), one line per state the CLI's
+ * session line reports; the refusal's code by name, as Live's refusals
+ * are. Static, so test_bridge pins every state's words. */
+QString SessionBridge::channelSessionText(const ecuio_channel_support_t& s)
+{
+    const QString ecu = QStringLiteral("ECU %1: ").arg(hexId(s.rx_id));
+    const QString name = QString::fromLatin1(cli::nrc_name(s.session_nrc));
+    switch (s.session_asked != 0 ? s.session_state
+                                 : ECUIO_SESSION_STATE_NOT_ASKED) {
+    case ECUIO_SESSION_STATE_ENTERED:
+        if (s.session_lost == 0) {
+            return ecu +
+                   QStringLiteral("reading in the extended session (50 03)");
+        }
+        return ecu +
+               QStringLiteral("left the extended session and entered it again "
+                              "(%1 %2 so far)")
+                   .arg(s.session_lost)
+                   .arg(s.session_lost == 1 ? QStringLiteral("time")
+                                            : QStringLiteral("times"));
+    case ECUIO_SESSION_STATE_REFUSED: {
+        const QString code = refusalCode(0x10, s.session_nrc);
+        return ecu + QStringLiteral(
+                         "refused the extended session (%1): reading in the "
+                         "default session")
+                         .arg(name.isEmpty()
+                                  ? code
+                                  : name + QStringLiteral(", ") + code);
+    }
+    case ECUIO_SESSION_STATE_UNANSWERED:
+        return ecu + QStringLiteral(
+                         "no answer to 10 03: reading in the default session, "
+                         "asked again when the link recovers");
+    case ECUIO_SESSION_STATE_ABANDONED: {
+        const QString code =
+            QStringLiteral("code %1").arg(hexByte(s.session_nrc));
+        return ecu +
+               QStringLiteral("kept leaving the extended session (%1, %2 times "
+                              "within %3 s): reading in the default session")
+                   .arg(name.isEmpty() ? code
+                                       : name + QStringLiteral(", ") + code)
+                   .arg(ECUIO_SESSION_LOSSES_MAX)
+                   .arg(ECUIO_SESSION_LOSS_WINDOW_MS / 1000);
+    }
+    default:
+        return QString();
+    }
+}
+
+QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
+{
+    if (s.session_asked == 0 || s.session_entries == 0) {
+        return QString();
+    }
+    return QStringLiteral("ECU %1: returned to the default session (10 01)")
+        .arg(hexId(s.rx_id));
 }
 
 /* What each channel's ECU said it is (ADR-0021), in the activity log

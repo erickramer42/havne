@@ -920,6 +920,12 @@ public:
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
+    // A module's session change (ADR-0060): "ECU 0x7E8: reading in the
+    // extended session (50 03)" and the like; "" for none to tell
+    static QString channelSessionText(const ecuio_channel_support_t& support);
+    // At Disconnect, for a module that entered the extended session; ""
+    // otherwise
+    static QString sessionReturnedText(const ecuio_channel_support_t& support);
     // Live's "Refused: <name> (7F <service> <code>)"
     static QString refusalText(uint8_t service, uint8_t nrc);
     // The negative reply alone: "7F 22 31"
@@ -1441,6 +1447,15 @@ private:
     // Each channel's last report, for the signals their ECUs refused
     ecuio_channel_support_t m_supportReports[ECUIO_SESSION_INFO_MAX_CHANNELS] =
         {};
+    // What each channel's session line last said (cli::session_due's rule)
+    struct SessionWritten {
+        uint8_t state = 0;
+        uint8_t nrc = 0;
+        uint16_t entries = 0;
+        uint16_t lost = 0;
+        bool written = false;
+    };
+    SessionWritten m_sessionWritten[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     QString m_refusedUnnamed;
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
