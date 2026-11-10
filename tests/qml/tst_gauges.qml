@@ -273,6 +273,34 @@ TestCase {
         fuzzyCompare(after.u, before.u, 0.5, "the unit's x")
     }
 
+    // A Number tile draws no dot: one that is on whenever all is well says
+    // nothing (qml.md), so its title runs to the edge, fresh or stale
+    function test_aNumberTileHasNoStatusDot_data() {
+        return [{ tag: "fresh", stale: false }, { tag: "stale", stale: true }]
+    }
+    function test_aNumberTileHasNoStatusDot(data) {
+        const g = gaugeOf(kinds[2], 30)
+        g.label = "Air flow"
+        g.stale = data.stale
+        const dots = []
+        let title = null
+        const walk = (item) => {
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (c.visible && c.radius !== undefined && c.width > 0 && c.width <= 12
+                        && c.radius >= c.width / 2)
+                    dots.push(c)
+                if (c.text === "Air flow")
+                    title = c
+                walk(c)
+            }
+        }
+        walk(g)
+        compare(dots.length, 0, "no round mark under 12 px")
+        verify(title, "the title is there")
+        fuzzyCompare(title.mapToItem(g, title.width, 0).x, g.width, 0.5, "the title runs to the edge")
+    }
+
     // Dark renders the graphite look: the zone colors and the needle are the ones the gauges had, the lit color and readout the text color
     function test_darkRendersAsItDid() {
         usePalette("dark")
@@ -282,12 +310,8 @@ TestCase {
         same(analog.zoneColor(70, "red"), "#ffd166", "the warning zone")
         same(analog.zoneColor(90, "red"), "#f87171", "the danger zone")
         same(find(analog, "readout").color, "#ebebee", "the readout")
-        // The status dot, the low shift lights and Home's logo keep the
-        // green
+        // The low shift lights and Home's logo keep the green
         same(Theme.success, "#4ade80", "success")
-        const digital = gaugeOf(kinds[2], 30)
-        const dot = find(digital, "statusDot")
-        same(dot.color, "#4ade80", "the digital gauge's live dot")
         const bar = createTemporaryObject(shiftC, testCase.parent)
         const hues = []
         const walk = (item) => {

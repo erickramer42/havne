@@ -95,9 +95,9 @@ GaugeBase {
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { left: title.right; leftMargin: 10; right: parent.right; baseline: title.baseline }
-        visible: !gauge.hasValue && width > 0
+        visible: (!gauge.hasValue || gauge.stale) && width > 0
         elide: Text.ElideRight
-        text: gauge.note
+        text: gauge.shownNote
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
     }

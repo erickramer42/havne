@@ -101,6 +101,11 @@ Page {
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
+    // The cell panel's Remove asks first: the panel opens on a hold outside
+    // edit mode too, and there is no undo
+    property bool confirmRemoveCell: false
+    onSelectedChanged: confirmRemoveCell = false
+    onPanelChanged: confirmRemoveCell = false
 
     // ---- The gesture (section 4): hold, then release or drag
 
@@ -972,11 +977,36 @@ Page {
             width: Theme.touchTarget
             height: Theme.touchTarget
             sourceComponent: ThemedButton {
+                id: removeBox
                 objectName: "cellRemove"
                 compact: true
                 text: "\u00D7"
                 Accessible.name: qsTr("Remove %1").arg(card.label)
                 onClicked: root.removeCell(card.cellIndex)
+                // A touch's size drawn as a smaller raised square with an edge:
+                // a button, not an empty tile, and inside a short cell
+                background: Item {
+                    Rectangle {
+                        objectName: "cellRemoveFace"
+                        anchors.centerIn: parent
+                        width: 32
+                        height: 32
+                        radius: Theme.radius
+                        color: removeBox.down ? removeBox.pressedColor
+                             : removeBox.hovered ? removeBox.hoverColor
+                             : removeBox.baseColor
+                        border.width: removeBox.visualFocus ? 2 : 1
+                        border.color: removeBox.visualFocus ? Theme.text : Theme.outline
+                    }
+                }
+                contentItem: Text {
+                    text: removeBox.text
+                    font.pixelSize: Theme.fontBody + 6
+                    font.weight: Font.DemiBold
+                    color: Theme.text
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
         }
 
@@ -1047,6 +1077,9 @@ Page {
             readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
             readonly property bool phone: root.form === "phone"
             readonly property bool hasSignal: kind !== "blank"
+            // The cell's label, or its kind's name when it has none
+            readonly property string name: cell && cell.label ? cell.label
+                                           : (root.kindNames[kind] ?? kind)
             implicitHeight: panelColumn.implicitHeight + 2 * padding
             padding: 12
 
@@ -1375,6 +1408,43 @@ Page {
                         enabled: root.selected < root.shownCells.length - 1
                         text: qsTr("To the end")
                         onClicked: root.moveTo(root.shownCells.length - 1)
+                    }
+                }
+
+                // Remove, last and quiet, in edit mode or out of it
+                ThemedButton {
+                    objectName: "panelRemove"
+                    visible: !root.confirmRemoveCell
+                    flat: true
+                    text: qsTr("Remove")
+                    Accessible.name: qsTr("Remove %1").arg(panelCard.name)
+                    onClicked: root.confirmRemoveCell = true
+                }
+                RowLayout {
+                    objectName: "panelRemoveAsk"
+                    Layout.fillWidth: true
+                    visible: root.confirmRemoveCell
+                    spacing: 8
+                    Label {
+                        objectName: "panelRemoveQuestion"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        wrapMode: Text.WordWrap
+                        color: Theme.warning
+                        font.pixelSize: Theme.fontCaption
+                        text: qsTr("Remove %1 from this page?").arg(panelCard.name)
+                    }
+                    ThemedButton {
+                        objectName: "panelRemoveConfirm"
+                        compact: panelCard.phone
+                        text: qsTr("Remove")
+                        onClicked: root.removeCell(root.selected)
+                    }
+                    ThemedButton {
+                        objectName: "panelRemoveKeep"
+                        compact: panelCard.phone
+                        text: qsTr("Keep")
+                        onClicked: root.confirmRemoveCell = false
                     }
                 }
             }

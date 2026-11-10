@@ -1,5 +1,5 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.gauges, QmlTest.accessibility,
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility,
 //          QmlTest.dashboard;
 //          manual smoke: DashboardPage under mock://demo
 
@@ -76,7 +76,7 @@ GaugeBase {
 
     Column {
         id: heading
-        anchors { left: parent.left; right: status.left; top: parent.top }
+        anchors { left: parent.left; right: parent.right; top: parent.top }
         Text {
             Accessible.ignored: true
             width: parent.width
@@ -97,17 +97,6 @@ GaugeBase {
         }
     }
 
-    // Live dot: zone color while fresh, hollow without data
-    Rectangle {
-        id: status
-        objectName: "statusDot"
-        anchors { right: parent.right; top: parent.top; topMargin: 3 }
-        width: 8; height: 8; radius: 4
-        color: gauge.hasValue && !gauge.stale ? gauge.zoneColor(gauge.value, Theme.success)
-                                              : "transparent"
-        border.width: 1
-        border.color: gauge.hasValue && !gauge.stale ? "transparent" : Theme.textDim
-    }
 
     Row {
         id: valueRow
@@ -178,18 +167,21 @@ GaugeBase {
             PathPolyline { path: trace.points }
         }
     }
-    // In the trace's place, or beside the value on a card too short for one
+    // Beside the value on a card too short for a trace; else in the trace's
+    // place, or after the holds while a stale value keeps its trace
     Text {
         objectName: "gaugeNote"
         Accessible.ignored: true
-        anchors.left: gauge.brief ? valueRow.right : parent.left
-        anchors.leftMargin: gauge.brief ? 8 : 0
+        readonly property bool atHolds: !gauge.brief && gauge.hasValue
+        anchors.left: gauge.brief ? valueRow.right : atHolds ? footer.right : parent.left
+        anchors.leftMargin: gauge.brief || atHolds ? 8 : 0
         anchors.right: parent.right
-        anchors.verticalCenter: gauge.brief ? valueBand.verticalCenter : trace.verticalCenter
-        horizontalAlignment: gauge.brief ? Text.AlignLeft : Text.AlignHCenter
+        anchors.verticalCenter: gauge.brief ? valueBand.verticalCenter
+                              : atHolds ? footer.verticalCenter : trace.verticalCenter
+        horizontalAlignment: gauge.brief ? Text.AlignLeft : atHolds ? Text.AlignRight : Text.AlignHCenter
         elide: Text.ElideRight
-        visible: !gauge.hasValue && text !== ""
-        text: gauge.note
+        visible: text !== ""
+        text: gauge.shownNote
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.8)
     }

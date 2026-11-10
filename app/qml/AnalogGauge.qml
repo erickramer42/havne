@@ -1,5 +1,5 @@
 // File/layer: app/qml/AnalogGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.gauges, QmlTest.accessibility;
+// Testing: QML: QmlTest.gauges, QmlTest.kinds, QmlTest.accessibility;
 //          manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
@@ -259,13 +259,14 @@ GaugeBase {
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             topPadding: gauge.size * 0.012
-            text: !gauge.hasValue ? gauge.note
+            objectName: "gaugeNote"
+            text: gauge.shownNote !== "" ? gauge.shownNote
                  : gauge.showPeak && !isNaN(gauge.peakValue)
                    ? "%1 %2".arg(gauge.peakLabel).arg(gauge.format(gauge.peakValue))
                    : ""
             font.pixelSize: Math.max(9, gauge.size * 0.032)
             font.features: Theme.valueFeatures
-            color: gauge.hasValue ? Theme.gaugeWarn : Theme.textDim
+            color: gauge.shownNote !== "" ? Theme.textDim : Theme.gaugeWarn
         }
     }
 
