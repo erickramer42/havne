@@ -38,10 +38,23 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **`havne-cli` and Python:** any session as JSON lines or iterators, recordings viewed and exported offline, the simulated car served as an ELM327 adapter ([ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md)).
 - **A simulated vehicle:** a modeled car through a cold start, pulls onto the limiter and a quarter mile, so every page runs with no hardware.
 
-| Dashboard | Live | Dashboard at night |
-|---|---|---|
-| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](docs/images/phone-dashboard-dark.png)](docs/images/phone-dashboard-dark.png) | [![Live on the test phone on the limiter: rpm, speed, MAF and lambda over a minute of the chart](docs/images/phone-live.png)](docs/images/phone-live.png) | [![The phone layout's Dashboard with Night on in red](docs/images/phone-dashboard-night.png)](docs/images/phone-dashboard-night.png) |
-| The phone layout in a 2nd-gear pull, the shift lights filling | Live on the test phone, on the rev limiter | Night in red, for a dark cabin |
+<table>
+<thead>
+<tr><th width="33%">Dashboard</th><th width="33%">Codes</th><th width="33%">Dashboard at night</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="docs/images/phone-dashboard-dark.png"><img src="docs/images/phone-dashboard-dark.png" alt="The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm" width="240"></a></td>
+<td><a href="docs/images/phone-codes.png"><img src="docs/images/phone-codes.png" alt="Codes on the test phone: the inspection verdict, the check-engine light, and stored, pending and permanent codes with their titles" width="240"></a></td>
+<td><a href="docs/images/phone-dashboard-night.png"><img src="docs/images/phone-dashboard-night.png" alt="The phone layout's Dashboard with Night on in red" width="240"></a></td>
+</tr>
+<tr>
+<td>The phone layout in a 2nd-gear pull, the shift lights filling</td>
+<td>Reading and clearing codes on the test phone</td>
+<td>Night in red, for a dark cabin</td>
+</tr>
+</tbody>
+</table>
 
 ![Live on the desktop: rpm, speed, MAF and lambda through a 3rd-gear pull onto the limiter](docs/images/live.png)
 
