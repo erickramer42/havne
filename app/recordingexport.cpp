@@ -13,6 +13,7 @@
 #include <QSaveFile>
 #include <QTemporaryDir>
 
+#include <chrono>
 #include <new>
 #include <system_error>
 
@@ -29,6 +30,43 @@ namespace {
 constexpr int kMaxIntervals = 64;
 // A temporary folder's age past which no export still runs in it
 constexpr qint64 kStaleSeconds = 24 * 60 * 60;
+
+using Hold = RecordingExport::HoldForTesting;
+
+// A worker's stop: the object's flag, asked by core (ecuio_export_with) and
+// by the copy between chunks
+struct Stop {
+    const std::atomic<bool>* stopping = nullptr;
+    Hold hold = Hold::None;
+    int holdMs = 0;
+    std::atomic<int>* held = nullptr;
+    bool asked = false;
+
+    bool stopped() const { return stopping->load(); }
+    // A test's hold: the stop, or its time, ends it
+    void holdAt(Hold where) const
+    {
+        if (hold != where) {
+            return;
+        }
+        held->fetch_add(1);
+        const auto until = std::chrono::steady_clock::now() +
+                           std::chrono::milliseconds(holdMs);
+        while (!stopped() && std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+};
+
+int stopAsked(void* user)
+{
+    auto* s = static_cast<Stop*>(user);
+    if (!s->asked) {
+        s->asked = true;
+        s->holdAt(Hold::FirstAsk);
+    }
+    return s->stopped() ? 1 : 0;
+}
 
 // What a worker that ran out of memory says: it can't build its own answer
 const auto kOutOfMemory = QStringLiteral("out of memory");
@@ -67,7 +105,7 @@ QString coreWords(ecuio_status_t status)
 }
 
 ecuio_status_t exportTo(const Job& job, const QString& out,
-                        ecuio_export_report_t* report)
+                        ecuio_export_report_t* report, Stop& stop)
 {
     const QByteArray outUtf8 = out.toUtf8();
     std::vector<const char*> names = pointers(job.columns);
@@ -85,7 +123,7 @@ ecuio_status_t exportTo(const Job& job, const QString& out,
             o.columns_utf8 = names.empty() ? nullptr : names.data();
         }
     }
-    return ecuio_export(&o, report);
+    return ecuio_export_with(&o, stopAsked, &stop, report);
 }
 
 // One count with its noun's number
@@ -180,11 +218,14 @@ QVariantMap written(const Job& job, const ecuio_export_report_t& r,
 }
 
 // A chunk at a time: a recording can be larger than the memory a phone
-// gives the app
-bool copyChunks(QFile& in, QIODevice& out)
+// gives the app. A stop ends it as a failure does
+bool copyChunks(QFile& in, QIODevice& out, const Stop& stop)
 {
     QByteArray chunk(1024 * 1024, Qt::Uninitialized);
     for (;;) {
+        if (stop.stopped()) {
+            return false;
+        }
         const qint64 n = in.read(chunk.data(), chunk.size());
         if (n <= 0) {
             return n == 0;
@@ -197,7 +238,8 @@ bool copyChunks(QFile& in, QIODevice& out)
 
 // A local file is written whole or not at all; a provider's can't be renamed
 // into place
-bool copyFile(const QString& from, const QString& to, bool provider)
+bool copyFile(const QString& from, const QString& to, bool provider,
+              const Stop& stop)
 {
     QFile in(from);
     if (!in.open(QIODevice::ReadOnly)) {
@@ -205,12 +247,12 @@ bool copyFile(const QString& from, const QString& to, bool provider)
     }
     if (!provider) {
         QSaveFile out(to);
-        return out.open(QIODevice::WriteOnly) && copyChunks(in, out) &&
+        return out.open(QIODevice::WriteOnly) && copyChunks(in, out, stop) &&
                out.commit();
     }
     QFile out(to);
     return out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-           copyChunks(in, out) && out.flush();
+           copyChunks(in, out, stop) && out.flush();
 }
 
 QString whereOf(const QUrl& url)
@@ -218,7 +260,7 @@ QString whereOf(const QUrl& url)
     return url.isLocalFile() ? url.toLocalFile() : url.toString();
 }
 
-QVariantMap runFile(const Job& job)
+QVariantMap runFile(const Job& job, Stop& stop)
 {
     const bool provider = job.throughProvider || !job.target.isLocalFile();
     const QString target = whereOf(job.target);
@@ -237,13 +279,14 @@ QVariantMap runFile(const Job& job)
     }
     const QString made = temp.filePath(QStringLiteral("export"));
     ecuio_export_report_t report{};
-    const ecuio_status_t status = exportTo(job, made, &report);
+    const ecuio_status_t status = exportTo(job, made, &report, stop);
     if (status != ECUIO_OK) {
         const QString words = coreWords(status);
         dropPicked();
         return failed(job, words);
     }
-    if (job.failCopy || !copyFile(made, target, provider)) {
+    stop.holdAt(Hold::BeforeCopy);
+    if (job.failCopy || !copyFile(made, target, provider, stop)) {
         dropPicked();
         return failed(job, QStringLiteral("Couldn't write the file"));
     }
@@ -263,7 +306,7 @@ QString freeName(const QString& parent, const QString& stem)
     return QString();
 }
 
-QVariantMap runFolder(const Job& job)
+QVariantMap runFolder(const Job& job, Stop& stop)
 {
     const bool provider = job.throughProvider || !job.target.isLocalFile();
     const QString parent = whereOf(job.target);
@@ -275,7 +318,7 @@ QVariantMap runFolder(const Job& job)
     ecuio_export_report_t report{};
     if (!provider) {
         // Core makes the folder whole or not at all, beside where it goes
-        const ecuio_status_t status = exportTo(job, copy, &report);
+        const ecuio_status_t status = exportTo(job, copy, &report, stop);
         return status == ECUIO_OK ? written(job, report, name)
                                   : failed(job, coreWords(status));
     }
@@ -285,17 +328,19 @@ QVariantMap runFolder(const Job& job)
         return failed(job, QStringLiteral("Couldn't make a temporary folder"));
     }
     const QString made = temp.filePath(QStringLiteral("copy"));
-    const ecuio_status_t status = exportTo(job, made, &report);
+    const ecuio_status_t status = exportTo(job, made, &report, stop);
     if (status != ECUIO_OK) {
         return failed(job, coreWords(status));
     }
+    stop.holdAt(Hold::BeforeCopy);
     if (!QDir(parent).mkdir(name)) {
         return failed(job, QStringLiteral("Couldn't make the folder there"));
     }
     const QStringList files = QDir(made).entryList(QDir::Files, QDir::Name);
     for (const QString& file : files) {
-        if (job.failCopy || !copyFile(made + QLatin1Char('/') + file,
-                                      copy + QLatin1Char('/') + file, true)) {
+        if (job.failCopy ||
+            !copyFile(made + QLatin1Char('/') + file,
+                      copy + QLatin1Char('/') + file, true, stop)) {
             QDir(copy).removeRecursively();
             return failed(job, QStringLiteral("Couldn't write the folder"));
         }
@@ -304,7 +349,8 @@ QVariantMap runFolder(const Job& job)
 }
 
 QVariantMap runEstimate(const QByteArray& folder, const QList<quint32>& rowMs,
-                        quint32 units, const QList<QByteArray>& columns)
+                        quint32 units, const QList<QByteArray>& columns,
+                        Stop& stop)
 {
     std::vector<const char*> names = pointers(columns);
     ecuio_export_options_t o{};
@@ -316,9 +362,9 @@ QVariantMap runEstimate(const QByteArray& folder, const QList<quint32>& rowMs,
     o.columns_utf8 = names.empty() ? nullptr : names.data();
     std::vector<ecuio_export_estimate_t> sized(
         static_cast<size_t>(rowMs.size()));
-    const ecuio_status_t status = ecuio_export_estimate(
-        &o, rowMs.constData(), static_cast<uint32_t>(rowMs.size()),
-        sized.data());
+    const ecuio_status_t status = ecuio_export_estimate_with(
+        &o, rowMs.constData(), static_cast<uint32_t>(rowMs.size()), stopAsked,
+        &stop, sized.data());
     if (status != ECUIO_OK) {
         return {{QStringLiteral("ok"), false},
                 {QStringLiteral("words"), coreWords(status)}};
@@ -355,6 +401,7 @@ RecordingExport::RecordingExport(QObject* parent) : QObject(parent) {}
 RecordingExport::~RecordingExport()
 {
     // What they post is dropped with this object
+    m_stopping.store(true);
     if (m_worker.joinable()) {
         m_worker.join();
     }
@@ -413,7 +460,8 @@ bool RecordingExport::estimate(const QString& folder, const QVariantList& rowMs,
     }
     const quint64 generation = ++m_estimateGeneration;
     if (m_sizing && m_estimateWorker.joinable()) {
-        // The one running can't be stopped: this one follows it
+        // A sizing under way runs on unless the object goes: this one
+        // follows it
         m_waitingEstimate = job;
         m_waitingGeneration = generation;
         return true;
@@ -436,15 +484,18 @@ void RecordingExport::launchEstimate(const EstimateJob& job, quint64 generation)
     const bool wasSizing = m_sizing;
     m_sizing = true;
     try {
+        Stop stop{&m_stopping, m_holdForTesting, m_holdMsForTesting,
+                  &m_heldForTesting};
         m_estimateWorker =
-            std::thread([this, job, generation, fail = m_failWorkerForTesting] {
+            std::thread([this, job, generation, stop,
+                         fail = m_failWorkerForTesting]() mutable {
                 QVariantMap result;
                 try {
                     if (fail) {
                         throw std::bad_alloc();
                     }
                     result = runEstimate(job.folder, job.rowMs, job.units,
-                                         job.columns);
+                                         job.columns, stop);
                 } catch (...) {
                     result.clear(); // estimateDone says so
                 }
@@ -521,14 +572,18 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     job.throughProvider = m_throughProvider;
     job.failCopy = m_failCopyForTesting;
     try {
-        m_worker = std::thread([this, job, fail = m_failWorkerForTesting] {
+        Stop stop{&m_stopping, m_holdForTesting, m_holdMsForTesting,
+                  &m_heldForTesting};
+        m_worker = std::thread([this, job, stop,
+                                fail = m_failWorkerForTesting]() mutable {
             QVariantMap result;
             try {
                 if (fail) {
                     throw std::bad_alloc();
                 }
-                result = job.format == ECUIO_EXPORT_FOLDER ? runFolder(job)
-                                                           : runFile(job);
+                result = job.format == ECUIO_EXPORT_FOLDER
+                             ? runFolder(job, stop)
+                             : runFile(job, stop);
             } catch (...) {
                 result.clear(); // exportDone says so
             }
