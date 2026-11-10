@@ -96,7 +96,8 @@ Page {
     onStoredTextChanged: problemDismissed = false
 
     // ---- Edit mode (section 5). Each edit is stored as it's made, so
-    // Done only leaves edit mode and nothing waits to be saved
+    // Done leaves edit mode and ends the undo history, and nothing waits
+    // to be saved
 
     property bool editing: false
     property int selected: -1        // the cell edited, on the page shown
@@ -107,11 +108,6 @@ Page {
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
-    // The cell panel's Remove asks first: the panel opens on a hold outside
-    // edit mode too, and there is no undo
-    property bool confirmRemoveCell: false
-    onSelectedChanged: confirmRemoveCell = false
-    onPanelChanged: confirmRemoveCell = false
 
     // ---- The gesture (section 4): hold, then release or drag
 
@@ -121,6 +117,142 @@ Page {
     property var copied: null        // { form, cell }
     readonly property bool canPaste: copied !== null && copied.form === form
                                      && DashboardBook.canAddCell(doc, pageIndex)
+
+    // ---- Undo (ADR-0057's appendix "undo in edit mode as built"). An
+    // entry keeps the text stored before its step, so an undo stores what
+    // was there: "" (nothing, the built-in layout) included
+
+    property var undoStack: []       // [{ text, step }], the newest last
+    property var redoStack: []
+    property string lastKey: ""      // the last step's grouping key
+    property double lastAt: 0        // when it was made (Date.now())
+    readonly property int undoLimit: 50
+    readonly property int groupMs: 1500
+    property int undoLineMs: 5000    // the line's time; a test shortens it
+    property string undoLine: ""     // the line's words; "" hides it
+    readonly property bool canUndo: undoStack.length > 0
+    readonly property bool canRedo: redoStack.length > 0
+    readonly property string undoWords: canUndo ? undoStack[undoStack.length - 1].step.words : ""
+    readonly property string redoWords: canRedo ? redoStack[redoStack.length - 1].step.words : ""
+    // The options whose control steps or toggles: a run of them is one step
+    readonly property var steppedOptions: ["decimals", "peak", "cells", "digits", "window",
+                                           "count", "marks", "vertical"]
+    // An option's word in a step's words, as its caption on the panel says it
+    readonly property var optionWords: ({
+        "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
+        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "decimals": qsTr("decimals"),
+        "peak": qsTr("peak hold"), "majorStep": qsTr("major step"),
+        "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
+        "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
+        "rise": qsTr("curve"), "digits": qsTr("digits"), "window": qsTr("window"),
+        "vertical": qsTr("standing up"), "marks": qsTr("scale marks"), "count": qsTr("lights")
+    })
+    onFormChanged: clearHistory()
+
+    // A step on the page shown: its grouping key ("" never groups), its
+    // words, and its cell before and after (-1 for none)
+    function stepOf(key, words, cell, cellAfter, pageAfter) {
+        return { key: key, words: words, page: pageIndex,
+                 pageAfter: pageAfter ?? pageIndex, cell: cell, cellAfter: cellAfter }
+    }
+    // A cell's name in a step's words: its label, or its kind's name
+    function cellName(c) {
+        return c && c.label ? c.label : c ? (kindNames[c.kind] ?? c.kind) : ""
+    }
+    // The text the store holds for what's shown
+    function shownText() {
+        return store[formKey] === "" ? "" : DashboardBook.serialize(doc)
+    }
+    function record(before, after, step) {
+        const now = Date.now()
+        const n = undoStack.length
+        if (n > 0 && step.key !== "" && step.key === lastKey && now - lastAt <= groupMs) {
+            // A run: the top already holds the text from before it
+            const top = undoStack[n - 1]
+            const rest = undoStack.slice(0, n - 1)
+            if (after === top.text) {
+                // Back where the run began, so an Undo would change nothing
+                undoStack = rest
+                lastKey = ""
+            } else {
+                undoStack = rest.concat([{ text: top.text, step: Object.assign({}, top.step,
+                    { pageAfter: step.pageAfter, cellAfter: step.cellAfter }) }])
+                lastKey = step.key
+            }
+        } else {
+            undoStack = undoStack.concat([{ text: before, step: step }]).slice(-undoLimit)
+            lastKey = step.key
+        }
+        lastAt = now
+        redoStack = []
+        // Edit mode's bar has Undo; outside it the line is the only way back
+        if (editing)
+            undoLine = ""
+        else
+            showLine(step.words.charAt(0).toUpperCase() + step.words.slice(1))
+    }
+    function restore(text) {
+        store[formKey] = text
+        doc = text === "" ? DashboardBook.reset(form) : DashboardBook.parse(text, form).doc
+    }
+    // An undo or a redo goes from (page, cell) to (toPage, toCell). The
+    // cell panel follows only when it was on the step's cell, so it never
+    // shows another cell at a moved index; Add's and a signal's close
+    function travel(text, page, cell, toPage, toCell) {
+        const shown = panel
+        const follows = selected >= 0 && selected === cell && page === pageIndex
+                        && (shown === "cell" || shown === "")
+        restore(text)
+        goTo(toPage)
+        if (follows && toCell >= 0 && toCell < shownCells.length) {
+            selected = toCell
+            panel = shown
+            return
+        }
+        panel = ""
+        addKind = ""
+        selected = -1
+    }
+    function undo() {
+        // A field still open commits as its own step, which this then takes back
+        commitTyping()
+        if (!canUndo)
+            return
+        const top = undoStack[undoStack.length - 1]
+        const s = top.step
+        undoStack = undoStack.slice(0, -1)
+        redoStack = redoStack.concat([{ text: shownText(), step: s }])
+        travel(top.text, s.pageAfter, s.cellAfter, s.page, s.cell)
+        lastKey = ""
+        showLine(qsTr("Undid: %1").arg(s.words))
+    }
+    function redo() {
+        commitTyping()
+        if (!canRedo)
+            return
+        const top = redoStack[redoStack.length - 1]
+        const s = top.step
+        redoStack = redoStack.slice(0, -1)
+        undoStack = undoStack.concat([{ text: shownText(), step: s }])
+        travel(top.text, s.page, s.cell, s.pageAfter, s.cellAfter)
+        lastKey = ""
+        showLine(qsTr("Redid: %1").arg(s.words))
+    }
+    function clearHistory() {
+        undoStack = []
+        redoStack = []
+        lastKey = ""
+        undoLine = ""
+    }
+    function showLine(words) {
+        undoLine = words
+        undoLineTimer.restart()
+    }
+    Timer {
+        id: undoLineTimer
+        interval: root.undoLineMs
+        onTriggered: root.undoLine = ""
+    }
 
     // The kinds this page draws, in the order Add offers them, and the
     // component that makes each (a cell's and Add's preview); null for
@@ -182,6 +314,7 @@ Page {
         moreShown = false
         confirmReset = false
         confirmRemovePage = false
+        clearHistory()
     }
 
     // Takes the focus off a text field, so the field commits what was
@@ -202,11 +335,16 @@ Page {
     }
 
     // Stores next as this form's document, unless it's the same (a
-    // refused write gives an equal copy). The first edit after a stored
+    // refused write gives an equal copy), and makes `step` an undo step
+    // (none: a write that can't be undone). The first edit after a stored
     // text that couldn't be used keeps that text in <form>Unread
-    function edit(next) {
-        if (DashboardBook.serialize(next) === DashboardBook.serialize(doc))
+    function edit(next, step) {
+        const now = DashboardBook.serialize(doc)
+        const after = DashboardBook.serialize(next)
+        if (after === now)
             return false
+        if (step)
+            record(store[formKey] === "" ? "" : now, after, step)
         const texts = DashboardBook.saveTexts(problem, store[formKey], next)
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
@@ -216,8 +354,10 @@ Page {
     }
 
     // Back to the built-in layout: nothing stored, so a later version's
-    // built-in layout reaches it
+    // built-in layout reaches it. Undo stores the replaced pages again
     function resetForm() {
+        if (store[formKey] !== "")
+            record(shownText(), "", stepOf("", qsTr("reset the layout"), -1, -1, 0))
         const texts = DashboardBook.saveTexts(problem, store[formKey], doc)
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
@@ -423,7 +563,8 @@ Page {
         if (!canPaste)
             return
         commitTyping()
-        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell))
+        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell),
+             stepOf("", qsTr("pasted %1").arg(cellName(copied.cell)), -1, i + 1))
     }
 
     // ---- Add: a kind, then a signal
@@ -448,7 +589,8 @@ Page {
     function pickKind(kind) {
         if (kind === "blank") {
             const span = newSpans[kind]
-            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] })))
+            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
+                     stepOf("", qsTr("added %1").arg(kindNames[kind]), -1, shownCells.length)))
                 select(shownCells.length - 1)
             return
         }
@@ -485,7 +627,9 @@ Page {
     }
     function pickSignal(row) {
         if (addKind !== "") {
-            if (edit(DashboardBook.addCell(doc, pageIndex, newCell(addKind, row)))) {
+            const cell = newCell(addKind, row)
+            if (edit(DashboardBook.addCell(doc, pageIndex, cell),
+                     stepOf("", qsTr("added %1").arg(cellName(cell)), -1, shownCells.length))) {
                 addKind = ""
                 select(shownCells.length - 1)
             }
@@ -502,7 +646,7 @@ Page {
             from: r.from, to: r.to, coldBelow: null, warnFrom: null, dangerFrom: null,
             majorStep: null, minorStep: null, labelDivisor: null, caption: null,
             description: null, peakLabel: null, decimals: null })
-        edit(next)
+        edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
     }
     Connections {
@@ -514,26 +658,40 @@ Page {
 
     // ---- The cell's panel
 
-    function setOptions(changes) {
-        return edit(DashboardBook.setOptions(doc, pageIndex, selected, changes))
+    // The selected cell's options, on `base` when given (a write already
+    // composed for the same step). A run of a stepped option on one cell
+    // is one undo step; a typed one never groups, since a field commits once
+    function setOptions(changes, base) {
+        const names = Object.keys(changes).sort()
+        const key = names.every(n => steppedOptions.indexOf(n) >= 0)
+            ? "opt/" + pageIndex + "/" + selected + "/" + names.join(",") : ""
+        const word = optionWords[names[0]] ?? names[0]
+        return edit(DashboardBook.setOptions(base ?? doc, pageIndex, selected, changes),
+                    stepOf(key, qsTr("changed %1's %2").arg(cellName(selectedCell)).arg(word),
+                           selected, selected))
     }
     function setLabel(text) {
         return edit(DashboardBook.setCell(doc, pageIndex, selected,
-                                          { label: text === "" ? null : text }))
+                                          { label: text === "" ? null : text }),
+                    stepOf("", qsTr("changed %1's label").arg(cellName(selectedCell)), selected, selected))
     }
     function resize(w, h) {
-        return edit(DashboardBook.resizeCell(doc, pageIndex, selected, w, h))
+        return edit(DashboardBook.resizeCell(doc, pageIndex, selected, w, h),
+                    stepOf("size/" + pageIndex + "/" + selected,
+                           qsTr("resized %1").arg(cellName(selectedCell)), selected, selected))
     }
     // Earlier, later, to the start and to the end: the cell's place in
     // the order, which both forms' grids follow
     function moveTo(to) {
         const t = Math.max(0, Math.min(shownCells.length - 1, to))
-        if (edit(DashboardBook.moveCell(doc, pageIndex, selected, t)))
+        if (edit(DashboardBook.moveCell(doc, pageIndex, selected, t),
+                 stepOf("", qsTr("moved %1").arg(cellName(selectedCell)), selected, t)))
             selected = t
     }
     function removeCell(i) {
         commitTyping()
-        if (!edit(DashboardBook.removeCell(doc, pageIndex, i)))
+        if (!edit(DashboardBook.removeCell(doc, pageIndex, i),
+                  stepOf("", qsTr("removed %1").arg(cellName(shownCells[i])), i, -1)))
             return
         if (selected === i) {
             selected = -1
@@ -546,13 +704,17 @@ Page {
     // ---- The pages' edits
 
     function addPage() {
-        if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1))))
+        if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1)),
+                 stepOf("", qsTr("added a page"), -1, -1, pages.length)))
             goTo(pages.length - 1)
     }
     function movePage(by) {
         const to = pageIndex + by
-        if (edit(DashboardBook.movePage(doc, pageIndex, to)))
+        if (edit(DashboardBook.movePage(doc, pageIndex, to), stepOf("", qsTr("moved the page"), -1, -1, to)))
             goTo(to)
+    }
+    function renamePage(name) {
+        edit(DashboardBook.renamePage(doc, pageIndex, name), stepOf("", qsTr("renamed the page"), -1, -1))
     }
     // Another page takes this one's index, so nothing stays selected
     function removePage() {
@@ -560,7 +722,11 @@ Page {
         selected = -1
         panel = ""
         addKind = ""
-        edit(DashboardBook.removePage(doc, pageIndex))
+        const p = pages[pageIndex]
+        const name = p && p.name ? p.name : qsTr("Page %1").arg(pageIndex + 1)
+        edit(DashboardBook.removePage(doc, pageIndex),
+             stepOf("", qsTr("removed the page %1").arg(name), -1, -1,
+                    Math.max(0, Math.min(pageIndex, pages.length - 2))))
     }
 
     // ---- Pages
@@ -609,6 +775,26 @@ Page {
         sequence: "Right"
         enabled: root.pageKeys
         onActivated: root.goTo(root.pageIndex + 1)
+    }
+    // Undo and Redo on the desktop form, in edit mode or out of it; a
+    // field with the focus keeps its own
+    readonly property bool undoKeys: visible && form === "desktop" && !typing && !driving
+    Shortcut {
+        id: undoKey
+        sequence: "Ctrl+Z"
+        enabled: root.undoKeys && root.canUndo
+        onActivated: root.undo()
+    }
+    Shortcut {
+        id: redoKey
+        sequence: "Ctrl+Shift+Z"
+        enabled: root.undoKeys && root.canRedo
+        onActivated: root.redo()
+    }
+    Shortcut {
+        sequence: "Ctrl+Y"
+        enabled: root.undoKeys && root.canRedo
+        onActivated: root.redo()
     }
 
     // ---- The sweep and the peaks, on every page
@@ -1347,16 +1533,17 @@ Page {
                         onToggled: {
                             // Standing up is a tall, narrow bar: the default
                             // span follows the toggle, and a size the user
-                            // chose stays
-                            // (the resize rebinds this switch, so its state is read first)
+                            // chose stays; one write, so one undo step
+                            // (the write rebinds this switch, so its state is read first)
                             const on = checked
                             const c = panelCard.cell
                             const s = root.spanScale
+                            let base = root.doc
                             if (c && on && c.w === 2 * s && c.h === 2 * s)
-                                root.resize(s, 4 * s)
+                                base = DashboardBook.resizeCell(base, root.pageIndex, root.selected, s, 4 * s)
                             else if (c && !on && c.w === s && c.h === 4 * s)
-                                root.resize(2 * s, 2 * s)
-                            root.setOptions({ vertical: on })
+                                base = DashboardBook.resizeCell(base, root.pageIndex, root.selected, 2 * s, 2 * s)
+                            root.setOptions({ vertical: on }, base)
                         }
                     }
                     Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
@@ -1421,41 +1608,14 @@ Page {
                     }
                 }
 
-                // Remove, last and quiet, in edit mode or out of it
+                // Remove, last and quiet, in edit mode or out of it; Undo
+                // takes it back, so it asks nothing
                 ThemedButton {
                     objectName: "panelRemove"
-                    visible: !root.confirmRemoveCell
                     flat: true
                     text: qsTr("Remove")
                     Accessible.name: qsTr("Remove %1").arg(panelCard.name)
-                    onClicked: root.confirmRemoveCell = true
-                }
-                RowLayout {
-                    objectName: "panelRemoveAsk"
-                    Layout.fillWidth: true
-                    visible: root.confirmRemoveCell
-                    spacing: 8
-                    Label {
-                        objectName: "panelRemoveQuestion"
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 0
-                        wrapMode: Text.WordWrap
-                        color: Theme.warning
-                        font.pixelSize: Theme.fontCaption
-                        text: qsTr("Remove %1 from this page?").arg(panelCard.name)
-                    }
-                    ThemedButton {
-                        objectName: "panelRemoveConfirm"
-                        compact: panelCard.phone
-                        text: qsTr("Remove")
-                        onClicked: root.removeCell(root.selected)
-                    }
-                    ThemedButton {
-                        objectName: "panelRemoveKeep"
-                        compact: panelCard.phone
-                        text: qsTr("Keep")
-                        onClicked: root.confirmRemoveCell = false
-                    }
+                    onClicked: root.removeCell(root.selected)
                 }
             }
         }
@@ -1960,35 +2120,41 @@ Page {
             }
         }
 
-        // Edit mode's bar: three buttons, compact on the phone, so its
-        // row holds them
+        // Edit mode's bar: Undo and Redo where Drive stands outside edit
+        // mode, Add and Page, and Done in Edit's place at the end. Compact
+        // on the phone, and Add's words shortened on a narrow page, so the
+        // row holds them at a 320 px width and a large font
         RowLayout {
             objectName: "dashEditBar"
             readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
             visible: root.editing
             spacing: 8
+            // Disabled rather than hidden with nothing to take back, so the row never moves
             ThemedButton {
-                objectName: "dashDone"
-                compact: root.form === "phone"
-                highlighted: true
-                text: qsTr("Done")
-                onClicked: root.stopEditing()
+                objectName: "dashUndo"
+                flat: true
+                enabled: root.canUndo
+                text: qsTr("Undo")
+                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
+                onClicked: root.undo()
             }
+            ThemedButton {
+                objectName: "dashRedo"
+                flat: true
+                enabled: root.canRedo
+                text: qsTr("Redo")
+                Accessible.name: root.canRedo ? qsTr("Redo: %1").arg(root.redoWords) : qsTr("Redo")
+                onClicked: root.redo()
+            }
+            Item { Layout.fillWidth: true }
             ThemedButton {
                 objectName: "dashAdd"
                 compact: root.form === "phone"
                 enabled: DashboardBook.canAddCell(root.doc, root.pageIndex)
-                text: qsTr("Add gauge")
+                text: root.compact ? qsTr("Add") : qsTr("Add gauge")
+                Accessible.name: qsTr("Add a gauge")
                 onClicked: root.startAdd()
-            }
-            ThemedButton {
-                objectName: "dashPaste"
-                compact: root.form === "phone"
-                visible: root.copied !== null
-                enabled: root.canPaste
-                text: qsTr("Paste")
-                onClicked: root.pasteAfter(root.shownCells.length - 1)
             }
             ThemedButton {
                 objectName: "dashMore"
@@ -2002,7 +2168,46 @@ Page {
                     root.confirmRemovePage = false
                 }
             }
-            Item { Layout.fillWidth: true }
+            ThemedButton {
+                objectName: "dashDone"
+                compact: root.form === "phone"
+                highlighted: true
+                text: qsTr("Done")
+                onClicked: root.stopEditing()
+            }
+        }
+
+        // After an undo or a redo, the step's words; outside edit mode,
+        // after each step too, with an Undo, since there is no bar there
+        RowLayout {
+            objectName: "dashUndoLine"
+            Layout.fillWidth: true
+            visible: root.undoLine !== "" && !root.driving
+            spacing: 10
+            Label {
+                objectName: "dashUndoLineText"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontCaption
+                text: root.undoLine
+            }
+            Label {
+                objectName: "dashUndoLineKeys"
+                visible: root.editing && root.form === "desktop"
+                color: Theme.textDim
+                font.pixelSize: Theme.fontCaption
+                text: undoKey.nativeText + "  " + redoKey.nativeText
+            }
+            ThemedButton {
+                objectName: "dashUndoLineUndo"
+                compact: true
+                visible: !root.editing
+                enabled: root.canUndo
+                text: qsTr("Undo")
+                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
+                onClicked: root.undo()
+            }
         }
 
         // The pages' controls, then a gap, then Reset (it replaces every page,
@@ -2026,7 +2231,7 @@ Page {
                 placeholderText: qsTr("Page name")
                 Accessible.name: qsTr("This page's name")
                 onEditingFinished: {
-                    root.edit(DashboardBook.renamePage(root.doc, root.pageIndex, text))
+                    root.renamePage(text)
                     text = Qt.binding(() => root.pages[root.pageIndex]
                                             ? root.pages[root.pageIndex].name : "")
                 }
@@ -2336,7 +2541,9 @@ Page {
                         return
                     if (to < 0)
                         root.select(from)
-                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to))
+                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to),
+                                       root.stepOf("", qsTr("moved %1").arg(root.cellName(pageView.cells[from])),
+                                                   from, to))
                              && root.selected >= 0)
                         root.selected = DashboardBook.movedIndex(root.selected, from, to)
                 }
@@ -2473,21 +2680,41 @@ Page {
                         }
                     }
 
-                    ThemedButton {
+                    // The "+" cell, split with Paste while a copy exists
+                    Item {
+                        id: addBox
                         readonly property var box: pageView.boxes[pageView.cells.length]
                         // Off the joined panel's hairlines
                         readonly property real inset: root.joined ? 4 : 0
-                        objectName: "dashAddCell_" + pageView.index
+                        readonly property bool split: root.copied !== null
+                        readonly property real half: (width - 8) / 2
+                        objectName: "dashAddCellBox_" + pageView.index
                         visible: pageView.addCell
                         x: box ? pageView.boxLeft(box) + inset : 0
                         y: box ? pageView.boxTop(box) + inset : 0
                         width: box ? pageView.boxWidth(box) - 2 * inset : 0
                         height: box ? Math.max(Theme.touchTarget,
                                                pageView.boxHeight(box) - 2 * inset) : 0
-                        text: "+"
-                        font.pixelSize: Theme.fontHero
-                        Accessible.name: qsTr("Add a gauge")
-                        onClicked: root.startAdd()
+                        ThemedButton {
+                            objectName: "dashAddCell_" + pageView.index
+                            width: addBox.split ? addBox.half : addBox.width
+                            height: addBox.height
+                            text: "+"
+                            font.pixelSize: Theme.fontHero
+                            Accessible.name: qsTr("Add a gauge")
+                            onClicked: root.startAdd()
+                        }
+                        ThemedButton {
+                            objectName: "dashPasteCell_" + pageView.index
+                            visible: addBox.split
+                            x: addBox.width - width
+                            width: addBox.half
+                            height: addBox.height
+                            enabled: root.canPaste
+                            text: qsTr("Paste")
+                            Accessible.name: qsTr("Paste the copied gauge")
+                            onClicked: root.pasteAfter(root.shownCells.length - 1)
+                        }
                     }
                 }
             }
