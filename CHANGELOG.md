@@ -11,6 +11,16 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- The Recordings viewer's Export panel has a Cancel button while an export runs:
+  it stops at once and leaves nothing half written.
+
+### Fixed
+
+- `havne-cli log` no longer ends a short replay with a values count of 0 (or
+  short) in its end line; the recording itself was always whole.
+
 ## [0.7.1] - 2026-11-10
 
 ### Added
