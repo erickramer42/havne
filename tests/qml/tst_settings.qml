@@ -754,17 +754,26 @@ TestCase {
         compare(Theme.nightUntil, "07:00", "a bad time is refused")
         compare(problem.text, "Not a time")
         verify(problem.visible)
+        compare(until.text, "07:00", "the field shows the stored time again")
         until.text = "20:30"
         until.editingFinished()
         compare(Theme.nightUntil, "07:00", "an equal pair is refused")
         compare(problem.text, "From and Until are the same time")
+        compare(until.text, "07:00")
         until.text = "06:15"
         until.editingFinished()
         compare(Theme.nightUntil, "06:15")
         compare(problem.visible, false, "the words go with a good time")
         compare(find(page, "nightWords").text, "Scheduled 20:30 to 06:15")
+        Theme.nightUntil = "05:45"
+        compare(until.text, "05:45", "and follows it after an edit")
+        until.text = "99:99"
+        until.editingFinished()
+        verify(problem.visible)
         find(page, "night_off").clicked()
         compare(sched.visible, false, "hidden again")
+        find(page, "night_schedule").clicked()
+        compare(problem.visible, false, "the words went with the schedule")
     }
 
     // The list's row says the night state
