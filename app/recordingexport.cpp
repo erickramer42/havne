@@ -4,6 +4,7 @@
 
 #include "recordingexport.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -26,6 +27,8 @@ static_assert(RecordingExport::Folder == ECUIO_EXPORT_FOLDER &&
 namespace {
 
 constexpr int kMaxIntervals = 64;
+// A temporary folder's age past which no export still runs in it
+constexpr qint64 kStaleSeconds = 24 * 60 * 60;
 
 // What a worker that ran out of memory says: it can't build its own answer
 const auto kOutOfMemory = QStringLiteral("out of memory");
@@ -41,6 +44,7 @@ struct Job {
     bool raw = false;
     QUrl target;
     bool throughProvider = false;
+    bool failCopy = false; // setFailCopyForTesting
 };
 
 std::vector<const char*> pointers(const QList<QByteArray>& names)
@@ -239,7 +243,7 @@ QVariantMap runFile(const Job& job)
         dropPicked();
         return failed(job, words);
     }
-    if (!copyFile(made, target, provider)) {
+    if (job.failCopy || !copyFile(made, target, provider)) {
         dropPicked();
         return failed(job, QStringLiteral("Couldn't write the file"));
     }
@@ -290,8 +294,8 @@ QVariantMap runFolder(const Job& job)
     }
     const QStringList files = QDir(made).entryList(QDir::Files, QDir::Name);
     for (const QString& file : files) {
-        if (!copyFile(made + QLatin1Char('/') + file,
-                      copy + QLatin1Char('/') + file, true)) {
+        if (job.failCopy || !copyFile(made + QLatin1Char('/') + file,
+                                      copy + QLatin1Char('/') + file, true)) {
             QDir(copy).removeRecursively();
             return failed(job, QStringLiteral("Couldn't write the folder"));
         }
@@ -371,6 +375,26 @@ QString RecordingExport::fileStem(const QString& folder)
 bool RecordingExport::holdsValues(const QString& folder)
 {
     return QFileInfo::exists(folder + QStringLiteral("/signals.csv"));
+}
+
+int RecordingExport::removeStaleCopies(const QString& tempPath,
+                                       const QDateTime& now)
+{
+    // QTemporaryDir's name for runFile's and runFolder's template
+    static const QRegularExpression name(
+        QStringLiteral("^havne-export-[A-Za-z0-9]{6}$"));
+    int removed = 0;
+    const QFileInfoList found = QDir(tempPath).entryInfoList(
+        {QStringLiteral("havne-export-*")},
+        QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks | QDir::Hidden);
+    for (const QFileInfo& folder : found) {
+        if (name.match(folder.fileName()).hasMatch() &&
+            folder.lastModified().secsTo(now) > kStaleSeconds &&
+            QDir(folder.absoluteFilePath()).removeRecursively()) {
+            ++removed;
+        }
+    }
+    return removed;
 }
 
 bool RecordingExport::estimate(const QString& folder, const QVariantList& rowMs,
@@ -495,6 +519,7 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     job.raw = options.value(QStringLiteral("raw")).toBool();
     job.target = target;
     job.throughProvider = m_throughProvider;
+    job.failCopy = m_failCopyForTesting;
     try {
         m_worker = std::thread([this, job, fail = m_failWorkerForTesting] {
             QVariantMap result;
