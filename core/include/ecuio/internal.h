@@ -189,8 +189,7 @@ void ecuio_elm327_set_log_dir(const char* dir);
 /*
  * J2534 transport factory (Win32). URI grammar:
  *   j2534://[<selector>][?<key>=<value>[&<key>=<value>...]]
- *   keys: baud, flags, filter, txid, poll, probe, identify, profile, did
- *         (any order; ecuio_j2534_query_keys is the list)
+ *   keys: those ecuio_j2534_query_keys lists (any order)
  *
  * Selector:
  *   j2534://                        first discovered device
