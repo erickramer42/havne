@@ -9,7 +9,8 @@
 # libecuio.so.<soname> file on Linux), on Windows name its own surrogates
 # where the wheel has them, and python/examples/read_pids.py must read
 # mock:// through it. Each fake J2534 DLL given then opens through the
-# wheel's surrogate of its own architecture.
+# wheel's surrogate of its own architecture. An imported log is exported
+# (pcapng) and reported on through it too.
 #
 #   python packaging/python/check_wheel.py <wheel> [--fake-dll <dll>]...
 #
@@ -38,6 +39,15 @@ if sys.platform == "win32":
                       ("ECUIO_SURROGATE_X64_EXE", "ecuio-j2534-surrogate-x64.exe")):
         if os.path.isfile(os.path.join(package, name)):   # a tree with no x86 one: CI's
             assert os.path.samefile(os.environ[var], os.path.join(package, name)), var
+# The export and health modules are in the wheel too: a pcapng and a report of an imported log
+import pathlib, tempfile
+with tempfile.TemporaryDirectory() as t:
+    t = pathlib.Path(t)
+    (t / "bus.log").write_text("(1700000000.250000) can0 7E8#04410C1AF8\n", newline="\n")
+    havne.import_candump(t / "bus.log", t / "rec")
+    assert havne.export_pcapng(t / "rec", t / "bus.pcapng").frames == 1
+    assert havne.health_report(t / "rec", t / "health.txt", "text").source == "recording"
+print("export and health report through the wheel")
 for fake in sys.argv[1:]:
     with havne.Session("j2534://" + fake.replace("\\", "/")) as s:
         assert s.info.backend == havne.c.ECUIO_BACKEND_J2534_SURROGATE
