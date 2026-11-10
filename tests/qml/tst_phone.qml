@@ -1710,20 +1710,20 @@ TestCase {
         tryVerify(() => Bridge.connected, 5000, "the chosen address connects")
         compare(Bridge.currentUri, "mock://older")
         compare(JSON.stringify(settings.recentUris), JSON.stringify(
-                    ["mock://older", "mock://newest", "elm327://bt:00:11:22:33:44:55"]),
-                "what connected goes first")
+                    ["mock://newest", "elm327://bt:00:11:22:33:44:55", "mock://older"]),
+                "the mock is never kept: the list as it was")
         compare(find(settings, "uriField").text, "mock://older", "Settings shows it")
         const dash = find(main.contentItem, "dashboardPage")
         tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "a session ends the list")
 
-        // The list comes back with what just connected chosen
+        // The list comes back as it was, the tapped row still chosen
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list returns")
         const again = findChild(dash, "dashConnectList")
-        tryVerify(() => findChild(again, "connectRow_0") !== null, 2000, "its rows")
-        verify(find(again, "connectRow_0").checked, "the newest is chosen again")
-        compare(find(find(again, "connectRow_0"), "connectRowAddress").text, "mock://older")
+        tryVerify(() => findChild(again, "connectRow_2") !== null, 2000, "its rows")
+        verify(find(again, "connectRow_2").checked, "the tap still stands")
+        compare(find(find(again, "connectRow_2"), "connectRowAddress").text, "mock://older")
     }
 
     // Nothing in the list takes a tap while a session starts or ends

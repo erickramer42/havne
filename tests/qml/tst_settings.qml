@@ -1327,18 +1327,23 @@ TestCase {
     // A restart gets back the last URI that connected and the Record
     // switch. Recording is switched on only after the connects, so no
     // session here records
+    // The mock is never kept, so the URI half needs the fake DLL
     function test_theLastConnectedUriAndTheRecordSwitchComeBack() {
+        const fake = Harness.fakeDllPath === "" ? ""
+                   : "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
         let page = createPage()
         const error = find(page, "errorLabel")
-        find(page, "uriField").text = "mock://demo?profile=raw"
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "the URI connects")
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        if (fake !== "") {
+            find(page, "uriField").text = fake + "&profile=raw"
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, "the URI connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
 
-        find(page, "uriField").text = "mock://demo?profile=uds-generic"
-        press(page, "connectButton")
-        tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+            find(page, "uriField").text = fake + "&profile=uds-generic"
+            press(page, "connectButton")
+            tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+        }
         Bridge.recording = true
         verify(find(page, "recordBox").checked)
 
@@ -1348,9 +1353,11 @@ TestCase {
         Bridge.recording = false   // a fresh bridge starts with it off
 
         page = createPage()
-        compare(find(page, "uriField").text, "mock://demo?profile=raw",
-                "the URI that connected, not the refused one")
-        verify(find(page, "profile_raw").checked, "read back into the row")
+        if (fake !== "") {
+            compare(find(page, "uriField").text, fake + "&profile=raw",
+                    "the URI that connected, not the refused one")
+            verify(find(page, "profile_raw").checked, "read back into the row")
+        }
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
     }
@@ -1388,37 +1395,72 @@ TestCase {
     }
 
     function test_aFirstRunWithAnOlderUriSeedsTheList() {
-        stored.setValue("uri", "mock://demo?profile=raw")
+        stored.setValue("uri", "elm327://COM1?profile=obd2")
         stored.sync()
         const page = createPage()
-        sameList(page.recentUris, ["mock://demo?profile=raw"], "what session/uri holds")
+        sameList(page.recentUris, ["elm327://COM1?profile=obd2"], "what session/uri holds")
     }
 
     // Only a connect that succeeded is written, the newest first, and the
     // list survives a restart
     function test_onlyASuccessfulConnectWritesTheRecentUris() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+        const raw = fake + "&profile=raw"
         let page = createPage()
         sameList(page.recentUris, [], "nothing yet")
         const field = find(page, "uriField")
-        for (const uri of ["mock://demo", "mock://demo?profile=raw", "mock://demo"]) {
+        for (const uri of [fake, raw, fake]) {
             field.text = uri
             press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 5000, uri + " connects")
+            tryVerify(() => Bridge.connected, 10000, uri + " connects")
             Bridge.disconnectSession()
             tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         }
-        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "newest first, once")
+        sameList(page.recentUris, [fake, raw], "newest first, once")
 
-        field.text = "mock://demo?profile=uds-generic"
+        field.text = fake + "&profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
-        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "a refusal writes nothing")
+        sameList(page.recentUris, [fake, raw], "a refusal writes nothing")
 
         // The page's store writes when the page goes, as at a quit
         page.destroy()
         wait(10)
         page = createPage()
-        sameList(page.recentUris, ["mock://demo", "mock://demo?profile=raw"], "kept between runs")
+        sameList(page.recentUris, [fake, raw], "kept between runs")
+    }
+
+    // A replay or the mock is never kept (Recordings is a replay's way
+    // back), and one an earlier version stored is dropped as it's read
+    function test_aReplayOrTheMockIsNeverKept() {
+        const kept = "elm327://COM1?profile=obd2"
+        const replay = "replay://" + Harness.replayFixtures + "/2026-10-25-engine-start?speed=max"
+        stored.setValue("uri", replay)
+        stored.setValue("recentUris", JSON.stringify([replay, kept, " MOCK://demo"]))
+        stored.sync()
+        let page = createPage()
+        compare(find(page, "uriField").text, "", "the stored replay isn't the field's")
+        sameList(page.recentUris, [kept], "nor in the list")
+        sameList(page.parseRecentUris("[]", "mock://demo"), [], "the mock seeds nothing")
+        verify(page.keptUri("socketcan://can0") && page.keptUri("j2534://Fake"), "an adapter is kept")
+
+        const field = find(page, "uriField")
+        for (const uri of ["mock://demo", replay]) {
+            field.text = uri
+            press(page, "connectButton")
+            tryVerify(() => Bridge.connected, 10000, uri + " connects")
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        }
+        sameList(page.recentUris, [kept], "a connect to either writes nothing")
+
+        page.destroy()
+        wait(10)
+        stored.sync()
+        compare(stored.value("uri"), "", "the stored replay is gone")
+        compare(stored.value("recentUris"), JSON.stringify([kept]), "and the list without either")
     }
 
     // The bridge's URI can differ from the request: a connect from this
