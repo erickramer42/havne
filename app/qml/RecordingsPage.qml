@@ -91,6 +91,9 @@ Page {
     property bool maximizedShort: true
     readonly property bool chartMaximized: recording.state === RecordingView.Open
                                            && (Theme.shortLayout ? maximizedShort : maximizedTall)
+    // The zoom row's room for the views' switch while maximized: a phone on
+    // its side or the desktop; under it the buttons would push the page wide
+    readonly property bool switchInZoomRow: column.width >= 480
     function toggleMaximized() {
         if (Theme.shortLayout)
             maximizedShort = !maximizedShort
@@ -115,6 +118,10 @@ Page {
     }
     property alias chartHeight: viewerSettings.chartHeight
     property alias stripFolded: viewerSettings.stripFolded
+    // The chart's height until the splitter sets one: on a phone 40 % of
+    // the page, no less than three panes of 72 and the time axis
+    readonly property real defaultChartHeight: phoneShape ? Math.max(248, scroller.height * 0.4)
+                                                          : Math.max(200, scroller.height * 0.45)
 
     // The part of the axis in view, in ms since the recording started
     // (before it too, with a compared recording that starts earlier), and
@@ -877,9 +884,11 @@ Page {
         return names.length === 1 ? qsTr("%1 has no values in this recording").arg(list)
                                   : qsTr("%1 have no values in this recording").arg(list)
     }
+    // The panel opens under the title row: the page goes to its top first
     function openExport() {
         exportOpen = true
         exportPanel.begin()
+        scroller.contentY = 0
     }
     function closeExport() {
         exportPanel.end()
@@ -1069,8 +1078,10 @@ Page {
         spacing: 10
 
         PageHeader {
+            objectName: "recordingsHeader"
             title: qsTr("Recordings")
-            visible: !root.chartMaximized
+            // On a phone the tab names the page, and the name is the viewer's title
+            visible: !root.chartMaximized && !(root.viewing && Theme.compact)
             Item { Layout.fillWidth: true }
             ThemedButton {
                 objectName: "importButton"
@@ -1403,44 +1414,88 @@ Page {
             }
         }
 
-        // ---- The viewer ----
+        // ---- The viewer: the chart and its signals first, then what
+        // applies to the whole recording under "About this recording" ----
         RowLayout {
+            objectName: "viewerTitleRow"
             visible: root.viewing && !root.chartMaximized
             Layout.fillWidth: true
             spacing: Theme.spacing
+            // On a phone a quiet back arrow at the left edge, where a back
+            // control is looked for
             ThemedButton {
                 objectName: "backToList"
-                text: qsTr("All recordings")
+                flat: Theme.compact
+                text: Theme.compact ? "←" : qsTr("All recordings")   // a left arrow
+                Accessible.name: qsTr("All recordings")
+                Layout.preferredWidth: Theme.compact ? Theme.touchTarget : -1
                 onClicked: root.backToList()
             }
             Label {
                 objectName: "openedTitle"
-                // On a phone the name takes a line of its own below
-                visible: !Theme.compact
                 text: root.openedTitle
                 color: Theme.text
-                elide: Text.ElideRight
+                font.pixelSize: Theme.fontEmphasis
+                // The folder's date is at the end
+                elide: Text.ElideMiddle
                 Layout.fillWidth: true
             }
-            // The part in view replayed as a session in one tap, as the
-            // list's Replay does; off while a session runs, as the list's is
+            // Replay and Save report...: here on the desktop, in About on a
+            // phone, side by side
+            RowLayout {
+                id: titleActions
+                visible: !Theme.compact
+                spacing: Theme.spacing
+                RowLayout {
+                    parent: Theme.compact ? aboutActions : titleActions
+                    visible: recording.state === RecordingView.Open
+                    Layout.fillWidth: Theme.compact
+                    spacing: Theme.spacing
+                    // The part in view replayed as a session in one tap, as
+                    // the list's Replay does; off while a session runs, as
+                    // the list's is
+                    ThemedButton {
+                        objectName: "replayView"
+                        visible: recording.hasFrames
+                        compact: Theme.compact
+                        Layout.fillWidth: Theme.compact
+                        Layout.preferredWidth: Theme.compact ? 1 : -1
+                        enabled: root.sessionIdle
+                        text: root.replayText
+                        Accessible.name: qsTr("Replay the part in view as a session")
+                        onClicked: root.replayRequested(root.stretchUri())
+                    }
+                    ThemedButton {
+                        objectName: "saveReport"
+                        compact: Theme.compact
+                        Layout.fillWidth: Theme.compact
+                        Layout.preferredWidth: Theme.compact ? 1 : -1
+                        enabled: !recording.reporting
+                        text: qsTr("Save report…")
+                        onClicked: reportDialog.open()
+                    }
+                }
+            }
             ThemedButton {
-                objectName: "replayView"
-                visible: recording.state === RecordingView.Open && recording.hasFrames
-                enabled: root.sessionIdle
-                text: root.replayText
-                Accessible.name: qsTr("Replay the part in view as a session")
-                onClicked: root.replayRequested(root.stretchUri())
+                objectName: "exportButton"
+                visible: recording.state === RecordingView.Open
+                compact: Theme.compact
+                text: qsTr("Export…")
+                // Selected while its panel is open: Save as... is the primary there
+                checkable: true
+                checked: root.exportOpen
+                onClicked: {
+                    if (root.exportOpen)
+                        root.closeExport()
+                    else
+                        root.openExport()
+                }
             }
         }
 
-        Label {
-            objectName: "openedTitleCompact"
-            visible: Theme.compact && root.viewing && !root.chartMaximized
-            text: root.openedTitle
-            color: Theme.text
-            // The folder's date is at the end
-            elide: Text.ElideMiddle
+        ColumnLayout {
+            id: topNote
+            visible: !Theme.compact && root.reportNote !== ""
             Layout.fillWidth: true
         }
 
@@ -1468,86 +1523,6 @@ Page {
             text: qsTr("This recording can't be opened: %1").arg(recording.error)
         }
 
-        Label {
-            objectName: "recordingInfo"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: recording.state === RecordingView.Open ? root.infoText() : ""
-        }
-
-        // The whole recording's health as one scrubbed file to share. A
-        // phone has two columns, so the views' switch has the second row
-        GridLayout {
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            Layout.preferredWidth: 100000   // the page's width, not its buttons'
-            columns: root.phoneShape ? 2 : 4
-            columnSpacing: Theme.spacing
-            rowSpacing: Theme.spacing
-            ThemedButton {
-                objectName: "saveReport"
-                compact: Theme.compact
-                enabled: !recording.reporting
-                text: qsTr("Save report…")
-                onClicked: reportDialog.open()
-            }
-            ThemedButton {
-                objectName: "exportButton"
-                compact: Theme.compact
-                text: qsTr("Export…")
-                // Selected while its panel is open: Save as... is the primary there
-                checkable: true
-                checked: root.exportOpen
-                onClicked: {
-                    if (root.exportOpen)
-                        root.closeExport()
-                    else
-                        root.openExport()
-                }
-            }
-            // The signal area's two views: the values at the cursor, or the
-            // frames in view. Hidden for a recording with no frames.csv
-            Rectangle {
-                visible: recording.state === RecordingView.Open && recording.hasFrames
-                         && !root.chartMaximized
-                implicitWidth: detailSwitch.implicitWidth + 4
-                implicitHeight: detailSwitch.implicitHeight + 4
-                radius: Theme.radius
-                color: Theme.surface
-
-                Row {
-                    id: detailSwitch
-                    anchors.centerIn: parent
-                    spacing: 2
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_values"
-                        text: qsTr("Values")
-                        selected: !root.framesShown
-                        onClicked: root.detailView = "values"
-                    }
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_frames"
-                        text: qsTr("Frames")
-                        selected: root.framesShown
-                        onClicked: root.detailView = "frames"
-                    }
-                }
-            }
-            Label {
-                objectName: "reportNote"
-                visible: text !== ""
-                Layout.fillWidth: true
-                Layout.columnSpan: root.phoneShape ? 2 : 1
-                wrapMode: Text.WordWrap
-                text: root.reportNote
-                color: root.reportFailed ? Theme.danger : Theme.textDim
-            }
-        }
-
         RecordingExportPanel {
             id: exportPanel
             objectName: "exportPanel"
@@ -1558,459 +1533,24 @@ Page {
             onCloseRequested: root.closeExport()
         }
 
-        // Where the values come from: offered once it opened, or failed
-        // (a profile that can't decode it, a folder with frames alone)
-        ComboBox {
-            implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                     implicitContentHeight + topPadding + bottomPadding,
-                                     implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-            id: decodeChoice
-            objectName: "decodeChoice"
-            // Values alone have no frames to decode through a profile
-            visible: (recording.state === RecordingView.Open
-                      || recording.state === RecordingView.Failed) && !root.chartMaximized
-                     && recording.hasFrames
-            Layout.fillWidth: true
-            textRole: "text"
-            valueRole: "value"
-            model: visible ? root.decodeChoices() : []
-            currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
-            Accessible.name: qsTr("Where the values come from")
-            onActivated: index => root.decodeWith(valueAt(index))
-        }
-
-        // The picked vehicle's baseline: this recording made it, or the
-        // baseline overlaid on it, lined up on their engine starts
-        Flow {
-            id: baselineFlow
-            objectName: "baselineRow"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-                     && root.pickedVehicle !== null
-            Layout.fillWidth: true
-            spacing: Theme.spacing
-            ThemedButton {
-                objectName: "useAsBaseline"
-                visible: !root.isBaseline
-                width: Math.min(implicitWidth, baselineFlow.width)
-                text: qsTr("Use as %1's baseline").arg(root.pickedVehicle !== null
-                                                        ? root.pickedVehicle.label : "")
-                onClicked: root.useAsBaseline()
-            }
-            Label {
-                objectName: "isBaseline"
-                visible: root.isBaseline
-                width: Math.min(implicitWidth, baselineFlow.width)
-                height: root.phoneShape ? Theme.touchTarget : Theme.controlHeight
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: Text.WordWrap
-                color: Theme.textDim
-                text: qsTr("%1's baseline").arg(root.pickedVehicle !== null
-                                                 ? root.pickedVehicle.label : "")
-            }
-            ThemedButton {
-                objectName: "compareBaseline"
-                visible: root.baselineRow !== null && !root.isBaseline
-                width: Math.min(implicitWidth, baselineFlow.width)
-                text: qsTr("Compare with the baseline")
-                Accessible.name: qsTr("Compare with %1's baseline, aligned on the engine starts")
-                                     .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
-                onClicked: root.compareWithBaseline()
-            }
-        }
-
-        // Another recording to overlay, and how the two line up
-        RowLayout {
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            spacing: Theme.spacing
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                id: compareChoice
-                objectName: "compareChoice"
-                readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
-                Layout.fillWidth: true
-                model: [root.comparing ? root.compareTitle : qsTr("Compare with…")]
-                       .concat(others.map(r => r.title))
-                enabled: others.length > 0
-                Accessible.name: qsTr("Compare with another recording")
-                onActivated: index => {
-                    if (index > 0)
-                        root.compareWith(others[index - 1])
-                    currentIndex = 0
-                }
-            }
-            ThemedButton {
-                objectName: "stopCompare"
-                visible: root.comparing
-                text: qsTr("Stop")
-                Accessible.name: qsTr("Stop comparing")
-                onClicked: root.stopComparing()
-            }
-        }
-        Flow {
-            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            spacing: 6
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                id: alignChoice
-                objectName: "alignChoice"
-                width: 170
-                textRole: "text"
-                valueRole: "value"
-                model: [{ text: qsTr("Align the starts"), value: "start" },
-                        { text: qsTr("Align UTC starts"), value: "utc" },
-                        { text: qsTr("Align a marker"), value: "marker" },
-                        { text: qsTr("Align a rise"), value: "rise" },
-                        { text: qsTr("Align a fall"), value: "fall" },
-                        { text: qsTr("Align engine starts"), value: "engine" }]
-                onActivated: root.setAlignOn(currentValue)
-            }
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                objectName: "alignMarker"
-                visible: root.alignOn === "marker"
-                width: 150
-                model: recording.state === RecordingView.Open ? root.markerLabels() : []
-                onActivated: root.alignLabel = currentText
-            }
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                objectName: "alignSignal"
-                visible: root.alignOn === "rise" || root.alignOn === "fall"
-                width: 150
-                model: recording.state === RecordingView.Open ? root.numberNames() : []
-                onActivated: root.alignSignal = currentText
-            }
-            ThemedTextField {
-                objectName: "alignLevel"
-                visible: root.alignOn === "rise" || root.alignOn === "fall"
-                width: 100
-                placeholderText: qsTr("Level")
-                inputMethodHints: Qt.ImhFormattedNumbersOnly
-                onEditingFinished: root.alignLevel = root.numberOf(text)
-            }
-            ThemedTextField {
-                objectName: "alignHysteresis"
-                visible: root.alignOn === "rise" || root.alignOn === "fall"
-                width: 100
-                placeholderText: qsTr("Hysteresis")
-                inputMethodHints: Qt.ImhFormattedNumbersOnly
-                onEditingFinished: {
-                    const v = root.numberOf(text)
-                    root.alignHysteresis = v >= 0 ? v : 0
-                }
-            }
-        }
-        Label {
-            objectName: "compareStatus"
-            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: root.compareStatus
-        }
-
-        // ---- The frames of the part in view, read from frames.csv ----
-        ColumnLayout {
-            objectName: "viewerFrames"
-            visible: root.framesShown && !root.chartMaximized
-            Layout.fillWidth: true
-            spacing: Theme.spacing
-
-            Flow {
-                Layout.fillWidth: true
-                spacing: Theme.spacing
-
-                Rectangle {
-                    implicitWidth: framesTableSwitch.implicitWidth + 4
-                    implicitHeight: framesTableSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
-
-                    Row {
-                        id: framesTableSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "framesTable_frames"
-                            text: qsTr("List")
-                            selected: !root.framesById
-                            onClicked: root.framesById = false
-                        }
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "framesTable_byId"
-                            text: qsTr("By ID")
-                            selected: root.framesById
-                            onClicked: {
-                                root.framesById = true
-                                viewFrames.ids.refresh()
-                            }
-                        }
-                    }
-                }
-                ThemedButton {
-                    objectName: "framesFilterToggle"
-                    text: viewFrames.frames.filterTerms > 0
-                          ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
-                          : qsTr("Filter")
-                    checkable: true
-                    checked: root.framesFilterOpen
-                    onClicked: root.framesFilterOpen = !root.framesFilterOpen
-                }
-            }
-
-            FrameFilterPanel {
-                id: framesFilterPanel
-                visible: root.framesFilterOpen
-                frames: viewFrames.frames
-            }
-
-            // How many rows the part in view has, and when it has more than
-            // the table holds, where the table begins
-            Label {
-                objectName: "framesWords"
-                Layout.fillWidth: true
-                Layout.preferredWidth: 0
-                wrapMode: Text.WordWrap
-                color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
-                font.pixelSize: Theme.fontCaption
-                text: viewFrames.error !== "" ? viewFrames.error
-                      : viewFrames.loading ? qsTr("Reading the frames…")
-                      : viewFrames.note !== "" ? viewFrames.note
-                      : viewFrames.frames.filterTerms > 0
-                        ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
-                                                         .arg(viewFrames.frames.heldCount)
-                        : viewFrames.rows === 1 ? qsTr("1 frame in view")
-                                               : qsTr("%1 frames in view").arg(viewFrames.rows)
-            }
-
-            // A fixed height: the page scrolls and the table scrolls inside
-            FrameTable {
-                objectName: "viewerFrameTable"
-                visible: !root.framesById
-                Layout.preferredHeight: 280
-                live: false
-                frames: viewFrames.frames
-                emptyText: viewFrames.loading ? qsTr("Reading the frames…")
-                         : viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
-                         : qsTr("No frame in view")
-                // A tap puts the chart's cursor at the frame's time, whether
-                // or not a signal has a sample there
-                onRowClicked: (index, modifiers, timestampUs) => root.setCursor(timestampUs / 1000)
-            }
-            FrameIdList {
-                objectName: "viewerFrameIds"
-                visible: root.framesById
-                Layout.preferredHeight: 280
-                ids: viewFrames.ids
-                refreshing: root.framesById && root.framesShown
-                emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
-                                                           : qsTr("No frame in view")
-                onIdTapped: (id, extended) => {
-                    framesFilterPanel.showId(id, extended)
-                    root.framesFilterOpen = true
-                    root.framesById = false
-                }
-            }
-        }
-
-        SignalFilterBar {
-            objectName: "recordingFilter"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
-            Layout.fillWidth: true
-            filter: signalFilter
-            codes: recording.signalList.map(s => s.group)
-        }
-
-        // The recording's signals: a tick plots one, and beside each its
-        // value at the cursor
-        ListView {
-            id: signalRows
-            objectName: "signalRows"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
-            Layout.fillWidth: true
-            Layout.preferredHeight: count * root.rowHeight
-            Layout.maximumHeight: Math.max(root.rowHeight, column.height * 0.3)
-            clip: true
-            currentIndex: -1
-            highlightFollowsCurrentItem: false
-            boundsBehavior: Flickable.StopAtBounds
-            model: root.shownSignals
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-
-            delegate: Rectangle {
-                id: signalRow
-                required property var modelData
-                required property int index
-                readonly property int signalIndex: modelData.index
-                readonly property var at: root.readout[signalIndex]
-                width: signalRows.width
-                height: root.rowHeight
-                color: index % 2 === 0 ? Theme.surface : Theme.bg
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 8
-                    anchors.rightMargin: 12
-                    ThemedCheckBox {
-                        objectName: "plotCheck"
-                        checked: root.plotted[signalRow.signalIndex] === true
-                        enabled: !signalRow.modelData.isText
-                        onToggled: root.togglePlotted(signalRow.signalIndex)
-                        Accessible.name: qsTr("Plot %1").arg(signalRow.modelData.name)
-                    }
-                    Rectangle {
-                        objectName: "swatch"
-                        readonly property bool shown: root.plotted[signalRow.signalIndex] === true
-                        implicitWidth: 10; implicitHeight: 10
-                        radius: 2
-                        color: shown ? Theme.seriesColor(signalRow.signalIndex) : "transparent"
-                        border.width: 1
-                        border.color: Theme.seriesColor(signalRow.signalIndex)
-                        opacity: shown ? 1.0 : 0.5
-                    }
-                    Label {
-                        text: signalRow.modelData.name
-                        color: Theme.text
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Label {
-                        objectName: "cursorValue"
-                        text: !signalRow.at || signalRow.at.atMs < 0 ? qsTr("—")
-                              : signalRow.modelData.isText ? signalRow.at.text
-                              : signalRow.at.label ? signalRow.at.label
-                              : root.valueText(Number(signalRow.at.text), signalRow.modelData.decimals,
-                                               signalRow.at.unit)
-                        Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
-                        elide: Text.ElideRight
-                        color: Theme.text
-                        font.family: Theme.monoFamily
-                    }
-                    // The compared recording's, at the cursor
-                    Label {
-                        objectName: "compareValue"
-                        readonly property var at: root.compareReadout[signalRow.signalIndex]
-                        visible: root.compareAligned
-                        text: !at || at.atMs < 0 ? qsTr("—")
-                              : signalRow.modelData.isText ? at.text
-                              : at.label ? at.label
-                              : root.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
-                        Layout.maximumWidth: Math.round(signalRow.width * 0.3)
-                        elide: Text.ElideRight
-                        color: Theme.textDim
-                        font.family: Theme.monoFamily
-                    }
-                }
-            }
-        }
-
-        // Zoom, and where the cursor is
-        // While the filter narrows the rows, how many it shows and how many
-        // the chart draws: the chart keeps every ticked signal (ADR-0050)
-        Label {
-            objectName: "filterCount"
-            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized && !root.framesShown
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
-                                 : qsTr("Showing %1 of %2 signals · plotting %3"))
-                  .arg(root.shownSignals.length).arg(recording.signalList.length)
-                  .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
-        }
-
-        // Compact on a phone: at their desktop widths the buttons, Frame
-        // test among them, outgrow its width
-        RowLayout {
-            visible: recording.state === RecordingView.Open
-            Layout.fillWidth: true
-            spacing: 6
-            ThemedButton {
-                objectName: "zoomAll"
-                compact: Theme.dense
-                text: qsTr("All")
-                Layout.maximumWidth: 72
-                onClicked: root.showAll()
-            }
-            ThemedButton {
-                objectName: "zoomOut"
-                compact: Theme.dense
-                text: "−"
-                Layout.maximumWidth: 48
-                Accessible.name: qsTr("Zoom out")
-                onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 2)
-            }
-            ThemedButton {
-                objectName: "zoomIn"
-                compact: Theme.dense
-                text: "+"
-                Layout.maximumWidth: 48
-                Accessible.name: qsTr("Zoom in")
-                onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 0.5)
-            }
-            ThemedButton {
-                objectName: "frameTest"
-                compact: Theme.dense
-                visible: Theme.developerMode
-                enabled: !root.frameTesting
-                text: qsTr("Frame test")
-                Layout.maximumWidth: 120
-                onClicked: root.startFrameTest()
-            }
-            // On a phone the hint wraps onto two caption lines where the
-            // row leaves it little width, instead of eliding to "Tap for …"
-            Label {
-                objectName: "cursorTime"
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignRight
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
-                maximumLineCount: Theme.compact ? 2 : 1
-                elide: Text.ElideRight
-                font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
-                color: Theme.textDim
-                text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
-                                                       : qsTr("Click the chart for values"))
-                                      : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
-            }
-            ThemedButton {
-                objectName: "maximizeChart"
-                text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
-                compact: Theme.dense
-                Layout.minimumWidth: 52
-                Layout.maximumWidth: 84
-                Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
-                                                     : qsTr("Give the chart the page")
-                onClicked: root.toggleMaximized()
-            }
-        }
-
         Rectangle {
             id: chartFrame
             objectName: "chartFrame"
+            // Maximized with Frames chosen, the table has the page instead
             visible: recording.state === RecordingView.Open && !root.exportShown
+                     && !(root.chartMaximized && root.framesShown)
             Layout.fillWidth: true
-            // Tall enough to read on a phone; the page scrolls to it. The
-            // splitter below sets it once dragged (not while maximized)
-            readonly property bool sized: viewerSettings.chartHeight > 0 && !root.chartMaximized
-            Layout.minimumHeight: sized ? Math.max(200, viewerSettings.chartHeight) : 200
-            Layout.preferredHeight: sized ? Math.max(200, viewerSettings.chartHeight) : -1
-            Layout.fillHeight: !sized
+            // A share of the page, so the rows show under it; the splitter
+            // below sets it once dragged. Maximized, it has the page
+            readonly property real restingHeight: viewerSettings.chartHeight > 0
+                                                  ? Math.max(200, viewerSettings.chartHeight)
+                                                  : root.defaultChartHeight
+            Layout.minimumHeight: root.chartMaximized ? 200 : restingHeight
+            Layout.preferredHeight: root.chartMaximized ? -1 : restingHeight
+            Layout.fillHeight: root.chartMaximized
             color: Theme.surface
             radius: 4
-            border.color: Theme.textDim
+            border.color: Theme.hairline
             border.width: 1
 
             // Maximized, the cursor's values in a strip beside the chart (below
@@ -2230,12 +1770,6 @@ Page {
             }
         }
 
-        // With the chart gone for the Export panel, the rest stays at the top
-        Item {
-            visible: root.exportShown
-            Layout.fillHeight: true
-        }
-
         // The splitter: drag it to make the chart taller or shorter, kept
         // between runs; a double-tap gives the chart the page's own height
         Item {
@@ -2266,6 +1800,85 @@ Page {
             DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
         }
 
+        // Maximized on a narrow page, the views' switch has a row of its own
+        RowLayout {
+            id: switchRowSlot
+            visible: root.chartMaximized && recording.hasFrames && !root.switchInZoomRow
+        }
+
+        // Zoom, and where the cursor is
+        // Compact on a phone: at their desktop widths the buttons, Frame
+        // test among them, outgrow its width
+        RowLayout {
+            visible: recording.state === RecordingView.Open
+            Layout.fillWidth: true
+            spacing: 6
+            // Maximized, the views' switch leads the row, so either view
+            // leads back to the other
+            RowLayout {
+                id: zoomSwitchSlot
+                visible: root.chartMaximized && recording.hasFrames && root.switchInZoomRow
+            }
+            ThemedButton {
+                objectName: "zoomAll"
+                compact: Theme.dense
+                text: qsTr("All")
+                Layout.maximumWidth: 72
+                onClicked: root.showAll()
+            }
+            ThemedButton {
+                objectName: "zoomOut"
+                compact: Theme.dense
+                text: "−"
+                Layout.maximumWidth: 48
+                Accessible.name: qsTr("Zoom out")
+                onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 2)
+            }
+            ThemedButton {
+                objectName: "zoomIn"
+                compact: Theme.dense
+                text: "+"
+                Layout.maximumWidth: 48
+                Accessible.name: qsTr("Zoom in")
+                onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 0.5)
+            }
+            ThemedButton {
+                objectName: "frameTest"
+                compact: Theme.dense
+                visible: Theme.developerMode
+                enabled: !root.frameTesting
+                text: qsTr("Frame test")
+                Layout.maximumWidth: 120
+                onClicked: root.startFrameTest()
+            }
+            // On a phone the hint wraps onto two caption lines where the
+            // row leaves it little width, instead of eliding to "Tap for …"
+            Label {
+                objectName: "cursorTime"
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignRight
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: Theme.compact ? 2 : 1
+                elide: Text.ElideRight
+                font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
+                color: Theme.textDim
+                text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
+                                                       : qsTr("Click the chart for values"))
+                                      : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
+            }
+            ThemedButton {
+                objectName: "maximizeChart"
+                text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
+                compact: Theme.dense
+                Layout.minimumWidth: 52
+                Layout.maximumWidth: 84
+                Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
+                                                     : qsTr("Give the chart the page")
+                onClicked: root.toggleMaximized()
+            }
+        }
+
         Label {
             objectName: "frameTestResult"
             visible: Theme.developerMode && root.frameTestResult !== "" && !root.chartMaximized
@@ -2274,6 +1887,461 @@ Page {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             text: root.frameTestResult
+        }
+
+        // The signal area's two views, the values at the cursor or the frames
+        // in view (hidden for a recording with no frames.csv), then the
+        // filter: one row on the desktop, a row each on a phone
+        GridLayout {
+            objectName: "detailRow"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            columns: root.phoneShape ? 1 : 2
+            columnSpacing: Theme.spacing
+            rowSpacing: 10
+            RowLayout {
+                id: detailSwitchSlot
+                visible: recording.hasFrames
+                // Maximized, it leads the zoom row where the row has room
+                Rectangle {
+                    parent: !root.chartMaximized ? detailSwitchSlot
+                          : root.switchInZoomRow ? zoomSwitchSlot : switchRowSlot
+                    implicitWidth: detailSwitch.implicitWidth + 4
+                    implicitHeight: detailSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    Row {
+                        id: detailSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "detailView_values"
+                            text: qsTr("Values")
+                            selected: !root.framesShown
+                            onClicked: root.detailView = "values"
+                        }
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "detailView_frames"
+                            text: qsTr("Frames")
+                            selected: root.framesShown
+                            onClicked: root.detailView = "frames"
+                        }
+                    }
+                }
+            }
+            SignalFilterBar {
+                objectName: "recordingFilter"
+                visible: !root.framesShown
+                Layout.fillWidth: true
+                filter: signalFilter
+                codes: recording.signalList.map(s => s.group)
+            }
+        }
+
+        // ---- The frames of the part in view, read from frames.csv ----
+        ColumnLayout {
+            objectName: "viewerFrames"
+            visible: root.framesShown
+            Layout.fillWidth: true
+            Layout.fillHeight: root.chartMaximized
+            spacing: Theme.spacing
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
+                Rectangle {
+                    implicitWidth: framesTableSwitch.implicitWidth + 4
+                    implicitHeight: framesTableSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    Row {
+                        id: framesTableSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "framesTable_frames"
+                            text: qsTr("List")
+                            selected: !root.framesById
+                            onClicked: root.framesById = false
+                        }
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "framesTable_byId"
+                            text: qsTr("By ID")
+                            selected: root.framesById
+                            onClicked: {
+                                root.framesById = true
+                                viewFrames.ids.refresh()
+                            }
+                        }
+                    }
+                }
+                ThemedButton {
+                    objectName: "framesFilterToggle"
+                    text: viewFrames.frames.filterTerms > 0
+                          ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
+                          : qsTr("Filter")
+                    checkable: true
+                    checked: root.framesFilterOpen
+                    onClicked: root.framesFilterOpen = !root.framesFilterOpen
+                }
+            }
+
+            FrameFilterPanel {
+                id: framesFilterPanel
+                visible: root.framesFilterOpen
+                frames: viewFrames.frames
+            }
+
+            // How many rows the part in view has, and when it has more than
+            // the table holds, where the table begins
+            Label {
+                objectName: "framesWords"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                wrapMode: Text.WordWrap
+                color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
+                font.pixelSize: Theme.fontCaption
+                text: viewFrames.error !== "" ? viewFrames.error
+                      : viewFrames.loading ? qsTr("Reading the frames…")
+                      : viewFrames.note !== "" ? viewFrames.note
+                      : viewFrames.frames.filterTerms > 0
+                        ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
+                                                         .arg(viewFrames.frames.heldCount)
+                        : viewFrames.rows === 1 ? qsTr("1 frame in view")
+                                               : qsTr("%1 frames in view").arg(viewFrames.rows)
+            }
+
+            // A fixed height, the page scrolling and the table inside it;
+            // maximized, what the page has left
+            FrameTable {
+                objectName: "viewerFrameTable"
+                visible: !root.framesById
+                Layout.preferredHeight: root.chartMaximized ? 0 : 280
+                Layout.fillHeight: root.chartMaximized
+                live: false
+                frames: viewFrames.frames
+                emptyText: viewFrames.loading ? qsTr("Reading the frames…")
+                         : viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
+                         : qsTr("No frame in view")
+                // A tap puts the chart's cursor at the frame's time, whether
+                // or not a signal has a sample there
+                onRowClicked: (index, modifiers, timestampUs) => root.setCursor(timestampUs / 1000)
+            }
+            FrameIdList {
+                objectName: "viewerFrameIds"
+                visible: root.framesById
+                Layout.preferredHeight: root.chartMaximized ? 0 : 280
+                Layout.fillHeight: root.chartMaximized
+                ids: viewFrames.ids
+                refreshing: root.framesById && root.framesShown
+                emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
+                                                           : qsTr("No frame in view")
+                onIdTapped: (id, extended) => {
+                    framesFilterPanel.showId(id, extended)
+                    root.framesFilterOpen = true
+                    root.framesById = false
+                }
+            }
+        }
+
+        // The recording's signals: a tick plots one, and beside each its
+        // value at the cursor
+        ListView {
+            id: signalRows
+            objectName: "signalRows"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
+            Layout.fillWidth: true
+            Layout.preferredHeight: count * root.rowHeight
+            Layout.maximumHeight: Math.max(root.rowHeight, column.height * 0.3)
+            clip: true
+            currentIndex: -1
+            highlightFollowsCurrentItem: false
+            boundsBehavior: Flickable.StopAtBounds
+            model: root.shownSignals
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            delegate: Rectangle {
+                id: signalRow
+                required property var modelData
+                required property int index
+                readonly property int signalIndex: modelData.index
+                readonly property var at: root.readout[signalIndex]
+                width: signalRows.width
+                height: root.rowHeight
+                color: index % 2 === 0 ? Theme.surface : Theme.bg
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 12
+                    ThemedCheckBox {
+                        objectName: "plotCheck"
+                        checked: root.plotted[signalRow.signalIndex] === true
+                        enabled: !signalRow.modelData.isText
+                        onToggled: root.togglePlotted(signalRow.signalIndex)
+                        Accessible.name: qsTr("Plot %1").arg(signalRow.modelData.name)
+                    }
+                    Rectangle {
+                        objectName: "swatch"
+                        readonly property bool shown: root.plotted[signalRow.signalIndex] === true
+                        implicitWidth: 10; implicitHeight: 10
+                        radius: 2
+                        color: shown ? Theme.seriesColor(signalRow.signalIndex) : "transparent"
+                        border.width: 1
+                        border.color: Theme.seriesColor(signalRow.signalIndex)
+                        opacity: shown ? 1.0 : 0.5
+                    }
+                    Label {
+                        text: signalRow.modelData.name
+                        color: Theme.text
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        objectName: "cursorValue"
+                        text: !signalRow.at || signalRow.at.atMs < 0 ? qsTr("—")
+                              : signalRow.modelData.isText ? signalRow.at.text
+                              : signalRow.at.label ? signalRow.at.label
+                              : root.valueText(Number(signalRow.at.text), signalRow.modelData.decimals,
+                                               signalRow.at.unit)
+                        Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.family: Theme.monoFamily
+                    }
+                    // The compared recording's, at the cursor
+                    Label {
+                        objectName: "compareValue"
+                        readonly property var at: root.compareReadout[signalRow.signalIndex]
+                        visible: root.compareAligned
+                        text: !at || at.atMs < 0 ? qsTr("—")
+                              : signalRow.modelData.isText ? at.text
+                              : at.label ? at.label
+                              : root.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
+                        Layout.maximumWidth: Math.round(signalRow.width * 0.3)
+                        elide: Text.ElideRight
+                        color: Theme.textDim
+                        font.family: Theme.monoFamily
+                    }
+                }
+            }
+        }
+
+        // While the filter narrows the rows, how many it shows and how many
+        // the chart draws: the chart keeps every ticked signal (ADR-0050)
+        Label {
+            objectName: "filterCount"
+            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized && !root.framesShown
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
+                                 : qsTr("Showing %1 of %2 signals · plotting %3"))
+                  .arg(root.shownSignals.length).arg(recording.signalList.length)
+                  .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
+        }
+
+        // ---- About this recording: what applies to it as a whole ----
+        Heading {
+            objectName: "aboutHeading"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            text: qsTr("About this recording")
+        }
+        Label {
+            objectName: "recordingInfo"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: recording.state === RecordingView.Open ? root.infoText() : ""
+        }
+        RowLayout {
+            id: aboutActions
+            visible: Theme.compact && recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+        }
+        ColumnLayout {
+            id: aboutNote
+            visible: Theme.compact && root.reportNote !== "" && !root.chartMaximized
+            Layout.fillWidth: true
+        }
+        Label {
+            objectName: "reportNote"
+            // Under Save report...: the title row's on the desktop, About's on a phone
+            parent: Theme.compact ? aboutNote : topNote
+            visible: root.reportNote !== ""
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            text: root.reportNote
+            color: root.reportFailed ? Theme.danger : Theme.textDim
+        }
+
+        // Where the values come from: offered once it opened, or failed
+        // (a profile that can't decode it, a folder with frames alone)
+        ComboBox {
+            implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                     implicitContentHeight + topPadding + bottomPadding,
+                                     implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+            id: decodeChoice
+            objectName: "decodeChoice"
+            // Values alone have no frames to decode through a profile
+            visible: (recording.state === RecordingView.Open
+                      || recording.state === RecordingView.Failed) && !root.chartMaximized
+                     && recording.hasFrames
+            Layout.fillWidth: true
+            textRole: "text"
+            valueRole: "value"
+            model: visible ? root.decodeChoices() : []
+            currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
+            Accessible.name: qsTr("Where the values come from")
+            onActivated: index => root.decodeWith(valueAt(index))
+        }
+
+        // The picked vehicle's baseline: this recording made it, or the
+        // baseline overlaid on it, lined up on their engine starts
+        Flow {
+            id: baselineFlow
+            objectName: "baselineRow"
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+                     && root.pickedVehicle !== null
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+            ThemedButton {
+                objectName: "useAsBaseline"
+                visible: !root.isBaseline
+                width: Math.min(implicitWidth, baselineFlow.width)
+                text: qsTr("Use as %1's baseline").arg(root.pickedVehicle !== null
+                                                        ? root.pickedVehicle.label : "")
+                onClicked: root.useAsBaseline()
+            }
+            Label {
+                objectName: "isBaseline"
+                visible: root.isBaseline
+                width: Math.min(implicitWidth, baselineFlow.width)
+                height: root.phoneShape ? Theme.touchTarget : Theme.controlHeight
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.WordWrap
+                color: Theme.textDim
+                text: qsTr("%1's baseline").arg(root.pickedVehicle !== null
+                                                 ? root.pickedVehicle.label : "")
+            }
+            ThemedButton {
+                objectName: "compareBaseline"
+                visible: root.baselineRow !== null && !root.isBaseline
+                width: Math.min(implicitWidth, baselineFlow.width)
+                text: qsTr("Compare with the baseline")
+                Accessible.name: qsTr("Compare with %1's baseline, aligned on the engine starts")
+                                     .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
+                onClicked: root.compareWithBaseline()
+            }
+        }
+
+        // Another recording to overlay, and how the two line up
+        RowLayout {
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+            ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                id: compareChoice
+                objectName: "compareChoice"
+                readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
+                Layout.fillWidth: true
+                model: [root.comparing ? root.compareTitle : qsTr("Compare with…")]
+                       .concat(others.map(r => r.title))
+                enabled: others.length > 0
+                Accessible.name: qsTr("Compare with another recording")
+                onActivated: index => {
+                    if (index > 0)
+                        root.compareWith(others[index - 1])
+                    currentIndex = 0
+                }
+            }
+            ThemedButton {
+                objectName: "stopCompare"
+                visible: root.comparing
+                text: qsTr("Stop")
+                Accessible.name: qsTr("Stop comparing")
+                onClicked: root.stopComparing()
+            }
+        }
+        Flow {
+            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            spacing: 6
+            ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                id: alignChoice
+                objectName: "alignChoice"
+                width: 170
+                textRole: "text"
+                valueRole: "value"
+                model: [{ text: qsTr("Align the starts"), value: "start" },
+                        { text: qsTr("Align UTC starts"), value: "utc" },
+                        { text: qsTr("Align a marker"), value: "marker" },
+                        { text: qsTr("Align a rise"), value: "rise" },
+                        { text: qsTr("Align a fall"), value: "fall" },
+                        { text: qsTr("Align engine starts"), value: "engine" }]
+                onActivated: root.setAlignOn(currentValue)
+            }
+            ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                objectName: "alignMarker"
+                visible: root.alignOn === "marker"
+                width: 150
+                model: recording.state === RecordingView.Open ? root.markerLabels() : []
+                onActivated: root.alignLabel = currentText
+            }
+            ComboBox {
+                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                         implicitContentHeight + topPadding + bottomPadding,
+                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                objectName: "alignSignal"
+                visible: root.alignOn === "rise" || root.alignOn === "fall"
+                width: 150
+                model: recording.state === RecordingView.Open ? root.numberNames() : []
+                onActivated: root.alignSignal = currentText
+            }
+            ThemedTextField {
+                objectName: "alignLevel"
+                visible: root.alignOn === "rise" || root.alignOn === "fall"
+                width: 100
+                placeholderText: qsTr("Level")
+                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                onEditingFinished: root.alignLevel = root.numberOf(text)
+            }
+            ThemedTextField {
+                objectName: "alignHysteresis"
+                visible: root.alignOn === "rise" || root.alignOn === "fall"
+                width: 100
+                placeholderText: qsTr("Hysteresis")
+                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                onEditingFinished: {
+                    const v = root.numberOf(text)
+                    root.alignHysteresis = v >= 0 ? v : 0
+                }
+            }
+        }
+        Label {
+            objectName: "compareStatus"
+            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: root.compareStatus
         }
 
         // The frames check: what it found, each row centering the view on
@@ -2340,6 +2408,12 @@ Page {
                     }
                 }
             }
+        }
+
+        // The rest stays at the top
+        Item {
+            visible: root.viewing && !root.chartMaximized
+            Layout.fillHeight: true
         }
     }
 }
