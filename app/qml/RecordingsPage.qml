@@ -77,6 +77,11 @@ Page {
     // relay holding the adapter (ADR-0047), as Settings' Connect judges it
     readonly property bool sessionIdle: !Bridge.connected && !Bridge.connecting
                                         && !Bridge.disconnecting && !Relay.running
+    // Replay's words: what to do first, or plain while a session starts or
+    // ends (connected is false once a disconnect begins)
+    readonly property string replayText: Relay.running ? qsTr("Stop the relay to replay")
+                                       : Bridge.connected ? qsTr("Disconnect to replay")
+                                                          : qsTr("Replay")
 
     // The chart maximized: it takes the page but for the zoom row, and the
     // cursor's values move to a strip beside it. Kept apart for a short
@@ -1386,7 +1391,7 @@ Page {
                         objectName: "replayButton"
                         visible: recordingRow.modelData.frames !== false
                         // One tap connects; during a session it says what to do first
-                        text: enabled ? qsTr("Replay") : qsTr("Disconnect to replay")
+                        text: root.replayText
                         // Darker than its row, so it reads as a button there
                         baseColor: Theme.surface
                         enabled: root.sessionIdle
@@ -1423,7 +1428,7 @@ Page {
                 objectName: "replayView"
                 visible: recording.state === RecordingView.Open && recording.hasFrames
                 enabled: root.sessionIdle
-                text: enabled ? qsTr("Replay") : qsTr("Disconnect to replay")
+                text: root.replayText
                 Accessible.name: qsTr("Replay the part in view as a session")
                 onClicked: root.replayRequested(root.stretchUri())
             }

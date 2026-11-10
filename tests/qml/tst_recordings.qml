@@ -459,6 +459,38 @@ TestCase {
         verify(!page.viewing, "Replay doesn't open the viewer")
     }
 
+    // Replay off says what to do first: stop the relay, or disconnect;
+    // while a session starts or ends it's plain Replay, off
+    function test_replaySaysWhatStopsIt() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        const button = find(list.itemAtIndex(0), "replayButton")
+        verify(button.enabled)
+        compare(button.text, "Replay")
+
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        tryVerify(() => !button.enabled, 2000, "off while relaying")
+        compare(button.text, "Stop the relay to replay")
+        Relay.stop()
+        tryVerify(() => button.enabled, 2000, "on again")
+
+        Bridge.connectSessionAsync("mock://replay-words")
+        verify(Bridge.connecting, "the connect is under way")
+        verify(!button.enabled)
+        compare(button.text, "Replay", "nothing to disconnect yet")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        compare(button.text, "Disconnect to replay")
+        Bridge.disconnectSession()
+        verify(Bridge.disconnecting, "the teardown is under way")
+        verify(!button.enabled)
+        compare(button.text, "Replay", "already disconnecting")
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        verify(button.enabled, "on again")
+        compare(button.text, "Replay")
+    }
+
     // The viewer's Replay view hands on the part in view as a stretch of
     // the row's URI, in the recording's seconds; the whole recording in
     // view, the row's URI alone
