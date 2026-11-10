@@ -33,16 +33,17 @@ constexpr qint64 kStaleSeconds = 24 * 60 * 60;
 
 using Hold = RecordingExport::HoldForTesting;
 
-// A worker's stop: the object's flag, asked by core (ecuio_export_with) and
-// by the copy between chunks
+// A worker's stop: the object's flag or the worker's own, asked by core
+// (ecuio_export_with) and by the copy between chunks
 struct Stop {
     const std::atomic<bool>* stopping = nullptr;
+    const std::atomic<bool>* canceled = nullptr;
     Hold hold = Hold::None;
     int holdMs = 0;
     std::atomic<int>* held = nullptr;
     bool asked = false;
 
-    bool stopped() const { return stopping->load(); }
+    bool stopped() const { return stopping->load() || canceled->load(); }
     // A test's hold: the stop, or its time, ends it
     void holdAt(Hold where) const
     {
@@ -196,6 +197,17 @@ QVariantMap failedIn(const QByteArray& folder, const QString& words)
 QVariantMap failed(const Job& job, const QString& words)
 {
     return failedIn(job.folder, words);
+}
+
+// An export cancel() stopped: no failure, nothing written
+QVariantMap canceledIn(const QByteArray& folder)
+{
+    return {
+        {QStringLiteral("ok"), false},
+        {QStringLiteral("canceled"), true},
+        {QStringLiteral("words"), QStringLiteral("The export was canceled")},
+        {QStringLiteral("folder"), QString::fromUtf8(folder)},
+        {QStringLiteral("line"), QStringLiteral("Export canceled")}};
 }
 
 QVariantMap written(const Job& job, const ecuio_export_report_t& r,
@@ -460,8 +472,9 @@ bool RecordingExport::estimate(const QString& folder, const QVariantList& rowMs,
     }
     const quint64 generation = ++m_estimateGeneration;
     if (m_sizing && m_estimateWorker.joinable()) {
-        // A sizing under way runs on unless the object goes: this one
-        // follows it
+        // The sizing under way stops at core's next ask: this one follows
+        // it
+        m_cancelEstimate.store(true);
         m_waitingEstimate = job;
         m_waitingGeneration = generation;
         return true;
@@ -474,6 +487,9 @@ void RecordingExport::dropEstimate()
 {
     ++m_estimateGeneration;
     m_waitingEstimate.reset();
+    if (m_sizing) {
+        m_cancelEstimate.store(true);
+    }
 }
 
 void RecordingExport::launchEstimate(const EstimateJob& job, quint64 generation)
@@ -483,9 +499,10 @@ void RecordingExport::launchEstimate(const EstimateJob& job, quint64 generation)
     }
     const bool wasSizing = m_sizing;
     m_sizing = true;
+    m_cancelEstimate.store(false);
     try {
-        Stop stop{&m_stopping, m_holdForTesting, m_holdMsForTesting,
-                  &m_heldForTesting};
+        Stop stop{&m_stopping, &m_cancelEstimate, m_holdForTesting,
+                  m_holdMsForTesting, &m_heldForTesting};
         m_estimateWorker =
             std::thread([this, job, generation, stop,
                          fail = m_failWorkerForTesting]() mutable {
@@ -571,9 +588,10 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     job.target = target;
     job.throughProvider = m_throughProvider;
     job.failCopy = m_failCopyForTesting;
+    m_cancelExport.store(false);
     try {
-        Stop stop{&m_stopping, m_holdForTesting, m_holdMsForTesting,
-                  &m_heldForTesting};
+        Stop stop{&m_stopping, &m_cancelExport, m_holdForTesting,
+                  m_holdMsForTesting, &m_heldForTesting};
         m_worker = std::thread([this, job, stop,
                                 fail = m_failWorkerForTesting]() mutable {
             QVariantMap result;
@@ -584,6 +602,10 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
                 result = job.format == ECUIO_EXPORT_FOLDER
                              ? runFolder(job, stop)
                              : runFile(job, stop);
+                if (!result.value(QStringLiteral("ok")).toBool() &&
+                    stop.stopped()) {
+                    result = canceledIn(job.folder);
+                }
             } catch (...) {
                 result.clear(); // exportDone says so
             }
@@ -600,6 +622,13 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     m_busy = true;
     emit busyChanged();
     return true;
+}
+
+void RecordingExport::cancel()
+{
+    if (m_busy) {
+        m_cancelExport.store(true);
+    }
 }
 
 void RecordingExport::exportDone(const QVariantMap& answer,

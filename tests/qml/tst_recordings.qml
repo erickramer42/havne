@@ -763,6 +763,38 @@ TestCase {
         compare(note.color, Theme.danger)
     }
 
+    // Cancel takes Save as...'s place while an export runs (held at core's
+    // first ask for a minute): it ends well inside that, says so in the
+    // note's own color, writes nothing, and the next export runs whole
+    function test_aCanceledExportWritesNothingAndSaysSo() {
+        const page = openEarlyViewer()
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        const exporter = find(panel, "exporter")
+        const go = find(panel, "exportGo")
+        const cancel = find(panel, "exportCancel")
+        const note = find(panel, "exportNote")
+        verify(go.visible && !cancel.visible, "Save as... while none runs")
+        const url = "file:///" + scratchFolder("canceled").replace(/^file:\/+/, "") + "/canceled.csv"
+        Harness.holdExports(exporter, 60000)
+        try {
+            verify(panel.exportTo(url))
+            tryVerify(() => Harness.heldExports(exporter) >= 1, 10000, "held at core's first ask")
+            verify(cancel.visible && !go.visible, "Cancel in its place")
+            cancel.clicked()
+            tryVerify(() => note.text.indexOf("Export canceled") === 0, 20000, note.text)
+        } finally {
+            Harness.holdExports(exporter, 0)
+        }
+        compare(note.color, Theme.textDim, "not a failure")
+        verify(go.visible && !cancel.visible)
+        compare(Harness.readScratchFile(url), "", "nothing written")
+        verify(panel.exportTo(url))
+        tryVerify(() => note.text.indexOf("Saved: ") === 0, 10000, note.text)
+        restoreExportChoices(panel)
+    }
+
     // A finished export for a recording the viewer has left says nothing
     // here: Back and another recording opened before it ended
     function test_aLateExportForAnotherRecordingLeavesTheNote() {

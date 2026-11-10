@@ -4,7 +4,8 @@
 // The Recordings viewer's Export (app/recordingexport.{h,cpp}): each file
 // compared byte for byte with what core's ecuio_export writes for the same
 // options, the sizes with core's, and what the class adds itself: the copy to
-// the place picked, a provider's document, a folder copy's name.
+// the place picked, a provider's document, a folder copy's name, and its
+// stops: a cancel, a sizing superseded or dropped, the object's end.
 
 #include <gtest/gtest.h>
 
@@ -761,4 +762,134 @@ TEST(RecordingExportTest, DestroyedBeforeAProvidersFolderCopyLeavesNoCopy)
     EXPECT_EQ(
         QDir(dir.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot),
         QStringList());
+}
+
+// Every finished() an export says
+struct Finished {
+    QList<QVariantMap> results;
+    QObject context;
+    explicit Finished(RecordingExport& e)
+    {
+        QObject::connect(&e, &RecordingExport::finished, &context,
+                         [this](const QVariantMap& r) { results << r; });
+    }
+};
+
+/* Canceled at core's first ask: it ends well under the hold, says it was
+ * canceled and not that it failed, writes nothing, and the next export runs
+ * whole. A cancel with none running is nothing */
+TEST(RecordingExportTest, ACanceledExportSaysSoAndWritesNothing)
+{
+    QTemporaryDir dir;
+    const QString out = dir.filePath(QStringLiteral("a.csv"));
+    RecordingExport e;
+    Finished done(e);
+    e.cancel();
+    e.setHoldForTesting(Hold::FirstAsk, kHoldMs);
+    ASSERT_TRUE(e.start(asMap(fixture("pull-early"), Options{}),
+                        QUrl::fromLocalFile(out)));
+    ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+    QElapsedTimer t;
+    t.start();
+    e.cancel();
+    ASSERT_TRUE(
+        waitUntil([&] { return !done.results.isEmpty(); }, kHoldMs / 2));
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    ASSERT_EQ(done.results.size(), 1);
+    const QVariantMap r = done.results[0];
+    EXPECT_FALSE(ok(r));
+    EXPECT_TRUE(r.value(QStringLiteral("canceled")).toBool());
+    EXPECT_EQ(text(r, "words").toStdString(), "The export was canceled");
+    EXPECT_EQ(text(r, "line").toStdString(), "Export canceled");
+    EXPECT_EQ(text(r, "folder"), fixture("pull-early"));
+    EXPECT_FALSE(e.busy());
+    EXPECT_EQ(
+        QDir(dir.path()).entryList(QDir::AllEntries | QDir::NoDotAndDotDot),
+        QStringList());
+
+    e.setHoldForTesting(Hold::None, 0);
+    const QVariantMap again =
+        exported(e, fixture("pull-early"), Options{}, QUrl::fromLocalFile(out));
+    EXPECT_TRUE(ok(again)) << text(again, "words").toStdString();
+    EXPECT_FALSE(again.value(QStringLiteral("canceled")).toBool());
+    EXPECT_FALSE(bytesOf(out).isEmpty());
+}
+
+/* Canceled after core's export, before a provider's copy: the copy stops
+ * at its first chunk and the picked document goes */
+TEST(RecordingExportTest, ACancelBeforeAProvidersCopyCopiesNothing)
+{
+    QTemporaryDir dir;
+    const QString out = dir.filePath(QStringLiteral("a.csv"));
+    writeFile(out, "the picker's document");
+    RecordingExport e;
+    Finished done(e);
+    e.setThroughProviderForTesting(true);
+    e.setHoldForTesting(Hold::BeforeCopy, kHoldMs);
+    ASSERT_TRUE(e.start(asMap(fixture("pull-early"), Options{}),
+                        QUrl::fromLocalFile(out)));
+    ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+    QElapsedTimer t;
+    t.start();
+    e.cancel();
+    ASSERT_TRUE(
+        waitUntil([&] { return !done.results.isEmpty(); }, kHoldMs / 2));
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    EXPECT_TRUE(done.results[0].value(QStringLiteral("canceled")).toBool());
+    EXPECT_FALSE(QFileInfo::exists(out));
+}
+
+/* A newer sizing stops the one running at core's next ask, and is the only
+ * one answered, whole */
+TEST(RecordingExportTest, ANewerSizingStopsTheOneRunning)
+{
+    RecordingExport e;
+    QList<QVariantMap> answers;
+    QObject context;
+    QObject::connect(&e, &RecordingExport::estimated, &context,
+                     [&](const QVariantMap& r) { answers << r; });
+    e.setHoldForTesting(Hold::FirstAsk, kHoldMs);
+    ASSERT_TRUE(e.estimate(fixture("pull-early"), asked({10}), 0, {}));
+    ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+    e.setHoldForTesting(Hold::None, 0); // the newer one is held nowhere
+    QElapsedTimer t;
+    t.start();
+    ASSERT_TRUE(e.estimate(fixture("pull-early"), asked({20}), 0, {}));
+    ASSERT_TRUE(waitUntil([&] { return !answers.isEmpty(); }, kHoldMs / 2));
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    ASSERT_TRUE(waitUntil([&e] { return !e.sizing(); }));
+    ASSERT_EQ(answers.size(), 1);
+    ASSERT_TRUE(ok(answers[0])) << text(answers[0], "words").toStdString();
+    EXPECT_EQ(answers[0]
+                  .value(QStringLiteral("sizes"))
+                  .toList()
+                  .first()
+                  .toMap()
+                  .value(QStringLiteral("rowMs"))
+                  .toInt(),
+              20);
+}
+
+/* A sizing dropped while it runs stops at core's next ask and says
+ * nothing; the next one runs whole */
+TEST(RecordingExportTest, ADroppedSizingStopsAtTheNextAsk)
+{
+    RecordingExport e;
+    int answers = 0;
+    QObject context;
+    QObject::connect(&e, &RecordingExport::estimated, &context,
+                     [&](const QVariantMap&) { ++answers; });
+    e.setHoldForTesting(Hold::FirstAsk, kHoldMs);
+    ASSERT_TRUE(e.estimate(fixture("pull-early"), asked({10}), 0, {}));
+    ASSERT_TRUE(waitUntil([&e] { return e.heldForTesting() == 1; }));
+    QElapsedTimer t;
+    t.start();
+    e.dropEstimate();
+    ASSERT_TRUE(waitUntil([&e] { return !e.sizing(); }, kHoldMs / 2));
+    EXPECT_LT(t.elapsed(), kHoldMs / 4);
+    EXPECT_EQ(answers, 0);
+
+    e.setHoldForTesting(Hold::None, 0);
+    const QVariantMap again = sized(e, fixture("pull-early"), {0});
+    EXPECT_TRUE(ok(again)) << text(again, "words").toStdString();
 }
