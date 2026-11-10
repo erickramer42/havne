@@ -819,6 +819,14 @@ if(TARGET havne-cli)
             COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
                     "-DARGS=${args}" -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
     endfunction()
+    # The same, with the refusal's words on standard error: for a case
+    # another usage error could pass
+    function(app_cli_usage_says name args words)
+        add_test(NAME CliUsageTest.${name}
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
+                    "-DARGS=${args}" "-DEXPECT_ERR=${words}"
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
+    endfunction()
     app_cli_usage(NoArgumentsIsUsage "")
     app_cli_usage(NoUriIsUsage "stream")
     app_cli_usage(AnUnknownCommandIsUsage "listen")
@@ -847,7 +855,16 @@ if(TARGET havne-cli)
     app_cli_usage(StreamSecondsPastTheCapIsUsage "stream|mock://x|--seconds|31622401")
     app_cli_usage(StreamSecondsThatWrapAreUsage "stream|mock://x|--seconds|18446744073710")
     app_cli_usage(SimSecondsPastTheCapIsUsage "sim|mock://x|--elm327|tcp:0|--seconds|31622401")
-    app_cli_usage(PlaySecondsPastTheCapIsUsage "play|mock://x|--to|vcan0|--seconds|31622401")
+    # play exists only on Linux (cli/main.cpp's HAVNE_CLI_PLAY); elsewhere
+    # its every form is the one refusal
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        app_cli_usage_says(PlaySecondsPastTheCapIsUsage
+            "play|mock://x|--to|vcan0|--seconds|31622401"
+            "--seconds takes a whole number from 1 to 31622400")
+    else()
+        app_cli_usage_says(PlayNeedsLinux
+            "play|mock://x|--to|vcan0" "play needs Linux")
+    endif()
     app_cli_usage(LogSignalsAndAPluginIsUsage "log|mock://x|f|--signals|a.json|--plugin|p")
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
