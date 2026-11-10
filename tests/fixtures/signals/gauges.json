@@ -1,0 +1,43 @@
+{
+  "havne_signals": 1,
+  "name": "Gauged extras",
+  "notes": "Synthetic: written for Havne's tests",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "signals": [
+    {
+      "key": "coolant",
+      "name": "Coolant",
+      "read": { "service": "01", "number": "05" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40,
+      "unit": "°C", "decimals": 0, "group": "engine",
+      "gauge": { "min": 40, "max": 130, "warn_high": 110 }
+    },
+    {
+      "key": "volts",
+      "name": "Module Volts",
+      "read": { "service": "01", "number": "42" },
+      "field": { "byte": 0, "bits": 16 },
+      "scale": 0.001,
+      "unit": "V", "decimals": 1, "group": "electrical",
+      "gauge": { "min": 10, "max": 16, "warn_low": 11.5, "warn_high": 15.25 }
+    },
+    {
+      "key": "load",
+      "name": "Load Share",
+      "read": { "service": "01", "number": "04" },
+      "field": { "byte": 0, "bits": 8 },
+      "scale": 0.392157,
+      "unit": "%", "decimals": 1, "group": "engine"
+    },
+    {
+      "key": "half_volts",
+      "name": "Half Volts",
+      "kind": "computed",
+      "expr": "volts / 2",
+      "unit": "V", "decimals": 2, "group": "electrical",
+      "gauge": { "min": 5, "max": 8 }
+    }
+  ]
+}

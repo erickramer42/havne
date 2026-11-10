@@ -30,6 +30,7 @@ CALLS = {
     ("signal_file.cpp", "what + \"'s field\"", 1): ("signal-file", "/$defs/textField"),
     ("signal_file.cpp", "what + \"'s field\"", 2): ("signal-file", "/$defs/enumField"),
     ("signal_file.cpp", "what + \"'s field\"", 3): ("signal-file", "/$defs/numberField"),
+    ("signal_file.cpp", "what + \"'s gauge\"", 1): ("signal-file", "/$defs/gauge"),
     ("signal_file.cpp", '"\\"source\\""', 1): ("signal-file", "/$defs/source"),
     ("signal_file.cpp", '"the file"', 1): ("signal-file", ""),
     # build: computed, then text and hex, then enum, then number

@@ -29,6 +29,8 @@ struct ecuio_signal_file {
     std::vector<ecuio_enum_entry_t> enums;
     std::vector<ecuio_computed_t> computed;
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */
+    std::vector<std::pair<uint32_t, ecuio_signal_gauge_t>>
+        gauges; /* def index */
     ecuio_signal_set_t set{};
     /* The bytes a recording copies as signals.json (ADR-0051 section 4):
      * those ecuio_signal_file_load read, or a plugin variant's files

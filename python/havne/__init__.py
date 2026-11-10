@@ -22,7 +22,7 @@ from .session import Frame, Recorder, Session, Stream, Value
 from .recording import (Column, GuessedMap, Imported, Marker, RecordedFrame, Recording,
                         Signal, guess_csv_map, import_candump, import_csv, read_frames)
 from .sim import Reply, Sim
-from .signals import Plugin, SignalFile
+from .signals import Gauge, Plugin, SignalFile
 from . import _ecuio as c
 
 __all__ = [
@@ -32,5 +32,5 @@ __all__ = [
     "Recording", "Signal", "Marker", "Column",
     "import_csv", "import_candump", "Imported", "read_frames", "RecordedFrame",
     "guess_csv_map", "GuessedMap",
-    "Sim", "Reply", "SignalFile", "Plugin",
+    "Sim", "Reply", "SignalFile", "Plugin", "Gauge",
 ]

@@ -855,9 +855,11 @@ void poll_refused(Output& out, const ecuio_signal_set_t* set,
 }
 
 // The session's signals: each def's id, name, unit, decimals and group,
-// then for an enum "enum":true and its "labels" ({"<raw>": label}, as a
-// signal file's "values"), for a computed def "computed":true
-void write_signals(Output& out, const ecuio_signal_set_t* set)
+// its "gauge" when the session's signal file gives one, then for an enum
+// "enum":true and its "labels" ({"<raw>": label}, as a signal file's
+// "values"), for a computed def "computed":true
+void write_signals(Output& out, const ecuio_signal_set_t* set,
+                   const ecuio_signal_file_t* file)
 {
     const uint32_t count = set ? set->count : 0;
     size_t bytes = 256 + size_t{count} * 512;
@@ -865,6 +867,9 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         uint32_t labels = 0;
         cli::def_labels(*set, set->defs[i], &labels);
         bytes += cli::labels_bytes(labels);
+        if (ecuio_signal_file_gauge(file, &set->defs[i]) != nullptr) {
+            bytes += cli::kGaugeBytes;
+        }
     }
     BigLine b(bytes);
     cli::Line& l = b.line;
@@ -888,6 +893,7 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         l.key("group");
         const char* group = ecuio_signal_group_name(d.group);
         l.string(group, std::strlen(group));
+        cli::gauge_field(l, ecuio_signal_file_gauge(file, &d));
         if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
             l.key("computed");
             l.raw("true");
@@ -1192,7 +1198,8 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
     for (uint32_t i = 0; i < set.count; ++i) {
         if (cli::own_signal(set.defs[i])) {
             BigLine b(cli::def_line_bytes(set, set.defs[i]));
-            cli::def_line(b.line, set, set.defs[i]);
+            cli::def_line(b.line, set, set.defs[i],
+                          ecuio_signal_file_gauge(file, &set.defs[i]));
             write_line(out, b.line);
         }
     }
@@ -1234,6 +1241,16 @@ int run_signals_check(const char* path)
 // command's return, so it is never freed, as g_signal_file isn't
 ecuio_plugin_t* g_plugin = nullptr;
 uint32_t g_plugin_variant = 0; // the variant the URI's profile= selects
+
+// The signal file decoding the session: the --signals file or a
+// recording's copy, the --plugin variant's files merged into one, or NULL
+const ecuio_signal_file_t* session_signal_file()
+{
+    return g_signal_file != nullptr ? g_signal_file
+           : g_plugin != nullptr
+               ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
+               : nullptr;
+}
 
 // Whether path names a folder (a plugin's); otherwise it's read as a file
 bool is_folder(const char* path)
@@ -1674,6 +1691,7 @@ int run_plugins_check(const char* path, const char* on)
         cli::plugin_line(b.line, 0, p, info);
         write_line(out, b.line);
     }
+    bool uses_gauge = false;
     for (uint32_t v = 0; v < info.variant_count; ++v) {
         const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
         const std::string id = variant_of(p, v);
@@ -1685,8 +1703,11 @@ int run_plugins_check(const char* path, const char* on)
         }
         for (uint32_t i = 0; i < set.count; ++i) {
             if (cli::own_signal(set.defs[i])) {
+                const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
+                    ecuio_plugin_variant_file(p, v), &set.defs[i]);
+                uses_gauge = uses_gauge || gauge != nullptr;
                 BigLine b(cli::def_line_bytes(set, set.defs[i]));
-                cli::def_line(b.line, set, set.defs[i]);
+                cli::def_line(b.line, set, set.defs[i], gauge);
                 write_line(out, b.line);
             }
         }
@@ -1763,6 +1784,14 @@ int run_plugins_check(const char* path, const char* on)
             b.line, r.file.c_str(), variant.c_str(), r.value, r.result, r.have,
             r.got,
             r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
+        write_line(out, b.line);
+    }
+    uint16_t declared[3] = {};
+    if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
+                                   &declared[2]) == ECUIO_OK &&
+        cli::gauge_needs_newer_core(declared, uses_gauge)) {
+        BigLine b(512);
+        cli::requires_core_line(b.line, declared);
         write_line(out, b.line);
     }
     {
@@ -2331,13 +2360,8 @@ bool open_recording(Output& out, ecuio_session_t* session, const char* root,
                         *detail ? detail : ecuio_status_string(st));
         return false;
     }
-    // The signal file decoding the session goes in as signals.json: the
-    // --signals file, or the --plugin variant's files merged into one
-    const ecuio_signal_file_t* file =
-        g_signal_file != nullptr ? g_signal_file
-        : g_plugin != nullptr
-            ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
-            : nullptr;
+    // The signal file decoding the session goes in as signals.json
+    const ecuio_signal_file_t* file = session_signal_file();
     if (file != nullptr) {
         st = ecuio_recorder_signal_file(*recorder, file);
     }
@@ -2545,7 +2569,7 @@ int run_stream(const StreamArgs& args)
     cli::TimingSnapshots timing_snaps;
     std::vector<ecuio_request_timing_t> timing_rows(ECUIO_PROFILE_MAX_REQUESTS);
     if (args.values) {
-        write_signals(out, set);
+        write_signals(out, set, session_signal_file());
     }
     out.flush();
 

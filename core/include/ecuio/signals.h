@@ -606,6 +606,49 @@ const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file
 const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
                                   const ecuio_signal_def_t* def);
 
+/* A gauge's warning levels (ecuio_signal_gauge_t's flags). Values are
+ * append-only. */
+#define ECUIO_GAUGE_WARN_LOW  0x1u  /* warn_low is given */
+#define ECUIO_GAUGE_WARN_HIGH 0x2u  /* warn_high is given */
+
+/* A signal's "gauge" (ADR-0051's appendix "a signal's gauge"): the range
+ * a dial shows and the levels it warns at, a value at or below warn_low
+ * or at or above warn_high, as the file wrote them, in the signal's own
+ * unit: the numbers a decoded value has before
+ * ecuio_display_convert. All finite, min < max; a level given is
+ * within them, and warn_low < warn_high when both are. A level not given
+ * is 0 with its flag clear. */
+typedef struct ecuio_signal_gauge {
+    double   min;
+    double   max;
+    double   warn_low;
+    double   warn_high;
+    uint32_t flags;               /* ECUIO_GAUGE_*; any other bit zero */
+    uint32_t reserved[3];         /* zero */
+} ecuio_signal_gauge_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_gauge_t) == 48, "ecuio_signal_gauge_t size is ABI");
+static_assert(offsetof(ecuio_signal_gauge_t, warn_high) == 24, "gauge warn_high offset is ABI");
+static_assert(offsetof(ecuio_signal_gauge_t, flags) == 32, "gauge flags offset is ABI");
+static_assert(offsetof(ecuio_signal_gauge_t, reserved) == 36, "gauge reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_gauge_t) == 48, "ecuio_signal_gauge_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_gauge_t, warn_high) == 24, "gauge warn_high offset is ABI");
+_Static_assert(offsetof(ecuio_signal_gauge_t, flags) == 32, "gauge flags offset is ABI");
+_Static_assert(offsetof(ecuio_signal_gauge_t, reserved) == 36, "gauge reserved offset is ABI");
+#endif
+
+/* The gauge a def of the file's own gives, found by the def's address
+ * as ecuio_signal_file_key finds its key. NULL for a def that gives
+ * none, a base set's def (extends), a def that isn't the file's
+ * (another set's, or a copy), or a NULL argument. Borrowed: valid until
+ * ecuio_signal_file_free. Any thread may call it while the file lives:
+ * it only reads. */
+const ecuio_signal_gauge_t*
+ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
+                        const ecuio_signal_def_t* def);
+
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */
 void ecuio_signal_file_free(ecuio_signal_file_t* file);

@@ -614,6 +614,11 @@ if(TARGET havne-cli)
         set(_cli_signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals)
         app_cli_golden(SignalsCheckReadsAFile signals-check.jsonl
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/extras.json)
+        app_cli_golden(SignalsCheckSaysEachGauge signals-check-gauges.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/gauges.json)
+        app_cli_golden(StreamListsEachGauge stream-gauges.jsonl
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
+               --signals ${_cli_signals}/gauges.json --values --count 1)
         app_cli_golden(SignalsCheckRefusesAFile signals-refused.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
         app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3

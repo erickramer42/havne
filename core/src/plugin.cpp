@@ -75,6 +75,7 @@ struct ecuio_plugin {
     std::string id;
     std::string name;
     std::string version;
+    uint16_t requires_core[3] = {};
     uint32_t tiers = 0;
     std::vector<match_rule> match;
     std::vector<variant> variants;
@@ -395,6 +396,9 @@ private:
         uint32_t want[3];
         if (!parse_version(needed, want)) {
             refuse(*needs, "\"requires\"'s core " + q(needed) + " isn't X.Y.Z");
+        }
+        for (int i = 0; i < 3; ++i) {
+            p.requires_core[i] = static_cast<uint16_t>(want[i]);
         }
         uint32_t have[3];
         core_version(have);
@@ -1018,6 +1022,20 @@ ecuio_status_t ecuio_plugin_info(const ecuio_plugin_t* plugin,
     info.variant_count = static_cast<uint32_t>(plugin->variants.size());
     info.fixture_count = static_cast<uint32_t>(plugin->fixtures.size());
     *out = info;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_requires_core(const ecuio_plugin_t* plugin,
+                                          uint16_t* major, uint16_t* minor,
+                                          uint16_t* patch)
+{
+    if (plugin == nullptr || major == nullptr || minor == nullptr ||
+        patch == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *major = plugin->requires_core[0];
+    *minor = plugin->requires_core[1];
+    *patch = plugin->requires_core[2];
     return ECUIO_OK;
 }
 

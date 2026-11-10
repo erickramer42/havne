@@ -102,6 +102,21 @@ std::string one(const std::string& signal, const std::string& ecus =
 const char* const kNumber =
     R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},"field":{"byte":0}})";
 
+/* An 8-bit signal in deg C reading -40 to 215, with the JSON after "gauge" */
+std::string gauged(const std::string& gauge)
+{
+    return one(
+        R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0},"offset":-40,"unit":"degC","gauge":)" +
+        gauge + "}");
+}
+
+const ecuio_signal_gauge_t* gauge_of(const File& f, const char* key)
+{
+    return ecuio_signal_file_gauge(f.get(),
+                                   ecuio_signal_file_find(f.get(), key));
+}
+
 } // namespace
 
 TEST(SignalFileTest, TheAdrsExampleLoadsIntoItsSet)
@@ -584,4 +599,256 @@ TEST(SignalFileTest, EachOwnDefNamesItsKeyAndNoOtherDefDoes)
     const ecuio_signal_set_t* s = ecuio_signal_file_set(alone.get());
     ASSERT_EQ(s->count, 1u);
     EXPECT_STREQ(ecuio_signal_file_key(alone.get(), &s->defs[0]), "a");
+}
+
+TEST(SignalFileTest, AGaugeIsKeptAsTheFileWroteIt)
+{
+    File f = load(
+        gauged(R"({"min":40.5,"max":130,"warn_low":60,"warn_high":110.25})"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    const ecuio_signal_gauge_t* g = gauge_of(f, "a");
+    ASSERT_NE(g, nullptr);
+    EXPECT_EQ(g->min, 40.5);
+    EXPECT_EQ(g->max, 130.0);
+    EXPECT_EQ(g->warn_low, 60.0);
+    EXPECT_EQ(g->warn_high, 110.25);
+    EXPECT_EQ(g->flags, ECUIO_GAUGE_WARN_LOW | ECUIO_GAUGE_WARN_HIGH);
+    EXPECT_EQ(g->reserved[0] | g->reserved[1] | g->reserved[2], 0u);
+}
+
+TEST(SignalFileTest, AGaugesLevelsAreOptionalAndEachHasItsFlag)
+{
+    File none = load(gauged(R"({"min":0,"max":100})"));
+    ASSERT_TRUE(none) << ecuio_last_error_detail();
+    ASSERT_NE(gauge_of(none, "a"), nullptr);
+    EXPECT_EQ(gauge_of(none, "a")->flags, 0u);
+    EXPECT_EQ(gauge_of(none, "a")->warn_low, 0.0);
+    EXPECT_EQ(gauge_of(none, "a")->warn_high, 0.0);
+
+    File low = load(gauged(R"({"min":0,"max":100,"warn_low":10})"));
+    ASSERT_TRUE(low) << ecuio_last_error_detail();
+    ASSERT_NE(gauge_of(low, "a"), nullptr);
+    EXPECT_EQ(gauge_of(low, "a")->flags, ECUIO_GAUGE_WARN_LOW);
+    EXPECT_EQ(gauge_of(low, "a")->warn_low, 10.0);
+    EXPECT_EQ(gauge_of(low, "a")->warn_high, 0.0);
+
+    File high = load(gauged(R"({"min":0,"max":100,"warn_high":90})"));
+    ASSERT_TRUE(high) << ecuio_last_error_detail();
+    ASSERT_NE(gauge_of(high, "a"), nullptr);
+    EXPECT_EQ(gauge_of(high, "a")->flags, ECUIO_GAUGE_WARN_HIGH);
+    EXPECT_EQ(gauge_of(high, "a")->warn_high, 90.0);
+    EXPECT_EQ(gauge_of(high, "a")->warn_low, 0.0);
+}
+
+TEST(SignalFileTest, AGaugeTakesWhatADialCanShow)
+{
+    const char* const kept[] = {
+        R"({"min":0,"max":100,"warn_low":0,"warn_high":100})", /* the ends */
+        R"({"min":-100,"max":500})", /* wider than the field */
+        R"({"min":-100,"max":-40})", /* meets the field's lowest */
+        R"({"min":215,"max":300})",  /* meets its highest */
+        R"({"min":200,"max":300})",  /* overlaps it */
+        R"({"min":0,"max":100,"notes":"from the gauge cluster","x-tool":[1]})",
+    };
+    for (const char* gauge : kept) {
+        File f = load(gauged(gauge));
+        EXPECT_TRUE(f) << gauge << ": " << ecuio_last_error_detail();
+    }
+}
+
+/* The field's reach follows its scale's sign and its own: a negative
+ * scale reads its span backwards (8 bits at -0.5 from 100: -27.5 to 100)
+ * and a signed field reads below zero (8 signed bits: -128 to 127) */
+TEST(SignalFileTest, AFieldsReachFollowsItsScaleAndItsSign)
+{
+    struct Case {
+        const char* field;
+        const char* gauge;
+        bool kept;
+    };
+    const char* const backwards =
+        R"("field":{"byte":0},"scale":-0.5,"offset":100)";
+    const char* const signed8 = R"("field":{"byte":0,"signed":true})";
+    const Case cases[] = {
+        {backwards, R"({"min":-27.5,"max":-10})", true},  /* its lowest */
+        {backwards, R"({"min":100,"max":200})", true},    /* its highest */
+        {backwards, R"({"min":-40,"max":0})", true},      /* overlapping */
+        {backwards, R"({"min":-60,"max":-28})", false},   /* under it */
+        {backwards, R"({"min":100.5,"max":200})", false}, /* over it */
+        {signed8, R"({"min":-128,"max":-100})", true},    /* its lowest */
+        {signed8, R"({"min":120,"max":200})", true},      /* overlapping */
+        {signed8, R"({"min":-200,"max":-129})", false},   /* under it */
+        {signed8, R"({"min":128,"max":200})", false},     /* over it */
+    };
+    for (const Case& k : cases) {
+        File f = load(one(std::string(R"({"key":"a","name":"A","read":)"
+                                      R"({"service":"22","number":"D100"},)") +
+                          k.field + R"(,"gauge":)" + k.gauge + "}"));
+        EXPECT_EQ(static_cast<bool>(f), k.kept)
+            << k.field << " " << k.gauge << ": " << ecuio_last_error_detail();
+        if (!k.kept) {
+            EXPECT_NE(std::string(ecuio_last_error_detail())
+                          .find("but its field reads only"),
+                      std::string::npos)
+                << ecuio_last_error_detail();
+        }
+    }
+}
+
+TEST(SignalFileTest, EveryGaugeRefusalSaysWhy)
+{
+    struct Case {
+        const char* gauge;
+        const char* words;
+    };
+    const Case cases[] = {
+        {"[]", "signal 'a''s gauge is a list, not an object"},
+        {R"({"max":1})", "gauge needs \"min\" and \"max\""},
+        {R"({"min":0})", "gauge needs \"min\" and \"max\""},
+        {R"({"min":"0","max":1})", "gauge min is a string, not a number"},
+        {R"({"min":0,"max":null})", "gauge max is"},
+        {R"({"min":0,"max":1,"warn_low":true})", "gauge warn_low is"},
+        {R"({"min":0,"max":1,"warn_high":[]})", "gauge warn_high is a list"},
+        {R"({"min":0,"max":1,"high":1})",
+         "unknown key 'high' in signal 'a''s gauge"},
+        {R"({"min":5,"max":5})", "gauge max 5 isn't above its min 5"},
+        {R"({"min":9,"max":5})", "gauge max 5 isn't above its min 9"},
+        {R"({"min":0,"max":10,"warn_low":-0.5})",
+         "gauge warn_low -0.5 is outside its range, 0 to 10"},
+        {R"({"min":0,"max":10,"warn_low":10.5})",
+         "gauge warn_low 10.5 is outside"},
+        {R"({"min":0,"max":10,"warn_high":-0.5})",
+         "gauge warn_high -0.5 is outside"},
+        {R"({"min":0,"max":10,"warn_high":10.5})",
+         "gauge warn_high 10.5 is outside"},
+        {R"({"min":0,"max":10,"warn_low":5,"warn_high":5})",
+         "gauge warn_high 5 isn't above its warn_low 5"},
+        {R"({"min":0,"max":10,"warn_low":6,"warn_high":5})",
+         "gauge warn_high 5 isn't above its warn_low 6"},
+        {R"({"min":250,"max":400})",
+         "gauge runs 250 to 400, but its field reads only -40 to 215: "
+         "is the gauge in another unit than 'degC'?"},
+        {R"({"min":-100,"max":-41})", "but its field reads only -40 to 215"},
+    };
+    for (const Case& c : cases) {
+        const std::string words = refusal(gauged(c.gauge));
+        EXPECT_NE(words.find("line 1, column"), std::string::npos) << words;
+        EXPECT_NE(words.find(c.words), std::string::npos)
+            << c.gauge << ": " << words;
+    }
+}
+
+TEST(SignalFileTest, ARangeTheFieldCantReachSaysSoWithNoUnitToName)
+{
+    const std::string words = refusal(
+        one(R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
+            R"("field":{"byte":0},"gauge":{"min":300,"max":400}})"));
+    EXPECT_NE(words.find("in another unit than the signal's?"),
+              std::string::npos)
+        << words;
+}
+
+TEST(SignalFileTest, ANumberPastTheDoubleRangeIsNoGauge)
+{
+    EXPECT_NE(refusal(gauged(R"({"min":0,"max":1e999})")).find("line 1"),
+              std::string::npos);
+    EXPECT_NE(refusal(gauged(R"({"min":-1e999,"max":0})")).find("line 1"),
+              std::string::npos);
+    EXPECT_NE(refusal(gauged(R"({"min":0,"max":NaN})")).find("line 1"),
+              std::string::npos);
+}
+
+TEST(SignalFileTest, OnlyNumbersAndComputedSignalsTakeAGauge)
+{
+    const char* const kGauge = R"("gauge":{"min":0,"max":1})";
+    const std::string read =
+        R"("read":{"service":"22","number":"D100"},"field":{"byte":0},)";
+    for (const std::string& s :
+         {R"({"key":"a","name":"A",)" + read + R"("kind":"text",)" + kGauge +
+              "}",
+          R"({"key":"a","name":"A",)" + read + R"("kind":"hex",)" + kGauge +
+              "}",
+          R"({"key":"a","name":"A",)" + read +
+              R"("kind":"enum","values":{"1":"On"},)" + kGauge + "}"}) {
+        const std::string words = refusal(one(s));
+        EXPECT_NE(words.find("unknown key 'gauge' in signal 'a'"),
+                  std::string::npos)
+            << words;
+    }
+
+    File f =
+        load(one(std::string(kNumber) + "," +
+                 R"({"key":"b","name":"B","kind":"computed","expr":"a * 2",)" +
+                 R"("gauge":{"min":-5,"max":5000,"warn_high":4000}})"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    ASSERT_NE(gauge_of(f, "b"), nullptr);
+    EXPECT_EQ(gauge_of(f, "b")->min, -5.0)
+        << "a computed signal has no field to judge";
+    EXPECT_EQ(gauge_of(f, "b")->warn_high, 4000.0);
+    EXPECT_EQ(gauge_of(f, "a"), nullptr);
+}
+
+TEST(SignalFileTest, AGaugeIsTheDefsOwnAndNoOtherDefs)
+{
+    File f = load(
+        R"json({"havne_signals":1,"name":"T","source":{"name":"t"},"extends":"obd2",
+      "signals":[
+        {"key":"a","name":"A","read":{"service":"22","number":"D100"},"field":{"byte":0},
+         "gauge":{"min":0,"max":1}},
+        {"key":"b","name":"B","read":{"service":"22","number":"D101"},"field":{"byte":0},
+         "gauge":{"min":2,"max":3}},
+        {"key":"c","name":"C","read":{"service":"22","number":"D102"},"field":{"byte":0}}
+      ]})json");
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    ASSERT_NE(gauge_of(f, "a"), nullptr);
+    ASSERT_NE(gauge_of(f, "b"), nullptr);
+    EXPECT_EQ(gauge_of(f, "a")->min, 0.0);
+    EXPECT_EQ(gauge_of(f, "b")->min, 2.0) << "each def's own";
+    EXPECT_EQ(gauge_of(f, "c"), nullptr);
+
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < obd2->count; ++i) {
+        EXPECT_EQ(ecuio_signal_file_gauge(f.get(), &set->defs[i]), nullptr)
+            << "the base set's " << set->defs[i].name;
+        EXPECT_EQ(ecuio_signal_file_gauge(f.get(), &obd2->defs[i]), nullptr);
+    }
+    ecuio_signal_def_t copy = *ecuio_signal_file_find(f.get(), "a");
+    EXPECT_EQ(ecuio_signal_file_gauge(f.get(), &copy), nullptr)
+        << "a copy isn't the file's";
+    File same = load(
+        R"({"havne_signals":1,"name":"T","source":{"name":"t"},"ecus":[{"id":"p","rx":"7E8"}],
+      "signals":[{"key":"a","name":"A","read":{"service":"22","number":"D100"},"field":{"byte":0},
+      "gauge":{"min":0,"max":1}}]})");
+    ASSERT_TRUE(same) << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_signal_file_gauge(f.get(),
+                                      ecuio_signal_file_find(same.get(), "a")),
+              nullptr)
+        << "another file's def";
+    EXPECT_EQ(ecuio_signal_file_gauge(nullptr, &copy), nullptr);
+    EXPECT_EQ(ecuio_signal_file_gauge(f.get(), nullptr), nullptr);
+}
+
+TEST(SignalFileTest, AGaugeLeavesTheDefAndTheRestOfTheSetAlone)
+{
+    File with = load(gauged(R"({"min":0,"max":100,"warn_high":90})"));
+    File without = load(
+        one(R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
+            R"("field":{"byte":0},"offset":-40,"unit":"degC"})"));
+    ASSERT_TRUE(with) << ecuio_last_error_detail();
+    ASSERT_TRUE(without) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* a = ecuio_signal_file_set(with.get());
+    const ecuio_signal_set_t* b = ecuio_signal_file_set(without.get());
+    ASSERT_EQ(a->count, b->count);
+    EXPECT_EQ(std::memcmp(a->defs, b->defs, sizeof *a->defs * a->count), 0)
+        << "a recording's decode never depends on a gauge";
+}
+
+TEST(SignalFileTest, AToolsOwnXGaugeStaysIgnored)
+{
+    File f = load(one(
+        R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0},"x-gauge":{"min":9,"max":1,"warn_low":"no"}})"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    EXPECT_EQ(gauge_of(f, "a"), nullptr);
 }
