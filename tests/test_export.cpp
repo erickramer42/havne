@@ -1,6 +1,6 @@
 // File/layer: tests/test_export.cpp | test_core, Qt-free, C++17
 // Testing: UNIT: ScrubTest, ExportTest, CsvExportTest, FolderExportTest,
-//          ScrubFramesTest (test_core)
+//          ScrubFramesTest, ExportCancelTest (test_core)
 //
 // scrub.h's classifier and check, and ecuio_export's pcapng: each export
 // read back by a pcapng parser of the test's own, its frames' bytes and
@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -24,6 +25,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "ecuio/core.h"
@@ -3129,6 +3131,322 @@ TEST(ExportTest, OutOfMemoryAnywhereLeavesNoFileBehind)
         EXPECT_EQ(open_handles(), handles)
             << format << ": a handle left open (a folder's listing)";
     }
+}
+
+// ---- a cancel (ecuio_export_with) ----
+
+/* Counts its asks and stops the export at the stop_at-th (0: never) */
+struct Asks {
+    unsigned long count = 0;
+    unsigned long stop_at = 0;
+};
+
+int ask(void* user)
+{
+    auto* a = static_cast<Asks*>(user);
+    ++a->count;
+    return a->stop_at != 0 && a->count >= a->stop_at ? 1 : 0;
+}
+
+/* The export's kinds: the pcapng, the long and the wide CSV, the folder,
+ * each with the asks whole_recording gives it: one as each pass and each
+ * file of a copy begins, its files too short for one as rows are read */
+struct Kind {
+    const char* name;
+    uint32_t format;
+    uint32_t layout;
+    unsigned long asks;
+};
+const Kind kKinds[] = {{"pcapng", ECUIO_EXPORT_PCAPNG, 0, 3},
+                       {"long", ECUIO_EXPORT_CSV, ECUIO_CSV_LONG, 4},
+                       {"wide", ECUIO_EXPORT_CSV, ECUIO_CSV_WIDE, 4},
+                       {"folder", ECUIO_EXPORT_FOLDER, 0, 13}};
+
+/* f's recording exported as k to <name>, through ecuio_export_with when
+ * asks is given, else ecuio_export */
+ecuio_status_t export_as(const Folder& f, const Kind& k,
+                         const std::string& name, Asks* asks)
+{
+    const std::string folder = f.utf8("rec");
+    const std::string out = f.utf8(name);
+    ecuio_export_options_t o{};
+    o.format = k.format;
+    o.layout = k.layout;
+    o.folder_utf8 = folder.c_str();
+    o.out_path_utf8 = out.c_str();
+    return asks != nullptr ? ecuio_export_with(&o, ask, asks, nullptr)
+                           : ecuio_export(&o, nullptr);
+}
+
+/* f's recording sized as the wide CSV at a sweep and a 250 ms grid */
+ecuio_status_t estimate_of(const Folder& f, Asks* asks,
+                           ecuio_export_estimate_t* out)
+{
+    const std::string folder = f.utf8("rec");
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_CSV;
+    o.folder_utf8 = folder.c_str();
+    const uint32_t intervals[2] = {0, 250};
+    return asks != nullptr
+               ? ecuio_export_estimate_with(&o, intervals, 2, ask, asks, out)
+               : ecuio_export_estimate(&o, intervals, 2, out);
+}
+
+/* What an export wrote at p: a file's bytes under "", or each file of a
+ * folder by name */
+std::map<std::string, std::string> written_at(const fs::path& p)
+{
+    std::map<std::string, std::string> out;
+    std::error_code ec;
+    if (fs::is_directory(p, ec)) {
+        for (const auto& e : fs::directory_iterator(p, ec)) {
+            out[e.path().filename().generic_u8string()] = read_file(e.path());
+        }
+    } else if (fs::exists(p, ec)) {
+        out[""] = read_file(p);
+    }
+    return out;
+}
+
+/* A cancel that never stops is asked as each pass and file begins and
+ * changes nothing: the same bytes as ecuio_export's, and a NULL cancel
+ * is ecuio_export */
+TEST(ExportCancelTest, ACancelThatNeverStopsWritesTheExportsBytes)
+{
+    Folder f;
+    whole_recording(f);
+    for (const Kind& k : kKinds) {
+        SCOPED_TRACE(k.name);
+        const std::string plain = std::string(k.name) + "-plain";
+        const std::string asked = std::string(k.name) + "-asked";
+        const std::string none = std::string(k.name) + "-null";
+        ASSERT_EQ(export_as(f, k, plain, nullptr), ECUIO_OK);
+        Asks asks;
+        ASSERT_EQ(export_as(f, k, asked, &asks), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(asks.count, k.asks);
+        const auto bytes = written_at(f.path / plain);
+        EXPECT_FALSE(bytes.empty());
+        EXPECT_EQ(written_at(f.path / asked), bytes);
+
+        const std::string folder = f.utf8("rec");
+        const std::string out = f.utf8(none);
+        ecuio_export_options_t o{};
+        o.format = k.format;
+        o.layout = k.layout;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = out.c_str();
+        ASSERT_EQ(ecuio_export_with(&o, nullptr, nullptr, nullptr), ECUIO_OK);
+        EXPECT_EQ(written_at(f.path / none), bytes);
+    }
+    ecuio_export_estimate_t plain[2] = {};
+    ecuio_export_estimate_t asked[2] = {};
+    Asks asks;
+    ASSERT_EQ(estimate_of(f, nullptr, plain), ECUIO_OK);
+    ASSERT_EQ(estimate_of(f, &asks, asked), ECUIO_OK);
+    EXPECT_EQ(asks.count, 2u) << "the survey's pass and the walk's";
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_EQ(asked[i].rows, plain[i].rows);
+        EXPECT_EQ(asked[i].bytes, plain[i].bytes);
+        EXPECT_EQ(asked[i].columns, plain[i].columns);
+    }
+}
+
+/* A stop at each ask in turn: CANCELED with its words, no ask after the
+ * one that stopped it, and nothing at the name or beside it (each pass's
+ * first ask and each file of a copy among them) */
+TEST(ExportCancelTest, AStopAtEachAskInTurnLeavesNothingBehind)
+{
+    Folder f;
+    whole_recording(f);
+    for (const Kind& k : kKinds) {
+        SCOPED_TRACE(k.name);
+        Asks all;
+        ASSERT_EQ(export_as(f, k, "counted", &all), ECUIO_OK);
+        std::error_code ec;
+        fs::remove_all(f.path / "counted", ec);
+        ASSERT_GE(all.count, 3u);
+        for (unsigned long n = 1; n <= all.count; ++n) {
+            Asks asks;
+            asks.stop_at = n;
+            ASSERT_EQ(export_as(f, k, "stopped", &asks), ECUIO_ERR_CANCELED)
+                << "at " << n;
+            EXPECT_STREQ(ecuio_last_error_detail(), "the export was canceled");
+            EXPECT_EQ(asks.count, n) << "asked again after it stopped";
+            ASSERT_FALSE(fs::exists(f.path / "stopped")) << "at " << n;
+            ASSERT_FALSE(partial_left(f.path, "stopped")) << "at " << n;
+        }
+    }
+    Asks all;
+    ecuio_export_estimate_t sized[2] = {};
+    ASSERT_EQ(estimate_of(f, &all, sized), ECUIO_OK);
+    ASSERT_GE(all.count, 2u);
+    for (unsigned long n = 1; n <= all.count; ++n) {
+        Asks asks;
+        asks.stop_at = n;
+        ecuio_export_estimate_t out[2];
+        std::memset(out, 0xAB, sizeof out);
+        ASSERT_EQ(estimate_of(f, &asks, out), ECUIO_ERR_CANCELED) << n;
+        EXPECT_EQ(asks.count, n);
+        for (const ecuio_export_estimate_t& e : out) {
+            EXPECT_EQ(e.rows | e.bytes | e.columns, 0u) << "at " << n;
+        }
+    }
+}
+
+/* A recording of a few rows in each file, but kBig in the one named */
+constexpr int kBig = 4096;
+
+void rows_recording(const Folder& f, const std::string& big)
+{
+    const auto rows_of = [&big](const char* name) {
+        return big == name ? kBig : 3;
+    };
+    std::string events = "ecuio session recording, format 3 (ADR-0049)\n"
+                         "started  2023-11-14 22:13:20.250 (UTC)\n"
+                         "utc  2023-11-14T22:13:20.250Z\n"
+                         "profile  raw\n"
+                         "frame flags  complete\n"
+                         "signal  RPM,number,rpm,0,1\n" +
+                         std::string(kColumns) + "\n";
+    std::string frames = "host_us,timestamp_us,id,flags,data\n";
+    std::string values = "host_us,signal,value,unit\n";
+    std::string markers = "host_us,label\n";
+    std::string latency = "t_s,ecu,request,answered\n";
+    char b[160];
+    for (int i = 0; i < rows_of("events.log"); ++i) {
+        events += "22:13:23.250  +3.000  asleep  Asleep for 1.0 s: nothing "
+                  "was read meanwhile\n";
+    }
+    for (int i = 0; i < rows_of("frames.csv"); ++i) {
+        frames += row(1000000 + 1000u * static_cast<unsigned>(i), 0x123, 0,
+                      {0x01, 0x02, 0x03});
+    }
+    for (int i = 0; i < rows_of("signals.csv"); ++i) {
+        std::snprintf(b, sizeof b, "%d,RPM,%d,rpm\n", 1000000 + 1000 * i,
+                      800 + i % 100);
+        values += b;
+    }
+    for (int i = 0; i < rows_of("markers.csv"); ++i) {
+        std::snprintf(b, sizeof b, "%d,m%d\n", 1000000 + 1000 * i, i);
+        markers += b;
+    }
+    for (int i = 0; i < rows_of("latency.csv"); ++i) {
+        std::snprintf(b, sizeof b, "%d.%03d,7E8,01 0C,5\n", 1 + i / 1000,
+                      i % 1000);
+        latency += b;
+    }
+    f.write("rec/events.log", events);
+    f.write("rec/frames.csv", frames);
+    f.write("rec/signals.csv", values);
+    f.write("rec/markers.csv", markers);
+    f.write("rec/latency.csv", latency);
+}
+
+/* Each pass is asked as its rows are read, not only as it begins: a file
+ * kBig rows longer adds asks for every pass over it (an ask each 1024
+ * rows is the export's own rule; the header promises no interval) */
+TEST(ExportCancelTest, EachPassIsAskedAsItsRowsAreRead)
+{
+    struct Pass {
+        const char* kind;
+        const char* file;
+        unsigned long passes;
+    };
+    const Pass passes[] = {
+        {"pcapng", "frames.csv", 2},  {"pcapng", "signals.csv", 1},
+        {"long", "frames.csv", 1},    {"long", "signals.csv", 3},
+        {"wide", "frames.csv", 1},    {"wide", "signals.csv", 3},
+        {"folder", "frames.csv", 2},  {"folder", "signals.csv", 3},
+        {"folder", "events.log", 2},  {"folder", "markers.csv", 2},
+        {"folder", "latency.csv", 2}, {"estimate", "signals.csv", 2},
+    };
+    const auto asks_for = [](const char* kind, const std::string& big) {
+        Folder f;
+        rows_recording(f, big);
+        Asks asks;
+        if (std::strcmp(kind, "estimate") == 0) {
+            ecuio_export_estimate_t sized[2];
+            EXPECT_EQ(estimate_of(f, &asks, sized), ECUIO_OK)
+                << ecuio_last_error_detail();
+            return asks.count;
+        }
+        for (const Kind& k : kKinds) {
+            if (std::strcmp(k.name, kind) == 0) {
+                EXPECT_EQ(export_as(f, k, "out", &asks), ECUIO_OK)
+                    << kind << " " << big << ": " << ecuio_last_error_detail();
+            }
+        }
+        return asks.count;
+    };
+    for (const Pass& p : passes) {
+        SCOPED_TRACE(std::string(p.kind) + " " + p.file);
+        const unsigned long few = asks_for(p.kind, "");
+        const unsigned long many = asks_for(p.kind, p.file);
+        EXPECT_GE(many, few + p.passes * (kBig / 1024))
+            << "asked " << few << " times with a few rows, " << many << " with "
+            << kBig;
+    }
+}
+
+/* What another thread's stop reaches: the export it asks */
+struct ThreadStop {
+    std::atomic<bool> stop{false};
+    std::atomic<unsigned long> asks{0};
+};
+
+int thread_ask(void* user)
+{
+    auto* s = static_cast<ThreadStop*>(user);
+    s->asks.fetch_add(1);
+    return s->stop.load() ? 1 : 0;
+}
+
+/* A stop set from another thread mid-export: the export returns
+ * CANCELED soon after, short of its whole run, nothing left behind */
+TEST(ExportCancelTest, AStopFromAnotherThreadEndsALongExport)
+{
+    Folder f;
+    std::string frames = "host_us,timestamp_us,id,flags,data\n";
+    for (unsigned i = 0; i < 200000; ++i) {
+        frames += row(1000000 + 100u * i, 0x123, 0, {0x01, 0x02, 0x03, 0x04});
+    }
+    f.write("rec/events.log", events_log());
+    f.write("rec/frames.csv", frames);
+
+    Asks whole;
+    ASSERT_EQ(export_as(f, kKinds[0], "whole", &whole), ECUIO_OK);
+
+    ThreadStop shared;
+    const std::string folder = f.utf8("rec");
+    const std::string out = f.utf8("stopped");
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_PCAPNG;
+    o.folder_utf8 = folder.c_str();
+    o.out_path_utf8 = out.c_str();
+    ecuio_status_t rc = ECUIO_OK;
+    std::string detail;
+    std::thread exporter([&] {
+        rc = ecuio_export_with(&o, thread_ask, &shared, nullptr);
+        detail = ecuio_last_error_detail();
+    });
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (shared.asks.load() < 3 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const auto stopped = std::chrono::steady_clock::now();
+    shared.stop.store(true);
+    exporter.join();
+    const auto took = std::chrono::steady_clock::now() - stopped;
+
+    EXPECT_EQ(rc, ECUIO_ERR_CANCELED) << detail;
+    EXPECT_EQ(detail, "the export was canceled");
+    EXPECT_LT(shared.asks.load(), whole.count) << "it ran to its end";
+    EXPECT_LT(took, std::chrono::seconds(2));
+    EXPECT_FALSE(fs::exists(f.path / "stopped"));
+    EXPECT_FALSE(partial_left(f.path, "stopped"));
 }
 
 } // namespace

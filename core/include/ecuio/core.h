@@ -151,9 +151,9 @@ typedef enum {
     ECUIO_ERR_RECORDING_FAILED = 18,  /* a recording's folder or files
                                          couldn't be made, or a write to
                                          them failed (ADR-0049, recording.h) */
-    ECUIO_ERR_CANCELED = 19,          /* the caller's progress callback
-                                         stopped a long call (a recording's
-                                         open, ADR-0049) */
+    ECUIO_ERR_CANCELED = 19,          /* the caller's callback stopped a
+                                         long call (a recording's open,
+                                         ADR-0049; an export, ADR-0054) */
     ECUIO_ERR_IN_USE = 20,            /* a session or a simulated ECU still
                                          decodes with what was to be freed
                                          (a plugin, ADR-0052) */

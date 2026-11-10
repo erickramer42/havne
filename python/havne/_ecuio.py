@@ -548,6 +548,7 @@ class ecuio_vin_info_t(Structure):
     pass
 
 # --- callbacks ---------------------------------------------------------
+ecuio_cancel_t = CFUNCTYPE(c_int, c_void_p)
 ecuio_check_finding_callback_t = CFUNCTYPE(c_int, POINTER(ecuio_check_finding_t), c_void_p)
 ecuio_frame_callback_t = CFUNCTYPE(None, POINTER(ecuio_frame_t), c_void_p)
 ecuio_frame_row_callback_t = CFUNCTYPE(c_int, c_void_p, POINTER(ecuio_frame_t), c_uint64)
@@ -1152,6 +1153,8 @@ FUNCTIONS = {
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_export_estimate': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, POINTER(ecuio_export_estimate_t)]),  # recording.h
+    'ecuio_export_estimate_with': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, ecuio_cancel_t, c_void_p, POINTER(ecuio_export_estimate_t)]),  # recording.h
+    'ecuio_export_with': (c_int, [POINTER(ecuio_export_options_t), ecuio_cancel_t, c_void_p, POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_health_export': (c_int, [POINTER(ecuio_health_options_t), POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h
     'ecuio_identity_vin': (c_int, [POINTER(ecuio_channel_identity_t), c_char_p, c_uint32]),  # core.h
