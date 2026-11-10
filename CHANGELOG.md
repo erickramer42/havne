@@ -18,6 +18,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A Daylight look, dark text on white for reading the screen in sun, chosen
   on Settings' Display page. Night still shows over it when it's on, and on
   Android the status and navigation bar icons turn dark to match.
+- A signal file can give a signal a gauge: its range and its low and high
+  warning levels, in the signal's own unit. `havne-cli` and the Python
+  package report it; the app's dials don't read it yet. A file that uses
+  it needs Havne 0.7.2 or later.
 
 ### Fixed
 
