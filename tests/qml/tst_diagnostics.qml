@@ -465,17 +465,21 @@ TestCase {
         connectAndRead(page, "mock://demo")
         const read = find(page, "readAgain"), clear = find(page, "clearCodes")
         const save = find(page, "saveReport")
-        const y = b => Math.round(b.mapToItem(page, 0, 0).y)
+        // One row when their heights overlap by more than half of either:
+        // buttons of other heights centered in a row have other tops
+        const y = b => b.mapToItem(page, 0, 0).y
+        const sameRow = (a, b) => Math.min(y(a) + a.height, y(b) + b.height) - Math.max(y(a), y(b))
+                                  > Math.min(a.height, b.height) / 2
         const right = b => b.mapToItem(page, b.width, 0).x
         waitForRendering(page)
-        verify(y(read) === y(clear) && y(clear) === y(save), "one row wide")
+        verify(sameRow(read, clear) && sameRow(clear, save), "one row wide")
         verify(right(clear) > right(read) && right(read) > right(save), "Save, Read again, Clear codes")
         tryVerify(() => right(clear) >= page.width - Theme.pageMargin - 0.5, 2000,
                   "at the right edge wide: " + right(clear) + " of " + page.width)
         page.width = 384
         waitForRendering(page)
-        tryVerify(() => y(save) > y(read), 2000, "Save report below")
-        compare(y(read), y(clear), "Read again and Clear codes share a row")
+        tryVerify(() => !sameRow(save, read) && y(save) > y(read), 2000, "Save report below")
+        verify(sameRow(read, clear), "Read again and Clear codes share a row")
         verify(right(clear) > right(read), "Clear codes at the right")
         verify(right(clear) >= page.width - Theme.pageMargin - 0.5, "at the right edge: " + right(clear))
         fuzzyCompare(save.width, page.width - 2 * Theme.pageMargin, 0.5, "Save report takes the row")

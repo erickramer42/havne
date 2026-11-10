@@ -415,37 +415,78 @@ TestCase {
         verify(find(find(page, "settingsDisplayPage"), "settingsBack").visible)
     }
 
-    // The rows of a page's buttons, by their top edge: [[button, ...], ...]
+    // The rows of a page's buttons, top to bottom, each in the order given:
+    // [[button, ...], ...]. A button is in a row when its height overlaps the
+    // row's by more than half of it, since buttons of other heights centered
+    // in one row have other tops (the fonts set the heights)
     function rowsOf(buttons, within) {
-        const rows = new Map()
+        const rows = []
         for (const b of buttons) {
-            const y = Math.round(b.mapToItem(within, 0, 0).y)
-            if (!rows.has(y))
-                rows.set(y, [])
-            rows.get(y).push(b)
+            const top = b.mapToItem(within, 0, 0).y
+            const bottom = top + b.height
+            const row = rows.find(r => Math.min(r.bottom, bottom) - Math.max(r.top, top) > b.height / 2)
+            if (row) {
+                row.items.push(b)
+                row.top = Math.min(row.top, top)
+                row.bottom = Math.max(row.bottom, bottom)
+            } else {
+                rows.push({ top: top, bottom: bottom, items: [b] })
+            }
         }
-        return Array.from(rows.keys()).sort((a, b) => a - b).map(y => rows.get(y))
+        return rows.sort((p, q) => p.top - q.top).map(r => r.items)
+    }
+
+    // rowsOf's rule: two heights centered in a row are one row, two stacked
+    // are two
+    Component {
+        id: rowOfTwoComponent
+        Row {
+            Rectangle { objectName: "low"; width: 60; height: 36; anchors.verticalCenter: parent.verticalCenter }
+            Rectangle { objectName: "high"; width: 60; height: 48; anchors.verticalCenter: parent.verticalCenter }
+        }
+    }
+    Component {
+        id: columnOfTwoComponent
+        Column {
+            Rectangle { objectName: "first"; width: 60; height: 36 }
+            Rectangle { objectName: "second"; width: 60; height: 48 }
+        }
+    }
+    function test_rowsOfGroupsByOverlapNotByTop() {
+        const row = createTemporaryObject(rowOfTwoComponent, testCase)
+        const low = find(row, "low"), high = find(row, "high")
+        verify(low.mapToItem(row, 0, 0).y !== high.mapToItem(row, 0, 0).y, "their tops differ")
+        const one = rowsOf([low, high], row)
+        compare(one.length, 1, "one row")
+        verify(one[0][0] === low && one[0][1] === high, "in the order given")
+        const column = createTemporaryObject(columnOfTwoComponent, testCase)
+        const first = find(column, "first"), second = find(column, "second")
+        const two = rowsOf([second, first], column)
+        compare(two.length, 2, "two rows")
+        verify(two[0][0] === first && two[1][0] === second, "top first")
     }
 
     // A phone's page scrolled: the title row stays at the top, its back
     // arrow quiet at the left edge, and the content runs under it
     function test_theTitleRowStaysWhileThePageScrolls() {
         const page = createPage(true)
+        // Short, so the page scrolls past its title row whatever the fonts' heights
         page.width = 384
-        page.height = 400
+        page.height = 240
         page.open("connection")
         const flick = find(page, "settingsConnectionPage")
         const header = find(flick, "settingsConnectionPageHeader")
         const back = find(flick, "settingsBack")
         const column = find(flick, "settingsConnectionPageColumn")
         waitForPolish(column)
-        verify(flick.contentHeight > flick.height + 150, "the page scrolls: " + flick.contentHeight)
+        verify(flick.contentHeight - flick.height > header.height + 10,
+               "the page scrolls past the title row: " + flick.contentHeight + " in " + flick.height)
         verify(back.visible && back.quiet, "a quiet back control")
         compare(back.mapToItem(flick, 0, 0).x, Theme.pageMargin, "at the left edge")
         compare(back.Accessible.name, "Back to Settings")
         compare(header.mapToItem(flick, 0, 0).y, 0, "the title row at the top")
         verify(column.mapToItem(flick, 0, 0).y >= header.height, "the content starts under it")
-        flick.contentY = 150
+        flick.contentY = Math.min(150, flick.contentHeight - flick.height)
         compare(header.mapToItem(flick, 0, 0).y, 0, "still at the top, scrolled")
         verify(column.mapToItem(flick, 0, 0).y < 0, "the content scrolled under it")
         back.clicked()
