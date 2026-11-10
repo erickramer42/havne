@@ -1,7 +1,8 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
 //          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest,
-//          CliTransferRunTest, CliExitTest, CliObdbImportTest (ctest);
+//          CliTransferRunTest, CliExitTest, CliObdbImportTest, CliLogRunTest
+//          (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
 //          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest,
 //          CliPartialTest
@@ -2828,6 +2829,22 @@ cli::LogReadout log_readout(uint64_t started, const std::string& folder,
     return r;
 }
 
+// The writer drains on a timer of its own (100 ms when idle), so a readout
+// right after the close can count none of a replay's rows: wait, at most
+// kRecordingCloseWait, until each frame put is written or dropped
+void wait_for_writer(const ecuio_recorder_t* recorder, uint64_t frames)
+{
+    const auto give_up = std::chrono::steady_clock::now() + kRecordingCloseWait;
+    ecuio_recorder_state_t st;
+    while (recorder != nullptr &&
+           ecuio_recorder_get_state(recorder, &st) == ECUIO_OK &&
+           st.state != ECUIO_RECORDING_FAILED &&
+           st.frame_rows + st.records_dropped < frames &&
+           std::chrono::steady_clock::now() < give_up) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
 // The analysis log from the command line (ADR-0056 section 7): the
 // session, the focus on the signals named (core asks those alone, as
 // often as the bus allows), a recorder attached before start so the
@@ -2995,6 +3012,7 @@ int run_log(const cli::LogArgs& args)
     closer.join();
 
     int code = kExitOk;
+    wait_for_writer(recorder, frames.covered.load(std::memory_order_acquire));
     poll_recording(out, recorder, nullptr, &recording_failed);
     const cli::LogReadout last = log_readout(started, folder, recorder);
     BigLine end(cli::log_end_line_bytes(folder.c_str()));
