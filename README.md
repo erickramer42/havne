@@ -5,10 +5,10 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/havne/graph/badge.svg)](https://codecov.io/gh/erickramer42/havne) [![Release](https://img.shields.io/github/v/release/erickramer42/havne)](https://github.com/erickramer42/havne/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
-Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux and Android: live data, trouble codes, and recordings to replay or share, scrubbed. A Qt-free C++17 core behind a C ABI serves a Qt app, `havne-cli` and Python. [Download](https://github.com/erickramer42/havne/releases/latest).
+Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux and Android: live data, trouble codes, and recordings to replay or share, scrubbed, from an app, `havne-cli` or Python. [Download](https://github.com/erickramer42/havne/releases/latest).
 
 > [!WARNING]
-> **Experimental.** It has read one car through two adapters and listened through a third; other cars and adapters are untested. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
+> **Experimental.** Tested on one car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it.
 
 ![The Dashboard through a quarter mile](docs/images/dashboard.gif)
 
@@ -17,7 +17,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 ## Engineering highlights
 
 - **Vendor drivers run out of process.** Each J2534 DLL runs in a surrogate of its own architecture, so a crashing driver ends its process, not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Fast paths, measured.** The worker decodes with no allocation per frame; a recorded engine start replays at over 300,000 frames a second in a load test CI repeats ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Fast paths, measured.** The worker decodes with no allocation per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI repeats the load test ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Measured on a real car.** A second controller on its bus showed Havne's adapter read adding 52 ms; fixing it cut latency from 65.5-73.7 ms to 16.4 ms ([session sheet](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Protocol logic with no I/O, fuzzed.** The request engine, ISO-TP and the ELM327 layer take no I/O or clock, so rules are unit tests; parsers run fuzzed in CI ([ADR-0015](docs/adr/0015-request-engine.md)).
 - **A user's signals are data.** Signal files are JSON that core reads from bytes and refuses at load with line and column, so every platform loads them alike ([ADR-0051](docs/adr/0051-signal-files.md)).
@@ -27,7 +27,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 ## What it does
 
-- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, and Dark, Low glare and Night themes ([ADR-0057](docs/adr/0057-dashboards.md)).
+- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
@@ -128,7 +128,8 @@ v0.7.0, the dashboard and the UI, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.1-v0.10.0 | A more modern look; triggered logging and alerts; discovery of every module; the scan tool |
+| v0.7.1 | A more modern look, phone first: Night, the new look, the phone's tabs, panel and drive view, the viewer's Export |
+| v0.7.2-v0.10.0 | The Dashboard and signals finished; the analysis viewer; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.

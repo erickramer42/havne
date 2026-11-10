@@ -292,6 +292,9 @@ machine, 2026-10-26; the times vary with the machine's load):
 scripts/verify.sh                         # both trees, full suite, cross-arch
 scripts/verify.sh --tests-only -R '^BridgeTest\.'   # a subset, no build
 scripts/verify.sh --build-only            # both trees, no tests
+scripts/verify.sh --suite Bridge,Qml      # named suites, after the build
+scripts/verify.sh --changed               # the steps this branch's changes need
+scripts/verify.sh --changed --dry-run     # the plan, nothing run
 ```
 
 ```
@@ -315,6 +318,26 @@ x86 `ecuio.dll` and `test_c_abi_shared`, and the cross-arch step runs
 `build-win32` (its line adds `x86 core 2/2`), since CI never builds the
 x86 DLL. The trees must already be configured. Off Windows, or without
 `build-win32`, the Win32 and cross-arch steps are left out.
+
+`--suite` and `--changed` are for the edit-and-check loop; a pull request
+needs the plain run. `--suite` takes suite names (`Bridge` for
+`BridgeTest.*`, and a single test such as `c_abi` by its whole name) and
+fails on a name that matches no test. `--changed` compares the working
+tree, untracked files included, with its merge-base with `origin/dev`
+(or a base named after it) and goes by `scripts/verify_scope.py`'s table:
+
+| What changed | What runs |
+|---|---|
+| Only `docs/` and markdown | Nothing |
+| Only `.qml` files in `app/qml/` and `tests/qml/`, with or without docs | `build`, then `QmlTest.*` |
+| Anything else, a build file among them, or a change it can't read | The full run |
+
+Any run less than the full one lists what it skipped, says whether
+clang-tidy applies (it doesn't when no C++ or build file changed) and
+ends with a `not a full verify` line, a failed run too. A full run that
+ran every step writes `Testing/verify/full-run.stamp` with HEAD's SHA,
+whether the tree stayed clean, the date and the main test step's
+passed, skipped and total counts; a run that fails removes the stamp.
 
 For any change touching the surrogate, the fakes, or the J2534
 client/transport: in this order:

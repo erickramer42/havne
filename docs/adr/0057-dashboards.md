@@ -1246,3 +1246,70 @@ open, for instance beside a floating overlay app, so placement doesn't
 pack the next gauges into it. Its panel has the size, the order, Copy
 and Paste after. Outside edit mode it has nothing to hold, so section
 4's gesture starts on it only in edit mode.
+
+## Appendix: the phone's panel, the gauges under the S2 look and the fit, as built (2026-11-09)
+
+The appendix "six columns, the panel, one gesture, copy and paste" says
+its sections 3 to 5 are decided and not built. All six of its sections
+are built: section 4's hold without a haptic and section 5's one slot,
+as their notes say.
+
+**The panel (section 3).** On the phone form the cells meet: the grid's
+gap is 0, and the grid draws one `Theme.surface` panel with a
+`Theme.hairline` edge and radius `Theme.radiusCard` (6), and a hairline
+between neighboring cells. `DashboardBook.seams(placed, boxes, columns)`
+gives the lines: between two different cells with at least one drawn,
+none past a blank or an empty square, one line along a boundary. A cell
+draws no fill, border or radius of its own; a held cell fills with
+`surface`, so it covers what it crosses. A hairline is a whole number of
+the display's pixels. The desktop keeps a card for each gauge. In the
+drive view ([ADR-0059](0059-drive-view.md)) the panel reaches the
+screen's edges with the same lines.
+
+**No empty strips.** Outside edit mode and while no cell is held, a
+gauge's drawn height runs down over the empty squares under it, as far
+as every column it spans stays empty, within the panel's rows, and a
+gauge alone in its rows runs right to the panel's edge
+(`DashboardBook.stretched(placed, boxes, columns)`). A blank cell
+doesn't stretch, and nothing stretches over one. The stored document
+keeps its `w` and `h`; edit mode and a held cell show the true sizes.
+
+**The built-in phone page's heights** are multiples of
+`phoneSpanScale` (3), the Height control's step: the shift lights 12 x 3,
+the dial 4 x 18 with three digital tiles at 2 x 6 beside it, the trace
+6 x 9, and three digital tiles at 2 x 6 across, so the page keeps its 36
+rows. Saved layouts don't change.
+
+**Digits.** A Digits card stacks when that draws its digits at least a
+fifth larger: the digits take the card's width, centered, with the unit
+centered under them; a short card keeps the unit beside, as section 1's
+table has it. With its `digits` option unset, a card's count comes from
+its range (`DashboardBook.digitsFor(from, to, decimals)`): what a value
+10 % past either end needs at the card's decimals, a minus counting as a
+digit, from 3 to 8, and 4 without a finite range, so a brief overshoot
+still draws. The option, 1 to 8, still wins. The appendix "the new kinds
+and the theme roles as built" gives the option a default of 4; that
+holds only without a finite range. A card's decimals come from the
+signal once a session runs, so an unset card's count can change by one
+at connect.
+
+**The gauges' drawing.** The appendix "the new kinds and the theme roles
+as built" lists `gaugeFace` and `gaugeShade`, and section 9 lists
+`gaugeFace`. Neither role is in `Theme`. A dial has no bezel and no
+face: its ticks, zones and needle draw on what is behind them, a card on
+the desktop and the panel on the phone. Its drawing grows by up to 6 %
+into the margin the bezel held, and less on a small dial, so the
+progress arc's glow stays inside the item at every size. The needle is
+one flat tapered shape in `gaugeNeedle` with no shadow, and the hub is
+`elevatedLight` with a `gaugeNeedle` pin. A bar's and the cells' lit
+segments are one flat color. The Digital and Sparkline traces are the
+line alone, with no fill under it. The danger mark's point is `surface`.
+
+**The card and the type.** A desktop card is flat: `Theme.surface`, a
+`Theme.hairline` border (the outline at 55 % over the surface) and
+radius `Theme.radiusCard` (6); controls take `Theme.radius` (4). The
+type is Barlow, bundled with its license (`THIRD_PARTY_NOTICES`), and
+readings at 17 sp and above take Barlow Semi Condensed Bold with
+fixed-width digits (`Theme.valueFamily`, `Theme.valueFeatures`). A
+bundled face draws the same on every platform, and Barlow gives the app
+an automotive feel.

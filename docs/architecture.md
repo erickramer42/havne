@@ -289,6 +289,16 @@ The full reference is [j2534.md](j2534.md).
   ([ADR-0038](adr/0038-clearing-trouble-codes.md) and its appendix of
   2026-11-01). `havne-cli clear <uri> --yes` runs the same clear from a
   script, each ECU at the report it wrote first.
+- **A focus narrows a running session** to picked signals
+  (`ecuio_session_set_focus`, [ADR-0056](adr/0056-analysis-log.md)
+  section 2): the engine's rotation on each channel asks only the picks'
+  requests, while the probe, the DID scan, identification and diagnostics
+  go on as before. The focus takes effect on the worker between two
+  requests and lasts until it changes or ends. It can carry a minimum time
+  between sweeps (`ecuio_session_set_focus_with`), for a slow adapter or a
+  busy ECU: each channel starts a sweep of the picks at most that often,
+  and only the rotation waits. A session that asks nothing (the mock, a
+  replay, a listener) takes a focus and changes nothing.
 - **Teardown order is a hard contract:** join the worker, then stop the
   filters, disconnect, close and unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.
@@ -442,11 +452,13 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   each frame and its values into a ring and the recorder's thread
   writes the files, so a slow disk never holds the worker up and the
   frames the Log page drops are recorded too. The bridge opens the
-  recorder, attaches it before the session starts, notes its activity
-  lines and closes it after the teardown; `havne-cli stream --record`
-  does the same, and `havne-cli log` records a session narrowed to the
-  signals named, the analysis log from the command line
-  ([ADR-0056](adr/0056-analysis-log.md)). Reading one back is core's
+  recorder, attaches it before the session starts (Record sessions) or
+  to the running session (Start log, `ecuio_session_record`), notes its
+  activity lines and closes it after the teardown or at Stop log;
+  `havne-cli stream --record` does the same, and `havne-cli log`
+  records a session narrowed to the signals named, the analysis log from
+  the command line ([ADR-0056](adr/0056-analysis-log.md)). Reading one
+  back is core's
   too: `ecuio_recording_open` reads the folder once into each signal's
   per-second summaries and
   an index of where each second starts, so its memory follows the
@@ -511,12 +523,15 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   list with its Import, and the viewer, with a vehicle's baseline, a
   health report and a Values | Frames switch), **Settings**
   (a list of pages: Connection, Vehicle, Signals, Recording, Display
-  with the theme, and Advanced with developer mode). Live and the
+  with the theme, and Advanced with developer mode). The phone has no
+  Home: it opens on the Dashboard, whose list of recent addresses
+  connects with no session, and its tab bar lists five pages. Live and the
   Recordings page share one signal filter (`SignalFilterBar.qml`, its
   rule in `app/signalfilter.h`, [ADR-0050](adr/0050-finding-a-signal.md)):
   words over the name and unit, plotted only, and the groups core
   gives each def. Settings is
-  the one place a session is connected; the header and Home open it.
+  the one place a session is connected; the header and Home open it,
+  and Dash's connect list hands it an address to connect.
   It composes the URI from a preset or a device (a J2534 interface or
   a serial port), a profile row
   (default, `raw`, `uds-generic`, the picked vehicle's signal files and
@@ -525,14 +540,22 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   `profile=` and `did=`, and the next click recomposes it with every
   other key kept. Core judges the result at connect and Settings shows
   its words.
-  Navigation is a sidebar at 720 px and wider, a tab bar below that.
-- **`Theme`** holds the three palettes (Dark, Low glare and Night, the
-  chosen one kept between runs), the gauges' color roles, the chart's series colors, the
-  monospace family and page margin, and the link-state color and
-  label functions, so every page shows a state the same way.
-  `PageHeader` gives every page but Home the same title row; where
-  the row is crowded (the Dashboard's), its title can give way,
-  eliding, so the row fits whatever the font.
+  Navigation is a sidebar of all seven pages at 720 px and wider, and
+  below that a tab bar of five (Dash, Live, Codes, Recs, Settings): the
+  Log opens from the status in the top bar. On a phone, Android's Back
+  takes one route across the pages ([ADR-0059](adr/0059-drive-view.md)).
+- **`Theme`** resolves one of three palettes (`dark`, `nightAmber`,
+  `nightRed`) from three kept controls: the look, Night (off, on or
+  scheduled) and its style ([ADR-0058](adr/0058-night-mode.md)). It
+  holds the gauges' color roles, the chart's series colors, the type
+  (Barlow, and Barlow Semi Condensed for readings), the monospace family
+  and page margin, and the link-state color and label functions, so
+  every page shows a state the same way.
+  `PageHeader` gives every page but Home and the phone's Dashboard the
+  same title row; the phone's Dashboard has a tool row (Drive, Reset
+  peaks, Edit, the Night switch) in its place. Where the title row is
+  crowded (the desktop Dashboard's), its title can give way, eliding,
+  so the row fits whatever the font.
 - **Live** keys each chart trace's color to its list row, so the
   row's swatch is the legend and a trace keeps its color when
   another signal is unsubscribed. The ticks choose what's plotted and

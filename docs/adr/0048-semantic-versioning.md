@@ -92,3 +92,23 @@ freeze of decision 5 runs as the 0.10.x releases (and decision 6's
 "0.9.x" reads 0.10.x); the ceiling of 0.99.99 is untouched. ADRs
 written before this date name discovery and the conversation tier
 v0.8.0: that's v0.9.0 now.
+
+## Appendix: what a PATCH may carry (2026-11-09)
+
+Decision 2 says a PATCH is for fixes alone. A PATCH may also carry
+follow-up work on its MINOR's theme: a MINOR's feature finished, its UI
+polished, its documents completed. A PATCH never breaks the C ABI,
+`havne-cli`'s output schema or a plugin format, and it adds to them only
+as a MINOR may, append-only. Work that needs a break makes that release
+the next MINOR.
+
+So a PATCH can add a C function, and the Consequences' "a fix release
+doesn't" ask a consumer to re-request holds only for a PATCH that adds
+nothing. The CMake package answers a request with the same MINOR
+(`SameMinorVersion`, `core/CMakeLists.txt`): `find_package(ecuio 0.7)`
+takes 0.7.0 as well as any later 0.7.x, so a consumer that needs a call
+a PATCH added asks for that PATCH, as in `find_package(ecuio 0.7.1)`,
+which takes 0.7.1 or later within 0.7. v0.7.1 adds
+`ecuio_session_set_focus_with`, `ecuio_export_with`,
+`ecuio_export_estimate_with` and the session fields of
+`ecuio_channel_support_t`.
