@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -401,6 +402,82 @@ TEST(RecordingExportTest, ARefusedExportLeavesAPickedDocumentGone)
     EXPECT_FALSE(text(r, "words").contains(dir.path()));
     EXPECT_TRUE(text(r, "line").startsWith(QStringLiteral("Export failed: ")));
     EXPECT_FALSE(QFileInfo::exists(picked)) << "the empty document goes";
+}
+
+/* Startup's sweep: an export's own temporary folder a day old goes, and
+ * nothing else there, however near its name or however old */
+TEST(RecordingExportTest, StartupRemovesOnlyStaleExportFolders)
+{
+    QTemporaryDir temp;
+    ASSERT_TRUE(temp.isValid());
+    const QDir t(temp.path());
+    const QStringList kept = {QStringLiteral("havne-export-Ab12C"),
+                              QStringLiteral("havne-export-Ab12Cd7"),
+                              QStringLiteral("havne-exporter-Ab12Cd"),
+                              QStringLiteral("other")};
+    for (const QString& n : kept) {
+        ASSERT_TRUE(t.mkpath(n));
+    }
+    ASSERT_TRUE(t.mkpath(QStringLiteral("havne-export-Ab12Cd")));
+    writeFile(t.filePath(QStringLiteral("havne-export-Ab12Cd/export")), "copy");
+    writeFile(t.filePath(QStringLiteral("havne-export-Zz99Yy")), "a file");
+
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(), now), 0);
+    EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(),
+                                                 now.addSecs(23 * 60 * 60)),
+              0)
+        << "under a day old";
+    EXPECT_TRUE(t.exists(QStringLiteral("havne-export-Ab12Cd")));
+
+    EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(), now.addDays(2)),
+              1);
+    EXPECT_FALSE(t.exists(QStringLiteral("havne-export-Ab12Cd")));
+    for (const QString& n : kept) {
+        EXPECT_TRUE(t.exists(n)) << n.toStdString();
+    }
+    EXPECT_TRUE(
+        QFileInfo(t.filePath(QStringLiteral("havne-export-Zz99Yy"))).isFile())
+        << "a file of that name stays";
+}
+
+/* Core's export written, the copy to the provider refused: the picked
+ * document goes, as after core's refusal */
+TEST(RecordingExportTest, ACopyAProviderRefusesLeavesThePickedDocumentGone)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    e.setFailCopyForTesting(true);
+    const QString picked = dir.filePath(QStringLiteral("picked.csv"));
+    writeFile(picked, QByteArray());
+    const QVariantMap r = exported(e, fixture("pull-early"), Options{},
+                                   QUrl::fromLocalFile(picked));
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(text(r, "words"), QStringLiteral("Couldn't write the file"));
+    EXPECT_FALSE(QFileInfo::exists(picked)) << "the empty document goes";
+}
+
+/* A folder copy whose first file a provider refuses leaves no folder of
+ * its own behind */
+TEST(RecordingExportTest, AFolderCopyAProviderRefusesLeavesNoFolder)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    e.setFailCopyForTesting(true);
+    const QString picked = dir.filePath(QStringLiteral("picked"));
+    ASSERT_TRUE(QDir().mkpath(picked));
+    Options o;
+    o.format = RecordingExport::Folder;
+    const QVariantMap r = exported(e, labeledCopy(dir, "findings"), o,
+                                   QUrl::fromLocalFile(picked));
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(text(r, "words"), QStringLiteral("Couldn't write the folder"));
+    EXPECT_TRUE(QDir(picked)
+                    .entryList(QDir::AllEntries | QDir::NoDotAndDotDot)
+                    .isEmpty())
+        << "the copy's folder goes";
 }
 
 TEST(RecordingExportTest, ARefusedExportLeavesALocalFileAsItWas)

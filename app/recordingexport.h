@@ -13,6 +13,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -50,6 +51,11 @@ public:
     Q_INVOKABLE static QString fileStem(const QString& folder);
     // Whether the folder holds a signals.csv, what a CSV export reads
     Q_INVOKABLE static bool holdsValues(const QString& folder);
+    // At startup: removes the folders an export killed mid-way left in
+    // tempPath (raw, they can hold a VIN), each named havne-export- and six
+    // letters or digits and last changed more than a day before now, and
+    // nothing else; the count removed
+    static int removeStaleCopies(const QString& tempPath, const QDateTime& now);
 
     // Sizes the wide CSV for each of rowMs (0 a row a sweep, at most 64), the
     // columns named (none: core's rule). One runs at a time: a newer call
@@ -77,6 +83,8 @@ public:
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
     // The workers run out of memory at once
     void setFailWorkerForTesting(bool on) { m_failWorkerForTesting = on; }
+    // Every copy to the target fails, as a provider refusing the bytes
+    void setFailCopyForTesting(bool on) { m_failCopyForTesting = on; }
 
 signals:
     void busyChanged();
@@ -105,4 +113,5 @@ private:
     bool m_sizing = false;
     bool m_throughProvider = false;
     bool m_failWorkerForTesting = false;
+    bool m_failCopyForTesting = false;
 };

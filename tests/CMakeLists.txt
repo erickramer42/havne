@@ -70,6 +70,12 @@ add_test(NAME NoticesTest.TheApkCarriesEachNoticeAsItsSource
 add_test(NAME NoticesTest.EachNoticeCarriesCoresData
     COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=core
             -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachCitedLicenseIsInTheTree
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=licenses
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
+add_test(NAME NoticesTest.EachBundledFontIsNamed
+    COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -DMODE=fonts
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/notices_match.cmake)
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone

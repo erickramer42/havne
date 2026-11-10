@@ -70,3 +70,23 @@ private:
     QColor m_bg{Qt::black};
     QColor m_text{Qt::white};
 };
+
+// A theme whose "surface" is there but never notifies (a constant)
+class FakeThemeWithConstantSurface : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QColor bg MEMBER m_bg NOTIFY bgChanged)
+    Q_PROPERTY(QColor surface READ surface CONSTANT)
+    Q_PROPERTY(QColor text MEMBER m_text NOTIFY textChanged)
+
+public:
+    QColor surface() const { return Qt::black; }
+
+signals:
+    void bgChanged();
+    void textChanged();
+
+private:
+    QColor m_bg{Qt::black};
+    QColor m_text{Qt::white};
+};

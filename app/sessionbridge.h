@@ -707,7 +707,8 @@ class SessionBridge : public QObject
     Q_PROPERTY(qint64 logBytes READ logBytes NOTIFY logProgressChanged)
     // What the Dashboard's header says about the log: "Log not started:
     // <why>" after a refusal, "Log ended: <why>" after an end the user
-    // didn't ask for (a failed write, the session's end), "" otherwise. A
+    // didn't ask for (a failed write), "Log ended" after the user's
+    // Disconnect, "" otherwise (Stop log). A
     // log that starts clears it, as does clearLogNotice (Dismiss). A
     // property, not a signal: Start log sits in Main's header, on every
     // page, so the Dashboard may not exist when the refusal lands
@@ -1184,6 +1185,12 @@ public:
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
+    // Test seam: core can't give a recorder's folder whole, so the bridge
+    // reads it as empty
+    void failRecorderFolderForTesting(bool on)
+    {
+        m_failRecorderFolderForTesting = on;
+    }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -1280,8 +1287,10 @@ private:
     void adoptRecorder(ecuio_recorder_t* recorder);
     // Its last notes, then closed with why; "" with nothing open. A log
     // ends with it: the whole set asked again while the session runs,
-    // its readout's last count, logStopped (byUser: Stop log's)
-    void stopRecording(const QString& why, bool byUser = false);
+    // its readout's last count, logStopped (byUser: Stop log's). An end
+    // not byUser is told on the Dashboard: told, or "Log ended: <why>"
+    void stopRecording(const QString& why, bool byUser = false,
+                       const QString& told = QString());
     // The log's folder size, its files' sum (a handful, stat'd once a
     // second on the GUI thread)
     void countLogBytes();
@@ -1324,6 +1333,7 @@ private:
     // test seam's addition to it
     uint64_t m_sleptUs = 0;
     uint64_t m_sleptAddedForTesting = 0;
+    bool m_failRecorderFolderForTesting = false;
     uint64_t sleptUs() const
     {
         return ecuio_clock_slept_us() + m_sleptAddedForTesting;
