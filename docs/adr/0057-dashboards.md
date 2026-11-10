@@ -83,7 +83,7 @@ What the code gives this decision:
 - **A `Popup` doesn't fit the zoom** (it draws in the unscaled
   overlay); every in-page question so far is a panel inside the page's
   `Flickable`.
-- **The density rules** (`.claude/rules/qml.md`): 48 dp targets on a
+- **The density rules:** 48 dp targets on a
   phone (`Theme.touchTarget`), 8 dp between them, at most three buttons
   in a phone's row, nothing past the edge at 320 dp.
 
@@ -428,27 +428,27 @@ Home's logo) are the themes item's.
 Each step is handed over on its own branch with its tests and mutants;
 the model named is the one sized for it.
 
-1. **Core** (Opus): `ecuio_signal_file_key` and `ecuio_def_range`,
+1. **Core:** `ecuio_signal_file_key` and `ecuio_def_range`,
    their tests, `test_c_abi`, the exports check, the regenerated
    `_ecuio.py`.
-2. **The bridge and the hub** (Opus): `RefRole`, `RangeLowRole`,
+2. **The bridge and the hub:** `RefRole`, `RangeLowRole`,
    `RangeHighRole`, `profileSignals(uri)`; `SignalHub` by reference
    with its wider `Entry`; `gaugeSignals` as reference lists. The
    Dashboard reads through it and looks the same.
-3. **The rules** (Opus): `DashboardBook.qml` with the built-in layout
+3. **The rules:** `DashboardBook.qml` with the built-in layout
    per form (today's gauges, in today's order, at spans that keep their
    proportions) and every function of section 7; `tst_dashboardbook`.
-4. **The renderer** (Sonnet, to this ADR): `DashboardPage.qml` draws a
+4. **The renderer**, to this ADR: `DashboardPage.qml` draws a
    form's pages from a document (no editing yet): the grid, the phone's
    swipe, the desktop's buttons and keys, section 3's states and notes,
    the saved last page. `tst_dashboard` keeps its cases over the
    built-in layout.
-5. **The new kinds and options** (Sonnet): `segments`, `seven-segment`,
+5. **The new kinds and options:** `segments`, `seven-segment`,
    `sparkline`; `vertical` and `marks` on the bar; `peak` on every kind.
-6. **Edit mode** (Sonnet for the controls, the rules being step 3's):
+6. **Edit mode** (the rules being step 3's):
    Edit and Done, Add, the cell's panel, remove, the pages' controls,
    Reset, the save to `Settings` and the restart test.
-7. **The gauge roles in `Theme`** (Sonnet, with the themes item).
+7. **The gauge roles in `Theme`**, with the themes item.
 8. **The done-when run** on the test phone and the desktop: a page built
    from the library survives a restart; the run sheet names the build.
 

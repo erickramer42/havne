@@ -78,7 +78,7 @@ if [ "$tests_only" = 0 ]; then
     if [ ! -f "$TREE/CMakeCache.txt" ]; then
         qt=${QT_PREFIX:-$(sed -n 's/^CMAKE_PREFIX_PATH:[A-Z]*=//p' build/CMakeCache.txt 2>/dev/null)}
         if [ -z "$qt" ]; then
-            echo "no Qt kit: set QT_PREFIX, or configure build first (CLAUDE.md, Commands)" >&2
+            echo "no Qt kit: set QT_PREFIX, or configure build first (docs/development.md, Build configurations)" >&2
             exit 2
         fi
         run configure cmake -B "$TREE" \
