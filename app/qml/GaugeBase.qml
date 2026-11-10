@@ -15,12 +15,14 @@ Item {
     property real windowHigh: value
     property real windowLow: value
     property bool hasValue: false   // false: parks at `from`, readout "—"
-    property bool stale: false      // dims readouts (LiveView's 3 s rule)
+    property bool stale: false      // dims readouts and says so (LiveView's 3 s rule)
     property real from: 0
     property real to: 100
     property string label: ""
     property string unit: ""
     property string note: ""        // why there is no value, e.g. "not in profile"
+    // The card's note line: why there is no value, or that the one shown is old
+    readonly property string shownNote: !hasValue ? note : stale ? qsTr("no new data") : ""
     property int decimals: 0
 
     // Zones in value units; NaN disables one
@@ -111,6 +113,6 @@ Item {
     // (Accessible.ignored) and changes them by opacity, never visibility
     Accessible.role: Accessible.Indicator
     Accessible.name: hasValue ? qsTr("%1: %2 %3").arg(label).arg(valueText).arg(unit).trim()
-                                + (inDanger ? qsTr(", danger") : "")
+                                + (inDanger ? qsTr(", danger") : "") + (stale ? qsTr(", no new data") : "")
                               : note !== "" ? qsTr("%1: %2").arg(label).arg(note) : label
 }
