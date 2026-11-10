@@ -44,7 +44,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   short) in its end line; the recording itself was always whole.
 - Quitting during an import or while the log viewer writes a health
   report no longer waits for it to finish: it stops, and nothing half
-  made is left. `havne-cli import` stops cleanly on Ctrl+C, and Python's
+  made is left. `havne-cli import`, and `havne-cli health` over a recording, stop
+  cleanly on Ctrl+C, and Python's
   `import_csv` and `import_candump` take a `cancel` and stop on Ctrl+C.
   The C API adds `ecuio_import_with` and `ecuio_health_export_with`.
 
