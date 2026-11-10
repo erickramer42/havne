@@ -20,6 +20,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - `havne-cli log` no longer ends a short replay with a values count of 0 (or
   short) in its end line; the recording itself was always whole.
+- Quitting during an import or while the log viewer writes a health
+  report no longer waits for it to finish: it stops, and nothing half
+  made is left. `havne-cli import` stops cleanly on Ctrl+C, and Python's
+  `import_csv` and `import_candump` take a `cancel` and stop on Ctrl+C.
+  The C API adds `ecuio_import_with` and `ecuio_health_export_with`.
 
 ## [0.7.1] - 2026-11-10
 

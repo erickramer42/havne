@@ -1720,3 +1720,18 @@ reader's open does (ADR-0049 section 5):
   the same cancel, so an interrupt during it leaves nothing written; its
   stderr lines come after the export.
 - **Python** has no export wrapper. `_ecuio.py` binds both calls.
+
+*Note of 2026-11-09:* the import and the health report take the same
+cancel. `ecuio_import_with` is asked as each pass begins and as bytes are
+read (every 64 KiB); `ecuio_health_export_with` is asked, for a
+recording's folder, as the frames pass begins and every 1024 of its
+rows, and through the reader's open as it reads. A session's report
+never asks. Each stop is `ECUIO_ERR_CANCELED` ("the import was
+canceled", "the report was canceled") with nothing left made.
+`RecordingImport` and `RecordingView` set a stop in their destructors
+before they join; a close or another open still lets a report run out,
+so the file the user picked is written. `havne-cli import` stops on
+Ctrl+C with the interrupted end line and exit 1. Python's `import_csv`
+and `import_candump` take `cancel=`, and a Ctrl+C on the main thread
+stops core at its next ask and is raised again as `KeyboardInterrupt`.
+`ecuio_import_csv_guess` takes no cancel: it reads at most 1.25 MiB.
