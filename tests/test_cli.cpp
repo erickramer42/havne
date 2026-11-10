@@ -1526,9 +1526,10 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
         SCOPED_TRACE(i);
         EXPECT_TRUE(cli::own_signal(set.defs[i]));
         EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
-        EXPECT_EQ(
-            text([&](cli::Line& l) { cli::def_line(l, set, set.defs[i]); }),
-            expected[i]);
+        EXPECT_EQ(text([&](cli::Line& l) {
+                      cli::def_line(l, set, set.defs[i], nullptr);
+                  }),
+                  expected[i]);
     }
     EXPECT_EQ(text([&](cli::Line& l) { cli::unit_line(l, set.defs[0]); }),
               "{\"type\":\"unit\",\"id\":30000,\"name\":\"Temp\","
@@ -1541,6 +1542,37 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
     EXPECT_EQ(cli::def_program(set, set.defs[0]), nullptr);
     EXPECT_NE(cli::def_program(set, set.defs[3]), nullptr);
     ecuio_signal_file_free(file);
+}
+
+// A def's gauge field: nothing for a def with none, else min and max and
+// only the levels given (cli::gauge_field)
+TEST(CliSignalFileTest, AGaugeFieldHoldsOnlyTheLevelsGiven)
+{
+    const auto field = [](const ecuio_signal_gauge_t* g) {
+        char buf[cli::kGaugeBytes + 16];
+        cli::Line l(buf, sizeof buf);
+        l.raw("{\"id\":1");
+        cli::gauge_field(l, g);
+        l.ch('}');
+        return std::string(l.data(), l.size());
+    };
+    EXPECT_EQ(field(nullptr), "{\"id\":1}");
+    ecuio_signal_gauge_t g{};
+    g.min = -40;
+    g.max = 130.5;
+    g.warn_low = 60;
+    g.warn_high = 110;
+    EXPECT_EQ(field(&g), "{\"id\":1,\"gauge\":{\"min\":-40,\"max\":130.5}}")
+        << "a level whose flag is clear isn't given";
+    g.flags = ECUIO_GAUGE_WARN_LOW;
+    EXPECT_EQ(field(&g), "{\"id\":1,\"gauge\":{\"min\":-40,\"max\":130.5,"
+                         "\"warn_low\":60}}");
+    g.flags = ECUIO_GAUGE_WARN_HIGH;
+    EXPECT_EQ(field(&g), "{\"id\":1,\"gauge\":{\"min\":-40,\"max\":130.5,"
+                         "\"warn_high\":110}}");
+    g.flags = ECUIO_GAUGE_WARN_LOW | ECUIO_GAUGE_WARN_HIGH;
+    EXPECT_EQ(field(&g), "{\"id\":1,\"gauge\":{\"min\":-40,\"max\":130.5,"
+                         "\"warn_low\":60,\"warn_high\":110}}");
 }
 
 // An import's notes and summary are lines of their own, each kind a word
@@ -1749,6 +1781,37 @@ TEST(CliPluginTest, TheCheckedAndRefusedLinesSayWhatHappened)
     const std::string ft = text_of(f);
     EXPECT_NE(ft.find("\"file\":\"a.json\",\"code\":11"), std::string::npos);
     EXPECT_EQ(ft.find("package"), std::string::npos);
+}
+
+// A plugin whose data files use "gauge" is warned of a requires.core
+// below 0.7.2 and of no other; one with no gauge never is
+TEST(CliPluginTest, AGaugeWantsTheCoreThatReadsIt)
+{
+    struct Version {
+        uint16_t part[3];
+    };
+    const auto older = [](Version v, bool uses_gauge) {
+        return cli::gauge_needs_newer_core(v.part, uses_gauge);
+    };
+    EXPECT_FALSE(older({{0, 7, 2}}, true));
+    EXPECT_FALSE(older({{0, 7, 3}}, true));
+    EXPECT_FALSE(older({{0, 8, 0}}, true));
+    EXPECT_FALSE(older({{1, 0, 0}}, true));
+    EXPECT_TRUE(older({{0, 7, 1}}, true));
+    EXPECT_TRUE(older({{0, 6, 9}}, true));
+    EXPECT_TRUE(older({{0, 1, 0}}, true));
+    EXPECT_FALSE(older({{0, 1, 0}}, false));
+
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    const uint16_t declared[3] = {0, 7, 1};
+    cli::requires_core_line(l, declared);
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"requires_core\",\"declared\":\"0.7.1\",\"needs\":"
+              "\"0.7.2\",\"warning\":\"the data files use \\\"gauge\\\", which "
+              "core reads from 0.7.2 on: raise the manifest's \\\"requires\\\" "
+              "core to 0.7.2, so an older Havne names that version instead of "
+              "refusing a signal file\"}\n");
 }
 
 // ---- A replay's own signal file (cli/recording_signals.h, ADR-0051

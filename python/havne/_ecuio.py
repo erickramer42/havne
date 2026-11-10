@@ -151,6 +151,8 @@ ECUIO_FRAME_FLAG_REASSEMBLED = 0x100
 ECUIO_FRAME_FLAG_REMOTE = 2
 ECUIO_FRAME_FLAG_TRUNCATED = 64
 ECUIO_FRAME_FLAG_TX_ECHO = 32
+ECUIO_GAUGE_WARN_HIGH = 2
+ECUIO_GAUGE_WARN_LOW = 1
 ECUIO_HEALTH_BASELINE_READ = 2
 ECUIO_HEALTH_JSON = 1
 ECUIO_HEALTH_TEXT = 2
@@ -524,6 +526,9 @@ class ecuio_signal_def_t(Structure):
     pass
 
 class ecuio_signal_file_t(Structure):
+    pass
+
+class ecuio_signal_gauge_t(Structure):
     pass
 
 class ecuio_signal_set_t(Structure):
@@ -1073,6 +1078,14 @@ ecuio_signal_def_t._fields_ = [
     ('table_count', c_uint16),
     ('reserved', (c_uint32 * 4)),
 ]
+ecuio_signal_gauge_t._fields_ = [
+    ('min', c_double),
+    ('max', c_double),
+    ('warn_low', c_double),
+    ('warn_high', c_double),
+    ('flags', c_uint32),
+    ('reserved', (c_uint32 * 3)),
+]
 ecuio_signal_set_t._fields_ = [
     ('layout_version', c_uint32),
     ('count', c_uint32),
@@ -1195,6 +1208,7 @@ FUNCTIONS = {
     'ecuio_plugin_load': (c_int, [c_char_p, c_size_t, ecuio_plugin_read_t, c_void_p, POINTER(POINTER(ecuio_plugin_t))]),  # plugin.h
     'ecuio_plugin_match': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_vin_info_t), POINTER(c_uint32), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_register': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
+    'ecuio_plugin_requires_core': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint16), POINTER(c_uint16), POINTER(c_uint16)]),  # plugin.h
     'ecuio_plugin_values': (c_int, [POINTER(ecuio_plugin_t), c_char_p, c_size_t, POINTER(ecuio_plugin_value_t), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_variant': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_variant_file': (POINTER(ecuio_signal_file_t), [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h
@@ -1259,6 +1273,7 @@ FUNCTIONS = {
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h
     'ecuio_signal_file_free': (None, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_gauge': (POINTER(ecuio_signal_gauge_t), [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h

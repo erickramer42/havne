@@ -202,6 +202,7 @@ Each entry of `signals` is one signal. A number read from a reply:
 | `decimals` | no | 0 to 3, how many Live shows |
 | `group` | no | The part of the car it reads, which Live and the viewer group by: `engine`, `air`, `fuel`, `oxygen sensors`, `emissions`, `vehicle`, `electrical` or `diagnostics`; left out, Other |
 | `plot` | no | 0 to 255: 0 not plotted when a session starts, otherwise its place among the signals that are, 1 first |
+| `gauge` | no | Number and computed signals: the range a dial shows and its warning levels (below) |
 
 A `key` is 1 to 31 of `a`-`z`, `0`-`9` and `_`, unique in the file,
 and an ECU's `id` the same. A group is spelled as the table lists it,
@@ -366,6 +367,44 @@ Any other unit (`%`, `V`, `rpm`, `ms`) loads, shows as written and
 never converts; `signals check` lists them, so a misspelled `kph`
 doesn't pass for `km/h`.
 
+### Gauges
+
+A number or computed signal can say how a dial should show it:
+
+```json
+"gauge": { "min": 40, "max": 130, "warn_low": 60, "warn_high": 110 }
+```
+
+| Key | Required | What it holds |
+|---|---|---|
+| `min`, `max` | yes | The dial's range, `min` below `max` |
+| `warn_low` | no | The level at or below which it warns, within the range |
+| `warn_high` | no | The level at or above which it warns, within the range, above `warn_low` |
+
+The numbers are in the signal's own `unit`, the ones its value has after
+`scale` and `offset`. A front end converts them as it converts the value
+([Units](#units)).
+
+A range may be wider than the field can read, or narrower. One that
+shares nothing with what the field can read is refused, since the needle
+could never move: the usual cause is numbers in another unit. A computed
+signal has no field, so its range isn't judged against one.
+
+`havne-cli` reports a gauge on the `signal_def` lines of `signals check`
+and `plugins check` and on the `signals` line of `stream`, and the Python
+package through `SignalFile.gauge(key)` and `Plugin.gauge(key)`. The
+app's dials don't read it: each still starts from the range the field
+decodes to.
+
+`gauge` needs Havne 0.7.2 or later; an older one refuses a file that uses
+it as a key it doesn't know, and loads every other file as before. A
+plugin whose data files use it names 0.7.2 or later in `requires.core`,
+so an older Havne says which version it needs. A recording made through
+such a file keeps the key in its `signals.json`, so an older Havne
+refuses that recording's scrubbed export too, its `signals.json` being a
+file it can't load. `havne-cli plugins check` says when a plugin's data
+files use `gauge` and its `requires.core` names an older version.
+
 ## Bounds
 
 | What | Bound |
@@ -406,7 +445,10 @@ A file is refused for:
   field, `bits` out of range); a text or hex field with `bits`; an
   `ecu` the file doesn't list; an enumeration's label too long; an
   `expr` that doesn't parse, names an input that doesn't exist, takes
-  a computed signal as an input, or passes 4 inputs or 16 operations.
+  a computed signal as an input, or passes 4 inputs or 16 operations;
+  a `gauge` on a text, hex or enumeration signal, whose `min` isn't below
+  its `max`, whose level is outside its range or out of order, or whose
+  range the field can't reach.
 - **A name, a unit or a label a spreadsheet would run as a formula:**
   one starting with `=`, `+`, `-`, `@`, a tab or a carriage return.
   Recordings are CSV, often opened in a spreadsheet

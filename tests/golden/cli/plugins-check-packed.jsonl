@@ -1,5 +1,6 @@
 {"schema": 1, "type": "start"}
 {"fixtures": 0, "id": "packed", "name": "A packed plugin, which carries no fixtures", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.packed.base"}], "version": "1.0.0"}
 {"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "id": "base", "profile": "plugin.packed.base", "signals": 1, "type": "variant"}
-{"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30000, "kind": "number", "name": "Oil Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"bits": 8, "byte": 0, "decimals": 0, "gauge": {"max": 150, "min": 40, "warn_high": 130}, "group": "Engine", "id": 30000, "kind": "number", "name": "Oil Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"declared": "0.1.0", "needs": "0.7.2", "type": "requires_core", "warning": "the data files use \"gauge\", which core reads from 0.7.2 on: raise the manifest's \"requires\" core to 0.7.2, so an older Havne names that version instead of refusing a signal file"}
 {"failed": 0, "files_refused": 0, "fixtures": 0, "not_run": 0, "on": null, "passed": 0, "type": "checked", "warning": "the plugin has no fixtures: its values are unchecked"}

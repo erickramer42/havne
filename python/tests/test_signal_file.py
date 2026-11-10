@@ -5,7 +5,9 @@
 # tests/fixtures/signals/extras.json (extends obd2, a computed RPM in
 # thousands) decoding the replay fixture, from its path and from its text;
 # a refused file's line and column; a recording opened through the file
-# it's given; the file recorded with its session.
+# it's given; the file recorded with its session; each signal's gauge as
+# havne.Gauge, a level not given None, and None for a signal with no
+# gauge or no such signal.
 
 import os
 
@@ -79,3 +81,20 @@ def test_a_session_s_recording_holds_its_signal_file(tmp_path):
     with open(os.path.join(folder, "signals.json"), "rb") as f:
         with open(os.path.join(SIGNALS, "extras.json"), "rb") as g:
             assert f.read() == g.read()
+
+
+def test_a_signal_file_says_each_signal_s_gauge():
+    gauges = havne.SignalFile(path=os.path.join(SIGNALS, "gauges.json"))
+    assert gauges.gauge("coolant") == havne.Gauge(40.0, 130.0, None, 110.0)
+    assert gauges.gauge("volts") == havne.Gauge(10.0, 16.0, 11.5, 15.25)
+    assert gauges.gauge("half_volts") == havne.Gauge(5.0, 8.0, None, None)
+    assert gauges.gauge("load") is None
+    assert gauges.gauge("no_such_signal") is None
+
+
+def test_a_gauge_the_field_cannot_reach_is_refused_naming_the_unit():
+    with open(os.path.join(SIGNALS, "gauges.json"), encoding="utf-8") as f:
+        text = f.read().replace('"min": 40, "max": 130, "warn_high": 110',
+                                '"min": 300, "max": 400')
+    with pytest.raises(havne.Error, match="another unit"):
+        havne.SignalFile(text)

@@ -558,6 +558,39 @@ TEST(PluginTest, AnOutOfMemoryInTheWordsIsStillARefusal)
         << ecuio_last_error_detail();
 }
 
+// The manifest's requires.core comes back part by part, each part whole
+// to its 65535; a NULL plugin or part is refused with nothing written
+TEST(PluginTest, RequiresCoreGivesTheManifestsVersion)
+{
+    Plugin p = load_packed(
+        packed(R"("id": "p", "name": "P", "version": "1.0.0",)"
+               R"( "requires": {"core": "0.6.65535"}, "source": {"name": "t"},)"
+               R"( "tiers": ["data"], "ecus": [{"id": "pcm", "rx": "7E8"}])",
+               kData));
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    uint16_t major = 9;
+    uint16_t minor = 9;
+    uint16_t patch = 9;
+    ASSERT_EQ(ecuio_plugin_requires_core(p.get(), &major, &minor, &patch),
+              ECUIO_OK);
+    EXPECT_EQ(major, 0u);
+    EXPECT_EQ(minor, 6u);
+    EXPECT_EQ(patch, 65535u);
+
+    major = minor = patch = 9;
+    EXPECT_EQ(ecuio_plugin_requires_core(nullptr, &major, &minor, &patch),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_requires_core(p.get(), nullptr, &minor, &patch),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_requires_core(p.get(), &major, nullptr, &patch),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_requires_core(p.get(), &major, &minor, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(major, 9u);
+    EXPECT_EQ(minor, 9u);
+    EXPECT_EQ(patch, 9u);
+}
+
 TEST(PluginTest, TheAccessorsRefuseWhatTheyCantFill)
 {
     Folder f = example_folder();
@@ -897,4 +930,56 @@ TEST(PluginTest, AVariantsFileNamesEachOfItsOwnDefsKeys)
                      late, ecuio_plugin_variant_find(p.get(), 0, "trans_temp")),
                  "")
         << "the other variant's def";
+}
+
+TEST(PluginTest, AVariantsGaugeFollowsItsSignalsLastFileAndItsCopy)
+{
+    const std::string read =
+        R"("read":{"service":"22","number":"D100"},"field":{"byte":0},"unit":"kPa")";
+    Folder f;
+    f.files["manifest.json"] =
+        R"json({"havne_plugin":1,"id":"gauged","name":"Gauged",
+      "version":"1.0.0","requires":{"core":"0.1.0"},"source":{"name":"Havne's tests"},
+      "tiers":["data"],"ecus":[{"id":"pcm","rx":"7E8"}],
+      "variants":[{"id":"replaced","files":["a.json","b.json"]},
+                  {"id":"dropped","files":["a.json","c.json"]},
+                  {"id":"kept","files":["a.json"]}]})json";
+    f.files["a.json"] =
+        R"({"havne_signals":1,"signals":[{"key":"p","name":"P",)" + read +
+        R"(,"gauge":{"min":0,"max":100,"warn_high":90}}]})";
+    f.files["b.json"] =
+        R"({"havne_signals":1,"signals":[{"key":"p","name":"P",)" + read +
+        R"(,"gauge":{"min":0,"max":200}}]})";
+    f.files["c.json"] =
+        R"({"havne_signals":1,"signals":[{"key":"p","name":"P",)" + read +
+        "}]}";
+    Plugin p = load_folder(f);
+    ASSERT_TRUE(p) << ecuio_last_error_detail();
+
+    const auto gauge = [&](uint32_t v) {
+        return ecuio_signal_file_gauge(
+            ecuio_plugin_variant_file(p.get(), v),
+            ecuio_plugin_variant_find(p.get(), v, "p"));
+    };
+    ASSERT_NE(gauge(0), nullptr);
+    EXPECT_EQ(gauge(0)->max, 200.0) << "the later file's signal, gauge and all";
+    EXPECT_EQ(gauge(0)->flags, 0u);
+    EXPECT_EQ(gauge(1), nullptr) << "a later file's signal with none has none";
+    ASSERT_NE(gauge(2), nullptr);
+    EXPECT_EQ(gauge(2)->warn_high, 90.0);
+
+    /* What a recording copies as signals.json carries the gauge */
+    const std::string& bytes =
+        ecuio_sf::bytes_of(*ecuio_plugin_variant_file(p.get(), 2));
+    ecuio_signal_file_t* back = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(bytes.data(), bytes.size(), &back),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_gauge_t* g =
+        ecuio_signal_file_gauge(back, ecuio_signal_file_find(back, "p"));
+    ASSERT_NE(g, nullptr);
+    EXPECT_EQ(g->max, 100.0);
+    EXPECT_EQ(g->warn_high, 90.0);
+    EXPECT_EQ(g->flags, ECUIO_GAUGE_WARN_HIGH);
+    ecuio_signal_file_free(back);
 }

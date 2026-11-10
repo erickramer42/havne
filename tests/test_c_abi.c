@@ -92,6 +92,10 @@ typedef char abi_computed_ages_check[(offsetof(ecuio_computed_t, max_age_us) == 
 typedef char abi_computed_steps_check[(offsetof(ecuio_computed_t, steps) == 28) ? 1 : -1];
 typedef char abi_computed_constants_check[(offsetof(ecuio_computed_t, constants) == 64) ? 1 : -1];
 typedef char abi_computed_reserved_check[(offsetof(ecuio_computed_t, reserved) == 192) ? 1 : -1];
+typedef char abi_gauge_size_check[(sizeof(ecuio_signal_gauge_t) == 48) ? 1 : -1];
+typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high) == 24) ? 1 : -1];
+typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
+typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -221,6 +225,9 @@ int main(void)
     uint64_t reading_at = 0;
     uint32_t reading_pick = 0;
     char reading_text[8];
+    uint16_t core_major = 0;
+    uint16_t core_minor = 0;
+    uint16_t core_patch = 0;
     ecuio_check_options_t check_options;
     ecuio_check_summary_t check_summary;
     ecuio_export_options_t export_options;
@@ -312,7 +319,8 @@ int main(void)
         if (ecuio_def_range(&byte_def, &lo, &hi) != ECUIO_DECODE_OK ||
             lo != -40.0 || hi != 215.0 ||
             ecuio_def_range(NULL, &lo, &hi) != ECUIO_DECODE_ERR_NULL ||
-            strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0) {
+            strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0 ||
+            ecuio_signal_file_gauge(NULL, &byte_def) != NULL) {
             return 1;
         }
     }
@@ -456,6 +464,8 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_variant_file(NULL, 0) != NULL ||
+        ecuio_plugin_requires_core(NULL, &core_major, &core_minor,
+                                   &core_patch) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_signal(NULL, 0, &reading_signal) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_marker(NULL, 0, &reading_marker) !=

@@ -1,0 +1,9 @@
+{"schema": 1, "type": "start"}
+{"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "name": "Gauged extras", "profile": "user.gauged-extras", "signals": 4, "type": "signal_file"}
+{"bits": 8, "byte": 0, "decimals": 0, "gauge": {"max": 130, "min": 40, "warn_high": 110}, "group": "Engine", "id": 30000, "kind": "number", "name": "Coolant", "offset": -40, "order": "be", "rank": 0, "read": {"number": "05", "service": "01"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"bits": 16, "byte": 0, "decimals": 1, "gauge": {"max": 16, "min": 10, "warn_high": 15.25, "warn_low": 11.5}, "group": "Electrical", "id": 30001, "kind": "number", "name": "Module Volts", "offset": 0, "order": "be", "rank": 0, "read": {"number": "42", "service": "01"}, "rx": "0x7E8", "scale": 0.001, "signed": false, "type": "signal_def", "unit": "V"}
+{"bits": 8, "byte": 0, "decimals": 1, "group": "Engine", "id": 30002, "kind": "number", "name": "Load Share", "offset": 0, "order": "be", "rank": 0, "read": {"number": "04", "service": "01"}, "rx": "0x7E8", "scale": 0.392157, "signed": false, "type": "signal_def", "unit": "%"}
+{"decimals": 2, "gauge": {"max": 8, "min": 5}, "group": "Electrical", "id": 30003, "inputs": [{"id": 30001, "max_age_us": 3000000}], "kind": "computed", "name": "Half Volts", "rank": 0, "type": "signal_def", "unit": "V"}
+{"converts": false, "id": 30001, "name": "Module Volts", "type": "unit", "unit": "V"}
+{"converts": false, "id": 30002, "name": "Load Share", "type": "unit", "unit": "%"}
+{"converts": false, "id": 30003, "name": "Half Volts", "type": "unit", "unit": "V"}
