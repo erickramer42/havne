@@ -396,6 +396,33 @@ TestCase {
         compare(storedText(page), DashboardBook.serialize(page.doc))
     }
 
+    // An option the cell leaves unset shows in its box as the cell draws it,
+    // in edit mode and out of it; a stored cell taller than the desktop's 16
+    // rows shows its own height
+    function test_theBoxesShowWhatTheCellDraws() {
+        const lights = cellOf("S", "shift-light")
+        const tall = Object.assign(cellOf("T"), { h: 20 })
+        const page = pageOf({ width: 400 }, docOf([lights, tall]))
+        verify(page.compact)
+        compare(find(page, "dashCell_0_0").count, 11, "a compact page draws 11")
+        page.select(0)
+        compare(find(page, "panelCount").value, 11, "out of edit mode")
+        page.closePanel()
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(find(page, "panelCount").value, 11, "in edit mode")
+        spin(find(page, "panelCount"), 12)
+        compare(page.doc.pages[0].cells[0].options.count, 12, "one more than shown")
+
+        page.select(1)
+        const rows = find(page, "panelH")
+        compare(rows.value, 20, "its own height")
+        spin(rows, 19)
+        compare(page.doc.pages[0].cells[1].h, 19)
+        page.select(0)
+        compare(rows.to, 16, "a cell of 16 or fewer stops at 16")
+    }
+
     // Step 5's kinds offer their own options in the panel, the bar its two
     // switches, and the peak switch shows for the kinds that draw a peak
     function test_theNewKindsOwnOptionsAreEditable() {

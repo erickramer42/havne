@@ -95,6 +95,7 @@ Page {
     property bool editing: false
     property int selected: -1        // the cell edited, on the page shown
     property int selectedDigits: 4   // the selected Digits card's count
+    property int selectedCount: 15   // the selected Shift lights card's lights
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool moreShown: false
@@ -686,12 +687,19 @@ Page {
         readonly property bool chosen: pageNo === root.pageIndex && root.selected === cellIndex
                                        && (root.editing || root.panel !== "")
 
-        // What the panel's Digits shows with the option unset
+        // What the panel's Digits and Lights show with the option unset: what
+        // the cell draws, in or out of edit mode
         Binding {
-            when: card.editable && root.selected === card.cellIndex
+            when: card.chosen
             target: root
             property: "selectedDigits"
             value: card.digits
+        }
+        Binding {
+            when: card.chosen
+            target: root
+            property: "selectedCount"
+            value: card.count
         }
 
         // A press held still lifts the cell; these go to its page's grid
@@ -1156,7 +1164,9 @@ Page {
                         // A stored h under the phone's step stays reachable
                         from: root.phoneForm && panelCard.cell
                               ? Math.min(root.spanScale, panelCard.cell.h) : 1
-                        to: root.phoneForm ? DashboardBook.maxRows : DashboardBook.format1MaxRows
+                        // The desktop's 16, or a taller stored cell's own height
+                        to: root.phoneForm ? DashboardBook.maxRows
+                            : Math.max(DashboardBook.format1MaxRows, panelCard.cell ? panelCard.cell.h : 1)
                         stepSize: root.spanScale
                         value: panelCard.cell ? panelCard.cell.h : 1
                         onValueModified: root.resize(panelCard.cell.w, root.phoneForm
@@ -1311,7 +1321,7 @@ Page {
                         to: 32
                         value: panelCard.cell && panelCard.cell.options
                                && panelCard.cell.options.count !== undefined
-                               ? panelCard.cell.options.count : 15
+                               ? panelCard.cell.options.count : root.selectedCount
                         onValueModified: root.setOptions({ count: value })
                     }
                 }

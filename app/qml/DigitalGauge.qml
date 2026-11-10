@@ -31,7 +31,10 @@ GaugeBase {
         repeat: true
         objectName: "sampler"
         running: gauge.hasValue && gauge.visible && gauge.shown
+        // A value that isn't a number is never kept, as SparkGauge's
         onTriggered: {
+            if (!isFinite(gauge.value))
+                return
             const h = gauge.history.slice(1 - gauge.historyLength)
             h.push(gauge.value)
             gauge.history = h

@@ -466,4 +466,21 @@ TestCase {
         compare(low.text, "MIN  \u2014", "after Reset peaks")
         compare(peak.text, "MAX  \u2014", "after Reset peaks")
     }
+
+    // The Number's trace keeps no value that isn't a number, as the
+    // sparkline's doesn't, so one never blanks the whole trace
+    function test_theNumbersTraceKeepsOnlyNumbers() {
+        const g = createTemporaryObject(digitalC, testCase.parent)
+        const sampler = find(g, "sampler")
+        g.hasValue = true
+        g.value = 40
+        sampler.triggered()
+        compare(g.history.length, 1)
+        g.value = Infinity
+        sampler.triggered()
+        g.value = NaN
+        sampler.triggered()
+        compare(g.history.length, 1, "neither kept")
+        compare(g.history[0], 40)
+    }
 }

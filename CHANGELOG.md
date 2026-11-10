@@ -177,6 +177,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A gauge's status, such as "waiting for data", stays inside its card on a
   narrow card.
 - Remove no longer covers a gauge's title in edit mode.
+- A Shift lights gauge's Lights box shows the number of lights it draws
+  (11 on a narrow page, where it showed 15), and a Digits gauge's Digits
+  box does the same when its menu is opened outside edit mode.
+- A Number's trace keeps drawing when its signal gives a value that
+  isn't a number.
 - A SocketCAN session that asks requests, or one halted after its first
   request failed, no longer keeps a CPU core busy between reads.
 - Python: `havne.Plugin` loads a packed plugin file; it raised
