@@ -22,6 +22,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   warning levels, in the signal's own unit. `havne-cli` and the Python
   package report it; the app's dials don't read it yet. A file that uses
   it needs Havne 0.7.2 or later.
+- The demo connection (`mock://`) reads a battery voltage: about 12.45 V
+  with the key on, a dip while the engine cranks, and the alternator's
+  14.1-14.6 V once it runs. It has the same name and unit as obd2's Battery
+  Voltage, so a Dashboard cell set up on one reads on the other.
 
 ### Fixed
 
