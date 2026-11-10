@@ -1428,8 +1428,7 @@ const ecuio_transport_ops_t kElm327Ops = {elm327_start, elm327_detach};
  *           two, which the ELM327 has protocols for
  *   serial  the serial port's rate for a wired adapter, default 38400;
  *           a Bluetooth port ignores it, a TCP address refuses it
- *   filter, txid, poll, probe, identify, diagnose: the request keys
- *           (ecuio_request_param), as for j2534://
+ *   the request keys (ecuio_request_param lists them), as for j2534://
  *   profile, did: core's, read by create */
 ecuio_status_t parse_query(const ecuio_uri_query* query, transport* t,
                            request_params* req)

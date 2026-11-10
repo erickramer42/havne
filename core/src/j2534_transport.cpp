@@ -525,9 +525,8 @@ void j2534_worker(ecuio_j2534_transport* t)
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
- *       filter, txid, poll, probe, identify, diagnose: the request keys
- *              (ecuio_request_param); ?filter='s channel registers a
- *              FLOW_CONTROL filter
+ *       the request keys (ecuio_request_param lists them); ?filter='s
+ *              channel registers a FLOW_CONTROL filter
  *       profile core's key, read by ecuio_session_create
  *   - every occurrence is judged, and of good ones the last wins
  *   - create has split the query by the shared grammar and refused
