@@ -554,6 +554,22 @@ TEST(RecordingExportTest, ADroppedEstimateSaysNothing)
     EXPECT_TRUE(ok(again)) << "it works after one is dropped";
 }
 
+/* The panel's own case: one estimate out, the format switched. Nothing
+ * waits behind it, so only the drop's generation keeps its answer from
+ * being said */
+TEST(RecordingExportTest, ADroppedEstimateWithNoneWaitingSaysNothing)
+{
+    RecordingExport e;
+    int answers = 0;
+    QObject context;
+    QObject::connect(&e, &RecordingExport::estimated, &context,
+                     [&](const QVariantMap&) { ++answers; });
+    ASSERT_TRUE(e.estimate(fixture("pull-early"), asked({10}), 0, {}));
+    e.dropEstimate();
+    EXPECT_TRUE(waitUntil([&] { return !e.sizing(); }));
+    EXPECT_EQ(answers, 0);
+}
+
 TEST(RecordingExportTest, AWorkerOutOfMemorySaysSoAndFreesTheNext)
 {
     QTemporaryDir dir;
