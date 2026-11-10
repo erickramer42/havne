@@ -1874,7 +1874,7 @@ TestCase {
             verify(waitForPolish(page.Window.window), "laid out")
             tryVerify(() => find(page, "frameTest").visible, 2000, "Frame test in the row")
             compare(hint.text, "Tap for values")
-            tryVerify(() => !hint.truncated, 2000, "every word shows in " + hint.width + " px")
+            tryVerify(() => !hint.truncated, 2000, "every word shows")
             verify(hint.lineCount <= 2, hint.lineCount + " lines")
             compare(hint.font.pixelSize, Theme.fontCaption)
             // Where the row leaves it less than its words, it wraps onto a
@@ -1886,6 +1886,47 @@ TestCase {
             Theme.compact = false
             Theme.dense = false
         }
+    }
+
+    // Compared with a recording that holds the signal's values, an empty
+    // signal's dashed trace draws and the chart says nothing about it
+    function test_aComparedRecordingDrawsASignalTheFirstLacks() {
+        const page = createPage()
+        const events = "ecuio session recording, format 2 (ADR-0049)\n"
+                       + "started  2026-11-03 09:00:00.000 (local time)\n"
+                       + "profile  test\n"
+                       + "signal  RPM,number,rpm,0,0\n"
+                       + "signal  Quiet,number,rpm,0,0\n"
+                       + "\n00:00:01.000  +1.000  end  test: 0 frames, 1 values, 0 records "
+                       + "dropped, 0 notes dropped\n"
+        const first = Harness.writeFramesRecording("lacks-quiet", 1, 10000)
+        const second = Harness.writeFramesRecording("has-quiet", 1, 10000)
+        verify(first !== "" && second !== "")
+        verify(Harness.writeScratchFile("lacks-quiet/events.log", events).toString() !== "")
+        verify(Harness.writeScratchFile("lacks-quiet/signals.csv",
+                   "host_us,signal,value,unit\n100000,RPM,1000,rpm\n").toString() !== "")
+        verify(Harness.writeScratchFile("has-quiet/events.log", events).toString() !== "")
+        verify(Harness.writeScratchFile("has-quiet/signals.csv",
+                   "host_us,signal,value,unit\n100000,RPM,900,rpm\n100000,Quiet,5,rpm\n"
+                   + "200000,Quiet,7,rpm\n").toString() !== "")
+        page.open({ title: "Lacks", uri: "replay://x?profile=test", source: "", folder: first,
+                    profile: "test" })
+        tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
+        const quiet = page.shownSignals.find(s => s.name === "Quiet")
+        const rpm = page.shownSignals.find(s => s.name === "RPM")
+        page.togglePlotted(rpm.index)
+        page.togglePlotted(quiet.index)
+        compare(page.plottedNoValues, ["Quiet"], "alone, it has nothing to draw")
+        compare(page.series(400).length, 0)
+        page.compareWith({ title: "Has", folder: second })
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.plottedNoValues, [], "the compared recording draws it")
+        const all = page.series(400)
+        compare(all.length, 1, "its dashed trace alone")
+        verify(all[0].dash !== undefined, "dashed")
+        compare(all[0].row, quiet.index)
+        page.stopComparing()
+        compare(page.plottedNoValues, ["Quiet"], "alone again")
     }
 
     // A ticked signal with no values in the recording: the chart says so

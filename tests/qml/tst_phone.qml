@@ -935,11 +935,15 @@ TestCase {
     // one line of words on each button, every tool a touch target
     function test_thePhonesToolRowFits_data() {
         return [
-            { tag: "at 320", w: 320, h: 800 },
-            { tag: "at 384", w: 384, h: 832 },
-            { tag: "on its side", w: 832, h: 384 }
+            { tag: "at 320", w: 320, h: 800, session: true },
+            { tag: "at 384", w: 384, h: 832, session: true },
+            { tag: "on its side", w: 832, h: 384, session: true },
+            { tag: "at 320 with no session", w: 320, h: 800, session: false },
+            { tag: "at 384 with no session", w: 384, h: 832, session: false }
         ]
     }
+    // With no session Drive reads "Connect first", longer than "Drive":
+    // Reset peaks gives way before anything passes the edge
     function test_thePhonesToolRowFits(data) {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -948,22 +952,30 @@ TestCase {
         const dash = find(main.contentItem, "dashboardPage")
         main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
         dash.form = "phone"
-        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        if (data.session)
+            compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         tryVerify(() => find(dash, "toolRowNight").item, 3000, "the row is there")
         verify(waitForPolish(main), "laid out")
         waitForRendering(main.contentItem)
         const row = find(dash, "resetPeaks").parent
         compare(pastTheEdge(row, main.contentItem, []).length, 0, "inside the page")
-        for (const n of ["resetPeaks", "dashEdit"]) {
+        const drive = find(dash, "dashDrive")
+        compare(drive.text, data.session ? "Drive" : "Connect first")
+        compare(drive.enabled, data.session)
+        for (const n of ["dashDrive", "resetPeaks", "dashEdit"]) {
             const b = find(dash, n)
+            if (!b.visible)
+                continue
             compare(b.contentItem.lineCount, 1, n + " on one line")
+            verify(b.contentItem.contentWidth <= b.width + 0.5, n + " keeps its words")
             verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " px tall")
         }
         const night = find(dash, "nightSwitch")
         verify(night.height >= Theme.touchTarget - 0.5, "Night is " + night.height + " px tall")
         verify(night.width >= Theme.touchTarget - 0.5, "Night is " + night.width + " px wide")
         fuzzyCompare(row.height, Theme.touchTarget, 0.5, "one touch target tall")
-        Bridge.disconnectSession()
+        if (data.session)
+            Bridge.disconnectSession()
     }
 
     // Edit mode's controls on the phone: each a touch target, the bar at
@@ -1371,8 +1383,70 @@ TestCase {
         main.replayRecording(row.uri)
         tryVerify(() => Bridge.connected, 10000, "the replay connects")
         compare(Bridge.currentUri, row.uri)
-        compare(main.currentPage, 2, "on Live")
+        tryCompare(main, "currentPage", main.livePage, 2000, "on Live once it connects")
         compare(find(main.contentItem, "settingsPage").uriField.text, row.uri, "Settings shows it")
+    }
+
+    // A Replay the core refuses (its folder gone) leaves the user on
+    // Settings' Connection page with the field's error, never on Live
+    function test_aFailedReplayShowsSettingsWithItsReason() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.gotoPage(main.recordingsPage)
+        const settings = find(main.contentItem, "settingsPage")
+        const uri = "replay://" + Harness.recordingFixtures + "/no-such-recording?profile=obd2"
+        main.replayRecording(uri)
+        tryVerify(() => settings.errorLabel.visible, 10000, "the refusal shows")
+        verify(!Bridge.connected, "nothing connected")
+        compare(main.currentPage, main.settingsPage, "on Settings, not Live")
+        compare(settings.shownKey, "connection", "the Connection page")
+        compare(settings.uriField.text, uri, "the address in the field")
+        verify(settings.errorLabel.text !== "", "with its reason")
+        compare(main.replayPending, "", "nothing left waiting")
+    }
+
+    // One primary on Dash: while its connect list shows, the header's
+    // Connect... is secondary and the list's Connect the primary; on
+    // another page the header's is primary again
+    function test_theHeadersConnectGivesWayToDashsList() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        main.gotoPage(main.dashboardPage)
+        const header = find(main.contentItem, "disconnectButton")
+        tryVerify(() => dash.connectShown, 3000, "Dash shows its connect list")
+        verify(header.visible, "the header's Connect... shows")
+        verify(!header.highlighted, "secondary on Dash")
+        verify(!header.flat, "a secondary, not a quiet one")
+        main.gotoPage(main.livePage)
+        verify(header.highlighted, "primary elsewhere")
+    }
+
+    // The header at the narrowest phone and the top zoom: the pill's word
+    // elides inside the pill, and the pill stays inside the page. The
+    // header's Connect... passes the edge there (160 layout units hold no
+    // button of its words beside a pill), which is the review's open item
+    function test_thePillsWordElidesAtTheTopZoom() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 800
+        main.font.pixelSize = 16
+        Theme.zoom = 2
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const pill = find(main.contentItem, "linkPill")
+        const word = find(main.contentItem, "linkPillText")
+        verify(word.width <= pill.width + 0.5, "the word inside the pill")
+        verify(word.contentWidth <= word.width + 0.5 || word.truncated, "painted inside its box or elided")
+        verify(pill.mapToItem(main.contentItem, pill.width, 0).x <= main.contentItem.width + 0.5,
+               "the pill inside the page")
+        compare(find(main.contentItem, "disconnectButton").visible, true, "Connect... still on the row")
     }
 
     // A Main on a phone's form at 384 x 832, laid out, with Android's text

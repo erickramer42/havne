@@ -207,13 +207,16 @@ TestCase {
         }
     }
 
-    // Night Red has one red: success takes the dim tone, so danger alone
-    // is full red
+    // Night Red has one red: danger alone is full red, and success is a
+    // quiet warm tint apart from the dim text, so Live and No session
+    // differ at a glance
     function test_nightRedKeepsFullRedForDangerAlone() {
         usePalette("nightRed")
-        verify(Qt.colorEqual(Theme.success, Theme.textDim), "success is the dim tone: " + Theme.success)
         verify(Qt.colorEqual(Theme.danger, "#ff3030"), "danger is full red: " + Theme.danger)
-        verify(!Qt.colorEqual(Theme.success, Theme.danger))
+        verify(!Qt.colorEqual(Theme.success, Theme.danger), "success is not danger's red")
+        verify(!Qt.colorEqual(Theme.success, Theme.textDim), "success is not the dim text: " + Theme.success)
+        // Quieter than danger: less red, and never the full channel
+        verify(Theme.success.r < Theme.danger.r, "quieter than danger: " + Theme.success)
     }
 
     // WCAG contrast of a text color on a background

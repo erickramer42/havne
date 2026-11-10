@@ -1691,14 +1691,13 @@ TestCase {
         verify(row.visible)
         verify(!find(page, "moreLeft").visible && !find(page, "moreRight").visible, "nothing to move")
         verify(reset.quiet, "Reset is quiet")
-        compare(reset.Accessible.name, "Replace this form's pages with the built-in layout")
+        compare(reset.Accessible.name, "Reset: replace this form's pages with the built-in layout")
         // The row is laid out at the layouts' next polish, after it shows
         tryVerify(() => Math.abs(row.width - (page.width - 2 * page.margin)) < 1, 3000,
                   "the row has the page's width: " + row.width + " of " + page.width + "; its parent "
                   + String(row.parent).replace(/\(0x[0-9a-f]+\)/, "") + " is " + row.parent.width
                   + " wide, x " + row.x + ", implicit " + row.implicitWidth + ", the gap "
                   + find(row, "moreResetGap").width)
-        verify(waitForPolish(row), "laid out")
         verify(waitForPolish(row), "the row laid out")
         const where = "Reset at " + reset.x + "," + reset.y + ", Remove page ends at "
                       + (remove.x + remove.width) + "," + (remove.y + remove.height) + " in a row of "

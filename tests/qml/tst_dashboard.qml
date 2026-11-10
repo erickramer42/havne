@@ -1352,34 +1352,62 @@ TestCase {
         tryCompare(label, "text", "Live · mock://demo", 5000)
         verify(label.roomForAddress)
         page.width = 300
-        tryVerify(() => label.width < 150, 3000, "a narrow label: " + label.width)
+        tryVerify(() => label.width < 150, 3000, "a narrow label")
         compare(label.text, "Live")
         page.width = 1000
         tryCompare(label, "text", "Live · mock://demo", 3000)
     }
 
     // A row too narrow for every tool drops Reset peaks, and edit mode's
-    // bar offers it instead
-    function test_aNarrowToolRowMovesResetPeaksIntoEditsBar() {
-        const page = pageOf({ form: "desktop", width: 1000, height: 600 }, null, true)
-        const reset = findChild(page, "resetPeaks"), inBar = findChild(page, "editResetPeaks")
-        const header = reset.parent
+    // Pages row offers it at its end, whole and inside the page
+    function test_aNarrowToolRowMovesResetPeaksIntoThePagesRow() {
+        // The phone form: the desktop's Pages flow keeps its unwrapped
+        // width in a page made alone this narrow
+        const page = pageOf({ form: "phone", width: 1000, height: 600 }, null, true)
+        const reset = findChild(page, "resetPeaks"), inRow = findChild(page, "moreResetPeaks")
+        const bar = reset.parent.parent
         verify(waitForPolish(page), "laid out")
-        verify(header.width >= page.toolRowFull, "a wide row: " + header.width)
+        verify(bar.width >= page.toolRowFull, "a wide bar: " + bar.width)
         verify(reset.visible, "Reset peaks in the row")
         page.startEditing()
-        verify(!inBar.visible, "and not in the bar")
+        page.moreShown = true
+        verify(!inRow.visible, "and not in the Pages row")
         page.stopEditing()
         page.width = 240
-        tryVerify(() => header.width < page.toolRowFull, 3000, "a narrow row: " + header.width)
+        tryVerify(() => bar.width < page.toolRowFull, 3000, "a narrow bar")
         verify(!reset.visible, "Reset peaks gives way")
         page.startEditing()
-        verify(inBar.visible, "the bar offers it")
-        verify(inBar.flat, "quiet, as in the row")
-        compare(inBar.text, "Reset peaks")
+        page.moreShown = true
+        verify(waitForPolish(page), "the Pages row laid out")
+        verify(inRow.visible, "the Pages row offers it")
+        verify(inRow.flat, "quiet, as in the row")
+        compare(inRow.text, "Reset peaks")
+        const shown = Array.from(inRow.parent.children).filter(c => c.visible)
+        compare(shown[shown.length - 1], inRow, "at the row's end")
+        verify(inRow.width >= inRow.implicitWidth - 0.5, "whole: " + inRow.width + " of " + inRow.implicitWidth)
+        verify(inRow.mapToItem(page, inRow.width, 0).x <= page.width + 0.5,
+               "inside the page's width: " + inRow.mapToItem(page, inRow.width, 0).x)
+        verify(inRow.mapToItem(page, 0, inRow.height).y <= page.height + 0.5,
+               "inside the page's height: " + inRow.mapToItem(page, 0, inRow.height).y)
         const spy = createTemporaryObject(spyComponent, testCase,
                                           { target: page, signalName: "peaksResetRequested" })
-        inBar.clicked()
+        inRow.clicked()
         compare(spy.count, 1, "and it resets the peaks")
+    }
+
+    // A stored accent of "info" (an older layout's blue) draws as the
+    // value's own color; "success" keeps its green. No document changes
+    function test_aStoredInfoAccentDrawsAsTheValueColor() {
+        const cell = (label, accent) => ({ kind: "digital", w: 2, h: 4, label: label,
+                                           refs: refsOf("Engine speed"), unit: "RPM",
+                                           options: { from: 0, to: 8000, accent: accent } })
+        const page = pageOf({}, docOf([cell("Blue", "info"), cell("Green", "success")]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauges load")
+        const blue = gaugeOf(findChild(page, "dashCell_0_0"))
+        const green = gaugeOf(findChild(page, "dashCell_0_1"))
+        verify(blue && green, "both load")
+        verify(Qt.colorEqual(blue.accent, Theme.gaugeValue), "info draws as the value: " + blue.accent)
+        verify(Qt.colorEqual(green.accent, Theme.success), "success stays: " + green.accent)
+        compare(page.doc.pages[0].cells[0].options.accent, "info", "the stored word stays")
     }
 }

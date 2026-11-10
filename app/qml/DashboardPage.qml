@@ -802,10 +802,10 @@ Page {
         readonly property real coldBelow: zone("coldBelow")
         readonly property real warnFrom: zone("warnFrom")
         readonly property real dangerFrom: zone("dangerFrom")
+        // A stored "info" draws as the value's own color: blue means cold alone
         readonly property color accent: {
             const a = opt("accent", "accent")
-            return a === "info" ? Theme.info : a === "success" ? Theme.success
-                                             : Theme.gaugeValue
+            return a === "success" ? Theme.success : Theme.gaugeValue
         }
 
         // Each kind's own
@@ -1749,6 +1749,7 @@ Page {
             // Drive, at the start of the phone's row. Its tools sit at the
             // right. With no session it stays, and says what it waits for
             ThemedButton {
+                id: driveButton
                 objectName: "dashDrive"
                 flat: true
                 compact: true
@@ -1757,9 +1758,9 @@ Page {
                 enabled: Bridge.connected && !root.editing
                 text: !Bridge.connected ? qsTr("Connect first")
                     : root.driving ? qsTr("Exit drive") : qsTr("Drive")
-                Accessible.name: !Bridge.connected ? qsTr("Connect a session to show the gauges full screen")
-                               : root.driving ? qsTr("Leave the drive view")
-                                              : qsTr("Show the gauges full screen")
+                Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
+                               : root.driving ? qsTr("Exit drive: leave the full-screen gauges")
+                                              : qsTr("Drive: show the gauges full screen")
                 onClicked: root.driving ? root.leaveDrive(true) : root.enterDrive()
             }
             Item {
@@ -1767,11 +1768,17 @@ Page {
                 Layout.fillWidth: true
                 visible: root.phoneForm
             }
-            // A row too narrow for every tool (a small window, a phone
-            // zoomed far in) drops Reset peaks, which edit mode's bar then
-            // offers (editResetPeaks)
-            readonly property bool holdsResetPeaks: width >= root.toolRowFull
+            // A row too narrow for every tool (a small window, a phone zoomed
+            // far in, or no session, whose Drive words are longer) drops Reset
+            // peaks, which edit mode's Pages row then offers (moreResetPeaks).
+            // Judged against the bar's width (the row can't shrink under its
+            // tools) and the tools' own widths, never the row's: no loop
+            readonly property real toolsWidth: (driveButton.visible ? driveButton.implicitWidth + spacing : 0)
+                + resetPeaksButton.implicitWidth + spacing + editButton.implicitWidth
+                + (nightLoader.active ? spacing + nightLoader.implicitWidth : 0)
+            readonly property bool holdsResetPeaks: topBar.width >= Math.max(root.toolRowFull, toolsWidth)
             ThemedButton {
+                id: resetPeaksButton
                 objectName: "resetPeaks"
                 flat: true
                 compact: root.compact || root.phoneForm
@@ -1780,6 +1787,7 @@ Page {
                 onClicked: root.resetPeaks()
             }
             ThemedButton {
+                id: editButton
                 objectName: "dashEdit"
                 compact: root.compact || root.phoneForm
                 horizontalPadding: root.phoneForm ? 18 : (compact ? 6 : 8)
@@ -1788,6 +1796,7 @@ Page {
                 onClicked: root.startEditing()
             }
             Loader {
+                id: nightLoader
                 objectName: "toolRowNight"
                 active: root.phoneForm
                 visible: active
@@ -1869,27 +1878,11 @@ Page {
                     root.confirmRemovePage = false
                 }
             }
-            // Reset peaks, when the tool row has no room for it
-            ThemedButton {
-                objectName: "editResetPeaks"
-                flat: true
-                compact: root.form === "phone"
-                visible: !header.holdsResetPeaks
-                text: qsTr("Reset peaks")
-                onClicked: root.resetPeaks()
-            }
             Item { Layout.fillWidth: true }
         }
 
-        // The pages' controls, in the page (never a menu), and Reset apart
-        // from them: it replaces every page, so it isn't one of the page's
-        // own controls. Wide, a gap pushes Reset to the row's end; narrow
-        // (a phone), where the controls wrap, the gap is a short one and
-        // Reset is the last of them. The gap's width is worked out from the
-        // bar's width and the controls' own, never the flow's: a hidden
-        // flow sizes itself from its children, and a child sized from it
-        // would loop. The layout takes the flow's unwrapped content as its
-        // least width unless told otherwise; 0 lets it wrap on a phone
+        // The pages' controls, then a gap, then Reset (it replaces every page,
+        // so it stands apart) and Reset peaks where the tool row has no room
         Flow {
             id: moreRow
             objectName: "dashMoreRow"
@@ -1947,10 +1940,14 @@ Page {
             }
             Item {
                 objectName: "moreResetGap"
+                // The bar's width and the controls' own, never the flow's: a
+                // hidden flow sizes itself from its children, and would loop
                 readonly property real used: pageName.width + moreAddPage.width + moreRemovePage.width
                     + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
                     + 2 * moreRow.spacing
-                width: Math.max(16, topBar.width - used - moreReset.width - 2 * moreRow.spacing)
+                readonly property real tail: moreReset.width
+                    + (moreResetPeaks.visible ? moreResetPeaks.width + moreRow.spacing : 0)
+                width: Math.max(16, topBar.width - used - tail - 2 * moreRow.spacing)
                 height: 1
             }
             ThemedButton {
@@ -1958,8 +1955,17 @@ Page {
                 objectName: "moreReset"
                 flat: true
                 text: qsTr("Reset")
-                Accessible.name: qsTr("Replace this form's pages with the built-in layout")
+                Accessible.name: qsTr("Reset: replace this form's pages with the built-in layout")
                 onClicked: root.confirmReset = true
+            }
+            // Reset peaks, when the tool row has no room for it
+            ThemedButton {
+                id: moreResetPeaks
+                objectName: "moreResetPeaks"
+                flat: true
+                visible: !header.holdsResetPeaks
+                text: qsTr("Reset peaks")
+                onClicked: root.resetPeaks()
             }
         }
         RowLayout {

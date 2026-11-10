@@ -34,7 +34,7 @@ QString AdapterRelay::start(const QString& uri, int port)
     const QString scheme = QStringLiteral("elm327://");
     QString rest = uri.trimmed();
     if (!rest.startsWith(scheme, Qt::CaseInsensitive)) {
-        return tr("A relay takes a paired Bluetooth adapter's URI, "
+        return tr("A relay takes a paired Bluetooth adapter's address, "
                   "elm327://bt:<address>: select one in the list");
     }
     rest = rest.mid(scheme.size());
@@ -48,7 +48,7 @@ QString AdapterRelay::start(const QString& uri, int port)
     }
     if (!rest.startsWith(QLatin1String("bt:"), Qt::CaseInsensitive) ||
         rest.size() <= 3) {
-        return tr("A relay takes a paired Bluetooth adapter's URI, "
+        return tr("A relay takes a paired Bluetooth adapter's address, "
                   "elm327://bt:<address>: select one in the list");
     }
     if (port < 0 || port > 65535) {

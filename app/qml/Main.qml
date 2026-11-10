@@ -99,6 +99,7 @@ ApplicationWindow {
 
     // Page indices, in the order of the sidebar and the stack
     readonly property int dashboardPage: 1
+    readonly property int livePage: 2
     readonly property int logPage: 4
     readonly property int recordingsPage: 5
     readonly property int settingsPage: 6
@@ -162,13 +163,24 @@ ApplicationWindow {
         openConnect()
         settingsView.backLeaves = true
     }
-    // A recording's Replay connects it in one tap and lands on Live; the
-    // address goes through Settings' field, as a typed one would, so the
-    // page shows what runs and its refusals read as the field's
+    // A recording's Replay connects it in one tap: the address goes through
+    // Settings' field, as a typed one would, and the result picks the page:
+    // Live once it connects, Settings' Connection page with the field's
+    // error when the core refuses it (the folder gone, the adapter held)
+    property string replayPending: ""
     function replayRecording(uri) {
         settingsView.pickRecording(uri)
+        replayPending = uri
         settingsView.requestConnect(uri)
-        gotoPage(2)
+    }
+    Connections {
+        target: Bridge
+        function onConnectResult(uri, error) {
+            if (root.replayPending === "" || uri !== root.replayPending)
+                return
+            root.replayPending = ""
+            root.gotoPage(error === "" ? root.livePage : root.settingsPage)
+        }
     }
     // A log's time as m:ss, or h:mm:ss past an hour; 0:00 for a value
     // that isn't a time
@@ -382,8 +394,9 @@ ApplicationWindow {
                             color: Theme.text
                         }
 
-                        // The link state and URI: the address elides first, the
-                        // word never. With the tab bar a tap opens the Log it omits
+                        // The link state and address: the address elides first, the
+                        // word only at a narrow phone's top zoom. With the tab bar a
+                        // tap opens the Log it omits
                         AbstractButton {
                             id: pill
                             objectName: "linkPill"
@@ -410,7 +423,10 @@ ApplicationWindow {
                             bottomPadding: 0
                             enabled: root.isCompact
                             text: address !== "" ? qsTr("%1 · %2").arg(stateWord).arg(address) : stateWord
-                            Accessible.name: enabled ? qsTr("%1: show the log").arg(text) : text
+                            // What the pill shows, the recording note included
+                            readonly property string spoken: recordingNote.visible
+                                                             ? text + " " + recordingNote.text : text
+                            Accessible.name: enabled ? qsTr("%1: show the log").arg(spoken) : spoken
                             onClicked: root.gotoPage(root.logPage)
                             // A dot and a word at rest, no capsule
                             background: Rectangle {
@@ -427,8 +443,14 @@ ApplicationWindow {
                                     radius: 4
                                     color: pill.tone
                                 }
+                                // With an address the address gives way and the word
+                                // keeps its width; alone, the word elides
                                 Label {
                                     objectName: "linkPillText"
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: pill.address !== "" ? implicitWidth : 0
+                                    Layout.maximumWidth: implicitWidth
+                                    elide: Text.ElideRight
                                     font.pixelSize: Theme.fontCaption
                                     color: Theme.text
                                     text: pill.stateWord
@@ -447,6 +469,7 @@ ApplicationWindow {
                                 // already, which is why Mark stands where Start log
                                 // would; the address gives way to the word
                                 Label {
+                                    id: recordingNote
                                     objectName: "linkPillRecording"
                                     visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive
                                     font.pixelSize: Theme.fontCaption
@@ -462,6 +485,7 @@ ApplicationWindow {
                             objectName: "frameRate"
                             visible: Theme.developerMode
                             font.pixelSize: Theme.fontCaption
+                            font.features: Theme.valueFeatures
                             color: Theme.textDim
                             text: qsTr("%1 frames/s").arg(root.framesPerSecond)
                         }
@@ -524,9 +548,11 @@ ApplicationWindow {
                         // A log's Stop log takes its place while the log runs
                         HeaderButton {
                             objectName: "disconnectButton"
-                            // Ending a session is quiet; Connect... is primary
+                            // Ending a session is quiet; Connect... is primary, unless
+                            // Dash shows its connect list, whose Connect is the primary
                             flat: Bridge.connected || Bridge.disconnecting
-                            highlighted: !flat
+                            highlighted: !flat && !(root.currentPage === root.dashboardPage
+                                                    && dashboardView.connectShown)
                             visible: !Bridge.logActive
                                      && (Bridge.connected || root.currentPage !== root.settingsPage)
                             // A teardown can take seconds with a wedged adapter; no

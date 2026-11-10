@@ -170,7 +170,7 @@ TestCase {
         verify(drive.visible, "on the phone's row")
         compare(drive.enabled, false)
         compare(drive.text, "Connect first", "and it says what it waits for")
-        compare(drive.Accessible.name, "Connect a session to show the gauges full screen")
+        compare(drive.Accessible.name, "Connect first: a session shows the gauges full screen")
         s.dash.enterDrive()
         compare(s.dash.driving, false, "and nothing else enters it")
     }

@@ -241,11 +241,8 @@ Page {
         anchors.margins: Theme.pageMargin
         spacing: 12
 
-        // The title and the actions: wide, one row, the actions at the
-        // right with Clear codes last; narrow (a phone), the title above
-        // and the actions under it in two rows chosen on purpose, Read
-        // again and Clear codes, then Save report across the row, so none
-        // wraps alone and none is squeezed beside the title
+        // Wide, the title and the actions share a row, Clear codes last; on a
+        // phone the title stands alone and the actions take two rows under it
         GridLayout {
             id: headerGrid
             readonly property bool twoRows: root.width < 560

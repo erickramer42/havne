@@ -458,10 +458,10 @@ TestCase {
         // The phone's list, not the hidden side list's row of the same name
         const row = find(find(page, "settingsList"), "settingsRow_display")
         const summary = find(row, "settingsRowSummary")
-        tryVerify(() => row.width >= 200, 2000, "a phone's row: " + row.width)
+        tryVerify(() => row.width >= 200, 2000, "a phone's row")
         verify(summary.visible, "the value shows at a phone's width")
         page.width = 224
-        tryVerify(() => row.width < 200, 2000, "a narrow row: " + row.width)
+        tryVerify(() => row.width < 200, 2000, "a narrow row")
         verify(!summary.visible, "the value gives way")
         page.width = 384
         tryVerify(() => summary.visible, 2000, "and comes back")
@@ -501,7 +501,7 @@ TestCase {
         // Wide, each row is one row
         page.width = 1000
         const moreRow = find(page, "vehicleMoreRow")
-        tryVerify(() => moreRow.parent.width >= 560, 3000, "the section widens: " + moreRow.parent.width)
+        tryVerify(() => moreRow.parent.width >= 560, 3000, "the section widens")
         verify(waitForPolish(moreRow), "the actions laid out")
         verify(waitForPolish(find(page, "vehicleNew").parent), "the field's row laid out")
         compare(rowsOf(more, column).length, 1, "one row of actions: "

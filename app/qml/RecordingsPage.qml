@@ -12,8 +12,8 @@ import App
 pragma ComponentBehavior: Bound
 
 // The recordings a session saved (ADR-0049), newest first: Open shows one
-// in the viewer, Replay puts its replay:// URI in Settings' field, and the
-// viewer's Replay in Settings the part in view's (?from=&to=). The
+// in the viewer, Replay connects it as a session in one tap, and the
+// viewer's Replay the part in view (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
 // wheel or a pinch to zoom, a tap to place the cursor), markers and the
@@ -73,6 +73,10 @@ Page {
     property string openedTitle: ""
     property string openedUri: ""
     readonly property bool viewing: recording.state !== RecordingView.Closed
+    // A replay can start: no session running, starting or ending, and no
+    // relay holding the adapter (ADR-0047), as Settings' Connect judges it
+    readonly property bool sessionIdle: !Bridge.connected && !Bridge.connecting
+                                        && !Bridge.disconnecting && !Relay.running
 
     // The chart maximized: it takes the page but for the zoom row, and the
     // cursor's values move to a strip beside it. Kept apart for a short
@@ -506,13 +510,14 @@ Page {
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
-        // A plotted signal with no samples has nothing to draw, so it's
-        // left out: with every plotted one empty, the chart says so
+        // A plotted signal with no samples in this recording has nothing to
+        // draw here, so its columns aren't read; the compared recording's
+        // of the same name still draw. With nothing drawn the chart says so
         const sigs = recording.signalList
-        const indexes = sigs.filter(s => !s.isText && root.plotted[s.index] && s.samples > 0)
-                            .map(s => s.index)
-        if (indexes.length === 0)
+        const plotted = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
+        if (plotted.length === 0)
             return []
+        const indexes = plotted.filter(i => sigs[i].samples > 0)
         const spanS = (viewT1 - viewT0) / 1000
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
         if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
@@ -531,7 +536,7 @@ Page {
         const g0 = Math.floor(viewT0 / colMs) * colMs
         const gn = Math.max(1, Math.ceil((viewT1 - g0) / colMs - 1e-9))
         const g1 = g0 + gn * colMs
-        const out = recording.columns(indexes, g0, g1, gn).map(c => {
+        const out = indexes.length === 0 ? [] : recording.columns(indexes, g0, g1, gn).map(c => {
             const s = sigs[c.index]
             return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
                      scaleKey: c.index, decimals: s.decimals, unit: s.unit,
@@ -541,8 +546,9 @@ Page {
         if (!compareAligned)
             return out
         const theirs = compare.signalList
-        const pairs = indexes.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
-                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText)
+        const pairs = plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
+                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
+                                          && theirs[p.theirs].samples > 0)
         if (pairs.length === 0)
             return out
         const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,
@@ -732,7 +738,7 @@ Page {
         }
     }
     function findingColor(kind) {
-        return kind === 7 ? Theme.info : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
+        return kind === 7 ? Theme.textDim : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
     }
 
     // Where the values can come from (ADR-0049's appendix of 2026-11-06):
@@ -842,11 +848,20 @@ Page {
                                         && !chartMaximized
     readonly property var plottedNames: recording.signalList
         .filter(s => !s.isText && root.plotted[s.index] === true).map(s => s.name)
-    // The plotted signals the recording holds no values of, when none of
-    // the plotted has any: the chart then has nothing to draw and says so
+    // The plotted signals, when none of them draws: no values in this
+    // recording, nor in the compared one's signal of the same name. The
+    // chart then has nothing to draw and says so
     readonly property var plottedNoValues: {
         const plotted = recording.signalList.filter(s => !s.isText && root.plotted[s.index] === true)
-        return plotted.length > 0 && plotted.every(s => s.samples === 0) ? plotted.map(s => s.name) : []
+        return plotted.length > 0 && plotted.every(s => !root.draws(s)) ? plotted.map(s => s.name) : []
+    }
+    function draws(s) {
+        if (s.samples > 0)
+            return true
+        if (!compareAligned)
+            return false
+        const theirs = compare.signalList[root.compareByName[s.name]]
+        return theirs !== undefined && !theirs.isText && theirs.samples > 0
     }
     function noValuesText(names) {
         const list = names.length <= 2 ? names.join(qsTr(" and "))
@@ -1371,7 +1386,7 @@ Page {
                         text: enabled ? qsTr("Replay") : qsTr("Disconnect to replay")
                         // Darker than its row, so it reads as a button there
                         baseColor: Theme.surface
-                        enabled: !Bridge.connected && !Bridge.connecting
+                        enabled: root.sessionIdle
                         Layout.maximumWidth: enabled ? 96 : 160
                         Accessible.name: qsTr("Replay %1").arg(recordingRow.modelData.title)
                         onClicked: root.replayRequested(recordingRow.modelData.uri)
@@ -1404,7 +1419,7 @@ Page {
             ThemedButton {
                 objectName: "replayView"
                 visible: recording.state === RecordingView.Open && recording.hasFrames
-                enabled: !(Bridge.connected || Bridge.connecting)
+                enabled: root.sessionIdle
                 text: enabled ? qsTr("Replay") : qsTr("Disconnect to replay")
                 Accessible.name: qsTr("Replay the part in view as a session")
                 onClicked: root.replayRequested(root.stretchUri())

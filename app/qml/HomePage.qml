@@ -244,12 +244,14 @@ Rectangle {
                 }
             }
 
+            // Secondary beside the header's primary; ending a session is quiet
             ThemedButton {
+                objectName: "homeConnect"
                 text: Bridge.connected ? qsTr("Disconnect")
                     : Bridge.connecting ? qsTr("Connecting…")
                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                     : qsTr("Connect…")
-                highlighted: !Bridge.connected
+                flat: Bridge.connected
                 enabled: !Bridge.connecting && !Bridge.disconnecting
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: 8

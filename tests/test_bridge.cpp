@@ -11122,7 +11122,7 @@ TEST(BridgeTest, HealthReportOfTheMockIsWrittenWhereChosen)
         bridge.saveHealthReport(QUrl::fromLocalFile(target), 0);
     EXPECT_FALSE(none.value(QStringLiteral("ok")).toBool());
     EXPECT_EQ(none.value(QStringLiteral("words")).toString().toStdString(),
-              "Not connected");
+              "No session");
     EXPECT_FALSE(QFile::exists(target));
 
     ASSERT_TRUE(

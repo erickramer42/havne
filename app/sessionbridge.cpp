@@ -1654,7 +1654,7 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
                                             const QString& baselineFolder)
 {
     if (m_session == nullptr || !connected()) {
-        const QString words = QStringLiteral("Not connected");
+        const QString words = QStringLiteral("No session");
         emit logMessage(
             QStringLiteral("Health report not saved: %1").arg(words));
         return {{QStringLiteral("ok"), false},

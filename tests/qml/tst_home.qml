@@ -52,6 +52,22 @@ TestCase {
         return out
     }
 
+    // Home's Connect... is secondary beside the header's primary, and
+    // Disconnect is quiet
+    function test_theConnectButtonRanksUnderTheHeaders() {
+        const page = createPage(380, 800)
+        const button = find(page, "homeConnect")
+        compare(button.text, "Connect…")
+        verify(!button.highlighted, "secondary")
+        verify(!button.flat, "not quiet: it is the page's action")
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        tryCompare(button, "text", "Disconnect", 5000)
+        verify(button.flat, "ending a session is quiet")
+        verify(!button.highlighted)
+        Bridge.disconnectSession()
+        tryCompare(button, "text", "Connect…", 5000)
+    }
+
     // Developer mode's hint line is the longest
     function test_uprightEverythingFitsTheWidth() {
         Theme.developerMode = true

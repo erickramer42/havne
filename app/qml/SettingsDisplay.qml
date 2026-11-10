@@ -85,14 +85,8 @@ ColumnLayout {
     // Night (ADR-0058): off, on, or on a schedule; and its style, amber or
     // red on near black, for a cabin after dark. Each takes effect at once;
     // Theme.qml stores it. The Dashboard's switch is the same control
-    // Wide, the caption and the three modes share a row; narrow (a
-    // phone), the caption takes a row and the three split the next, so
-    // none wraps alone under the other two. A grid, not a flow: its
-    // columns follow the section's width, and no child's width is bound
-    // to the row's own (a flow sized from children sized from it loops).
-    // The modes fill, capped at their own width when wide: a child that
-    // doesn't fill sets the grid's minimum, which would hold the section
-    // at the wide width
+    // Wide, the caption and the three modes share a row; on a phone the
+    // caption takes a row and the three split the next, so none wraps alone
     GridLayout {
         id: nightRow
         Layout.fillWidth: true

@@ -63,13 +63,8 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // Wide, the field and its three buttons share a row; narrower (a
-    // phone), the field takes a row and the three buttons split the next,
-    // so none wraps alone. A grid, not a flow: its columns follow the
-    // section's width, and no child's width is bound to the row's own (a
-    // flow sized from children sized from it loops). Every child fills,
-    // capped at its own width when wide: a child that doesn't fill sets
-    // the grid's minimum, which would hold the section at the wide width
+    // Wide, the field and its three buttons share a row; on a phone the
+    // field takes a row and the three split the next, so none wraps alone
     GridLayout {
         id: labelRow
         Layout.fillWidth: true
@@ -118,11 +113,8 @@ ColumnLayout {
         }
     }
 
-    // The minor and destructive actions apart from New, all quiet, in a
-    // row of their own under the page's zoom (a Popup menu keeps the
-    // window's scale and the Basic style's row height), each destructive
-    // one still confirming. Narrow, two share each row, so none wraps
-    // alone; a grid as the row above, for the same reason
+    // The minor and destructive actions apart from New, all quiet, each
+    // destructive one confirming; on a phone two share each row
     GridLayout {
         id: moreRow
         objectName: "vehicleMoreRow"
