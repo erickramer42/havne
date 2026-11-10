@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -1041,8 +1042,8 @@ TEST(RecordingViewTest, HealthReportNamesTheBaselineItIsGiven)
 }
 
 // A report under way when the viewer closes or opens another recording
-// ends unannounced: its thread runs out (core's export can't stop
-// midway), and the result is dropped
+// ends unannounced: its thread runs out (only the viewer's destruction
+// stops it), and the result is dropped
 TEST(RecordingViewTest, AReportEndingAfterACloseIsDropped)
 {
     QTemporaryDir root;
@@ -1067,6 +1068,47 @@ TEST(RecordingViewTest, AReportEndingAfterACloseIsDropped)
     v.open(folder);
     ASSERT_TRUE(waitFor([&] { return !v.reporting() && settled(v); }));
     EXPECT_EQ(saved, 0) << "another open drops it too";
+}
+
+// A report under way when the viewer goes (the app quitting) stops at
+// core's next ask: the destructor's wait ends with no file written, where
+// the same report run to its end writes one
+TEST(RecordingViewTest, AReportStopsWhenTheViewerGoes)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    {
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::Append));
+        QByteArray rows;
+        for (int i = 0; i < 200000; ++i) {
+            const QByteArray us = QByteArray::number(400000 + i * 100);
+            rows += us + ',' + us + ",0x7E8,0x0,04 41 0C 0C 90 00 00 00\n";
+        }
+        ASSERT_EQ(frames.write(rows), rows.size());
+    }
+    auto v = std::make_unique<RecordingView>();
+    v->open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(*v); }, 30000));
+    ASSERT_EQ(v->state(), RecordingView::Open) << v->error().toStdString();
+    QList<QVariantMap> saved;
+    QObject::connect(v.get(), &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    const QUrl whole =
+        QUrl::fromLocalFile(root.path() + QStringLiteral("/whole.txt"));
+    ASSERT_TRUE(v->saveHealthReport(whole, 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }, 30000));
+    ASSERT_TRUE(saved[0].value(QStringLiteral("ok")).toBool())
+        << saved[0].value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_TRUE(QFile::exists(whole.toLocalFile()));
+
+    const QUrl stopped =
+        QUrl::fromLocalFile(root.path() + QStringLiteral("/stopped.txt"));
+    ASSERT_TRUE(v->saveHealthReport(stopped, 0));
+    v.reset();
+    EXPECT_FALSE(QFile::exists(stopped.toLocalFile()));
 }
 
 // A CSV import holds values alone, and Save report stays offered on it:

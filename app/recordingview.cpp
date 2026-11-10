@@ -170,6 +170,7 @@ RecordingView::RecordingView(QObject* parent) : QObject(parent) {}
 
 RecordingView::~RecordingView()
 {
+    m_reportStop = true;
     stop();
     // Its end, posted to this object, is dropped with it
     if (m_reportWorker.joinable()) {
@@ -444,7 +445,7 @@ bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
         o.folder_utf8 = folder.constData();
         o.baseline_folder_utf8 =
             baseline.isEmpty() ? nullptr : baseline.constData();
-        const QVariantMap result = writeHealthReport(o, url);
+        const QVariantMap result = writeHealthReport(o, url, &m_reportStop);
         QMetaObject::invokeMethod(
             this,
             [this, result, generation] { reportFinished(result, generation); },

@@ -229,9 +229,11 @@ private:
 
     std::thread m_worker;
     std::atomic<bool> m_cancel{false};
-    // The health report's: joined when it posts its end, or at destruction
-    // (core's export can't be stopped midway)
+    // The health report's: joined when it posts its end, or at
+    // destruction, which sets m_reportStop first so core's export stops
+    // at its next ask
     std::thread m_reportWorker;
+    std::atomic<bool> m_reportStop{false};
     bool m_reporting = false;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped

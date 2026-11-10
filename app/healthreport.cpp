@@ -74,7 +74,17 @@ QByteArray healthBaselineArgument(const QString& folder)
                             : QDir::toNativeSeparators(folder).toUtf8();
 }
 
-QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url)
+namespace {
+
+int stopAsked(void* user)
+{
+    return static_cast<const std::atomic<bool>*>(user)->load() ? 1 : 0;
+}
+
+} // namespace
+
+QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
+                              std::atomic<bool>* stop)
 {
     // Core's own name in a folder of the app's: never the vehicle's label
     QTemporaryDir dir(QDir::tempPath() +
@@ -89,7 +99,10 @@ QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url)
     options.out_path_utf8 = out.constData();
 
     ecuio_health_report_t report{};
-    const ecuio_status_t rc = ecuio_health_export(&options, &report);
+    const ecuio_status_t rc =
+        stop != nullptr
+            ? ecuio_health_export_with(&options, stopAsked, stop, &report)
+            : ecuio_health_export(&options, &report);
     if (rc != ECUIO_OK) {
         // Core's words name no path and no value
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
