@@ -51,15 +51,19 @@ TestCase {
         return a
     }
 
+    // Power through readPower and a tick of the timer, so a later tick
+    // reads the same and a slow run can't undo it
     function test_theScreenFlagFollowsTheRule() {
-        const a = awake()
+        let power = false
+        const a = awake({ readPower: () => power })
         compare(PhoneWindow.keepScreenOn, false)
         a.connected = true
         a.dashShown = true
         tryCompare(PhoneWindow, "keepScreenOn", true)
         a.dashShown = false
         tryCompare(PhoneWindow, "keepScreenOn", false, 3000, "off Dash on battery it sleeps")
-        a.hasPower = true
+        power = true
+        findChild(a, "powerTimer").triggered()
         tryCompare(PhoneWindow, "keepScreenOn", true)
         a.connected = false
         tryCompare(PhoneWindow, "keepScreenOn", false, 3000, "no session, no flag")

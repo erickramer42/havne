@@ -34,6 +34,8 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
         Bridge.deleteUnusedSignalFiles([])
+        Theme.night = "off"
+        Theme.nightStyle = "amber"
     }
 
     function sameColor(actual, expected, what) {
@@ -72,7 +74,7 @@ TestCase {
         verify(spy.count >= 1, "painted again for the night theme")
         const before = spy.count
         usePalette("nightAmber")
-        tryVerify(() => spy.count > before, 2000, "and again for low glare")
+        tryVerify(() => spy.count > before, 2000, "and again for the amber style")
         usePalette("dark")
     }
 

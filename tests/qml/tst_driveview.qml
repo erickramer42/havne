@@ -452,8 +452,7 @@ TestCase {
     }
 
     // Pressed over the delay's first part, the delay starts over: the bars
-    // outlast the first delay by the press's own time (a 1 s margin each way
-    // around a 3 s delay)
+    // outlast the first delay by the press's own time
     function test_aTouchRestartsTheDelayAndTheButtonStillWorks() {
         const s = driven()
         enterOn(s)
@@ -606,11 +605,16 @@ TestCase {
         verify(dashSaved(s), "the session's end doesn't clear it")
     }
 
+    // The bridge's "Replay finished" line is the recording's end
     function test_aRecordingThatEndsKeepsTheView() {
         const s = phoneMain()
+        let finished = false
+        const heard = line => { if (line.indexOf("Replay finished") === 0) finished = true }
+        Bridge.logMessage.connect(heard)
         connect(replayUri())
         enterOn(s)
-        wait(1500)
+        tryVerify(() => finished, 10000, "the replay plays to its end")
+        Bridge.logMessage.disconnect(heard)
         verify(Bridge.connected, "still connected at the recording's end")
         verify(s.dash.driving, "a replay user may rewind")
     }
