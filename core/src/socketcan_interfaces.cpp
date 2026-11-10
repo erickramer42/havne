@@ -133,8 +133,8 @@ bool socketcan_read_links(void (*visit)(const socketcan_link& link, void* user),
         errno = err;
         return false;
     }
-    /* The kernel's dump comes in messages of up to a page or so each;
-     * 32 KB holds any one of them, aligned for nlmsghdr */
+    /* The kernel's dump comes in messages of up to a page or so each; 32 KB
+     * holds any one, aligned for nlmsghdr */
     alignas(struct nlmsghdr) unsigned char buf[32768];
     for (;;) {
         const ssize_t n = recv(fd, buf, sizeof buf, 0);
@@ -210,9 +210,9 @@ struct list_state {
 void list_visit(const socketcan_link& link, void* user)
 {
     list_state* s = static_cast<list_state*>(user);
-    /* Straight into the caller's slot while there's room; a link past
-     * the capacity is still counted. No local copied into the list:
-     * GCC 13 took that copy for a dangling pointer */
+    /* Straight into the caller's slot (a link past capacity is still
+     * counted), not via a local: GCC 13 took that copy for a dangling
+     * pointer */
     ecuio_can_interface_t spare;
     ecuio_can_interface_t* out =
         s->count < s->capacity ? &s->list[s->count] : &spare;

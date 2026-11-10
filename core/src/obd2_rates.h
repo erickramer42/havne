@@ -9,14 +9,13 @@
 
 #include <stdint.h>
 
-/* ADR-0039 section 3: the Service 01 PIDs the obd2 set asks in the fast class,
- * what a driver or a logged pull watches change within a second: load,
- * the short-term trims, fuel pressure in each of J1979's forms, MAP,
- * rpm, speed, timing, MAF, throttle, the wide-range sensors' lambda,
- * commanded lambda and the pedal. Everything else the set asks is slow:
- * temperatures, the other pressures, the voltage, long-term trims, the
- * narrow-band sensors, commanded throttle, torque, counters and
- * distances. */
+/* ADR-0039 section 3: the Service 01 PIDs asked in the fast class, those
+ * that change within a second (load, short-term trims, fuel pressure in
+ * each of J1979's forms, MAP, rpm, speed, timing, MAF, throttle, wide-range
+ * lambda, commanded lambda, the pedal). Everything else is slow
+ * (temperatures, the other pressures,
+ * voltage, long-term trims, narrow-band sensors, commanded throttle,
+ * torque, counters, distances). */
 constexpr uint8_t ECUIO_OBD2_FAST_PIDS[] = {
     0x04,                                           /* load */
     0x06, 0x08,                                     /* short-term trims */

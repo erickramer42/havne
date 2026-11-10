@@ -33,13 +33,10 @@ namespace {
 
     enum class ProfileQuery { Absent, Valid, BadValue };
 
-    /* The LAST `profile` value of a split query. Tri-state: a
-     * present-but-malformed value (empty or over-length) is INVALID and
-     * fails session_create: it must NEVER silently downgrade to the
-     * scheme default, which would hand a typo'd ?profile=raw a decoding
-     * session or vice versa. Any malformed occurrence fails; last-wins
-     * applies only across valid values. out_val holds
-     * ECUIO_PROFILE_NAME_MAX + 1 bytes. */
+    /* The last `profile` value of a split query. A malformed one (empty or
+     * over-length) fails session_create, never falls back to the scheme
+     * default (a typo'd raw would decode); last-wins applies across valid
+     * values only. out_val holds ECUIO_PROFILE_NAME_MAX + 1 bytes. */
     ProfileQuery query_profile(const ecuio_uri_query& q, char* out_val)
     {
         bool found = false;
@@ -78,18 +75,16 @@ namespace {
     }
 
     /* The list a dispatch calls (ADR-0002): copied under the callback
-     * mutex, called unlocked. It sits on the stack while the list fits,
-     * as the app's one callback does, so a frame costs the worker no
-     * allocation; a longer list is copied to the heap. */
+     * mutex, called unlocked. On the stack while it fits, as the app's one
+     * callback does (no allocation per frame), else on the heap. */
     template <typename Callback>
     class snapshot_of {
     public:
         using entry = std::pair<Callback, void*>;
 
         /* Copies list; the caller holds the mutex. False when the heap
-         * copy failed: the caller drops what it would have delivered,
-         * since a bad_alloc can't leave an extern "C" call on the
-         * worker. */
+         * copy failed: the caller drops the delivery (no bad_alloc may
+         * leave an extern "C" call). */
         bool take(const std::vector<entry>& list)
         {
             count_ = list.size();
@@ -196,11 +191,10 @@ void ecuio_detail_set_vendor(const char* call, long status,
         ecuio_text_one_line(text);
     }
     const char* name = ecuio_pt_status_name(status);
-    /* An open refused with a status of the vendor's own and no text says
-     * nothing a user can act on; the two usual causes, for any vendor,
-     * are no adapter and another program holding it (the VX answers 34
-     * to both: docs/bench-sessions/2026-11-02-vehicle.md). The vendor's
-     * text, when it gave one, goes first below. */
+    /* A vendor status with no text isn't actionable; the usual causes are
+     * no adapter or another program holding it (the VX answers 34 to both:
+     * docs/bench-sessions/2026-11-02-vehicle.md). The vendor's text goes
+     * first below. */
     const bool open_hint = name == nullptr && strcmp(call, "PassThruOpen") == 0;
     if (name == nullptr) {
         name = "vendor-specific";
@@ -514,10 +508,8 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
     }
     {
         std::lock_guard<std::mutex> lock(session->focus_mutex);
-        /* A session that asks requests refuses a focus that would leave
-         * it nothing to ask: none of the picks is a request it can make
-         * (askable, kept by its worker). One that asks nothing (the mock,
-         * a replay, listening) takes any focus. */
+        /* A session that asks requests refuses a focus with no askable
+         * pick; one that asks nothing (mock, replay, listening) takes any. */
         if (count > 0 && session->focus_requests) {
             bool asks = false;
             for (uint32_t i = 0;
@@ -799,10 +791,9 @@ ecuio_status_t ecuio_session_create(
         return ECUIO_ERR_NO_TRANSPORT;
     }
 
-    /* The query, split once (uri_query.h) and checked against the keys
-     * the scheme's transport reads, before anything attaches: a
-     * malformed query or an unknown key fails with no DLL load and no
-     * discovery, the same way on every scheme. */
+    /* The query, split once (uri_query.h) and checked against the scheme's
+     * keys before anything attaches: a bad query or an unknown key fails
+     * with no DLL load and no discovery, the same way on every scheme. */
     const char* scheme = is_mock        ? "mock://"
                          : is_replay    ? "replay://"
                          : is_elm327    ? "elm327://"
@@ -836,10 +827,9 @@ ecuio_status_t ecuio_session_create(
         return ECUIO_ERR_BAD_URI;
     }
 
-    /* ADR-0013 profile selection: default per scheme, ?profile=
-     * override. Resolved and validated BEFORE any transport attach so
-     * an unknown or MALFORMED profile fails fast with no DLL load and
-     * no discovery. */
+    /* ADR-0013 profile selection (a default per scheme, ?profile= over it),
+     * resolved before any attach so a bad profile fails with no DLL load
+     * and no discovery. */
     char profile_name[ECUIO_PROFILE_NAME_MAX + 1];
     const char* chosen = nullptr;
     switch (query_profile(query, profile_name)) {
@@ -1125,12 +1115,10 @@ void ecuio_session_dispatch_callbacks(
     ECUIO_PROBE5(frame, session, frame->arbitration_id, frame->flags,
                  frame->data_length, frame->timestamp_us);
 
-    /* A recording's time, read before any callback (ADR-0049 section 1)
-     * when a recorder looks attached; the link is the session's from
-     * create, its recorder attached at any time (ADR-0056 section 3),
-     * so the zero it counts from is read once the recorder is pinned
-     * below: one that comes or goes meanwhile lends its zero to no
-     * other's frame */
+    /* A recording's time, read before any callback (ADR-0049 section 1);
+     * a recorder attaches at any time (ADR-0056 section 3), so the zero is
+     * read once it is pinned below: one that comes or goes meanwhile lends
+     * its zero to no other's frame */
     ecuio_record_link* link = session->record_link.get();
     uint64_t now = link->active.load(std::memory_order_relaxed) != nullptr
                        ? ecuio_clock_us()

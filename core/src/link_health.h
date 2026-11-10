@@ -22,9 +22,8 @@
 constexpr uint32_t LINK_BACKOFF_BASE_MS = 100;
 constexpr uint32_t LINK_BACKOFF_CAP_MS  = 5000;
 
-/* The wait that follows one of `ms`: twice as long, clamped to the cap.
- * The doubled value is what gets clamped, so no wait exceeds the cap
- * even though the cap isn't the base times a power of two. */
+/* The wait that follows one of `ms`: doubled, then clamped, so none exceeds
+ * the cap (which isn't the base times a power of two). */
 constexpr uint32_t link_backoff_next(uint32_t ms)
 {
     return (ms >= LINK_BACKOFF_CAP_MS / 2) ? LINK_BACKOFF_CAP_MS : ms * 2;
@@ -71,10 +70,9 @@ inline void link_set_state(link_health& h, int32_t state)
     }
 }
 
-/* A transition into a failure that counts an episode. The count goes
- * first: ecuio_session_get_error_state reads the code, then the count,
- * so a reader that sees the code sees its episode (replay's stop_early
- * does the same). */
+/* A transition into a failure that counts an episode. The count goes first:
+ * get_error_state reads the code, then the count, so a reader that sees the
+ * code sees its episode (replay's stop_early does the same). */
 inline void link_begin_episode(link_health& h, int32_t state)
 {
     h.episodes.fetch_add(1);
@@ -105,10 +103,9 @@ inline void link_count_quiet(link_health& h)
  *                         mode, or nothing left to ask), one more quiet
  *                         read
  * While there is something to ask the quiet count is the requests' own
- * (link_on_request_timeout), and the empty reads between two requests
- * mean nothing. A frame for no channel of ours answers nothing, so it
- * moves no state; it only shows the adapter reads, which ends the
- * backoff. */
+ * (link_on_request_timeout), and the empty reads between two requests mean
+ * nothing. A frame for no channel of ours moves no state;
+ * it only shows the adapter reads, which ends the backoff. */
 inline void link_on_read(link_health& h, bool hard_failure, bool matched,
                          bool reads_count)
 {
@@ -158,13 +155,12 @@ inline void link_on_request_timeout(link_health& h)
     }
 }
 
-/* Write-side link health, separate from reads, because a bus where no
- * node ACKs (ignition off, ECU asleep) fails writes while the adapter
- * still reads cleanly; calling that a hard failure would blame the
- * adapter. A failed write latches REQUEST_FAILED with ONE episode; a
- * successful write clears it at once, since an accepted write proves
- * requests flow. A hard READ failure outranks it; quiet reads can't
- * downgrade it. */
+/* Write-side link health, apart from reads: a bus where no node ACKs
+ * (ignition off, ECU asleep) fails writes while the adapter reads cleanly,
+ * and a hard failure would blame the adapter. A failed write latches
+ * REQUEST_FAILED with one episode; a successful one clears it at once,
+ * since an accepted write proves requests flow. A
+ * hard READ failure outranks it; quiet reads can't downgrade it. */
 inline void link_on_write(link_health& h, bool sent)
 {
     if (sent) {

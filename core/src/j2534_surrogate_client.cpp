@@ -36,11 +36,9 @@ struct ecuio_j2534_sur_handle {
     DWORD transact_ms = kTransactTimeoutMs;
     bool    pipe_connected = false;
     HANDLE pipe = INVALID_HANDLE_VALUE;
-    /* The manual-reset event every overlapped operation on the pipe
-     * waits on. One per handle is enough: a handle is used by one
-     * thread at a time (the connect thread, then the worker, then the
-     * teardown thread), and each operation completes, or is canceled
-     * and drained, before the next begins. */
+    /* Manual-reset event for every overlapped pipe operation; one is enough
+     * because one thread uses a handle at a time and each operation ends
+     * (or is canceled and drained) before the next. */
     HANDLE io_event = nullptr;
     HANDLE job = nullptr;
     HANDLE process = nullptr;
@@ -52,17 +50,13 @@ struct ecuio_j2534_sur_handle {
     uint32_t next_request_id = 1;
     uint32_t pending_response_id = 0;   /* response in flight from a
                                            timed-out transaction */
-    /* The child missed two deadlines in a row: a transaction's, then
-     * the wait for its late reply. A slow vendor answers inside the
-     * second; a wedged one doesn't. From then on every transaction
-     * fails at once instead of costing another timeout each (a
-     * teardown would otherwise pay one per filter, the disconnect and
-     * the close), and close kills the child without the polite
-     * shutdown. */
+    /* The child missed a transaction's deadline, then the wait for its late
+     * reply, which a slow vendor answers inside: wedged. Every transaction
+     * now fails at once (a teardown would otherwise pay a timeout each) and
+     * close kills the child without the polite shutdown. */
     bool unresponsive = false;
-    /* Batch cache: one OP_READ returns up to 16 messages; dispensed one
-     * per read_msg call. Worker-thread-only by construction (the
-     * transport serializes all reads through its worker). */
+    /* Batch cache: one OP_READ returns up to 16 messages, dispensed one per
+     * read_msg. Worker-thread-only. */
     ecuio_pt_rx_t pending[ECUIO_SUR_MAX_FRAMES_PER_READ];
     uint32_t pending_count = 0;
     uint32_t pending_next = 0;
@@ -73,10 +67,9 @@ struct ecuio_j2534_sur_handle {
 
 namespace {
 
-/* One surrogate per DLL architecture (ADR-0025): the x86 exe, and the
- * x64 one that also hosts a PE for any other machine, so Windows
- * answers it as the app's own process would. Each has its own
- * relocation variable. */
+/* One surrogate per DLL architecture (ADR-0025): x86, and x64, which also
+ * hosts a PE for any other machine so Windows answers it as the app's own
+ * process would. Each has its own relocation variable. */
 struct SurrogateExe {
     const wchar_t* name;
     const char* name8;
@@ -112,11 +105,9 @@ DWORD open_timeout_ms()
     return kOpenTimeoutMs_default;
 }
 
-/* Client trace line: to stderr, and to the session log when there is
- * one, so a GUI launch (no stderr) keeps the client's half next to the
- * child's. Stamped with local wall-clock
- * time, like the child's lines. One WriteFile per line, as on the
- * child's side, so the two never splice mid-line. h may be null. */
+/* Client trace line to stderr and the session log (a GUI launch has no
+ * stderr), local-time stamped like the child's. One WriteFile per line so
+ * the two sides never splice mid-line. h may be null. */
 void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
 {
     SYSTEMTIME t;
@@ -147,9 +138,8 @@ void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
 
 #define SUR_LOG(h, ...) sur_log((h), __VA_ARGS__)
 
-/* Deletes the oldest kept logs past SUR_LOG_KEEP (surrogate_log_names.h:
- * a suite run spawns dozens of sessions, so this bounds TEMP, not
- * history). The stamp sorts by time, so the oldest is the smallest name. */
+/* Deletes the oldest kept logs past SUR_LOG_KEEP (a suite run spawns dozens
+ * of sessions; this bounds TEMP). The stamp sorts by time. */
 void prune_kept_logs(const wchar_t* prefix)
 {
     wchar_t pattern[MAX_PATH + 64];
@@ -179,9 +169,9 @@ void prune_kept_logs(const wchar_t* prefix)
     }
 }
 
-/* Deletes the oldest per-spawn logs past SUR_LOG_KEEP, by last write
- * (their names don't sort by time). One a running session still holds
- * can't be deleted and is skipped; a later spawn takes it. */
+/* Deletes the oldest per-spawn logs past SUR_LOG_KEEP, by last write (their
+ * names don't sort by time). One still held is skipped; a later spawn takes
+ * it. */
 void prune_per_spawn_logs(const wchar_t* prefix)
 {
     wchar_t pattern[MAX_PATH + 64];
@@ -208,10 +198,9 @@ void prune_per_spawn_logs(const wchar_t* prefix)
     }
 }
 
-/* Keeps the previous session's log: before this session takes the
- * fixed name, the file there is renamed after its last write (local
- * time). A log another session still holds can't be renamed; the open
- * that follows fails the same way and takes a per-spawn name. */
+/* Keeps the previous session's log: the file at the fixed name is renamed
+ * after its last write. One another session holds can't be renamed; the
+ * open that follows then fails too and takes a per-spawn name. */
 void keep_previous_log(const wchar_t* prefix)
 {
     wchar_t fixed[MAX_PATH + 64];
@@ -235,13 +224,11 @@ void keep_previous_log(const wchar_t* prefix)
     }
 }
 
-/* The session log's path. The fixed name keeps the documented path for
- * the usual single session, and the log it replaces is kept
- * (keep_previous_log). A second concurrent session finds it held (a
- * sharing violation) and gets a per-spawn name, so its child never
- * runs without a log. path receives the name as UTF-8 (TEMP can hold a
- * non-ASCII user name). Returns INVALID_HANDLE_VALUE, with path empty,
- * if neither name opens. */
+/* The session log's path. The fixed name is the documented one for a single
+ * session (the log it replaces is kept); a concurrent session finds it held
+ * and gets a per-spawn name, so no child runs without a log. path receives
+ * UTF-8 (TEMP can hold a non-ASCII name). Returns INVALID_HANDLE_VALUE, with
+ * path empty, if neither name opens. */
 HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
                         char* path, size_t cap)
 {
@@ -269,12 +256,11 @@ HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
 }
 
 /* The surrogate exe: its variable (ECUIO_SURROGATE_EXE or
- * ECUIO_SURROGATE_X64_EXE) when set, else the one next to the running
- * exe. The variable relocates the surrogate and nothing more: it must
- * be an absolute path to an existing file of that surrogate's name, so
- * it can't start some other program, and the path is always logged.
- * Either way the file must exist, so a missing copy says so instead of
- * failing CreateProcess. On failure, why says what was wrong. */
+ * ECUIO_SURROGATE_X64_EXE) when set, else the one next to the running exe.
+ * The variable only relocates: an absolute path to an existing file of that
+ * surrogate's name, so it can't start another program, and the path is
+ * always logged. The file must exist either way, so a missing copy says
+ * so. On failure, why says what was wrong. */
 bool resolve_exe_path(const SurrogateExe& sur, wchar_t* out, size_t cap,
                       bool* from_env, char* why, size_t why_cap)
 {
@@ -291,8 +277,7 @@ bool resolve_exe_path(const SurrogateExe& sur, wchar_t* out, size_t cap,
             snprintf(why, why_cap, "%s is not an absolute path", sur.env8);
             return false;
         }
-        /* An absolute path has a separator; the last one starts the
-         * file name. */
+        /* The last separator starts the file name. */
         const wchar_t* sep = wcsrchr(out, L'\\');
         const wchar_t* fwd = wcsrchr(out, L'/');
         if (fwd != nullptr && (sep == nullptr || fwd > sep)) sep = fwd;
@@ -329,10 +314,9 @@ bool resolve_exe_path(const SurrogateExe& sur, wchar_t* out, size_t cap,
     return true;
 }
 
-/* A pipe name no other process can predict. The pipe is created with
- * FILE_FLAG_FIRST_PIPE_INSTANCE, so a process that created a guessed
- * name first would make the spawn fail; the random part rules that out.
- * The pid and sequence stay in the name for whoever reads a log. */
+/* A pipe name no other process can predict (FILE_FLAG_FIRST_PIPE_INSTANCE
+ * would make a squatter fail the spawn). The pid and sequence stay in the
+ * name for whoever reads a log. */
 bool make_pipe_name(LONG seq, char* out, size_t cap)
 {
     uint8_t rnd[16];
@@ -349,11 +333,11 @@ bool make_pipe_name(LONG seq, char* out, size_t cap)
     return n > 0;
 }
 
-/* The pipe's security: full access for this process's user, no one
- * else. The default DACL also lets Everyone open a pipe for reading,
- * which is enough to connect before the child and take the only
- * instance. The child runs under the same token, so it still connects.
- * Lives on the caller's stack until CreateNamedPipe returns. */
+/* The pipe's security: full access for this process's user only (the
+ * default DACL lets Everyone connect before the child and take the only
+ * instance). The child runs
+ * under the same token. Lives on the caller's stack until CreateNamedPipe
+ * returns. */
 struct user_only_security {
     SECURITY_ATTRIBUTES sa;
     SECURITY_DESCRIPTOR sd;
@@ -415,8 +399,8 @@ bool ov_write(HANDLE pipe, HANDLE event, const void* buf, DWORD len,
 
 enum read_result { RD_OK, RD_SHORT_READ, RD_TIMEOUT, RD_OS_ERROR };
 
-/* One overlapped ReadFile of up to len bytes. *out_got is what it
- * read, a canceled read's included. */
+/* One overlapped ReadFile of up to len bytes; *out_got includes a canceled
+ * read's. */
 read_result ov_read(HANDLE pipe, HANDLE event, void* buf, DWORD len,
                     DWORD timeout_ms, DWORD* out_got, DWORD* out_err)
 {
@@ -458,11 +442,9 @@ read_result ov_read(HANDLE pipe, HANDLE event, void* buf, DWORD len,
     return res;
 }
 
-/* Read exactly len bytes within timeout_ms. A byte-mode pipe may hand
- * a long reply over in pieces, so a short read reads on with what's
- * left of the time. RD_TIMEOUT means nothing arrived, so the reply may
- * still come whole later; a reply cut off part way is RD_SHORT_READ,
- * and the pipe is out of step after it. */
+/* Read exactly len bytes within timeout_ms (a byte-mode pipe may deliver a
+ * reply in pieces). RD_TIMEOUT: nothing arrived, the reply may still come
+ * whole later; RD_SHORT_READ: cut off part way, the pipe is out of step. */
 read_result read_exact(ecuio_j2534_sur_handle_t* h, void* buf, DWORD len,
                        DWORD timeout_ms, DWORD* out_got, DWORD* out_err)
 {
@@ -491,8 +473,8 @@ read_result read_exact(ecuio_j2534_sur_handle_t* h, void* buf, DWORD len,
     }
 }
 
-/* Read and drop the count messages after a reply nobody will use: a
- * late reply's. One at a time, so no batch-sized buffer is needed. */
+/* Read and drop a late reply's count messages, one at a time (no
+ * batch-sized buffer). */
 bool discard_frames(ecuio_j2534_sur_handle_t* h, uint32_t count,
                     DWORD timeout_ms)
 {
@@ -507,14 +489,12 @@ bool discard_frames(ecuio_j2534_sur_handle_t* h, uint32_t count,
     return true;
 }
 
-/* Read and discard the late reply to a previous timed-out request, so
- * the next request isn't paired with it (every later call would fail
- * the ID check). If that reply never arrives, the child is hung: mark
- * the handle unresponsive and fail without sending anything new.
+/* Read and discard the late reply to a timed-out request, or every later
+ * call fails the ID check. If it never arrives the child is hung: mark the
+ * handle unresponsive and send nothing new.
  *
- * If the late reply was an OP_READ's, its frames are dropped with it.
- * That takes a read the child answered more than 500 ms past its own
- * timeout, so it's rare, but the drop is logged rather than silent. */
+ * An OP_READ's late frames are dropped with it (rare: the child answered
+ * over 500 ms past its own timeout); the drop is logged. */
 bool drain_pending(ecuio_j2534_sur_handle_t* h, DWORD timeout_ms)
 {
     ecuio_sur_response_t stale = {};
@@ -549,11 +529,11 @@ bool drain_pending(ecuio_j2534_sur_handle_t* h, DWORD timeout_ms)
     return true;
 }
 
-/* One request and its reply. frames receives a READ's messages and
- * has room for ECUIO_SUR_MAX_FRAMES_PER_READ; every other opcode
- * passes none, so frames on its reply mean a skewed child. A reply
- * that arrives only in part, or claims more frames than fit, leaves
- * the pipe out of step, so the handle turns unresponsive. */
+/* One request and its reply. frames receives a READ's messages (room for
+ * ECUIO_SUR_MAX_FRAMES_PER_READ); other opcodes pass none, so frames on
+ * their reply mean a skewed child. A partial reply, or one claiming more
+ * frames than fit, leaves the pipe out of step: the handle turns
+ * unresponsive. */
 bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
               ecuio_sur_response_t* out_resp, DWORD timeout_ms,
               ecuio_pt_rx_t* frames = nullptr)
@@ -607,9 +587,9 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
         }
     }
     if (out_resp->request_id != req.request_id) {
-        /* The child answers one reply per request, so this request's is
-         * still in the pipe and every later one would read the reply
-         * before its own: out of step for good, like a short read. */
+        /* This request's reply is still in the pipe, so every later read
+         * would be one reply behind: out of step for good, like a short
+         * read. */
         SUR_LOG(h, "transact: DESYNC (got req_id=%u want=%u); child "
                 "unresponsive\n", out_resp->request_id, req.request_id);
         h->unresponsive = true;
@@ -719,9 +699,9 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     ecuio_j2534_sur_handle_t* h = new (std::nothrow) ecuio_j2534_sur_handle_t();
     if (h == nullptr) return ECUIO_ERR_OUT_OF_MEMORY;
 
-    /* The log opens first, so every startup failure below lands in it.
-     * Inheritable only until the spawn: the child gets it as its
-     * stdout/stderr, and the client keeps its own copy for SUR_LOG. */
+    /* The log opens first, so every startup failure lands in it. Inheritable
+     * only until the spawn: the child gets it as stdout/stderr, and the
+     * client keeps its own copy for SUR_LOG. */
     SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), nullptr, TRUE };
     h->log = open_session_log(seq, &inherit_sa, h->log_path, sizeof(h->log_path));
     const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
@@ -741,8 +721,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         return ECUIO_ERR_SURROGATE_FAILED;
     }
 
-    /* Local, user-only, unguessable, and refused if the name already
-     * exists, so no other process can sit on the child's end. */
+    /* Local, user-only, unguessable, first instance only: no other process
+     * can sit on the child's end. */
     char pipe_name[128];
     wchar_t wpipe[128];
     user_only_security sec = {};
@@ -796,9 +776,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         return spawn_failed("the command line is too long", 0);
     }
 
-    /* Only the log reaches the child. Inheritance on its own would hand
-     * it every inheritable handle in the app; the handle list narrows it
-     * to the one named. */
+    /* Only the log reaches the child: the handle list narrows inheritance,
+     * which alone would pass every inheritable handle in the app. */
     STARTUPINFOEXW si = {};
     si.StartupInfo.cb = sizeof(si);
     alignas(void*) BYTE attr_buf[128];
@@ -830,8 +809,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         si.StartupInfo.hStdError  = h->log;
     }
     PROCESS_INFORMATION pi = {};
-    /* The exe is named twice, as the application and in the command
-     * line, so CreateProcess never searches for it. */
+    /* The exe is named as application and in the command line, so
+     * CreateProcess never searches for it. */
     const BOOL spawned = CreateProcessW(
         exe, cmdline, nullptr, nullptr, attrs != nullptr,
         CREATE_SUSPENDED | CREATE_NO_WINDOW |
@@ -847,12 +826,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         return spawn_failed("CreateProcess", spawn_err);
     }
     if (h->log != INVALID_HANDLE_VALUE) {
-        /* No later spawn, by this client or anyone in the app, inherits
-         * this session's log. */
+        /* No later spawn in the app inherits this session's log. */
         SetHandleInformation(h->log, HANDLE_FLAG_INHERIT, 0);
     }
-    /* Logged while the child is still suspended, so it heads the
-     * session log instead of racing the child's first line. */
+    /* Logged while the child is suspended, so it heads the session log. */
     SUR_LOG(h, "open: child pid %lu, surrogate '%s'%s%s%s, dll '%s'\n",
             pi.dwProcessId, exe8, exe_from_env ? " (" : "",
             exe_from_env ? sur.env8 : "", exe_from_env ? ")" : "", dll_path);
@@ -863,11 +840,9 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     }
 
     h->process = pi.hProcess;
-    /* Kill-on-close is a safety guarantee, not an optimization:
-     * without the assignment a wedged child outlives the app. Fail
-     * fast instead of silently losing the guarantee. The child is
-     * still CREATE_SUSPENDED and no vendor call has run, so a hard
-     * termination here is clean. */
+    /* Kill-on-close is a guarantee: without the job a wedged child outlives
+     * the app, so fail here. The child is still suspended, so terminating
+     * it is clean. */
     if (!AssignProcessToJobObject(h->job, pi.hProcess)) {
         const DWORD err = GetLastError();
         SUR_LOG(h, "open: AssignProcessToJobObject failed (err=%lu)\n", err);
@@ -878,9 +853,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
-    /* The spawn's last step before the handshake's wait: a log ending
-     * here waited on the handshake, one ending above never got this far.
-     * The line names the window the wait below uses. */
+    /* A log ending here waited on the handshake; one ending above never
+     * got this far. */
     const DWORD startup_ms = kStartupTimeoutMs;
     SUR_LOG(h, "open: child resumed, waiting up to %lu ms for its pipe\n",
             startup_ms);
@@ -911,10 +885,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         }
     }
 
-    /* A failed handshake can leave ConnectNamedPipe pending. Cancel and
-     * drain it BEFORE releasing the event and the pipe, or the kernel
-     * completes that I/O into freed structures. CancelIoEx on an
-     * already-completed request is harmless: it reports NOT_FOUND. */
+    /* A failed handshake can leave ConnectNamedPipe pending: cancel and drain
+     * it before releasing the event and pipe, or the kernel completes it into
+     * freed structures. CancelIoEx on a completed request just reports
+     * NOT_FOUND. */
     if (!connected) {
         CancelIoEx(h->pipe, &ov);
         DWORD drained = 0;
@@ -936,13 +910,11 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
 
     h->pipe_connected = true;
 
-    /* OP_OPEN: the child connects the pipe before it loads the vendor
-     * DLL, so this transaction covers LoadLibraryEx (the vendor's
-     * DllMain), export resolution and PassThruOpen. A load or export
-     * failure exits the child (codes 4/5, decoded below); a refusal is
-     * a non-success status; no reply with a live child is a vendor
-     * blocked in DllMain or PassThruOpen, typically on absent
-     * hardware. It carries this build's fingerprint of the shared
+    /* OP_OPEN covers LoadLibraryEx (the vendor's DllMain), export resolution
+     * and PassThruOpen: the child connects the pipe before loading. A load or
+     * export failure exits the child (codes 4/5); a refusal is a non-success
+     * status; no reply from a live child is a vendor blocked, typically on
+     * absent hardware. It carries this build's fingerprint of the shared
      * headers; the child refuses one not its own. */
     ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
@@ -951,14 +923,11 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     ecuio_sur_response_t resp = {};
     const DWORD open_ms = open_timeout_ms();
     if (!transact(h, req, &resp, open_ms)) {
-        /* Classify by why the transaction failed, not by a liveness
-         * snapshot. A reply that TIMED OUT with the child still alive
-         * is a vendor wedged in DllMain or PassThruOpen. A broken pipe
-         * means the child is exiting with code 4 or 5: its pipe closes
-         * a moment before its process handle signals, so a liveness
-         * check at that instant would call a failed DLL load
-         * "blocked". Wait for that exit and let log_child_exit name
-         * the stage instead. */
+        /* Classify by why the transaction failed, not by liveness: a timeout
+         * with the child alive is a wedged vendor, but a broken pipe is the
+         * child exiting with code 4 or 5 (the pipe closes before the process
+         * handle signals), so wait for the exit and let log_child_exit name
+         * the stage. */
         const bool timed_out = (h->pending_response_id == req.request_id);
         bool vendor_blocked = false;
         if (timed_out && WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
@@ -971,8 +940,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
             WaitForSingleObject(h->process, 1000);
         }
         const DWORD code = log_child_exit(h);
-        /* Wait out the kill as well, so close sees a dead child and
-         * skips the polite OP_SHUTDOWN it could never answer. */
+        /* Wait out the kill so close skips the OP_SHUTDOWN it could never
+         * get answered. */
         TerminateProcess(h->process, 1);
         WaitForSingleObject(h->process, 1000);
         ecuio_j2534_sur_close(h);
@@ -988,9 +957,8 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         ecuio_detail_set("the surrogate stopped answering during PassThruOpen");
         return ECUIO_ERR_SURROGATE_FAILED;
     }
-    /* Checked here too, before the status: a child older than the
-     * check echoes nothing and opens the device anyway, and the close
-     * below shuts that down. */
+    /* Checked before the status: a child older than the check echoes nothing
+     * and opens the device anyway; the close shuts that down. */
     if (resp.aux != ECUIO_SUR_FINGERPRINT) {
         SUR_LOG(h, "open: the surrogate was built from other shared headers "
                 "(surrogate %08x, client %08x): rebuild build-win32, then build\n",
@@ -1136,8 +1104,8 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         return ECUIO_ERR_VENDOR_REFUSED;
     }
-    /* Trust boundary, as for read's num_frames: the pipe is untrusted,
-     * and a reply could claim more than resp.data holds. */
+    /* Trust boundary, as for read's num_frames: a reply could claim more
+     * than resp.data holds. */
     if (resp.data_len > ECUIO_SUR_IOCTL_DATA_MAX) {
         SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
                 resp.data_len);
@@ -1285,8 +1253,7 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
     }
     *got_msg = false;
 
-    /* Dispense from the cache first: no pipe traffic while a batch
-     * is partially consumed. */
+    /* Dispense from the cache first: no pipe traffic mid-batch. */
     if (h->pending_next < h->pending_count) {
         *out_msg = h->pending[h->pending_next++];
         if (h->overflow_pending) {
@@ -1303,34 +1270,30 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
     req.u.read.timeout_ms = timeout_ms;
 
     ecuio_sur_response_t resp = {};
-    /* Margin over the vendor timeout: the child spends up to
-     * timeout_ms inside ReadMsgs before answering. Transact timing
-     * out before the child does means the child is hung, not busy. */
+    /* Margin over the vendor timeout: the child may spend all of timeout_ms
+     * in ReadMsgs, so a transact timeout means hung, not busy. */
     const DWORD tmo = timeout_ms + 500;
     if (!transact(h, req, &resp, tmo, h->pending)) {
         return ECUIO_ERR_TRANSPORT_HARD_FAILURE;    /* child dead/wedged/skewed */
     }
 
-    /* Deliver first, judge the status second. Per J2534-1 a read
-     * asking for N messages with a nonzero timeout returns ERR_TIMEOUT
-     * TOGETHER WITH however many arrived, so a conforming vendor reports
-     * nearly every response that way. Dropping such a message would
-     * hide the ECU's answer and leave a
-     * healthy session showing nothing at all. The child has already
-     * applied the count-trust rule (ecuio_trusted_count), so a
-     * non-empty batch only arrives under NOERROR, ERR_TIMEOUT or
+    /* Deliver first, judge the status second. Per J2534-1 a read of N
+     * messages with a nonzero timeout returns ERR_TIMEOUT together with
+     * however many arrived, so a conforming vendor reports nearly every
+     * response that way; dropping them would leave a healthy session blank.
+     * The child has applied the count-trust rule (ecuio_trusted_count), so a
+     * non-empty batch arrives only under NOERROR, ERR_TIMEOUT or
      * ERR_BUFFER_OVERFLOW, whose loss the child marked on a frame. */
     if (resp.num_frames > 0) {
         h->pending_count = resp.num_frames;
         h->pending_next = 0;
-        /* Recurse once into the cache-dispense path above. */
         return ecuio_j2534_sur_read_msg(h, channel, out_msg, timeout_ms,
                                         got_msg);
     }
 
-    /* Empty batch: the status decides. ERR_BUFFER_OVERFLOW with nothing
-     * after it: frames were lost and the adapter reads on, so the next
-     * message delivered carries the bit, and the link is as it was. */
+    /* Empty batch: the status decides. ERR_BUFFER_OVERFLOW with nothing after
+     * it means frames were lost: the next message delivered carries the bit
+     * and the link is unchanged. */
     if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_BUFFER_OVERFLOW)) {
         h->overflow_pending = true;
         return ECUIO_OK;
@@ -1380,11 +1343,9 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
 ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
 {
     if (h == nullptr) return ECUIO_OK;
-    /* OK only for a child that lived to the end: still running here,
-     * answering OP_SHUTDOWN, then exiting 0. Anything else (it exited
-     * on its own, wedged, or answered and exited otherwise) is
-     * SURROGATE_FAILED, so a test's close asserts that the child
-     * survived every refusal before it (ADR-0014). */
+    /* OK only for a child that lived to the end: running, answering
+     * OP_SHUTDOWN, exiting 0. Anything else is SURROGATE_FAILED, so a test's
+     * close asserts the child survived every refusal before it (ADR-0014). */
     bool clean = false;
     const bool alive = h->process != nullptr &&
                        WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0;
@@ -1397,8 +1358,7 @@ ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
         clean = transact(h, req, &resp, 1500) &&
                 resp.status == ECUIO_PT_STATUS_NOERROR;
     }
-    /* An unresponsive child won't exit on its own: closing the job
-     * below kills it, so don't wait for it first. */
+    /* An unresponsive child won't exit on its own: the job close kills it. */
     DWORD code = STILL_ACTIVE;
     if (h->process != nullptr && !h->unresponsive &&
         WaitForSingleObject(h->process, 1500) == WAIT_OBJECT_0) {

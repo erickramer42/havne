@@ -18,15 +18,14 @@
 #include <algorithm>
 #include <vector>
 
-/* Backing type for the header's opaque ecuio_j2534_handle_t. At global
- * scope, never in the anonymous namespace: the header's typedef targets
- * the global tag name (C2027 otherwise).
+/* Backing type for the header's opaque ecuio_j2534_handle_t. Global scope,
+ * not the anonymous namespace: the header's typedef targets the global tag
+ * name (C2027 otherwise).
  *
- * ecuio_j2534_open sniffs the PE architecture once and loads the DLL in
- * a surrogate of that architecture (ADR-0025); nothing loads in this
- * process. Every helper below checks its arguments at this seam and
- * forwards to the surrogate client, so the transport layer
- * (j2534_transport.cpp) never knows which surrogate serves a session. */
+ * ecuio_j2534_open sniffs the PE architecture once and loads the DLL in a
+ * surrogate of that architecture (ADR-0025); nothing loads in this process.
+ * Every helper below checks its arguments here and forwards to the client,
+ * so the transport never knows which surrogate serves a session. */
 struct ecuio_j2534_handle {
     uint32_t dll_arch = ECUIO_DLL_ARCH_UNKNOWN;   /* the PE sniff at open */
     ecuio_j2534_sur_handle_t* sur = nullptr;      /* owned */
@@ -34,21 +33,17 @@ struct ecuio_j2534_handle {
 
 namespace {
 
-/* Root registry keys swept by discovery, per SAE J2534-1 v4.04 section 5.3
- * ("Pass-Thru Support.04.04") PLUS the no-hyphen variant some vendor
- * installers write ("PassThruSupport.04.04", as the OBDX Pro does).
- * Both spellings exist in the wild; the spec spelling is kept first
- * so conforming vendors keep discovery-order precedence. Dedupe in
- * ecuio_j2534_discover_devices absorbs a vendor writing both. */
+/* Root registry keys swept by discovery: SAE J2534-1 v4.04 section 5.3
+ * ("Pass-Thru Support.04.04") plus the no-hyphen variant some installers
+ * write (the OBDX Pro). The spec spelling stays first for discovery-order
+ * precedence; the dedupe absorbs a vendor writing both. */
 constexpr const wchar_t* kPassThruRoots[] = {
     L"SOFTWARE\\Pass-Thru Support.04.04",
     L"SOFTWARE\\PassThruSupport.04.04",
 };
 
-/* FUNCTIONLIBRARY as a UTF-8 path (the j2534.h contract). Read as
- * UTF-16: the A variant would hand back the ANSI code page's bytes,
- * which the bridge and the loader read as UTF-8, so a non-ASCII install
- * path would mangle. */
+/* FUNCTIONLIBRARY as a UTF-8 path (the j2534.h contract). Read as UTF-16:
+ * the A variant returns ANSI bytes, which would mangle a non-ASCII path. */
 bool read_function_library(HKEY hvendor, char* out, size_t out_size)
 {
     wchar_t raw[ECUIO_J2534_DLL_PATH_LEN] = {};
@@ -65,10 +60,9 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
     if (raw[0] == L'\0') {
         return false;
     }
-    /* RegQueryValueExW returns REG_EXPAND_SZ unexpanded, so a path
-     * like "%ProgramFiles(x86)%\\..." would pass discovery and then
-     * fail to load. ExpandEnvironmentStringsW's return counts the
-     * terminator. */
+    /* RegQueryValueExW returns REG_EXPAND_SZ unexpanded, which would pass
+     * discovery and fail to load. ExpandEnvironmentStringsW's return counts
+     * the terminator. */
     const wchar_t* path = raw;
     wchar_t expanded[1024];
     if (type == REG_EXPAND_SZ) {
@@ -98,11 +92,10 @@ struct PeSniff {
     DWORD error = 0;
 };
 
-/* ecuio_j2534_open routes on it: the unreadable and the non-PE are
- * refused there, with no spawn; x86 goes to the x86 surrogate and every
- * other PE to the x64 one. The discovery annotation is only a UI label
- * (its arch); the sniff in open() is authoritative and also covers
- * direct-path selectors. */
+/* ecuio_j2534_open routes on it: unreadable and non-PE are refused with no
+ * spawn; x86 goes to the x86 surrogate, every other PE to the x64 one. The
+ * discovery annotation is only a UI label; open()'s sniff is authoritative
+ * and also covers direct-path selectors. */
 PeSniff sniff_pe(const char* dll_path)
 {
     PeSniff out;
@@ -198,9 +191,8 @@ void enumerate_view(const wchar_t* root_path,
 
         if (read_function_library(hvendor, dev.dll_path,
                                   sizeof(dev.dll_path))) {
-            /* Annotate architecture (reserved[0]) for the picker's
-             * x86/x64 label. Routing re-sniffs at open. One small
-             * file read per vendor (typically 1-3 entries). */
+            /* Architecture (reserved[0]) for the picker's label; routing
+             * re-sniffs at open. */
             dev.reserved[0] = sniff_pe_architecture(dev.dll_path);
             out_devices.push_back(dev);
         }
@@ -227,11 +219,9 @@ ecuio_status_t ecuio_j2534_discover_devices(ecuio_j2534_device_t** devices_out,
     std::vector<ecuio_j2534_device_t> devices;
     devices.reserve(4);
 
-    /* Both root spellings x both WOW64 views = 4 sweeps. Identical
-     * entries across sweeps collapse in the dedupe below (dll_path +
-     * vendor name); a vendor that wrote only the compacted root under
-     * the 32-bit view (the OBDX Pro case) is found on exactly one
-     * sweep and passes straight through. */
+    /* Both root spellings x both WOW64 views = 4 sweeps; identical entries
+     * collapse in the dedupe below (dll_path + vendor name), and the OBDX
+     * Pro's one root in the 32-bit view is found by exactly one sweep. */
     for (const wchar_t* root : kPassThruRoots) {
         enumerate_view(root, KEY_WOW64_64KEY, devices);
         enumerate_view(root, KEY_WOW64_32KEY, devices);
@@ -284,22 +274,20 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
     }
     *out_handle = nullptr;
 
-    /* Every path reaches the child's LoadLibraryEx with
-     * LOAD_WITH_ALTERED_SEARCH_PATH, and a relative one follows the
-     * search order, the current directory included. Checked here, before
-     * the architecture sniff opens the file, so a URI's selector, a
-     * registry entry and a direct caller meet the same rule. */
+    /* The child's LoadLibraryEx takes LOAD_WITH_ALTERED_SEARCH_PATH, so a
+     * relative path would follow the search order, the current directory
+     * included. Checked before the sniff opens the file, so a URI's
+     * selector, a registry entry and a direct caller meet the same rule. */
     if (!ecuio_is_absolute_path(device->dll_path)) {
         ecuio_detail_set("the DLL path must be absolute, like "
                          "C:\\path\\to\\vendor.dll");
         return ECUIO_ERR_LOAD_FAILED;
     }
 
-    /* ROUTING DECISION: made here, once (ADR-0025). A file that can't
-     * be a DLL is refused with no spawn. Every PE loads in a surrogate:
-     * x86 in the x86 one (next to the app, or ECUIO_SURROGATE_EXE),
-     * x64 and any other machine in the x64 one
-     * (ECUIO_SURROGATE_X64_EXE), which loads or refuses it as the app's
+    /* Routing is decided here, once (ADR-0025). A file that can't be a DLL
+     * is refused with no spawn; x86 loads in the x86 surrogate (next to the
+     * app, or ECUIO_SURROGATE_EXE), x64 and any other machine in the x64
+     * one (ECUIO_SURROGATE_X64_EXE), which loads or refuses it as the app's
      * own process would. */
     const PeSniff pe = sniff_pe(device->dll_path);
     if (pe.kind == PeSniff::kUnreadable) {
@@ -339,9 +327,8 @@ ecuio_status_t ecuio_j2534_close(ecuio_j2534_handle_t* handle)
     if (handle == nullptr) {
         return ECUIO_OK;
     }
-    /* Polite SHUTDOWN, bounded wait, job-object kill: all inside the
-     * surrogate client. Deleting the box after is safe: the transport
-     * already joined its worker before calling here. */
+    /* Shutdown and kill live in the client; the transport has already
+     * joined its worker, so deleting the box is safe. */
     const ecuio_status_t st = ecuio_j2534_sur_close(handle->sur);
     delete handle;
     return st;
@@ -395,11 +382,9 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
  *                                     may leave the count untouched
  *                                     on error)
  *
- * The child reads in batches (OP_READ) and skips indications; the
- * client applies this mapping to the batch's status and maps a broken
- * pipe to ECUIO_ERR_TRANSPORT_HARD_FAILURE. The worker turns these
- * codes into link health, which callers read through
- * ecuio_session_get_error_state. */
+ * The child reads in batches (OP_READ) and skips indications; the client
+ * applies this mapping to the batch's status and maps a broken pipe to
+ * ECUIO_ERR_TRANSPORT_HARD_FAILURE. */
 ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
                                     unsigned long channel,
                                     ecuio_pt_rx_t* out_msg,
@@ -434,9 +419,9 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
         *out_num_written = 0;
     }
 
-    /* A NOERROR that wrote nothing comes back as ECUIO_OK with the
-     * count: the vendor said yes, the count tells the truth, and the
-     * caller judges it (send_request). */
+    /* A NOERROR that wrote nothing returns ECUIO_OK with the count: the
+     * vendor said yes, the count tells the truth, and the caller judges it
+     * (send_request). */
     return ecuio_j2534_sur_write_frame(handle->sur, channel, data, len,
                                        tx_flags, timeout_ms, out_num_written);
 }
@@ -463,11 +448,9 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
         *out_len = 0;
     }
 
-    /* Contract: only ioctls we can SHAPE correctly may cross this
-     * seam. Pointer-bearing ids (FAST_INIT, FIVE_BAUD_INIT...) would
-     * require vendor-specific struct marshaling: refusing beats
-     * guessing. Transport-layer init sequences that need them get a
-     * proper wire op if/when required. */
+    /* Only ioctls we can shape correctly cross this seam: pointer-bearing
+     * ids (FAST_INIT, FIVE_BAUD_INIT...) need vendor-specific marshaling, and
+     * refusing beats guessing. */
     const bool is_sconfig = (ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG ||
                              ioctl_id == ECUIO_PT_IOCTL_SET_CONFIG);
     const bool is_null_form = (ioctl_id == ECUIO_PT_IOCTL_READ_VBATT ||
@@ -478,8 +461,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
         return ECUIO_ERR_NOT_IMPLEMENTED;
     }
     /* A flattened SCONFIG array is whole pairs, 1 to
-     * ECUIO_PT_SCONFIG_MAX_PARAMS of them. Judged here, before the
-     * pipe; the child checks again at its trust boundary. */
+     * ECUIO_PT_SCONFIG_MAX_PARAMS; the child checks again. */
     if (is_sconfig && (input_len == 0 || (input_len % 8) != 0 ||
                        input_len / 8 > ECUIO_PT_SCONFIG_MAX_PARAMS)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
@@ -507,10 +489,9 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
         out_filter_id == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    /* Spec: pattern 1..12 bytes, mask/pattern lengths equal, flow
-     * control only with FLOW_CONTROL_FILTER and then also matching
-     * lengths. Enforced at the seam: malformed filters must not
-     * reach a real device. */
+    /* Spec: pattern 1..12 bytes, mask/pattern lengths equal, flow control
+     * only with FLOW_CONTROL_FILTER and then also matching lengths.
+     * Enforced here so a malformed filter never reaches a real device. */
     if (mask_len < 1 || mask_len > ECUIO_PT_FILTER_PATTERN_MAX ||
         mask_len != pattern_len ||
         fc_len > ECUIO_PT_FILTER_PATTERN_MAX) {
@@ -540,9 +521,8 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
     if (handle == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    /* Not idempotent: stopping a stopped filter is a strict vendor's
-     * ERR_FAILED, passed on as ECUIO_ERR_VENDOR_REFUSED rather than our
-     * guess about idempotence. */
+    /* Not idempotent: a strict vendor answers ERR_FAILED for a stopped
+     * filter, passed on as ECUIO_ERR_VENDOR_REFUSED. */
     return ecuio_j2534_sur_stop_msg_filter(handle->sur, channel, filter_id);
 }
 
@@ -583,10 +563,10 @@ uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* handle)
     return (handle != nullptr) ? handle->dll_arch : ECUIO_DLL_ARCH_UNKNOWN;
 }
 
-/* TEST-ONLY: forward an injected frame over the pipe into the child's
- * fake DLL (OP_INJECT). InjectFrame is a test hook, not a J2534 export,
- * so the child resolves it lazily and a DLL without it answers
- * ECUIO_ERR_NOT_IMPLEMENTED rather than failing the open. */
+/* TEST-ONLY: forward an injected frame into the child's fake DLL
+ * (OP_INJECT). InjectFrame isn't a J2534 export, so the child resolves it
+ * lazily and a DLL without it answers ECUIO_ERR_NOT_IMPLEMENTED rather
+ * than failing the open. */
 ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              const uint8_t* data,
                                              uint32_t len,

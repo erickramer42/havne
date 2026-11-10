@@ -92,10 +92,9 @@ constexpr uint64_t kSilenceUs = 1000000;
 constexpr uint64_t kSilenceTimes = 3;
 
 /* A number to d decimal places (0 to 3) with a '.', whatever the
- * locale: the scaled value rounded half away from zero, then its
- * digits; no "-0.0". Not finite, "" (no cell). Past what the fixed digits
- * hold (the scaled value at 9e15 or more), the value as signals.csv
- * writes it (%.12g), so a cell is never empty for being large */
+ * locale: rounded half away from zero, no "-0.0"; not finite, "" (no
+ * cell). At 9e15 or more scaled, %.12g as signals.csv writes it, so a cell
+ * is never empty for being large */
 std::string fixed_text(double v, int d)
 {
     static const double kPow10[] = {1.0, 10.0, 100.0, 1000.0};
@@ -298,9 +297,8 @@ public:
         return true;
     }
 
-    /* The wide CSV's size for each interval, nothing written: the
-     * header, the classes, the survey, then one pass feeding every
-     * interval's rows (ecuio_export_estimate) */
+    /* The wide CSV's size for each interval, nothing written
+     * (ecuio_export_estimate) */
     bool estimate(const std::string& folder, const uint32_t* row_ms,
                   uint32_t count, ecuio_export_estimate_t* out)
     {
@@ -372,9 +370,8 @@ private:
         return !csv_out || (!raw_ && files::exists(folder + "/frames.csv"));
     }
 
-    /* A def keyed as an identification reply is (49 xx, 62 F180-F1FF):
-     * its key at the message's start, judged by the classifier the
-     * frames go through */
+    /* A def keyed as an identification reply (49 xx, 62 F180-F1FF) at the
+     * message's start, judged by the classifier the frames go through */
     static bool identification_def(const ecuio_signal_def_t& d)
     {
         if (d.mux_length == 0 || d.mux_length > 3 || d.mux_offset != 0) {
@@ -1099,10 +1096,9 @@ private:
         std::string* sink = nullptr;
         std::string line;
 
-        /* A column with samples in range starts in the rule (its first
-         * sample is due with the first sweep's); one with none, a named
-         * pick the recording never answered, starts outside it and holds
-         * no row up */
+        /* A column with samples in range starts in the rule; one with none
+         * (a named pick never answered) starts outside it and holds no
+         * row up */
         void start(const std::vector<wide_column>& cols, uint64_t t0)
         {
             const size_t n = cols.size();
@@ -1151,13 +1147,11 @@ private:
             }
         }
 
-        /* The grid rows due before t (or at it, when inclusive): each
-         * with the newest values at its time, skipped with no new cell.
-         * Once a step finds nothing new, nothing is new until the next
-         * sample, so the steps up to the last one before t are skipped
-         * in one move (a gap of hours at --rows 1 costs no loop); the
-         * silence is judged at the step that writes, which is at or
-         * after every step skipped */
+        /* The grid rows due before t (or at it, when inclusive), each with
+         * the newest values, skipped with no new cell. Nothing is new
+         * until the next sample, so steps are skipped in one move (a gap
+         * of hours at --rows 1 costs no loop); silence is judged at the
+         * step that writes, at or after every step skipped */
         void grid_to(uint64_t t, bool inclusive,
                      const std::vector<wide_column>& cols)
         {
@@ -1270,8 +1264,8 @@ private:
     }
 
     /* The first pass: the columns (named, the header's focus, or every
-     * number signal met), each one's samples, usual interval, unit and
-     * decimals; the values left out counted */
+     * number signal met) with their samples, interval, unit and decimals;
+     * the values left out counted */
     bool wide_survey(const std::string& folder)
     {
         if (o_.column_count > kWideColumnsMax) {

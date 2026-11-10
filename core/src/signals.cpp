@@ -8,10 +8,9 @@
 #include <math.h>
 #include <cmath>
 
-/* Internal helper: extract bitfield from byte array (little-endian)
- * Intel (little-endian) bit numbering: the field's LSB sits at bit
- * `bit_offset` inside byte `start_byte`, running upward through
- * consecutive bytes, so a 32-bit field at bit 7 spans five. */
+/* Little-endian (Intel) bit numbering: the field's LSB sits at bit
+ * `bit_offset` of byte `start_byte` and runs upward, so a 32-bit field at
+ * bit 7 spans five bytes. */
 static uint32_t extract_bitfield_le(const uint8_t* data,
                                      uint16_t start_byte,
                                      uint8_t bit_offset,
@@ -28,10 +27,8 @@ static uint32_t extract_bitfield_le(const uint8_t* data,
     return result;
 }
 
-/* Big-endian extraction: whole bytes only (bit_offset 0, bit_length a
- * multiple of 8; the caller checks both). Reads MSB-first: the first
- * byte is most significant. The last_bit bounds check already covers
- * start_byte + n. */
+/* Big-endian: whole bytes only (the caller checks), first byte most
+ * significant. The last_bit bounds check already covers start_byte + n. */
 static uint32_t extract_bytes_be(const uint8_t* data,
                                   uint16_t start_byte, uint8_t bit_length)
 {
@@ -47,12 +44,10 @@ static uint32_t extract_bytes_be(const uint8_t* data,
  * 62 <DID>. The validator, the decoder and the gate all stop here. */
 static const uint8_t kMuxMaxBytes = 3;
 
-/* Read the def's mux key from a payload into *out_key, first byte most
- * significant whatever the field's byte_order: the key is a byte
- * sequence, not a number. False when the key region ends past
- * payload_len. The caller has checked mux_length (1 to kMuxMaxBytes).
- * Shared by decode and the frame gate, so the two can't disagree on
- * which payloads carry the key. */
+/* Reads the def's mux key into *out_key, first byte most significant
+ * whatever the byte_order (the key is a byte sequence). False when the key
+ * ends past payload_len; the caller has checked mux_length. Shared by
+ * decode and the frame gate so they agree on which payloads carry the key. */
 static bool read_mux_key(const ecuio_signal_def_t* signal,
                          const uint8_t* payload, uint32_t payload_len,
                          uint32_t* out_key)
@@ -296,9 +291,9 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi)
     if (!def || !lo || !hi) {
         return ECUIO_DECODE_ERR_NULL;
     }
-    /* The decoder's order: the kind and byte order, then the bits, then
-     * the FLOAT check. The text kinds and a computed def have no field
-     * to bound, and a FLOAT's field holds any binary32. */
+    /* The decoder's order: the kind and byte order, then the bits, then the
+     * FLOAT check. Text kinds and a computed def have no field to bound,
+     * and a FLOAT's field holds any binary32. */
     if (!is_decodable_kind(def->kind) ||
         !is_known_byte_order(def->byte_order) || is_computed(def)) {
         return ECUIO_DECODE_ERR_UNSUPPORTED;
@@ -425,10 +420,9 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
             return ECUIO_VALIDATE_ERR_COMPUTED;
         }
     } else {
-        /* A text kind is a byte field: no bit parameters, and byte_length
-         * within a frame. A numeric kind is bits, and byte_length is the
-         * text kinds' alone. The shapes ecuio_decode_text and
-         * ecuio_decode_signal take. */
+        /* A text kind is a byte field (no bit parameters, byte_length within
+         * a frame); a numeric kind is bits, and byte_length is the text
+         * kinds' alone: the shapes ecuio_decode_text and _signal take. */
         if (is_text_kind(signal->kind)) {
             if (signal->bit_length != 0) {
                 return ECUIO_VALIDATE_ERR_BIT_LENGTH;
@@ -451,9 +445,8 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
             }
         }
 
-        /* MUX validation. The key lives in the frame's payload, and any
-         * region a one-byte mux_offset can name fits ECUIO_FRAME_DATA_MAX,
-         * so only decode can find it past the end (payload_len). */
+        /* Any region a one-byte mux_offset names fits ECUIO_FRAME_DATA_MAX,
+         * so only decode can find the key past the end. */
         if (signal->mux_length > kMuxMaxBytes) {
             return ECUIO_VALIDATE_ERR_MUX_LENGTH;
         }
@@ -505,10 +498,10 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_DECIMALS;
     }
 
-    /* Zero, so a later field can take this room and existing sets
-     * still load. ECUIO_DEF_FLAG_COMPUTED is the one flag. plot_rank
-     * and group take any value; the table fields are an enum's or a
-     * computed def's alone. */
+    /* Zero, so a later field can take this room and existing sets still
+     * load. ECUIO_DEF_FLAG_COMPUTED is the one flag; plot_rank and group
+     * take any value; the table fields are an enum's or a computed def's
+     * alone. */
     const bool tabled = signal->kind == ECUIO_VALUE_ENUM || is_computed(signal);
     if (signal->reserved0 != 0 ||
         !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||

@@ -528,9 +528,8 @@ private:
         return v;
     }
 
-    /* The first column's cells only rise: every one a number or an ISO
-     * time with its offset, never less than the one before, two or more
-     * of them apart */
+    /* The first column only rises: numbers or ISO times with an offset,
+     * never less than the one before, two or more distinct */
     bool rises(size_t at) const
     {
         bool any = false;

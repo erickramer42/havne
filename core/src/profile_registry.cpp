@@ -22,10 +22,8 @@ using Registry = std::unordered_map<std::string, const ecuio_signal_set_t*>;
  * so a URI that names one always means the same thing. */
 const char* const kBuiltIns[] = {"mock", "raw", "obd2", ECUIO_UDS_GENERIC_NAME};
 
-/* Function-local static: initialized on FIRST ACCESS, thread-safe
- * (C++11 magic statics), immune to translation-unit init-order
- * problems, and available with no ecuio_init, which core doesn't
- * need (core.h). */
+/* Function-local static: thread-safe (C++11), immune to init-order
+ * problems, and available with no ecuio_init (core.h). */
 Registry& registry()
 {
     static Registry r = {
@@ -65,9 +63,9 @@ bool is_built_in(const char* name)
     return false;
 }
 
-/* 1..ECUIO_PROFILE_NAME_MAX characters of [a-z0-9._-]: a name a
- * ?profile= value can carry ('&' would end it) and that reads the same
- * in every URI (keys and names are lowercase, ADR-0013 section 2). */
+/* 1..ECUIO_PROFILE_NAME_MAX characters of [a-z0-9._-]: what a ?profile=
+ * value can carry ('&' would end it) and reads the same in every URI
+ * (keys and names are lowercase, ADR-0013 section 2). */
 bool is_valid_name(const char* name)
 {
     size_t n = 0;
@@ -130,10 +128,9 @@ ecuio_status_t ecuio_profile_register(const char* name,
         ecuio_validate_signal_set(signal_set, out) != ECUIO_VALIDATE_OK) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    /* Every request the set derives must fit the engine's table, or a
-     * session would never ask for the rest and nothing would say why.
-     * Counted on the set's own channels: a session's ?filter= override
-     * merges them into one, which can only dedupe more. */
+    /* Every derived request must fit the engine's table, or the rest would
+     * silently never be asked. Counted on the set's own channels: a
+     * ?filter= override merges them, which can only dedupe more. */
     if (signal_set != nullptr && !fits_request_table(signal_set, out)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
@@ -218,9 +215,8 @@ void ecuio_profile_release(const ecuio_signal_set_t* set) noexcept
             uses().erase(it);
         }
     } catch (...) {
-        /* A lock that fails (std::system_error) leaves the use counted:
-         * the set's owner is then told it's in use, never freed under a
-         * reader */
+        /* A failed lock (std::system_error) leaves the use counted: the owner
+         * is told it's in use, never freed under a reader */
         return;
     }
 }

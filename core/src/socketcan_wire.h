@@ -798,12 +798,11 @@ inline socketcan_proof socketcan_proof_for(const socketcan_link& l)
 
 /* Until the rate is proven, the first error or the third request unseen
  * halts the session, and an echo starts the confirmation
- * (socketcan_proof_settle): a controller may echo a frame before any
- * node acknowledged it (the desk bus's adapter reported the missing ACK
- * 1.5 ms after its echo, ADR-0040's appendix of 2026-11-02), so an error
- * frame within the quiet time still halts. Once proven, an unechoed
- * request is a failed write and an error the link health's, so nothing
- * here changes */
+ * (socketcan_proof_settle): a controller may echo a frame before any node
+ * acknowledged it (the desk bus's adapter reported the missing ACK 1.5 ms
+ * after its echo, ADR-0040's appendix of 2026-11-02), so an error frame
+ * within the quiet time still halts. Once proven, an unechoed request is a
+ * failed write and an error the link health's, so nothing here applies */
 inline socketcan_proof_step
 socketcan_proof_on(socketcan_proof& p, socketcan_sent what, int64_t now_us)
 {
