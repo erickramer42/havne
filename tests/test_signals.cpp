@@ -224,18 +224,18 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
      * landing in a wide range. */
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     uint8_t frame[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {
-                         0xE8, 0x03, // RPM raw 1000
-                         0x64,       // Coolant raw 100 -> 60 deg C
-                         0x3C,       // Speed raw 60 -> 60 km/h
-                         0x80,       // Throttle raw 128 -> 50.2%
-                         0x74,       // IAT raw 116 -> 76 deg C
-                         0xCD,       // Load raw 0xCD -> 80.4%
-                         0x84, 0x1D, // MAF raw 0x1D84 = 7556 -> 75.56 g/s
-                         0x78,       // Oil raw 120 -> 80 deg C
-                         0x14, 0x6E, // Lambda raw 0x6E14 = 28180 -> 0.86
-                         0x25,       // MAP raw 37 -> 37 kPa
-                         0x65,       // Baro raw 101 -> 101 kPa
-                         0x00, 0x00};
+        0xE8, 0x03,  // RPM raw 1000
+        0x64,        // Coolant raw 100 -> 60 deg C
+        0x3C,        // Speed raw 60 -> 60 km/h
+        0x80,        // Throttle raw 128 -> 50.2%
+        0x74,        // IAT raw 116 -> 76 deg C
+        0xCD,        // Load raw 0xCD -> 80.4%
+        0x84, 0x1D,  // MAF raw 0x1D84 = 7556 -> 75.56 g/s
+        0x78,        // Oil raw 120 -> 80 deg C
+        0x14, 0x6E,  // Lambda raw 0x6E14 = 28180 -> 0.86
+        0x25,        // MAP raw 37 -> 37 kPa
+        0x65,        // Baro raw 101 -> 101 kPa
+        0xB0, 0x36}; // Battery raw 0x36B0 = 14000 -> 14.0 V
 
     for (uint32_t i = 0; i < set->count; ++i) {
         if (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) {
@@ -279,6 +279,9 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
             break;
         case ECUIO_MOCK_SIG_BARO_ID:
             EXPECT_DOUBLE_EQ(val, 101.0);
+            break;
+        case ECUIO_MOCK_SIG_BATTERY_V_ID:
+            EXPECT_NEAR(val, 14.0, 1e-9);
             break;
         }
     }
@@ -699,11 +702,17 @@ TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
      * DashboardPage.qml). A quantity both sets carry has one name, unit
      * and precision in both, so a gauge reads under either profile.
      * Temperatures are a UTF-8 degree sign, never "degC". */
-    const char* const kShared[] = {"RPM", "Vehicle Speed", "Coolant Temp",
-                                   "Engine Oil Temp", "Intake Air Temp", "MAF",
-                                   "Throttle Position", "Engine Load",
+    const char* const kShared[] = {"RPM",
+                                   "Vehicle Speed",
+                                   "Coolant Temp",
+                                   "Engine Oil Temp",
+                                   "Intake Air Temp",
+                                   "MAF",
+                                   "Throttle Position",
+                                   "Engine Load",
                                    "Intake Manifold Pressure",
-                                   "Barometric Pressure"};
+                                   "Barometric Pressure",
+                                   "Battery Voltage"};
     auto find = [](const ecuio_signal_set_t* set, const char* name) -> const ecuio_signal_def_t* {
         for (uint32_t i = 0; i < set->count; ++i) {
             if (std::strcmp(set->defs[i].name, name) == 0) return &set->defs[i];

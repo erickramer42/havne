@@ -191,7 +191,7 @@ TestCase {
     // minimum height or more; a tall page shows every row
     function test_chartStaysOnAShortPage_data() {
         return [{ tag: "330", h: 330 }, { tag: "450", h: 450 },
-                { tag: "600", h: 600 }, { tag: "1000", h: 1000 }]
+                { tag: "600", h: 600 }, { tag: "1200", h: 1200 }]
     }
 
     function test_chartStaysOnAShortPage(data) {
@@ -213,7 +213,7 @@ TestCase {
         }
         verify(ok, "list " + list.height + " (one row at least), chart " + chart.height
                + " (its minimum at least), ending at " + bottom() + " of " + page.height)
-        if (data.h === 1000)
+        if (data.h === 1200)
             compare(list.height, list.count * page.rowHeight, "every row shows")
     }
 
