@@ -85,8 +85,27 @@ ColumnLayout {
     // Night (ADR-0058): off, on, or on a schedule; and its style, amber or
     // red on near black, for a cabin after dark. Each takes effect at once;
     // Theme.qml stores it. The Dashboard's switch is the same control
-    LabeledFlow {
-        label: qsTr("Night:")
+    // Wide, the caption and the three modes share a row; narrow (a
+    // phone), the caption takes a row and the three split the next, so
+    // none wraps alone under the other two. A grid, not a flow: its
+    // columns follow the section's width, and no child's width is bound
+    // to the row's own (a flow sized from children sized from it loops).
+    // The modes fill, capped at their own width when wide: a child that
+    // doesn't fill sets the grid's minimum, which would hold the section
+    // at the wide width
+    GridLayout {
+        id: nightRow
+        Layout.fillWidth: true
+        columnSpacing: Theme.spacing
+        rowSpacing: Theme.spacing
+        readonly property bool oneRow: root.width >= 560
+        columns: oneRow ? 4 : 3
+        Label {
+            text: qsTr("Night:")
+            color: Theme.textDim
+            topPadding: 8
+            Layout.columnSpan: nightRow.oneRow ? 1 : 3
+        }
         Repeater {
             model: [
                 { mode: "off", label: qsTr("Off") },
@@ -96,6 +115,8 @@ ColumnLayout {
             ThemedButton {
                 required property var modelData
                 objectName: "night_" + modelData.mode
+                Layout.fillWidth: true
+                Layout.maximumWidth: nightRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
                 text: modelData.label
                 checkable: true
                 checked: Theme.clampNight(Theme.night) === modelData.mode

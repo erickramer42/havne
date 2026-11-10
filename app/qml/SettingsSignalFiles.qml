@@ -86,8 +86,8 @@ ColumnLayout {
     Label {
         objectName: "signalFilesNone"
         visible: root.host.pickedVehicle !== null && root.host.pickedVehicle.signals.length === 0
-        text: qsTr("None yet. Import adds a file of your own signals, each "
-                   + "then a profile under Profile")
+        text: qsTr("None yet. Import adds a signal file, which is then "
+                   + "offered under Profile as a profile of its own")
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true

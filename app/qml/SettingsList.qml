@@ -37,8 +37,11 @@ ColumnLayout {
                     font.pixelSize: Theme.fontEmphasis
                     font.weight: Font.DemiBold
                 }
+                // The value gives way whole in a narrow row (a phone zoomed
+                // far in): a few letters of it say nothing
                 Label {
                     objectName: "settingsRowSummary"
+                    visible: row.width >= 200
                     text: row.modelData.summary
                     color: Theme.textDim
                     elide: Text.ElideRight

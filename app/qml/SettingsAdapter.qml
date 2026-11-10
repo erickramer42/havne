@@ -143,7 +143,7 @@ ColumnLayout {
                         text: row.modelData.versions === ""
                               ? "" : qsTr("last seen: %1").arg(row.modelData.versions)
                         color: Theme.textDim
-                        font.pointSize: 8
+                        font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignRight
                         rightPadding: Theme.spacing   // clear of the list's scroll bar
@@ -154,7 +154,7 @@ ColumnLayout {
                     objectName: "deviceDetail"
                     text: row.modelData.detail
                     color: Theme.textDim
-                    font.pointSize: 8
+                    font.pixelSize: Theme.fontCaption
                     elide: Text.ElideMiddle
                     Layout.fillWidth: true
                 }

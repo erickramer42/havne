@@ -952,7 +952,9 @@ Pane {
     // as on a phone, where the pick otherwise seems to do nothing
     function showUriField() {
         const body = connectionPage.body
+        // Under the pinned title row, not behind it
         const top = uriField.mapToItem(body, 0, 0).y + body.y - Theme.spacing
+                    - connectionPage.headerHeight
         if (top < connectionPage.contentY)
             connectionPage.contentY = Math.max(0, top)
     }

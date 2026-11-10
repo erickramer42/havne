@@ -413,6 +413,146 @@ TestCase {
         verify(find(find(page, "settingsDisplayPage"), "settingsBack").visible)
     }
 
+    // The rows of a page's buttons, by their top edge: [[button, ...], ...]
+    function rowsOf(buttons, within) {
+        const rows = new Map()
+        for (const b of buttons) {
+            const y = Math.round(b.mapToItem(within, 0, 0).y)
+            if (!rows.has(y))
+                rows.set(y, [])
+            rows.get(y).push(b)
+        }
+        return Array.from(rows.keys()).sort((a, b) => a - b).map(y => rows.get(y))
+    }
+
+    // A phone's page scrolled: the title row stays at the top, its back
+    // arrow quiet at the left edge, and the content runs under it
+    function test_theTitleRowStaysWhileThePageScrolls() {
+        const page = createPage(true)
+        page.width = 384
+        page.height = 400
+        page.open("connection")
+        const flick = find(page, "settingsConnectionPage")
+        const header = find(flick, "settingsConnectionPageHeader")
+        const back = find(flick, "settingsBack")
+        const column = find(flick, "settingsConnectionPageColumn")
+        waitForPolish(column)
+        verify(flick.contentHeight > flick.height + 150, "the page scrolls: " + flick.contentHeight)
+        verify(back.visible && back.quiet, "a quiet back control")
+        compare(back.mapToItem(flick, 0, 0).x, Theme.pageMargin, "at the left edge")
+        compare(back.Accessible.name, "Back to Settings")
+        compare(header.mapToItem(flick, 0, 0).y, 0, "the title row at the top")
+        verify(column.mapToItem(flick, 0, 0).y >= header.height, "the content starts under it")
+        flick.contentY = 150
+        compare(header.mapToItem(flick, 0, 0).y, 0, "still at the top, scrolled")
+        verify(column.mapToItem(flick, 0, 0).y < 0, "the content scrolled under it")
+        back.clicked()
+        compare(page.pageKey, "", "the arrow goes back")
+    }
+
+    // The list's values give way whole in a narrow row (a phone zoomed far
+    // in), instead of eliding to a few letters
+    function test_theListsValuesGiveWayInANarrowRow() {
+        const page = createPage(true)
+        page.width = 384
+        // The phone's list, not the hidden side list's row of the same name
+        const row = find(find(page, "settingsList"), "settingsRow_display")
+        const summary = find(row, "settingsRowSummary")
+        tryVerify(() => row.width >= 200, 2000, "a phone's row: " + row.width)
+        verify(summary.visible, "the value shows at a phone's width")
+        page.width = 224
+        tryVerify(() => row.width < 200, 2000, "a narrow row: " + row.width)
+        verify(!summary.visible, "the value gives way")
+        page.width = 384
+        tryVerify(() => summary.visible, 2000, "and comes back")
+    }
+
+    // The Vehicle page's rows on a phone: the field on its own row, New,
+    // Duplicate and More sharing the next, and More's four quiet actions
+    // two to a row, so no row holds one button alone
+    function test_theVehicleRowsNeverLeaveAButtonAlone() {
+        const page = createPage(true)
+        page.width = 384
+        page.open("vehicle")
+        press(page, "vehicleNew")
+        find(page, "vehicleMore").clicked()
+        const column = find(page, "settingsVehiclePageColumn")
+        waitForPolish(column)
+        const field = find(page, "vehicleLabelField")
+        const top = rowsOf(["vehicleNew", "vehicleDuplicate", "vehicleMore"].map(n => find(page, n)),
+                           column)
+        compare(top.length, 1, "New, Duplicate and More share a row")
+        const grid = field.parent
+        verify(field.mapToItem(column, 0, 0).y < top[0][0].mapToItem(column, 0, 0).y,
+               "the field has the row above them: field " + field.width + "@" + field.x + "," + field.y
+               + " New @" + top[0][0].x + "," + top[0][0].y + " grid " + grid.width + " x " + grid.height
+               + " columns " + grid.columns + " section " + grid.parent.width + " column " + column.width
+               + " past: " + pastTheEdge(column, column, []).join("; "))
+        compare(Math.round(field.width), Math.round(column.width), "the field takes the row")
+        const more = ["vehicleRename", "vehicleForgetVin", "vehicleForget", "vehicleForgetAll"]
+                     .map(n => find(page, n))
+        for (const b of more)
+            verify(b.quiet, b.objectName + " is quiet")
+        const rows = rowsOf(more, column)
+        compare(rows.map(r => r.length), [2, 2], "two to a row")
+        for (const b of more.concat(top[0]))
+            verify(b.width >= 48 - 0.5, b.objectName + " is " + b.width + " wide")
+
+        // Wide, each row is one row
+        page.width = 1000
+        const moreRow = find(page, "vehicleMoreRow")
+        tryVerify(() => moreRow.parent.width >= 560, 3000, "the section widens: " + moreRow.parent.width)
+        verify(waitForPolish(moreRow), "the actions laid out")
+        verify(waitForPolish(find(page, "vehicleNew").parent), "the field's row laid out")
+        compare(rowsOf(more, column).length, 1, "one row of actions: "
+                + more.map(b => b.objectName + " " + b.width + "@" + b.x + "," + b.y).join(" "))
+        compare(rowsOf([field].concat(top[0]), column).length, 1, "one row with the field")
+    }
+
+    // Night's three modes share a row under their caption on a phone,
+    // instead of Scheduled wrapping alone under Off and On
+    function test_theNightModesShareARowOnAPhone() {
+        const page = createPage(true)
+        page.width = 320
+        page.open("display")
+        const column = find(page, "settingsDisplayPageColumn")
+        waitForPolish(column)
+        const modes = ["off", "on", "schedule"].map(n => find(page, "night_" + n))
+        const rows = rowsOf(modes, column)
+        compare(rows.length, 1, "one row: "
+                + rows.map(r => r.map(b => b.objectName + " " + b.width + "@" + b.x).join("+")).join(" / "))
+        // Under the caption, which has the row above to itself
+        const caption = modes[0].parent.children[0]
+        compare(caption.text, "Night:")
+        verify(modes[0].mapToItem(column, 0, 0).y >= caption.mapToItem(column, 0, caption.height).y - 0.5,
+               "the modes start under the caption")
+        for (const b of modes)
+            verify(b.width >= 48 - 0.5, b.objectName + " is " + b.width + " wide")
+        verify(modes[2].mapToItem(column, modes[2].width, 0).x <= column.width + 0.5,
+               "Scheduled ends inside the column")
+    }
+
+    // The signal form names what each row of choices chooses, and Save is
+    // the form's one primary
+    function test_theFormNamesItsChoicesAndSaveIsPrimary() {
+        const page = createPage(true)
+        press(page, "vehicleNew")
+        page.open("ownform")
+        page.formKind = "number"
+        compare(find(page, "formReadBy").label, "Read by:")
+        compare(find(page, "formType").label, "Type:")
+        const order = find(page, "formOrderLabel")
+        verify(order.visible, "a number has a byte order")
+        compare(order.text, "Byte order:")
+        compare(find(page, "formOrder_be").text, "big")
+        compare(find(page, "formOrder_le").text, "little")
+        press(page, "formKind_hex")
+        verify(!order.visible, "hex has none")
+        verify(find(page, "formSave").primary, "Save is primary")
+        verify(!find(page, "formReadOnce").primary)
+        verify(find(page, "formClear").quiet)
+    }
+
     // Connect... elsewhere opens what to connect to, at the page's top
     function test_showAdaptersOpensWhatToConnectTo() {
         const page = createPage(true)
@@ -752,6 +892,9 @@ TestCase {
         compare(find(list.itemAtIndex(1), "deviceDetail").text,
                 "Serial port, for elm327:// · \\Device\\BthModem0")
         compare(find(list.itemAtIndex(2), "deviceDetail").text, "Serial port, for elm327://")
+        // The rows' detail is caption text, never under the 12 px floor
+        compare(find(list.itemAtIndex(1), "deviceDetail").font.pixelSize, Theme.fontCaption)
+        verify(Theme.fontCaption >= 12)
 
         press(page, "preset_elm327")
         compare(uri.text, "elm327://", "the port is the user's pick")
@@ -899,7 +1042,8 @@ TestCase {
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "elm327://bt:00:11:22:33:44:55")
         const top = uri.mapToItem(flick, 0, 0).y
-        verify(top >= 0 && top + uri.height <= flick.height, "the field is in view, at " + top)
+        verify(top >= flick.headerHeight && top + uri.height <= flick.height,
+               "the field is in view, under the title row, at " + top)
 
         // A field already in view stays where it is
         flick.contentY = 0
@@ -1561,6 +1705,9 @@ TestCase {
         press(page, "vehicleNew")
         page.open("signals")
         verify(find(page, "signalFilesNone").visible)
+        compare(find(page, "signalFilesNone").text,
+                "None yet. Import adds a signal file, which is then offered under Profile "
+                + "as a profile of its own")
         verify(importFile(page, "extras.json", "Extras"))
         compare(page.pickedVehicle.signals.length, 1)
         compare(page.pickedVehicle.signals[0].profile, "user.extras")

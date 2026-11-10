@@ -65,9 +65,9 @@ ColumnLayout {
         }
     }
 
-    Flow {
-        Layout.fillWidth: true
-        spacing: Theme.spacing
+    LabeledFlow {
+        objectName: "formReadBy"
+        label: qsTr("Read by:")
         Repeater {
             model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
             ThemedButton {
@@ -91,9 +91,9 @@ ColumnLayout {
         }
     }
 
-    Flow {
-        Layout.fillWidth: true
-        spacing: Theme.spacing
+    LabeledFlow {
+        objectName: "formType"
+        label: qsTr("Type:")
         Repeater {
             model: SignalForm.kinds
             ThemedButton {
@@ -151,12 +151,19 @@ ColumnLayout {
                 width: Theme.controlHeight * 3
             }
         }
+        Label {
+            objectName: "formOrderLabel"
+            visible: root.host.formKind === "number" || root.host.formKind === "enum"
+            text: qsTr("Byte order:")
+            color: Theme.textDim
+            topPadding: 8
+        }
         Repeater {
             model: root.host.formKind === "number" || root.host.formKind === "enum" ? ["be", "le"] : []
             ThemedButton {
                 required property string modelData
                 objectName: "formOrder_" + modelData
-                text: modelData
+                text: modelData === "be" ? qsTr("big") : qsTr("little")
                 checkable: true
                 checked: root.host.formOrder === modelData
                 onClicked: root.host.formOrder = modelData
@@ -244,9 +251,11 @@ ColumnLayout {
             enabled: root.host.idle && !Bridge.readingOnce && root.host.confirming === ""
             onClicked: root.host.readOnceDraft()
         }
+        // The form's one action
         ThemedButton {
             objectName: "formSave"
             text: qsTr("Save")
+            highlighted: true
             enabled: root.host.idle && root.host.confirming === ""
             onClicked: {
                 if (root.host.saveDraft()) {
