@@ -94,6 +94,50 @@ TestCase {
         verify(!toFrames.visible)
     }
 
+    // A hidden table takes no rows, so a frame makes no delegate on any other
+    // page; shown, it holds the ring's rows at once, not only the next ones
+    function test_aHiddenTableHoldsNoRowsAndShowsTheRingWhenShown() {
+        const page = create(logComponent)
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.model.count >= 5, 5000, "frames arrive")
+        compare(list.count, 0, "hidden: no rows")
+
+        Theme.developerMode = true
+        compare(list.count, 0, "the activity log still shows")
+        const held = Bridge.model.count
+        find(page, "view_frames").clicked()
+        verify(list.count >= held, list.count + " rows of the " + held + " held")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "a row is drawn")
+
+        Theme.developerMode = false
+        compare(list.count, 0, "hidden again: no rows")
+    }
+
+    // The list is one named node; its rows' labels are kept out of the tree
+    function test_theFrameRowsLabelsAreIgnored() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count > 0 && list.itemAtIndex(0) !== null, 2000, "a row shows")
+        compare(list.Accessible.name, "Frames")
+        let labels = 0
+        const walk = item => {
+            for (let i = 0; i < item.children.length; ++i) {
+                const child = item.children[i]
+                if (child.textFormat !== undefined) {
+                    ++labels
+                    verify(child.Accessible.ignored, "ignored: '" + child.text + "'")
+                }
+                walk(child)
+            }
+        }
+        walk(list.itemAtIndex(0))
+        compare(labels, 7, "every column's label")
+    }
+
     // The items painted past the page's right edge (a Text by its
     // painted width): the page scrolls in neither direction, so on a
     // phone they can't be seen
@@ -302,11 +346,13 @@ TestCase {
 
     // ---- The filter and By ID (framefilter.h) ----
 
-    // The frames a mock session puts in the table, held still
+    // The frames a mock session puts in the table, held still. The mock
+    // sends its extended ID every 16th frame and 0x0C0 otherwise, so any
+    // 17 in a row hold both
     function heldFrames(page) {
         find(page, "view_frames").clicked()
         compare(Bridge.connectSession("mock://demo"), "")
-        tryVerify(() => Bridge.model.heldCount >= 40, 10000, "frames arrive")
+        tryVerify(() => Bridge.model.heldCount >= 17, 10000, "frames arrive")
         Bridge.logPaused = true
     }
 

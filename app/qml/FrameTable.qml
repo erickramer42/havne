@@ -110,7 +110,12 @@ Rectangle {
                   right: parent.right; bottom: parent.bottom }
         anchors.margins: 4
         clip: true
-        model: table.frames          // the bridge's FrameListModel
+        // Bound only while shown: each live frame inserts a row, and a hidden
+        // table would make and destroy a delegate for it on every page
+        model: table.visible ? table.frames : null
+        // The rows' labels stay out of the accessibility tree: on Android each
+        // row's coming and going rebuilds a node on the main thread
+        Accessible.name: qsTr("Frames")
 
         // Oldest-first reads as a tail: new rows land at the
         // bottom, and the view follows them while it's at the
@@ -193,6 +198,7 @@ Rectangle {
                 Label {
                     // Session-relative us, shown as s.mmm
                     text: (frameRow.model.timestampUs / 1e6).toFixed(3)
+                    Accessible.ignored: true
                     color: Theme.textDim
                     font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 64 : 96
@@ -200,6 +206,7 @@ Rectangle {
                 }
                 Label {
                     text: frameRow.model.dlc
+                    Accessible.ignored: true
                     visible: !frameRow.narrow
                     color: Theme.text
                     font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
@@ -207,6 +214,7 @@ Rectangle {
                 }
                 Label {
                     text: frameRow.model.extended ? "E" : "-"
+                    Accessible.ignored: true
                     color: frameRow.model.extended ? Theme.success : Theme.textDim
                     font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 20 : 36
@@ -215,6 +223,7 @@ Rectangle {
                     // Role name is "arbId" (a quint32): hex-format
                     // it for display.
                     text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
+                    Accessible.ignored: true
                     color: Theme.textDim
                     font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: frameRow.narrow ? 80 : 96
@@ -227,6 +236,7 @@ Rectangle {
                         id: payloadLabel
                         width: parent.width
                         text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
+                        Accessible.ignored: true
                         color: Theme.text
                         font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                         wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
@@ -238,6 +248,7 @@ Rectangle {
                         width: parent.width
                         visible: frameRow.narrow && text !== ""
                         text: frameRow.model.flagsText
+                        Accessible.ignored: true
                         color: Theme.textDim
                         font.pixelSize: Theme.fontCaption
                         elide: Text.ElideRight
@@ -247,6 +258,7 @@ Rectangle {
                     objectName: "rowFlags"
                     visible: !frameRow.narrow
                     text: frameRow.model.flagsText
+                    Accessible.ignored: true
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: table.flagsWidth

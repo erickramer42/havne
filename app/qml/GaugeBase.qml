@@ -1,5 +1,5 @@
 // File/layer: app/qml/GaugeBase.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 
@@ -107,7 +107,10 @@ Item {
         if (isNaN(lowValue) || windowLow < lowValue) lowValue = windowLow
     }
 
+    // One line for a screen reader: each kind keeps its parts out of the tree
+    // (Accessible.ignored) and changes them by opacity, never visibility
     Accessible.role: Accessible.Indicator
-    Accessible.name: label
-    Accessible.description: hasValue ? valueText + " " + unit : note
+    Accessible.name: hasValue ? qsTr("%1: %2 %3").arg(label).arg(valueText).arg(unit).trim()
+                                + (inDanger ? qsTr(", danger") : "")
+                              : note !== "" ? qsTr("%1: %2").arg(label).arg(note) : label
 }

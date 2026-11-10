@@ -1,5 +1,5 @@
 // File/layer: app/qml/BarGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
 
 import QtQuick
 
@@ -30,6 +30,7 @@ GaugeBase {
 
     Text {
         id: title
+        Accessible.ignored: true
         anchors { left: parent.left; verticalCenter: readout.verticalCenter }
         text: gauge.label
         font.pixelSize: 12
@@ -38,6 +39,7 @@ GaugeBase {
     }
     Text {
         objectName: "gaugeNote"
+        Accessible.ignored: true
         anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
                   baseline: title.baseline }
         visible: !gauge.hasValue && width > 0
@@ -54,6 +56,7 @@ GaugeBase {
         Text {
             id: valueLabel
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: 22
             font.weight: Font.Bold
@@ -72,6 +75,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: valueLabel.baseline
             text: gauge.unit
@@ -156,6 +160,7 @@ GaugeBase {
             model: gauge.scaleMarks
             delegate: Text {
                 required property real modelData
+                Accessible.ignored: true
                 readonly property real f: gauge.fractionOf(modelData)
                 // End labels align to the bar's edges, the rest center; standing
                 // up the low end is at the bottom

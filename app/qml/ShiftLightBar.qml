@@ -1,5 +1,6 @@
 // File/layer: app/qml/ShiftLightBar.qml | Qt6 Quick, UI layer
-// Testing: manual smoke: DashboardPage under mock://demo; LEDs fill
+// Testing: QML: QmlTest.gauges, QmlTest.accessibility;
+//          manual smoke: DashboardPage under mock://demo; LEDs fill
 //          green -> amber -> red through the band and flash at the shift
 //          point (the 2nd/3rd-gear limiter holds show it for 5 s)
 
@@ -56,7 +57,7 @@ GaugeBase {
                 Rectangle {   // halo
                     anchors.centerIn: parent
                     width: parent.width * 1.5; height: width; radius: width / 2
-                    visible: slot.lit
+                    opacity: slot.lit ? 1 : 0
                     color: Qt.alpha(slot.glow, 0.16)
                 }
                 Rectangle {   // lens

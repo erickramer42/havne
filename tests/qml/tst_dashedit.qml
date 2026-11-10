@@ -74,8 +74,9 @@ TestCase {
         d.pages = [{ name: "Test", cells: cells }]
         return d
     }
+    // A number by default: a dial is many times slower to build, so a case passes "analog" only where the kind matters
     function cellOf(label, kind) {
-        return { kind: kind || "analog", w: 2, h: 4, label: label, refs: ["id:1001"],
+        return { kind: kind || "digital", w: 2, h: 4, label: label, refs: ["id:1001"],
                  unit: "RPM", options: { from: 0, to: 8000 } }
     }
     function labels(page) {
@@ -126,7 +127,7 @@ TestCase {
     // and nothing was waiting to be saved
     function test_editAndDone() {
         // B's dial shows its peak, so its gauge takes taps too
-        const peaked = cellOf("B")
+        const peaked = cellOf("B", "analog")
         peaked.options.peak = true
         const page = pageOf({}, docOf([cellOf("A"), peaked]))
         const bar = find(page, "dashEditBar")
@@ -188,7 +189,7 @@ TestCase {
     function test_addTakesTheDecodedUnitAndRange(data) {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         Bridge.unitSystem = data.units
-        const page = pageOf({}, docOf([cellOf("A")]))
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
         click(page, "dashEdit")
         click(page, "dashAdd")
         compare(page.panel, "add")
@@ -241,7 +242,7 @@ TestCase {
     // An enumeration only for a digital tile; text never
     function test_thePickerOffersWhatTheKindCanShow() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const page = pageOf({}, docOf([cellOf("A")]))
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
         page.refreshRows()
         const rows = page.profileRows
@@ -262,7 +263,7 @@ TestCase {
 
     // No session: the rows of the last URI that connected; none, a line
     function test_withNoSessionThePickerReadsWhatSettingsChose() {
-        const page = pageOf({}, docOf([cellOf("A")]))
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
         page.pickKind("ring")
         find(page, "dashSignalPanel")
@@ -289,7 +290,7 @@ TestCase {
     // go with the old signal
     function test_anotherSignalDropsTheZones() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const zoned = cellOf("A")
+        const zoned = cellOf("A", "analog")
         zoned.options.coldBelow = 500
         zoned.options.warnFrom = 6000
         zoned.options.dangerFrom = 7000
@@ -348,7 +349,7 @@ TestCase {
     // The cell's panel: each field writes its option, an emptied zone
     // goes, a refused write (from past to) stores nothing
     function test_theCellsPanelSetsItsOptions() {
-        const page = pageOf({}, docOf([cellOf("A"), cellOf("D", "digital"),
+        const page = pageOf({}, docOf([cellOf("A", "analog"), cellOf("D", "digital"),
                                        cellOf("S", "shift-light")]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))
@@ -615,8 +616,8 @@ TestCase {
     // and Add's signals
     function test_aPageChangeClosesAnyPanel() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const two = docOf([cellOf("A")])
-        two.pages.push({ name: "More", cells: [cellOf("B")] })
+        const two = docOf([cellOf("A", "analog")])
+        two.pages.push({ name: "More", cells: [cellOf("B", "analog")] })
         const page = pageOf({}, two)
         page.startEditing()
         press(find(page, "dashCell_0_0"))
@@ -825,7 +826,7 @@ TestCase {
     // The major step is typed in the stored unit, in any unit system
     function test_theMajorStepIsNotConverted() {
         Bridge.unitSystem = 1
-        const t = cellOf("T")
+        const t = cellOf("T", "analog")
         t.unit = "°C"
         t.options = { from: 0, to: 150 }
         const page = pageOf({}, docOf([t]))
@@ -910,10 +911,13 @@ TestCase {
 
     // ---- The gesture (ADR-0057's appendix, section 4)
 
-    // The finger down on a cell until the page lifts it
-    function hold(page, cell) {
+    // The finger down on a cell until the page lifts it, after a short
+    // hold unless the case asks for the platform's
+    function hold(page, cell, platformHold) {
         tryVerify(() => cell.width > 0, 3000, "laid out")
         verify(waitForPolish(page.Window.window), "laid out")
+        if (!platformHold)
+            shortHold(cell)
         mousePress(cell)
         tryVerify(() => page.held >= 0, 10000, "the hold completes")
     }
@@ -922,6 +926,12 @@ TestCase {
         return item.mapToItem(page, item.width / 2, item.height / 2)
     }
     readonly property int holdMs: Application.styleHints.mousePressAndHoldInterval
+    // Set on the held cell alone, just before its press (a reflow can replace
+    // the delegate); other cells' taps keep the platform's interval
+    readonly property int shortHoldMs: 200
+    function shortHold(cell) {
+        find(cell, "cellTap").pressAndHoldInterval = shortHoldMs
+    }
 
     // A release after the hold opens the cell's menu, on both forms and
     // in or out of edit mode, and leaves the mode as it was
@@ -986,9 +996,10 @@ TestCase {
         tryVerify(() => cell.width > 0, 3000, "laid out")
         verify(waitForPolish(page.Window.window), "laid out")
         const at = centerOf(page, cell)
+        shortHold(cell)
         mousePress(page, at.x, at.y)
         mouseMove(page, at.x + data.dx, at.y + data.dy, -1, Qt.LeftButton)
-        wait(holdMs + 300)
+        wait(shortHoldMs + 300)
         compare(page.held, -1, "the hold was canceled")
         mouseRelease(page, at.x + data.dx, at.y + data.dy)
         compare(page.panel, "", "and it isn't a tap either")
@@ -1196,7 +1207,7 @@ TestCase {
     function test_aDragNearTheEdgeScrollsThePage() {
         const cells = []
         for (let i = 0; i < 6; ++i)
-            cells.push({ kind: "analog", w: 6, h: 8, label: "C" + i, refs: ["id:1001"], unit: "RPM",
+            cells.push({ kind: "digital", w: 6, h: 8, label: "C" + i, refs: ["id:1001"], unit: "RPM",
                          options: { from: 0, to: 8000 } })
         const page = pageOf({ height: 400 }, docOf(cells))
         const view = find(page, "dashPage_0")
@@ -1228,7 +1239,7 @@ TestCase {
 
     // A dial's tap resets its peak, through the cell's hold area
     function test_aDialsTapStillResetsItsPeak() {
-        const c = cellOf("A")
+        const c = cellOf("A", "analog")
         c.options.peak = true
         const page = pageOf({}, docOf([c]))
         const cell = find(page, "dashCell_0_0")
@@ -1236,7 +1247,8 @@ TestCase {
         tryVerify(() => loader.item !== null, 3000, "it loads")
         const dial = loader.item
         dial.peakValue = 1000
-        hold(page, cell)
+        // The one hold at the platform's interval, then a tap on the same cell
+        hold(page, cell, true)
         mouseRelease(cell)
         compare(dial.peakValue, 1000, "a hold leaves the peak")
         page.closePanel()
@@ -1330,7 +1342,7 @@ TestCase {
     // ---- The blank cell
 
     function test_aBlankCellIsOfferedAndNeedsNoSignal() {
-        const page = pageOf({}, docOf([cellOf("A")]))
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
         page.startAdd()
         verify(find(page, "preview_blank").item, "its preview loads")
@@ -1372,7 +1384,7 @@ TestCase {
         tryVerify(() => cell.width > 0, 3000, "laid out")
         verify(waitForPolish(page.Window.window), "laid out")
         mousePress(cell)
-        wait(holdMs + 300)
+        wait(holdMs + 300)   // the platform's interval, as a user's finger meets it
         compare(page.held, -1, "not held outside edit mode")
         mouseRelease(cell)
         compare(page.panel, "")

@@ -1,5 +1,6 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.gauges, QmlTest.dashboard;
+// Testing: QML: QmlTest.kinds (the brief tile), QmlTest.gauges, QmlTest.accessibility,
+//          QmlTest.dashboard;
 //          manual smoke: DashboardPage under mock://demo
 
 import QtQuick
@@ -74,6 +75,7 @@ GaugeBase {
         id: heading
         anchors { left: parent.left; right: status.left; top: parent.top }
         Text {
+            Accessible.ignored: true
             width: parent.width
             text: gauge.label
             elide: Text.ElideRight
@@ -82,6 +84,7 @@ GaugeBase {
             color: Theme.textDim
         }
         Text {
+            Accessible.ignored: true
             width: parent.width
             visible: gauge.roomy && text !== ""
             text: gauge.description
@@ -112,6 +115,7 @@ GaugeBase {
         Text {
             id: readout
             objectName: "readout"
+            Accessible.ignored: true
             text: gauge.valueText
             font.pixelSize: Math.max(18, Math.min(valueBand.height * 0.9, gauge.width * 0.24))
             font.weight: Font.Bold
@@ -130,6 +134,7 @@ GaugeBase {
         }
         Text {
             objectName: "unit"
+            Accessible.ignored: true
             visible: gauge.hasValue
             anchors.baseline: readout.baseline
             text: gauge.unit
@@ -173,6 +178,7 @@ GaugeBase {
     // In the trace's place, or beside the value on a card too short for one
     Text {
         objectName: "gaugeNote"
+        Accessible.ignored: true
         anchors.left: gauge.brief ? valueRow.right : parent.left
         anchors.leftMargin: gauge.brief ? 8 : 0
         anchors.right: parent.right
@@ -191,19 +197,18 @@ GaugeBase {
         visible: !gauge.brief
         anchors { left: parent.left; bottom: parent.bottom }
         spacing: 14
-        Repeater {
-            model: [
-                { tag: qsTr("MIN"), v: gauge.lowValue },
-                { tag: qsTr("MAX"), v: gauge.peakValue }
-            ]
-            delegate: Text {
-                required property var modelData
-                text: "%1  %2".arg(modelData.tag)
-                              .arg(isNaN(modelData.v) ? qsTr("—") : gauge.format(modelData.v))
-                font.pixelSize: 11
-                font.features: Theme.valueFeatures
-                color: Theme.textDim
-            }
+        // Two fixed items: a Repeater over the holds would rebuild both at
+        // each new low or peak
+        component Hold: Text {
+            required property string tag
+            required property real held
+            text: "%1  %2".arg(tag).arg(isNaN(held) ? qsTr("—") : gauge.format(held))
+            font.pixelSize: 11
+            font.features: Theme.valueFeatures
+            color: Theme.textDim
+            Accessible.ignored: true
         }
+        Hold { objectName: "lowHold"; tag: qsTr("MIN"); held: gauge.lowValue }
+        Hold { objectName: "peakHold"; tag: qsTr("MAX"); held: gauge.peakValue }
     }
 }

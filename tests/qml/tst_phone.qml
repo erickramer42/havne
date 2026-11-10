@@ -235,7 +235,8 @@ TestCase {
         find(page, "driveHide_0").text = "W".repeat(60)
         find(page, "driveOrientation_follow").text = "W".repeat(60)
         wait(300)
-        waitForRendering(main.contentItem)
+        // Geometry alone is read below; a render waits out 5 s at 100 % when no frame is due
+        verify(waitForPolish(main), "laid out")
         compare(display.width, widthBefore, "the rows leave the page's width alone")
         for (const row of ["driveHideRow", "driveOrientationRow"]) {
             const past = pastTheEdge(find(page, row), display, [])
