@@ -91,6 +91,9 @@ Page {
     property bool maximizedShort: true
     readonly property bool chartMaximized: recording.state === RecordingView.Open
                                            && (Theme.shortLayout ? maximizedShort : maximizedTall)
+    // The zoom row's room for the views' switch while maximized: a phone on
+    // its side or the desktop; under it the buttons would push the page wide
+    readonly property bool switchInZoomRow: column.width >= 480
     function toggleMaximized() {
         if (Theme.shortLayout)
             maximizedShort = !maximizedShort
@@ -1533,7 +1536,9 @@ Page {
         Rectangle {
             id: chartFrame
             objectName: "chartFrame"
+            // Maximized with Frames chosen, the table has the page instead
             visible: recording.state === RecordingView.Open && !root.exportShown
+                     && !(root.chartMaximized && root.framesShown)
             Layout.fillWidth: true
             // A share of the page, so the rows show under it; the splitter
             // below sets it once dragged. Maximized, it has the page
@@ -1795,6 +1800,12 @@ Page {
             DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
         }
 
+        // Maximized on a narrow page, the views' switch has a row of its own
+        RowLayout {
+            id: switchRowSlot
+            visible: root.chartMaximized && recording.hasFrames && !root.switchInZoomRow
+        }
+
         // Zoom, and where the cursor is
         // Compact on a phone: at their desktop widths the buttons, Frame
         // test among them, outgrow its width
@@ -1802,6 +1813,12 @@ Page {
             visible: recording.state === RecordingView.Open
             Layout.fillWidth: true
             spacing: 6
+            // Maximized, the views' switch leads the row, so either view
+            // leads back to the other
+            RowLayout {
+                id: zoomSwitchSlot
+                visible: root.chartMaximized && recording.hasFrames && root.switchInZoomRow
+            }
             ThemedButton {
                 objectName: "zoomAll"
                 compact: Theme.dense
@@ -1882,30 +1899,36 @@ Page {
             columns: root.phoneShape ? 1 : 2
             columnSpacing: Theme.spacing
             rowSpacing: 10
-            Rectangle {
+            RowLayout {
+                id: detailSwitchSlot
                 visible: recording.hasFrames
-                implicitWidth: detailSwitch.implicitWidth + 4
-                implicitHeight: detailSwitch.implicitHeight + 4
-                radius: Theme.radius
-                color: Theme.surface
+                // Maximized, it leads the zoom row where the row has room
+                Rectangle {
+                    parent: !root.chartMaximized ? detailSwitchSlot
+                          : root.switchInZoomRow ? zoomSwitchSlot : switchRowSlot
+                    implicitWidth: detailSwitch.implicitWidth + 4
+                    implicitHeight: detailSwitch.implicitHeight + 4
+                    radius: Theme.radius
+                    color: Theme.surface
 
-                Row {
-                    id: detailSwitch
-                    anchors.centerIn: parent
-                    spacing: 2
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_values"
-                        text: qsTr("Values")
-                        selected: !root.framesShown
-                        onClicked: root.detailView = "values"
-                    }
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_frames"
-                        text: qsTr("Frames")
-                        selected: root.framesShown
-                        onClicked: root.detailView = "frames"
+                    Row {
+                        id: detailSwitch
+                        anchors.centerIn: parent
+                        spacing: 2
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "detailView_values"
+                            text: qsTr("Values")
+                            selected: !root.framesShown
+                            onClicked: root.detailView = "values"
+                        }
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "detailView_frames"
+                            text: qsTr("Frames")
+                            selected: root.framesShown
+                            onClicked: root.detailView = "frames"
+                        }
                     }
                 }
             }
@@ -1921,8 +1944,9 @@ Page {
         // ---- The frames of the part in view, read from frames.csv ----
         ColumnLayout {
             objectName: "viewerFrames"
-            visible: root.framesShown && !root.chartMaximized
+            visible: root.framesShown
             Layout.fillWidth: true
+            Layout.fillHeight: root.chartMaximized
             spacing: Theme.spacing
 
             Flow {
@@ -1994,11 +2018,13 @@ Page {
                                                : qsTr("%1 frames in view").arg(viewFrames.rows)
             }
 
-            // A fixed height: the page scrolls and the table scrolls inside
+            // A fixed height, the page scrolling and the table inside it;
+            // maximized, what the page has left
             FrameTable {
                 objectName: "viewerFrameTable"
                 visible: !root.framesById
-                Layout.preferredHeight: 280
+                Layout.preferredHeight: root.chartMaximized ? 0 : 280
+                Layout.fillHeight: root.chartMaximized
                 live: false
                 frames: viewFrames.frames
                 emptyText: viewFrames.loading ? qsTr("Reading the frames…")
@@ -2011,7 +2037,8 @@ Page {
             FrameIdList {
                 objectName: "viewerFrameIds"
                 visible: root.framesById
-                Layout.preferredHeight: 280
+                Layout.preferredHeight: root.chartMaximized ? 0 : 280
+                Layout.fillHeight: root.chartMaximized
                 ids: viewFrames.ids
                 refreshing: root.framesById && root.framesShown
                 emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")

@@ -456,6 +456,88 @@ TestCase {
         }
     }
 
+    // On its side the viewer gives the page to the view the switch names:
+    // Values the chart, Frames the table, and the switch leads the zoom
+    // row in both, so either leads back
+    function test_theSideViewFollowsTheSwitch() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 832
+        main.height = 384
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const chart = find(page, "chartFrame")
+        tryVerify(() => chart.visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        verify(Theme.shortLayout && page.chartMaximized, "on its side the chart has the page")
+        const table = find(page, "viewerFrameTable")
+        const frames = find(page, "detailView_frames")
+        const values = find(page, "detailView_values")
+        const scroll = find(page, "recordingsScroll")
+        verify(!table.visible, "Values: no table")
+        verify(frames.visible, "the switch shows on its side")
+        verify(frames.mapToItem(scroll, 0, 0).y > chart.mapToItem(scroll, 0, 0).y + chart.height - 1,
+               "in the zoom row, under the chart")
+        tap(frames, frames.width / 2, frames.height / 2)
+        tryVerify(() => page.framesShown && table.visible, 2000, "Frames: the table")
+        verify(waitForPolish(main), "laid out")
+        verify(!chart.visible, "and no chart")
+        verify(page.chartMaximized, "still the side view")
+        tryVerify(() => find(table, "frameList").count > 0, 10000, "the rows")
+        const foot = table.mapToItem(scroll, 0, table.height).y
+        verify(foot >= scroll.height - Theme.pageMargin - 1 && foot <= scroll.height + 0.5,
+               "the table runs to the page's foot: " + foot + " of " + scroll.height)
+        verify(table.height >= 3 * Theme.touchTarget, "the table is " + table.height)
+        verify(values.visible && frames.mapToItem(scroll, 0, 0).y < table.mapToItem(scroll, 0, 0).y,
+               "the switch above the table")
+        tap(values, values.width / 2, values.height / 2)
+        tryVerify(() => !page.framesShown && chart.visible, 2000, "Values: the chart again")
+        verify(!table.visible, "no table")
+    }
+
+    // Upright on the narrowest phone, the maximized viewer's switch has a
+    // row of its own above the zoom row, which would otherwise push the
+    // page past the glass
+    function test_aNarrowMaximizedViewerKeepsTheSwitchInARow() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 800
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const chart = find(page, "chartFrame")
+        tryVerify(() => chart.visible, 10000, "the recording opens")
+        if (!page.chartMaximized)
+            page.toggleMaximized()
+        try {
+            verify(waitForPolish(main), "laid out")
+            const frames = find(page, "detailView_frames")
+            const zoom = find(page, "zoomAll")
+            verify(frames.visible, "the switch shows maximized")
+            verify(frames.mapToItem(main.contentItem, 0, frames.height).y
+                   <= zoom.mapToItem(main.contentItem, 0, 0).y + 0.5, "in a row above the zoom row")
+            const over = []
+            pastTheEdge(page, main.contentItem, over)
+            compare(over, [], "past the edge: " + over.join(", "))
+            tap(frames, frames.width / 2, frames.height / 2)
+            const table = find(page, "viewerFrameTable")
+            tryVerify(() => page.framesShown && table.visible && !chart.visible, 2000,
+                      "Frames: the table has the page")
+            verify(waitForPolish(main), "laid out")
+            pastTheEdge(page, main.contentItem, over)
+            compare(over, [], "past the edge in Frames: " + over.join(", "))
+        } finally {
+            page.detailView = "values"
+            if (page.chartMaximized)
+                page.toggleMaximized()
+        }
+    }
+
     // The Import panel's preview on a phone: every control in it is a
     // touch's size (48 on the glass at any zoom, in the layout's units
     // Theme.touchTarget), and none is past the window's edge

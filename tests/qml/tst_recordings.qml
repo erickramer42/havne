@@ -1056,6 +1056,37 @@ TestCase {
         }
     }
 
+    // The desktop's F with Frames chosen gives the table the page, the
+    // switch leading the zoom row; with Values, the chart
+    function test_maximizedWithFramesTheTableHasThePage() {
+        const page = openFindings()
+        const chart = find(page, "chartFrame")
+        const table = find(page, "viewerFrameTable")
+        const frames = find(page, "detailView_frames")
+        mouseClick(frames)
+        verify(page.framesShown, "the Frames view")
+        tryVerify(() => table.visible, 2000, "the table")
+        page.toggleMaximized()
+        try {
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(!chart.visible, "no chart")
+            verify(table.visible && table.height > page.height * 0.6,
+                   "the table has the page: " + table.height + " of " + page.height)
+            verify(frames.visible && frames.mapToItem(page, 0, 0).y < table.mapToItem(page, 0, 0).y,
+                   "the switch above it")
+            verify(!find(page, "signalRows").visible && !find(page, "aboutHeading").visible,
+                   "the rest gives way")
+            mouseClick(find(page, "detailView_values"))
+            tryVerify(() => chart.visible && !table.visible, 2000, "Values: the chart")
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(chart.height > page.height * 0.6, "the chart has the page: " + chart.height)
+        } finally {
+            if (page.chartMaximized)
+                page.toggleMaximized()
+            page.detailView = "values"
+        }
+    }
+
     // The Export panel opens under the title row, so the page goes to its
     // top, wherever it was scrolled
     function test_theExportPanelOpensAtThePagesTop() {
