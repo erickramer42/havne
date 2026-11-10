@@ -1,7 +1,8 @@
 // File/layer: app/qml/SettingsDisplay.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.phone, QmlTest.driveview (test_qml)
-// Zoom, units and the drive view's settings: one part of SettingsPage, which
-// holds the zoom's and the units' state; the drive view's is stored here
+// Zoom, the look, Night, units and the drive view's settings: one part of
+// SettingsPage, which holds the zoom's and the units' state; the drive
+// view's is stored here
 
 import QtCore
 import QtQuick
@@ -80,6 +81,28 @@ ColumnLayout {
         color: Theme.textDim
         wrapMode: Text.WordWrap
         Layout.fillWidth: true
+    }
+
+    // The look (ADR-0058): Dark, or Daylight for a screen read in sun.
+    // Night shows over either; Theme.qml stores it. Shown while there is
+    // more than one look to choose
+    LabeledFlow {
+        visible: Theme.lookNames.length > 1
+        label: qsTr("Look:")
+        Repeater {
+            model: [
+                { look: "dark", label: qsTr("Dark") },
+                { look: "daylight", label: qsTr("Daylight") }
+            ]
+            ThemedButton {
+                required property var modelData
+                objectName: "look_" + modelData.look
+                text: modelData.label
+                checkable: true
+                checked: Theme.clampLook(Theme.look) === modelData.look
+                onClicked: Theme.look = modelData.look
+            }
+        }
     }
 
     // Night (ADR-0058): off, on, or on a schedule; and its style, amber or

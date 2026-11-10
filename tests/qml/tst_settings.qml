@@ -59,6 +59,7 @@ TestCase {
     function cleanup() {
         Theme.compact = false
         Theme.dense = false
+        Theme.look = "dark"
         Theme.night = "off"
         Theme.nightStyle = "amber"
         Theme.nightFrom = "19:00"
@@ -758,13 +759,39 @@ TestCase {
         compare(Theme.active, "nightRed")
     }
 
-    // A stored mode or style outside the lists reads as the default, and
-    // the buttons agree
+    // The Display page's Look buttons set Theme.look at once, the chosen
+    // one is chosen, and Night still wins over the look
+    function test_theLookButtonsSetTheLook() {
+        const page = createPage()
+        page.open("display")
+        for (const name of ["daylight", "dark"]) {
+            const b = find(page, "look_" + name)
+            verify(b.visible, name + " is offered")
+            b.clicked()
+            compare(Theme.look, name)
+            compare(Theme.active, name)
+            verify(b.checked, name + " is chosen")
+            verify(!find(page, "look_" + (name === "dark" ? "daylight" : "dark")).checked)
+        }
+        compare(find(page, "look_dark").text, "Dark")
+        compare(find(page, "look_daylight").text, "Daylight")
+        find(page, "night_on").clicked()
+        find(page, "look_daylight").clicked()
+        compare(Theme.active, "nightAmber", "Night over Daylight")
+        find(page, "night_off").clicked()
+        compare(Theme.active, "daylight")
+    }
+
+    // A stored mode, style or look outside the lists reads as the default,
+    // and the buttons agree
     function test_anUnknownNightValueHighlightsTheDefault() {
         const page = createPage()
         page.open("display")
         Theme.night = "nonsense"
         Theme.nightStyle = "nonsense"
+        Theme.look = "nonsense"
+        verify(find(page, "look_dark").checked, "Dark is shown as the look in use")
+        verify(!find(page, "look_daylight").checked)
         verify(find(page, "night_off").checked, "off is shown as the mode in use")
         verify(!find(page, "night_on").checked)
         verify(!find(page, "night_schedule").checked)
@@ -817,7 +844,7 @@ TestCase {
         compare(problem.visible, false, "the words went with the schedule")
     }
 
-    // The list's row says the night state
+    // The list's row says the night state, and the look when it isn't Dark
     function test_theDisplayRowSaysTheNightState() {
         const page = createPage()
         const summary = () => page.pageList.find(p => p.key === "display").summary
@@ -829,6 +856,11 @@ TestCase {
         compare(summary(), "100 % · metric · Night on, amber")
         Theme.night = "schedule"
         compare(summary(), "100 % · metric · Night scheduled 19:00 to 07:00")
+        Theme.night = "off"
+        Theme.look = "daylight"
+        compare(summary(), "100 % · metric · Daylight · Night off", "the look when it isn't Dark")
+        Theme.look = "dark"
+        compare(summary(), "100 % · metric · Night off")
     }
 
     // A preset or row of another scheme keeps the query's keys that
