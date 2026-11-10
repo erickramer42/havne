@@ -508,7 +508,7 @@ TestCase {
         }
         const tach = findChild(page, "dashCell_0_1")
         const tallest = cells.reduce((m, c) => Math.max(m, c.h), 1)
-        const cap = (Math.max(160, view.height - page.topGap - page.margin) + page.cellGap) / tallest
+        const cap = (Math.max(160, view.height - page.gridTop - page.margin) + page.cellGap) / tallest
         fuzzyCompare(view.pitch, Math.min(pitchX / 4, cap), 1e-6,
                      "a row is a quarter of a column, unless the tallest cell wouldn't fit")
         if (data.form === "desktop")
@@ -527,24 +527,33 @@ TestCase {
         verify(tach.x < speedo.x)
     }
 
-    // The desktop's page buttons and Left and Right; one page has neither
-    function test_theDesktopsPageButtonsAndKeys() {
+    // The desktop's pages as tabs, and Left and Right; one page outside
+    // edit mode has neither
+    function tabOf(page, i) {
+        return findChild(page, "dashPageTab_" + i)
+    }
+    function test_thePageStripAndKeys() {
         const page = pageOf({}, pagesDoc(3), true)
-        const buttons = findChild(page, "dashPageButtons")
+        const host = findChild(page, "dashPageStripHost")
         const swipe = findChild(page, "dashPages")
-        verify(buttons.visible, "the buttons show with three pages")
+        verify(host.visible, "the strip shows with three pages")
+        const strip = findChild(page, "dashPageStrip")
+        verify(strip, "the strip")
         verify(!findChild(page, "dashIndicator").visible, "no indicator on the desktop")
         verify(!swipe.interactive, "the desktop's pages don't swipe")
-        compare(findChild(page, "dashPageButton_0").text, "Engine")
-        compare(findChild(page, "dashPageButton_2").text, "Page 3")
+        compare(tabOf(page, 0).text, "Engine")
+        compare(tabOf(page, 2).text, "Page 3")
+        verify(!tabOf(page, 3), "a tab per page")
+        verify(!findChild(page, "dashPageAdd").visible, "no + tab outside edit mode")
         compare(page.pageIndex, 0)
-        verify(findChild(page, "dashPageButton_0").checked)
+        verify(tabOf(page, 0).checked)
 
-        mouseClick(findChild(page, "dashPageButton_2"))
+        verify(waitForPolish(page.Window.window), "laid out")
+        mouseClick(tabOf(page, 2))
         compare(page.pageIndex, 2)
         tryCompare(swipe, "currentIndex", 2)
-        verify(findChild(page, "dashPageButton_2").checked)
-        verify(!findChild(page, "dashPageButton_0").checked)
+        verify(tabOf(page, 2).checked)
+        verify(!tabOf(page, 0).checked)
 
         keyClick(Qt.Key_Right)
         compare(page.pageIndex, 2, "Right on the last page stays")
@@ -554,6 +563,18 @@ TestCase {
         keyClick(Qt.Key_Left)
         keyClick(Qt.Key_Left)
         compare(page.pageIndex, 0, "Left on the first page stays")
+
+        // With a tab focused the keys still page, one step each, and the
+        // focus moves to the shown page's tab
+        tabOf(page, 0).forceActiveFocus()
+        verify(tabOf(page, 0).activeFocus)
+        keyClick(Qt.Key_Right)
+        compare(page.pageIndex, 1, "one step from a focused tab")
+        verify(tabOf(page, 1).activeFocus, "the focus follows to the shown tab")
+        keyClick(Qt.Key_Left)
+        compare(page.pageIndex, 0)
+        verify(tabOf(page, 0).activeFocus)
+        tabOf(page, 0).focus = false
 
         // A focused text field keeps its keys, at its text's end too
         const field = createTemporaryObject(fieldComponent, testCase.Window.window.contentItem)
@@ -596,7 +617,12 @@ TestCase {
         // with one the keys go on to the item that has the focus
         page.doc = pagesDoc(1)
         compare(page.pageIndex, 0)
-        verify(!buttons.visible, "one page has no buttons")
+        verify(!host.visible, "one page has no strip")
+        page.startEditing()
+        verify(host.visible, "edit mode shows it with one page")
+        verify(findChild(page, "dashPageAdd").visible, "with the + tab")
+        page.stopEditing()
+        verify(!host.visible, "Done hides it again")
         keyClick(Qt.Key_Right)
         compare(page.pageIndex, 0)
         compare(taker.rights, 1, "one page leaves Right to the focused item")
@@ -609,7 +635,7 @@ TestCase {
         const indicator = findChild(page, "dashIndicator")
         verify(swipe.interactive)
         verify(indicator.visible)
-        verify(!findChild(page, "dashPageButtons").visible, "no buttons on the phone")
+        verify(!findChild(page, "dashPageStrip"), "no strip on the phone")
         compare(indicator.count, 3)
         keyClick(Qt.Key_Right)
         compare(page.pageIndex, 0, "the phone has no page keys")
@@ -1169,7 +1195,38 @@ TestCase {
     }
 
     function test_thePhoneIsOnePanel() {
+        checkOnePanel(pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true))
+    }
+
+    // A blank cell draws nothing, so the panel's surface shows there; the
+    // panel ends at the last row used
+    function test_aJointPanelEndsWithItsLastRow() {
         const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        const surface = findChild(page, "dashPanelSurface")
+        fuzzyCompare(surface.height, view.rows * view.pitch, 1e-6, "the height of its rows")
+    }
+
+    // The cell held up covers what it crosses; a blank has no fill to show
+    function test_aLiftedCellIsOpaqueOnThePanel() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        const c = findChild(page, "dashCell_0_0"), blank = findChild(page, "dashCell_0_3")
+        page.held = 0
+        tryVerify(() => c.lifted, 1000, "lifted")
+        compare(c.color, Theme.surface, "the held cell is opaque")
+        compare(c.radius, Theme.radiusCard, "a card while held")
+        page.held = 3
+        tryVerify(() => blank.lifted, 1000, "lifted")
+        compare(Qt.colorEqual(blank.color, "transparent"), true, "a blank stays empty")
+        page.cancelHold()
+        compare(Qt.colorEqual(c.color, "transparent"), true, "put back")
+    }
+
+    // The phone's panel's checks, for either form
+    function checkOnePanel(page) {
         const view = findChild(page, "dashPage_0")
         tryVerify(() => view.width > 0, 3000, "laid out")
         compare(page.cellGap, 0, "the cells meet")
@@ -1207,46 +1264,10 @@ TestCase {
         }
     }
 
-    // A blank cell draws nothing, so the panel's surface shows there; the
-    // panel ends at the last row used
-    function test_aJointPanelEndsWithItsLastRow() {
-        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
-        const view = findChild(page, "dashPage_0")
-        tryVerify(() => view.width > 0, 3000, "laid out")
-        const surface = findChild(page, "dashPanelSurface")
-        fuzzyCompare(surface.height, view.rows * view.pitch, 1e-6, "the height of its rows")
-    }
-
-    // The cell held up covers what it crosses; a blank has no fill to show
-    function test_aLiftedCellIsOpaqueOnThePanel() {
-        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
-        const view = findChild(page, "dashPage_0")
-        tryVerify(() => view.width > 0, 3000, "laid out")
-        const c = findChild(page, "dashCell_0_0"), blank = findChild(page, "dashCell_0_3")
-        page.held = 0
-        tryVerify(() => c.lifted, 1000, "lifted")
-        compare(c.color, Theme.surface, "the held cell is opaque")
-        compare(c.radius, Theme.radiusCard, "a card while held")
-        page.held = 3
-        tryVerify(() => blank.lifted, 1000, "lifted")
-        compare(Qt.colorEqual(blank.color, "transparent"), true, "a blank stays empty")
-        page.cancelHold()
-        compare(Qt.colorEqual(c.color, "transparent"), true, "put back")
-    }
-
-    // The desktop keeps a card per gauge, with the gap between them
-    function test_theDesktopKeepsItsCards() {
+    // The desktop's gauges are one panel too, as the phone's
+    function test_theDesktopIsOnePanelToo() {
         const page = pageOf({ form: "desktop", width: 1280, height: 800 }, jointDoc(), true)
-        const view = findChild(page, "dashPage_0")
-        tryVerify(() => view.width > 0, 3000, "laid out")
-        verify(page.cellGap > 0, "the gap")
-        compare(page.cellGap, page.gap)
-        verify(!findChild(page, "dashPanelSurface").visible, "no panel surface")
-        compare(seamsOf(page).length, 0, "no seams")
-        const c = findChild(page, "dashCell_0_0")
-        compare(c.radius, Theme.radiusCard, "a card's radius")
-        compare(c.border.width, 1, "a card's edge")
-        compare(c.color, Theme.surface, "a card's surface")
+        checkOnePanel(page)
         const edit = findChild(page, "dashEdit")
         verify(!edit.compact, "a wide window's Edit isn't compact")
         compare(edit.horizontalPadding, 8, "Edit keeps a button's padding")
@@ -1295,11 +1316,116 @@ TestCase {
         fuzzyCompare(short.height, 6 * view.pitch, 1e-6, "edit mode's true size")
         compare(page.doc.pages[0].cells[0].h, 6, "the layout is unchanged")
     }
-    function test_theDesktopDoesNotStretchItsCards() {
+    // The desktop's short cell fills the empty squares under it too, and
+    // the stored layout stays
+    function test_theDesktopStretchesAShortCellToo() {
         const page = pageOf({ form: "desktop", width: 1280, height: 800 }, fitDoc(6, false), true)
         const view = findChild(page, "dashPage_0")
         tryVerify(() => view.width > 0, 3000, "laid out")
-        fuzzyCompare(findChild(page, "dashCell_0_0").height, 6 * view.pitch - page.cellGap, 1e-6)
+        compare(view.columns, 6)
+        const short = findChild(page, "dashCell_0_0")
+        fuzzyCompare(short.height, 7 * view.pitch, 1e-6, "down to the next cell")
+        page.held = 0
+        tryVerify(() => Math.abs(short.height - 6 * view.pitch) < 1e-6, 1000, "a held cell's true size")
+        page.cancelHold()
+        page.startEditing()
+        fuzzyCompare(short.height, 6 * view.pitch, 1e-6, "edit mode's true size")
+        compare(page.doc.pages[0].cells[0].h, 6, "the layout is unchanged")
+        page.stopEditing()
+    }
+
+    // The strip's shown tab meets the panel: the panel's top at the
+    // strip's foot, the tab's sheet a hairline over it, the strip painted
+    // over the pages; an edit panel open sits a gap lower
+    function test_thePanelMeetsTheStrip() {
+        const page = pageOf({ form: "desktop", width: 1280, height: 800 }, pagesDoc(2), true)
+        const surface = findChild(page, "dashPanelSurface")
+        const host = findChild(page, "dashPageStripHost")
+        tryVerify(() => surface.height > 0 && host.height > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(page.stripMeetsPanel)
+        compare(page.gridTop, 0)
+        const foot = host.mapToItem(null, 0, host.height).y
+        verify(Math.abs(surface.mapToItem(null, 0, 0).y - foot) <= page.hairlineWidth,
+               "the panel starts at the strip's foot: " + surface.mapToItem(null, 0, 0).y + " and " + foot)
+        const sheet = findChild(findChild(page, "dashPageTab_0"), "tabSheet")
+        verify(sheet.visible, "the shown tab's sheet")
+        fuzzyCompare(sheet.mapToItem(null, 0, sheet.height).y, foot + page.hairlineWidth, 1e-6,
+                     "a hairline past the strip, over the panel's top line")
+        verify(!findChild(findChild(page, "dashPageTab_1"), "tabSheet").visible, "only the shown one")
+        verify(findChild(page, "dashPageStripHost").parent.z > findChild(page, "dashPages").z,
+               "the strip paints over the pages")
+        compare(surface.topLeftRadius, 0, "the first tab runs straight into the panel")
+        page.goTo(1)
+        tryVerify(() => findChild(page, "dashPageTab_1").checked, 1000, "the second page")
+        compare(findChild(page, "dashPanelSurface").topLeftRadius, Theme.radiusCard,
+                "the first page's corner keeps its radius")
+        const second = findChild(findChild(page, "dashPage_1"), "dashPanelSurface")
+        verify(second, "the second page's surface")
+        compare(second.topLeftRadius, Theme.radiusCard, "under another tab the corner is round")
+
+        page.goTo(0)
+        page.select(0)
+        compare(page.panel, "cell")
+        verify(!page.stripMeetsPanel, "an edit panel doesn't meet the strip")
+        compare(page.gridTop, page.topGap)
+        const panel = findChild(page, "dashCellPanel")
+        tryVerify(() => panel && panel.height > 0, 3000, "the panel")
+        fuzzyCompare(panel.mapToItem(null, 0, 0).y - foot, page.topGap, 1, "a gap under the strip")
+        page.closePanel()
+
+        page.doc = pagesDoc(1)
+        verify(!host.visible)
+        compare(page.gridTop, page.topGap, "one page: the header's gap")
+    }
+
+    // A row of tabs wider than the strip scrolls to the shown one, and the
+    // wheel moves it
+    function test_aLongStripScrollsToTheShownTab() {
+        const page = pageOf({ form: "desktop", width: 560, height: 760 }, pagesDoc(10), true)
+        const view = findChild(page, "dashPageStripView")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        verify(view.contentWidth > view.width, "ten tabs are wider than the strip")
+        compare(view.contentX, 0)
+        page.goTo(9)
+        const last = findChild(page, "dashPageTab_9")
+        tryVerify(() => last.x >= view.contentX - 0.5 && last.x + last.width <= view.contentX + view.width + 0.5,
+                  2000, "the shown tab scrolled into view")
+        page.goTo(0)
+        tryCompare(view, "contentX", 0, 2000, "and back")
+        // Near the strip's start: the test window is narrower than the page
+        mouseWheel(view, 20, view.height / 2, 0, -120)
+        tryVerify(() => view.contentX > 0, 1000, "the wheel moves the row")
+
+        // Tabs at their widest keep the row's width when the shown one turns
+        // bold, so the page change alone brings the tab into view
+        const d = pagesDoc(10)
+        for (let i = 0; i < d.pages.length; ++i)
+            d.pages[i].name = "A page name long enough to be cut " + i
+        page.doc = d
+        page.goTo(0)
+        tryCompare(view, "contentX", 0, 2000, "at the start")
+        const width = view.contentWidth
+        page.goTo(8)
+        const eighth = findChild(page, "dashPageTab_8")
+        tryVerify(() => eighth.x >= view.contentX - 0.5
+                        && eighth.x + eighth.width <= view.contentX + view.width + 0.5,
+                  2000, "the shown tab scrolled into view")
+        compare(view.contentWidth, width, "the row kept its width")
+    }
+
+    // A long name is cut at the tab's widest and read whole
+    function test_aLongNameElidesAndIsReadWhole() {
+        const d = pagesDoc(2)
+        const name = "A page name thirty-four chars long"
+        d.pages[1].name = name
+        const page = pageOf({ form: "desktop", width: 1280, height: 800 }, d, true)
+        const t = findChild(page, "dashPageTab_1")
+        tryVerify(() => t.width > 0, 3000, "laid out")
+        compare(t.width, 220, "at the widest")
+        verify(t.contentItem.truncated, "the name is cut")
+        compare(t.Accessible.name, name, "and read whole")
+        verify(findChild(page, "dashPageTab_0").width >= 64, "a short name keeps the least width")
     }
 
     // A Digits card counts from its range; its own option wins
@@ -1318,12 +1444,19 @@ TestCase {
 
     // Each hairline is a whole number of the display's pixels, and sits on them
     function test_aHairlineIsWholePixels_data() {
-        return [{ tag: "100 %", zoom: 1 }, { tag: "125 %", zoom: 1.25 }, { tag: "75 %", zoom: 0.75 },
-                { tag: "110 %", zoom: 1.1 }, { tag: "67 %", zoom: 0.67 }]
+        const rows = []
+        for (const form of ["phone", "desktop"])
+            for (const z of [{ tag: "100 %", zoom: 1 }, { tag: "125 %", zoom: 1.25 },
+                             { tag: "75 %", zoom: 0.75 }, { tag: "110 %", zoom: 1.1 },
+                             { tag: "67 %", zoom: 0.67 }])
+                rows.push({ tag: form + ", " + z.tag, zoom: z.zoom, form: form })
+        return rows
     }
     function test_aHairlineIsWholePixels(data) {
         Theme.zoom = data.zoom
-        const page = pageOf({ form: "phone", width: 384, height: 832 }, jointDoc(), true)
+        const page = pageOf(data.form === "phone" ? { form: "phone", width: 384, height: 832 }
+                                                  : { form: "desktop", width: 1280, height: 800 },
+                            jointDoc(), true)
         const view = findChild(page, "dashPage_0")
         tryVerify(() => view.width > 0, 3000, "laid out")
         const ratio = (Screen.devicePixelRatio || 1) * Theme.zoom
