@@ -90,7 +90,7 @@ struct LinkSpec {
 
 /* The Innomaker USB2CAN on the desk bus (BENCH prep #26): gs_usb from
  * Linux 6.0 says which modes its firmware offers, and one-shot isn't
- * among them (WSL's 6.18 kernel, 2026-11-03: loopback, listen-only,
+ * among them (WSL's 6.18 kernel: loopback, listen-only,
  * cc-len8-dlc) */
 LinkSpec usb2can()
 {

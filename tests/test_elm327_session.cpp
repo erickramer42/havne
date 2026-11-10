@@ -1593,7 +1593,7 @@ TEST_F(Elm327SessionTest, TwoEcusAreAskedAtTheEnginesFloor)
      * so request i to request i + 2 is one channel's period, and its
      * median is the floor's (about 21 ms) whatever a few stalls add. The
      * floor is judged; the ceiling is loose, 4x the floor, since a loaded
-     * machine's median reached 34 ms (2026-11-07, under verify.sh) and
+     * machine's median reaches about 34 ms under a full verify.sh and
      * macOS runners end a plain sleep up to 18 ms late: it fails a pace
      * that drifted far slow, not load. The high-resolution timer's own
      * pace is CoreTest.APreciseWait*'s */

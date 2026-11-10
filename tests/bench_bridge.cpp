@@ -294,7 +294,7 @@ constexpr double kMaxPacedValueP99Ms = 1000.0;   // dev: about 112, a tick and a
 constexpr double kMaxPacedFrameP99Ms = 500.0;    // dev: under 1
 // The ratios, which a slow runner moves on both sides alike: decode at
 // 1000 defs against 9 (dev: 1.26 to 1.94x), and the looping run's rate
-// under obd2 against raw (dev: 0.69 to 0.76), 2026-11-01; a run of the
+// under obd2 against raw (dev: 0.69 to 0.76); a run of the
 // decode ratio is kDecodeFrames frames
 constexpr double kMaxDecodeRatio = 3.0;
 constexpr double kMinDecodingShare = 0.5;
@@ -308,8 +308,8 @@ constexpr double kMinDecodingShare = 0.5;
 // the bridge's worker rate follows the GUI thread's through the
 // in-flight gate, so holding the worker to a core of its own moved the
 // share above 1 rather than steadying it (0.94 to 1.13 on two of the dev
-// machine's cores, 2026-11-05). Over 63 CI runs each (2026-11-03 to
-// 2026-11-05) Linux read 0.79 to 0.95 (median 0.89) and Windows 0.68 to
+// machine's cores). Over 63 CI runs each, Linux read 0.79 to 0.95
+// (median 0.89) and Windows 0.68 to
 // 0.95 (median 0.80, 4 under 0.75, one under 0.70), most of the spread
 // runner to runner: a job's two recorded runs agree within a few
 // percent. Windows' bound sits about two standard deviations under its
@@ -468,8 +468,7 @@ double decodeMicros(int n)
 // put every frame and value in the files, none dropped
 constexpr int kRecordRounds = 5;
 constexpr double kMinBridgeRecordedShare = 0.9; // ADR-0049 section 9's 10%
-constexpr double kMaxRecordedNs = 75.0; // dev: 42 to 47, Windows and Linux,
-                                        // 2026-11-02
+constexpr double kMaxRecordedNs = 75.0; // dev: 42 to 47, Windows and Linux
 constexpr quint64 kFixtureValues = 7061;
 
 struct CoreRun {
@@ -517,7 +516,7 @@ int readSysInt(const char* format, int cpu)
 // cores, so its busy threads (the worker, the writer, the bridge's GUI
 // thread) never share a core: otherwise where the OS puts them decides
 // the figures (a busy thread on the worker's own core slowed it by about
-// 40%, on another by about 4%, 2026-11-02). Its processors in *which;
+// 40%, on another by about 4%). Its processors in *which;
 // false where it can't be done. Threads started later inherit it, the
 // sessions' among them
 bool pinToCores(int n, std::string* which)
