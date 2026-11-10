@@ -333,7 +333,7 @@ def check(base, head):
     return findings
 
 
-# --- self-test ------------------------------------------------------------
+# Self-test
 
 BASE = """
 /* A header in the house style */
