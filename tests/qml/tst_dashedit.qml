@@ -785,6 +785,32 @@ TestCase {
         compare(page.selected, -1)
         compare(page.panel, "")
     }
+    // The built-in layout an unreadable text gave isn't stored as the user's
+    // by an undo: "" is the built-in layout, one a later version can change
+    function test_undoOverAnUnreadableTextStoresNothing() {
+        const stored = createTemporaryObject(storeComponent, testCase)
+        stored.setValue("desktop", "{")
+        const page = pageOf({}, null)
+        compare(page.problem, "damaged")
+        page.startEditing()
+        page.removeCell(0)
+        verify(storedText(page) !== "", "the edit is stored")
+        page.undo()
+        compare(storedText(page), "", "the built-in layout again, as nothing")
+        compare(find(page, "dashStore").desktopUnread, "{", "the unread text is kept")
+    }
+    // The strip's state comes from the pages and edit mode, never from
+    // whether the page is on screen: another page in front moves no layout
+    function test_theStripDoesntFollowThePagesVisibility() {
+        const page = pageOf({}, twoPages())
+        verify(page.stripShown, "two pages: the strip")
+        const top = page.gridTop
+        page.visible = false
+        verify(page.stripShown, "still the strip, off screen")
+        compare(page.gridTop, top, "and the grid's top is where it was")
+        page.visible = true
+        compare(page.gridTop, top)
+    }
     function test_resetKeepsATextThatCantBeRead() {
         const stored = createTemporaryObject(storeComponent, testCase)
         stored.setValue("desktop", "{")
@@ -1852,6 +1878,25 @@ TestCase {
         compare(storedText(page), before, "and stored as it was")
     }
 
+    // The Undo line outside edit mode is the only way back from a panel's
+    // Remove and hides after seconds, so its button is a touch's size
+    function test_theUndoLinesButtonIsATouchTarget() {
+        Theme.compact = true
+        try {
+            const page = storedPageOf({ form: "phone", width: 384, height: 832 },
+                                      docOf([cellOf("A"), cellOf("B")]))
+            hold(page, find(page, "dashCell_0_1"))
+            mouseRelease(find(page, "dashCell_0_1"))
+            find(page, "panelRemove").clicked()   // a press can miss a compact panel's foot
+            const undo = find(page, "dashUndoLineUndo")
+            tryVerify(() => undo.visible, 2000, "the line offers Undo")
+            verify(undo.height >= Theme.touchTarget,
+                   "Undo is " + undo.height + " tall, a touch is " + Theme.touchTarget)
+        } finally {
+            Theme.compact = false
+        }
+    }
+
     // A cell with no label is named by its kind, on Remove and in the step's words
     function test_aCellWithNoLabelIsNamedByItsKind() {
         const page = storedPageOf({}, docOf([cellOf("A"), cellOf("", "blank"), cellOf("C")]))
@@ -2114,6 +2159,20 @@ TestCase {
         compare(labels(page), ["B", "C", "T"], "the menu's step undone after Edit")
     }
 
+    // Leaving the Dashboard ends the history as Done does, so a step made
+    // outside edit mode (a panel's Remove) isn't undone much later
+    function test_leavingTheDashboardEndsTheHistory() {
+        const page = storedPageOf({}, twoPages())
+        page.select(0)
+        click(page, "panelLater")
+        verify(page.canUndo, "the menu's step is undoable")
+        page.visible = false
+        verify(!page.canUndo && !page.canRedo, "hidden: nothing to undo")
+        compare(page.undoLine, "")
+        page.visible = true
+        verify(!page.canUndo, "and still none when it comes back")
+    }
+
     function test_theHistoryKeepsFifty() {
         const page = storedPageOf({}, twoPages())
         page.startEditing()
@@ -2181,7 +2240,8 @@ TestCase {
     // takes; it hides after its time. In edit mode only an undo or a redo
     // shows it, with the keys on the desktop
     function test_theLineOutsideEditMode() {
-        const page = storedPageOf({ undoLineMs: 300 }, twoPages())
+        // A long time while the presses land, short only before the step that must hide
+        const page = storedPageOf({ undoLineMs: 60000 }, twoPages())
         const line = find(page, "dashUndoLine")
         page.select(0)
         click(page, "panelLater")
@@ -2192,6 +2252,7 @@ TestCase {
         click(page, "dashUndoLineUndo")
         compare(labels(page), ["A", "B", "C", "T"])
         compare(find(page, "dashUndoLineText").text, "Undid: moved A")
+        page.undoLineMs = 300
         tryVerify(() => !line.visible, 3000, "the line hides after its time")
 
         page.startEditing()

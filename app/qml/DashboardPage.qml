@@ -34,7 +34,7 @@ Page {
     readonly property real topGap: driving ? 0 : phoneForm ? 12 : margin
     // The desktop's page strip shows, and its shown tab meets the panel:
     // not with an edit panel open, which sits a gap under the strip
-    readonly property bool stripShown: stripHost.visible
+    readonly property bool stripShown: !phoneForm && (pages.length > 1 || editing)
     readonly property bool stripMeetsPanel: !phoneForm && stripShown && panel === "" && !driving
     // The space above the panel, or above an edit panel over it
     readonly property real gridTop: stripMeetsPanel ? 0 : topGap
@@ -344,7 +344,7 @@ Page {
         if (after === now)
             return false
         if (step)
-            record(store[formKey] === "" ? "" : now, after, step)
+            record(store[formKey] === "" || problem !== "" ? "" : now, after, step)
         const texts = DashboardBook.saveTexts(problem, store[formKey], next)
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
@@ -808,9 +808,13 @@ Page {
     function resetPeaks() { peaksResetRequested() }
     onVisibleChanged: {
         maybeSweep()
-        // Any page but Dash ends the view for good: a tab, the status's Log
-        if (!visible)
+        // Any page but Dash ends the view for good: a tab, the status's Log,
+        // and the history, as Done does: a step from outside edit mode
+        // isn't undone by a Ctrl+Z days later
+        if (!visible) {
             leaveDrive(true)
+            clearHistory()
+        }
     }
     Component.onCompleted: {
         goTo(form === "phone" ? store.phonePage : store.desktopPage)
@@ -1944,6 +1948,7 @@ Page {
     component LogNotice: RowLayout {
         id: notice
         required property string name
+        readonly property real touchMin: Theme.touchTarget
         objectName: name
         Layout.fillWidth: true
         visible: Bridge.logNotice !== ""
@@ -2283,6 +2288,7 @@ Page {
         // after each step too, with an Undo, since there is no bar there
         RowLayout {
             objectName: "dashUndoLine"
+            readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
             visible: root.undoLine !== "" && !root.driving
             spacing: 10
@@ -2494,7 +2500,7 @@ Page {
             Layout.fillWidth: true
             Layout.preferredHeight: item ? (item as DashPageStrip).implicitHeight : 0
             active: !root.phoneForm
-            visible: active && (root.pages.length > 1 || root.editing)
+            visible: root.stripShown
             sourceComponent: Component {
                 DashPageStrip {
                     pages: root.pages
