@@ -92,6 +92,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- Holding a Dashboard gauge opens its menu even when the finger drifts a
+  little while it's held, as a thumb or a finger on a phone in a holder
+  does; dragging it to another place and back still changes nothing.
 - `havne-cli log` no longer ends a short replay with a values count of 0 (or
   short) in its end line; the recording itself was always whole.
 - Quitting during an import or while the log viewer writes a health
