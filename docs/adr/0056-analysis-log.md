@@ -636,3 +636,16 @@ time is v0.7.1's and is built (the appendix "the minimum time between
 sweeps as built"). The navigation aids moved to v0.7.3, with the
 analysis viewer, since they need logs from real drives to design
 against.
+
+## Note: a focus on a computed signal (2026-11-10)
+
+Section 2's focus names signals to ask, and a computed signal asks nothing
+itself. A picked computed def now keeps its inputs' requests in rotation:
+`ecuio_session_set_focus` adds each input's def to the session's picked
+defs (`focus_defs`), which `ecuio_take_focus` and the askable judgment
+read, and leaves the caller's ids (`focus_ids`) as given, so the recorder's
+`focus` line, the CLI's `focus` line and the app's picks name what was
+picked. A focus naming obd2's Boost alone is taken and keeps MAP (01 0B)
+and baro (01 33); a focus whose picks, inputs included, have no askable
+request is refused as before. `CoreTest.AComputedPickKeepsItsInputsRequested`
+and `J2534AdoptionTest.AFocusOnBoostAsksItsInputsAndComputesIt` pin it.
