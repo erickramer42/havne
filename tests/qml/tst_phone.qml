@@ -1844,6 +1844,13 @@ TestCase {
         compare(list.chosen, "mock://third")
     }
 
+    // A build without Bluetooth has no permission to ask for: a list
+    // reading it offers no Allow (Android's answers are the phone's)
+    function test_aComputerHasNoBluetoothPermissionToAsk() {
+        verify(!Bluetooth.available, "no Bluetooth in this build")
+        compare(Bluetooth.permission, "unavailable")
+    }
+
     // Settings' Log row opens the Log page itself, and Back returns to
     // Settings' list
     function test_backFromTheLogReturnsToSettings() {

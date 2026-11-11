@@ -1,5 +1,5 @@
 // File/layer: app/bluetoothdevices.h | Qt6 Core/Qml, app layer, C++17
-// Testing: QML: QmlTest.settings (test_qml); BENCH, Vehicle
+// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml); BENCH, Vehicle
 
 #pragma once
 
@@ -48,6 +48,11 @@ class BluetoothDevices : public QObject
     // The permission is refused and Android won't ask: the page shows the
     // way to Havne's page in Android's settings and a button to it
     Q_PROPERTY(bool needsSettings READ needsSettings NOTIFY statusChanged)
+    // Android's answer on the permission listing needs: "granted",
+    // "denied", "undetermined" (not asked, or not answered yet), or
+    // "unavailable" in a build without Bluetooth. Read without asking:
+    // a list shows an Allow button until it's granted
+    Q_PROPERTY(QString permission READ permission NOTIFY statusChanged)
 
 public:
     explicit BluetoothDevices(QObject* parent = nullptr);
@@ -68,6 +73,7 @@ public:
     QString status() const { return m_status; }
     bool statusWarns() const { return m_statusWarns; }
     bool needsSettings() const { return m_needsSettings; }
+    QString permission() const;
 
     // Lists the paired adapters. With ask, asks for the permission when
     // Android hasn't been asked yet; without, lists only once it's given
@@ -106,6 +112,8 @@ private:
     // Whether Android has been asked and what it said. user: a tap, which
     // asks again after a refusal
     bool permitted(bool ask, bool forScan, bool user = false);
+    void setPermission(const QString& permission);
+    QString m_permission = QStringLiteral("undetermined");
     void deniedStatus();
     void listPaired();
     void scanNow();
