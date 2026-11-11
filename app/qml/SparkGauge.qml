@@ -135,7 +135,7 @@ GaugeBase {
             color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
         }
         DangerMark {
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: 18
             anchors.verticalCenter: valueLabel.verticalCenter

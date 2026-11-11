@@ -119,7 +119,7 @@ GaugeBase {
         DangerMark {
             // The slot stays once a gauge has a danger zone, so the readout
             // never moves as the mark appears
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: Math.max(14, readout.font.pixelSize * 0.55)
             anchors.verticalCenter: readout.verticalCenter

@@ -145,7 +145,8 @@ Page {
     // An option's word in a step's words, as its caption on the panel says it
     readonly property var optionWords: ({
         "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
-        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "decimals": qsTr("decimals"),
+        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "warnBelow": qsTr("zones"),
+        "dangerBelow": qsTr("zones"), "decimals": qsTr("decimals"),
         "peak": qsTr("peak hold"), "color": qsTr("color"), "majorStep": qsTr("major step"),
         "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
         "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
@@ -592,7 +593,7 @@ Page {
             // (another signal keeps its range both ways)
             if ((kind === "shift-light") !== (selectedCell.kind === "shift-light")
                     && (selectedCell.unit ?? "").toLowerCase() === "rpm") {
-                const range = kind === "shift-light" ? { from: 4500, to: 6500 }
+                const range = kind === "shift-light" ? Object.assign({}, DashboardBook.shiftBand)
                                                      : DashboardBook.defaultRange(selectedCell.unit)
                 next = DashboardBook.setOptions(next, pageIndex, selected, range)
             }
@@ -642,14 +643,48 @@ Page {
     function labelFor(row) {
         return Array.from(String(row.name)).slice(0, DashboardBook.maxLabel).join("")
     }
-    // A new gauge's cell (section 5): the row's name, its unit and range
-    // as core decodes them (section 6), no zones; decimals follow the row
+    // The Bridge.gaugeSignals key whose refs hold this ref ("" for none)
+    function keyOfRef(ref) {
+        const sets = Bridge.gaugeSignals
+        for (const key in sets) {
+            if (sets[key].indexOf(ref) >= 0)
+                return key
+        }
+        return ""
+    }
+    // What a gauge on this row starts with, in the unit the cell stores: the
+    // signal file's own gauge (its range and levels), else the row's range
+    // and, for a common signal, the zones of DashboardBook's table; a shift
+    // light on engine speed starts from the shift band. All of it is written
+    // into the cell, so the panel shows ordinary values to type over or clear
+    function startOptions(kind, row) {
+        const g = row.gauge ?? ({})
+        const hasGauge = g.min !== undefined && g.max !== undefined
+        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        const options = hasGauge ? { from: g.min, to: g.max } : { from: r.from, to: r.to }
+        const key = keyOfRef(row.ref)
+        if (kind === "shift-light") {
+            if (key === "rpm")
+                Object.assign(options, DashboardBook.shiftBand)
+            return options
+        }
+        if (g.warnLow !== undefined || g.warnHigh !== undefined) {
+            if (g.warnLow !== undefined)
+                options.warnBelow = g.warnLow
+            if (g.warnHigh !== undefined)
+                options.warnFrom = g.warnHigh
+        } else {
+            Object.assign(options, DashboardBook.zonesFor(key))
+        }
+        return options
+    }
+    // A new gauge's cell (section 5): the row's name, its unit and what a
+    // gauge on it starts with (startOptions); decimals follow the row
     function newCell(kind, row) {
         const span = newSpans[kind] ?? [1, 4]
-        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
         return { kind: kind, w: span[0], h: span[1], label: labelFor(row),
                  refs: counterparts(row.ref), unit: row.decodedUnit,
-                 options: { from: r.from, to: r.to } }
+                 options: startOptions(kind, row) }
     }
     function pickSignal(row) {
         if (addKind !== "") {
@@ -663,15 +698,18 @@ Page {
         }
         if (selected < 0)
             return
-        // Another signal: its name, unit and range, and none of the old
-        // signal's zones, steps, words or decimals, which were its own
-        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        // Another signal: its name, unit, range and zones as a new gauge on
+        // it would start, and none of the old signal's steps, words or
+        // decimals, which were its own
         let next = DashboardBook.setCell(doc, pageIndex, selected, {
             refs: counterparts(row.ref), unit: row.decodedUnit, label: labelFor(row) })
-        next = DashboardBook.setOptions(next, pageIndex, selected, {
-            from: r.from, to: r.to, coldBelow: null, warnFrom: null, dangerFrom: null,
+        const cleared = {
             majorStep: null, minorStep: null, labelDivisor: null, caption: null,
-            description: null, peakLabel: null, decimals: null })
+            description: null, peakLabel: null, decimals: null }
+        for (const zone of DashboardBook.zoneOptions)
+            cleared[zone] = null
+        next = DashboardBook.setOptions(next, pageIndex, selected,
+                                        Object.assign(cleared, startOptions(selectedCell.kind, row)))
         edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
     }
@@ -1057,6 +1095,8 @@ Page {
         readonly property real coldBelow: zone("coldBelow")
         readonly property real warnFrom: zone("warnFrom")
         readonly property real dangerFrom: zone("dangerFrom")
+        readonly property real warnBelow: zone("warnBelow")
+        readonly property real dangerBelow: zone("dangerBelow")
         // A picked color (options.color) takes the normal zone's place; the
         // zones, and Night, still win
         readonly property string picked: Theme.gaugeColor(opt("color", ""))
@@ -1100,7 +1140,7 @@ Page {
 
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "readoutColor",
+                                       "coldBelow", "warnFrom", "dangerFrom", "warnBelow", "dangerBelow", "accent", "readoutColor",
                                        "showPeak"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
@@ -1399,7 +1439,13 @@ Page {
                         }
                     }
 
-                    Caption { visible: panelCard.hasSignal; text: qsTr("From (%1)").arg(panelCard.unitShown) }
+                    Caption {
+                        objectName: "panelFromCaption"
+                        visible: panelCard.hasSignal
+                        text: panelCard.kind === "shift-light"
+                              ? qsTr("First light at (%1)").arg(panelCard.unitShown)
+                              : qsTr("From (%1)").arg(panelCard.unitShown)
+                    }
                     OptionField {
                         objectName: "panelFrom"
                         visible: panelCard.hasSignal
@@ -1407,7 +1453,13 @@ Page {
                         clearable: false
                         fallback: panelCard.range.from
                     }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("To (%1)").arg(panelCard.unitShown) }
+                    Caption {
+                        objectName: "panelToCaption"
+                        visible: panelCard.hasSignal
+                        text: panelCard.kind === "shift-light"
+                              ? qsTr("Shift at (%1)").arg(panelCard.unitShown)
+                              : qsTr("To (%1)").arg(panelCard.unitShown)
+                    }
                     OptionField {
                         objectName: "panelTo"
                         visible: panelCard.hasSignal
@@ -1415,9 +1467,22 @@ Page {
                         clearable: false
                         fallback: panelCard.range.to
                     }
+                    Caption {
+                        objectName: "panelShiftHint"
+                        visible: panelCard.kind === "shift-light"
+                        Layout.fillWidth: true
+                        Layout.columnSpan: panelCard.phone ? 2 : 4
+                        Layout.preferredWidth: 0
+                        wrapMode: Text.WordWrap
+                        text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
+                    }
 
                     Caption { visible: panelCard.hasSignal; text: qsTr("Cold below") }
                     OptionField { objectName: "panelColdBelow"; visible: panelCard.hasSignal; option: "coldBelow" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Warning below") }
+                    OptionField { objectName: "panelWarnBelow"; visible: panelCard.hasSignal; option: "warnBelow" }
+                    Caption { visible: panelCard.hasSignal; text: qsTr("Danger below") }
+                    OptionField { objectName: "panelDangerBelow"; visible: panelCard.hasSignal; option: "dangerBelow" }
                     Caption { visible: panelCard.hasSignal; text: qsTr("Warning from") }
                     OptionField { objectName: "panelWarnFrom"; visible: panelCard.hasSignal; option: "warnFrom" }
                     Caption { visible: panelCard.hasSignal; text: qsTr("Danger from") }

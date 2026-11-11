@@ -38,10 +38,20 @@ Item {
                                          ? shownNote : qsTr("%1: %2").arg(label).arg(shownNote)
     property int decimals: 0
 
-    // Zones in value units; NaN disables one
+    // Zones in value units; NaN disables one. From is at or above, Below is
+    // strictly below; danger beats warning beats cold, on either side
     property real coldBelow: NaN
     property real warnFrom: NaN
     property real dangerFrom: NaN
+    property real warnBelow: NaN
+    property real dangerBelow: NaN
+    // Where the low bands end on the scale: danger from the start of it to
+    // dangerBelow, warning from there to warnBelow (each clipped to the scale)
+    readonly property real lowDangerEnd: isNaN(dangerBelow) ? from
+                                         : Math.max(from, Math.min(to, dangerBelow))
+    readonly property real lowWarnEnd: isNaN(warnBelow) ? lowDangerEnd
+                                       : Math.max(lowDangerEnd, Math.min(to, warnBelow))
+    readonly property bool hasDangerZone: !isNaN(dangerFrom) || !isNaN(dangerBelow)
     property color accent: Theme.gaugeValue   // normal-zone color
     // The big value's color outside a zone: the look's, or the cell's picked one
     property color readoutColor: Theme.gaugeReadout
@@ -57,9 +67,10 @@ Item {
     // Drawn position 0..1: the eased value, or the sweep while it plays
     readonly property real fraction: Math.max(sweepPos, fractionOf(smoothed))
     readonly property bool sweeping: sweepAnim.running
-    // Past dangerFrom: the readout gains a DangerMark and the zone's stroke
-    // is heavier, so danger is more than a hue
-    readonly property bool inDanger: hasValue && !isNaN(dangerFrom) && value >= dangerFrom
+    // In the danger zone, past dangerFrom or under dangerBelow: the readout
+    // gains a DangerMark and the zone's stroke is heavier, so danger is more
+    // than a hue
+    readonly property bool inDanger: hasValue && inDangerAt(value)
     // An enumeration's label, shown in place of the number
     property string valueLabel: ""
     readonly property string valueText: hasValue ? (valueLabel !== "" ? valueLabel : format(value))
@@ -82,9 +93,13 @@ Item {
         while (d < most && Math.abs(n - Number(n.toFixed(d))) > 1e-9) ++d
         return n.toLocaleString(Qt.locale(), 'f', d)
     }
+    function inDangerAt(v) {
+        return (!isNaN(dangerFrom) && v >= dangerFrom) || (!isNaN(dangerBelow) && v < dangerBelow)
+    }
     function zoneColor(v, normal) {
-        if (!isNaN(dangerFrom) && v >= dangerFrom) return Theme.gaugeDanger
-        if (!isNaN(warnFrom) && v >= warnFrom) return Theme.gaugeWarn
+        if (inDangerAt(v)) return Theme.gaugeDanger
+        if ((!isNaN(warnFrom) && v >= warnFrom) || (!isNaN(warnBelow) && v < warnBelow))
+            return Theme.gaugeWarn
         if (!isNaN(coldBelow) && v < coldBelow) return Theme.info
         return normal
     }

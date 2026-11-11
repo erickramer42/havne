@@ -152,7 +152,29 @@ TestCase {
         // No accent: blue means cold, nothing else
         compare(c[7].options, { from: 0, to: 300, description: "Mass air flow" })
         compare(c[8].options, { from: 0.5, to: 2, description: "Equivalence ratio" })
-        compare(c[9].options, { from: 10, to: 16 })
+        compare(c[9].options, { from: 10, to: 16, dangerBelow: 11.8, warnBelow: 12.4, warnFrom: 14.8, dangerFrom: 15.2 })
+    }
+
+    // The built-in layouts read the zone table: a cell on a table signal has
+    // exactly the table's zones, and the shift lights the band
+    function test_theBuiltInLayoutsTakeTheirZonesFromTheTable() {
+        for (const form of ["desktop", "phone"]) {
+            for (const c of DashboardBook.builtIn(form).pages[0].cells) {
+                const key = c.refs && c.refs.length ? Object.keys(Bridge.gaugeSignals).find(
+                    k => Bridge.gaugeSignals[k][0] === c.refs[0]) : undefined
+                if (key === undefined || c.kind === "shift-light")
+                    continue
+                const zones = DashboardBook.zonesFor(key)
+                for (const name of DashboardBook.zoneOptions)
+                    compare(c.options[name], zones[name], form + " " + c.label + " " + name)
+            }
+            const shift = DashboardBook.builtIn(form).pages[0].cells[0]
+            compare([shift.kind, shift.options.from, shift.options.to],
+                    ["shift-light", DashboardBook.shiftBand.from, DashboardBook.shiftBand.to])
+        }
+        const battery = DashboardBook.zonesFor("battery")
+        verify(battery.dangerBelow < battery.warnBelow && battery.warnBelow < battery.warnFrom
+               && battery.warnFrom < battery.dangerFrom, "the battery's four levels are ordered")
     }
 
     // No empty square on a desktop grid of 5 to 8 columns (1280 x 800 is 5,

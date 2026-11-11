@@ -94,6 +94,37 @@ GaugeBase {
             strokeColor: Qt.alpha(Theme.gaugeDanger, 0.30)
             strokeWidth: gauge.majorLen
         }
+        // The low side: warning under warnBelow, danger under dangerBelow
+        GaugeArc {
+            centerX: gauge.cx; centerY: gauge.cy
+            radius: gauge.tickOuter - gauge.majorLen / 2
+            startAngle: gauge.angleOf(gauge.lowDangerEnd)
+            sweepAngle: gauge.angleOf(gauge.lowWarnEnd) - startAngle
+            strokeColor: Qt.alpha(Theme.gaugeWarn, 0.14)
+            strokeWidth: gauge.majorLen
+        }
+        GaugeArc {
+            centerX: gauge.cx; centerY: gauge.cy
+            radius: gauge.tickOuter - gauge.majorLen / 2
+            startAngle: gauge.startAngle
+            sweepAngle: gauge.angleOf(gauge.lowDangerEnd) - startAngle
+            strokeColor: Qt.alpha(Theme.gaugeDanger, 0.30)
+            strokeWidth: gauge.majorLen
+        }
+        GaugeArc {
+            centerX: gauge.cx; centerY: gauge.cy; radius: gauge.tickOuter
+            startAngle: gauge.angleOf(gauge.lowDangerEnd)
+            sweepAngle: gauge.angleOf(gauge.lowWarnEnd) - startAngle
+            strokeColor: Theme.gaugeWarn
+            strokeWidth: Math.max(2, gauge.size * 0.009)
+        }
+        GaugeArc {
+            centerX: gauge.cx; centerY: gauge.cy; radius: gauge.tickOuter
+            startAngle: gauge.startAngle
+            sweepAngle: gauge.angleOf(gauge.lowDangerEnd) - startAngle
+            strokeColor: Theme.gaugeDanger
+            strokeWidth: Math.max(4, gauge.size * 0.02)
+        }
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.tickOuter
             startAngle: gauge.angleOf(gauge.warnStart)
@@ -243,7 +274,7 @@ GaugeBase {
             DangerMark {
                 // The slot stays once a gauge has a danger zone, so the readout
                 // never moves as the mark appears
-                visible: !isNaN(gauge.dangerFrom)
+                visible: gauge.hasDangerZone
                 opacity: gauge.inDanger ? 1 : 0
                 size: valueLabel.font.pixelSize * 0.8
                 anchors { left: valueLabel.right; leftMargin: 4; verticalCenter: valueLabel.verticalCenter }

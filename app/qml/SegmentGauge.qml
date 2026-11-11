@@ -88,7 +88,7 @@ GaugeBase {
         }
         // Past dangerFrom, beside the value; its slot stays
         DangerMark {
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: 18
             anchors.verticalCenter: valueLabel.verticalCenter
@@ -119,8 +119,7 @@ GaugeBase {
                 readonly property color lit: gauge.zoneColor(gauge.valueAt(index), gauge.accent)
                 readonly property real fill: Math.max(0, Math.min(1,
                     gauge.fraction * gauge.drawn - index))
-                readonly property bool inDangerZone: !isNaN(gauge.dangerFrom)
-                                                     && gauge.valueAt(index) >= gauge.dangerFrom
+                readonly property bool inDangerZone: gauge.inDangerAt(gauge.valueAt(index))
 
                 width: (field.width - (gauge.drawn - 1) * gauge.cellGap) / gauge.drawn
                 height: (field.height - gauge.headroom) * gauge.heightOf(index)

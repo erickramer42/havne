@@ -249,7 +249,8 @@ TestCase {
         compare(made.options.from, 0, "the unit's default range")
         compare(made.options.to, 150)
         verify(made.options.decimals === undefined, "decimals follow the row")
-        verify(made.options.warnFrom === undefined, "no zones")
+        compare([made.options.coldBelow, made.options.warnFrom, made.options.dangerFrom],
+                [60, 105, 115], "the coolant's table zones")
         compare(page.selected, 1, "the new cell is selected")
         compare(page.panel, "cell")
         compare(storedText(page), DashboardBook.serialize(page.doc), "stored as it's made")
@@ -264,6 +265,161 @@ TestCase {
         type(find(page, "panelWarnFrom"), data.units === 1 ? "194" : "90")
         compare(page.doc.pages[0].cells[1].options.warnFrom, 90)
         tryCompare(find(page, "dashCell_0_1"), "cell", page.doc.pages[0].cells[1])
+    }
+
+    // A new gauge on a common signal starts with the table's zones, stored in
+    // the base unit and shown through the unit system; a signal outside the
+    // table starts with none
+    function addGauge(page, kind, signalKey) {
+        click(page, "dashAdd")
+        click(page, "addKind_" + kind)
+        click(page, "pickSignal_" + Bridge.gaugeSignals[signalKey][0])
+        return page.doc.pages[0].cells[page.selected]
+    }
+    function test_aNewGaugeStartsWithItsSignalsZones_data() {
+        return [{ tag: "metric", units: 0 }, { tag: "imperial", units: 1 }]
+    }
+    function test_aNewGaugeStartsWithItsSignalsZones(data) {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        Bridge.unitSystem = data.units
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        for (const key in DashboardBook.zoneTable) {
+            if (key === "rpm")
+                continue
+            const cell = addGauge(page, "analog", key)
+            const zones = DashboardBook.zonesFor(key)
+            for (const name in zones)
+                compare(cell.options[name], zones[name], key + " stores " + name)
+            for (const name of DashboardBook.zoneOptions)
+                verify((cell.options[name] !== undefined) === (zones[name] !== undefined),
+                       key + ": only the table's zones, " + name)
+        }
+        const cell = addGauge(page, "analog", "coolant")
+        const shown = field => find(page, field).text
+        compare([shown("panelColdBelow"), shown("panelWarnFrom"), shown("panelDangerFrom")],
+                data.units === 1 ? ["140", "221", "239"] : ["60", "105", "115"],
+                "the panel shows the unit system's values")
+        compare(cell.options.dangerFrom, 115, "stored in the base unit")
+        for (const key of ["speed", "maf", "throttle", "load", "lambda", "boost"]) {
+            const plain = addGauge(page, "analog", key)
+            for (const name of DashboardBook.zoneOptions)
+                verify(plain.options[name] === undefined, key + " starts with no " + name)
+        }
+    }
+
+    function test_aNewShiftLightStartsFromTheShiftBandOnRpm() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        Bridge.unitSystem = 0
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        let cell = addGauge(page, "shift-light", "rpm")
+        compare([cell.options.from, cell.options.to], [4500, 6500], "rpm takes the band")
+        verify(cell.options.dangerFrom === undefined, "and no zones")
+        compare(find(page, "panelShiftHint").visible, true, "the hint shows")
+        compare(find(page, "panelDangerFrom").visible, true)
+        compare([find(page, "panelFromCaption").text, find(page, "panelToCaption").text],
+                ["First light at (RPM)", "Shift at (RPM)"], "the shift light's captions")
+        cell = addGauge(page, "analog", "rpm")
+        compare([find(page, "panelFromCaption").text, find(page, "panelToCaption").text],
+                ["From (RPM)", "To (RPM)"], "another kind shows From and To")
+        verify(!find(page, "panelShiftHint").visible, "and no hint")
+        cell = addGauge(page, "shift-light", "speed")
+        const speed = Bridge.profileSignals("mock://demo").find(
+            r => r.ref === Bridge.gaugeSignals["speed"][0])
+        const range = DashboardBook.defaultRange(speed.decodedUnit, speed.decodedLow, speed.decodedHigh)
+        compare([cell.options.from, cell.options.to], [range.from, range.to],
+                "another signal keeps its range")
+    }
+
+    // A file's gauge on engine speed doesn't change a shift light's band; a
+    // gauge with a range and no levels takes the table's zones
+    function test_aShiftLightOnRpmTakesTheBandWhateverTheFilesGauge() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        const row = { ref: Bridge.gaugeSignals["rpm"][0], decodedUnit: "RPM", decodedLow: 0,
+                      decodedHigh: 8000, gauge: { min: 0, max: 8000 } }
+        const light = page.startOptions("shift-light", row)
+        compare([light.from, light.to], [4500, 6500], "the band, not the file's 0-8000")
+        const dial = page.startOptions("analog", row)
+        compare([dial.from, dial.to, dial.dangerFrom], [0, 8000, 6800],
+                "a dial takes the file's range and, with no levels, the table's zones")
+    }
+
+    // The file's gauge is the signal's own: its range and levels win over
+    // the table, and a file level it leaves out stays unset
+    function test_aFilesGaugeWinsOverTheTable() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        const ref = Bridge.gaugeSignals["battery"][0]
+        const row = { ref: ref, decodedUnit: "V", decodedLow: 0, decodedHigh: 20,
+                      gauge: { min: 9, max: 17, warnLow: 11.5 } }
+        const o = page.startOptions("analog", row)
+        compare([o.from, o.to, o.warnBelow], [9, 17, 11.5], "the file's range and low level")
+        for (const name of ["dangerBelow", "warnFrom", "dangerFrom", "coldBelow"])
+            verify(o[name] === undefined, "not the table's " + name)
+        row.gauge = { min: 9, max: 17, warnHigh: 15 }
+        const high = page.startOptions("analog", row)
+        compare(high.warnFrom, 15)
+        verify(high.warnBelow === undefined, "no low level the file lacks")
+        row.gauge = {}
+        const table = page.startOptions("analog", row)
+        compare([table.dangerBelow, table.warnBelow, table.warnFrom, table.dangerFrom],
+                [11.8, 12.4, 14.8, 15.2], "no gauge: the table")
+    }
+
+    // End to end: a signal file's gauge, loaded as a profile, reaches the cell
+    // picked on its row, and the levels it leaves out stay unset
+    function test_aSignalFilesLevelsReachTheNewCell() {
+        const file = { havne_signals: 1, name: "Gauged", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "a", name: "A", read: { service: "22", number: "D100" },
+                                   field: { byte: 0, bits: 8 }, unit: "V",
+                                   gauge: { min: 10, max: 16, warn_low: 11.5, warn_high: 15.25 } },
+                                 { key: "b", name: "B", read: { service: "22", number: "D101" },
+                                   field: { byte: 0, bits: 8 }, unit: "V",
+                                   gauge: { min: 0, max: 50 } }] }
+        const url = Harness.writeScratchFile("gauged.json", JSON.stringify(file))
+        const r = Bridge.importSignalFile(url)
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        compare(Bridge.connectSession("mock://demo?profile=" + r.profile), "", "the file's profile connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_analog")
+        click(page, "pickSignal_key:a")
+        let cell = page.doc.pages[0].cells[page.selected]
+        compare([cell.options.from, cell.options.to, cell.options.warnBelow, cell.options.warnFrom],
+                [10, 16, 11.5, 15.25], "the file's range and levels")
+        verify(cell.options.dangerBelow === undefined && cell.options.dangerFrom === undefined,
+               "no danger level the file lacks")
+        click(page, "dashAdd")
+        click(page, "addKind_analog")
+        click(page, "pickSignal_key:b")
+        cell = page.doc.pages[0].cells[page.selected]
+        compare([cell.options.from, cell.options.to], [0, 50], "a gauge with a range and no levels")
+        for (const name of DashboardBook.zoneOptions)
+            verify(cell.options[name] === undefined, "starts with no " + name + ": a key outside the table")
+    }
+
+    function test_changeSignalReplacesTheZonesWithTheNewSignalsTable() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        let cell = addGauge(page, "analog", "battery")
+        compare([cell.options.dangerBelow, cell.options.warnBelow], [11.8, 12.4])
+        click(page, "panelSignal")
+        click(page, "pickSignal_" + Bridge.gaugeSignals["coolant"][0])
+        cell = page.doc.pages[0].cells[page.selected]
+        verify(cell.options.dangerBelow === undefined && cell.options.warnBelow === undefined,
+               "the battery's low levels go")
+        compare([cell.options.coldBelow, cell.options.warnFrom, cell.options.dangerFrom], [60, 105, 115])
+        click(page, "panelSignal")
+        click(page, "pickSignal_" + Bridge.gaugeSignals["speed"][0])
+        cell = page.doc.pages[0].cells[page.selected]
+        for (const name of DashboardBook.zoneOptions)
+            verify(cell.options[name] === undefined, "a signal outside the table clears " + name)
     }
 
     // An enumeration only for a digital tile; text never
@@ -390,9 +546,8 @@ TestCase {
                             "description", "peakLabel"])
             verify(c.options[gone] === undefined, gone + " goes with the old signal")
         compare(c.options.peak, true, "peak hold stays")
-        verify(c.options.coldBelow === undefined, "no cold zone")
-        verify(c.options.warnFrom === undefined, "no warning zone")
-        verify(c.options.dangerFrom === undefined, "no danger zone")
+        compare([c.options.coldBelow, c.options.warnFrom, c.options.dangerFrom],
+                [60, 105, 115], "the old zones are replaced by the new signal's")
         compare(page.panel, "cell")
         compare(page.selected, 0)
         compare(storedText(page), DashboardBook.serialize(page.doc))
@@ -1353,7 +1508,8 @@ TestCase {
 
     // The selection follows its cell through another cell's drag
     function test_aDragKeepsTheSelectionOnItsCell() {
-        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        // Tall enough that the cell panel, with its zone fields, leaves cell C on screen
+        const page = pageOf({ height: 1000 }, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
@@ -1731,6 +1887,20 @@ TestCase {
         g.value = 7500
         tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugeDanger), 3000, "danger")
         g.value = 10
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugePalettes.dark.teal), 3000,
+                  "and back to the pick")
+    }
+
+    function test_aLowZoneBeatsThePickedColor_data() {
+        return ["analog", "bar", "digital", "ring"].map(k => ({ tag: k, kind: k }))
+    }
+    function test_aLowZoneBeatsThePickedColor(data) {
+        const g = colored(data.kind, "dark", "teal", { warnBelow: 600, dangerBelow: 300 })
+        g.value = 500
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugeWarn), 3000, "warn")
+        g.value = 200
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugeDanger), 3000, "danger")
+        g.value = 1000
         tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugePalettes.dark.teal), 3000,
                   "and back to the pick")
     }
